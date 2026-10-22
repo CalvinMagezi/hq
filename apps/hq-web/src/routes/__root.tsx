@@ -33,11 +33,13 @@ import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '
 import { hqJson, needsSignIn, onSignInChange } from '~/lib/hqAuth'
 import { syncPushSubscription } from '~/lib/webPush'
 import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
+import { EMBED_HEAD_SCRIPT, readEmbedFlag } from '~/lib/embedHost'
 
 const SYSTEM_NOTICE_DISMISS_MS = 6_000
 
 export const Route = createRootRoute({
   head: () => ({
+    scripts: [{ children: EMBED_HEAD_SCRIPT }],
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content' },
@@ -57,16 +59,31 @@ export const Route = createRootRoute({
   component: RootComponent,
 })
 
+/** True inside the Android app's own screen (`?host=android`). The server render and the first client render say false, so hydration matches. */
+function useEmbedded(): boolean {
+  return useSyncExternalStore(
+    () => () => undefined,
+    readEmbedFlag,
+    () => false,
+  )
+}
+
 function RootComponent() {
+  const embedded = useEmbedded()
   return (
     <RootDocument>
       <WebSocketProvider>
         <SetupRedirect />
-        <VaultShell />
-        <SearchOverlay />
-        <QuickNoteOverlay />
-        <GlobalChatOverlay />
-        {/* One drawer for every note link, whatever page or overlay it was clicked in. */}
+        <VaultShell embedded={embedded} />
+        {/* The app has its own search, quick note and chat screens. */}
+        {!embedded && (
+          <>
+            <SearchOverlay />
+            <QuickNoteOverlay />
+            <GlobalChatOverlay />
+          </>
+        )}
+        {/* One drawer for every note link, whatever page or overlay it was clicked in. It stays in the app's host, where a note link in a task would otherwise do nothing. */}
         <VaultNoteDrawer />
       </WebSocketProvider>
     </RootDocument>
@@ -78,9 +95,12 @@ function SetupRedirect() {
   const navigate = useNavigate()
   useEffect(() => {
     if (window.location.pathname === '/setup') return
+    // The Android app has its own first-run screens; its host shows the page it asked for.
+    if (readEmbedFlag()) return
     fetchSetupStatus()
       .then((status) => {
-        if (shouldRedirectToSetup(status)) void navigate({ to: '/setup' })
+        // Replaces the page it left, so Back from setup does not return to a page that sends the visitor straight back.
+        if (shouldRedirectToSetup(status)) void navigate({ to: '/setup', replace: true })
       })
       .catch(() => undefined)
   }, [navigate])
@@ -130,7 +150,7 @@ function CopilotChip() {
   )
 }
 
-function VaultShell() {
+function VaultShell({ embedded }: { embedded: boolean }) {
   const wsConnected = useHQStore((s) => s.wsConnected)
   const setGlobalChatOpen = useHQStore((s) => s.setGlobalChatOpen)
   const chatUnreadCount = useHQStore((s) => s.chatUnreadCount)
@@ -208,13 +228,17 @@ function VaultShell() {
       }}
     >
       <div className="hq-ambient-bg" />
-      <AppRail />
+      {!embedded && <AppRail />}
       <div className="flex flex-col flex-1 min-w-0 min-h-0 relative z-10">
-      <InstallPrompt />
-      <SignInPrompt />
-      <ReachabilityBanner />
+      {!embedded && (
+        <>
+          <InstallPrompt />
+          <SignInPrompt />
+          <ReachabilityBanner />
+        </>
+      )}
 
-      {systemNotice && (
+      {!embedded && systemNotice && (
         <div
           className="flex items-center justify-between gap-3 px-4 py-2 text-sm relative z-10"
           style={{ background: 'rgba(255,176,0,0.08)', borderBottom: '1px solid rgba(255,176,0,0.2)' }}
@@ -232,7 +256,7 @@ function VaultShell() {
         </div>
       )}
 
-      {swUpdateAvailable && (
+      {!embedded && swUpdateAvailable && (
         <div
           className="flex items-center justify-between px-4 py-2 text-sm relative z-10"
           style={{ background: 'rgba(0,255,163,0.08)', borderBottom: '1px solid rgba(0,255,163,0.2)' }}
@@ -250,7 +274,7 @@ function VaultShell() {
         </div>
       )}
 
-      <header
+      {!embedded && <header
         className="flex-shrink-0 flex items-center gap-2 px-3 sticky top-0 z-30 hq-header"
         style={{ height: '48px' }}
       >
@@ -327,14 +351,14 @@ function VaultShell() {
             {wsConnected ? 'live' : <SavedDataLabel reconnecting={isOnline} />}
           </span>
         </div>
-      </header>
+      </header>}
 
       <main className="flex-1 min-h-0 overflow-hidden relative main-content md:mx-3 md:mb-3 md:rounded-2xl hq-glass-pane">
         <Outlet />
       </main>
 
       </div>
-      <BottomNav />
+      {!embedded && <BottomNav />}
     </div>
   )
 }

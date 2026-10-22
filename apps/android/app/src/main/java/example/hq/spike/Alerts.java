@@ -51,6 +51,14 @@ final class Alerts {
                 if (!problem.equals(lastProblem)) Log.w(HubService.TAG, "alert poll failed: " + problem);
                 lastProblem = problem;
             }
+            // Notes and tasks saved while HQ was down go out as soon as it answers; the widgets learn what is in progress.
+            try {
+                example.hq.spike.capture.OutboxSender.flushNow(c);
+                example.hq.spike.capture.Widgets.refreshTasks(c);
+            } catch (Exception e) {
+                // Kotlin does not declare the IOExceptions it throws, so Java sees them only here; nothing in this step may end the poll loop.
+                Log.w(HubService.TAG, "outbox flush failed: " + e.getClass().getSimpleName());
+            }
             try {
                 Thread.sleep(POLL_MS);
             } catch (InterruptedException e) {
@@ -61,6 +69,18 @@ final class Alerts {
 
     private static void poll(Context c) throws IOException, JSONException {
         Map<String, JSONObject> items = fetch(c);
+        String newest = null;
+        int needing = 0;
+        for (JSONObject item : items.values()) {
+            if (!AlertPoster.needsYou(item)) continue;
+            if (newest == null) newest = item.optString("title", "");
+            needing++;
+        }
+        try {
+            example.hq.spike.capture.Widgets.needs(c, needing, newest);
+        } catch (Exception e) {
+            Log.w(HubService.TAG, "widget update failed: " + e.getClass().getSimpleName());
+        }
         SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String stored = prefs.getString(SEEN, null);
         List<String> seen = stored == null || stored.isEmpty() ? new ArrayList<String>() : Arrays.asList(stored.split(SEP));

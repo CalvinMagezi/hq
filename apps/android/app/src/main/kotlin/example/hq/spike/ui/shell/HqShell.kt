@@ -95,6 +95,9 @@ fun HqShell(
     status: HqStatus = HqStatus.Live,
     onSearch: () -> Unit = {},
     onSettings: () -> Unit = {},
+    /** What a place adds to the bar: a line in front of the status ("43 active") and buttons between search and settings. */
+    subline: (Place) -> String? = { null },
+    topActions: @Composable (Place) -> Unit = {},
     balance: BalanceChip? = null,
     onBalance: (ChipTarget) -> Unit = {},
     request: Place? = null,
@@ -114,7 +117,7 @@ fun HqShell(
     CompositionLocalProvider(LocalGoTo provides { current = it }) {
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                TopBar(title = current.label, status = statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance)
+                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance, actions = { topActions(current) })
                 Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
                 if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
             }
@@ -134,7 +137,7 @@ fun NotBuilt(place: Place) {
 }
 
 @Composable
-fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}) {
+fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}, actions: @Composable () -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().height(TopBarHeight).background(Mts.Surface000).padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -148,6 +151,7 @@ fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Un
         }
         balance?.let { BalancePill(it) { onBalance(it.target) } }
         IconButton(onSearch, Modifier.size(TouchTarget)) { Icon(HqIcons.Search, "Search", Modifier.size(24.dp), tint = Mts.Ink) }
+        actions()
         IconButton(onSettings, Modifier.size(TouchTarget)) { Icon(HqIcons.Gear, "Settings", Modifier.size(24.dp), tint = Mts.Ink) }
     }
 }

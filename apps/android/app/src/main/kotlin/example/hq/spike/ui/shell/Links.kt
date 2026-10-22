@@ -1,5 +1,6 @@
 package example.hq.spike.ui.shell
 
+import example.hq.spike.ui.webhost.WebPage
 import java.net.URI
 import java.net.URISyntaxException
 
@@ -13,16 +14,18 @@ data class LinkTarget(
     /** A Settings screen name, from [Links.SETTINGS_SCREENS]. */
     val screen: String? = null,
     val search: Boolean = false,
+    /** A web page the app shows in its own screen, by [example.hq.spike.ui.webhost.WebPage.slug]. */
+    val web: String? = null,
 )
 
-/** The links of the design's "Navigation and Back" table: hq://chat/{id}, inbox/{id}, tasks/{id}, notes/{path}, helpers[/{id}], settings/{screen}, search. hq://web/{page} joins them with the WebView host. */
+/** The links of the design's "Navigation and Back" table: hq://chat/{id}, inbox/{id}, tasks/{id}, notes/{path}, helpers[/{id}], settings/{screen}, search. hq://web/{home|usage|board|timeline} opens a web page in the app's own screen. */
 object Links {
     const val SCHEME = "hq"
     const val EXTRA = "link"
     private const val MAX_PATH = 512
     private val ID = Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 
-    val SETTINGS_SCREENS = setOf("home", "safety", "keys", "messaging", "claude", "devices", "spending", "about", "background", "keeprunning", "notifications", "origins", "connectedtools", "computers")
+    val SETTINGS_SCREENS = setOf("home", "safety", "keys", "messaging", "claude", "devices", "spending", "about", "background", "keeprunning", "notifications", "origins", "connectedtools", "computers", "capturewidgets")
 
     /** Never throws. Null for anything that is not one of our links, so a stray or hostile link does nothing at all. */
     fun parse(raw: String?): LinkTarget? {
@@ -39,8 +42,19 @@ object Links {
             "notes" -> LinkTarget(Place.Notes, path = notePath(rest))
             "settings" -> rest.lowercase().ifEmpty { "home" }.takeIf { it in SETTINGS_SCREENS }?.let { LinkTarget(Place.Chat, screen = it) }
             "search" -> LinkTarget(Place.Notes, search = true)
+            "web" -> webPage(rest, u.query)?.let { LinkTarget(Place.Chat, web = it.slug) }
             else -> null
         }
+    }
+
+    /** The link to a vault note. Each part of the path is percent-encoded, since a title with a space or a # would not parse as a link otherwise. */
+    fun noteLink(path: String): String = "$SCHEME://notes/" + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+
+    /** Only the four pages the host shows: hq://web/home, usage, board, timeline (and /vault and /tasks?view= as the web app spells them). */
+    private fun webPage(rest: String, query: String?): WebPage? = when (rest.lowercase()) {
+        "vault" -> WebPage.Home
+        "tasks" -> when (query) { "view=board" -> WebPage.Board; "view=timeline" -> WebPage.Timeline; else -> null }
+        else -> WebPage.fromSlug(rest)
     }
 
     private fun id(s: String): String? = s.takeIf { ID.matches(it) }

@@ -12,6 +12,7 @@
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
+      <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
     </activity>
     <activity android:name=".ShellActivity" android:exported="true" android:permission="android.permission.DUMP" android:enableOnBackInvokedCallback="true" android:theme="@style/Theme.AgentHQ.Shell" android:windowSoftInputMode="adjustResize"/>
     <activity android:name=".LinkActivity" android:exported="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity="">
@@ -22,6 +23,25 @@
         <data android:scheme="hq"/>
       </intent-filter>
     </activity>
+    <activity android:name=".capture.CaptureActivity" android:exported="true" android:theme="@style/Theme.AgentHQ.Capture" android:excludeFromRecents="true" android:taskAffinity="" android:windowSoftInputMode="adjustResize" android:label="AgentHQ">
+      <intent-filter>
+        <action android:name="android.intent.action.SEND"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:mimeType="text/plain"/>
+      </intent-filter>
+    </activity>
+    <receiver android:name=".capture.CaptureWidget" android:exported="false" android:label="Capture">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_capture_info"/>
+    </receiver>
+    <receiver android:name=".capture.NeedsYouWidget" android:exported="false" android:label="Needs you">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_needs_info"/>
+    </receiver>
+    <receiver android:name=".capture.TasksWidget" android:exported="false" android:label="Tasks">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_tasks_info"/>
+    </receiver>
     <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">
       <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths"/>
     </provider>

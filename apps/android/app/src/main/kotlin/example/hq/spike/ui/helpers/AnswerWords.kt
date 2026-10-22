@@ -11,6 +11,11 @@ object AnswerWords {
     val failed = Say("Couldn't send your answer", "HQ didn't reply. It may be restarting.")
     val answersOff = Say("Answers from notifications are off", "Open the app to answer.")
     val sentNotRecorded = Say("Answer sent", "HQ did not record it. Open the app to check.")
+    val alreadyAnswered = Say("Already answered", "Someone answered this somewhere else.")
+
+    /** True only when HQ's answered items positively list this one as decided; anything else (not listed, cannot tell) lets the answer go. */
+    fun answeredElsewhere(id: String, history: List<Pair<String, String>>): Boolean =
+        history.any { (itemId, state) -> itemId == id && (state == "approved" || state == "dismissed") }
 
     /** The helper's name from the title its question carried ("Claude needs your OK"); null when the title is not one of those. */
     fun asker(title: String): String? = title.removeSuffix(NEEDS_OK).takeIf { it != title && it.isNotBlank() }

@@ -23,9 +23,11 @@ data class SettingsSnapshot(
     val copilot: JSONObject? = null,
     /** This month's spend and where it is heading (/api/usage/forecast). */
     val forecast: JSONObject? = null,
+    /** What HQ says about the vault (/api/vault-status): its path and, from a build that has it, how many notes are indexed. */
+    val vault: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
@@ -124,6 +126,13 @@ object SettingsWords {
         if (d == null) return NOT_ANSWERED
         val n = d.arr("devices").items().size
         return if (n == 0) "None signed in" else "$n signed in"
+    }
+
+    /** "2,860" for the About page, or null when this HQ does not say how many notes there are (an older build). */
+    fun notesCount(snap: SettingsSnapshot): String? {
+        val v = snap.vault ?: return null
+        if (!v.has("notes") || v.isNull("notes")) return null
+        return v.optLong("notes", -1L).takeIf { it >= 0 }?.let { String.format(java.util.Locale.ROOT, "%,d", it) }
     }
 
     private fun money(v: Double) = "$" + String.format(java.util.Locale.ROOT, "%.2f", v)
@@ -245,6 +254,52 @@ object SettingsWords {
         }
     }
 
+    // ------------------------------------------------------------ Add a key
+
+    /** The button a key row gets: only the three providers HQ can check have one, and a key set by the environment cannot be changed here. */
+    data class KeyAction(val id: String, val label: String)
+
+    fun keyAction(s: JSONObject?, name: String, set: Boolean, source: String?): KeyAction? {
+        if (source == "env") return null
+        val id = s.arr("provider_keys").items().firstOrNull { it.optString("name") == name }?.text("id") ?: return null
+        return KeyAction(id, if (set) "Replace" else "Add")
+    }
+
+    data class KeyWords(val title: String, val body: String)
+
+    fun keyWords(name: String, replace: Boolean) = KeyWords(
+        if (replace) "Replace your $name key" else "Add your $name key",
+        "A key is a long code that lets HQ use an AI service. Copy it from your $name account, then paste it here.",
+    )
+
+    const val KEY_REFUSED = "That key didn't work. Check that you copied all of it."
+    const val KEY_NO_ANSWER = "HQ did not reply. Try again."
+    const val KEY_ENV = "This key is set outside the app. Change it where it was set."
+    const val KEY_OTHER = "HQ could not save the key. Try again later."
+    const val KEY_NOTE = "HQ keeps the key on this phone and never shows it again."
+
+    /** What the sheet says when a key was not saved: the key was refused, the environment owns it, or HQ did not answer (not blamed on the key). */
+    fun keyFailure(status: Int): String = when {
+        status == 0 || status >= HTTP_SERVER -> KEY_NO_ANSWER
+        status == HTTP_CONFLICT -> KEY_ENV
+        status == HTTP_BAD_KEY -> KEY_REFUSED
+        else -> KEY_OTHER
+    }
+
+    private const val HTTP_SERVER = 500
+    private const val HTTP_CONFLICT = 409
+    private const val HTTP_BAD_KEY = 400
+
+    fun keySaved(name: String) = "$name key saved."
+
+    /** Where to find a provider's key, as the web app points. */
+    fun keyHelpUrl(id: String): String? = when (id) {
+        "open_router" -> "https://openrouter.ai/keys"
+        "anthropic" -> "https://console.anthropic.com/settings/keys"
+        "google" -> "https://aistudio.google.com/apikey"
+        else -> null
+    }
+
     // ------------------------------------------------------------ AI service and keys
 
     /** The stored API keys, with the GitHub Copilot plan first when HQ uses it: its token is set outside the key list, so the plan answering is what says it works. */
@@ -320,7 +375,7 @@ object SettingsWords {
 
     data class AppCard(val name: String, val on: Boolean, val line: String, val bot: String?, val owner: String)
 
-    fun appCard(chat: JSONObject?, key: String, name: String): AppCard {
+    fun appCard(chat: JSONObject?, key: String, name: String, now: Instant = Instant.now()): AppCard {
         val a = chat.obj(key)
         val on = a?.let { it.optBoolean("enabled") && it.optBoolean("token_set") } == true
         val relay = a.obj("relay")
@@ -330,7 +385,7 @@ object SettingsWords {
         val line = when {
             !on -> "Off"
             !current -> "Not running yet"
-            status == "connected" || status == "running" || status == "online" -> "Running"
+            status == "connected" || status == "running" || status == "online" -> "Running" + (time(relay, "last_seen")?.let { " \u00b7 seen ${seen(it, now)}" }.orEmpty())
             status != null -> status.replaceFirstChar(Char::uppercase)
             else -> "Saved"
         } + if (a?.optBoolean("needs_restart") == true) " · restart needed" else ""
@@ -387,6 +442,61 @@ object SettingsWords {
         ModeWords("Pause background work?", "HQ will stop answering your chats and running scheduled tasks. It restarts for a moment.", "Pause")
     }
 
+    /** "12 s ago", "3 min ago", "2 h ago": how long since a relay last said it was there. */
+    fun seen(t: Instant, now: Instant): String {
+        val s = Duration.between(t, now).seconds.coerceAtLeast(0)
+        return when {
+            s < 60 -> "$s s ago"
+            s < 3_600 -> "${s / 60} min ago"
+            else -> "${s / 3_600} h ago"
+        }
+    }
+
+    // ------------------------------------------------------------ Set up and pair a messaging app
+
+    /** The steps the web app gives for making a bot, plain, one per row. */
+    fun setupSteps(platform: String): List<String> = if (platform == "telegram") listOf(
+        "Open @BotFather in Telegram.", "Send /newbot.", "Pick a display name, then a username that ends in bot.", "BotFather replies with a token. Copy it and paste it below.",
+    ) else listOf(
+        "Open the Discord developer portal and choose New Application.", "Open Bot, press Reset Token and copy the token.",
+        "On the same page, under Privileged Gateway Intents, turn on Message Content Intent and save.", "Paste the token below.",
+    )
+
+    fun setupLabel(platform: String) = if (platform == "telegram") "Open Telegram" else "Open the Discord developer portal"
+    fun setupUrl(platform: String) = if (platform == "telegram") "https://t.me/BotFather" else "https://discord.com/developers/applications"
+    fun appName(platform: String) = if (platform == "telegram") "Telegram" else "Discord"
+    fun inviteUrl(appId: String) = "https://discord.com/oauth2/authorize?client_id=$appId&scope=bot%20applications.commands&permissions=309237730368"
+
+    const val TOKEN_REFUSED = "That token did not work."
+    const val INTENT_OFF = "Message Content Intent looks off. Turn it on under Bot, Privileged Gateway Intents, or the bot cannot read messages."
+    const val SAVED_RESTARTED = "HQ restarted with the new settings."
+
+    fun standbyNotice(platform: String) = "Background work is paused, so HQ cannot answer on ${appName(platform)} yet. Turn it on in Background work."
+
+    fun disconnectWords(platform: String) = ModeWords("Disconnect ${appName(platform)}?", "HQ stops answering on ${appName(platform)} and forgets the bot token. HQ restarts for a moment.", "Disconnect")
+    val REPLACE_WORDS = ModeWords("Link a different account?", "The current owner loses access until the new account pairs. Continue?", "Continue")
+
+    fun pairBlurb(platform: String) = "Send this code to your bot. It tells HQ which ${appName(platform)} account is yours."
+
+    /** What to do with the code when there is no button to press: where to send it. */
+    fun pairHelp(platform: String, rawCommand: String, hasLink: Boolean): String = pairText(platform, rawCommand.replace(' ', '\u00A0'), hasLink)
+
+    private fun pairText(platform: String, command: String, hasLink: Boolean): String = when {
+        platform == "telegram" && hasLink -> "Tap the button to open your bot and press Start. Or send it $command yourself."
+        platform == "telegram" -> "Open your bot in Telegram and send it $command."
+        else -> "Open a direct message with your bot in Discord and send $command."
+    }
+
+    fun pairWaiting(left: String) = "Waiting for the message. The code works for $left."
+    const val PAIR_EXPIRED = "The code ran out. Get a new one."
+
+    /** The sentence under a failed pairing or setup call: the server's own words when it gave some. */
+    fun chatAppFailure(status: Int, serverText: String?): String = when {
+        status == 0 -> "HQ did not reply. Try again."
+        status == 409 -> serverText ?: "That is set outside the app. Change it where it was set."
+        else -> serverText ?: TOKEN_REFUSED
+    }
+
     // ------------------------------------------------------------ Connect Claude
 
     data class Grant(val id: String, val client: String, val scope: String, val since: String)
@@ -396,6 +506,26 @@ object SettingsWords {
     fun grants(c: JSONObject?, now: Instant, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<Grant> = liveGrants(c, now).map {
         Grant(it.optString("id"), it.text("label") ?: it.text("client_name") ?: "A client", scopeWords(it.optString("grant_scope")), dayOf(time(it, "created_at"), zone))
     }
+
+    /** Whether new connections are open, for how long, and when it closes on its own (local HH:mm). */
+    data class Window(val open: Boolean, val left: String, val closesAt: String)
+
+    fun window(c: JSONObject?, now: Instant, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Window {
+        val until = time(c, "armed_until")?.takeIf { it.isAfter(now) } ?: return Window(false, "", "")
+        return Window(true, clock(Duration.between(now, until).seconds), until.atZone(zone).toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
+    }
+
+    val CLAUDE_OFF_WORDS = ModeWords("Disconnect Claude everywhere?", "Every Claude connected to this HQ loses access now, and new connections stay closed until you open them again.", "Disconnect")
+    val SIGN_OUT_ALL_WORDS = ModeWords("Sign out everywhere?", "Every other device is signed out, and so is any sign-in link you made earlier. Claude connections end too. HQ restarts for a moment.", "Sign out")
+
+    /** The name HQ gives the one sign-in that "Sign out everywhere" leaves behind. */
+    const val ROTATE_LABEL = "Sign out everywhere"
+
+    /** A device sign-in code as it is read out: ten characters as two groups of five. */
+    fun groupCode(code: String): String = if (code.length == 10) code.chunked(5).joinToString("-") else code
+
+    /** The helper line under a sign-in code. */
+    fun codeHelp(left: String) = "Works once, for $left. Enter the code on the other device."
 
     // ------------------------------------------------------------ Other devices
 

@@ -27,6 +27,9 @@ data class ChannelFacts(val id: String, val name: String, val importance: Int, v
 /** [buttonsSupported] is false where Android cannot ask for an unlock on a notification button (before Android 12), so the switch would do nothing. */
 data class NotifFacts(val allowed: Boolean = true, val channels: List<ChannelFacts> = emptyList(), val answers: Boolean = true, val buttonsSupported: Boolean = true)
 
+/** What Capture and the widgets are set to, and what is saved on the phone but not yet sent. */
+data class CaptureFacts(val shareOpens: String = "note", val showTitles: Boolean = false, val waiting: List<example.hq.spike.capture.Queued> = emptyList())
+
 /** The phone pages under Settings (Keep running, Notifications): only what Android can say, and where it cannot, saying so. */
 object PhoneWords {
     private const val IMPORTANCE_HIGH = 4
@@ -60,6 +63,15 @@ object PhoneWords {
         }
         return KeepPage(title, body, bad > 0 || f.samsung, rows, f.samsung, history(f.lastStop, now))
     }
+
+    /** The Home row for Capture: where a share opens, and how many saved things still wait for HQ. */
+    fun captureSummary(f: CaptureFacts): String {
+        val opens = when (f.shareOpens) { "task" -> "Sharing opens a new task"; example.hq.spike.capture.CapturePrefs.LAST -> "Sharing opens the last one you used"; else -> "Sharing opens a new note" }
+        return if (f.waiting.isEmpty()) opens else "$opens \u00b7 ${f.waiting.size} waiting to send"
+    }
+
+    /** What a queued item says about itself: what it is, and why it is still here. */
+    fun queuedLine(q: example.hq.spike.capture.Queued): String = (if (q.isNote) "Note" else "Task") + " \u00b7 " + (q.failure ?: "Waiting for HQ")
 
     /** The Home row: "Good" when every setting Android can read is fine, with the one it cannot read called out on a Samsung. */
     fun keepSummary(f: KeepFacts, now: Instant): String {

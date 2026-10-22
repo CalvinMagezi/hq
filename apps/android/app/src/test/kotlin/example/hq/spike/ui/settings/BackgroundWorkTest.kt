@@ -3,6 +3,7 @@ package example.hq.spike.ui.settings
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -94,5 +95,77 @@ class BackgroundWorkTest {
         assertEquals("Backup and about", row.title)
         assertEquals("No backup yet", row.status)
         assertTrue(row.warn)
+    }
+
+    @Test fun onlyTheThreeCheckableProvidersGetAKeyButton() {
+        val s = JSONObject("""{"provider_keys":[{"name":"OpenRouter","id":"open_router","configured":true,"source":"env"},{"name":"Anthropic","id":"anthropic","configured":false,"source":null},{"name":"Google AI","id":"google","configured":true,"source":"file"},{"name":"DeepSeek","configured":true}]}""")
+        assertNull(SettingsWords.keyAction(s, "OpenRouter", true, "env"))
+        assertEquals(SettingsWords.KeyAction("anthropic", "Add"), SettingsWords.keyAction(s, "Anthropic", false, null))
+        assertEquals(SettingsWords.KeyAction("google", "Replace"), SettingsWords.keyAction(s, "Google AI", true, "file"))
+        assertNull(SettingsWords.keyAction(s, "DeepSeek", true, null))
+    }
+
+    @Test fun theKeySheetSaysAddOrReplaceAndWhyItFailed() {
+        assertEquals("Add your Anthropic key", SettingsWords.keyWords("Anthropic", false).title)
+        assertEquals("Replace your Google AI key", SettingsWords.keyWords("Google AI", true).title)
+        assertEquals(SettingsWords.KEY_REFUSED, SettingsWords.keyFailure(400))
+        assertEquals(SettingsWords.KEY_NO_ANSWER, SettingsWords.keyFailure(0))
+        assertEquals(SettingsWords.KEY_ENV, SettingsWords.keyFailure(409))
+        assertEquals(SettingsWords.KEY_NO_ANSWER, SettingsWords.keyFailure(503))
+        assertEquals(SettingsWords.KEY_OTHER, SettingsWords.keyFailure(403))
+        assertEquals("Anthropic key saved.", SettingsWords.keySaved("Anthropic"))
+        assertEquals("https://openrouter.ai/keys", SettingsWords.keyHelpUrl("open_router"))
+        assertNull(SettingsWords.keyHelpUrl("deepseek"))
+    }
+
+    @Test fun theConnectionWindowSaysHowLongAndWhenItCloses() {
+        val now = java.time.Instant.parse("2026-10-22T14:00:00Z")
+        val w = SettingsWords.window(JSONObject("""{"armed_until":${now.epochSecond + 581}}"""), now, java.time.ZoneOffset.UTC)
+        assertEquals(SettingsWords.Window(true, "9:41", "14:09"), w)
+        assertEquals(SettingsWords.Window(false, "", ""), SettingsWords.window(JSONObject("""{"armed_until":${now.epochSecond - 5}}"""), now))
+        assertEquals(SettingsWords.Window(false, "", ""), SettingsWords.window(JSONObject("""{"armed_until":null}"""), now))
+    }
+
+    @Test fun aSignInCodeIsReadInTwoGroupsOfFive() {
+        assertEquals("8KQ3M-W2T7P", SettingsWords.groupCode("8KQ3MW2T7P"))
+        assertEquals("SHORT", SettingsWords.groupCode("SHORT"))
+        assertEquals("Works once, for 9:41. Enter the code on the other device.", SettingsWords.codeHelp("9:41"))
+    }
+
+    @Test fun theSignOutEverywhereDialogSaysClaudeEndsToo() {
+        assertEquals(true, SettingsWords.SIGN_OUT_ALL_WORDS.body.contains("Claude connections end too"))
+        assertEquals("Sign out", SettingsWords.SIGN_OUT_ALL_WORDS.confirm)
+        assertEquals("Disconnect", SettingsWords.CLAUDE_OFF_WORDS.confirm)
+    }
+
+    @Test fun aRelaySaysWhenItWasLastSeen() {
+        val now = java.time.Instant.parse("2026-10-22T14:00:00Z")
+        val chat = JSONObject("""{"telegram":{"enabled":true,"token_set":true,"relay":{"status":"connected","current":true,"last_seen":${now.epochSecond - 12}}},"discord":{"enabled":false,"token_set":false}}""")
+        assertEquals("Running \u00b7 seen 12 s ago", SettingsWords.appCard(chat, "telegram", "Telegram", now).line)
+        assertEquals("12 s ago", SettingsWords.seen(now.minusSeconds(12), now))
+        assertEquals("5 min ago", SettingsWords.seen(now.minusSeconds(300), now))
+        assertEquals("2 h ago", SettingsWords.seen(now.minusSeconds(7200), now))
+    }
+
+    @Test fun setupWordsFollowTheWebAppsSteps() {
+        assertEquals(4, SettingsWords.setupSteps("telegram").size)
+        assertEquals("Open @BotFather in Telegram.", SettingsWords.setupSteps("telegram").first())
+        assertEquals("Paste the token below.", SettingsWords.setupSteps("discord").last())
+        assertEquals("https://t.me/BotFather", SettingsWords.setupUrl("telegram"))
+        assertEquals("https://discord.com/oauth2/authorize?client_id=42&scope=bot%20applications.commands&permissions=309237730368", SettingsWords.inviteUrl("42"))
+    }
+
+    @Test fun pairingTellsWhereToSendTheCodeWithOrWithoutAButton() {
+        assertEquals("Tap the button to open your bot and press Start. Or send it /pair\u00A0K4M7Q-2XPA9 yourself.", SettingsWords.pairHelp("telegram", "/pair K4M7Q-2XPA9", true))
+        assertEquals("Open your bot in Telegram and send it /pair\u00A0K4M7Q-2XPA9.", SettingsWords.pairHelp("telegram", "/pair K4M7Q-2XPA9", false))
+        assertEquals("Open a direct message with your bot in Discord and send !pair\u00A0K4M7Q-2XPA9.", SettingsWords.pairHelp("discord", "!pair K4M7Q-2XPA9", false))
+        assertEquals("Waiting for the message. The code works for 4:32.", SettingsWords.pairWaiting("4:32"))
+    }
+
+    @Test fun aChatAppFailureUsesTheServersWordsWhenItGaveSome() {
+        assertEquals("HQ did not reply. Try again.", SettingsWords.chatAppFailure(0, null))
+        assertEquals("Token rejected by Telegram", SettingsWords.chatAppFailure(400, "Token rejected by Telegram"))
+        assertEquals(SettingsWords.TOKEN_REFUSED, SettingsWords.chatAppFailure(400, null))
+        assertEquals("Disconnect Telegram?", SettingsWords.disconnectWords("telegram").title)
     }
 }
