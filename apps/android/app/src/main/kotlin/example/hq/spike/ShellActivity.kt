@@ -54,6 +54,7 @@ import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.search.SearchUi
 import example.hq.spike.ui.search.SearchViewModel
 import example.hq.spike.ui.tasks.QuickAddSheet
+import example.hq.spike.ui.tasks.BriefingPage
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
@@ -382,6 +383,9 @@ class ShellActivity : ComponentActivity() {
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasks.actions) }
         if (tasksState.filterOpen) TaskFilterSheet(tasksState, tasks.actions)
+        tasksState.briefing?.let { b ->
+            BriefingPage(b, onClose = { tasks.actions.onBriefing(false) }, onRetry = { tasks.actions.onBriefing(true) }, onTask = { t -> tasks.actions.onBriefing(false); tasks.openById(t.id) { } }, onNote = { path -> tasks.actions.onBriefing(false); notes.openNote(path) })
+        }
         HelperOverlays(helpersState, helpers.actions)
     }
 

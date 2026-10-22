@@ -89,6 +89,8 @@ data class TasksUi(
     val tree: TaskTree? = null,
     val treeFailed: Boolean = false,
     val filterOpen: Boolean = false,
+    /** The briefing page for an initiative, while it is open. */
+    val briefing: BriefingUi? = null,
 ) {
     /** Whether a task is inside what the All tab is narrowed to. */
     val keep: (TaskItem) -> Boolean get() = TaskFilters.keeps(tree, scope)
@@ -131,6 +133,7 @@ class TasksActions(
     val onChip: (AllChip) -> Unit = {},
     val onFilter: (Boolean) -> Unit = {},
     val onScope: (TaskScope) -> Unit = {},
+    val onBriefing: (Boolean) -> Unit = {},
     val onRestore: () -> Unit = {},
     val onSelect: (String) -> Unit = {},
     val onSelectAll: (List<String>) -> Unit = {},
@@ -161,7 +164,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onStatus = { s -> patchDetail(JSONObject().put("status", s)) }, onPriority = { p -> patchDetail(JSONObject().put("priority", p ?: JSONObject.NULL)) },
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
         onQuick = { q -> _state.update { it.copy(quick = q) } }, onQuickSave = ::saveQuick,
-        onChip = ::chooseChip, onRestore = ::restore, onFilter = ::openFilter, onScope = ::chooseScope,
+        onChip = ::chooseChip, onRestore = ::restore, onFilter = ::openFilter, onScope = ::chooseScope, onBriefing = ::openBriefing,
         onSelect = { id -> _state.update { if (it.bulking) it else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id) } },
         onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
         onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
@@ -256,6 +259,19 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(treeFailed = true) }
             }
+        }
+    }
+
+    /** The briefing of the initiative the list is narrowed to; false closes it. */
+    private fun openBriefing(open: Boolean) {
+        val state = _state.value
+        val scope = state.scope as? TaskScope.Initiative
+        if (!open || scope == null) { _state.update { it.copy(briefing = null) }; return }
+        val name = TaskFilters.label(state.tree, scope) ?: scope.id
+        _state.update { it.copy(briefing = BriefingUi(scope.id, name), filterOpen = false) }
+        viewModelScope.launch {
+            val phase = try { BriefingPhase.Ready(client.initiativeBriefing(scope.id)) } catch (e: HqUnavailable) { BriefingPhase.Failed(missing = e.status == HTTP_NOT_FOUND) }
+            _state.update { s -> if (s.briefing?.initiativeId == scope.id) s.copy(briefing = s.briefing.copy(phase = phase)) else s }
         }
     }
 

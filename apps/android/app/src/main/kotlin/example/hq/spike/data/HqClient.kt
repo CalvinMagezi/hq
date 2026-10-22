@@ -167,6 +167,30 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         return example.hq.spike.ui.tasks.TaskTree(spaces, folders, initiatives)
     }
 
+    /** The briefing for one initiative, as HQ generates it now. A 404 is an edition with no agents (Lite): the caller says so. */
+    suspend fun initiativeBriefing(id: String): example.hq.spike.ui.tasks.Briefing = send(authed("/api/initiatives/${java.net.URLEncoder.encode(id, "UTF-8").replace("+", "%20")}/activity").build()) { text ->
+        val o = JSONObject(text)
+        val counts = { name: String -> o.optJSONObject(name)?.let { c -> c.keys().asSequence().map { it to c.optInt(it) }.toList() }.orEmpty() }
+        example.hq.spike.ui.tasks.Briefing(
+            name = o.optJSONObject("initiative")?.optString("name").orEmpty(),
+            tasksShown = o.optInt("tasks_shown"),
+            statusCounts = counts("status_counts"),
+            awaiting = o.optJSONArray("awaiting_review").objects().map { example.hq.spike.ui.tasks.BriefTask(it.getString("id"), it.optString("display_id"), it.optString("title")) },
+            blocked = o.optJSONArray("blocked").objects().map { example.hq.spike.ui.tasks.BlockedTask(it.getString("id"), it.optString("display_id"), it.optString("title"), it.optStringOrNull("reason"), it.optStringOrNull("waiting_on")) },
+            contributors = o.optJSONArray("contributors").objects().map { example.hq.spike.ui.tasks.Contributor(it.optString("actor"), it.optInt("notes"), it.optInt("leases"), it.optStringOrNull("last_active")) },
+            reviewCounts = counts("review_counts"),
+            gapsTotal = o.optInt("gaps_total"),
+            notes = o.optJSONArray("recent_notes").objects().map {
+                example.hq.spike.ui.tasks.BriefNote(
+                    it.optString("path"), it.optString("task_display_id"),
+                    example.hq.spike.ui.tasks.BriefingWords.author(it.optString("attribution"), it.optStringOrNull("actor"), it.optStringOrNull("source_kind")),
+                    it.optStringOrNull("written_at"), it.optStringOrNull("review_state"),
+                )
+            },
+            freshness = o.optJSONObject("freshness")?.let { f -> f.keys().asSequence().map { it to f.optStringOrNull(it) }.toList() }.orEmpty(),
+        )
+    }
+
     /** A helper working on a task right now: who, where, and which task. */
     data class WorkSession(val taskId: String, val actor: String, val harness: String, val cwd: String)
 

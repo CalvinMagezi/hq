@@ -59,6 +59,16 @@ fun TaskFilterSheet(ui: TasksUi, actions: TasksActions) {
 private fun FilterRows(ui: TasksUi, tree: TaskTree, actions: TasksActions) {
     val rows = TaskFilters.rows(tree, ui.tasks)
     Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp)) {
+        if (ui.scope is TaskScope.Initiative) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button) { actions.onBriefing(true) }.padding(start = 8.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { Icon(HqIcons.Info, null, Modifier.size(20.dp), tint = Mts.BrandBlue) }
+                Text(BriefingWords.TITLE, style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
+                Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
+        }
         rows.forEach { row ->
             val on = row.scope == ui.scope
             Row(
