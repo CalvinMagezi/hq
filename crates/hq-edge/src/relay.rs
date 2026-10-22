@@ -73,6 +73,15 @@ impl Drop for RelayHost {
     }
 }
 
+/// Chooses ring as the process-wide rustls provider, once. The relay's ACME code
+/// (`tokio-rustls-acme`) builds a `ServerConfig` with the process default, which rustls resolves by
+/// itself only when exactly one provider is compiled in. A build that includes `hq-web` has two
+/// (it pulls in aws-lc-rs), so without this the relay panics at start-up. If the process already
+/// installed a provider, that one stays: either works for ACME.
+fn ensure_default_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 impl RelayHost {
     /// Starts the relay. `edge_id` is the edge's own endpoint, which it must be able to use to
     /// reach devices; everyone else must be in `registry`.
@@ -81,6 +90,7 @@ impl RelayHost {
         registry: Arc<dyn Registry>,
         edge_id: EndpointId,
     ) -> Result<Self> {
+        ensure_default_crypto_provider();
         let denied = Arc::new(AtomicU64::new(0));
         let admitted = Admitted::default();
         let mut relay = RelayConfig::new((LOOPBACK, 0));
