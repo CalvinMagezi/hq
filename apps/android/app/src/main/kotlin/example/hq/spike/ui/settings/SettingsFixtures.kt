@@ -41,7 +41,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         """{"active":true,"quota":{"login":"example","plan":"pro","entitlement":1500,"credits_used":588,"remaining":912,"percent_remaining":60.8,"overage_permitted":false,"reset_at":"2026-11-01T00:00:00Z"},"burn":{"windows":[{"window_hours":6,"credits_used":50,"per_hour":8.3}]}}""",
     )
     val phone = listOf(
-        HomeRow(null, "background", "Background work", "On · answers chats, runs tasks"),
+        HomeRow(SettingsPage.Background, "background", "Background work", SettingsWords.BACKGROUND_ON),
         HomeRow(null, "battery", "Keep running", "Good · 1 thing to check"),
         HomeRow(null, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
@@ -57,6 +57,10 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-chat" -> base.copy(stack = listOf(SettingsPage.Messaging))
         "s-claude" -> base.copy(stack = listOf(SettingsPage.Claude))
         "s-devices" -> base.copy(stack = listOf(SettingsPage.Devices))
+        "s-background" -> base.copy(stack = listOf(SettingsPage.Background))
+        "s-background-standby" -> base.copy(stack = listOf(SettingsPage.Background), mode = "standby")
+        "s-background-ask" -> base.copy(stack = listOf(SettingsPage.Background), askMode = false)
+        "s-background-restarting" -> base.copy(stack = listOf(SettingsPage.Background), restarting = true)
         "s-spend" -> base.copy(stack = listOf(SettingsPage.Spending))
         "s-spend-exceeded" -> base.copy(stack = listOf(SettingsPage.Spending), snap = base.snap.copy(budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":5.2,"pct":104,"state":"exceeded","resets_at":${future(1_800)}}]}"""), forecast = JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}""")))
         "s-about" -> base.copy(stack = listOf(SettingsPage.About))

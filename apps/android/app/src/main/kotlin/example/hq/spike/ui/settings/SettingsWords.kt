@@ -25,14 +25,14 @@ data class SettingsSnapshot(
     val forecast: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
 data class HomeGroup(val title: String, val rows: List<HomeRow>)
 
 /** A line on a read-only page: a title with its value, and a sentence that says what it means. */
-data class FactRow(val title: String, val value: String, val text: String? = null)
+data class FactRow(val title: String, val value: String, val text: String? = null, val good: Boolean = false)
 
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
@@ -314,6 +314,45 @@ object SettingsWords {
         val bot = a.obj("bot").text("username")?.let { if (key == "telegram") "@$it" else it }
         val paired = a.obj("owner")?.optBoolean("paired") == true
         return AppCard(name, on, line, bot, if (paired) "Linked" else "Not linked")
+    }
+
+    // ------------------------------------------------------------ Background work
+
+    const val BACKGROUND_ON = "On \u00b7 answers chats, runs tasks"
+    const val BACKGROUND_OFF = "Only when I open the app"
+
+    /** The three lines under "Right now": hq itself, and each chat app as far as the run mode lets it be connected. */
+    fun rightNow(snap: SettingsSnapshot, active: Boolean, restarting: Boolean): List<FactRow> {
+        val hq = when {
+            restarting -> FactRow("HQ", "Restarting")
+            snap.health != null -> FactRow("HQ", "Running", good = true)
+            else -> FactRow("HQ", NOT_ANSWERED)
+        }
+        return listOf(hq, chatAppRow(snap.chatApps, "telegram", "Telegram", active), chatAppRow(snap.chatApps, "discord", "Discord", active))
+    }
+
+    private fun chatAppRow(chat: JSONObject?, key: String, name: String, active: Boolean): FactRow {
+        val a = chat.obj(key)
+        val relay = a.obj("relay")
+        val status = relay.text("status")
+        val value = when {
+            a == null || !(a.optBoolean("enabled") && a.optBoolean("token_set")) -> "Not set up"
+            !active -> "Paused"
+            relay?.optBoolean("current", true) == false -> "Not connected yet"
+            status == "connected" -> "Connected"
+            status == "error" -> "Error"
+            else -> "Not connected yet"
+        }
+        return FactRow(name, value)
+    }
+
+    data class ModeWords(val title: String, val body: String, val confirm: String)
+
+    /** What the dialog says before the run mode changes: what stops or starts, and that hq restarts for a moment. */
+    fun modeDialog(toActive: Boolean) = if (toActive) {
+        ModeWords("Start background work?", "HQ will start answering your chats and running scheduled tasks, even when the app is closed. It restarts for a moment.", "Start")
+    } else {
+        ModeWords("Pause background work?", "HQ will stop answering your chats and running scheduled tasks. It restarts for a moment.", "Pause")
     }
 
     // ------------------------------------------------------------ Connect Claude

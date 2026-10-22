@@ -3,10 +3,12 @@ package example.hq.spike;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
@@ -100,6 +102,21 @@ final class HubConfig {
     /** The relays and the scheduler run only when files/mode says "active"; anything else is standby. */
     static boolean isActive(String modeFile) {
         return modeFile != null && modeFile.trim().equals(MODE_ACTIVE);
+    }
+
+    /**
+     * The wait before hq is started again: short when the stop was asked for (a new run mode, a new token) or the last
+     * run was long, otherwise doubled up to the cap, so a crash loop slows down and a deliberate restart does not.
+     */
+    static long nextBackoff(long backoff, long ranMs, boolean asked, long min, long max, long stableRun) {
+        return asked || ranMs >= stableRun ? min : Math.min(backoff * 2, max);
+    }
+
+    /** Writes the run mode so a reader sees the old text or the new one, never part of it: a temp file beside it, then a rename over it. */
+    static void writeMode(Path file, boolean active) throws IOException {
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+        Files.write(tmp, (active ? MODE_ACTIVE : "standby").getBytes(StandardCharsets.UTF_8));
+        Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 
     /** Standby serves the web app only; active is the daemon with relays, which serves it too. Supervised keeps the sign-in token out of the log. */

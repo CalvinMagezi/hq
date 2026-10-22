@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,9 +36,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -63,6 +66,8 @@ private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp
 private const val LINE_MS = 4_000L
 private const val REFRESH_MS = 15_000L
 private val BAR_HEIGHT = 8.dp
+private const val DISABLED_ALPHA = 0.5f
+private const val SCRIM_ALPHA = 0.62f
 private val VALUE_MAX = 180.dp
 private val KEY_COLUMN = 120.dp
 
@@ -89,6 +94,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Devices -> "Other devices"
     SettingsPage.Spending -> "Spending limits"
     SettingsPage.About -> "About"
+    SettingsPage.Background -> "Background work"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -118,8 +124,10 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Devices -> Devices(ui)
                 SettingsPage.Spending -> Spending(ui)
                 SettingsPage.About -> About(ui, actions)
+                SettingsPage.Background -> Background(ui, actions)
             }
         }
+        ui.askMode?.let { ModeDialog(it, actions) }
         ui.line?.let { Snack(it, actions.onDismissLine, Modifier.align(Alignment.BottomCenter)) }
     }
 }
@@ -183,7 +191,7 @@ private fun Fact(row: FactRow, first: Boolean) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(row.title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
-            Text(row.value, style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.widthIn(max = VALUE_MAX))
+            Text(row.value, style = HqType.BodySm, color = if (row.good) Mts.BrandGreen else Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.widthIn(max = VALUE_MAX))
         }
         row.text?.let { Text(it, style = SmallText, color = Mts.InkMuted) }
     }
@@ -441,6 +449,66 @@ private fun BudgetCardView(c: SettingsWords.BudgetCard) {
                 .semantics { progressBarRangeInfo = ProgressBarRangeInfo(c.fraction, 0f..1f) },
         ) { Box(Modifier.fillMaxWidth(c.fraction).fillMaxHeight().background(fill)) }
         Text(c.stand, style = SmallText, color = Mts.InkMuted)
+    }
+}
+
+// ---------------------------------------------------------------- background work
+
+@Composable
+private fun Background(ui: SettingsUi, actions: SettingsActions) {
+    val active = ui.mode == "active"
+    Page {
+        Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ModeCard("Working in the background", "HQ answers your chats and runs scheduled tasks, even when the app is closed.", active, !ui.restarting) { actions.onMode(true) }
+            ModeCard("Only when I open the app", "Your notes and tasks work. Chats and scheduled tasks pause.", !active, !ui.restarting) { actions.onMode(false) }
+        }
+        Box(Modifier.padding(top = 12.dp)) { Notice("Use this on one device only. If two copies of HQ share your data, both answer the same messages and run the same tasks.", HqIcons.Warning, warn = true) }
+        Label("Right now")
+        Facts(SettingsWords.rightNow(ui.snap, active, ui.restarting))
+    }
+}
+
+/** One of the two run modes as a radio card: the whole card is the tap target, and the selected one has a green border. */
+@Composable
+private fun ModeCard(title: String, text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier.fillMaxWidth().alpha(if (enabled) 1f else DISABLED_ALPHA).clip(shape).background(Mts.Surface100).border(1.dp, if (selected) Mts.BrandGreen else Mts.Line, shape)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick).padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top,
+    ) {
+        Box(Modifier.padding(top = 1.dp).size(22.dp).border(2.dp, if (selected) Mts.BrandGreen else Mts.Line, CircleShape), contentAlignment = Alignment.Center) {
+            if (selected) Box(Modifier.size(13.dp).background(Mts.BrandGreen, CircleShape))
+        }
+        Column {
+            Text(title, style = HqType.BodyBold, color = Mts.Ink)
+            Text(text, style = HqType.BodySm, color = Mts.InkMuted)
+        }
+    }
+}
+
+/** Says what stops or starts before the run mode changes, over the whole of Settings. Back and a tap outside cancel. */
+@Composable
+private fun ModeDialog(toActive: Boolean, actions: SettingsActions) {
+    val words = SettingsWords.modeDialog(toActive)
+    BackHandler(onBack = actions.onModeCancel)
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = actions.onModeCancel))
+        Column(Modifier.padding(start = 24.dp, top = 270.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp)) {
+            Text(words.title, style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
+            Text(words.body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 20.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                DialogButton("Cancel", actions.onModeCancel)
+                DialogButton(words.confirm, actions.onModeConfirm)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogButton(label: String, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+        Text(label, style = HqType.BodySmBold, color = Mts.Ink)
     }
 }
 

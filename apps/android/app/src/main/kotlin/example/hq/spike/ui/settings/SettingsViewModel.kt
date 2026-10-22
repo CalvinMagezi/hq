@@ -7,18 +7,25 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import example.hq.spike.AlertPoster
+import example.hq.spike.HubService
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
 import java.io.File
 import java.time.Instant
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 data class SettingsUi(
@@ -32,6 +39,10 @@ data class SettingsUi(
     val build: String = "",
     val line: String? = null,
     val now: Instant = Instant.now(),
+    /** The run mode the owner is being asked to confirm (true is Active), or null when no dialog is open. */
+    val askMode: Boolean? = null,
+    /** hq is restarting for a new run mode; the choices are off until it is back. */
+    val restarting: Boolean = false,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 }
@@ -44,6 +55,9 @@ class SettingsActions(
     val onPhoneRow: (String) -> Unit = {},
     val onCopyDiagnostics: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
+    val onMode: (Boolean) -> Unit = {},
+    val onModeCancel: () -> Unit = {},
+    val onModeConfirm: () -> Unit = {},
     /** One read of everything Settings shows; the page calls it every few seconds while it is showing and the app is in front. */
     val onRefresh: suspend () -> Unit = {},
 )
@@ -62,6 +76,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onPhoneRow = ::phoneRow,
         onCopyDiagnostics = ::copyDiagnostics,
         onDismissLine = { _state.update { it.copy(line = null) } },
+        onMode = { toActive -> _state.update { if (it.restarting || toActive == (it.mode == "active")) it else it.copy(askMode = toActive) } },
+        onModeCancel = { _state.update { it.copy(askMode = null) } },
+        onModeConfirm = ::confirmMode,
         onRefresh = ::refreshNow,
     )
 
@@ -135,7 +152,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         fun on(id: String) = nm.getNotificationChannel(id)?.importance?.let { it != NotificationManager.IMPORTANCE_NONE } ?: true
         val allowed = nm.areNotificationsEnabled()
         return listOf(
-            HomeRow(null, "background", "Background work", if (active) "On · answers chats, runs tasks" else "Only when the app is open"),
+            HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
             HomeRow(null, "battery", "Keep running", if (battery) "Good · 1 thing to check" else "Battery use is limited", warn = !battery),
             HomeRow(null, "notifications", "Notifications", if (!allowed) "Off in Android" else "Needs you ${if (on(AlertPoster.NEEDS)) "on" else "off"} · Updates ${if (on(AlertPoster.UPDATES)) "on" else "off"}", warn = !allowed),
             HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
@@ -150,11 +167,52 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             else -> null
         }
         if (intent == null) {
-            _state.update { it.copy(line = if (key == "background") "Switching background work is not in the native app yet." else "These options are not in the native app yet.") }
+            _state.update { it.copy(line = "These options are not in the native app yet.") }
             return
         }
         try { c.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: android.content.ActivityNotFoundException) { _state.update { it.copy(line = "Android could not open that screen.") } }
     }
+
+    /**
+     * Writes the new run mode and restarts hq, then waits for it to answer again. Both cards stay off meanwhile; the mode shown
+     * afterwards is what the file says, not what was tapped.
+     */
+    private fun confirmMode() {
+        val toActive = _state.value.askMode ?: return
+        if (_state.value.restarting) return
+        _state.update { it.copy(askMode = null, restarting = true) }
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { switchAndWait(toActive) }
+            _state.update { it.copy(restarting = false, mode = modeOf(), phone = phoneRows(), line = if (ok) null else RESTART_TIMEOUT_LINE) }
+            refreshNow()
+        }
+    }
+
+    private suspend fun switchAndWait(toActive: Boolean): Boolean {
+        val before = startStamp().second
+        try { HubService.switchMode(ctx(), toActive) } catch (e: java.io.IOException) { return false }
+        if (!waitForHq(before)) return false
+        if (HubService.childActive() == toActive) return true
+        // The switch landed while hq was starting with the old mode: restart once more so it reads the file.
+        val again = startStamp().second
+        HubService.restartHq()
+        return waitForHq(again)
+    }
+
+    private suspend fun waitForHq(before: String?): Boolean {
+        val watch = RestartWatch(before)
+        val end = SystemClock.elapsedRealtime() + RestartWatch.TIMEOUT_MS
+        while (SystemClock.elapsedRealtime() < end) {
+            delay(RestartWatch.POLL_MS)
+            val (answered, stamp) = startStamp()
+            if (watch.back(answered, stamp)) return true
+        }
+        return false
+    }
+
+    /** Whether hq answered, and the start time it reports (it changes each time hq starts). */
+    private suspend fun startStamp(): Pair<Boolean, String?> =
+        try { true to client.json("/api/chat-apps").let { o -> if (o.has("started_at") && !o.isNull("started_at")) o.get("started_at").toString() else null } } catch (e: HqUnavailable) { false to null }
 
     private fun copyDiagnostics() {
         val s = _state.value
@@ -170,5 +228,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MODE_MAX = 64L
+        const val RESTART_TIMEOUT_LINE = "HQ did not come back within two minutes."
     }
 }
