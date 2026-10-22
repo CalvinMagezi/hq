@@ -20,7 +20,7 @@ Nothing starts by itself. Opening the app starts no host, opens no network port 
 nothing but its own folder (`~/.hq/desktop`). The host starts when you press Start (or when you turned on "Start the
 host when this app opens"); the pairing endpoint opens when you press Switch on; the app's local
 web address opens when you press Open HQ. The app never registers a login item, and it stops the
-host it started when it quits. A host it did not start (one you run in a terminal, or a service)
+host it started when it quits (Cmd-Q, closing the window or a plain kill). A host it did not start (one you run in a terminal, or a service)
 is shown as "Running elsewhere" and cannot be stopped from the app.
 
 ## Pairing a device

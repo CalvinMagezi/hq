@@ -46,6 +46,9 @@ pub struct PairingController {
     db: Mutex<Option<Database>>,
     handler: StreamHandler,
     bridge: tokio::sync::Mutex<Option<Bridge>>,
+    /// This machine's card while it is switched on. The screen reads it instead of the bridge, so
+    /// a slow start or revoke (both can wait on a relay) never freezes the refresh.
+    host: Mutex<Option<HostCard>>,
     session: Arc<Mutex<Session>>,
     changed: watch::Sender<u64>,
 }
@@ -164,6 +167,7 @@ impl PairingController {
             db: Mutex::new(None),
             handler: handler.unwrap_or_else(echo_handler),
             bridge: tokio::sync::Mutex::new(None),
+            host: Mutex::new(None),
             session: Arc::default(),
             changed: watch::channel(0).0,
         }
@@ -213,6 +217,13 @@ impl PairingController {
                 Some(self.handler.clone()),
             )
             .await?;
+            let card = bridge.card();
+            *self.host.lock().unwrap() = Some(HostCard {
+                short_id: short(&card.id),
+                id: card.id,
+                name: printable(&card.name, SHOWN_NAME_CHARS),
+                addrs: card.addrs,
+            });
             *slot = Some(bridge);
         }
         Ok(slot.as_ref().expect("just set"))
@@ -222,6 +233,7 @@ impl PairingController {
     pub async fn stop(&self) {
         self.cancel_ticket();
         let bridge = self.bridge.lock().await.take();
+        *self.host.lock().unwrap() = None;
         if let Some(bridge) = bridge {
             bridge.shutdown().await;
         }
@@ -365,15 +377,7 @@ impl PairingController {
     }
 
     pub async fn snapshot(&self) -> PairingSnapshot {
-        let host = self.bridge.lock().await.as_ref().map(|b| {
-            let card = b.card();
-            HostCard {
-                short_id: short(&card.id),
-                id: card.id,
-                name: printable(&card.name, SHOWN_NAME_CHARS),
-                addrs: card.addrs,
-            }
-        });
+        let host = self.host.lock().unwrap().clone();
         let (peers, peers_error) = match self.list_peers().await {
             Ok(list) => (list, None),
             Err(e) => (Vec::new(), Some(format!("{e:#}"))),

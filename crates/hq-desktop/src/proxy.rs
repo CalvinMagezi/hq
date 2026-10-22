@@ -36,6 +36,8 @@ const HOP_BY_HOP: [&str; 8] = [
 /// Paths that belong to the public machine door, never to this one.
 const MACHINE_PATHS: [&str; 4] = ["/mcp", "/oauth/token", "/oauth/revoke", "/.well-known"];
 const WS_PATH: &str = "/ws";
+/// How long a stopping proxy lets open responses (an event stream never ends by itself) finish.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct ProxyConfig {
@@ -68,6 +70,9 @@ impl ProxyConfig {
 pub enum Refusal {
     /// An absolute-form target, `CONNECT`, or no `Host` at all.
     BadTarget,
+    /// A path that can mean two things to two parsers: dot segments, encoded dots, slashes or
+    /// backslashes, empty segments.
+    AmbiguousPath,
     /// `Host` is not this proxy's own address: a rebound DNS name or a misdirected request.
     WrongHost,
     /// A browser request that carries another site's `Origin`.
@@ -81,7 +86,7 @@ pub enum Refusal {
 impl Refusal {
     fn status(self) -> StatusCode {
         match self {
-            Self::BadTarget => StatusCode::BAD_REQUEST,
+            Self::BadTarget | Self::AmbiguousPath => StatusCode::BAD_REQUEST,
             Self::WrongHost => StatusCode::MISDIRECTED_REQUEST,
             Self::CrossOrigin | Self::CrossSiteFetch => StatusCode::FORBIDDEN,
             Self::MachineEndpoint => StatusCode::NOT_FOUND,
@@ -89,15 +94,17 @@ impl Refusal {
     }
 }
 
-/// The names this proxy answers to.
-fn own_authorities(port: u16) -> [String; 2] {
-    [format!("127.0.0.1:{port}"), format!("localhost:{port}")]
+/// The one name this proxy answers to. The app only ever hands out this address, and a second name
+/// (`localhost` may resolve to `::1`, where another program could be listening) would add a
+/// second origin to defend.
+fn own_authority(port: u16) -> String {
+    format!("127.0.0.1:{port}")
 }
 
 /// Decides, from the request line and headers alone, whether the request may go on.
 pub fn judge(method: &Method, uri: &Uri, headers: &HeaderMap, port: u16) -> Result<(), Refusal> {
-    let own = own_authorities(port);
-    let is_own = |a: &str| own.iter().any(|o| o.eq_ignore_ascii_case(a.trim()));
+    let own = own_authority(port);
+    let is_own = |a: &str| own.eq_ignore_ascii_case(a.trim());
     if method == Method::CONNECT {
         return Err(Refusal::BadTarget);
     }
@@ -133,10 +140,27 @@ pub fn judge(method: &Method, uri: &Uri, headers: &HeaderMap, port: u16) -> Resu
     if matches!(fetch_site, Some("cross-site" | "same-site")) && !navigation {
         return Err(Refusal::CrossSiteFetch);
     }
+    // The path is judged as written and forwarded through a URL parser that resolves `.` and `..`.
+    // A path where those two disagree would let `/x/../mcp` past the check, so none is allowed.
+    if is_ambiguous_path(uri.path()) {
+        return Err(Refusal::AmbiguousPath);
+    }
     if is_machine_path(uri.path()) {
         return Err(Refusal::MachineEndpoint);
     }
     Ok(())
+}
+
+fn is_ambiguous_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    if path.contains('\\') || ["%2e", "%2f", "%5c"].iter().any(|e| lower.contains(e)) {
+        return true;
+    }
+    let segments: Vec<&str> = path.split('/').skip(1).collect();
+    segments
+        .iter()
+        .enumerate()
+        .any(|(i, s)| *s == "." || *s == ".." || (s.is_empty() && i + 1 != segments.len()))
 }
 
 fn is_machine_path(path: &str) -> bool {
@@ -156,7 +180,7 @@ fn is_ws_path(path: &str) -> bool {
 /// so it can only narrow what the page may do: no connections but this origin's, no framing.
 fn extra_csp(port: u16) -> String {
     format!(
-        "connect-src 'self' blob: ws://127.0.0.1:{port} ws://localhost:{port}; \
+        "connect-src 'self' blob: ws://127.0.0.1:{port}; \
          frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
     )
 }
@@ -184,7 +208,12 @@ impl ProxyHandle {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
-        let _ = self.task.await;
+        if tokio::time::timeout(SHUTDOWN_GRACE, &mut self.task)
+            .await
+            .is_err()
+        {
+            self.task.abort();
+        }
     }
 }
 
@@ -454,11 +483,12 @@ mod tests {
     }
 
     #[test]
-    fn the_proxys_own_names_pass_and_every_other_host_does_not() {
+    fn the_proxys_own_name_passes_and_every_other_host_does_not() {
         assert_eq!(req("GET", "/", &[HOST]), Ok(()));
-        assert_eq!(req("GET", "/", &[("host", "LOCALHOST:47474")]), Ok(()));
         for host in [
             "evil.example:47474",
+            "localhost:47474",
+            "LOCALHOST:47474",
             "127.0.0.1:5678",
             "127.0.0.1",
             "localhost.evil.com:47474",
@@ -517,8 +547,43 @@ mod tests {
                 "/api/x",
                 &[HOST, ("origin", "http://localhost:47474")]
             ),
-            Ok(())
+            Err(Refusal::CrossOrigin)
         );
+    }
+
+    #[test]
+    fn a_path_two_parsers_could_read_differently_is_refused() {
+        for path in [
+            "/./mcp",
+            "/x/../mcp",
+            "/x/./../mcp",
+            "/%2e/mcp",
+            "/%2E%2E/mcp",
+            "/oauth/./token",
+            "/a/../.well-known/oauth-authorization-server",
+            "//mcp",
+            "/api//x",
+            "/mcp%2fsse",
+            "/api/x%5c..",
+            "/api/x\\y",
+            "/..",
+            "/.",
+        ] {
+            assert_eq!(
+                req("GET", path, &[HOST]),
+                Err(Refusal::AmbiguousPath),
+                "{path}"
+            );
+        }
+        for path in [
+            "/",
+            "/api/x/",
+            "/assets/app.min.js",
+            "/connect",
+            "/a.b/c..d",
+        ] {
+            assert_eq!(req("GET", path, &[HOST]), Ok(()), "{path}");
+        }
     }
 
     #[test]

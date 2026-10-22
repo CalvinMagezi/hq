@@ -85,12 +85,11 @@ async fn open_main_window(handle: AppHandle, app: App<'_>) -> Reply<()> {
 #[tauri::command]
 async fn open_in_browser(app: App<'_>, url: String) -> Reply<()> {
     let origin = app.proxy_origin().await.map_err(shown)?;
-    if !hq_desktop::window::main_page_allowed(&url, &origin) {
-        return Err("only this app's own address can be opened".into());
-    }
-    std::process::Command::new("open")
-        .arg(&url)
-        .spawn()
+    let target = hq_desktop::window::browser_target(&url, &origin)
+        .ok_or_else(|| "only this app's own address can be opened".to_string())?;
+    std::process::Command::new("/usr/bin/open")
+        .arg(target)
+        .status()
         .map(|_| ())
         .map_err(shown)
 }

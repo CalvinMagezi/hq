@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// `hq start all` waits up to 10 s for its cleanup before it exits.
-const STOP_GRACE: Duration = Duration::from_secs(12);
+pub const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(12);
 const STOP_POLL: Duration = Duration::from_millis(100);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 const PROBE_READ_MAX: usize = 64;
@@ -27,6 +27,8 @@ pub struct HostSpec {
     pub log: PathBuf,
     /// The web port the host answers `/health` on (`ws_port` in the HQ config).
     pub health_port: u16,
+    /// How long a stop waits after the polite signal before it kills what is left.
+    pub stop_grace: Duration,
 }
 
 impl HostSpec {
@@ -36,6 +38,7 @@ impl HostSpec {
             args: vec!["start".into(), "all".into()],
             log,
             health_port,
+            stop_grace: DEFAULT_STOP_GRACE,
         }
     }
 }
@@ -82,6 +85,9 @@ struct Inner {
 pub struct HostController {
     spec: HostSpec,
     inner: Mutex<Inner>,
+    /// Held for the whole of a start or a stop, so two clicks cannot start two hosts and a start
+    /// cannot slip in while a stop is still waiting.
+    gate: tokio::sync::Mutex<()>,
 }
 
 impl HostController {
@@ -89,6 +95,7 @@ impl HostController {
         Self {
             spec,
             inner: Mutex::new(Inner::default()),
+            gate: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -108,6 +115,7 @@ impl HostController {
     }
 
     pub async fn start(&self) -> Result<HostStatus, HostError> {
+        let _gate = self.gate.lock().await;
         if self.reap_and_pid().is_some() {
             return Ok(self.status().await);
         }
@@ -124,30 +132,45 @@ impl HostController {
     }
 
     /// Stops the child this app started: a polite signal to its whole process group, then a kill
-    /// after the grace period. Refuses when the host was not started here.
+    /// of whatever is left of the group once the grace period is over, however the leader fared.
+    /// Refuses when the host was not started here.
     pub async fn stop(&self) -> Result<HostStatus, HostError> {
-        let taken = self.inner.lock().unwrap().child.take();
-        let Some(mut child) = taken else {
+        let _gate = self.gate.lock().await;
+        let Some(pid) = self.reap_and_pid() else {
             return if probe_health(self.spec.health_port).await {
                 Err(HostError::NotOurs)
             } else {
+                // Nothing of ours is running; stopping also clears a note that it ended by itself.
+                self.inner.lock().unwrap().last_exit = None;
                 Ok(HostStatus::Stopped)
             };
         };
-        let pid = child.id();
         signal_group(pid, Signal::Term);
-        let deadline = tokio::time::Instant::now() + STOP_GRACE;
-        while child.try_wait().ok().flatten().is_none() {
+        let deadline = tokio::time::Instant::now() + self.spec.stop_grace;
+        loop {
+            let leader_gone = self.reap_and_pid().is_none();
+            if leader_gone && !group_alive(pid) {
+                break;
+            }
             if tokio::time::Instant::now() >= deadline {
                 signal_group(pid, Signal::Kill);
-                let _ = child.kill();
-                let _ = child.wait();
+                self.reap_after_kill();
                 break;
             }
             tokio::time::sleep(STOP_POLL).await;
         }
         self.inner.lock().unwrap().last_exit = None;
         Ok(self.status().await)
+    }
+
+    /// After a kill: collect the leader if it is still ours to collect.
+    fn reap_after_kill(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(child) = inner.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        inner.child = None;
     }
 
     /// The pid of the live child, forgetting one that ended.
@@ -215,6 +238,19 @@ fn signal_group(pid: u32, signal: Signal) {
 
 #[cfg(not(unix))]
 fn signal_group(_pid: u32, _signal: Signal) {}
+
+/// Whether any process of the group is still alive. A group id is not reused while it has a
+/// member, so this cannot be fooled by a new, unrelated process.
+#[cfg(unix)]
+fn group_alive(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks that the group exists.
+    unsafe { libc::killpg(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn group_alive(_pid: u32) -> bool {
+    false
+}
 
 /// Whether anything answers `GET /health` with a success on this machine's loopback.
 pub async fn probe_health(port: u16) -> bool {
@@ -347,6 +383,7 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             log: dir.join("logs").join("host.log"),
             health_port,
+            stop_grace: Duration::from_millis(600),
         }
     }
 
@@ -411,6 +448,49 @@ mod tests {
             gone(grandchild).await,
             "the child's own child is still running"
         );
+    }
+
+    #[tokio::test]
+    async fn stop_kills_group_members_that_ignore_the_polite_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("stubborn.pid");
+        // The leader dies on the polite signal; its child ignores it and would live on.
+        let script = format!(
+            "(trap '' TERM; exec sleep 60) & echo $! > {}; wait",
+            pidfile.display()
+        );
+        let host = HostController::new(spec(dir.path(), &script, free_port()));
+        host.start().await.unwrap();
+        for _ in 0..50 {
+            if std::fs::read_to_string(&pidfile).is_ok_and(|t| !t.trim().is_empty()) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let stubborn: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(alive(stubborn));
+        assert_eq!(host.stop().await.unwrap(), HostStatus::Stopped);
+        assert!(
+            gone(stubborn).await,
+            "a group member that ignored the signal survived"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_starts_at_once_make_one_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let marks = dir.path().join("starts");
+        let script = format!("echo started >> {}; sleep 60", marks.display());
+        let host = HostController::new(spec(dir.path(), &script, free_port()));
+        let (first, second) = tokio::join!(host.start(), host.start());
+        assert!(first.is_ok() && second.is_ok());
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert_eq!(std::fs::read_to_string(&marks).unwrap().lines().count(), 1);
+        host.stop().await.unwrap();
     }
 
     #[tokio::test]

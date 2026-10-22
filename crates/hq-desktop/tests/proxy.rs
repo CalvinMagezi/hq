@@ -61,6 +61,17 @@ async fn socket(ws: WebSocketUpgrade) -> Response {
     })
 }
 
+async fn endless_stream() -> Response {
+    let ticks = futures::stream::unfold((), |()| async {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        Some((
+            Ok::<_, std::convert::Infallible>(axum::body::Bytes::from("tick\n")),
+            (),
+        ))
+    });
+    Response::new(axum::body::Body::from_stream(ticks))
+}
+
 struct Rig {
     proxy: ProxyHandle,
     upstream_hits: Seen,
@@ -72,6 +83,7 @@ async fn rig() -> Rig {
     let app = Router::new()
         .route("/ws", get(socket))
         .route("/api/socket", get(socket))
+        .route("/api/stream", get(endless_stream))
         .route("/health", get(|| async { "ok" }))
         .fallback(any(echo_request))
         .with_state(seen.clone());
@@ -218,6 +230,8 @@ async fn a_request_for_another_host_never_reaches_hq() {
         .send()
         .await
         .unwrap();
+    assert_eq!(res.status(), StatusCode::MISDIRECTED_REQUEST);
+    let res = c.get(rig.url("/api/x")).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(rig.hits(), 1);
 }
@@ -272,6 +286,49 @@ async fn the_machine_endpoints_are_not_served_here() {
         assert_eq!(res.status(), StatusCode::NOT_FOUND, "{path}");
     }
     assert_eq!(rig.hits(), 0);
+}
+
+#[tokio::test]
+async fn paths_that_a_url_parser_would_resolve_to_a_machine_endpoint_never_reach_hq() {
+    let rig = rig().await;
+    let own = format!("127.0.0.1:{}", rig.port());
+    // A client library would tidy these paths before sending, so they go out raw.
+    for path in [
+        "/./mcp",
+        "/x/../mcp",
+        "/%2e/mcp",
+        "/oauth/./token",
+        "/a/../.well-known/oauth-authorization-server",
+        "//mcp",
+    ] {
+        let reply = raw(
+            rig.proxy.addr,
+            &format!("GET {path} HTTP/1.1\r\nHost: {own}\r\nConnection: close\r\n\r\n"),
+        )
+        .await;
+        assert!(reply.starts_with("HTTP/1.1 400"), "{path}: {reply}");
+    }
+    assert_eq!(rig.hits(), 0);
+}
+
+#[tokio::test]
+async fn stopping_the_proxy_does_not_wait_for_a_stream_that_never_ends() {
+    use futures::StreamExt;
+    let rig = rig().await;
+    let mut stream = client()
+        .get(rig.url("/api/stream"))
+        .send()
+        .await
+        .unwrap()
+        .bytes_stream();
+    // The first chunk proves the stream is open and flowing through the proxy.
+    assert_eq!(&stream.next().await.unwrap().unwrap()[..], b"tick\n");
+
+    let stopped = tokio::time::timeout(std::time::Duration::from_secs(8), rig.proxy.shutdown());
+    assert!(
+        stopped.await.is_ok(),
+        "stopping the proxy hung on an open stream"
+    );
 }
 
 #[tokio::test]

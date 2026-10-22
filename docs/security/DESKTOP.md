@@ -40,7 +40,7 @@ silently. The app registers no login item and no launch agent, and has no plugin
 |---|---|---|
 | Shows | Files bundled in the app (`tauri://localhost`) | HQ's web app from `http://127.0.0.1:<proxy_port>` |
 | Can call the app | Yes: 20 named commands (`capabilities/control.json`) | No. No capability names it, and Tauri refuses app commands from a non-bundled origin without one |
-| CSP | `default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`. No inline script or style, no `eval`, no `https:`/`ws:`/`data:`/`blob:` | HQ's own policy (hashes for its bootstrap scripts, `connect-src 'self' blob:` plus this host's `ws://`) **and** a second one added by the proxy to every response: `connect-src 'self' blob: ws://127.0.0.1:<port> ws://localhost:<port>; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'`. A browser enforces both, so the second can only narrow |
+| CSP | `default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`. No inline script or style, no `eval`, no `https:`/`ws:`/`data:`/`blob:` | HQ's own policy (hashes for its bootstrap scripts, `connect-src 'self' blob:` plus this host's `ws://`) **and** a second one added by the proxy to every response: `connect-src 'self' blob: ws://127.0.0.1:<port>; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'`. A browser enforces both, so the second can only narrow |
 | Navigation | Only its own bundled page (`window::app_page_allowed`) | Only `http://127.0.0.1:<proxy_port>` (`window::main_page_allowed`: scheme, host and port compared after parsing, so `:474741`, `:47474.evil.com`, userinfo tricks and `https` are refused) |
 | New windows | Denied | Denied |
 | Reaches over the network | Nothing | The proxy and nothing else: a link to another site does nothing, a script's `fetch` or socket to another host is blocked by the CSP, and the window cannot be navigated there |
@@ -65,12 +65,14 @@ window uses, and the address the consent page is served on.
 | Rule | Why |
 |---|---|
 | Listens on, and forwards to, loopback only; checked before it binds | A proxy that listens elsewhere is a door onto the machine; one that forwards elsewhere is an open proxy |
-| `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (421 otherwise) | A rebound DNS name makes a hostile page same-origin with the proxy. HQ's own Host check only applies when no token is set |
+| `Host` must be `127.0.0.1:<port>` (421 otherwise). `localhost` is not accepted | A rebound DNS name makes a hostile page same-origin with the proxy. HQ's own Host check only applies when no token is set. `localhost` can resolve to `::1`, where another program could be listening, and the app only hands out `127.0.0.1` |
 | An `Origin` header must be the proxy's own (403) | A page on another site cannot make the browser POST through it. `null` is refused |
 | A cross-site or same-site browser fetch that is not a page navigation is refused (403) | The consent page is opened by a redirect from Claude, which is a navigation and passes; scripts on other sites are not |
 | Absolute-form targets and `CONNECT` are refused (400) | It never fetches other URLs for a client |
+| A path with `.` or `..` segments, an encoded dot, slash or backslash, a backslash, or an empty segment is refused (400) | The path is judged as written but forwarded through a URL parser that resolves dot segments, so `/x/../mcp` would pass the next rule and arrive as `/mcp`. HQ's own pages use none of these |
 | `/mcp`, `/oauth/token`, `/oauth/revoke`, `/.well-known/*` answer 404 | Those belong to the public machine door, not this one |
 | The chat socket is proxied only on `/ws` | No other upgrade is carried |
+| Stopping the proxy waits two seconds for open responses, then drops them | An event stream never ends by itself; waiting for it would hang the app's quit |
 | **No credential is ever added.** `Host`, `Authorization`, `Cookie` and `X-HQ-Client` go through as the client sent them | A proxy that signed requests in would hand the whole API to any local page or process, because HQ trusts any loopback origin. Consent therefore needs the browser to be signed in to HQ, like any other browser |
 | `Access-Control-*` response headers are dropped; a second CSP, `nosniff`, `Referrer-Policy: no-referrer` and `Cross-Origin-Resource-Policy: same-origin` are added | Same-origin for its clients, nothing wider |
 | `Set-Cookie` passes through unchanged | See the open item in section 6 |
@@ -83,16 +85,23 @@ window uses, and the address the consent page is served on.
 - **Revoking goes through the one running bridge**, because only it holds the connections a revoke
   has to close. Revoking in the database alone leaves open connections working.
 - **The app only stops what it started.** The host is a child in its own process group; stop sends
-  the group a TERM, then KILL after the 12-second grace. The app never runs `hq stop` (it kills by
+  the group a TERM and, once the 12-second grace is over, a KILL to whatever is left of the group,
+  including members that ignored the TERM after the leader exited. Start and stop run one at a
+  time, so two clicks cannot make two hosts. The app never runs `hq stop` (it kills by
   name and by port) and never signals a pid it did not spawn. If something already answers
   `/health` and is not the child, start and stop both refuse.
+- **Quitting closes everything, and is held until it has.** Cmd-Q, closing the last window and
+  SIGTERM or ctrl-c all close the host, the proxy and the pairing endpoints side by side, each
+  with its own bound, so an open event stream or a slow relay cannot keep the host from being
+  stopped. A second quit while that runs is held, not let through.
 - **The token reaches the HQ window in the URL fragment** (`/#token=…`), built in process: it never
   passes through argv, the environment, a log, or the proxy (a fragment is not sent). HQ's web app
   moves it into the window's local storage and removes it from the address bar. The sign-in link
   for another browser carries a one-time code, which does pass through `open`'s argv for an
   instant; it is single use and lasts ten minutes.
-- **The control window sees no secret.** The web token, the bridge key and the pairing digits stay
-  in Rust.
+- **The control window never receives the web token, the bridge key or the expected pairing
+  digits**; they stay in Rust. It does show the pairing link and a one-time sign-in code, which are
+  meant to be shown and are single use.
 - **Settings are owner-only, unknown keys are refused, and a corrupt file is an error**, not a
   silent reset.
 
@@ -111,6 +120,9 @@ window uses, and the address the consent page is served on.
 - **The web token is at rest in the HQ window's storage** (WebKit's data store for the app's
   identifier), like a signed-in browser. An XSS in HQ's web app would reach it; HQ's CSP is the
   defense.
+- **Cookies are not scoped to a port.** A cookie HQ sets for `127.0.0.1` (the consent request's
+  binder) is also sent to any other local service on another port. It is `HttpOnly`, short lived and
+  useless without the request id, but it is shared with whatever else listens on this machine.
 - **A host the app started survives a crash of the app** (its own process group). A clean quit
   stops it. A later launch shows it as "Running elsewhere", which cannot be stopped from the app.
 - **The sign-in code appears in `ps` for an instant** when opened in the browser.
@@ -145,10 +157,15 @@ window uses, and the address the consent page is served on.
 | 16 | A future change | Adds a login item, a plugin, a remote URL or a looser CSP | The configuration tests fail | `shell_config.rs` |
 | 17 | A page-supplied address | Asks the app to open it in the browser | Only an address on the proxy's origin is opened | `main_page_allowed` in `open_in_browser` |
 | 18 | A settings file | Carries an unknown key or a port clash | Refused | `unknown_keys_are_refused`, `ports_and_relays_are_checked` |
+| 19 | A raw-socket local client | Reaches `/mcp` or the token route through `/x/../mcp`, `/%2e/mcp`, `//mcp` | 400 before HQ sees it | `a_path_two_parsers_could_read_differently_is_refused`, `paths_that_a_url_parser_would_resolve_to_a_machine_endpoint_never_reach_hq` |
+| 20 | An open event stream | Keeps the proxy, and so the quit, waiting | The proxy stops after two seconds; the host is stopped in parallel | `stopping_the_proxy_does_not_wait_for_a_stream_that_never_ends` |
+| 21 | A double click, or a launch-time start plus a click | Starts two hosts, one untracked | Start and stop run one at a time | `two_starts_at_once_make_one_host` |
+| 22 | A host process that ignores the polite signal | Survives a stop after its leader exited | The group is killed at the end of the grace period | `stop_kills_group_members_that_ignore_the_polite_signal` |
+| 23 | A script in the control window | Passes a backslash URL to `open` that two parsers read differently | Refused; the address goes out in the parser's own spelling | `only_a_plain_address_on_the_proxy_is_handed_to_the_browser` |
 
 ## 8. Guard checks
 
-Each guard below was broken one at a time and `cargo test -p hq-desktop` run; every break made at least the tests named fail. `python3 scripts/check-desktop-guards.py` repeats the run (about twenty minutes, so a pre-release check rather than part of CI).
+Each guard below was broken one at a time and `cargo test -p hq-desktop` run; every break made at least the tests named fail. `python3 scripts/check-desktop-guards.py` repeats the run (about half an hour, so a pre-release check rather than part of CI).
 
 | Guard removed or broken | Tests that failed |
 |---|---|
@@ -181,5 +198,12 @@ Each guard below was broken one at a time and `cargo test -p hq-desktop` run; ev
 | An updater plugin added | `the_shell_has_no_plugin_and_so_no_login_item_shell_access_or_updater` |
 | InnerHTML in the control window script | `the_control_window_loads_nothing_from_outside` |
 | A window without a navigation guard | `both_windows_are_made_in_code_with_a_navigation_guard_and_no_new_windows` |
+| Ambiguous paths allowed | `paths_that_a_url_parser_would_resolve_to_a_machine_endpoint_never_reach_hq`, `a_path_two_parsers_could_read_differently_is_refused` |
+| Proxy stop waits for streams that never end | `stopping_the_proxy_does_not_wait_for_a_stream_that_never_ends` |
+| Two starts can race | `two_starts_at_once_make_one_host` |
+| Group members that ignore the polite signal are left alone | `stop_kills_group_members_that_ignore_the_polite_signal` |
+| Localhost accepted as the proxy's name | `a_request_for_another_host_never_reaches_hq`, `a_foreign_or_null_origin_is_refused_and_the_proxys_own_passes`, `the_proxys_own_name_passes_and_every_other_host_does_not` |
+| Backslash allowed in the address handed to the browser | `only_a_plain_address_on_the_proxy_is_handed_to_the_browser` |
+| IPv6 loopback accepted as HQ's web bind | `the_app_reaches_hq_over_loopback_or_not_at_all` |
 
-29 guards, 29 caught. The script edits the source, runs the tests and restores the file; it covers the proxy, the host, the pairing controller, settings, the navigation allow-lists and the shell's configuration files.
+36 guards, 36 caught. The script edits the source, runs the tests and restores the file; it covers the proxy, the host, the pairing controller, settings, the navigation allow-lists and the shell's configuration files.

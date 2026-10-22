@@ -34,6 +34,22 @@ pub fn main_page_allowed(url: &str, origin: &str) -> bool {
         && url.password().is_none()
 }
 
+/// The address to hand to the system browser, or `None`. It must be on the proxy's origin, hold
+/// nothing a second parser could read differently (a backslash is a slash to one and part of the
+/// user name to another), and goes out in the parser's own spelling.
+pub fn browser_target(url: &str, origin: &str) -> Option<String> {
+    if url
+        .chars()
+        .any(|c| c == '\\' || c.is_control() || c.is_whitespace())
+    {
+        return None;
+    }
+    if !main_page_allowed(url, origin) {
+        return None;
+    }
+    Url::parse(url).ok().map(String::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,6 +71,23 @@ mod tests {
             "not a url",
         ] {
             assert!(!app_page_allowed(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn only_a_plain_address_on_the_proxy_is_handed_to_the_browser() {
+        assert_eq!(
+            browser_target("http://127.0.0.1:47474/#code=ABCD", ORIGIN).as_deref(),
+            Some("http://127.0.0.1:47474/#code=ABCD")
+        );
+        for bad in [
+            "http://127.0.0.1:47474\\@evil.example/",
+            "http://127.0.0.1:47474/ x",
+            "http://127.0.0.1:47474/\nx",
+            "http://evil.example/",
+            "file:///etc/passwd",
+        ] {
+            assert_eq!(browser_target(bad, ORIGIN), None, "{bad:?}");
         }
     }
 

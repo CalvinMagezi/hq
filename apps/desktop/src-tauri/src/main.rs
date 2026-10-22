@@ -8,10 +8,15 @@ mod commands;
 use hq_core::config::HqConfig;
 use hq_desktop::{Desktop, DesktopInit};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use tauri::{
     Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, webview::NewWindowResponse,
 };
+
+// Where the app is in closing, so a second quit never cuts the first one short.
+const RUNNING: u8 = 0;
+const CLOSING: u8 = 1;
+const CLOSED: u8 = 2;
 
 pub const CONTROL: &str = "control";
 pub const MAIN: &str = "hq";
@@ -65,6 +70,8 @@ fn main() {
         .init();
     let (desktop, startup) = open_desktop();
     let for_setup = desktop.clone();
+    let phase = Arc::new(AtomicU8::new(RUNNING));
+    let phase_for_setup = phase.clone();
     let app = tauri::Builder::default()
         .manage(desktop.clone())
         .manage(startup)
@@ -86,26 +93,47 @@ fn main() {
             });
             let launch = for_setup.clone();
             tauri::async_runtime::spawn(async move { launch.on_launch().await });
+            // A plain kill (SIGTERM, ctrl-c) closes what the app opened too.
+            let (handle, desktop, phase) = (
+                app.handle().clone(),
+                for_setup.clone(),
+                phase_for_setup.clone(),
+            );
+            tauri::async_runtime::spawn(async move {
+                hq_desktop::desktop::wait_for_termination().await;
+                close_then_exit(handle, desktop, phase).await;
+            });
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("could not build the app");
 
-    let closing = AtomicBool::new(false);
     app.run(move |app, event| {
         if let RunEvent::ExitRequested { api, .. } = event {
             // Close what the app opened, including a host it started, before the process ends.
-            if !closing.swap(true, Ordering::SeqCst) {
+            // Until that is done every quit request is held, so a second one cannot skip it.
+            if phase.load(Ordering::SeqCst) != CLOSED {
                 api.prevent_exit();
-                let desktop = desktop.clone();
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    desktop.shutdown().await;
-                    app.exit(0);
-                });
+                tauri::async_runtime::spawn(close_then_exit(
+                    app.clone(),
+                    desktop.clone(),
+                    phase.clone(),
+                ));
             }
         }
     });
+}
+
+/// Closes everything once, then ends the app. Later calls while it runs do nothing.
+async fn close_then_exit(app: tauri::AppHandle, desktop: Arc<Desktop>, phase: Arc<AtomicU8>) {
+    if phase
+        .compare_exchange(RUNNING, CLOSING, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        desktop.shutdown().await;
+        phase.store(CLOSED, Ordering::SeqCst);
+        app.exit(0);
+    }
 }
 
 /// Shows HQ's web app, or brings its window forward.

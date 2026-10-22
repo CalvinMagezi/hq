@@ -16,6 +16,8 @@ use std::sync::Mutex;
 use tokio::sync::Mutex as AsyncMutex;
 
 const HOST_LOG: &str = "host.log";
+/// How long closing the pairing endpoints may take before the app stops waiting for them.
+const SHUTDOWN_STEP: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_DEVICE_NAME: &str = "hq-desktop";
 
 pub struct DesktopInit {
@@ -64,7 +66,8 @@ pub fn upstream_addr(config: &HqConfig) -> Result<SocketAddr> {
         .web_bind
         .parse()
         .with_context(|| format!("web_bind {:?} is not an address", config.web_bind))?;
-    if !bind.is_loopback() && !bind.is_unspecified() {
+    // The app dials 127.0.0.1, so only a host that answers there is usable: not `::1` alone.
+    if bind != IpAddr::V4(Ipv4Addr::LOCALHOST) && !bind.is_unspecified() {
         bail!(
             "HQ listens on {bind} only, which this app does not use; set web_bind to 127.0.0.1 or 0.0.0.0"
         );
@@ -204,14 +207,46 @@ impl Desktop {
         }
     }
 
-    /// Runs when the app quits: closes what it opened, including the host it started.
+    /// Runs when the app quits: closes what it opened, including the host it started. The three
+    /// closes run side by side and each is bounded, so an open event stream or a slow relay
+    /// cannot keep the host from being stopped.
     pub async fn shutdown(&self) {
-        self.pairing.stop().await;
-        if let Some(proxy) = self.proxy.lock().await.take() {
-            proxy.shutdown().await;
-        }
-        let _ = self.host.stop().await;
+        let host = async {
+            let _ = self.host.stop().await;
+        };
+        let pairing = async {
+            let _ = tokio::time::timeout(SHUTDOWN_STEP, self.pairing.stop()).await;
+        };
+        let proxy = async {
+            let open = self.proxy.lock().await.take();
+            if let Some(proxy) = open {
+                proxy.shutdown().await;
+            }
+        };
+        tokio::join!(host, pairing, proxy);
     }
+}
+
+/// Resolves when this process is asked to end (SIGTERM or SIGINT), so the app can close what it
+/// opened instead of leaving its host behind.
+#[cfg(unix)]
+pub async fn wait_for_termination() {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (Ok(mut term), Ok(mut int)) = (
+        signal(SignalKind::terminate()),
+        signal(SignalKind::interrupt()),
+    ) else {
+        return std::future::pending().await;
+    };
+    tokio::select! {
+        _ = term.recv() => {}
+        _ = int.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+pub async fn wait_for_termination() {
+    std::future::pending::<()>().await
 }
 
 #[cfg(test)]
@@ -228,16 +263,37 @@ mod tests {
 
     #[test]
     fn the_app_reaches_hq_over_loopback_or_not_at_all() {
-        for ok in ["127.0.0.1", "0.0.0.0", "::1", "::"] {
+        for ok in ["127.0.0.1", "0.0.0.0", "::"] {
             assert_eq!(
                 upstream_addr(&config(ok)).unwrap(),
                 "127.0.0.1:6001".parse().unwrap(),
                 "{ok}"
             );
         }
-        for bad in ["192.168.1.9", "100.64.0.5", "hq.example.com"] {
+        for bad in [
+            "192.168.1.9",
+            "100.64.0.5",
+            "hq.example.com",
+            "::1",
+            "127.0.0.2",
+        ] {
             assert!(upstream_addr(&config(bad)).is_err(), "{bad}");
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_termination_signal_ends_the_wait() {
+        let waiting = tokio::spawn(wait_for_termination());
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // SAFETY: raises a signal the wait above has just installed a handler for.
+        unsafe {
+            libc::raise(libc::SIGTERM);
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(3), waiting)
+            .await
+            .expect("the wait did not end on SIGTERM")
+            .unwrap();
     }
 
     #[tokio::test]
