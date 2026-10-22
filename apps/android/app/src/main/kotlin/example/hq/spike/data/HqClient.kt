@@ -379,6 +379,11 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             JSONObject(it).getString("path")
         }
 
+    /** A POST with a JSON body (empty by default) whose answer is a JSON object, or none. */
+    suspend fun postJson(path: String, body: JSONObject = JSONObject()): JSONObject = send(authed(path).post(json(body)).build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
+
+    suspend fun deleteAt(path: String) { send(authed(path).delete().build()) { } }
+
     /** Checks an AI provider key with one small call to the provider and, if it works, stores it. 400 means the key was refused, 409 that the environment sets it. */
     suspend fun setProviderKey(provider: String, key: String) {
         send(authed("/api/settings/provider-key").post(JSONObject().put("provider", provider).put("api_key", key).toString().toRequestBody("application/json".toMediaType())).build()) { }

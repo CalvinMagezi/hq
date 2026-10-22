@@ -133,8 +133,8 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Safety -> Safety(ui, actions)
                 SettingsPage.Keys -> Keys(ui, actions)
                 SettingsPage.Messaging -> Messaging(ui)
-                SettingsPage.Claude -> Claude(ui)
-                SettingsPage.Devices -> Devices(ui)
+                SettingsPage.Claude -> Claude(ui, actions)
+                SettingsPage.Devices -> Devices(ui, actions)
                 SettingsPage.Spending -> Spending(ui)
                 SettingsPage.About -> About(ui, actions)
                 SettingsPage.Background -> Background(ui, actions)
@@ -148,6 +148,8 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         }
         ui.askMode?.let { ConfirmDialog(SettingsWords.modeDialog(it), actions.onModeCancel, actions.onModeConfirm) }
         ui.keySheet?.let { KeySheetView(it, actions) }
+        if (ui.askClaudeOff) ConfirmDialog(SettingsWords.CLAUDE_OFF_WORDS, { actions.onClaudeOff(false) }, actions.onClaudeOffConfirm)
+        if (ui.askSignOutAll) ConfirmDialog(SettingsWords.SIGN_OUT_ALL_WORDS, { actions.onSignOutAll(false) }, actions.onSignOutAllConfirm)
         if (ui.askRestart) ConfirmDialog(SettingsWords.RESTART_WORDS, { actions.onRestart(false) }, actions.onRestartConfirm)
         ui.line?.let { Snack(it, actions.onDismissLine, Modifier.align(Alignment.BottomCenter)) }
     }
@@ -375,7 +377,7 @@ private fun KeyValue(key: String, value: String, color: Color = Mts.Ink) {
 // ---------------------------------------------------------------- Connect Claude
 
 @Composable
-private fun Claude(ui: SettingsUi) {
+private fun Claude(ui: SettingsUi, actions: SettingsActions) {
     val c = ui.snap.connector
     val armed = SettingsWords.time(c, "armed_until")?.isAfter(ui.now) == true
     // Between reads the clock stands still; while a window is open it is the countdown, so it is kept moving.
@@ -390,48 +392,115 @@ private fun Claude(ui: SettingsUi) {
             return@Page
         }
         val shape = RoundedCornerShape(12.dp)
+        val url = c.optString("url", "Not set")
+        val window = SettingsWords.window(c, now)
+        val busy = ui.busy
         Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("ADDRESS TO GIVE CLAUDE", style = HqType.Group.copy(fontSize = 12.sp, letterSpacing = 0.06.em), color = Mts.InkMuted)
-                Text(c.optString("url", "Not set"), style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
+            Row(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(start = 16.dp, top = 16.dp, bottom = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("ADDRESS TO GIVE CLAUDE", style = HqType.Group.copy(fontSize = 12.sp, letterSpacing = 0.06.em), color = Mts.InkMuted)
+                    Text(url, style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
+                }
+                IconAction(HqIcons.Copy, "Copy the address", iconSize = 22.dp) { actions.onCopy(url) }
             }
-            Text(SettingsWords.connectorStatus(c, now), style = HqType.BodyBold, color = Mts.Ink)
+            if (window.open) {
+                Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.BrandBlue, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("New connections are open", style = HqType.BodyBold, color = Mts.Ink)
+                    Text("Press Connect in Claude now. This closes on its own at ${window.closesAt}.", style = HqType.BodySm, color = Mts.InkMuted)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.heightIn(min = 28.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, Mts.BrandBlue, RoundedCornerShape(14.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                            Text("Open \u00b7 ${window.left} left", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.BrandBlue)
+                        }
+                        Box(Modifier.weight(1f))
+                        TextLink("Close now", Mts.BrandBlue, enabled = busy == null) { actions.onDisarm() }
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("New connections are closed", style = HqType.BodyBold, color = Mts.Ink)
+                    Text("In Claude, open Settings, then Connectors, add a custom connector with the address above and press Connect. Approve it on the page that opens.", style = HqType.BodySm, color = Mts.InkMuted)
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(enabled = busy == null, role = Role.Button) { actions.onArm() },
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (busy == "arm") Spinner(18, Mts.OnGreen)
+                        Text("Let Claude connect now", style = HqType.BodySmBold, color = Mts.OnGreen)
+                    }
+                }
+            }
         }
         Label("Connected")
         val grants = SettingsWords.grants(c, now)
         if (grants.isEmpty()) Text("Nothing is connected.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp))
-        else Group {
-            grants.forEachIndexed { i, g ->
-                if (i > 0) Divider()
-                Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Text(g.client, style = HqType.BodyBold, color = Mts.Ink)
-                    Text("${g.scope} · connected ${g.since}", style = HqType.BodySm, color = Mts.InkMuted)
+        else {
+            Group {
+                grants.forEachIndexed { i, g ->
+                    if (i > 0) Divider()
+                    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, top = 8.dp, end = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(g.client, style = HqType.BodyBold, color = Mts.Ink)
+                            Text("${g.scope} \u00b7 connected ${g.since}", style = HqType.BodySm, color = Mts.InkMuted)
+                        }
+                        TextLink("Disconnect", Mts.DangerText, enabled = busy == null) { actions.onRevoke(g.id) }
+                    }
                 }
             }
+            Box(Modifier.padding(start = 4.dp)) { TextLink("Disconnect Claude everywhere", Mts.DangerText, enabled = busy == null) { actions.onClaudeOff(true) } }
         }
-        Text("Opening the connection window and disconnecting are done in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
     }
 }
 
-// ---------------------------------------------------------------- other devices
+/** A word that acts, in a colour, with a 48 dp target. */
+@Composable
+private fun TextLink(text: String, color: Color, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 48.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = HqType.BodySmBold, color = if (enabled) color else Mts.InkMuted)
+    }
+}
 
 @Composable
-private fun Devices(ui: SettingsUi) {
+private fun Devices(ui: SettingsUi, actions: SettingsActions) {
+    val code = ui.deviceCode
+    val left by produceState(0L, code) {
+        while (code != null) { value = (code.expiresAt - Instant.now().epochSecond).coerceAtLeast(0); delay(1_000) }
+    }
     Page {
         val d = ui.snap.devices
         if (Unanswered(ui, "devices", d != null) || d == null) return@Page
-        val list = SettingsWords.devices(d)
-        if (list.isEmpty()) Text("No other device is signed in.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
-        else Group {
-            list.forEachIndexed { i, dev ->
-                if (i > 0) Divider()
-                Column(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Text(dev.label + if (dev.current) " (this phone)" else "", style = HqType.BodyBold, color = Mts.Ink)
-                    Text(dev.line, style = HqType.BodySm, color = Mts.InkMuted)
+        val shape = RoundedCornerShape(12.dp)
+        val live = code != null && left > 0
+        Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Sign in another device", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.fillMaxWidth())
+            if (live && code != null) {
+                Text(SettingsWords.groupCode(code.code), style = HqType.H2.copy(fontFamily = FontFamily.Monospace, fontSize = 28.sp, lineHeight = 36.sp, letterSpacing = 0.06.em), color = Mts.Ink)
+                Text(SettingsWords.codeHelp(SettingsWords.clock(left)), style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center)
+                TextLink("New code", Mts.BrandBlue, enabled = ui.busy == null) { actions.onNewCode() }
+            } else {
+                Text(if (code != null) "That code expired." else "Get a code, then enter it on the other device.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.fillMaxWidth())
+                Row(Modifier.align(Alignment.Start).heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(enabled = ui.busy == null, role = Role.Button) { actions.onNewCode() }.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (ui.busy == "code") Spinner(18)
+                    Text("New code", style = HqType.BodySmBold, color = Mts.Ink)
                 }
             }
         }
-        Text("Signing in another device and signing devices out are done in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        val list = SettingsWords.devices(d)
+        Label("Signed in")
+        if (list.isEmpty()) Text("No other device is signed in.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 16.dp))
+        else {
+            Group {
+                list.forEachIndexed { i, dev ->
+                    if (i > 0) Divider()
+                    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, top = 8.dp, end = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(dev.label + if (dev.current) " (this phone)" else "", style = HqType.BodyBold, color = Mts.Ink)
+                            Text(dev.line, style = HqType.BodySm, color = Mts.InkMuted)
+                        }
+                        if (!dev.current) TextLink("Sign out", Mts.BrandBlue, enabled = ui.busy == null) { actions.onSignOut(dev.id) }
+                    }
+                }
+            }
+        }
+        Box(Modifier.padding(start = 4.dp, top = 4.dp)) { TextLink("Sign out everywhere", Mts.DangerText, enabled = ui.busy == null && !ui.restarting) { actions.onSignOutAll(true) } }
     }
 }
 

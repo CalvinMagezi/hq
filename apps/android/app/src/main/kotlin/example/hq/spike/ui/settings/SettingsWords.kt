@@ -433,6 +433,26 @@ object SettingsWords {
         Grant(it.optString("id"), it.text("label") ?: it.text("client_name") ?: "A client", scopeWords(it.optString("grant_scope")), dayOf(time(it, "created_at"), zone))
     }
 
+    /** Whether new connections are open, for how long, and when it closes on its own (local HH:mm). */
+    data class Window(val open: Boolean, val left: String, val closesAt: String)
+
+    fun window(c: JSONObject?, now: Instant, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Window {
+        val until = time(c, "armed_until")?.takeIf { it.isAfter(now) } ?: return Window(false, "", "")
+        return Window(true, clock(Duration.between(now, until).seconds), java.time.LocalTime.ofInstant(until, zone).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
+    }
+
+    val CLAUDE_OFF_WORDS = ModeWords("Disconnect Claude everywhere?", "Every Claude connected to this HQ loses access now, and new connections stay closed until you open them again.", "Disconnect")
+    val SIGN_OUT_ALL_WORDS = ModeWords("Sign out everywhere?", "Every other device is signed out, and so is any sign-in link you made earlier. Claude connections end too. HQ restarts for a moment.", "Sign out")
+
+    /** The name HQ gives the one sign-in that "Sign out everywhere" leaves behind. */
+    const val ROTATE_LABEL = "Sign out everywhere"
+
+    /** A device sign-in code as it is read out: ten characters as two groups of five. */
+    fun groupCode(code: String): String = if (code.length == 10) code.chunked(5).joinToString("-") else code
+
+    /** The helper line under a sign-in code. */
+    fun codeHelp(left: String) = "Works once, for $left. Enter the code on the other device."
+
     // ------------------------------------------------------------ Other devices
 
     data class Device(val id: String, val label: String, val line: String, val current: Boolean)

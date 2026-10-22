@@ -115,4 +115,24 @@ class BackgroundWorkTest {
         assertEquals("https://openrouter.ai/keys", SettingsWords.keyHelpUrl("open_router"))
         assertNull(SettingsWords.keyHelpUrl("deepseek"))
     }
+
+    @Test fun theConnectionWindowSaysHowLongAndWhenItCloses() {
+        val now = java.time.Instant.parse("2026-10-22T14:00:00Z")
+        val w = SettingsWords.window(JSONObject("""{"armed_until":${now.epochSecond + 581}}"""), now, java.time.ZoneOffset.UTC)
+        assertEquals(SettingsWords.Window(true, "9:41", "14:09"), w)
+        assertEquals(SettingsWords.Window(false, "", ""), SettingsWords.window(JSONObject("""{"armed_until":${now.epochSecond - 5}}"""), now))
+        assertEquals(SettingsWords.Window(false, "", ""), SettingsWords.window(JSONObject("""{"armed_until":null}"""), now))
+    }
+
+    @Test fun aSignInCodeIsReadInTwoGroupsOfFive() {
+        assertEquals("8KQ3M-W2T7P", SettingsWords.groupCode("8KQ3MW2T7P"))
+        assertEquals("SHORT", SettingsWords.groupCode("SHORT"))
+        assertEquals("Works once, for 9:41. Enter the code on the other device.", SettingsWords.codeHelp("9:41"))
+    }
+
+    @Test fun theSignOutEverywhereDialogSaysClaudeEndsToo() {
+        assertEquals(true, SettingsWords.SIGN_OUT_ALL_WORDS.body.contains("Claude connections end too"))
+        assertEquals("Sign out", SettingsWords.SIGN_OUT_ALL_WORDS.confirm)
+        assertEquals("Disconnect", SettingsWords.CLAUDE_OFF_WORDS.confirm)
+    }
 }

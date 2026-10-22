@@ -75,9 +75,15 @@ public class HubService extends Service {
      * RECOVER_MIN_GAP_MS, so a 401 with another cause cannot make hq restart over and over.
      */
     public static void recoverToken(Context c) {
+        recoverToken(c, false);
+    }
+
+    /** [force] is for a deliberate sign-out of everything: the app caused the 401, so the five minute guard against a loop does not apply. */
+    public static void recoverToken(Context c, boolean force) {
         long now = SystemClock.elapsedRealtime();
         long last = lastRecovery.get();
-        if (now - last < RECOVER_MIN_GAP_MS || !lastRecovery.compareAndSet(last, now)) return;
+        if (!force && (now - last < RECOVER_MIN_GAP_MS || !lastRecovery.compareAndSet(last, now))) return;
+        if (force) lastRecovery.set(now);
         try {
             SecretStore.replaceWebToken(c);
             Log.w(TAG, "web token was signed out, replaced it and restarting hq");

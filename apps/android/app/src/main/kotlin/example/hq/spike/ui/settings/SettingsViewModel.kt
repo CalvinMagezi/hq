@@ -37,6 +37,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+/** A sign-in code for another device, and when it stops working (epoch seconds). */
+data class DeviceCode(val code: String, val expiresAt: Long)
+
 /** Which provider the key is for, and whether HQ is checking it or refused it. */
 data class KeySheet(val id: String, val name: String, val replace: Boolean, val checking: Boolean = false, val error: String? = null)
 
@@ -63,6 +66,11 @@ data class SettingsUi(
     val capture: CaptureFacts = CaptureFacts(),
     /** The sheet that takes a key, while it is open. The key itself is never kept here. */
     val keySheet: KeySheet? = null,
+    /** What is being asked or done on the Connect Claude and Other devices pages. */
+    val busy: String? = null,
+    val askClaudeOff: Boolean = false,
+    val askSignOutAll: Boolean = false,
+    val deviceCode: DeviceCode? = null,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 }
@@ -84,6 +92,16 @@ class SettingsActions(
     val onChannel: (String) -> Unit = {},
     val onAnswers: (Boolean) -> Unit = {},
     val onShareOpens: (String) -> Unit = {},
+    val onArm: () -> Unit = {},
+    val onDisarm: () -> Unit = {},
+    val onRevoke: (String) -> Unit = {},
+    val onClaudeOff: (Boolean) -> Unit = {},
+    val onClaudeOffConfirm: () -> Unit = {},
+    val onNewCode: () -> Unit = {},
+    val onSignOut: (String) -> Unit = {},
+    val onSignOutAll: (Boolean) -> Unit = {},
+    val onSignOutAllConfirm: () -> Unit = {},
+    val onCopy: (String) -> Unit = {},
     val onKeyOpen: (KeySheet) -> Unit = {},
     val onKeyClose: () -> Unit = {},
     val onKeySave: (String) -> Unit = {},
@@ -116,6 +134,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onRestartConfirm = ::confirmRestart,
         onFix = ::fix,
         onChannel = ::openChannel,
+        onArm = { act("arm", "Could not open the window. HQ is not answering.") { client.postJson("/api/oauth/connector/arm") } },
+        onDisarm = { act("disarm", "Could not close it. HQ is not answering.") { client.postJson("/api/oauth/connector/disarm") } },
+        onRevoke = { id -> act("revoke:$id", "Could not disconnect it. HQ is not answering.") { client.postJson("/api/oauth/grants/${java.net.URLEncoder.encode(id, "UTF-8")}/revoke") } },
+        onClaudeOff = { ask -> _state.update { it.copy(askClaudeOff = ask) } },
+        onClaudeOffConfirm = { _state.update { it.copy(askClaudeOff = false) }; act("off", "Could not disconnect Claude. HQ is not answering.") { client.postJson("/api/oauth/connector/off") } },
+        onNewCode = ::newCode,
+        onSignOut = { id -> act("out:$id", "Could not sign it out. HQ is not answering.") { client.deleteAt("/api/auth/devices/${java.net.URLEncoder.encode(id, "UTF-8")}") } },
+        onSignOutAll = { ask -> _state.update { if (it.restarting) it else it.copy(askSignOutAll = ask) } },
+        onSignOutAllConfirm = ::signOutAll,
+        onCopy = { text -> copyText(text) },
         onKeyOpen = { k -> _state.update { it.copy(keySheet = k) } },
         onKeyClose = { _state.update { if (it.keySheet?.checking == true) it else it.copy(keySheet = null) } },
         onKeySave = ::saveKey,
@@ -127,7 +155,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     /** Closes Settings and every page inside it. */
-    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null) }
+    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null, askClaudeOff = false, askSignOutAll = false, deviceCode = null) }
 
     fun freeze(fixed: SettingsUi) {
         frozen = true
@@ -249,6 +277,62 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(keySheet = it.keySheet?.copy(checking = false, error = SettingsWords.keyFailure(e.status))) }
             }
         }
+    }
+
+    /** One call to HQ from these pages: the tapped control is inert until it returns, a failure says so, and the page reads again either way. */
+    private fun act(key: String, failure: String, block: suspend () -> Unit) {
+        if (_state.value.busy != null) return
+        _state.update { it.copy(busy = key) }
+        viewModelScope.launch {
+            val said = try { block(); null } catch (e: HqUnavailable) { if (e.status == HTTP_NOT_FOUND) "That is already gone." else failure }
+            _state.update { it.copy(busy = null, line = said ?: it.line) }
+            refreshNow()
+        }
+    }
+
+    private fun newCode() = act("code", "Could not get a code. HQ is not answering.") {
+        val o = client.postJson("/api/auth/device-code")
+        val code = o.optString("code")
+        if (code.isNotBlank()) _state.update { it.copy(deviceCode = DeviceCode(code, o.optLong("expires_at"))) }
+    }
+
+    /**
+     * Signs out every other device. HQ also revokes this app's own sign-in, so a new one is sealed and hq restarted
+     * with it at once; the app then waits for hq as Restart HQ does.
+     */
+    private fun signOutAll() {
+        if (_state.value.restarting) return
+        _state.update { it.copy(askSignOutAll = false, restarting = true, deviceCode = null) }
+        viewModelScope.launch {
+            val said = withContext(Dispatchers.IO) {
+                val before = startStamp().second
+                try { client.postJson("/api/auth/rotate") } catch (e: HqUnavailable) { return@withContext "Could not sign out. HQ is not answering." }
+                HubService.recoverToken(ctx(), true)
+                if (waitForHq(before)) { dropRotateDevice(); "Signed out everywhere." } else RESTART_TIMEOUT_LINE
+            }
+            _state.update { it.copy(restarting = false, line = said).withFacts() }
+            refreshNow()
+        }
+    }
+
+    /** Signing out everywhere leaves one new sign-in for "this device", which the app never uses: it would show as a stranger signed in, so it is removed. */
+    private suspend fun dropRotateDevice() {
+        try {
+            client.json("/api/auth/devices").optJSONArray("devices")?.let { a ->
+                for (i in 0 until a.length()) {
+                    val d = a.optJSONObject(i) ?: continue
+                    if (d.optString("label") == SettingsWords.ROTATE_LABEL && !d.optBoolean("current")) client.deleteAt("/api/auth/devices/${java.net.URLEncoder.encode(d.optString("id"), "UTF-8")}")
+                }
+            }
+        } catch (e: HqUnavailable) {
+            // Left in the list; the owner can sign it out there.
+        }
+    }
+
+    private fun copyText(text: String) {
+        val cm = ctx().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("AgentHQ", text))
+        _state.update { it.copy(line = "Copied.") }
     }
 
     private fun captureFacts() = CaptureFacts(CapturePrefs.shareOpens(ctx()), CapturePrefs.showTitles(ctx()), Outbox.of(ctx()).all())
@@ -387,6 +471,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         const val HUB_CHANNEL = "hub"
         const val SAMSUNG_BATTERY_PACKAGE = "com.samsung.android.lool"
         const val SAMSUNG_BATTERY_PAGE = "com.samsung.android.sm.battery.ui.BatteryActivity"
+        const val HTTP_NOT_FOUND = 404
         const val SAVE_FAILED_LINE = "Could not save the setting."
         const val KEEP_CACHE_MS = 5_000L
         const val RESTART_TIMEOUT_LINE = "HQ did not come back within two minutes."
