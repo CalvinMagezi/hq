@@ -17,8 +17,8 @@ fun settingsFixture(name: String?): SettingsUi? {
           {"name":"deepseek","kind":"openai-compatible","model":"deepseek-flash","endpoint_host":"api.deepseek.com","primary":false,"fallback_position":2}]},
         "limits":{"chat_turn_timeout_secs":600,"turn_ack_timeout_secs":270,"background_turn_max_days":5,"background_progress_secs":300},
         "safety":{"bash_sandbox":"required","bash_network":false,"skills_write_approval":false,"web_allowed_origins":["https://hq.example.ts.net"]},
-        "agent_host":{"default_host":"mac-mini","hosts":["mac-mini"],"sandbox_mode":"process","idle_reap_hours":6,"drive_new_watches":false,"driver_checkin_minutes":5,"driver_nudge_budget":3,"driver_no_progress_limit":4},
-        "integrations":{"remote_mcp":[],"searxng_host":null,"disk_watchdog_enabled":true}}""",
+        "agent_host":{"default_host":"mac-mini","hosts":["mac-mini","native"],"sandbox_mode":"process","idle_reap_hours":6,"drive_new_watches":false,"driver_checkin_minutes":5,"driver_nudge_budget":3,"driver_no_progress_limit":4},
+        "integrations":{"remote_mcp":[{"name":"diagrams","host":"example.com","live_user_turn_only":true},{"name":"search","host":"search.example.com","live_user_turn_only":false}],"searxng_host":null,"disk_watchdog_enabled":true}}""",
     )
     val chat = JSONObject(
         """{"telegram":{"token_set":true,"enabled":true,"owner":{"paired":true},"bot":{"username":"example_bot"},"relay":{"status":"connected","current":true}},"discord":{"token_set":true,"enabled":true,"relay":{"status":"connected","current":false}}}""",
@@ -27,7 +27,8 @@ fun settingsFixture(name: String?): SettingsUi? {
         """{"enabled":true,"url":"https://hq.example.ts.net/mcp","armed_until":${future(581)},"grants":[{"id":"g1","label":"Claude","grant_scope":"read_only","created_at":${now.minusSeconds(90_000).epochSecond},"expires_at":${future(86_400)},"last_used_at":null,"revoked_at":null}]}""",
     )
     val devices = JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":${now.minusSeconds(170_000).epochSecond},"last_used_at":${now.minusSeconds(10_800).epochSecond},"expires_at":null}]}""")
-    val budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","limit_usd":5,"spent_usd":2.1,"state":"ok"},{"name":"openrouter","scope":"provider:openrouter","period":"week","limit_usd":10,"spent_usd":9.5,"state":"warn"}]}""")
+    val budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":2.1,"pct":42,"state":"ok","resets_at":${future(32_400)}},{"name":"openrouter","scope":"provider:openrouter","period":"week","action":"notify","limit_usd":10,"spent_usd":9.5,"pct":95,"state":"warning","resets_at":${future(259_200)}}]}""")
+    val forecast = JSONObject("""{"month":{"rate_per_hour":0.18,"spent_this_period":31.8,"hours_to_reset":240,"projected_period_total":74.0,"limit_usd":null,"hours_to_limit":null,"exhausts_before_reset":false,"confidence":"medium","history_hours":72,"seasonality_note":null,"windows":[]},"budgets":[],"drivers":{"models":[],"origins":[]}}""")
     val health = JSONObject("""{"status":"ok","service":"hq","version":"0.9.1"}""")
     val providers = JSONObject(
         """{"generated_at":"2026-10-22T04:00:00Z","backends":[
@@ -40,12 +41,13 @@ fun settingsFixture(name: String?): SettingsUi? {
         """{"active":true,"quota":{"login":"example","plan":"pro","entitlement":1500,"credits_used":588,"remaining":912,"percent_remaining":60.8,"overage_permitted":false,"reset_at":"2026-11-01T00:00:00Z"},"burn":{"windows":[{"window_hours":6,"credits_used":50,"per_hour":8.3}]}}""",
     )
     val phone = listOf(
-        HomeRow(null, "background", "Background work", "On · answers chats, runs tasks"),
-        HomeRow(null, "battery", "Keep running", "Good · 1 thing to check"),
-        HomeRow(null, "notifications", "Notifications", "Needs you on · Updates on"),
+        HomeRow(SettingsPage.Background, "background", "Background work", SettingsWords.BACKGROUND_ON),
+        HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", "Good · 1 thing to check"),
+        HomeRow(SettingsPage.Notifications, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
     )
-    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
+    val channels = listOf(ChannelFacts("needs", "Needs you", 4, true), ChannelFacts("updates", "Updates", 3, false), ChannelFacts("hub", "HQ is running", 2, false))
+    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
     return when (name) {
         "s-home" -> base
         "s-loading" -> SettingsUi(open = true, loaded = false, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
@@ -56,7 +58,20 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-chat" -> base.copy(stack = listOf(SettingsPage.Messaging))
         "s-claude" -> base.copy(stack = listOf(SettingsPage.Claude))
         "s-devices" -> base.copy(stack = listOf(SettingsPage.Devices))
+        "s-keep" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(autoRevokeOff = true, samsung = true, lastStop = LastStop(android.app.ApplicationExitInfo.REASON_LOW_MEMORY, now.minusSeconds(172_800))))
+        "s-keep-bad" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false))
+        "s-notif" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(true, channels, true))
+        "s-notif-off" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(false, channels, false))
+        "s-background" -> base.copy(stack = listOf(SettingsPage.Background))
+        "s-background-standby" -> base.copy(stack = listOf(SettingsPage.Background), mode = "standby")
+        "s-background-ask" -> base.copy(stack = listOf(SettingsPage.Background), askMode = false)
+        "s-background-restarting" -> base.copy(stack = listOf(SettingsPage.Background), restarting = true)
         "s-spend" -> base.copy(stack = listOf(SettingsPage.Spending))
+        "s-spend-exceeded" -> base.copy(stack = listOf(SettingsPage.Spending), snap = base.snap.copy(budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":5.2,"pct":104,"state":"exceeded","resets_at":${future(1_800)}}]}"""), forecast = JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}""")))
+        "s-origins" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.Origins))
+        "s-tools" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.ConnectedTools))
+        "s-computers" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.Computers))
+        "s-restart-ask" -> base.copy(stack = listOf(SettingsPage.About), askRestart = true)
         "s-about" -> base.copy(stack = listOf(SettingsPage.About))
         "s-down" -> base.copy(stack = listOf(SettingsPage.Keys), snap = SettingsSnapshot(), loaded = true)
         else -> null

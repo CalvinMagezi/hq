@@ -2,6 +2,7 @@
 
 pub mod ask_requests;
 pub mod background_turns;
+pub mod bridge;
 pub mod chat;
 pub mod copilot_usage_samples;
 pub mod harness_drive_gate;

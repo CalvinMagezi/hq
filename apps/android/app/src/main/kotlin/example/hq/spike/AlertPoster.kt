@@ -7,9 +7,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
+import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import example.hq.spike.data.HqClient.InboxItem
 import example.hq.spike.ui.inbox.CardKind
+import example.hq.spike.ui.shell.Links
 import example.hq.spike.ui.inbox.InboxCard
 import example.hq.spike.ui.inbox.InboxWords
 import org.json.JSONObject
@@ -28,6 +31,8 @@ object AlertPoster {
     private const val SDK_AUTH_ACTION = 31
     private const val PREFS = "alerts"
     private const val ALLOW_ANSWERS = "allow_answers"
+    private const val RESULT_KEEP_MS = 15_000L
+    private val answeredAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     @JvmStatic
     fun channels(): List<NotificationChannel> = listOf(
@@ -39,7 +44,12 @@ object AlertPoster {
     @JvmStatic
     fun notificationId(id: String): Int = ID_BASE + Math.abs(id.hashCode() % ID_SPAN)
 
-    private fun answersAllowed(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ALLOW_ANSWERS, true)
+    internal fun answersAllowed(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ALLOW_ANSWERS, true)
+
+    /** Off removes Allow and Not now from notifications, so an approval waits in the Inbox. */
+    internal fun setAnswersAllowed(c: Context, on: Boolean) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(ALLOW_ANSWERS, on).apply()
+    }
 
     fun itemOf(o: JSONObject): InboxItem {
         val meta = o.optJSONObject("metadata")
@@ -70,12 +80,26 @@ object AlertPoster {
     @JvmStatic
     fun cancelGone(c: Context, seen: List<String>, current: Set<String>) {
         val nm = c.getSystemService(NotificationManager::class.java)
-        seen.filter { it !in current }.forEach { nm.cancel(notificationId(it)) }
+        val now = SystemClock.elapsedRealtime()
+        // An item answered from its notification is no longer pending, but the card that says what happened must stay its few seconds.
+        seen.filter { it !in current && now - (answeredAt[it] ?: Long.MIN_VALUE / 2) > RESULT_KEEP_MS }.forEach { nm.cancel(notificationId(it)) }
     }
 
-    private fun open(c: Context): PendingIntent {
-        val intent = Intent(c, ShellActivity::class.java).putExtra("place", "inbox").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        return PendingIntent.getActivity(c, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    /** Records that [id] was just answered from its notification, so the sweep leaves the card that replaced the question alone. */
+    internal fun answeredNow(id: String) {
+        answeredAt[id] = SystemClock.elapsedRealtime()
+    }
+
+    /** Taps open what the notification is about: the helper for a helper's question, else the Inbox item; the Inbox when it is about nothing in particular. */
+    internal fun open(c: Context, link: String = "hq://inbox"): PendingIntent {
+        val intent = Intent(c, ShellActivity::class.java).setData(Uri.parse(link)).putExtra(Links.EXTRA, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(c, link.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    internal fun linkFor(card: InboxCard): String = when {
+        card.kind == CardKind.Update -> "hq://inbox"
+        card.sessionId != null -> "hq://helpers/${card.sessionId}"
+        else -> "hq://inbox/${card.id}"
     }
 
     private fun simple(c: Context, channel: String, title: String, body: String, tap: PendingIntent): Notification =
@@ -86,7 +110,7 @@ object AlertPoster {
         val needs = card.kind != CardKind.Update
         val body = if (card.body.length > MAX_BODY) card.body.take(MAX_BODY) + "…" else card.body
         val b = Notification.Builder(c, if (needs) NEEDS else UPDATES).setSmallIcon(HubService.statIcon(c)).setContentTitle(card.title).setContentText(body)
-            .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(open(c)).setAutoCancel(true)
+            .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(open(c, linkFor(card))).setAutoCancel(true)
             .setCategory(if (needs) Notification.CATEGORY_REMINDER else Notification.CATEGORY_STATUS).setVisibility(Notification.VISIBILITY_PRIVATE)
         // The lock screen shows only that something is there, never what.
         val public = Notification.Builder(c, if (needs) NEEDS else UPDATES).setSmallIcon(HubService.statIcon(c))
@@ -103,7 +127,7 @@ object AlertPoster {
             out += Notification.Action.Builder(icon, card.allowLabel, AnswerReceiver.intent(c, card, "approve")).setAuthenticationRequired(true).build()
             out += Notification.Action.Builder(icon, "Not now", AnswerReceiver.intent(c, card, "reject")).build()
         }
-        out += Notification.Action.Builder(icon, if (card.kind == CardKind.HelperStuck) "Take a look" else "Open", open(c)).build()
+        out += Notification.Action.Builder(icon, if (card.kind == CardKind.HelperStuck) "Take a look" else "Open", open(c, linkFor(card))).build()
         return out
     }
 }

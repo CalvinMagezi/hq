@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /** Everything the Notes pages can ask for. */
 class NotesActions(
@@ -34,6 +35,7 @@ class NotesActions(
     val onEdit: () -> Unit = {},
     val onMenu: (Boolean) -> Unit = {},
     val onTogglePin: () -> Unit = {},
+    val onMakeTask: () -> Unit = {},
     val onExport: () -> Unit = {},
     val onExportFormat: (example.hq.spike.ui.chat.ExportFormat) -> Unit = {},
     val onExportClose: () -> Unit = {},
@@ -71,7 +73,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onOpenSearch = { push(NotesRoute.Search); _state.update { it.copy(search = SearchState()) } },
         onQuery = ::query, onFilter = { f -> _state.update { it.copy(search = it.search.copy(filter = f)) } },
         onBack = ::back, onNew = ::newNote, onEdit = ::edit, onMenu = { open -> _state.update { it.copy(menu = open) } },
-        onTogglePin = ::togglePin,
+        onTogglePin = ::togglePin, onMakeTask = ::makeTask,
         onExport = { (_state.value.reader as? ReaderPhase.Ready)?.note?.let { n -> _state.update { it.copy(menu = false) }; exporter.choose(n.path, n.title, n.body) } },
         onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
         onNotice = { text -> _state.update { it.copy(notice = Notice(text)) } }, onDismissNotice = { _state.update { it.copy(notice = null) } },
@@ -200,6 +202,19 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** A task in the Inbox that points at this note. The same note twice answers with the first task, so a second tap adds nothing. */
+    private fun makeTask() {
+        val note = (_state.value.reader as? ReaderPhase.Ready)?.note ?: return
+        viewModelScope.launch {
+            val said = try {
+                if (client.createTaskOnce(noteTaskBody(note.path, note.title))) "This note already has a task" else "Task added to your Inbox"
+            } catch (e: HqUnavailable) {
+                if (e.status == 0) "Could not add the task. HQ is not answering." else "Could not add the task."
+            }
+            _state.update { it.copy(notice = Notice(said)) }
+        }
+    }
+
     private fun newNote(folder: String) {
         val draft = drafts.getString(draftKey(null, folder), null)
         val text = draft ?: ""
@@ -250,11 +265,12 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun reloadReader(path: String) {
+        val pinned = (_state.value.reader as? ReaderPhase.Ready)?.note?.pinned ?: false
         _state.update { it.copy(reader = ReaderPhase.Loading) }
         viewModelScope.launch {
             val phase = try {
                 val body = client.note(path)
-                ReaderPhase.Ready(NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, false), "edited just now")
+                ReaderPhase.Ready(NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, pinned), "edited just now")
             } catch (e: NoteNotFound) { ReaderPhase.Gone } catch (e: HqUnavailable) { ReaderPhase.Failed }
             _state.update { if (it.top == NotesRoute.Reader(path)) it.copy(reader = phase) else it }
         }

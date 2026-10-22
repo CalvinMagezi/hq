@@ -21,20 +21,25 @@ data class SettingsSnapshot(
     /** What each AI service in use says about its balance and spend (/api/usage/providers), and the GitHub Copilot credits (/api/copilot-usage). */
     val providers: JSONObject? = null,
     val copilot: JSONObject? = null,
+    /** This month's spend and where it is heading (/api/usage/forecast). */
+    val forecast: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
 data class HomeGroup(val title: String, val rows: List<HomeRow>)
 
 /** A line on a read-only page: a title with its value, and a sentence that says what it means. */
-data class FactRow(val title: String, val value: String, val text: String? = null)
+data class FactRow(val title: String, val value: String, val text: String? = null, val good: Boolean = false, val opens: SettingsPage? = null)
 
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
     private const val NOT_ANSWERED = "Not answering"
+    private const val PERCENT = 100.0
+    private const val SECONDS_PER_HOUR = 3_600.0
+    private const val HOURS_PER_DAY = 24.0
     private val RESET_DAY: java.time.format.DateTimeFormatter get() = java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.getDefault())
 
     fun yesNo(v: Boolean) = if (v) "Yes" else "No"
@@ -147,7 +152,7 @@ object SettingsWords {
         HomeGroup(
             "Your data", listOf(
                 HomeRow(SettingsPage.Spending, "gauge", "Spending limits", spendingStatus(snap.budgets)),
-                HomeRow(SettingsPage.About, "arch", "About", aboutStatus(snap.health)),
+                HomeRow(SettingsPage.About, "arch", "Backup and about", NO_BACKUP, warn = true),
             ),
         ),
     ))
@@ -155,6 +160,9 @@ object SettingsWords {
     /** Until the first read has finished, the rows that come from HQ say so, rather than "Not answering". */
     private fun withChecking(loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
         if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { it.copy(status = "Checking…") }) }
+
+    /** No route says whether a backup was made, so this stays until one does; it is never inferred. */
+    const val NO_BACKUP = "No backup yet"
 
     fun aboutStatus(h: JSONObject?): String = h?.text("version")?.let { "HQ $it" } ?: if (h == null) NOT_ANSWERED else "HQ is running"
 
@@ -180,6 +188,26 @@ object SettingsWords {
     /** The computer a helper runs on: the phone itself is "native" in the config. */
     private fun computerName(host: String) = if (host == "native" || host == "local") "This phone" else host
 
+    /** A count that opens its list, unless there is nothing in it to open. */
+    private fun countRow(title: String, n: Int, page: SettingsPage, text: String? = null) = FactRow(title, "$n", text, opens = if (n > 0) page else null)
+
+    /** The web addresses allowed to open HQ, one per row. */
+    fun originRows(s: JSONObject?): List<String> = s.obj("safety").arr("web_allowed_origins").let { a -> if (a == null) emptyList() else (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }
+
+    /** Each tool server HQ can call: its name, where it lives, and when it is used. */
+    fun toolRows(s: JSONObject?): List<FactRow> = s.obj("integrations").arr("remote_mcp").items().map {
+        val lines = listOfNotNull(it.text("host"), "Used only while you are in the chat.".takeIf { _ -> it.optBoolean("live_user_turn_only") })
+        FactRow(it.text("name") ?: "Tool", "", lines.joinToString("\n").ifBlank { null })
+    }
+
+    /** The computers helpers can run on; the default one says so. */
+    fun computerRows(s: JSONObject?): List<FactRow> {
+        val host = s.obj("agent_host")
+        val default = host.text("default_host")
+        val a = host.arr("hosts") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf { it.isNotBlank() } }.map { FactRow(computerName(it), "", if (it == default) "Default" else null) }
+    }
+
     fun safetyRows(s: JSONObject?, tab: SafetyTab): List<FactRow> {
         if (s == null) return emptyList()
         val safety = s.obj("safety")
@@ -191,7 +219,7 @@ object SettingsWords {
                 FactRow("Run commands in a safe box", sandbox(safety.text("bash_sandbox").orEmpty()), "Fences in the commands a helper runs, when the phone can."),
                 FactRow("Commands can use the internet", yesNo(safety?.optBoolean("bash_network", true) ?: true), "Lets those commands download things and reach websites."),
                 FactRow("Ask me before HQ changes its skills", yesNo(safety?.optBoolean("skills_write_approval") == true), "When on, a change to one of HQ's skills waits for your yes."),
-                FactRow("Addresses allowed to open HQ", "${safety.arr("web_allowed_origins")?.length() ?: 0}", "The web addresses that may show HQ's screens."),
+                countRow("Addresses allowed to open HQ", safety.arr("web_allowed_origins")?.length() ?: 0, SettingsPage.Origins, "The web addresses that may show HQ's screens."),
             )
             SafetyTab.Time -> listOf(
                 FactRow("Longest time for one reply", secs(limits?.optInt("chat_turn_timeout_secs") ?: 0)),
@@ -201,7 +229,7 @@ object SettingsWords {
             )
             SafetyTab.Helpers -> listOf(
                 FactRow("Default computer", host.text("default_host")?.let(::computerName) ?: "None set"),
-                FactRow("Computers", "${host.arr("hosts")?.length() ?: 0}"),
+                countRow("Computers", host.arr("hosts")?.length() ?: 0, SettingsPage.Computers),
                 FactRow("Safe box for helpers", sandbox(host.text("sandbox_mode").orEmpty())),
                 FactRow("Stop idle helpers after", host?.optInt("idle_reap_hours")?.let { if (it <= 0) "Never" else "$it h" } ?: "Never"),
                 FactRow("New helpers: HQ answers their questions", yesNo(host?.optBoolean("drive_new_watches") == true)),
@@ -210,7 +238,7 @@ object SettingsWords {
                 FactRow("Stop answering a helper that makes no progress after", "${host?.optInt("driver_no_progress_limit") ?: 0} turns", "HQ stops answering its questions for you. The helper itself keeps running."),
             )
             SafetyTab.Tools -> listOf(
-                FactRow("Connected tools", "${integ.arr("remote_mcp")?.length() ?: 0}"),
+                countRow("Connected tools", integ.arr("remote_mcp")?.length() ?: 0, SettingsPage.ConnectedTools),
                 FactRow("Search server", integ.text("searxng_host") ?: "Built in"),
                 FactRow("Disk space check", onOff(integ?.optBoolean("disk_watchdog_enabled") == true)),
             )
@@ -311,6 +339,54 @@ object SettingsWords {
         return AppCard(name, on, line, bot, if (paired) "Linked" else "Not linked")
     }
 
+    // ------------------------------------------------------------ Background work
+
+    const val BACKGROUND_ON = "On \u00b7 answers chats, runs tasks"
+    const val BACKGROUND_OFF = "Only when I open the app"
+
+    /** The three lines under "Right now": hq itself, and each chat app as far as the run mode lets it be connected. */
+    fun rightNow(snap: SettingsSnapshot, active: Boolean, restarting: Boolean): List<FactRow> {
+        val hq = when {
+            restarting -> FactRow("HQ", "Restarting")
+            snap.health != null -> FactRow("HQ", "Running", good = true)
+            else -> FactRow("HQ", NOT_ANSWERED)
+        }
+        return listOf(hq, chatAppRow(snap.chatApps, "telegram", "Telegram", active), chatAppRow(snap.chatApps, "discord", "Discord", active))
+    }
+
+    private fun chatAppRow(chat: JSONObject?, key: String, name: String, active: Boolean): FactRow {
+        val a = chat.obj(key)
+        val relay = a.obj("relay")
+        val status = relay.text("status")
+        val value = when {
+            a == null || !(a.optBoolean("enabled") && a.optBoolean("token_set")) -> "Not set up"
+            !active -> "Paused"
+            relay?.optBoolean("current", true) == false -> "Not connected yet"
+            status == "connected" -> "Connected"
+            status == "error" -> "Error"
+            else -> "Not connected yet"
+        }
+        return FactRow(name, value)
+    }
+
+    data class ModeWords(val title: String, val body: String, val confirm: String)
+
+    val RESTART_WORDS = ModeWords("Restart HQ?", "HQ stops for a moment and starts again. Anything it is answering right now is cut off.", "Restart")
+
+    /** The text "Copy diagnostics" puts on the clipboard: the build, what runs, where it serves, and what HQ says about itself. */
+    fun diagnostics(build: String, active: Boolean, health: JSONObject?, port: Int): String = buildString {
+        appendLine("AgentHQ hub build $build")
+        appendLine("Run mode: ${if (active) "Active: relays and scheduler on" else "Standby: web app only"}. Serving this device on 127.0.0.1:$port")
+        appendLine("Health: ${health?.toString() ?: "no answer"}")
+    }
+
+    /** What the dialog says before the run mode changes: what stops or starts, and that hq restarts for a moment. */
+    fun modeDialog(toActive: Boolean) = if (toActive) {
+        ModeWords("Start background work?", "HQ will start answering your chats and running scheduled tasks, even when the app is closed. It restarts for a moment.", "Start")
+    } else {
+        ModeWords("Pause background work?", "HQ will stop answering your chats and running scheduled tasks. It restarts for a moment.", "Pause")
+    }
+
     // ------------------------------------------------------------ Connect Claude
 
     data class Grant(val id: String, val client: String, val scope: String, val since: String)
@@ -333,11 +409,60 @@ object SettingsWords {
 
     // ------------------------------------------------------------ Spending limits
 
-    fun budgetRows(b: JSONObject?): List<FactRow> = b.arr("budgets").items().map {
-        val period = when (it.optString("period")) { "day" -> "Per day"; "week" -> "Per week"; "month" -> "Per month"; else -> it.optString("period") }
-        val scope = scopeOf(it.optString("scope"))
-        FactRow(it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase), "${money(it.optDouble("spent_usd"))} of ${money(it.optDouble("limit_usd"))}", listOfNotNull(period, scope, stateWords(it.optString("state"))).joinToString(" · "))
+    enum class BudgetTone { Ok, Warning, Exceeded }
+
+    /** One budget as the Spending page draws it: its name and what it covers, how much is used, a bar, and where it stands. */
+    data class BudgetCard(val title: String, val covers: String, val used: String, val fraction: Float, val stand: String, val tone: BudgetTone)
+
+    fun budgetCards(b: JSONObject?, now: Instant): List<BudgetCard> = b.arr("budgets").items().map {
+        val spent = numOrNull(it, "spent_usd") ?: 0.0
+        val limit = numOrNull(it, "limit_usd")
+        val pct = numOrNull(it, "pct") ?: if (limit != null && limit > 0) spent / limit * PERCENT else 0.0
+        val tone = when (it.optString("state")) { "warning", "warn" -> BudgetTone.Warning; "exceeded", "blocked" -> BudgetTone.Exceeded; else -> BudgetTone.Ok }
+        val state = when (tone) { BudgetTone.Ok -> "Within budget"; BudgetTone.Warning -> "Past the alert threshold"; BudgetTone.Exceeded -> "Limit reached" }
+        val resets = numOrNull(it, "resets_at")?.let { at -> ", resets in ${span((at - now.epochSecond) / SECONDS_PER_HOUR)}" }.orEmpty()
+        val period = when (it.optString("period")) { "day" -> "daily"; "week" -> "weekly"; "month" -> "monthly"; else -> it.optString("period") }
+        val action = it.optString("action").takeIf { a -> a.isNotBlank() }?.let { a -> ", then $a" }.orEmpty()
+        BudgetCard(
+            it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase),
+            it.optString("scope").ifBlank { "global" } + ", " + period + action,
+            "${UsageWords.usd(spent)} of ${UsageWords.usd(limit)} (${Math.round(pct)}%)",
+            (pct / PERCENT).coerceIn(0.0, 1.0).toFloat(),
+            state + resets,
+            tone,
+        )
     }
+
+    /** The empty Budgets page: nothing is capped, unless HQ also holds a cap for each background run. */
+    fun noBudgets(b: JSONObject?): String =
+        if ((numOrNull(b, "background_run_usd") ?: 0.0) > 0.0) "No budgets are set." else "No budgets are set, so nothing is limited."
+
+    /** Hours as the board writes them: under an hour "<1h", under a day "9h", then "3 days". */
+    fun span(hours: Double): String = when {
+        !hours.isFinite() || hours < 1 -> "<1h"
+        hours < HOURS_PER_DAY -> "${Math.round(hours)}h"
+        else -> Math.round(hours / HOURS_PER_DAY).coerceAtLeast(1).let { d -> "$d day${if (d == 1L) "" else "s"}" }
+    }
+
+    /** The month so far, where it ends, and when it resets; one line saying so when nothing has been spent yet. Null when the route gave no month. */
+    data class Forecast(val rows: List<FactRow>, val note: String?)
+
+    fun forecast(f: JSONObject?): Forecast? {
+        val m = f.obj("month") ?: return null
+        val spent = numOrNull(m, "spent_this_period") ?: 0.0
+        if (numOrNull(m, "rate_per_hour") == null && spent <= 0.0) return Forecast(emptyList(), "No spend recorded yet, so there is nothing to forecast.")
+        val rough = if (m.optString("confidence") == "low") "Not much history yet, so this is a rough guess." else null
+        return Forecast(
+            listOf(
+                FactRow("Spent so far", UsageWords.usd(spent)),
+                FactRow("Projected month end", UsageWords.usd(numOrNull(m, "projected_period_total")), rough),
+                FactRow("Resets in", numOrNull(m, "hours_to_reset")?.let(::span) ?: "-"),
+            ),
+            null,
+        )
+    }
+
+    private fun numOrNull(o: JSONObject?, name: String): Double? = o?.takeIf { it.has(name) && !it.isNull(name) }?.optDouble(name)?.takeIf { it.isFinite() }
 
     /** What a budget covers, when it is not everything: "global" says nothing, "provider:openrouter" says which. */
     private fun scopeOf(scope: String): String? = when {

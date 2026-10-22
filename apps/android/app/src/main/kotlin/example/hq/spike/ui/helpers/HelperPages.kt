@@ -323,6 +323,7 @@ private fun MenuSheet(card: HelperCard, actions: HelpersActions) {
     val running = card.state != HelperState.Finished && card.state != HelperState.Stopped
     SheetFrame({ actions.onMenu(false) }, top = null) {
         ActionRow(HqIcons.Edit, "Rename", null, { actions.onRename(card.title) })
+        ActionRow(HqIcons.Chat, "Follow in chat", "Opens a chat that follows this helper.", actions.onFollow)
         if (running) ActionRow(HqIcons.Pause, "Stop", "It stops and its terminal closes. Asks first.", { actions.onAskStop(true) }, tint = Mts.DangerText)
     }
 }

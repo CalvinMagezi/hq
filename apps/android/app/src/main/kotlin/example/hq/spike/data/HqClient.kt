@@ -149,7 +149,14 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val blockedReason: String?,
         val readyAt: String?,
         val updatedAt: String,
+        val blockedSince: String? = null,
+        val waitingOn: String? = null,
+        val completedAt: String? = null,
+        val archivedAt: String? = null,
     )
+
+    /** A helper working on a task right now: who, where, and which task. */
+    data class WorkSession(val taskId: String, val actor: String, val harness: String, val cwd: String)
 
     data class TaskComment(val id: String, val author: String, val body: String, val createdAt: String)
 
@@ -158,17 +165,24 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         o.optStringOrNull("priority"), o.optStringOrNull("due_date"), o.optStringOrNull("start_date"), o.optJSONArray("tags").strings(), o.optJSONArray("assignees").strings(),
         o.optStringOrNull("parent_task_id"), o.optInt("subtask_count", 0), o.optInt("subtask_done", 0), o.optStringOrNull("blocked_reason"),
         o.optStringOrNull("first_ready_for_review_at"), o.optString("updated_at", ""),
+        o.optStringOrNull("blocked_since"), o.optStringOrNull("waiting_on"), o.optStringOrNull("completed_at"), o.optStringOrNull("archived_at"),
     )
 
     private fun json(body: JSONObject) = body.toString().toRequestBody("application/json".toMediaType())
 
+    /** The helpers working on a task now (a lease that has not ended). */
+    suspend fun liveWorkSessions(): List<WorkSession> = send(authed("/api/work-sessions?days=1").build()) { text ->
+        JSONObject(text).optJSONArray("work_sessions").objects().filter { it.isNull("ended_at") || !it.has("ended_at") }
+            .map { WorkSession(it.optString("task_id"), it.optString("actor"), it.optString("harness"), it.optString("cwd")) }
+    }
+
     /** Active tasks, or the sub-tasks of one. The lists group and count them on the phone. */
-    suspend fun tasks(parentId: String? = null): List<TaskItem> {
+    suspend fun tasks(parentId: String? = null, archived: Boolean = false): List<TaskItem> {
         // Pages are read one after another while tasks change, so a row can come twice (or be missed); each id is kept once.
         val all = LinkedHashMap<String, TaskItem>()
         var offset = 0
         while (all.size < TASK_CAP) {
-            val query = "limit=$TASK_PAGE&offset=$offset" + (parentId?.let { "&parent_task_id=$it" } ?: "&top_level_only=true")
+            val query = "limit=$TASK_PAGE&offset=$offset" + (parentId?.let { "&parent_task_id=$it" } ?: "&top_level_only=true") + (if (archived) "&archived=true" else "")
             val (page, more) = send(authed("/api/tasks?$query").build()) { text ->
                 val o = JSONObject(text)
                 o.optJSONArray("tasks").objects().map(::taskOf) to o.optBoolean("has_more", false)
@@ -186,6 +200,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}").patch(json(change)).build()) { taskOf(JSONObject(it)) }
 
     suspend fun createTask(body: JSONObject): TaskItem = send(authed("/api/tasks").post(json(body)).build()) { taskOf(JSONObject(it)) }
+
+    /** Adds a task with a repeat key; true when HQ already had one with that key and so added nothing. */
+    suspend fun createTaskOnce(body: JSONObject): Boolean = send(authed("/api/tasks").post(json(body)).build()) { JSONObject(it).optBoolean("deduplicated") }
 
     suspend fun taskComments(id: String): List<TaskComment> =
         send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/comments").build()) { text ->
@@ -286,6 +303,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun stopHelper(id: String) {
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/stop").post(EMPTY_JSON).build()) { }
     }
+
+    /** Opens the chat that follows this helper, making one if no chat does yet; returns that chat's id. Asking again returns the same chat. */
+    suspend fun followHelper(id: String): String =
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/adopt").post(EMPTY_JSON).build()) { JSONObject(it).optString("thread_id") }
 
     suspend fun renameHelper(id: String, label: String) {
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/rename").post(JSONObject().put("label", label).toString().toRequestBody("application/json".toMediaType())).build()) { }

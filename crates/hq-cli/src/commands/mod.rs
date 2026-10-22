@@ -44,6 +44,8 @@ pub mod host {
     }
 }
 pub mod backup;
+#[cfg(all(unix, feature = "bridge"))]
+pub mod bridge;
 pub mod connector;
 pub mod install;
 pub mod kill;

@@ -70,6 +70,11 @@ allow = [
     "bzip2-1.0.6", "MPL-2.0",
 ]
 
+# webpki-roots is the Mozilla root certificate list as data, under CDLA-Permissive-2.0: a
+# permissive license (attribution, no copyleft). iroh-relay and n0-dns-resolver use it, so
+# hq-bridge brings it in. Allowed for this one crate only, not for every crate.
+exceptions = [{ allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" }]
+
 # Workspace crates do not yet set `license.workspace = true` (crates/ is out of
 # scope for the CI change). Drop these clarifications once they do.
 

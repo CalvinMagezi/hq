@@ -22,7 +22,12 @@ fun tasksFixture(name: String?): TasksUi? {
         t("8", "Plan the winter soak test", due = today.plusDays(30)),
         t("9", "Tidy the vault folders"),
     )
-    val base = TasksUi(loaded = true, tasks = tasks, today = today)
+    val stuckSince = LocalDateTime.now(ZoneOffset.UTC).minusDays(2).toString().replace('T', ' ').substringBefore('.')
+    val withDetail = tasks.map { if (it.id == "1") it.copy(blockedSince = stuckSince, waitingOn = "you", priority = null) else it }
+    val finished = listOf(t("d1", "Plan the cutover week", "complete").copy(completedAt = hoursAgo), t("d2", "Pick the soak test phone", "complete").copy(completedAt = hoursAgo))
+    val put = listOf(t("x1", "Old idea: a desktop widget", "to_do").copy(archivedAt = hoursAgo))
+    val helpers = listOf(example.hq.spike.data.HqClient.WorkSession("4", "hq", "claude-code", "/work/hq-oss"))
+    val base = TasksUi(loaded = true, tasks = withDetail + finished, today = today, archived = put, sessions = helpers)
     val real = TasksUi(loaded = true, tasks = realTasks(today), today = today)
     return when (name) {
         "t-real" -> real
@@ -31,6 +36,12 @@ fun tasksFixture(name: String?): TasksUi? {
         "t-today" -> base
         "t-upcoming" -> base.copy(tab = TaskTab.Upcoming)
         "t-all" -> base.copy(tab = TaskTab.All)
+        "t-select" -> base.copy(tab = TaskTab.All, selected = setOf("3", "4"))
+        "t-select-status" -> base.copy(tab = TaskTab.All, selected = setOf("3", "4"), bulkPrompt = "status")
+        "t-all-stuck" -> base.copy(tab = TaskTab.All, chip = AllChip.Stuck)
+        "t-all-done" -> base.copy(tab = TaskTab.All, chip = AllChip.Done)
+        "t-all-archived" -> base.copy(tab = TaskTab.All, chip = AllChip.Archived)
+        "t-archived" -> base.copy(tab = TaskTab.All, chip = AllChip.Archived, detail = TaskDetail(put[0].copy(description = "Not needed now."), loading = false))
         "t-quick" -> base.copy(quick = QuickState("Check Samsung battery whitelist tomorrow !high #inbox"))
         "t-more" -> base.copy(quick = QuickState("Check Samsung battery whitelist", more = true, priority = "high", due = today.plusDays(1)))
         "t-ready" -> base.copy(detail = TaskDetail(tasks[1], loading = false))

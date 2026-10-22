@@ -4,12 +4,18 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqClient.TaskComment
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.TaskItem
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -67,12 +73,26 @@ data class TasksUi(
     val quick: QuickState? = null,
     val line: TaskLine? = null,
     val today: LocalDate = LocalDate.now(),
+    /** Which list the All tab shows, the archived tasks (read only when that list is chosen), and the helpers working now. */
+    val chip: AllChip = AllChip.Active,
+    val archived: List<TaskItem> = emptyList(),
+    val sessions: List<HqClient.WorkSession> = emptyList(),
+    /** The tasks picked on the All tab, what is being asked of them ("status" or "priority"), and a change in flight. */
+    val selected: Set<String> = emptySet(),
+    val bulkPrompt: String? = null,
+    val bulking: Boolean = false,
+    /** A bulk change waiting for the owner's yes, and whether the archived list has been read at least once. */
+    val bulkAsk: Bulk? = null,
+    val archivedLoaded: Boolean = false,
 ) {
+    /** The tasks the All tab shows now: only these can be picked or changed. */
+    val visibleIds: Set<String> get() = groups.flatMapTo(HashSet()) { g -> g.tasks.map { it.id } }
+    val workingIds: Set<String> get() = sessions.mapTo(HashSet()) { it.taskId }
     val shown: List<TaskItem> get() = tasks.filter { it.id !in hidden }
     val groups: List<TaskGroup> get() = when (tab) {
         TaskTab.Today -> TasksLogic.today(shown, today)
         TaskTab.Upcoming -> TasksLogic.upcoming(shown, today)
-        TaskTab.All -> TasksLogic.all(shown)
+        TaskTab.All -> TasksLogic.allList(shown, chip, archived)
     }
 }
 
@@ -98,6 +118,14 @@ class TasksActions(
     val onArchive: () -> Unit = {},
     val onQuick: (QuickState?) -> Unit = {},
     val onQuickSave: () -> Unit = {},
+    val onChip: (AllChip) -> Unit = {},
+    val onRestore: () -> Unit = {},
+    val onSelect: (String) -> Unit = {},
+    val onSelectAll: (List<String>) -> Unit = {},
+    val onClearSelection: () -> Unit = {},
+    val onBulkPrompt: (String?) -> Unit = {},
+    val onBulk: (Bulk) -> Unit = {},
+    val onBulkAsk: (Bulk?) -> Unit = {},
 )
 
 class TasksViewModel(app: Application) : AndroidViewModel(app) {
@@ -109,9 +137,10 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     private var lineJob: Job? = null
     private var refreshSeq = 0
     private val writing = mutableSetOf<String>()
+    private val restoring = mutableSetOf<String>()
 
     val actions = TasksActions(
-        onTab = { t -> _state.update { it.copy(tab = t) } }, onRefresh = { viewModelScope.launch { refresh() } },
+        onTab = ::chooseTab, onRefresh = { viewModelScope.launch { refresh() } },
         onToggleGroup = { k -> _state.update { it.copy(expanded = if (k in it.expanded) it.expanded - k else it.expanded + k) } },
         onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) } },
         onOpen = ::open, onClose = { _state.update { it.copy(detail = null) } }, onMarkDone = { _state.value.detail?.task?.let(::done); _state.update { it.copy(detail = null) } },
@@ -120,6 +149,11 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onStatus = { s -> patchDetail(JSONObject().put("status", s)) }, onPriority = { p -> patchDetail(JSONObject().put("priority", p ?: JSONObject.NULL)) },
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
         onQuick = { q -> _state.update { it.copy(quick = q) } }, onQuickSave = ::saveQuick,
+        onChip = ::chooseChip, onRestore = ::restore,
+        onSelect = { id -> _state.update { if (it.bulking) it else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id) } },
+        onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
+        onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
+        onBulkPrompt = { p -> _state.update { it.copy(bulkPrompt = p) } }, onBulk = ::askBulk, onBulkAsk = { c -> if (c == null) _state.update { it.copy(bulkAsk = null) } else runBulk(c) },
     )
 
     init {
@@ -140,13 +174,85 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refresh() {
         val seq = ++refreshSeq
         val tasks = try { client.tasks() } catch (e: HqUnavailable) { null }
+        // The extras are only read for the list that shows them, and a failed read keeps what was there.
+        val onAll = _state.value.tab == TaskTab.All
+        val sessions = if (onAll && tasks != null) try { client.liveWorkSessions() } catch (e: HqUnavailable) { null } else null
+        val archived = if (onAll && tasks != null && _state.value.chip == AllChip.Archived) try { client.tasks(archived = true) } catch (e: HqUnavailable) { null } else null
         if (frozen || seq != refreshSeq) return
         _state.update { s ->
             if (tasks == null) s.copy(loaded = true, offline = true)
             else s.copy(
-                loaded = true, offline = false, tasks = tasks, hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
+                loaded = true, offline = false, tasks = tasks, sessions = sessions ?: s.sessions, archived = archived ?: s.archived, archivedLoaded = s.archivedLoaded || archived != null,
+                hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
                 detail = s.detail?.let { d -> tasks.firstOrNull { it.id == d.task.id }?.let { fresh -> d.copy(task = fresh) } ?: d },
-            )
+            ).let { next -> next.copy(selected = next.selected intersect next.visibleIds) }
+        }
+    }
+
+    /** Applies one change to every selected task, four at a time, and says what happened to each. Tasks that failed stay selected. */
+    /** Finishing many tasks at once asks first; every other change goes straight through. */
+    private fun askBulk(change: Bulk) {
+        val n = pickedTasks().size
+        if (change == Bulk.Status("complete") && n > 1) _state.update { it.copy(bulkPrompt = null, bulkAsk = change) } else runBulk(change)
+    }
+
+    /** The selected tasks that are still on the list: one that moved off it meanwhile is not changed by a tap on rows that no longer show it. */
+    private fun pickedTasks(): List<TaskItem> {
+        val visible = _state.value.visibleIds
+        return _state.value.tasks.filter { it.id in _state.value.selected && it.id in visible }
+    }
+
+    private fun runBulk(change: Bulk) {
+        val picked = pickedTasks()
+        if (picked.isEmpty() || _state.value.bulking) return
+        _state.update { it.copy(bulkPrompt = null, bulkAsk = null, bulking = true) }
+        viewModelScope.launch {
+            val gate = Semaphore(BulkEdit.IN_FLIGHT)
+            val results = coroutineScope { picked.map { t -> async { gate.withPermit { applyOne(change, t) } } }.awaitAll() }
+            val failedIds = picked.zip(results).filter { it.second is Applied.Failed }.mapTo(HashSet()) { it.first.id }
+            refreshSeq++
+            _state.update { it.copy(bulking = false, selected = failedIds) }
+            say(BulkEdit.summary(change, results))
+            refresh()
+        }
+    }
+
+    private suspend fun applyOne(change: Bulk, t: TaskItem): Applied {
+        val body = BulkEdit.patchFor(change, t) ?: return Applied.Already
+        return try {
+            client.patchTask(t.id, body)
+            Applied.Changed
+        } catch (e: HqUnavailable) {
+            Applied.Failed(t.displayId.ifBlank { t.title }, BulkEdit.failure(e.status))
+        }
+    }
+
+    private fun chooseTab(tab: TaskTab) {
+        _state.update { if (it.bulking) it else it.copy(tab = tab, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
+        // Coming to All reads the helpers working now, which are not read while another tab shows.
+        if (tab == TaskTab.All) viewModelScope.launch { refresh() }
+    }
+
+    private fun chooseChip(chip: AllChip) {
+        _state.update { if (it.bulking) it else it.copy(chip = chip, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
+        if (chip == AllChip.Archived) viewModelScope.launch { refresh() }
+    }
+
+    /** Brings an archived task back, with the sub-tasks archived along with it. */
+    private fun restore() {
+        val t = _state.value.detail?.task ?: return
+        if (!restoring.add(t.id)) return
+        viewModelScope.launch {
+            try {
+                client.restoreTask(t.id)
+                _state.update { it.copy(detail = null, archived = it.archived.filter { a -> a.id != t.id }) }
+                say("Task restored")
+                refresh()
+            } catch (e: HqUnavailable) {
+                say(why(e, "Could not restore it. HQ is not answering."))
+            } finally {
+                restoring.remove(t.id)
+            }
         }
     }
 
@@ -245,8 +351,17 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Opens the task with this id, as [openRef] does for a short id. */
+    fun openById(id: String, onMissing: () -> Unit) {
+        viewModelScope.launch {
+            val task = _state.value.tasks.firstOrNull { it.id == id } ?: run { refresh(); _state.value.tasks.firstOrNull { it.id == id } }
+            if (task != null) open(task) else { say("Could not find that task."); onMissing() }
+        }
+    }
+
     private fun open(t: TaskItem) {
         _state.update { it.copy(detail = TaskDetail(t)) }
+        if (t.archivedAt != null) { detailOf(t.id) { it.copy(loading = false) }; return }
         viewModelScope.launch {
             val subs = try { client.tasks(parentId = t.id) } catch (e: HqUnavailable) { emptyList() }
             val comments = try { client.taskComments(t.id) } catch (e: HqUnavailable) { emptyList() }

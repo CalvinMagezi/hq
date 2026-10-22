@@ -72,10 +72,18 @@ jobs:
       - name: clippy (tunnel feature)
         run: cargo clippy -p hq-cli --all-targets --features tunnel --locked -- -D warnings
 
+      # `hq bridge` is behind a feature the workspace run leaves off (nothing listens until a
+      # command is run). The hq-bridge crate itself is in the workspace run.
+      - name: clippy (bridge feature)
+        run: cargo clippy -p hq-cli --all-targets --features bridge --locked -- -D warnings
+
       - name: test
         env:
           HQ_REQUIRE_BUILT_APP: "1"
         run: cargo test --workspace --locked
+
+      - name: test (bridge feature)
+        run: cargo test -p hq-cli --features bridge --locked --bin hq -- bridge_commands
 
       - name: test (tunnel feature)
         run: |

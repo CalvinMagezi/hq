@@ -148,6 +148,11 @@ enum Commands {
         spool: Option<PathBuf>,
     },
 
+    /// Pair machines with a QR code and reach them by key: pair, join, serve, ping, peers, revoke (`hq bridge --help`)
+    #[cfg(all(unix, feature = "bridge"))]
+    #[command(subcommand)]
+    Bridge(commands::bridge::BridgeAction),
+
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
         /// serve (run the host in this terminal), status, stop, lockdown [reason] (stop every agent and refuse new ones), unlock (lift a lockdown; only on this machine), install (run it as a login service), sign <path> (macOS: give an hq binary the stable local signature when this machine has one), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate; with --gate-key, a server's key for the TCP gate), gate-key <host> (make this server's key for a host's TCP gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
@@ -876,6 +881,8 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::SelfApply { .. }
         | Commands::Agents { .. }
         | Commands::Models { .. } => LiteRule::NotInLite,
+        #[cfg(all(unix, feature = "bridge"))]
+        Commands::Bridge(_) => LiteRule::NotInLite,
         Commands::Install { .. }
         | Commands::Update(_)
         | Commands::UpdateDb { .. }
@@ -1167,6 +1174,8 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Skills(action) => commands::skills::run(config, action).await,
         Commands::Queue(action) => commands::queue::run(config, action).await,
         Commands::Connector(action) => commands::connector::run(config, action),
+        #[cfg(all(unix, feature = "bridge"))]
+        Commands::Bridge(action) => commands::bridge::run(config, action).await,
         Commands::Decisions { days, site } => {
             commands::decisions::run(config, days, site.as_deref())
         }
@@ -1319,6 +1328,51 @@ mod lite_rule_tests {
 mod net_args_tests {
     use super::Cli;
     use clap::Parser;
+
+    #[cfg(all(unix, feature = "bridge"))]
+    #[test]
+    fn bridge_commands_parse_and_no_option_takes_a_secret_or_a_code() {
+        for argv in [
+            &["hq", "bridge", "pair"][..],
+            &[
+                "hq",
+                "bridge",
+                "pair",
+                "--ttl",
+                "60",
+                "--relay",
+                "none",
+                "--no-addrs",
+            ],
+            &[
+                "hq",
+                "bridge",
+                "join",
+                "hqpair://ticket/AAAA",
+                "--bind",
+                "127.0.0.1:0",
+            ],
+            &["hq", "bridge", "join", "-"],
+            &["hq", "bridge", "join"],
+            &["hq", "bridge", "serve"],
+            &["hq", "bridge", "ping", "abcd", "--count", "3"],
+            &["hq", "bridge", "peers", "--all", "--json"],
+            &["hq", "bridge", "revoke", "abcd"],
+        ] {
+            assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
+        }
+        // The one-time code travels only inside the link, never as its own option, and pairing
+        // cannot be answered from the command line: the digits are typed at the prompt.
+        for argv in [
+            &["hq", "bridge", "pair", "--code", "x"][..],
+            &["hq", "bridge", "pair", "--auto-accept"],
+            &["hq", "bridge", "pair", "--ttl", "99999999999"],
+            &["hq", "bridge", "pair", "--ttl", "1"],
+            &["hq", "bridge", "join", "--digits", "123456", "x"],
+        ] {
+            assert!(Cli::try_parse_from(argv).is_err(), "{argv:?}");
+        }
+    }
 
     #[cfg(all(unix, feature = "tunnel"))]
     #[test]
