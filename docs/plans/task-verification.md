@@ -1,6 +1,6 @@
 # Task verification: completion without a person in the queue
 
-Status: proposed. Nothing here is built. Date: 2026-10-22.
+Status: approved 2026-10-22 (see "Decisions"). Nothing here is built.
 
 One person cannot review every task that several agents finish. This plan takes
 the owner out of per-task review and replaces it with a gate that moves a task
@@ -209,7 +209,10 @@ the weekly audit digest.
 
 Config (`tasks.verification`): `mode` is `off` (default, a fresh install is
 unchanged), `shadow` or `enforce`; `enforce_tiers`, `max_attempts` (3),
-`tier2_tags`, `tier2_paths`, `veto_hours` (24), `audit_rate` and a cost budget.
+`tier2_tags`, `tier2_paths`, `veto_hours` (24), `audit_rate`, `concurrency`,
+`sweep_confirm_over` (25), `owner_queue_alert` (20), `owner_queue_age_days` (3),
+`shadow_e2_sample` (50) and a reviewer cost ceiling. Reviewer (E2) runs stay off
+until a ceiling is set; E1 verification needs none.
 
 ## Calibration: how the owner can trust it unread
 
@@ -221,10 +224,12 @@ unchanged), `shadow` or `enforce`; `enforce_tiers`, `max_attempts` (3),
    check, an unmet criterion, a fabricated citation) and matching good controls,
    at an unpredictable rate. The catch rate and false-reject rate are tracked
    per verifier configuration and tier.
-3. **Audit sample.** A random sample of auto-completed tasks (start at 5%, at
-   least 10 a week) arrives as one weekly digest, one tap each: agree or not.
-   Every disagreement reopens the task, raises the sample rate for that tier and
-   counts against the verifier.
+3. **Audit sample.** The push is a floor: a random sample of auto-completed tasks
+   (5%, at least 10 a week) arrives as one weekly digest, one tap each: agree or
+   not. You can pull more at any time from the audit view, stratified toward the
+   tiers and verifier configurations with the least data. Every disagreement
+   reopens the task, raises the push rate for that tier and counts against the
+   verifier.
 4. **Escapes.** A completed task that is reopened, or that gets a follow-up
    tagged `regression` linked to it, counts as a late failure against both the
    worker and the verifier.
@@ -256,14 +261,137 @@ audited verdicts, so expect a few weeks.
 | Verification cost runs away | Budget cap, E1 before any model, bounded attempts |
 | Two verifiers racing | Verdicts are append-only; apply is one transaction on the task row |
 
-## The existing backlog
+## Verify and audit are different jobs
 
-Do not change hundreds of tasks on a policy nobody has approved. Run shadow mode
-over the whole queue as a triage report with four buckets: would pass, would
-fail, no discoverable artifact, and cannot decide. The owner picks one
-disposition policy for the third bucket (for example return to `to_do` with a
-note, or archive, both reversible) and it is applied once. Unverifiable tasks
-are never auto-completed.
+| | Verify | Audit |
+|---|---|---|
+| Who does it | The machine (the verifier) | You |
+| What it acts on | Tasks waiting in `ready_for_review` | Tasks already verified and completed |
+| What it produces | Verdicts, and with them completed, reopened or parked tasks | Agree or disagree on a verdict |
+| What it is for | Clearing the queue | Measuring whether the verifier can be trusted |
+| Cadence | Always running; you can also start it | 5% and at least 10 a week is only the floor you are pushed; pull as many as you like |
+
+A human audit can never clear a backlog, it only samples one. So the button you
+reach for on a Monday is Verify, and Audit is how you decide how far to trust
+what Verify did.
+
+An on-demand audit is stratified, not uniform: it favours tiers and verifier
+configurations with the least audit data and the highest risk, so 25 audits on a
+Monday teach the system more than 25 random ones. A second opinion on one task (a
+fresh independent verifier, on request) counts as an audit datum when it
+disagrees with the first verdict.
+
+## Clearing a queue on demand: sweeps
+
+A sweep is a persisted batch over a scope: everything waiting, one initiative,
+tasks changed since a date, or a hand-picked set. It survives a restart and can
+be paused, resumed or cancelled. The first three steps change nothing.
+
+1. **Plan.** Deterministic collectors only: no model, no spend. Every task goes
+   into a bucket. The plan shows counts, the estimated spend and time for the
+   reviewer runs it would need, and how many tasks would wait on you.
+2. **Run.** Verdicts are produced in priority order: tasks other tasks wait on,
+   then tier 2 (its veto clock should start early), then oldest. Progress is live.
+3. **Review the buckets, not the tasks.** One summary, one decision.
+4. **Apply.** One confirmation applies the policy to the buckets. Above
+   `sweep_confirm_over` tasks, apply always needs your tap, whatever the mode.
+   Every change carries the sweep id.
+
+Undo restores the previous status of every task the sweep moved that has not been
+changed since, and reports the ones it left alone.
+
+| Bucket | Meaning | What apply does |
+|---|---|---|
+| Passed | Evidence met the tier's bar | Complete, with the level recorded |
+| Failed | A criterion is unmet, with the finding | Return to `to_do` with the findings as the checkpoint |
+| No artifact | Nothing a verifier could inspect (the approved default) | Return to `to_do` with a note naming what to link; never completed |
+| Undecidable | Evidence conflicts, checks still running, or the reviewer was unsure | Left in place and retried; shown to you only after the retries are used |
+| Needs you | Tier 2 inside its veto window, three failures, or a canary alarm | Stays in the exceptions list |
+
+An existing legacy queue is handled the same way, which is why the first run over
+a large backlog is a plan you read once and an apply you confirm once, not a
+review of each task. Unverifiable tasks are never auto-completed.
+
+## Weekend bursts and the Monday briefing
+
+The risk is not the size of one queue. It is that agents produce completions
+while you are away and the check-in turns into a pile. Four rules prevent that.
+
+**Verification never waits for you.** `verify-dispatch` runs continuously. A burst
+is absorbed by a concurrency cap, the priority order above, and a budget that
+degrades instead of stalling: when the ceiling is reached, deterministic (E1)
+verification continues for free, and tasks that need a reviewer are marked
+deferred with the reason, visible and one tap to raise the ceiling for the day.
+
+**Evidence is captured when the work ends.** The cheapest moment to find a pull
+request is the release, while the agent still has it in context. A release to
+`ready_for_review` on a task with a code artifact HQ cannot find gets an
+immediate reply naming what to link (the lease's branch is tried first). Modes
+are `warn` then `enforce`, as with leases. Most of the unverifiable backlog is
+created by skipping this step.
+
+**Every waiting task names who acts next.** A task that is not done carries a
+`waiting_for`, and only `owner` counts against you.
+
+| waiting_for | Because | Handled by |
+|---|---|---|
+| `worker` | Failed, or no artifact | Returned to `to_do` with findings; the next claim sees them |
+| `ci` | Required checks still running | Re-checked with backoff; never failed for being slow |
+| `verifier` | Queued behind a burst | Priority order; capacity is visible |
+| `budget` | Ceiling reached | Deterministic checks continue; one tap to raise it |
+| `owner` | Three failures, tier 2 veto window, canary alarm, or a policy you must choose | The exceptions list, with a one-line choice |
+
+**The briefing is exception-first.** "While you were away" is built on demand and,
+if you set a time, on a schedule. It leads with what needs you, then what was
+verified and completed (grouped by initiative with the evidence level), what
+failed and was reworked without you, tier 2 completions inside their veto window
+(with a veto button), and a suggested audit set. It never lists passes one by
+one. If more than `owner_queue_alert` items wait on you, it stops listing and
+offers a bulk policy instead ("40 of 47 have no artifact: apply the default
+disposition?"), because a long flat list is the bottleneck this plan exists to
+remove. Queue health sits beside it: backlog by `waiting_for`, oldest age,
+24-hour throughput, the estimated time to clear, and spend against the ceiling.
+One alert is raised when the owner-waiting set ages past `owner_queue_age_days` or
+the estimated time to clear passes 24 hours.
+
+## Surfaces: web and mobile
+
+The Android app is the same web app in a WebView (`apps/android`), and its
+`Alerts` service already turns unread approvals and `notify_owner` messages into
+notifications that open `/notifications`. So this is one responsive, touch-first UI
+in `apps/hq-web`, plus items on the existing notification path. There is no native
+task screen to build.
+
+| Surface | What it does |
+|---|---|
+| Verification bar on the tasks page | Counts by `waiting_for`, and **Verify now** with a scope picker (everything waiting, this initiative, since a date, selected) |
+| Sweep sheet | Plan, estimate, run with live progress, the bucket summary, apply, undo, pause, cancel |
+| Briefing card | At the top of the tasks page and on the home screen |
+| Audit view | A stack of cards: title, criteria with each check's result, evidence links, verdict and level. Agree, Disagree (reopens with a note) or Skip. **Audit 10 more** whenever you want, with the running error estimate and its sample size |
+| Task drawer, Verification section | Verdict history and evidence, **Second opinion**, **Complete anyway** (owner override), **Return to to_do** |
+| Queue health | Backlog, ages, throughput, spend, and the deferral reasons |
+| Notifications | One summary item for the briefing, and an `ActionNeeded` item only for a decision |
+
+Touch rules: large targets, bottom sheets, a sticky action bar (the pattern
+`BulkActionBar` already uses), gestures through `usePointerDrag` and its
+long-press, and polling through the existing `usePolled` and `useRefreshOn`.
+
+REST is owner-only: the web credential (the configured token or a paired device),
+and never an MCP key of any scope, so no agent can start, apply or undo a sweep or
+record an audit.
+
+| Endpoint | Does |
+|---|---|
+| `POST /api/verification/sweeps` | Plan a sweep for a scope |
+| `POST /api/verification/sweeps/{id}/run`, `/pause`, `/cancel` | Run and control |
+| `POST /api/verification/sweeps/{id}/apply`, `/undo` | Apply and undo |
+| `GET /api/verification/queue` | Queue health |
+| `GET /api/verification/briefing?since=` | The briefing |
+| `GET /api/verification/audits?n=` and `POST /api/verification/audits/{id}` | Pull a stratified audit set; record a decision |
+| `POST /api/tasks/{id}/reverify` | Second opinion on one task |
+
+Agents get one read-only addition: `task_get` shows the task's verification state
+and `waiting_for`, so an agent can see why its task is waiting.
 
 ## Work streams
 
@@ -294,13 +422,15 @@ unknown observation is rejected; a worker cannot verify its own task; a changed
 sha voids a verdict; shadow mode moves nothing.
 
 **WS4. Workflow plumbing.** Agent `complete` becomes queued review with a clear
-reply; rejection loop (`to_do`, findings as checkpoint, reopen count); parent
-rule; exception items replace the per-task owner notification. Accept: the
-`fresh_agent_task_loop` acceptance extended with a fail then pass cycle; the
-owner receives no item for a clean pass.
+reply; release-time artifact check (lease branch first, modes `warn` and
+`enforce`); rejection loop (`to_do`, findings as checkpoint, reopen count); parent
+rule; a `waiting_for` on every waiting task; exception items replace the per-task
+owner notification. Accept: the `fresh_agent_task_loop` acceptance extended with
+a fail then pass cycle; a code task released with no findable artifact gets a
+reply naming what to link; the owner receives no item for a clean pass.
 
-**WS5. Calibration.** Canary generator, audit digest, escapes, autonomy gate,
-`hq tasks verification` report. Accept: a seeded bad verifier is demoted by the
+**WS5. Calibration.** Canary generator, audit digest (push floor) and stratified
+audit selection (pull), escapes, autonomy gate, `hq tasks verification` report. Accept: a seeded bad verifier is demoted by the
 canaries within the configured window; the report prints counts and "insufficient
 data" correctly.
 
@@ -312,23 +442,49 @@ already exists in `crates/hq-memory/src/context_task.rs`). Accept: this finds
 nothing outside this plan (it finds nine sites today):
 `grep -rniE 'HQ never (marks|sets|completes)|never mark(s|ed)? (the task |their work |it )?(complete|done)|never `?complete`?[;:.,]|never completed' crates docs --include=*.rs --include=*.md`.
 
-**WS7. Rollout.** Shadow on the live instance, backlog triage report, then
-`enforce` for tier 0, then tier 1 once calibration passes, then tier 2. Accept:
-each step gated on the WS5 numbers, not on elapsed time.
+**WS7. Rollout.** Shadow on the live instance (E1 on everything, E2 on a bounded
+sample to price the rest), a plan-only sweep over the existing backlog and one
+apply, then `enforce` for tier 0, then tier 1 once calibration passes, then
+tier 2. Accept: each step gated on the WS5 numbers, not on elapsed time.
 
-Order: WS1, WS2, WS3 in sequence; WS4, WS5 and WS6 can follow in parallel; WS0
-is independent and should go first because it removes failure modes this plan
-would otherwise inherit.
+**WS8. Sweeps and on-demand verification.** Persisted sweeps with plan, run,
+pause, cancel, apply and undo; the bucket policy; the sweep id on every change;
+priority order; the confirm threshold; the owner-only REST endpoints. Accept: a
+plan changes no status and makes no model call; a sweep survives a daemon restart
+mid-run; undo restores exactly the tasks still in the status the sweep set;
+apply above the threshold is refused without confirmation; an MCP key of any
+scope is refused on every sweep and audit endpoint.
 
-## Decisions for the owner
+**WS9. Briefing, queue health and bottlenecks.** The briefing builder, queue
+health, `waiting_for`, deferral states, the bulk-policy offer past
+`owner_queue_alert`, the aging alert, and the notification items. Accept: a seeded
+weekend (200 completions in 48 hours) yields a briefing that lists no pass
+individually and a queue health whose `waiting_for` counts sum to the backlog;
+budget exhaustion keeps E1 verification running and marks the rest deferred with
+the reason; one alert fires when the owner-waiting set ages past the threshold.
 
-1. Approve the principle change: HQ completes verified tasks.
-2. Tier 2: the proposed default is two independent verifiers, E1, and a 24 hour
-   veto window. A harder choice is to keep a human approval for tier 2.
-3. Weekly audit load: the proposed default is 5%, minimum 10 a week.
-4. The disposition for tasks with no discoverable artifact (see the backlog).
-5. The reviewer's model and a monthly cost ceiling. Shadow mode will show the
-   real cost per verification before this has to be fixed.
+**WS10. Web and mobile surfaces.** Everything under "Surfaces". Accept: component
+tests in the style of `BulkActionBar.test.ts` and `TaskActivity.test.tsx`; each
+flow works at a 390 px width in a browser run; the web build passes
+(`cd apps/hq-web && bun install && bun run build`); Verify now, Audit more and Undo
+are each reachable in two taps from the tasks page.
+
+Order: WS0 first, because it removes failure modes this plan would otherwise
+inherit. Then WS1, WS2, WS3 in sequence; then WS4 and WS8, which share the verdict
+and apply path; then WS5, WS6, WS9 and WS10 in parallel. WS10 can start against
+stubbed endpoints once WS8 fixes the contract. WS7 is last, and ends by running
+the gate over this plan's own tasks.
+
+## Decisions (resolved 2026-10-22)
+
+1. HQ completes verified tasks. The "never completes" claims change together.
+2. Tier 2: two independent verifiers, E1, and a 24 hour veto window.
+3. Audit: 5% and at least 10 a week pushed, and as many pulled on demand as the
+   owner wants.
+4. Tasks with no discoverable artifact return to `to_do` with a note, are never
+   auto-completed, and are handled through a sweep.
+5. Reviewer cost: no ceiling is set yet. E2 runs stay off until one is, and E1
+   verification runs meanwhile. Shadow mode prices E2 on a bounded sample first.
 
 ## Unknowns to resolve first
 
