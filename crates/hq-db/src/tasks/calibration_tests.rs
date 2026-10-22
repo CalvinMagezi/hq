@@ -419,7 +419,7 @@ fn a_pass_that_never_completed_the_task_is_not_an_escape() {
         "unapplied sweep verdicts must not withdraw a tier: {:?}",
         cal.tiers[1].why
     );
-    // Nor are they "completed by HQ" in the day's figures: three never completed and the fourth
+    // Nor are they "completed by HQ" in the day's figures: three were not completed and the fourth
     // was reopened.
     let health = db.with_conn(|x| queue_health(x, &enforcing())).unwrap();
     assert_eq!(health.completed_24h, 0, "{health:?}");
