@@ -5,18 +5,18 @@
 //! strikes) and the per-source limits.
 
 use crate::code::{
-    self, Code, DEFAULT_GLOBAL_ATTEMPTS, DEFAULT_TTL, SasInputs, Verdict, Window, bind_host,
-    new_code, new_nonce, opens, printable,
+    self, Code, DEFAULT_GLOBAL_ATTEMPTS, DEFAULT_TTL, MAX_TTL, SasInputs, Verdict, Window,
+    bind_host, new_bind_key, new_code, new_nonce, opens, printable,
 };
 use crate::limits::{Admission, LimitConfig, Limiter, Source};
 use crate::ticket::{Purpose, Ticket};
 use crate::wire::{
-    Card, Final, Hello, MAX_NAME_CHARS, Outcome, Reply, Reveal, b32, commitment_from, nonce_from,
-    read_line, send_line, unb32,
+    Card, Details, Final, Hello, MAX_NAME_CHARS, Outcome, Reply, Reveal, b32, clean_addrs,
+    clean_relays, commitment_from, nonce_from, read_line, send_line, unb32,
 };
 use anyhow::{Result, anyhow, bail};
 use iroh::{
-    Endpoint, EndpointId, RelayMode, RelayUrl, SecretKey, TransportAddr,
+    Endpoint, EndpointId, RelayMode, SecretKey, TransportAddr,
     endpoint::{AfterHandshakeOutcome, Connection, EndpointHooks, presets},
     protocol::{AcceptError, ProtocolHandler, Router},
 };
@@ -41,8 +41,6 @@ pub const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DECISION_TIMEOUT: Duration = Duration::from_secs(120);
 const ONLINE_WAIT: Duration = Duration::from_secs(5);
 const CLOSE_GRACE: Duration = Duration::from_secs(2);
-const MAX_JOINER_ADDRS: usize = 4;
-const MAX_ADDR_CHARS: usize = 300;
 
 /// A device asking to be paired, waiting for the person at the host. The person types the digits
 /// shown on the other device; `decide(true)` is sent only if they match `sas`. The pairing is
@@ -60,9 +58,8 @@ pub struct PairRequest {
 #[derive(Debug, Clone)]
 pub struct Joiner {
     pub id: EndpointId,
+    /// What the device calls itself: unchecked text, made printable.
     pub name: String,
-    pub relays: Vec<String>,
-    pub addrs: Vec<String>,
 }
 
 /// What a purpose does with a device the person accepted. Pairing writes the peer into the
@@ -71,6 +68,11 @@ pub trait Registrar: Send + Sync + 'static {
     /// Records the joiner. The value, if any, is sent back to it. An error becomes "error" for the
     /// joiner, and nothing is recorded.
     fn accept(&self, joiner: &Joiner) -> Result<Option<serde_json::Value>>;
+
+    /// How to dial the joiner back, once it has checked the host's card and sent it. May never be
+    /// called (the joiner left first), so nothing may depend on it. Relays and addresses are
+    /// already parsed and capped.
+    fn details(&self, _joiner: &EndpointId, _relays: &[String], _addrs: &[String]) {}
 }
 
 /// The limits and timeouts of one ticket.
@@ -82,6 +84,16 @@ pub struct Tuning {
     pub limits: LimitConfig,
     pub hello_timeout: Duration,
     pub decision_timeout: Duration,
+}
+
+impl Tuning {
+    /// The longest one exchange may take, whichever of its waits stalls: a slot is never held
+    /// longer than this. Seven waits can each use the step timeout (a stream, the hello, the
+    /// reply, the reveal, the request to the person, the final answer, the details), then the
+    /// person's decision and the two close waits.
+    pub fn exchange_budget(&self) -> Duration {
+        self.hello_timeout * 7 + self.decision_timeout + CLOSE_GRACE * 2
+    }
 }
 
 impl Default for Tuning {
@@ -250,20 +262,22 @@ impl std::fmt::Debug for PairHandler {
     }
 }
 
-fn clean_list(items: Vec<String>, valid: impl Fn(&str) -> bool) -> Vec<String> {
-    items
-        .into_iter()
-        .filter(|s| s.len() <= MAX_ADDR_CHARS && valid(s))
-        .take(MAX_JOINER_ADDRS)
-        .collect()
-}
-
 impl PairHandler {
     async fn step<T>(&self, what: &str, f: impl Future<Output = Result<T>>) -> Result<T> {
         match tokio::time::timeout(self.tuning.hello_timeout, f).await {
             Ok(result) => result,
             Err(_) => bail!("timed out waiting for {what}"),
         }
+    }
+
+    /// Writes a line. A peer that never reads (a tiny flow-control window) must not hold a slot.
+    async fn say<T: serde::Serialize>(
+        &self,
+        send: &mut iroh::endpoint::SendStream,
+        value: &T,
+    ) -> Result<()> {
+        self.step("the other side to read", send_line(send, value))
+            .await
     }
 
     async fn refuse(
@@ -277,7 +291,7 @@ impl PairHandler {
             why: why.into(),
             ..Reply::default()
         };
-        send_line(send, &reply).await?;
+        self.say(send, &reply).await?;
         send.finish()?;
         let _ = tokio::time::timeout(CLOSE_GRACE, conn.closed()).await;
         Ok(())
@@ -340,8 +354,9 @@ impl PairHandler {
         }
 
         let host_nonce = new_nonce();
-        let binding = bind_host(&self.host_id, &host_nonce);
-        send_line(
+        let bind_key = new_bind_key();
+        let binding = bind_host(&self.host_id, &host_nonce, &bind_key);
+        self.say(
             &mut send,
             &Reply {
                 ok: true,
@@ -351,8 +366,13 @@ impl PairHandler {
             },
         )
         .await?;
-        let reveal: Reveal =
-            serde_json::from_str(&self.step("the reveal", read_line(&mut recv)).await?)?;
+        let reveal = match self.read_reveal(&mut recv).await {
+            Ok(reveal) => reveal,
+            Err(e) => {
+                self.shared.strike(source);
+                return Err(e);
+            }
+        };
         let Some(joiner_nonce) = nonce_from(&reveal.nonce).filter(|n| opens(&alpn, &commitment, n))
         else {
             self.shared.strike(source);
@@ -374,8 +394,6 @@ impl PairHandler {
         let who = Joiner {
             id: joiner,
             name: printable(&reveal.name, MAX_NAME_CHARS),
-            relays: clean_list(reveal.relays, |s| s.parse::<RelayUrl>().is_ok()),
-            addrs: clean_list(reveal.addrs, |s| s.parse::<SocketAddr>().is_ok()),
         };
         let (decide, answer) = oneshot::channel();
         self.step("the host person", async {
@@ -396,11 +414,47 @@ impl PairHandler {
             Ok(Ok(false)) => (Outcome::Declined, None),
             _ => (Outcome::Timeout, None),
         };
-        let card = (result == Outcome::Accepted).then(|| self.card.clone());
-        send_line(&mut send, &Final { result, card, info }).await?;
+        let accepted = result == Outcome::Accepted;
+        let last = Final {
+            result,
+            card: accepted.then(|| self.card.clone()),
+            bind_key: if accepted {
+                b32(&bind_key)
+            } else {
+                String::new()
+            },
+            info,
+        };
+        self.say(&mut send, &last).await?;
         send.finish()?;
-        let _ = tokio::time::timeout(CLOSE_GRACE, conn.closed()).await;
+        if accepted {
+            self.take_details(&mut recv, joiner).await;
+            conn.close(0u32.into(), b"done");
+        } else {
+            // Closing now could cut the answer off before the joiner has read it.
+            let _ = tokio::time::timeout(CLOSE_GRACE, conn.closed()).await;
+        }
         Ok(())
+    }
+
+    async fn read_reveal(&self, recv: &mut iroh::endpoint::RecvStream) -> Result<Reveal> {
+        let line = self.step("the reveal", read_line(recv)).await?;
+        Ok(serde_json::from_str(&line)?)
+    }
+
+    /// The joiner's dial-back details, if it sends them in time. Not a strike when it does not:
+    /// the device is already recorded and can be dialed by id.
+    async fn take_details(&self, recv: &mut iroh::endpoint::RecvStream, joiner: EndpointId) {
+        let Ok(line) = self.step("the details", read_line(recv)).await else {
+            return;
+        };
+        let Ok(details) = serde_json::from_str::<Details>(&line) else {
+            return;
+        };
+        let registrar = self.registrar.clone();
+        let (relays, addrs) = (clean_relays(details.relays), clean_addrs(details.addrs));
+        let _ =
+            tokio::task::spawn_blocking(move || registrar.details(&joiner, &relays, &addrs)).await;
     }
 
     /// Records the device only now, after an answer arrived in time and while the joiner is still
@@ -438,7 +492,12 @@ impl ProtocolHandler for PairHandler {
                 return Ok(());
             }
         };
-        if let Err(e) = self.exchange(&conn, &source).await {
+        let budget = self.tuning.exchange_budget();
+        let outcome = match tokio::time::timeout(budget, self.exchange(&conn, &source)).await {
+            Ok(outcome) => outcome,
+            Err(_) => Err(anyhow!("the exchange took longer than {budget:?}")),
+        };
+        if let Err(e) = outcome {
             tracing::debug!(
                 "[pair] exchange with {} failed: {}",
                 conn.remote_id().fmt_short(),
@@ -470,7 +529,8 @@ impl OpenTicket {
             .map_err(|_| anyhow!("the host card names no machine"))?;
         let code = new_code();
         let stats = Arc::new(Stats::default());
-        let tuning = spec.tuning.clone();
+        let mut tuning = spec.tuning.clone();
+        tuning.ttl = tuning.ttl.min(MAX_TTL);
         let shared = Arc::new(Shared {
             window: Mutex::new(Window::new(
                 code,
@@ -538,6 +598,11 @@ impl OpenTicket {
     /// The throwaway endpoint's id: what the ticket names.
     pub fn pairing_id(&self) -> EndpointId {
         self.pairing_endpoint.id()
+    }
+
+    /// Whether the throwaway endpoint's socket has been closed.
+    pub fn endpoint_closed(&self) -> bool {
+        self.pairing_endpoint.is_closed()
     }
 
     /// Whether the ticket can still be used.

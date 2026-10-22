@@ -82,14 +82,16 @@ struct Live {
 }
 
 impl Live {
+    /// Remembers a connection (weakly: dropping it still closes it). Handles whose connection is
+    /// gone are dropped here, so connections nobody unregisters do not pile up.
     fn register(&self, id: EndpointId, conn: WeakConnectionHandle) -> u64 {
         let token = self.next.fetch_add(1, Ordering::SeqCst);
-        self.conns
-            .lock()
-            .unwrap()
-            .entry(id)
-            .or_default()
-            .push((token, conn));
+        let mut conns = self.conns.lock().unwrap();
+        conns.retain(|_, list| {
+            list.retain(|(_, c)| c.upgrade().is_some());
+            !list.is_empty()
+        });
+        conns.entry(id).or_default().push((token, conn));
         token
     }
 
@@ -228,14 +230,14 @@ pub struct PeerRegistrar {
 
 impl Registrar for PeerRegistrar {
     fn accept(&self, joiner: &host::Joiner) -> Result<Option<serde_json::Value>> {
-        peers::add_peer(
-            &self.db,
-            &joiner.id.to_string(),
-            &joiner.name,
-            &joiner.relays,
-            &joiner.addrs,
-        )?;
+        peers::add_peer(&self.db, &joiner.id.to_string(), &joiner.name, &[], &[])?;
         Ok(None)
+    }
+
+    fn details(&self, joiner: &EndpointId, relays: &[String], addrs: &[String]) {
+        if let Err(e) = peers::set_dial_info(&self.db, &joiner.to_string(), relays, addrs) {
+            tracing::warn!("could not record how to dial {}: {e:#}", joiner.fmt_short());
+        }
     }
 }
 
@@ -381,14 +383,20 @@ impl Bridge {
 
     /// Connects to a paired peer by key alone: no code, no ticket.
     pub async fn connect(&self, peer: &str) -> Result<Connection> {
+        let id: EndpointId = peer
+            .parse()
+            .map_err(|_| anyhow!("{peer} is not a machine id"))?;
         let db = self.db.clone();
-        let id = peer.to_string();
-        let record = tokio::task::spawn_blocking(move || peers::get(&db, &id))
+        let key = id.to_string();
+        let record = tokio::task::spawn_blocking(move || peers::get(&db, &key))
             .await??
             .filter(|p| p.is_active())
             .ok_or_else(|| anyhow!("{peer} is not a paired peer"))?;
-        let target = target_from(record.id.parse()?, &record.relays, &record.addrs)?;
-        Ok(self.endpoint.connect(target, SERVICE_ALPN).await?)
+        let target = target_from(id, &record.relays, &record.addrs)?;
+        let conn = self.endpoint.connect(target, SERVICE_ALPN).await?;
+        // A revoke closes this one too, not only the connections the peer opened to us.
+        self.live.register(id, conn.weak_handle());
+        Ok(conn)
     }
 
     /// Takes a peer off the list and closes every connection it has open, at once.

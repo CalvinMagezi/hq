@@ -82,6 +82,21 @@ pub fn revoke(db: &Database, id: &str) -> Result<bool> {
     })
 }
 
+/// Records how to dial an active peer back. A peer revoked in between is left alone.
+pub fn set_dial_info(db: &Database, id: &str, relays: &[String], addrs: &[String]) -> Result<()> {
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE bridge_peers SET relays = ?2, addrs = ?3 WHERE id = ?1 AND revoked_at IS NULL",
+            params![
+                id,
+                serde_json::to_string(relays)?,
+                serde_json::to_string(addrs)?
+            ],
+        )?;
+        Ok(())
+    })
+}
+
 pub fn touch(db: &Database, id: &str) -> Result<()> {
     db.with_conn(|c| {
         c.execute(
@@ -168,6 +183,29 @@ mod tests {
         assert!(is_paired(&db, ID).unwrap());
         let peer = get(&db, ID).unwrap().unwrap();
         assert_eq!((peer.label.as_str(), peer.addrs.len()), ("new", 1));
+    }
+
+    #[test]
+    fn dial_info_is_set_for_an_active_peer_only() {
+        let db = Database::open_memory().unwrap();
+        add_peer(&db, ID, "phone", &[], &[]).unwrap();
+        set_dial_info(
+            &db,
+            ID,
+            &["https://relay.example.com".into()],
+            &["192.0.2.1:7000".into()],
+        )
+        .unwrap();
+        let peer = get(&db, ID).unwrap().unwrap();
+        assert_eq!(peer.relays, ["https://relay.example.com"]);
+        assert_eq!(peer.addrs, ["192.0.2.1:7000"]);
+        revoke(&db, ID).unwrap();
+        set_dial_info(&db, ID, &[], &[]).unwrap();
+        assert_eq!(
+            get(&db, ID).unwrap().unwrap().addrs.len(),
+            1,
+            "a revoked peer is not touched"
+        );
     }
 
     #[test]

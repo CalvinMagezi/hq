@@ -241,6 +241,11 @@ async fn a_scanned_link_pairs_and_then_the_key_alone_reconnects_both_ways() {
     assert_eq!(host_digits.as_deref(), Some(joined.sas.as_str()));
     assert_eq!(host.peers(), [phone.id()]);
     assert_eq!(phone.peers(), [host.id()]);
+    let on_host = peers::get(&host.db, &phone.id()).unwrap().unwrap();
+    assert!(
+        !on_host.addrs.is_empty(),
+        "the host was told how to dial the phone back"
+    );
 
     // No code, no ticket: just the keys. The phone dials the host, and the host dials the phone.
     let conn = with_timeout(phone.bridge.connect(&host.id()))
@@ -272,9 +277,14 @@ async fn the_long_term_endpoint_does_not_speak_the_pairing_protocol() {
     let host = Machine::host().await;
     let open = host.bridge.open_ticket(tuning()).await.unwrap();
     let client = raw_client(V4).await;
-    // Even the right ticket's protocol name gets nothing from the long-term id.
+    // No pairing protocol name is offered on the long-term id, so the handshake itself fails.
     for purpose in [Purpose::Pair, Purpose::Register] {
-        assert!(!dials(&client, address_of(&host), &purpose.alpn(3)).await);
+        let dial =
+            tokio::time::timeout(GONE, client.connect(address_of(&host), &purpose.alpn(3))).await;
+        assert!(
+            matches!(dial, Ok(Err(_))),
+            "the long-term endpoint completed a handshake for {purpose:?}"
+        );
     }
     assert_eq!(open.stats.reached.load(Ordering::SeqCst), 0);
     assert_eq!(host.bridge.reached_service.load(Ordering::SeqCst), 0);
@@ -330,6 +340,10 @@ async fn a_ticket_works_once_and_its_endpoint_is_gone_afterwards() {
     let (mut open, _) = answering.await.unwrap();
     with_timeout(open.closed()).await;
     assert!(!open.is_open());
+    assert!(
+        open.endpoint_closed(),
+        "the throwaway socket is closed, not just idle"
+    );
 
     // A photograph of the screen: nothing answers on that endpoint any more.
     let second = tokio::time::timeout(GONE, intruder.bridge.join(&ticket, &tuning(), |_| {})).await;
@@ -764,7 +778,6 @@ async fn a_name_with_a_terminal_escape_reaches_the_person_clean() {
         &Reveal {
             nonce: wire::b32(&raw.nonce),
             name: "\u{1b}[2Jevil\u{7}".into(),
-            ..Reveal::default()
         },
     )
     .await
@@ -960,25 +973,29 @@ async fn a_device_registers_with_an_edge_and_the_two_purposes_never_cross() {
     );
 }
 
-/// A host that behaves until the digits are confirmed, then names a different long-term identity
-/// than the one it promised.
+/// A host that behaves until the digits are confirmed, then sends the card it chooses. It also
+/// listens for anything the joiner says after the final answer.
 #[derive(Clone, Debug)]
-struct SwappingHost {
+struct RogueHost {
+    /// The id the binding was made for, before the digits.
     promised: iroh::EndpointId,
+    /// The id in the card, after them.
     delivered: iroh::EndpointId,
+    key_used: code::BindKey,
+    key_sent: code::BindKey,
     code: code::Code,
-    seen: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    after_final: Arc<Mutex<Vec<String>>>,
+    finished: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
-impl ProtocolHandler for SwappingHost {
+impl ProtocolHandler for RogueHost {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        let alpn = conn.alpn().to_vec();
         let (mut send, mut recv) = conn.accept_bi().await?;
         let hello: Hello =
             serde_json::from_str(&wire::read_line(&mut recv).await.unwrap()).unwrap();
         assert_eq!(wire::unb32(&hello.code), self.code);
         let nonce = code::new_nonce();
-        let binding = code::bind_host(&self.promised, &nonce);
+        let binding = code::bind_host(&self.promised, &nonce, &self.key_used);
         wire::send_line(
             &mut send,
             &Reply {
@@ -1003,47 +1020,61 @@ impl ProtocolHandler for SwappingHost {
             &Final {
                 result: Outcome::Accepted,
                 card: Some(card),
+                bind_key: wire::b32(&self.key_sent),
                 info: None,
             },
         )
         .await
         .unwrap();
         send.finish().unwrap();
-        let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
-        let _ = alpn;
-        if let Some(tx) = self.seen.lock().unwrap().take() {
+        if let Ok(Ok(line)) =
+            tokio::time::timeout(Duration::from_secs(2), wire::read_line(&mut recv)).await
+            && !line.is_empty()
+        {
+            self.after_final.lock().unwrap().push(line);
+        }
+        if let Some(tx) = self.finished.lock().unwrap().take() {
             let _ = tx.send(());
         }
         Ok(())
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_host_that_swaps_its_identity_after_the_digits_is_refused() {
-    let phone = Machine::phone().await;
-    let rogue = Endpoint::builder(presets::Minimal)
-        .secret_key(SecretKey::generate())
-        .relay_mode(RelayMode::Disabled)
-        .clear_ip_transports()
-        .bind_addr(V4.parse::<SocketAddr>().unwrap())
-        .unwrap()
-        .bind()
-        .await
-        .unwrap();
-    let (promised, delivered) = (
-        SecretKey::generate().public(),
-        SecretKey::generate().public(),
-    );
+struct RogueSetup {
+    ticket: Ticket,
+    after_final: Arc<Mutex<Vec<String>>>,
+    finished: oneshot::Receiver<()>,
+    _router: Router,
+}
+
+async fn rogue_host(swap_id: bool, wrong_key: bool) -> RogueSetup {
+    let rogue = raw_client(V4).await;
+    let promised = SecretKey::generate().public();
+    let delivered = if swap_id {
+        SecretKey::generate().public()
+    } else {
+        promised
+    };
+    let key_used = code::new_bind_key();
+    let key_sent = if wrong_key {
+        code::new_bind_key()
+    } else {
+        key_used
+    };
     let code = code::new_code();
-    let (tx, rx) = oneshot::channel();
-    let _router = Router::builder(rogue.clone())
+    let (tx, finished) = oneshot::channel();
+    let after_final = Arc::new(Mutex::new(Vec::new()));
+    let router = Router::builder(rogue.clone())
         .accept(
             Purpose::Pair.alpn(3),
-            SwappingHost {
+            RogueHost {
                 promised,
                 delivered,
+                key_used,
+                key_sent,
                 code,
-                seen: Arc::new(Mutex::new(Some(tx))),
+                after_final: after_final.clone(),
+                finished: Arc::new(Mutex::new(Some(tx))),
             },
         )
         .spawn();
@@ -1058,12 +1089,179 @@ async fn a_host_that_swaps_its_identity_after_the_digits_is_refused() {
             .map(|a| a.to_string())
             .collect(),
     );
-    let result = join(&phone, &ticket).await;
-    let _ = rx.await;
-    let err = result.unwrap_err().to_string();
-    assert!(err.contains("promised"), "{err}");
+    RogueSetup {
+        ticket,
+        after_final,
+        finished,
+        _router: router,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_that_swaps_its_identity_or_its_key_after_the_digits_is_refused() {
+    for (swap_id, wrong_key) in [(true, false), (false, true)] {
+        let phone = Machine::phone().await;
+        let rogue = rogue_host(swap_id, wrong_key).await;
+        let result = join(&phone, &rogue.ticket).await;
+        let _ = rogue.finished.await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("promised"), "{err}");
+        assert!(
+            phone.peers().is_empty(),
+            "a host with a swapped identity was stored"
+        );
+        assert!(
+            rogue.after_final.lock().unwrap().is_empty(),
+            "the joiner told a host it did not trust how to dial it back"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_that_keeps_its_promise_is_stored_and_only_then_told_how_to_dial_back() {
+    // The control for the test above: the same rogue, honest this time. It is accepted, and it
+    // hears the details only now.
+    let phone = Machine::phone().await;
+    let rogue = rogue_host(false, false).await;
+    let result = join(&phone, &rogue.ticket).await;
+    let _ = rogue.finished.await;
+    assert!(paired(&result), "{result:?}");
+    let heard = rogue.after_final.lock().unwrap().clone();
+    assert_eq!(heard.len(), 1, "{heard:?}");
+    let details: wire::Details = serde_json::from_str(&heard[0]).unwrap();
     assert!(
-        phone.peers().is_empty(),
-        "a host with a swapped identity was stored"
+        !details.addrs.is_empty(),
+        "the details carry the phone's addresses"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_that_leaves_before_sending_details_is_still_recorded_without_them() {
+    let (host, phone) = (Machine::host().await, Machine::phone().await);
+    let open = host.bridge.open_ticket(tuning()).await.unwrap();
+    let ticket = open.ticket.clone();
+    let answering = answer_with(open, true);
+    assert!(paired(&join(&phone, &ticket).await));
+    answering.await.unwrap();
+    let peer = peers::get(&host.db, &phone.id()).unwrap().unwrap();
+    assert!(
+        !peer.addrs.is_empty() && peer.label == "phone",
+        "the host knows the phone's name and how to dial it: {peer:?}"
+    );
+}
+
+/// A client whose receive window is zero and which never reads: a write to it can never finish.
+async fn stalled_client() -> Endpoint {
+    let transport = iroh::endpoint::QuicTransportConfig::builder()
+        .stream_receive_window(0u32.into())
+        .build();
+    Endpoint::builder(presets::Minimal)
+        .secret_key(SecretKey::generate())
+        .relay_mode(RelayMode::Disabled)
+        .clear_ip_transports()
+        .transport_config(transport)
+        .bind_addr(V4.parse::<SocketAddr>().unwrap())
+        .unwrap()
+        .bind()
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_never_reads_cannot_hold_a_slot_or_keep_the_endpoint_up() {
+    let host = Machine::host().await;
+    let tuning = Tuning {
+        hello_timeout: Duration::from_secs(1),
+        decision_timeout: Duration::from_secs(1),
+        ..tuning()
+    };
+    let budget = tuning.exchange_budget();
+    let open = host.bridge.open_ticket(tuning).await.unwrap();
+    let ticket = open.ticket.clone();
+    let client = stalled_client().await;
+    let raw = raw_pair(&client, &ticket, &wrong_code(), 3).await;
+    // The host answers a wrong code, and the answer can never be delivered.
+    assert!(
+        tokio::time::timeout(budget + Duration::from_secs(3), raw.conn.closed())
+            .await
+            .is_ok(),
+        "a connection that never reads was kept for longer than the exchange budget"
+    );
+    // With the ticket cancelled, nothing keeps the throwaway endpoint up.
+    tokio::time::timeout(Duration::from_secs(5), open.cancel())
+        .await
+        .expect("the endpoint stayed up for a stalled client");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_peer_also_closes_the_connections_we_opened_to_it() {
+    let (host, phone) = (Machine::host().await, Machine::phone().await);
+    let open = host.bridge.open_ticket(tuning()).await.unwrap();
+    let ticket = open.ticket.clone();
+    let answering = answer_with(open, true);
+    assert!(paired(&join(&phone, &ticket).await));
+    answering.await.unwrap();
+
+    // The host dials the phone, then revokes the phone: that connection goes too.
+    let conn = with_timeout(host.bridge.connect(&phone.id()))
+        .await
+        .unwrap();
+    with_timeout(echo(&conn, b"hello")).await.unwrap();
+    assert!(host.bridge.revoke(&phone.bridge.id()).await.unwrap());
+    tokio::time::timeout(Duration::from_secs(2), conn.closed())
+        .await
+        .expect("an outbound connection to a revoked peer stayed open");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_peer_can_be_dialed_by_any_spelling_of_its_id() {
+    let (host, phone) = (Machine::host().await, Machine::phone().await);
+    let open = host.bridge.open_ticket(tuning()).await.unwrap();
+    let ticket = open.ticket.clone();
+    let answering = answer_with(open, true);
+    assert!(paired(&join(&phone, &ticket).await));
+    answering.await.unwrap();
+    let base32 = data_encoding::BASE32_NOPAD
+        .encode(host.bridge.id().as_bytes())
+        .to_lowercase();
+    assert_ne!(base32, host.id());
+    let conn = with_timeout(phone.bridge.connect(&base32)).await.unwrap();
+    with_timeout(echo(&conn, b"by base32")).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ticket_that_is_dropped_while_a_device_waits_pairs_nobody() {
+    let (host, phone) = (Machine::host().await, Machine::phone().await);
+    let mut open = host.bridge.open_ticket(tuning()).await.unwrap();
+    let ticket = open.ticket.clone();
+    let joining = {
+        let tuning = tuning();
+        tokio::spawn(async move {
+            phone
+                .bridge
+                .join(&ticket, &tuning, |_| {})
+                .await
+                .map(|r| (r, phone))
+        })
+    };
+    let request = with_timeout(open.requests.recv()).await.unwrap();
+    drop(request.decide);
+    drop(open);
+    let (result, phone) = with_timeout(joining).await.unwrap().unwrap();
+    assert!(!matches!(result, JoinResult::Paired(_)), "{result:?}");
+    assert!(host.peers().is_empty() && phone.peers().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ticket_cannot_be_made_to_outlive_a_day() {
+    let host = Machine::host().await;
+    let open = host
+        .bridge
+        .open_ticket(Tuning {
+            ttl: Duration::MAX,
+            ..Tuning::default()
+        })
+        .await
+        .unwrap();
+    assert!(open.is_open());
 }

@@ -29,8 +29,11 @@ It prints a QR code and the same link as text (`hqpair://ticket/...`), then wait
 machine:
 
 ```bash
-hq bridge join 'hqpair://ticket/...'
+hq bridge join                  # paste the link when asked
 ```
+
+(`hq bridge join <link>` also works, but a link on the command line is visible to every user of
+the machine while it runs, and it holds the one-time code.)
 
 The second machine prints six digits. Type them at the prompt on the first. The first pairs the
 device only if they match, and only if you answer within two minutes. Then:
@@ -48,7 +51,7 @@ production. `--relay <url>` uses a relay you run. `--no-addrs` keeps this machin
 out of the ticket (smaller QR code; the other side then needs a relay to find the direct path).
 `--bind <ip:port>` chooses where it listens; the default is every address and any port.
 
-A ticket works for 10 minutes and once. Run `hq bridge pair` again for another device.
+A ticket works for 10 minutes (`--ttl` 10 to 3600 seconds) and once. Run `hq bridge pair` again for another device.
 
 The key lives in `~/.hq/bridge/bridge.key` (mode 0600; a key that others can read is refused) and
 the paired list in the `bridge_peers` table of the vault database.
@@ -118,7 +121,7 @@ at once. `bridge.card()` is this machine's id and how to dial it. `hq_db::bridge
 (`list`, `get`, `is_paired`, `revoke`).
 
 `Tuning` holds the ticket's lifetime, the global backstop (1000 wrong codes), the per-source
-limits (`LimitConfig`: 5 strikes per address, 20 per relay, 2 exchanges per source, 8 in all, 1024
+limits (`LimitConfig`: 5 strikes per address, 20 per relay, 2 exchanges per source, 8 in all, 4096
 sources remembered) and the two timeouts (10 s per step, 120 s for the person). The defaults are in
 `code.rs`, `limits.rs` and `host.rs`.
 
@@ -128,7 +131,8 @@ The same exchange runs under the protocol name `hq/register/<version>` for the e
 W1). The edge is the machine that shows the QR code; the device scans it.
 
 ```rust
-// On the edge: implement Registrar (record the device, say what to return), then
+// On the edge: implement Registrar (accept: record the device, say what to return; details:
+// optional, how to dial the device back), then
 let open = OpenTicket::open(PairingSpec { purpose: Purpose::Register, card, registrar, bind,
                                           relay, with_addrs, advertise, tuning }).await?;
 // On the device:

@@ -22,6 +22,10 @@ const BRIDGE_SUBDIR: &str = "bridge";
 const DEFAULT_NAME: &str = "hq";
 const DEFAULT_PINGS: usize = 5;
 const SHOWN_CHARS: usize = 120;
+const MIN_TTL_SECS: u64 = 10;
+const MAX_TTL_SECS: u64 = 3_600;
+/// A pasted link is a few hundred characters; this is far more than any ticket.
+const LINK_READ_MAX: u64 = 4_096;
 
 #[derive(Args, Clone)]
 pub struct NetArgs {
@@ -52,12 +56,15 @@ pub enum BridgeAction {
         #[command(flatten)]
         net: NetArgs,
         /// How long the ticket works, in seconds
-        #[arg(long, default_value_t = hq_bridge::code::DEFAULT_TTL.as_secs())]
+        #[arg(long, default_value_t = hq_bridge::code::DEFAULT_TTL.as_secs(),
+              value_parser = clap::value_parser!(u64).range(MIN_TTL_SECS..=MAX_TTL_SECS))]
         ttl: u64,
     },
     /// Pair with the machine that shows a link (from its QR code or copied text)
     Join {
-        link: String,
+        /// The link. Leave it out, or give -, to paste it on standard input: a link on the
+        /// command line is visible to every user of this machine for as long as the command runs
+        link: Option<String>,
         #[command(flatten)]
         net: NetArgs,
     },
@@ -150,7 +157,7 @@ pub async fn run(config: &HqConfig, action: BridgeAction) -> Result<()> {
     let db = Database::open(&config.db_path())?;
     match action {
         BridgeAction::Pair { net, ttl } => pair(&net, db, Duration::from_secs(ttl)).await,
-        BridgeAction::Join { link, net } => join(&net, db, &link).await,
+        BridgeAction::Join { link, net } => join(&net, db, &read_link(link)?).await,
         BridgeAction::Serve { net } => serve(&net, db).await,
         BridgeAction::Ping { peer, count, net } => ping(&net, db, &peer, count).await,
         BridgeAction::Peers { all, json } => list(&db, all, json),
@@ -214,9 +221,28 @@ async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
         Ok(()) => println!("Declined {}.", request.joiner),
         Err(_) => println!("Too late: the other device gave up waiting. Nothing was paired."),
     }
-    open.closed().await;
+    // The first ctrl-c handler stays installed for the life of the process, so this wait has to
+    // listen for it too or the person could not stop it.
+    tokio::select! {
+        _ = open.closed() => {}
+        _ = tokio::signal::ctrl_c() => {}
+    }
     bridge.shutdown().await;
     Ok(())
+}
+
+fn read_link(arg: Option<String>) -> Result<String> {
+    use std::io::Read;
+    match arg.as_deref() {
+        Some(link) if link != "-" => Ok(link.to_string()),
+        _ => {
+            let mut text = String::new();
+            std::io::stdin()
+                .take(LINK_READ_MAX)
+                .read_to_string(&mut text)?;
+            Ok(text)
+        }
+    }
 }
 
 async fn join(net: &NetArgs, db: Database, link: &str) -> Result<()> {
@@ -299,9 +325,11 @@ fn list(db: &Database, all: bool, json: bool) -> Result<()> {
 }
 
 fn revoke(db: &Database, id: &str) -> Result<()> {
-    id.parse::<EndpointId>()
+    let id: EndpointId = id
+        .parse()
         .map_err(|_| anyhow!("{id} is not a machine id (see `hq bridge peers`)"))?;
-    if peers::revoke(db, id)? {
+    let id = id.to_string();
+    if peers::revoke(db, &id)? {
         println!("Revoked {id}. A machine serving it stops at its next request.");
     } else {
         println!("{id} is not an active peer.");

@@ -19,9 +19,11 @@ pub const DEFAULT_RELAY_STRIKES: u32 = 20;
 pub const DEFAULT_PER_SOURCE_ACTIVE: u32 = 2;
 /// Pairing exchanges served at once in all. Larger than a few sources can fill together.
 pub const DEFAULT_MAX_ACTIVE: usize = 8;
-/// Sources remembered. When the table is full of sources with strikes, new ones are refused, which
-/// fails closed instead of forgetting the offenders.
-pub const DEFAULT_MAX_SOURCES: usize = 1_024;
+/// Sources remembered. When the table is full, the source that has been quiet longest and has
+/// nothing running is forgotten to make room, so new sources are never refused for lack of space.
+/// An attacker who cycles through more sources than this only resets the per-source count: the
+/// global backstop on wrong codes still bounds the guessing.
+pub const DEFAULT_MAX_SOURCES: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Source {
@@ -146,7 +148,8 @@ impl Limiter {
         Admission::Allowed
     }
 
-    /// Forgets the oldest source that has no strikes and nothing running. False if there is none.
+    /// Forgets the source that has been quiet longest and has nothing running. False only when
+    /// every remembered source has an exchange running.
     fn make_room(&mut self) -> bool {
         if self.sources.len() < self.cfg.max_sources {
             return true;
@@ -154,7 +157,7 @@ impl Limiter {
         let oldest = self
             .sources
             .iter()
-            .filter(|(_, e)| e.strikes == 0 && e.active == 0)
+            .filter(|(_, e)| e.active == 0)
             .min_by_key(|(_, e)| e.last)
             .map(|(s, _)| s.clone());
         match oldest {
@@ -277,36 +280,42 @@ mod tests {
     }
 
     #[test]
-    fn a_full_table_forgets_only_the_harmless_and_otherwise_refuses_new_sources() {
+    fn a_full_table_forgets_the_quietest_idle_source_and_never_refuses_a_new_one() {
         let t0 = Instant::now();
+        let later = |n: u64| t0 + std::time::Duration::from_secs(n);
         let mut limiter = Limiter::new(small());
-        for n in 1..=4 {
+        // Four sources with a strike each, the first the quietest.
+        for n in 1..=4u64 {
             let s = ip(&format!("192.0.2.{n}"));
-            assert_eq!(limiter.admit(&s, t0), Admission::Allowed);
+            limiter.admit(&s, later(n));
+            limiter.strike(&s, later(n));
             limiter.release(&s);
         }
-        let fifth = ip("192.0.2.5");
+        let fifth = ip("192.0.2.9");
         assert_eq!(
-            limiter.admit(&fifth, t0),
+            limiter.admit(&fifth, later(10)),
             Admission::Allowed,
-            "an idle source with no strikes made room"
+            "a struck source made room: a flood of sources cannot lock the door"
         );
         limiter.release(&fifth);
-
-        // Everything now has a strike: nobody can be forgotten.
-        let mut limiter = Limiter::new(small());
-        for n in 1..=4 {
-            let s = ip(&format!("192.0.2.{n}"));
-            limiter.admit(&s, t0);
-            limiter.strike(&s, t0);
-            limiter.release(&s);
-        }
-        assert_eq!(limiter.admit(&ip("192.0.2.9"), t0), Admission::Blocked);
         assert_eq!(
-            limiter.admit(&ip("192.0.2.1"), t0),
+            limiter.admit(&ip("192.0.2.1"), later(11)),
             Admission::Allowed,
-            "a known source with strikes left still gets in"
+            "the quietest was forgotten, so it starts again (the global backstop bounds the guessing)"
         );
+    }
+
+    #[test]
+    fn a_table_full_of_running_exchanges_refuses_a_new_source() {
+        let t0 = Instant::now();
+        let mut limiter = Limiter::new(LimitConfig {
+            max_sources: 2,
+            max_active: 8,
+            ..small()
+        });
+        assert_eq!(limiter.admit(&ip("192.0.2.1"), t0), Admission::Allowed);
+        assert_eq!(limiter.admit(&ip("192.0.2.2"), t0), Admission::Allowed);
+        assert_eq!(limiter.admit(&ip("192.0.2.3"), t0), Admission::Blocked);
     }
 
     #[test]

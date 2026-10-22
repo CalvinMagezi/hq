@@ -1352,6 +1352,8 @@ mod net_args_tests {
                 "--bind",
                 "127.0.0.1:0",
             ],
+            &["hq", "bridge", "join", "-"],
+            &["hq", "bridge", "join"],
             &["hq", "bridge", "serve"],
             &["hq", "bridge", "ping", "abcd", "--count", "3"],
             &["hq", "bridge", "peers", "--all", "--json"],
@@ -1364,6 +1366,8 @@ mod net_args_tests {
         for argv in [
             &["hq", "bridge", "pair", "--code", "x"][..],
             &["hq", "bridge", "pair", "--auto-accept"],
+            &["hq", "bridge", "pair", "--ttl", "99999999999"],
+            &["hq", "bridge", "pair", "--ttl", "1"],
             &["hq", "bridge", "join", "--digits", "123456", "x"],
         ] {
             assert!(Cli::try_parse_from(argv).is_err(), "{argv:?}");

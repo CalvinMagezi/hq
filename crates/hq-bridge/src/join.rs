@@ -7,19 +7,22 @@ use crate::code::{self, SasInputs, commit, new_nonce, printable};
 use crate::host::{DECISION_TIMEOUT, HELLO_TIMEOUT};
 use crate::ticket::{Purpose, Ticket, WIRE_VERSIONS};
 use crate::wire::{
-    Card, Final, Hello, MAX_NAME_CHARS, Outcome, Reply, Reveal, b32, binding_from, nonce_from,
-    read_line, send_line,
+    Card, Details, Final, Hello, MAX_NAME_CHARS, Outcome, Reply, Reveal, b32, bind_key_from,
+    binding_from, clean_addrs, clean_relays, nonce_from, normalize_card, read_line, send_line,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectOptions};
 use std::time::Duration;
 
 const SHOWN_ERROR_CHARS: usize = 200;
+/// How long to wait for the host to read the details and close, so they are not cut off.
+const CLOSE_WAIT: Duration = Duration::from_secs(2);
 
 pub struct JoinOptions {
     /// What this device calls itself, shown to the person at the host.
     pub name: String,
-    /// How the host can dial this device back, sent once the code is proven.
+    /// How the host can dial this device back. Sent only after the host accepted and its identity
+    /// checked out, so a host that never accepts learns none of it.
     pub relays: Vec<String>,
     pub addrs: Vec<String>,
     pub hello_timeout: Duration,
@@ -155,8 +158,6 @@ pub async fn join(
         &Reveal {
             nonce: b32(&joiner_nonce),
             name: opts.name.clone(),
-            relays: opts.relays.clone(),
-            addrs: opts.addrs.clone(),
         },
     )
     .await?;
@@ -177,23 +178,51 @@ pub async fn join(
         )
         .await??,
     )?;
-    conn.close(0u32.into(), b"done");
     if last.result != Outcome::Accepted {
+        conn.close(0u32.into(), b"done");
         return Ok(JoinResult::Declined { sas });
     }
-    let card = last
-        .card
-        .ok_or_else(|| anyhow!("the host accepted but sent no identity"))?;
-    let promised: EndpointId = card
-        .id
-        .parse()
-        .map_err(|_| anyhow!("the host's identity is not a key"))?;
-    if code::bind_host(&promised, &host_nonce) != binding {
-        bail!("the host's identity is not the one it promised before the digits");
+    let checked = check_card(last.card, &last.bind_key, &host_nonce, &binding);
+    let card = match checked {
+        Ok(card) => card,
+        Err(e) => {
+            conn.close(0u32.into(), b"done");
+            return Err(e);
+        }
+    };
+    // The host is who it promised to be: now it may know how to dial this device back.
+    let details = Details {
+        relays: clean_relays(opts.relays.clone()),
+        addrs: clean_addrs(opts.addrs.clone()),
+    };
+    let sent = tokio::time::timeout(opts.hello_timeout, send_line(&mut send, &details)).await;
+    if matches!(sent, Ok(Ok(()))) && send.finish().is_ok() {
+        let _ = tokio::time::timeout(CLOSE_WAIT, conn.closed()).await;
     }
+    conn.close(0u32.into(), b"done");
     Ok(JoinResult::Paired(Joined {
         sas,
         card,
         info: last.info,
     }))
+}
+
+/// The card the host sent after the digits, checked against the binding it gave before them, and
+/// made safe to store.
+fn check_card(
+    card: Option<Card>,
+    bind_key: &str,
+    host_nonce: &code::Nonce,
+    binding: &code::Binding,
+) -> Result<Card> {
+    let card = card.ok_or_else(|| anyhow!("the host accepted but sent no identity"))?;
+    let promised: EndpointId = card
+        .id
+        .parse()
+        .map_err(|_| anyhow!("the host's identity is not a key"))?;
+    let key = bind_key_from(bind_key).ok_or_else(|| anyhow!("the host sent no binding key"))?;
+    if &code::bind_host(&promised, host_nonce, &key) != binding {
+        bail!("the host's identity is not the one it promised before the digits");
+    }
+    normalize_card(card)
 }

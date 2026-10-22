@@ -11,6 +11,9 @@ pub const CODE_BYTES: usize = 8;
 pub const NONCE_BYTES: usize = 16;
 pub const COMMIT_BYTES: usize = 32;
 pub const BIND_BYTES: usize = 32;
+pub const BIND_KEY_BYTES: usize = 16;
+/// The longest a ticket can be made to live, whatever the caller asks for.
+pub const MAX_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 /// How long a ticket works. Long enough to walk to the other machine, short enough to be useless
 /// to someone who photographed the screen later.
 pub const DEFAULT_TTL: Duration = Duration::from_secs(600);
@@ -27,6 +30,7 @@ const BIND_CONTEXT: &[u8] = b"hq/pair/bind/3";
 pub type Code = [u8; CODE_BYTES];
 pub type Nonce = [u8; NONCE_BYTES];
 pub type Binding = [u8; BIND_BYTES];
+pub type BindKey = [u8; BIND_KEY_BYTES];
 
 /// Why an offered code was not taken.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,15 +144,22 @@ pub fn opens(alpn: &[u8], commitment: &[u8], offered: &Nonce) -> bool {
 }
 
 /// The host's promise of its long-term id, sent before the person confirms and without the id in
-/// it: a hash with the host's fresh nonce. The id arrives only after the digits matched, and the
-/// joiner checks it against this, so the digits the person compared cover the identity that gets
-/// stored, and a ticket holder who only burns a ticket learns nothing about it.
-pub fn bind_host(host: &EndpointId, host_nonce: &Nonce) -> Binding {
+/// it: a hash with the host's fresh nonce and a fresh secret key. The id and the key arrive only
+/// after the digits matched, and the joiner checks them against this, so the digits the person
+/// compared cover the identity that gets stored. Without the secret key, nobody who has only the
+/// binding and the public nonce can test a guessed id against it, so a ticket holder who only
+/// burns a ticket learns nothing about the host's identity, not even a yes or no.
+pub fn bind_host(host: &EndpointId, host_nonce: &Nonce, key: &BindKey) -> Binding {
     let mut hash = Sha256::new();
     hash.update(BIND_CONTEXT);
     hash.update(host.as_bytes());
     hash.update(host_nonce);
+    hash.update(key);
     hash.finalize().into()
+}
+
+pub fn new_bind_key() -> BindKey {
+    rand::random()
 }
 
 /// Everything both screens' digits depend on.
@@ -189,8 +200,22 @@ pub fn sas(i: &SasInputs) -> String {
 pub fn printable(text: &str, max_chars: usize) -> String {
     text.chars()
         .take(max_chars)
-        .map(|c| if c.is_control() { '?' } else { c })
+        .map(|c| if hides_or_reorders(c) { '?' } else { c })
         .collect()
+}
+
+/// Control characters, and the invisible ones that can reorder or hide text on a screen: the
+/// bidirectional overrides and isolates, zero-width characters, line and paragraph separators.
+fn hides_or_reorders(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{00AD}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
 }
 
 #[cfg(test)]
@@ -260,7 +285,8 @@ mod tests {
     fn the_digits_agree_on_both_sides_and_change_with_any_input() {
         let (pairing_endpoint, joiner, other) = (id(), id(), id());
         let (code, nj, nh) = (new_code(), new_nonce(), new_nonce());
-        let binding = bind_host(&id(), &nh);
+        let key = new_bind_key();
+        let binding = bind_host(&id(), &nh, &key);
         let alpn = b"hq/pair/3".as_slice();
         let base = || SasInputs {
             alpn,
@@ -293,7 +319,7 @@ mod tests {
         assert_ne!(
             digits,
             sas(&SasInputs {
-                host_binding: &bind_host(&other, &nh),
+                host_binding: &bind_host(&other, &nh, &key),
                 ..base()
             }),
             "the host's long-term id counts"
@@ -353,13 +379,18 @@ mod tests {
     }
 
     #[test]
-    fn the_host_binding_hides_the_id_and_depends_on_the_nonce() {
+    fn the_host_binding_hides_the_id_and_depends_on_the_nonce_and_the_key() {
         let host = id();
-        let nonce = new_nonce();
-        let binding = bind_host(&host, &nonce);
-        assert_eq!(binding, bind_host(&host, &nonce));
-        assert_ne!(binding, bind_host(&host, &new_nonce()));
-        assert_ne!(binding, bind_host(&id(), &nonce));
+        let (nonce, key) = (new_nonce(), new_bind_key());
+        let binding = bind_host(&host, &nonce, &key);
+        assert_eq!(binding, bind_host(&host, &nonce, &key));
+        assert_ne!(binding, bind_host(&host, &new_nonce(), &key));
+        assert_ne!(binding, bind_host(&id(), &nonce, &key));
+        assert_ne!(
+            binding,
+            bind_host(&host, &nonce, &new_bind_key()),
+            "without the key a guessed id cannot be tested against the binding"
+        );
         assert!(
             !binding
                 .windows(host.as_bytes().len())
@@ -372,6 +403,11 @@ mod tests {
     fn text_from_the_other_machine_cannot_carry_a_terminal_escape() {
         let shown = printable("ok\u{1b}[2J\u{7}\nnext", 120);
         assert!(!shown.chars().any(char::is_control), "{shown:?}");
+        let bidi = printable("a\u{202E}b\u{200B}c\u{2066}d\u{FEFF}e\u{2028}f", 120);
+        assert_eq!(
+            bidi, "a?b?c?d?e?f",
+            "text that reorders or hides is replaced"
+        );
         assert!(printable(&"x".repeat(10_000), 120).chars().count() <= 120);
     }
 }
