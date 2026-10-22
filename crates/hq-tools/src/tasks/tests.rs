@@ -3192,6 +3192,230 @@ async fn an_agent_that_never_heartbeats_keeps_its_lease_and_resumes_after_a_long
     );
 }
 
+fn tools_verifying(
+    mode: hq_core::config::VerificationMode,
+) -> (Vec<Box<dyn HqTool>>, Arc<Database>) {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let settings = hq_core::config::TasksConfig {
+        verification: hq_core::config::VerificationConfig {
+            mode,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let tools = create_task_tools_with(vault_path, vault, db.clone(), settings);
+    (tools, db)
+}
+
+#[tokio::test]
+async fn building_the_tools_records_the_configured_completion_policy_in_the_database() {
+    let (_tools, db) = tools_verifying(hq_core::config::VerificationMode::Enforce);
+    let policy = db.with_conn(hq_db::tasks::verification_policy).unwrap();
+    assert_eq!(policy.mode, hq_core::config::VerificationMode::Enforce);
+    let (_tools, db) = tools_verifying(hq_core::config::VerificationMode::Off);
+    let policy = db.with_conn(hq_db::tasks::verification_policy).unwrap();
+    assert_eq!(policy.mode, hq_core::config::VerificationMode::Off);
+}
+
+#[tokio::test]
+async fn an_agent_asking_for_complete_under_enforcement_gets_a_queued_review_not_an_error() {
+    let (tools, _db) = tools_verifying(hq_core::config::VerificationMode::Enforce);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+
+    let updated = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "complete", "lease": claim["lease"] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated["status"], "ready_for_review");
+    assert_eq!(updated["verification_queued"], true);
+    let warnings = updated["warnings"].to_string();
+    assert!(
+        warnings.contains("not complete") && warnings.contains("verified"),
+        "{warnings}"
+    );
+
+    // A bulk update meets the same rule, item by item.
+    let many = call_tool(
+        &tools,
+        "task_update_many",
+        json!({ "updates": [{ "id": id, "status": "in_progress" }, { "id": id, "status": "complete" }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(many["failed"].as_u64().unwrap_or(0), 0, "{many}");
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(
+        got["status"], "ready_for_review",
+        "never complete from an agent"
+    );
+    assert!(got["verification"].is_null(), "nobody has verified it yet");
+}
+
+#[tokio::test]
+async fn releasing_as_complete_under_enforcement_hands_the_task_over_for_review() {
+    let (tools, _db) = tools_verifying(hq_core::config::VerificationMode::Enforce);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "complete", "summary": "done, PR is up" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(released["released"], true);
+    assert_eq!(released["task"]["status"], "ready_for_review");
+    assert_eq!(released["verification_queued"], true);
+    assert!(released["warnings"].to_string().contains("pull request"));
+}
+
+#[tokio::test]
+async fn with_verification_off_complete_means_complete_as_it_always_did() {
+    let (tools, _db) = tools_verifying(hq_core::config::VerificationMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let updated = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "complete" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated["status"], "complete");
+    assert!(updated.get("verification_queued").is_none());
+}
+
+#[tokio::test]
+async fn task_get_shows_how_a_task_was_verified() {
+    let (tools, db) = tools_verifying(hq_core::config::VerificationMode::Shadow);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Write the note" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let internal = task["id"].as_str().unwrap().to_string();
+    db.with_conn(|c| {
+        hq_db::tasks::record_verdict(
+            c,
+            &hq_db::tasks::NewVerdict {
+                task_id: &internal,
+                artifact: "note:Notebooks/a.md@abc",
+                contract_hash: "",
+                tier: 0,
+                verdict: "pass",
+                level: "peer",
+                verifier: "verify:run-1",
+                independence: "different_session",
+                observations: &json!([{"id": "o1", "fact": "the note exists"}]),
+                criteria: &json!([]),
+                reasons: "",
+                applied: false,
+                canary: false,
+            },
+        )
+        .map(|_| ())
+    })
+    .unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(got["verification"]["verdict"], "pass");
+    assert_eq!(got["verification"]["level"], "peer");
+    assert_eq!(
+        got["verification"]["applied"], false,
+        "shadow moved nothing"
+    );
+    assert_eq!(got["status"], "to_do");
+}
+
+#[tokio::test]
+async fn verification_facts_come_from_a_tasks_links_lease_branch_and_produced_notes() {
+    use super::verify::{Artifact, TaskFacts, discover};
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        db.clone(),
+        hq_core::config::TasksConfig::default(),
+    );
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Ship", "links": [
+            { "kind": "vault_note", "ref": "Notebooks/plan.md", "direction": "origin" },
+            { "kind": "pr", "ref": "Example/Repo#9", "direction": "produced" },
+        ] }),
+    )
+    .await
+    .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let internal = task["id"].as_str().unwrap().to_string();
+    call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder", "branch": "claude/feature-x", "cwd": "/work/repo" }),
+    )
+    .await
+    .unwrap();
+
+    let facts = db.with_conn(|c| TaskFacts::load(c, &internal)).unwrap();
+    assert!(
+        facts
+            .links
+            .iter()
+            .any(|l| l.kind == "pr" && l.reference == "example/repo#9")
+    );
+    assert_eq!(facts.branches.len(), 1);
+    assert_eq!(facts.branches[0].branch, "claude/feature-x");
+    assert_eq!(facts.branches[0].cwd, "/work/repo");
+
+    // The linked pull request is the artifact; the note it came from is not.
+    let found = discover(
+        &super::verify::remote::fake_for_tests(),
+        &facts,
+        &std::collections::HashMap::new(),
+    )
+    .await;
+    assert_eq!(
+        found.artifacts,
+        [Artifact::Pr {
+            repo: "example/repo".into(),
+            number: 9
+        }]
+    );
+}
+
 #[tokio::test]
 async fn an_agent_cannot_write_under_the_name_of_the_web_board() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);

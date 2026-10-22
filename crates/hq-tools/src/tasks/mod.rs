@@ -25,6 +25,7 @@ mod tools_ops;
 mod tools_org;
 mod tools_task;
 mod tools_time;
+pub mod verify;
 
 use activity::TaskActivityTool;
 use from_note::TaskCreateFromNoteTool;
@@ -75,6 +76,13 @@ pub fn create_task_tools_for_chat(
     settings: TasksConfig,
     origin_thread: Option<String>,
 ) -> Vec<Box<dyn HqTool>> {
+    // The completion policy lives in the database, so the web server, the daemon and an MCP
+    // server all meet the same rule. Whoever builds the tools writes its configuration there.
+    if let Err(e) = db.with_conn(|c| {
+        hq_db::tasks::sync_verification_policy(c, &settings.verification).map(|_| ())
+    }) {
+        tracing::warn!(error = %e, "could not record the task verification policy");
+    }
     let create = || TaskCreateTool {
         settings: settings.clone(),
         origin_thread: origin_thread.clone(),

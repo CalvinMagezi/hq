@@ -360,6 +360,14 @@ fn apply_update(
         );
     }
     validate_patch(conn, &current, patch)?;
+    // The one edge into complete is guarded: when verification is enforced for the task's tier,
+    // only a passing verdict or the owner may take it there.
+    let completion =
+        if patch.status.as_deref() == Some(STATUS_COMPLETE) && current.status != STATUS_COMPLETE {
+            Some(verification::authorize_completion(conn, &current, ctx)?)
+        } else {
+            None
+        };
 
     // 'static: only literals can become part of the statement text.
     let mut sets: Vec<&'static str> = vec!["updated_at = datetime('now')"];
@@ -451,6 +459,14 @@ fn apply_update(
     if let Some(status) = patch.status.as_deref().filter(|s| *s != current.status) {
         record_transition(conn, &current.id, &current.status, status, ctx)?;
         track_blocked(conn, &current.id, &current.status, status, patch)?;
+    }
+    if let Some(verification::Completion::Owner { tier }) = completion {
+        verification::record_owner_completion(
+            conn,
+            &current.id,
+            tier,
+            ctx.actor.unwrap_or(WEB_ACTOR),
+        )?;
     }
 
     get_task(conn, &current.id)?.ok_or_else(|| anyhow::anyhow!("task {id} vanished after update"))

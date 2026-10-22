@@ -525,6 +525,96 @@ Rollback of 085, then delete the `085_task_assignees` row from `schema_version`:
 DROP TABLE task_assignees;
 ```
 
+## Verified completion (TVER WS1)
+
+The design is `docs/plans/task-verification.md`. This is the part that exists so far: the policy,
+the verdict record and the guard on the one edge into `complete`. Migration
+`095_task_verification` adds two tables.
+
+- **The policy lives in the database.** `task_verification_policy` holds one row, the
+  `tasks.verification` configuration. Every process that builds the task tools writes its own
+  configuration there (`sync_verification_policy`, a write only when it differs), so the web
+  server, the daemon and an MCP server meet the same rule where a task becomes complete, and tests
+  that run in parallel in one process each have their own. If two processes are configured
+  differently the last to start wins. `mode` is `off` (the default, nothing changes), `shadow`
+  (verdicts will be made and move nothing) or `enforce`.
+- **Verdicts are append-only.** `task_verdicts` records what a verifier decided about a task:
+  the artifact (`pr:<owner>/<repo>#<n>@<sha>`, `note:<path>@<sha256>` or `none`), the tier (0
+  to 2), `pass`, `fail` or `inconclusive`, the level of evidence (`machine_peer`, `peer`,
+  `machine`, `owner`, `none`), the verifier, the facts HQ recorded (`observations`) and the
+  per-criterion results that cite them (`criteria`). Triggers refuse any update, and refuse a
+  delete unless the task is archived, so only a purge removes them. `record_verdict` is the one way
+  in for a verifier and enforces the plan's rules: the verifier must not be an actor that worked
+  the task (`task_workers`: lease holders and whoever moved it into progress or review), an owner
+  verdict cannot be supplied, and a pass needs at least one observation and, per criterion, a
+  `pass` that cites observation ids that exist. Only a tier 0 task with no criteria may pass with
+  an empty list, as an assessment.
+- **The guard.** `apply_update` checks every transition into `complete`. With the policy `off`
+  nothing is gated. In `shadow` nothing is gated either. In `enforce`, for a task in an enforced
+  tier (`enforce_tiers`, default all), only a write with `WriteCtx.owner` or with a
+  `verdict_id` allows it, and the refusal is a `NeedsVerification` error. A verdict allows a
+  completion only if it is a passing, applied verdict for that task made after the task last
+  entered review. `WriteCtx` is set by HQ's own code, never by a caller's arguments: the web
+  handler sets `owner` (the web credential is the owner's), and nothing else does yet.
+- **Tiers from what is known cheaply.** `task_tier`: 2 for a tag in `tier2_tags`, 1 for a task
+  tagged `code` or linked to a commit or pull request, else 0. The verifier raises it when the
+  change touches a `tier2_paths` prefix.
+- **Agents are not refused for saying complete.** Under `enforce`, `task_update` with
+  `status: complete` and `task_release` with `status: complete` hand the task over as
+  `ready_for_review` instead and say so (`verification_queued: true` and a warning). HQ completes
+  it once it passes. Bulk updates meet the same rule item by item.
+- **The owner is recorded.** While the policy is `shadow` or `enforce`, a completion by the owner
+  at the board writes a `level: owner` verdict, so every completion says how it was verified.
+  With the policy `off` nothing is recorded.
+- **Reading.** `task_get` has `verification`: the newest verdict in short (verdict, level, tier,
+  artifact, verifier, applied, at), or null.
+
+### Evidence collectors (TVER WS2)
+
+`crates/hq-tools/src/tasks/verify/` reads facts from outside the task and records them as
+observations: `o1`, `o2`, ... with a source, a kind, one readable sentence, whether it supports,
+contradicts or says nothing about completion, and structured data. A source that cannot be read
+becomes an `unavailable` observation, which never supports anything. A verifier may only cite an
+observation that exists (WS1 enforces it when a pass is recorded).
+
+- **GitHub** goes through the `GitHubRead` trait (`gh` when installed, public HTTPS otherwise, the
+  same validation as the `github_read` tool), so every collector is tested on canned answers.
+  `collect_pr` reads a pull request (merged supports, closed unmerged contradicts, open is neither).
+  `collect_checks` reads check runs and commit statuses on a sha, and the checks the base branch
+  requires: any failure contradicts, still running or never reported is neither, all green
+  supports; a base with no required checks, or protection that cannot be read, is said plainly and
+  is not a pass.
+- **`collect_diff`** records the changed paths (flagging any under `tier2_paths`) and runs the
+  tamper scan: deleted test files, fewer tests or assertions than before in a test file, newly
+  skipped tests (`#[ignore]`, `.skip(`, `xit(`, `@pytest.mark.skip`, `t.Skip`, `@Disabled`),
+  relaxed lints (`#[allow(`, `eslint-disable`, `@ts-ignore`, `# noqa`), changed lint config, CI
+  workflow edits and updated snapshots. A flag is neither a pass nor a failure: it asks for
+  scrutiny. A diff that was cut short is itself a flag.
+- **`collect_note`** records that a note exists and its content hash (the same hash provenance
+  uses), for a path that cannot leave the vault.
+- **`probe_url`** fetches a URL a task says it deployed, from the machine HQ runs on, so it is
+  built not to be a way into that network: https only, public addresses only (loopback, private,
+  link-local, carrier-grade NAT, unique-local and reserved ranges are refused, for names and for
+  literal addresses), the checked address pinned for the request, no redirects followed, a ten
+  second timeout, no credentials in the URL, and the body never read.
+- **Artifact discovery** (`discover`) finds what a task produced: linked pull requests, commits
+  and produced notes first (a note the task came from is its source, not its product), plus notes
+  recorded as written under it. With no pull request linked it looks for one from the branch each
+  lease worked on, in the repositories its links name or that the lease's working directory pushes
+  to (read from the checkout's `.git/config`, following a worktree to its repository; git is never
+  run against a directory an agent named). A branch with no known repository is said, not guessed.
+- **The contract** is the `Acceptance` section of the description (the parser context packets
+  use) and its SHA-256, so a change to the criteria is detectable.
+
+Rollback of 095, then delete the `095_task_verification` row from `schema_version`:
+
+```sql
+DROP TRIGGER task_verdicts_no_delete;
+DROP TRIGGER task_verdicts_no_update;
+DROP TABLE task_verdicts;
+DROP TABLE task_verification_policy;
+```
+
 ## Task relationship graph (FR-069)
 
 `task_related` (crates/hq-tools/src/tasks/tools_graph.rs) answers "what else is connected to this task". The

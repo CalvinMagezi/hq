@@ -608,7 +608,7 @@ fn status_patch(status: &str) -> TaskPatch {
     }
 }
 
-fn move_to(db: &Database, id: &str, status: &str) -> Result<Task> {
+pub(super) fn move_to(db: &Database, id: &str, status: &str) -> Result<Task> {
     db.with_conn(|c| update_task(c, id, &status_patch(status), None))
 }
 
@@ -750,7 +750,7 @@ fn a_legacy_status_does_not_block_an_unrelated_edit() {
     );
 }
 
-fn get_one(db: &Database, id: &str) -> Task {
+pub(super) fn get_one(db: &Database, id: &str) -> Task {
     db.with_conn(|c| get_task(c, id)).unwrap().unwrap()
 }
 
@@ -951,7 +951,7 @@ fn a_zero_limit_still_returns_a_row() {
     assert_eq!(db.with_conn(|c| list_tasks(c, &filter)).unwrap().len(), 1);
 }
 
-const TTL: i64 = 900;
+pub(super) const TTL: i64 = 900;
 
 /// What a removal used to be, for tests about what it cleans up: archive, then purge.
 fn delete_task(conn: &Connection, id: &str, cascade: bool) -> Result<Vec<String>> {
@@ -983,7 +983,7 @@ fn register_session(db: &Database, id: &str) {
     .unwrap();
 }
 
-fn who(actor: &str) -> LeaseIdentity<'_> {
+pub(super) fn who(actor: &str) -> LeaseIdentity<'_> {
     LeaseIdentity {
         actor,
         harness: "claude-code",
@@ -992,7 +992,7 @@ fn who(actor: &str) -> LeaseIdentity<'_> {
     }
 }
 
-fn claim_as(db: &Database, task: &str, actor: &str) -> Result<Claimed> {
+pub(super) fn claim_as(db: &Database, task: &str, actor: &str) -> Result<Claimed> {
     db.with_conn(|c| claim(c, task, &who(actor), TTL, false))
 }
 
@@ -3193,7 +3193,7 @@ fn a_checkpoint_of_nothing_visible_is_empty_and_hidden_characters_are_stripped()
     );
 }
 
-fn assign(db: &Database, id: &str, names: &[&str]) -> Task {
+pub(super) fn assign(db: &Database, id: &str, names: &[&str]) -> Task {
     let patch = TaskPatch {
         assignees: Some(names.iter().map(|n| n.to_string()).collect()),
         ..Default::default()

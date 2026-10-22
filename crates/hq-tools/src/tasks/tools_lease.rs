@@ -102,6 +102,7 @@ impl Actor {
         t::WriteCtx {
             actor: Some(&self.name),
             work_session_id: self.work_session_id.as_deref(),
+            ..Default::default()
         }
     }
 
@@ -779,6 +780,17 @@ impl HqTool for TaskReleaseTool {
             "lease": lease_json(&done.session),
             "task": task_json_with_warnings(&done.task),
         });
+        if done.verification_queued {
+            out["verification_queued"] = json!(true);
+            add_warning(
+                &mut out,
+                format!(
+                    "{} is now ready_for_review, not complete: completion is verified, and HQ completes \
+                     it once it passes. Say how it can be checked (links to the pull request or notes) in your summary.",
+                    done.task.display_id
+                ),
+            );
+        }
         if asked_for_status && !done.status_applied {
             add_warning(
                 &mut out,

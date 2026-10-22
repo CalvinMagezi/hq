@@ -122,6 +122,7 @@ fn record_in(
     let ctx = t::WriteCtx {
         actor: Some(&session.id),
         work_session_id: lease.as_deref(),
+        ..Default::default()
     };
     let moved = match (
         does_work,

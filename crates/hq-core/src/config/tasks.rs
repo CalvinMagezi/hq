@@ -22,6 +22,116 @@ pub enum LeaseMode {
     Enforce,
 }
 
+/// How completion is verified (`tasks.verification.mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationMode {
+    /// Nothing changes. The default, so a fresh install needs no setup.
+    #[default]
+    Off,
+    /// Tasks waiting for review get verdicts that move nothing, to measure the verifier first.
+    Shadow,
+    /// `complete` is reachable only through a passing verdict or the owner.
+    Enforce,
+}
+
+/// Risk tiers a task can sit in. The default is every tier, so `mode: enforce` means all of them
+/// until `enforce_tiers` narrows it for a staged rollout.
+pub const ALL_TIERS: [u8; 3] = [0, 1, 2];
+
+/// Completion verification (`tasks.verification:`). See `docs/plans/task-verification.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VerificationConfig {
+    pub mode: VerificationMode,
+    /// Tiers whose completion is gated when `mode` is `enforce`. Others behave as before.
+    pub enforce_tiers: Vec<u8>,
+    /// Failed verifications after which a task goes to the owner as an exception.
+    pub max_attempts: u32,
+    /// Tags that make a task tier 2 (irreversible or high blast radius).
+    pub tier2_tags: Vec<String>,
+    /// Path prefixes in a task's change that make it tier 2.
+    pub tier2_paths: Vec<String>,
+    /// Hours the owner may reverse a tier 2 completion.
+    pub veto_hours: u32,
+    /// Share of auto-completed tasks pushed to the owner as an audit sample.
+    pub audit_rate: f64,
+    /// Fewest audits pushed in a week, whatever the rate gives.
+    pub audit_min_per_week: u32,
+    /// Verifications run at once.
+    pub concurrency: u32,
+    /// A sweep over more tasks than this always needs the owner's confirmation to apply.
+    pub sweep_confirm_over: u32,
+    /// Items waiting on the owner past which the briefing offers a bulk policy, not a list.
+    pub owner_queue_alert: u32,
+    /// Days the oldest owner-waiting item may age before one alert is raised.
+    pub owner_queue_age_days: u32,
+    /// Tasks given a reviewer run in shadow mode, to price the rest.
+    pub shadow_e2_sample: u32,
+    /// Monthly spend allowed on reviewer (model) runs, in USD. Unset: no model is called and only
+    /// deterministic checks run.
+    pub reviewer_monthly_ceiling_usd: Option<f64>,
+}
+
+impl Default for VerificationConfig {
+    fn default() -> Self {
+        Self {
+            mode: VerificationMode::Off,
+            enforce_tiers: ALL_TIERS.to_vec(),
+            max_attempts: 3,
+            tier2_tags: [
+                "security",
+                "payments",
+                "production",
+                "deploy",
+                "migration",
+                "outbound",
+                "deletion",
+            ]
+            .map(String::from)
+            .to_vec(),
+            tier2_paths: [".github/workflows/", "deploy/", "migrations/", "auth/"]
+                .map(String::from)
+                .to_vec(),
+            veto_hours: 24,
+            audit_rate: 0.05,
+            audit_min_per_week: 10,
+            concurrency: 2,
+            sweep_confirm_over: 25,
+            owner_queue_alert: 20,
+            owner_queue_age_days: 3,
+            shadow_e2_sample: 50,
+            reviewer_monthly_ceiling_usd: None,
+        }
+    }
+}
+
+impl VerificationConfig {
+    /// Whether tier `tier` is gated by this configuration.
+    pub fn enforces(&self, tier: u8) -> bool {
+        self.mode == VerificationMode::Enforce && self.enforce_tiers.contains(&tier)
+    }
+
+    /// Whether a reviewer (model) may be called at all: only with a ceiling above zero.
+    pub fn reviewer_enabled(&self) -> bool {
+        self.reviewer_monthly_ceiling_usd.is_some_and(|c| c > 0.0)
+    }
+
+    /// The audit share, kept inside 0 to 1.
+    pub fn audit_share(&self) -> f64 {
+        if self.audit_rate.is_finite() {
+            self.audit_rate.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Verifications at once, at least one.
+    pub fn parallelism(&self) -> usize {
+        self.concurrency.max(1) as usize
+    }
+}
+
 /// Task system settings (`tasks:` in the config).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TasksConfig {
@@ -45,6 +155,10 @@ pub struct TasksConfig {
     /// turn it off once routing tags have been replaced by assignees, so tags stay topical.
     #[serde(default = "default_route_tags")]
     pub route_tags: bool,
+
+    /// Verifying completion without a person reading each task.
+    #[serde(default)]
+    pub verification: VerificationConfig,
 }
 
 impl TasksConfig {
@@ -78,6 +192,7 @@ impl Default for TasksConfig {
             lease_ttl_secs: default_lease_ttl_secs(),
             stale_after_hours: default_stale_after_hours(),
             route_tags: default_route_tags(),
+            verification: VerificationConfig::default(),
         }
     }
 }
@@ -110,6 +225,58 @@ mod tests {
         assert_eq!(cfg.lease_ttl(), MIN_LEASE_TTL_SECS);
         let cfg: TasksConfig = serde_yaml::from_str("lease_ttl_secs: 3600").unwrap();
         assert_eq!(cfg.lease_ttl(), 3600);
+    }
+
+    #[test]
+    fn verification_is_off_and_asks_for_no_spend_by_default() {
+        let cfg: TasksConfig = serde_yaml::from_str("{}").unwrap();
+        let v = &cfg.verification;
+        assert_eq!(v.mode, VerificationMode::Off);
+        assert!(!v.enforces(0) && !v.enforces(1) && !v.enforces(2));
+        assert!(
+            !v.reviewer_enabled(),
+            "no model is called without a ceiling"
+        );
+        assert_eq!(
+            (v.max_attempts, v.veto_hours, v.sweep_confirm_over),
+            (3, 24, 25)
+        );
+        assert_eq!(
+            (
+                v.owner_queue_alert,
+                v.owner_queue_age_days,
+                v.shadow_e2_sample
+            ),
+            (20, 3, 50)
+        );
+    }
+
+    #[test]
+    fn verification_reads_from_yaml_and_enforces_only_the_tiers_named() {
+        let cfg: TasksConfig = serde_yaml::from_str(
+            "verification:\n  mode: enforce\n  enforce_tiers: [0]\n  reviewer_monthly_ceiling_usd: 20\n",
+        )
+        .unwrap();
+        let v = &cfg.verification;
+        assert!(v.enforces(0));
+        assert!(!v.enforces(1), "tier 1 is not staged in yet");
+        assert!(v.reviewer_enabled());
+        let shadow: TasksConfig = serde_yaml::from_str("verification:\n  mode: shadow\n").unwrap();
+        assert!(!shadow.verification.enforces(0), "shadow gates nothing");
+    }
+
+    #[test]
+    fn nonsense_numbers_are_kept_in_range() {
+        let cfg: TasksConfig = serde_yaml::from_str(
+            "verification:\n  audit_rate: 7\n  concurrency: 0\n  reviewer_monthly_ceiling_usd: 0\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.verification.audit_share(), 1.0);
+        assert_eq!(cfg.verification.parallelism(), 1);
+        assert!(
+            !cfg.verification.reviewer_enabled(),
+            "a zero ceiling is no ceiling"
+        );
     }
 
     #[test]

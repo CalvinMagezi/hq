@@ -253,6 +253,12 @@ pub const WEB_ACTOR: &str = "web";
 pub struct WriteCtx<'a> {
     pub actor: Option<&'a str>,
     pub work_session_id: Option<&'a str>,
+    /// The write is the owner's, made at the board. While completion is verified, this and a
+    /// passing verdict are the only ways a task becomes complete. Agents and the supervisor
+    /// never set it.
+    pub owner: bool,
+    /// A passing, applied verdict that allows the completion this write makes.
+    pub verdict_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -388,6 +394,9 @@ mod stale;
 #[cfg(test)]
 mod tests;
 mod time;
+mod verification;
+#[cfg(test)]
+mod verification_tests;
 
 pub use archive::*;
 pub use checkpoints::*;
@@ -402,3 +411,4 @@ use rows::*;
 pub use rows::{list_task_events, validate_date};
 pub use stale::*;
 pub use time::*;
+pub use verification::*;

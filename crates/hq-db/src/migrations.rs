@@ -346,6 +346,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "094_skill_invocation_rollups",
         include_str!("../sql/094_skill_invocation_rollups.sql"),
     ),
+    (
+        "095_task_verification",
+        include_str!("../sql/095_task_verification.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -765,6 +769,62 @@ mod tests {
             "DROP TABLE task_events;
              ALTER TABLE tasks DROP COLUMN work_started_at;
              ALTER TABLE tasks DROP COLUMN first_ready_for_review_at;",
+        )
+        .unwrap();
+        let title: String = conn
+            .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "old");
+    }
+
+    #[test]
+    fn task_verification_migration_seeds_an_off_policy_keeps_tasks_and_rolls_back() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "095_task_verification")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');
+             INSERT INTO tasks (id, initiative_id, display_id, title, status)
+                 VALUES ('t1', 'i', 'I-001', 'old', 'complete');",
+        )
+        .unwrap();
+
+        super::run(&conn).unwrap();
+        let policy: String = conn
+            .query_row(
+                "SELECT config FROM task_verification_policy WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(policy, "{}", "a fresh policy is empty, which reads as off");
+        let verdicts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_verdicts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(verdicts, 0, "existing tasks get no invented verdict");
+        let status: String = conn
+            .query_row("SELECT status FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(status, "complete", "existing tasks are untouched");
+        assert!(
+            conn.execute(
+                "INSERT INTO task_verification_policy (id, config) VALUES (2, '{}')",
+                []
+            )
+            .is_err(),
+            "there is one policy row"
+        );
+
+        // The rollback documented in docs/plans/native-tasks.md.
+        conn.execute_batch(
+            "DROP TRIGGER task_verdicts_no_delete;
+             DROP TRIGGER task_verdicts_no_update;
+             DROP TABLE task_verdicts;
+             DROP TABLE task_verification_policy;",
         )
         .unwrap();
         let title: String = conn

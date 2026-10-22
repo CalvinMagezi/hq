@@ -113,21 +113,7 @@ fn task_history(conn: &Connection, task_id: &str) -> Result<TaskHistory> {
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
-    let mut workers: HashSet<String> = events
-        .iter()
-        .filter(|e| {
-            matches!(
-                e.event_type.as_str(),
-                "entered_in_progress" | "entered_ready_for_review"
-            )
-        })
-        .filter_map(|e| e.actor.as_deref().map(norm))
-        .collect();
-    let mut stmt =
-        conn.prepare("SELECT DISTINCT actor FROM task_work_sessions WHERE task_id = ?1")?;
-    for actor in stmt.query_map([task_id], |r| r.get::<_, String>(0))? {
-        workers.insert(norm(&actor?));
-    }
+    let workers = crate::tasks::task_workers(conn, task_id)?;
     Ok(TaskHistory { events, workers })
 }
 
@@ -380,6 +366,7 @@ mod tests {
         let ctx = t::WriteCtx {
             actor,
             work_session_id: None,
+            ..Default::default()
         };
         db.with_conn(|c| {
             t::update_task_as(

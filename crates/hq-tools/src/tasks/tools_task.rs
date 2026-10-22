@@ -576,7 +576,7 @@ impl HqTool for TaskGetTool {
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
         let stale_hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
-        let (task, subtasks, dependents, events, sessions, time, links, checkpoint, stale) =
+        let (task, subtasks, dependents, events, sessions, time, links, checkpoint, stale, verdict) =
             self.db.with_conn(move |c| {
                 let task = t::get_task(c, &id)?
                     .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
@@ -592,8 +592,10 @@ impl HqTool for TaskGetTool {
                 let links = t::list_task_links(c, &task.id)?;
                 let checkpoint = t::latest_checkpoint(c, &task.id)?;
                 let stale = t::is_stale_now(c, &task.id, stale_hours)?;
+                let verdict = t::latest_verdict(c, &task.id)?;
                 Ok::<_, anyhow::Error>((
                     task, subtasks, dependents, events, sessions, time, links, checkpoint, stale,
+                    verdict,
                 ))
             })?;
         let mut value = task_json(&task);
@@ -603,6 +605,19 @@ impl HqTool for TaskGetTool {
         value["time"] = json!(time);
         value["links"] = json!(links);
         value["stale"] = json!(stale);
+        // How the task was verified, when anyone did: the newest verdict, in short.
+        value["verification"] = match &verdict {
+            Some(v) => json!({
+                "verdict": v.verdict,
+                "level": v.level,
+                "tier": v.tier,
+                "artifact": v.artifact,
+                "verifier": v.verifier,
+                "applied": v.applied,
+                "at": v.created_at,
+            }),
+            None => Value::Null,
+        };
         if let Some(cp) = &checkpoint {
             value["checkpoint"] = super::tools_lease::resume_json(cp);
         }
@@ -756,10 +771,20 @@ impl HqTool for TaskUpdateTool {
         let entering_in_progress = patch.status.as_deref() == Some(t::STATUS_IN_PROGRESS);
         // One transaction: the status and the dependency change commit together
         // or not at all, and "previous" is read under the same write lock.
-        let (task, previous, unblocked, lease_warning) = self.db.with_conn(move |c| {
+        let (task, previous, unblocked, lease_warning, queued) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
                 let previous = t::get_task(c, &id_for_update)?
                     .ok_or_else(|| anyhow::anyhow!("task {id_for_update} not found"))?;
+                // Asking for complete while completion is verified is asking for review: the
+                // work is handed over and HQ completes it once it passes. An agent is never
+                // refused for using the word.
+                let mut patch = patch;
+                let queued = patch.status.as_deref() == Some(t::STATUS_COMPLETE)
+                    && previous.status != t::STATUS_COMPLETE
+                    && t::completion_requires_verification(c, &previous)?;
+                if queued {
+                    patch.status = Some(t::STATUS_READY_FOR_REVIEW.to_string());
+                }
                 if scoped
                     && edits_text
                     && !crate::harness_session::is_own_scope_actor(&scope_args, &previous.created_by)
@@ -791,7 +816,7 @@ impl HqTool for TaskUpdateTool {
                         .ok_or_else(|| anyhow::anyhow!("task vanished after update"))?;
                 }
                 let unblocked = unblocked_by_transition(c, Some(&previous.status), &task)?;
-                Ok((task, previous, unblocked, lease_warning))
+                Ok((task, previous, unblocked, lease_warning, queued))
             })
         })?;
         let became_ready_for_review = task.status == t::STATUS_READY_FOR_REVIEW
@@ -817,6 +842,17 @@ impl HqTool for TaskUpdateTool {
         let mut out = task_json_with_warnings(&task);
         if let Some(warning) = lease_warning {
             add_warning(&mut out, warning);
+        }
+        if queued {
+            out["verification_queued"] = json!(true);
+            add_warning(
+                &mut out,
+                format!(
+                    "{} is now ready_for_review, not complete: completion is verified, and HQ completes \
+                     it once it passes. Link the pull request or notes that show it is done.",
+                    task.display_id
+                ),
+            );
         }
         Ok(with_onboarding(&args, out))
     }

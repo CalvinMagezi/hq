@@ -498,6 +498,7 @@ pub fn claim(
         let ctx = WriteCtx {
             actor: Some(&actor),
             work_session_id: Some(&id),
+            ..Default::default()
         };
         let moved = CLAIMABLE.contains(&task.status.as_str());
         if moved {
@@ -559,6 +560,9 @@ pub struct Released {
     /// Whether the lease still held the task as of this release. A late release from an
     /// expired lease on a task that has moved on is not current, and writes no checkpoint.
     pub current: bool,
+    /// The release asked for `complete` and completion is verified, so the task went to
+    /// `ready_for_review` and HQ completes it once it passes.
+    pub verification_queued: bool,
 }
 
 /// Ends the lease a token names. With `status` the task moves there too, under
@@ -615,6 +619,24 @@ pub fn release(
         let ctx = WriteCtx {
             actor: Some(&lease.actor),
             work_session_id: Some(&lease.id),
+            ..Default::default()
+        };
+        // Asking for complete while completion is verified is asking for review: the work is
+        // handed over, and HQ completes it once it passes.
+        let mut verification_queued = false;
+        let status = match status {
+            Some(STATUS_COMPLETE) if may_change_status => {
+                let task = get_task(conn, &lease.task_id)?
+                    .ok_or_else(|| anyhow::anyhow!("task vanished while releasing"))?;
+                if task.status != STATUS_COMPLETE && completion_requires_verification(conn, &task)?
+                {
+                    verification_queued = true;
+                    Some(STATUS_READY_FOR_REVIEW)
+                } else {
+                    status
+                }
+            }
+            other => other,
         };
         let status_applied = match status {
             Some(status) if may_change_status => {
@@ -638,7 +660,7 @@ pub fn release(
             conn,
             &lease.task_id,
             &lease.actor,
-            &release_note(status, status_applied, summary),
+            &release_note(status, status_applied, verification_queued, summary),
             None,
         )?;
         let session = conn.query_row(
@@ -653,6 +675,7 @@ pub fn release(
             task,
             status_applied,
             current: may_change_status,
+            verification_queued,
         })
     })
 }
@@ -671,8 +694,11 @@ fn first_line(summary: &str) -> String {
 
 /// The thread comment for a release: what HQ did, then the agent's own words
 /// quoted line by line so they cannot pass for HQ's.
-fn release_note(status: Option<&str>, applied: bool, summary: &str) -> String {
+fn release_note(status: Option<&str>, applied: bool, queued: bool, summary: &str) -> String {
     let head = match (status, applied) {
+        (Some(s), true) if queued => format!(
+            "Work lease released ({s}). Completion was requested; HQ completes it once it passes verification."
+        ),
         (Some(s), true) => format!("Work lease released ({s})."),
         (Some(s), false) => format!(
             "Work lease released. Status {s} was not applied: the task moved on since this lease expired."

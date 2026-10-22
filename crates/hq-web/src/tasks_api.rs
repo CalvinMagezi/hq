@@ -504,6 +504,10 @@ pub(crate) async fn update_task_handler(
             let ctx = t::WriteCtx {
                 actor: Some(t::WEB_ACTOR),
                 work_session_id: None,
+                // The web credential is the owner's: the one caller that may complete a task
+                // directly while completion is verified.
+                owner: true,
+                verdict_id: None,
             };
             let mut task = t::update_task_as(c, &id, &patch, expected_status.as_deref(), &ctx)?;
             if !add_deps.is_empty() || !remove_deps.is_empty() {
@@ -1423,6 +1427,47 @@ mod tests {
                 .iter()
                 .all(|e| e.actor.as_deref() == Some(t::WEB_ACTOR)),
             "a person at the board is not an anonymous or missing actor: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_owner_at_the_board_can_complete_a_task_while_completion_is_verified() {
+        let state = test_state();
+        state
+            .db
+            .with_conn(|c| {
+                t::sync_verification_policy(
+                    c,
+                    &hq_core::config::VerificationConfig {
+                        mode: hq_core::config::VerificationMode::Enforce,
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap();
+        let response = create_task_handler(
+            State(state.clone()),
+            Json(serde_json::from_value(json!({ "title": "Sign me off" })).unwrap()),
+        )
+        .await;
+        let id: String = body_json(response).await["id"].as_str().unwrap().into();
+        for status in ["in_progress", "ready_for_review", "complete"] {
+            let body: UpdateTaskBody = serde_json::from_value(json!({ "status": status })).unwrap();
+            let response =
+                update_task_handler(State(state.clone()), AxumPath(id.clone()), Json(body)).await;
+            assert_eq!(response.status(), StatusCode::OK, "{status}");
+        }
+        let verdict = state
+            .db
+            .with_conn({
+                let id = id.clone();
+                move |c| t::latest_verdict(c, &id)
+            })
+            .unwrap()
+            .expect("a completion at the board says how it was verified");
+        assert_eq!(
+            (verdict.level.as_str(), verdict.verifier.as_str()),
+            ("owner", "web")
         );
     }
 
