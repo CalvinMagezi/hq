@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_capture">Capture</string>
+    <string name="shortcut_new_task">New task</string>
+    <string name="shortcut_ask_hq">Ask HQ</string>
+    <string name="widget_capture_desc">Capture a thought, a note or a task from the home screen</string>
+    <string name="widget_needs_desc">How many things wait on you</string>
+    <string name="widget_tasks_desc">The tasks in progress</string>
+</resources>

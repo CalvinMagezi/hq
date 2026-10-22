@@ -55,6 +55,7 @@ object HqIcons {
     val Info = outline("info", "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 16v-4", "M12 8h.01")
     val Pause = outline("pause", "M10 4H6v16h4z", "M18 4h-4v16h4z")
     val Eye = outline("eye", "M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z")
+    val EyeOff = outline("eye-off", "M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94", "M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19", "m1 1 22 22", "M14.12 14.12a3 3 0 1 1-4.24-4.24")
     val Folder = outline("folder", "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z")
     val Sort = outline("sort", "m21 16-4 4-4-4", "M17 20V4", "m3 8 4-4 4 4", "M7 4v16")
     val List = outline("list", "M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01")
@@ -94,6 +95,8 @@ object HqIcons {
         "M19 15l.8 2 2.2.8-2.2.8-.8 2.2-.8-2.2L16 17.8l2.2-.8z",
     )
     val Inbox = outline("inbox", "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9", "M10.3 21a1.94 1.94 0 0 0 3.4 0")
+    val Paste = outline("paste", "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2", "M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z")
+    val Filter = outline("filter", "M22 3H2l8 9.46V19l4 2v-8.54z")
     val Search = outline("search", "M3 11a8 8 0 1 0 16 0a8 8 0 1 0-16 0", "m21 21-4.3-4.3")
     val Gear = outline(
         "gear", "M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0",

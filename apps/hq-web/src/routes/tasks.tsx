@@ -30,6 +30,7 @@ import { usePersistedState } from '~/lib/usePersistedState'
 import { TaskBoardView } from '~/components/tasks/TaskBoardView'
 import { TaskGanttView } from '~/components/tasks/TaskGanttView'
 import { TaskDetailDrawer } from '~/components/tasks/TaskDetailDrawer'
+import { useBackClosesLayer } from '~/lib/backLayer'
 import { TaskFormModal } from '~/components/tasks/TaskFormModal'
 import { ALL_SELECTION, TasksSidebar, type TaskSelection } from '~/components/tasks/TasksSidebar'
 import { useTasksData } from '~/components/tasks/useTasksData'
@@ -203,6 +204,10 @@ function TasksPage() {
     () => tasks.find((t) => t.id === selectedTaskId) ?? archivedTasks.find((t) => t.id === selectedTaskId) ?? null,
     [tasks, archivedTasks, selectedTaskId]
   )
+
+  // Inside the Android app, Back closes the task drawer and the new-task form before it leaves the page.
+  useBackClosesLayer(selectedTask != null, () => setSelectedTaskId(null))
+  useBackClosesLayer(formOpen, () => setFormOpen(false))
 
   const liveSessions = live.data ?? NO_SESSIONS
   const workingMap = useMemo(() => (liveSessions.length ? workingNow(liveSessions) : NO_WORKING), [liveSessions])

@@ -37,7 +37,7 @@ object TasksLogic {
 
     fun parse(date: String?): LocalDate? = try { date?.let(LocalDate::parse) } catch (e: DateTimeParseException) { null }
 
-    private fun open(t: TaskItem) = t.status != "complete" && t.parentId == null
+    internal fun open(t: TaskItem) = t.status != "complete" && t.parentId == null
 
     /** Priority first, then the oldest. */
     val byUrgency: Comparator<TaskItem> = compareBy<TaskItem>({ PRIORITY_ORDER.indexOf(it.priority).let { i -> if (i < 0) PRIORITY_ORDER.size else i } }, { it.updatedAt })

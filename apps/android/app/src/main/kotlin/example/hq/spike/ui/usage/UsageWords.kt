@@ -130,9 +130,11 @@ object UsageWords {
     /** Dollars with cents; small amounts keep three places so a little spend is not "$0.00". */
     fun usd(n: Double?): String {
         if (n == null || !n.isFinite()) return "-"
-        if (n != 0.0 && abs(n) < CENT) return "$" + String.format(Locale.ROOT, "%.4f", n)
-        val places = if (abs(n) < SMALL_USD) 3 else 2
-        return "$" + String.format(Locale.ROOT, "%.${places}f", n).replace(Regex("(\\.\\d\\d)0$"), "$1")
+        val sign = if (n < 0) "-" else ""
+        val a = abs(n)
+        if (a != 0.0 && a < CENT) return sign + "$" + String.format(Locale.ROOT, "%.4f", a)
+        val places = if (a < SMALL_USD) 3 else 2
+        return sign + "$" + String.format(Locale.ROOT, "%.${places}f", a).replace(Regex("(\\.\\d\\d)0$"), "$1")
     }
 
     private fun short(provider: String) = if (provider == COPILOT) "Copilot" else provider
