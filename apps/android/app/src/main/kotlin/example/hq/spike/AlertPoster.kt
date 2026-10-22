@@ -76,7 +76,7 @@ object AlertPoster {
     }
 
     /** Taps open what the notification is about: the helper for a helper's question, else the Inbox item; the Inbox when it is about nothing in particular. */
-    private fun open(c: Context, link: String = "hq://inbox"): PendingIntent {
+    internal fun open(c: Context, link: String = "hq://inbox"): PendingIntent {
         val intent = Intent(c, ShellActivity::class.java).setData(Uri.parse(link)).putExtra(Links.EXTRA, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         return PendingIntent.getActivity(c, link.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
