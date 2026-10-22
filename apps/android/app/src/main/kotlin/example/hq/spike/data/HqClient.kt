@@ -287,6 +287,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/stop").post(EMPTY_JSON).build()) { }
     }
 
+    /** Opens the chat that follows this helper, making one if no chat does yet; returns that chat's id. Asking again returns the same chat. */
+    suspend fun followHelper(id: String): String =
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/adopt").post(EMPTY_JSON).build()) { JSONObject(it).optString("thread_id") }
+
     suspend fun renameHelper(id: String, label: String) {
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/rename").post(JSONObject().put("label", label).toString().toRequestBody("application/json".toMediaType())).build()) { }
     }

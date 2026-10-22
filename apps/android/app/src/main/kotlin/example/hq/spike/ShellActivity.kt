@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -257,6 +258,14 @@ class ShellActivity : ComponentActivity() {
             notes.closeAll()
             chat.startChatWith(items.map { (path, title) -> ContextRef(ContextRef.Kind.Note, path, title) })
             go(Place.Chat)
+        }
+        helpersState.followed?.let { thread ->
+            LaunchedEffect(thread) {
+                helpers.actions.onFollowedHandled()
+                helpers.actions.onClose()
+                chat.openLinked(thread)
+                go(Place.Chat)
+            }
         }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
