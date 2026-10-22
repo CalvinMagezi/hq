@@ -49,6 +49,9 @@ class NotesActions(
     val onLeave: () -> Unit = {},
     val onKeepEditing: () -> Unit = {},
     val onDiscard: () -> Unit = {},
+    /** The note page being left reports how far it was scrolled (first visible item, offset), so Back can return to the same place. */
+    val onScrolled: (String, Int, Int) -> Unit = { _, _, _ -> },
+    val scrollOf: (String) -> Pair<Int, Int>? = { null },
 )
 
 class NotesViewModel(app: Application) : AndroidViewModel(app) {
@@ -60,6 +63,8 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     private val exporter = NoteExporter(app, client, viewModelScope)
     private var searchJob: Job? = null
     private var frozen = false
+
+    private val scrolls = ScrollMemory()
 
     val actions = NotesActions(
         onRefresh = ::refresh, onOpenFolder = ::openFolder, onOpenNote = ::openNote,
@@ -76,7 +81,9 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onChooseFolder = { open -> edit { it.copy(chooser = open) } },
         onPickFolder = { f -> edit { it.copy(folder = f, chooser = false) } },
         onSave = ::save, onLeave = ::leave, onKeepEditing = { edit { it.copy(leaving = false) } }, onDiscard = ::discard,
+        onScrolled = scrolls::save, scrollOf = scrolls::restore,
     )
+
 
     init {
         viewModelScope.launch { exporter.state.collect { e -> _state.update { it.copy(export = e) } } }
@@ -145,6 +152,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     /** Opens a note on its own page; a link inside a note pushes another. */
     fun openNote(path: String) {
         if (_state.value.top == NotesRoute.Reader(path)) return
+        scrolls.forget(path)
         push(NotesRoute.Reader(path))
         loadReader(path)
     }
