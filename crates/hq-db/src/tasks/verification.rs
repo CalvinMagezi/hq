@@ -171,10 +171,12 @@ pub struct Verdict {
     pub created_at: String,
     /// The submission (see [`review_marker`]) this verdict is about.
     pub submission: Option<i64>,
+    /// Who acts next when this is not a pass (see [`WAITING_FOR`]).
+    pub waiting_for: Option<String>,
 }
 
 const VERDICT_COLS: &str = "id, task_id, artifact, contract_hash, tier, verdict, level, verifier, \
-     independence, observations, criteria, reasons, applied, canary, created_at, submission";
+     independence, observations, criteria, reasons, applied, canary, created_at, submission, waiting_for";
 
 fn row_to_verdict(r: &rusqlite::Row) -> rusqlite::Result<Verdict> {
     let json = |i: usize| -> rusqlite::Result<Value> {
@@ -198,6 +200,7 @@ fn row_to_verdict(r: &rusqlite::Row) -> rusqlite::Result<Verdict> {
         canary: r.get::<_, i64>(13)? != 0,
         created_at: r.get(14)?,
         submission: r.get(15)?,
+        waiting_for: r.get(16)?,
     })
 }
 
@@ -222,6 +225,8 @@ pub struct NewVerdict<'a> {
     /// The submission the facts were gathered for. `None` means the task's current one; a number
     /// that is no longer current is refused, because the work was submitted again meanwhile.
     pub submission: Option<i64>,
+    /// Who acts next when this is not a pass (see [`WAITING_FOR`]).
+    pub waiting_for: Option<&'a str>,
 }
 
 /// Longest reasons text kept.
@@ -291,8 +296,8 @@ fn insert_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
     conn.execute(
         "INSERT INTO task_verdicts \
          (id, task_id, artifact, contract_hash, tier, verdict, level, verifier, independence, \
-          observations, criteria, reasons, applied, canary, submission) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+          observations, criteria, reasons, applied, canary, submission, waiting_for) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             id,
             v.task_id,
@@ -312,6 +317,7 @@ fn insert_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
             v.applied,
             v.canary,
             v.submission,
+            v.waiting_for,
         ],
     )?;
     conn.query_row(
@@ -366,6 +372,14 @@ pub fn record_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
         }
         if v.applied && v.verdict != VERDICT_PASS {
             anyhow::bail!("only a pass can be applied to a task");
+        }
+        if let Some(w) = v.waiting_for {
+            if !WAITING_FOR.contains(&w) {
+                anyhow::bail!("waiting_for must be one of {}", WAITING_FOR.join(", "));
+            }
+            if v.verdict == VERDICT_PASS {
+                anyhow::bail!("a pass waits on no one");
+            }
         }
         let current = review_marker(conn, &task.id)?;
         if v.submission.is_some() && v.submission != current {
@@ -501,7 +515,8 @@ pub(super) fn record_owner_completion(
             reasons: "",
             applied: true,
             canary: false,
-            submission: None,
+            submission: review_marker(conn, task_id)?,
+            waiting_for: None,
         },
     )?;
     Ok(())
@@ -530,47 +545,72 @@ pub struct Candidate {
     pub marker: Option<i64>,
 }
 
-/// Tasks in review that have no verdict for their current submission, in the order they should
-/// be verified: those other work waits on first, then tier 2 (its veto clock should start early),
-/// then the longest waiting.
+/// Tasks in review that have no verdict for their current submission and are not waiting out a
+/// retry, in the order they should be verified: those other work waits on first, then tier 2
+/// (its veto clock should start early), then the longest waiting. `now` is unix seconds.
 pub fn verification_candidates(
     conn: &Connection,
     cfg: &VerificationConfig,
+    now: i64,
 ) -> Result<Vec<Candidate>> {
+    let mut out = Vec::new();
+    for (task, wait) in tasks_awaiting_verdict(conn)? {
+        if wait.is_some_and(|w| w.retry_at > now) {
+            continue;
+        }
+        let tier = task_tier(conn, &task, cfg)?;
+        out.push(candidate(conn, task, tier)?);
+    }
+    sort_candidates(&mut out);
+    Ok(out)
+}
+
+/// Every task in review with no verdict for its current submission, with its wait if it has one.
+pub fn tasks_awaiting_verdict(conn: &Connection) -> Result<Vec<(Task, Option<Wait>)>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, \
-                COALESCE((SELECT MAX(occurred_at) FROM task_events e \
-                          WHERE e.task_id = t.id AND e.event_type = 'entered_ready_for_review'), '') \
-         FROM tasks t \
+        "SELECT t.id FROM tasks t \
          WHERE t.status = 'ready_for_review' AND t.archived_at IS NULL \
            AND NOT EXISTS (SELECT 1 FROM task_verdicts v WHERE v.task_id = t.id AND v.canary = 0 \
                  AND v.submission IS (SELECT MAX(e.id) FROM task_events e \
                        WHERE e.task_id = t.id AND e.event_type = 'entered_ready_for_review'))",
     )?;
-    let rows: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+    let ids: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    let mut out = Vec::with_capacity(rows.len());
-    for (id, entered_at) in rows {
-        let Some(task) = get_task(conn, &id)? else {
-            continue;
-        };
-        let dependents: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM task_dependencies d JOIN tasks x ON x.id = d.task_id \
-             WHERE d.depends_on_task_id = ?1 AND x.status <> 'complete' AND x.archived_at IS NULL",
-            params![id],
-            |r| r.get(0),
-        )?;
-        let tier = task_tier(conn, &task, cfg)?;
-        let marker = review_marker(conn, &id)?;
-        out.push(Candidate {
-            task,
-            tier,
-            dependents,
-            entered_at,
-            marker,
-        });
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(task) = get_task(conn, &id)? {
+            let wait = current_wait(conn, &id)?;
+            out.push((task, wait));
+        }
     }
+    Ok(out)
+}
+
+fn candidate(conn: &Connection, task: Task, tier: u8) -> Result<Candidate> {
+    let entered_at: String = conn.query_row(
+        "SELECT COALESCE(MAX(occurred_at), '') FROM task_events \
+         WHERE task_id = ?1 AND event_type = 'entered_ready_for_review'",
+        params![task.id],
+        |r| r.get(0),
+    )?;
+    let dependents: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM task_dependencies d JOIN tasks x ON x.id = d.task_id \
+         WHERE d.depends_on_task_id = ?1 AND x.status <> 'complete' AND x.archived_at IS NULL",
+        params![task.id],
+        |r| r.get(0),
+    )?;
+    let marker = review_marker(conn, &task.id)?;
+    Ok(Candidate {
+        task,
+        tier,
+        dependents,
+        entered_at,
+        marker,
+    })
+}
+
+fn sort_candidates(out: &mut [Candidate]) {
     out.sort_by(|a, b| {
         (b.dependents > 0)
             .cmp(&(a.dependents > 0))
@@ -578,7 +618,6 @@ pub fn verification_candidates(
             .then(a.entered_at.cmp(&b.entered_at))
             .then(a.task.id.cmp(&b.task.id))
     });
-    Ok(out)
 }
 
 /// Dollars the reviewer has cost in the current UTC month, from the usage ledger.

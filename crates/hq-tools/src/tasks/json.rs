@@ -179,10 +179,14 @@ pub(super) fn tags_from_args(args: &Value, key: &str) -> Vec<String> {
 /// crate's `task_update` tool and `hq-web`'s REST update handler whenever a
 /// task's status transitions into `ready_for_review`; the dedup key collapses
 /// a repeat while one request is still outstanding. Never fails the caller.
+///
+/// A task whose completion HQ verifies itself (`tasks.verification` enforced for its tier) is
+/// not the owner's to review, so it raises nothing: the owner hears only of exceptions
+/// ([`notify_owner_exception`]).
 pub async fn notify_ready_for_review(vault_path: PathBuf, task: t::Task) {
     let summary = format!("{}: {}", task.display_id, task.title);
     let item = hq_core::types::ValueItem::new(
-        "task_ready_for_review",
+        TASK_REVIEW_SOURCE,
         hq_core::types::ValueKind::ActionNeeded,
         summary,
         task.description.clone(),
@@ -190,9 +194,44 @@ pub async fn notify_ready_for_review(vault_path: PathBuf, task: t::Task) {
     .with_dedup_key(format!("task-review-{}", task.id));
 
     let db_path = vault_path.join("_data").join("vault.db");
+    let emitted = hq_db::Database::open(&db_path).and_then(|db| {
+        // A policy that cannot be read is off, so the owner is told as before.
+        if db
+            .with_conn(|c| t::completion_requires_verification(c, &task))
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        hq_db::value_items::emit(&db, &item).map(|_| ())
+    });
+    if let Err(e) = emitted {
+        tracing::warn!(error = %e, task_id = %task.id, "task-notify: failed to emit ready-for-review value item");
+    }
+}
+
+/// The value source of a review request.
+pub const TASK_REVIEW_SOURCE: &str = "task_ready_for_review";
+/// The value source of a task verification could not settle and only the owner can.
+pub const TASK_EXCEPTION_SOURCE: &str = "task_needs_owner";
+
+/// Best-effort: tells the owner, in the web inbox, about one task that verification returned to its
+/// worker as often as it allows. This is the "exception" of the exception-first model; it is
+/// web-only and deduplicated per task.
+pub async fn notify_owner_exception(vault_path: PathBuf, task: t::Task, findings: String) {
+    let item = hq_core::types::ValueItem::new(
+        TASK_EXCEPTION_SOURCE,
+        hq_core::types::ValueKind::ActionNeeded,
+        format!("{} needs a decision: {}", task.display_id, task.title),
+        format!(
+            "{}\n\nThe last findings:\n{findings}",
+            task.blocked_reason.clone().unwrap_or_default()
+        ),
+    )
+    .with_dedup_key(format!("task-exception-{}", task.id));
+    let db_path = vault_path.join("_data").join("vault.db");
     let emitted = hq_db::Database::open(&db_path)
         .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
     if let Err(e) = emitted {
-        tracing::warn!(error = %e, task_id = %task.id, "task-notify: failed to emit ready-for-review value item");
+        tracing::warn!(error = %e, task_id = %task.id, "task-notify: failed to emit the owner exception");
     }
 }

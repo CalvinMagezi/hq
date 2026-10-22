@@ -654,16 +654,29 @@ pub async fn review(
     }
 }
 
+/// What a recorded verdict did to the task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Moved {
+    /// The task stays where it was: shadow mode, a tier that is not enforced, or a verdict that
+    /// waits for something other than its worker.
+    Nothing,
+    /// A pass completed it.
+    Completed,
+    /// Sent back to `to_do` with the findings for its worker.
+    Returned,
+    /// Blocked on the owner, as one exception.
+    Escalated,
+}
+
 /// What came of applying a resolution.
 #[derive(Debug)]
 pub enum Finished {
     Recorded {
         verdict: Box<t::Verdict>,
-        /// The task was completed by it.
-        completed: bool,
+        moved: Moved,
         waiting_for: Option<WaitingFor>,
     },
-    /// Nothing was recorded; look again after this long.
+    /// Nothing was recorded. The wait is stored, so the task is looked at again after this long.
     Deferred {
         reason: String,
         waiting_for: WaitingFor,
@@ -710,15 +723,43 @@ fn new_verifier_id() -> String {
     )
 }
 
-/// Records the verdict and, in enforce mode for an enforced tier, completes the task. A pass is
-/// applied only if the artifacts and the submission are unchanged since they were checked.
+/// Records the verdict and, in enforce mode for an enforced tier, acts on it: a pass completes the
+/// task (only if the artifacts and the submission are unchanged since they were checked), and a
+/// verdict that waits on the worker sends the task back with its findings, or to the owner once it
+/// has failed `max_attempts` times. A resolution that could not decide yet records a wait instead
+/// of a verdict.
 pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Result<Finished> {
+    let marker = ev.marker;
+    let task_id = ev.task.id.clone();
     let (verdict, level, independence, criteria, reasons, waiting_for) = match resolution {
         Resolution::Defer {
             reason,
             waiting_for,
             retry_after_secs,
         } => {
+            let stored = reason.clone();
+            let id = task_id.clone();
+            let recorded = env.db.with_conn(move |c| {
+                t::in_write_tx(c, |c| {
+                    if t::review_marker(c, &id)? != marker {
+                        return Ok(false);
+                    }
+                    t::record_wait(
+                        c,
+                        &id,
+                        waiting_for.as_str(),
+                        &stored,
+                        retry_after_secs,
+                        chrono::Utc::now().timestamp(),
+                    )?;
+                    Ok(true)
+                })
+            })?;
+            if !recorded {
+                return Ok(Finished::Voided {
+                    reason: "the task was submitted again while it was being verified".to_string(),
+                });
+            }
             return Ok(Finished::Deferred {
                 reason,
                 waiting_for,
@@ -766,9 +807,9 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
             Some(waiting_for),
         ),
     };
-    let applies = verdict == t::VERDICT_PASS
-        && env.cfg.mode == VerificationMode::Enforce
-        && env.cfg.enforces(ev.tier);
+    let enforced = env.cfg.mode == VerificationMode::Enforce && env.cfg.enforces(ev.tier);
+    let applies = verdict == t::VERDICT_PASS && enforced;
+    let sends_back = enforced && waiting_for == Some(WaitingFor::Worker);
     if applies && let Some(reason) = still_current(env, ev).await {
         return Ok(Finished::Voided { reason });
     }
@@ -776,12 +817,12 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
     let verifier = new_verifier_id();
     let observations = ev.log.to_json();
     let artifact = ev.primary_artifact();
-    let task_id = ev.task.id.clone();
-    let marker = ev.marker;
     let contract_hash = ev.contract.hash.clone();
     let tier = ev.tier;
     let route_tags = env.route_tags;
+    let max_attempts = env.cfg.max_attempts;
     let vault_path = env.vault_path;
+    let findings = reasons.clone();
     let outcome = env.db.with_conn(move |c| {
         t::in_write_tx(c, |c| {
             // The work must still be the submission that was checked: a verdict recorded about
@@ -791,7 +832,7 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
                     "the task was submitted again while it was being verified".to_string(),
                 ));
             }
-            if applies {
+            if applies || sends_back {
                 let current = t::get_task(c, &task_id)?
                     .ok_or_else(|| anyhow::anyhow!("task {task_id} vanished"))?;
                 if current.status != t::STATUS_READY_FOR_REVIEW {
@@ -815,8 +856,10 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
                 applied: applies,
                 canary: false,
                 submission: marker,
+                waiting_for: waiting_for.map(WaitingFor::as_str),
             };
             let recorded = t::record_verdict(c, &new)?;
+            t::clear_wait(c, &task_id)?;
             if applies {
                 let ctx = t::WriteCtx {
                     actor: Some(&verifier),
@@ -835,21 +878,41 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
                     Some(t::STATUS_READY_FOR_REVIEW),
                     &done,
                 )?;
-                return Ok(Ok((recorded, Some((done, unblocked)))));
+                return Ok(Ok((recorded, Moved::Completed, Some((done, unblocked)))));
             }
-            Ok(Ok((recorded, None)))
+            if sends_back {
+                let reworked = t::send_back(c, &task_id, &verifier, &reasons, max_attempts)?;
+                let moved = match reworked {
+                    t::Reworked::Returned { .. } => Moved::Returned,
+                    t::Reworked::Escalated { .. } => Moved::Escalated,
+                };
+                // A task that now waits on the owner is the one thing the owner is told about.
+                let task = (moved == Moved::Escalated)
+                    .then(|| t::get_task(c, &task_id))
+                    .transpose()?
+                    .flatten();
+                return Ok(Ok((recorded, moved, task.map(|t| (t, Vec::new())))));
+            }
+            Ok(Ok((recorded, Moved::Nothing, None)))
         })
     })?;
     match outcome {
         Err(reason) => Ok(Finished::Voided { reason }),
-        Ok((verdict, completed)) => {
-            let done = completed.is_some();
-            if let Some((task, unblocked)) = completed {
-                crate::tasks::notify_unblocked(vault_path, &task, &unblocked, route_tags);
+        Ok((verdict, moved, follow_up)) => {
+            match (moved, follow_up) {
+                (Moved::Completed, Some((task, unblocked))) => {
+                    crate::tasks::notify_unblocked(vault_path, &task, &unblocked, route_tags);
+                }
+                (Moved::Escalated, Some((task, _))) => {
+                    crate::tasks::notify_owner_exception(vault_path.to_path_buf(), task, findings)
+                        .await;
+                }
+                _ => {}
             }
+            // A task returned to its worker may unblock nothing, but its worker should hear of it.
             Ok(Finished::Recorded {
                 verdict: Box::new(verdict),
-                completed: done,
+                moved,
                 waiting_for,
             })
         }

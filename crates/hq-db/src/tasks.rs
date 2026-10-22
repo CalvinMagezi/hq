@@ -389,6 +389,7 @@ mod messages;
 mod org;
 mod queue;
 mod refs;
+mod rework;
 mod rows;
 mod stale;
 #[cfg(test)]
@@ -397,6 +398,7 @@ mod time;
 mod verification;
 #[cfg(test)]
 mod verification_tests;
+mod waits;
 
 pub use archive::*;
 pub use checkpoints::*;
@@ -407,8 +409,10 @@ pub use messages::*;
 pub use org::*;
 pub use queue::*;
 pub use refs::*;
+pub use rework::*;
 use rows::*;
 pub use rows::{list_task_events, validate_date};
 pub use stale::*;
 pub use time::*;
 pub use verification::*;
+pub use waits::*;

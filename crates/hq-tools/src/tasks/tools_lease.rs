@@ -675,6 +675,7 @@ pub(super) struct TaskReleaseTool {
     pub(super) settings: TasksConfig,
     pub(super) vault_path: std::path::PathBuf,
     pub(super) db: Arc<Database>,
+    pub(super) gh: Arc<dyn super::verify::GitHubRead>,
 }
 
 #[async_trait]
@@ -724,6 +725,42 @@ impl HqTool for TaskReleaseTool {
         });
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let mails_no_one = crate::harness_session::writes_no_mail(&args);
+        // Handing work over is the cheapest time to find what it produced, while the agent still
+        // has it in context.
+        let mut handover_warning = None;
+        if matches!(
+            status.as_deref(),
+            Some(t::STATUS_READY_FOR_REVIEW | t::STATUS_COMPLETE)
+        ) {
+            let held = {
+                let token = token.clone();
+                self.db.with_conn(move |c| {
+                    Ok(match t::lease_for_token(c, &token)? {
+                        Some(lease) => t::get_task(c, &lease.task_id)?,
+                        None => None,
+                    })
+                })?
+            };
+            if let Some(task) = held.filter(|task| {
+                !matches!(
+                    task.status.as_str(),
+                    t::STATUS_READY_FOR_REVIEW | t::STATUS_COMPLETE
+                )
+            }) {
+                match super::verify::check_release(
+                    &self.db,
+                    self.gh.as_ref(),
+                    &self.settings.verification,
+                    &task,
+                )
+                .await
+                {
+                    super::verify::Checked::Refuse(message) => bail!(message),
+                    super::verify::Checked::Warn(message) => handover_warning = Some(message),
+                    super::verify::Checked::Fine => {}
+                }
+            }
+        }
         let (done, previous_status, unblocked) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
                 check_scope_owns_lease(c, &args, &token)?;
@@ -780,6 +817,9 @@ impl HqTool for TaskReleaseTool {
             "lease": lease_json(&done.session),
             "task": task_json_with_warnings(&done.task),
         });
+        if let Some(warning) = handover_warning {
+            add_warning(&mut out, warning);
+        }
         if done.verification_queued {
             out["verification_queued"] = json!(true);
             add_warning(

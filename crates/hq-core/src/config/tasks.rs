@@ -35,6 +35,20 @@ pub enum VerificationMode {
     Enforce,
 }
 
+/// What a release into review does when HQ cannot find what the task produced
+/// (`tasks.verification.release_check`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseCheck {
+    /// Nothing is looked up.
+    Off,
+    /// The release succeeds and the reply says what to link. The default.
+    #[default]
+    Warn,
+    /// The release is refused, with what to link, for tasks whose completion is enforced.
+    Enforce,
+}
+
 /// Risk tiers a task can sit in. The default is every tier, so `mode: enforce` means all of them
 /// until `enforce_tiers` narrows it for a staged rollout.
 pub const ALL_TIERS: [u8; 3] = [0, 1, 2];
@@ -48,6 +62,8 @@ pub struct VerificationConfig {
     pub enforce_tiers: Vec<u8>,
     /// Failed verifications after which a task goes to the owner as an exception.
     pub max_attempts: u32,
+    /// What a release into review does for a code task with no pull request or commit HQ can find.
+    pub release_check: ReleaseCheck,
     /// Tags that make a task tier 2 (irreversible or high blast radius).
     pub tier2_tags: Vec<String>,
     /// Path prefixes in a task's change that make it tier 2.
@@ -88,6 +104,7 @@ impl Default for VerificationConfig {
             mode: VerificationMode::Off,
             enforce_tiers: ALL_TIERS.to_vec(),
             max_attempts: 3,
+            release_check: ReleaseCheck::Warn,
             tier2_tags: [
                 "security",
                 "payments",

@@ -23,6 +23,7 @@ pub mod pipeline;
 #[cfg(test)]
 mod pipeline_tests;
 pub mod probe;
+pub mod release_check;
 pub mod remote;
 pub mod reviewer;
 pub mod tamper;
@@ -33,13 +34,14 @@ pub use collect::{
     record_diff_excerpts, touches_tier2_path,
 };
 pub use contract::{Contract, contract_of};
-pub use dispatch::{Backoff, DispatchReport, dispatch};
+pub use dispatch::{DispatchReport, dispatch};
 pub use observation::{Observation, ObservationLog};
 pub use pipeline::{
-    Env, Evidence, Finished, Gate, Resolution, WaitingFor, finish, gate, gather, review,
+    Env, Evidence, Finished, Gate, Moved, Resolution, WaitingFor, finish, gate, gather, review,
     verify_task,
 };
 pub use probe::{ProbePolicy, probe_url};
+pub use release_check::{Checked, check_release};
 pub use remote::{Diff, GhCli, GitHubRead};
 pub use reviewer::{LlmReviewer, NoReviewer, ReviewReply, ReviewRequest, Reviewer};
 pub use tamper::{TamperFlag, TamperReport, scan_diff};

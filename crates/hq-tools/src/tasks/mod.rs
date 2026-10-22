@@ -30,7 +30,8 @@ pub mod verify;
 use activity::TaskActivityTool;
 use from_note::TaskCreateFromNoteTool;
 pub use json::{
-    added_tags, apply_dependency_changes, notify_ready_for_review, notify_recipients, notify_tags,
+    TASK_EXCEPTION_SOURCE, TASK_REVIEW_SOURCE, added_tags, apply_dependency_changes,
+    notify_owner_exception, notify_ready_for_review, notify_recipients, notify_tags,
     notify_unblocked, task_json, task_json_with_warnings, unblocked_by_transition,
 };
 pub use placement::{
@@ -76,6 +77,26 @@ pub fn create_task_tools_for_chat(
     settings: TasksConfig,
     origin_thread: Option<String>,
 ) -> Vec<Box<dyn HqTool>> {
+    build_task_tools(
+        vault_path,
+        vault,
+        db,
+        settings,
+        origin_thread,
+        Arc::new(verify::GhCli),
+    )
+}
+
+/// The task tools reading GitHub through `gh`. The release check is the only tool code that does;
+/// tests pass a client with canned answers.
+pub(crate) fn build_task_tools(
+    vault_path: PathBuf,
+    vault: Arc<VaultClient>,
+    db: Arc<Database>,
+    settings: TasksConfig,
+    origin_thread: Option<String>,
+    gh: Arc<dyn verify::GitHubRead>,
+) -> Vec<Box<dyn HqTool>> {
     // The completion policy lives in the database, so the web server, the daemon and an MCP
     // server all meet the same rule. Whoever builds the tools writes its configuration there.
     if let Err(e) = db.with_conn(|c| {
@@ -93,6 +114,7 @@ pub fn create_task_tools_for_chat(
         settings: settings.clone(),
         vault_path: vault_path.clone(),
         db: db.clone(),
+        gh: gh.clone(),
     };
     vec![
         Box::new(create()),
@@ -137,6 +159,7 @@ pub fn create_task_tools_for_chat(
             settings: settings.clone(),
             vault_path: vault_path.clone(),
             db: db.clone(),
+            gh: gh.clone(),
         }),
         Box::new(TaskTimeReportTool {
             settings: settings.clone(),

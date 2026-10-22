@@ -27,6 +27,11 @@ const SHARED_BRANCHES: [&str; 7] = [
     "staging",
     "production",
 ];
+/// Whether `branch` is where work lands rather than where one task's work was done.
+pub fn is_shared_branch(branch: &str) -> bool {
+    SHARED_BRANCHES.contains(&branch.to_ascii_lowercase().as_str())
+}
+
 /// Largest git config read to find a remote.
 const MAX_CONFIG_BYTES: u64 = 256 * 1024;
 /// Pull requests taken from one branch lookup.
@@ -202,7 +207,7 @@ pub async fn discover(
         return out;
     }
     for lease in &facts.branches {
-        if SHARED_BRANCHES.contains(&lease.branch.to_ascii_lowercase().as_str()) {
+        if is_shared_branch(&lease.branch) {
             continue;
         }
         let mut candidates = repos.clone();

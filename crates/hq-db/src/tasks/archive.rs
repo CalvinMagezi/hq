@@ -175,6 +175,7 @@ pub fn purge_task(conn: &Connection, id: &str, actor: &str) -> Result<Vec<String
                 "task_work_sessions",
                 "task_checkpoints",
                 "task_verdicts",
+                "task_verification_waits",
             ] {
                 conn.execute(
                     &format!("DELETE FROM {table} WHERE task_id = ?1"),

@@ -74,6 +74,7 @@ fn pass_for<'a>(
         applied: true,
         canary: false,
         submission: None,
+        waiting_for: None,
     }
 }
 
@@ -672,7 +673,7 @@ fn the_queue_lists_only_tasks_without_a_verdict_for_their_current_submission() {
     make(&db, "idle", &initiative, None).unwrap();
 
     let ids = |db: &Database| -> Vec<String> {
-        db.with_conn(|c| verification_candidates(c, &cfg))
+        db.with_conn(|c| verification_candidates(c, &cfg, chrono::Utc::now().timestamp()))
             .unwrap()
             .into_iter()
             .map(|c| c.task.id)
@@ -726,7 +727,7 @@ fn the_queue_puts_what_others_wait_on_first_then_tier_two_then_the_oldest() {
         .unwrap();
 
     let order: Vec<String> = db
-        .with_conn(|c| verification_candidates(c, &cfg))
+        .with_conn(|c| verification_candidates(c, &cfg, chrono::Utc::now().timestamp()))
         .unwrap()
         .into_iter()
         .map(|c| c.task.id)
@@ -795,4 +796,190 @@ fn reviewer_runs_are_counted_from_the_verdicts_that_recorded_one() {
     })
     .unwrap();
     assert_eq!(db.with_conn(reviewer_runs_recorded).unwrap(), 1);
+}
+
+// ---- waits and rework ----
+
+fn failing_verdict(db: &Database, task: &str) -> Verdict {
+    let (obs, crit) = good_evidence();
+    db.with_conn(|c| {
+        record_verdict(
+            c,
+            &NewVerdict {
+                verdict: VERDICT_FAIL,
+                level: LEVEL_NONE,
+                applied: false,
+                reasons: "the tests do not cover closed jobs",
+                waiting_for: Some(WAIT_WORKER),
+                ..pass_for(task, "verify:run-1", &obs, &crit)
+            },
+        )
+    })
+    .unwrap()
+}
+
+fn resubmit(db: &Database, id: &str) {
+    move_to(db, id, STATUS_IN_PROGRESS).unwrap();
+    set_status_as(db, id, STATUS_READY_FOR_REVIEW, "alpha");
+}
+
+#[test]
+fn a_wait_hides_a_task_until_it_is_due_and_counts_looks_at_one_submission() {
+    let (db, initiative) = setup();
+    let cfg = VerificationConfig::default();
+    in_review(&db, &initiative, "tk-1", "alpha");
+    let queued = |at: i64| {
+        db.with_conn(|c| verification_candidates(c, &cfg, at))
+            .unwrap()
+            .len()
+    };
+    let first = db
+        .with_conn(|c| record_wait(c, "tk-1", WAIT_CI, "checks are running", 300, 1_000))
+        .unwrap();
+    assert_eq!((first.tries, first.retry_at), (1, 1_300));
+    assert_eq!(queued(1_100), 0, "waiting out its retry");
+    assert_eq!(queued(1_300), 1, "due");
+
+    let second = db
+        .with_conn(|c| record_wait(c, "tk-1", WAIT_BUDGET, "ceiling used", 1_800, 1_300))
+        .unwrap();
+    assert_eq!(
+        (second.tries, second.waiting_for.as_str()),
+        (2, WAIT_BUDGET)
+    );
+    assert_eq!(
+        db.with_conn(|c| current_wait(c, "tk-1")).unwrap().unwrap(),
+        second
+    );
+}
+
+#[test]
+fn a_wait_for_an_earlier_submission_is_not_a_wait_for_this_one() {
+    let (db, initiative) = setup();
+    let cfg = VerificationConfig::default();
+    in_review(&db, &initiative, "tk-1", "alpha");
+    db.with_conn(|c| record_wait(c, "tk-1", WAIT_CI, "checks are running", 10_000, 0))
+        .unwrap();
+    resubmit(&db, "tk-1");
+    assert!(db.with_conn(|c| current_wait(c, "tk-1")).unwrap().is_none());
+    assert_eq!(
+        db.with_conn(|c| verification_candidates(c, &cfg, 1))
+            .unwrap()
+            .len(),
+        1,
+        "the new submission is looked at at once"
+    );
+    let again = db
+        .with_conn(|c| record_wait(c, "tk-1", WAIT_CI, "checks are running", 60, 1))
+        .unwrap();
+    assert_eq!(again.tries, 1, "a new submission starts counting over");
+}
+
+#[test]
+fn a_verdict_names_who_acts_next_only_from_the_known_set_and_never_for_a_pass() {
+    let (db, initiative) = setup();
+    in_review(&db, &initiative, "tk-1", "alpha");
+    let (obs, crit) = good_evidence();
+    let record = |waiting_for: Option<&'static str>, verdict: &'static str| {
+        db.with_conn(|c| {
+            record_verdict(
+                c,
+                &NewVerdict {
+                    verdict,
+                    waiting_for,
+                    applied: false,
+                    ..pass_for("tk-1", "verify:run-1", &obs, &crit)
+                },
+            )
+        })
+    };
+    assert!(record(Some("the moon"), VERDICT_FAIL).is_err());
+    let err = record(Some(WAIT_WORKER), VERDICT_PASS).unwrap_err();
+    assert!(err.to_string().contains("waits on no one"), "{err}");
+    assert_eq!(
+        record(Some(WAIT_OWNER), VERDICT_FAIL)
+            .unwrap()
+            .waiting_for
+            .as_deref(),
+        Some("owner")
+    );
+}
+
+#[test]
+fn a_failed_task_goes_back_to_to_do_keeping_its_worker_with_the_findings_to_resume_from() {
+    let (db, initiative) = setup();
+    in_review(&db, &initiative, "tk-1", "alpha");
+    assign(&db, "tk-1", &["alpha"]);
+    failing_verdict(&db, "tk-1");
+    let done = db
+        .with_conn(|c| {
+            send_back(
+                c,
+                "tk-1",
+                "verify:run-1",
+                "the tests do not cover closed jobs",
+                3,
+            )
+        })
+        .unwrap();
+    assert_eq!(done, Reworked::Returned { rejections: 1 });
+
+    let task = get_one(&db, "tk-1");
+    assert_eq!(task.status, STATUS_TO_DO);
+    assert_eq!(task.assignees, ["alpha"]);
+    let checkpoint = db
+        .with_conn(|c| latest_checkpoint(c, "tk-1"))
+        .unwrap()
+        .unwrap();
+    assert!(checkpoint.summary.contains("closed jobs"), "{checkpoint:?}");
+    assert!(checkpoint.next_step.contains("ready_for_review"));
+    let comments = db.with_conn(|c| list_comments(c, "tk-1")).unwrap();
+    let note = &comments.last().unwrap().body;
+    assert!(note.contains("return 1 of 3"), "{note}");
+    assert!(
+        note.contains("> the tests do not cover closed jobs"),
+        "{note}"
+    );
+    assert_eq!(db.with_conn(|c| rejections(c, "tk-1")).unwrap(), 1);
+}
+
+#[test]
+fn the_third_return_is_one_exception_for_the_owner_not_another_bounce() {
+    let (db, initiative) = setup();
+    in_review(&db, &initiative, "tk-1", "alpha");
+    let mut outcomes = Vec::new();
+    for round in 0..3 {
+        if round > 0 {
+            resubmit(&db, "tk-1");
+        }
+        failing_verdict(&db, "tk-1");
+        outcomes.push(
+            db.with_conn(|c| send_back(c, "tk-1", "verify:run-1", "still failing", 3))
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        outcomes,
+        [
+            Reworked::Returned { rejections: 1 },
+            Reworked::Returned { rejections: 2 },
+            Reworked::Escalated { rejections: 3 },
+        ]
+    );
+    let task = get_one(&db, "tk-1");
+    assert_eq!(task.status, STATUS_BLOCKED);
+    assert_eq!(task.waiting_on.as_deref(), Some("owner"));
+    assert!(task.blocked_reason.unwrap().contains("3 times"));
+    let wait = db.with_conn(|c| current_wait(c, "tk-1")).unwrap().unwrap();
+    assert_eq!(wait.waiting_for, WAIT_OWNER);
+}
+
+#[test]
+fn only_a_task_waiting_for_review_can_be_sent_back() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let err = db
+        .with_conn(|c| send_back(c, "tk-1", "verify:run-1", "x", 3))
+        .unwrap_err();
+    assert!(err.to_string().contains("not waiting for review"), "{err}");
 }

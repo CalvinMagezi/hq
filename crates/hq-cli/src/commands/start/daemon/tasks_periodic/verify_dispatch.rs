@@ -11,18 +11,17 @@ use anyhow::Result;
 use hq_core::config::{HqConfig, VerificationMode};
 use hq_db::Database;
 use hq_tools::tasks::verify::{
-    Backoff, DispatchReport, Env, GhCli, LlmReviewer, NoReviewer, Reviewer, dispatch,
+    DispatchReport, Env, GhCli, LlmReviewer, NoReviewer, Reviewer, dispatch,
 };
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 /// How long one pass may run before the rest of the queue is left to the next one.
 const PASS_DEADLINE: Duration = Duration::from_secs(20 * 60);
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
-static BACKOFF: LazyLock<Backoff> = LazyLock::new(Backoff::new);
 
 /// Clears the running flag when a pass ends however it ends.
 struct Running;
@@ -84,7 +83,7 @@ async fn pass(vault_path: &Path, db: &Database, config: &HqConfig) -> Result<Dis
     } else {
         Box::new(NoReviewer)
     };
-    dispatch(&env, reviewer.as_ref(), &BACKOFF).await
+    dispatch(&env, reviewer.as_ref()).await
 }
 
 fn log(report: &DispatchReport) {
@@ -99,6 +98,8 @@ fn log(report: &DispatchReport) {
         attempted = report.attempted,
         recorded = report.recorded,
         completed = report.completed,
+        returned = report.returned,
+        escalated = report.escalated,
         deferred = report.deferred,
         voided = report.voided,
         "verify-dispatch: pass done"

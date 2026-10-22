@@ -576,28 +576,40 @@ impl HqTool for TaskGetTool {
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
         let stale_hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
-        let (task, subtasks, dependents, events, sessions, time, links, checkpoint, stale, verdict) =
-            self.db.with_conn(move |c| {
-                let task = t::get_task(c, &id)?
-                    .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
-                crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
-                let subtasks = t::list_subtasks(c, &task.id)?;
-                let dependents = t::list_dependents(c, &task.id)?;
-                let events = t::list_task_events(c, &task.id)?;
-                // A lease that went silent is closed first, so a crashed session is
-                // never shown as still working.
-                t::expire_stale_leases(c, ttl)?;
-                let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
-                let time = t::time_summary(c, &task.id, ttl)?;
-                let links = t::list_task_links(c, &task.id)?;
-                let checkpoint = t::latest_checkpoint(c, &task.id)?;
-                let stale = t::is_stale_now(c, &task.id, stale_hours)?;
-                let verdict = t::latest_verdict(c, &task.id)?;
-                Ok::<_, anyhow::Error>((
-                    task, subtasks, dependents, events, sessions, time, links, checkpoint, stale,
-                    verdict,
-                ))
-            })?;
+        let (
+            task,
+            subtasks,
+            dependents,
+            events,
+            sessions,
+            time,
+            links,
+            checkpoint,
+            stale,
+            verdict,
+            waiting,
+        ) = self.db.with_conn(move |c| {
+            let task =
+                t::get_task(c, &id)?.ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
+            crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
+            let subtasks = t::list_subtasks(c, &task.id)?;
+            let dependents = t::list_dependents(c, &task.id)?;
+            let events = t::list_task_events(c, &task.id)?;
+            // A lease that went silent is closed first, so a crashed session is
+            // never shown as still working.
+            t::expire_stale_leases(c, ttl)?;
+            let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
+            let time = t::time_summary(c, &task.id, ttl)?;
+            let links = t::list_task_links(c, &task.id)?;
+            let checkpoint = t::latest_checkpoint(c, &task.id)?;
+            let stale = t::is_stale_now(c, &task.id, stale_hours)?;
+            let verdict = t::latest_verdict(c, &task.id)?;
+            let waiting = t::waiting_state(c, &task)?;
+            Ok::<_, anyhow::Error>((
+                task, subtasks, dependents, events, sessions, time, links, checkpoint, stale,
+                verdict, waiting,
+            ))
+        })?;
         let mut value = task_json(&task);
         value["subtasks"] = json!(subtasks.iter().map(task_summary).collect::<Vec<_>>());
         value["dependents"] = json!(dependents.iter().map(task_summary).collect::<Vec<_>>());
@@ -618,6 +630,10 @@ impl HqTool for TaskGetTool {
             }),
             None => Value::Null,
         };
+        // Who acts next, for a task that is not simply being worked on.
+        if let Some(w) = &waiting {
+            value["waiting_for"] = json!({ "who": w.who, "reason": w.reason });
+        }
         if let Some(cp) = &checkpoint {
             value["checkpoint"] = super::tools_lease::resume_json(cp);
         }
@@ -663,6 +679,7 @@ pub(super) struct TaskUpdateTool {
     pub(super) settings: TasksConfig,
     pub(super) vault_path: PathBuf,
     pub(super) db: Arc<Database>,
+    pub(super) gh: Arc<dyn super::verify::GitHubRead>,
 }
 
 #[async_trait]
@@ -765,6 +782,30 @@ impl HqTool for TaskUpdateTool {
         let add_deps = tags_from_args(&args, "add_depends_on");
         let remove_deps = tags_from_args(&args, "remove_depends_on");
 
+        // Handing work over is the cheapest time to find what it produced.
+        let mut handover_warning = None;
+        if matches!(
+            patch.status.as_deref(),
+            Some(t::STATUS_READY_FOR_REVIEW | t::STATUS_COMPLETE)
+        ) && let Some(current) = self.db.with_conn(|c| t::get_task(c, &id))?
+            && !matches!(
+                current.status.as_str(),
+                t::STATUS_READY_FOR_REVIEW | t::STATUS_COMPLETE
+            )
+        {
+            match super::verify::check_release(
+                &self.db,
+                self.gh.as_ref(),
+                &self.settings.verification,
+                &current,
+            )
+            .await
+            {
+                super::verify::Checked::Refuse(message) => bail!(message),
+                super::verify::Checked::Warn(message) => handover_warning = Some(message),
+                super::verify::Checked::Fine => {}
+            }
+        }
         let id_for_update = id.clone();
         let hints = ActorHints::from_args(&args, "actor");
         let settings = self.settings.clone();
@@ -841,6 +882,9 @@ impl HqTool for TaskUpdateTool {
         }
         let mut out = task_json_with_warnings(&task);
         if let Some(warning) = lease_warning {
+            add_warning(&mut out, warning);
+        }
+        if let Some(warning) = handover_warning {
             add_warning(&mut out, warning);
         }
         if queued {

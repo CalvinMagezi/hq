@@ -2,79 +2,39 @@
 //! verify them a few at a time (docs/plans/task-verification.md, "Verifier").
 //!
 //! One pass is bounded: at most [`MAX_PER_PASS`] tasks, [`Env::cfg`]'s concurrency at once. A task
-//! that cannot be decided yet (checks running, the reviewer's ceiling reached) is remembered with
-//! a retry time, so a long queue of such tasks does not take every pass. The retry time is held in
-//! memory and is keyed by the submission, so a restart only costs one extra look and a resubmitted
-//! task is looked at again at once.
+//! that cannot be decided yet (checks running, the reviewer's ceiling reached) has a wait stored
+//! in the database with its retry time, so a long queue of such tasks does not take every pass,
+//! a restart forgets nothing, and the web server can say what each task is waiting on.
 
-use super::pipeline::{Env, Finished, verify_task};
+use super::pipeline::{Env, Finished, Moved, verify_task};
 use super::reviewer::Reviewer;
 use anyhow::Result;
 use futures::future::join_all;
 use hq_core::config::VerificationMode;
 use hq_db::tasks as t;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 /// Tasks looked at in one pass, so one pass ends in bounded time however long the queue is.
 pub const MAX_PER_PASS: usize = 40;
 
-/// When tasks were last deferred, and until when to leave them alone.
-#[derive(Default)]
-pub struct Backoff {
-    until: Mutex<HashMap<String, Instant>>,
-}
-
-impl Backoff {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn key(c: &t::Candidate) -> String {
-        format!("{}@{}", c.task.id, c.marker.unwrap_or_default())
-    }
-
-    fn waiting(&self, c: &t::Candidate, now: Instant) -> bool {
-        let map = self.until.lock().unwrap_or_else(|p| p.into_inner());
-        map.get(&Self::key(c)).is_some_and(|until| *until > now)
-    }
-
-    fn defer(&self, c: &t::Candidate, secs: u64, now: Instant) {
-        let mut map = self.until.lock().unwrap_or_else(|p| p.into_inner());
-        map.insert(Self::key(c), now + Duration::from_secs(secs));
-    }
-
-    /// Forgets everything that is no longer in the queue, so the map cannot grow without bound.
-    fn retain_only(&self, queue: &[t::Candidate]) {
-        let live: std::collections::HashSet<String> = queue.iter().map(Self::key).collect();
-        let mut map = self.until.lock().unwrap_or_else(|p| p.into_inner());
-        map.retain(|k, _| live.contains(k));
-    }
-
-    pub fn len(&self) -> usize {
-        self.until.lock().unwrap_or_else(|p| p.into_inner()).len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
+/// Seconds to leave a task whose verification failed to run at all.
+const ERROR_RETRY_SECS: u64 = 300;
 
 /// What one pass did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DispatchReport {
-    /// Tasks waiting for a verdict when the pass began.
+    /// Tasks due for a verdict when the pass began.
     pub queued: usize,
-    /// Of those, left alone this pass because they are in a retry wait.
-    pub backed_off: usize,
     /// Verifications started.
     pub attempted: usize,
     /// Verdicts recorded.
     pub recorded: usize,
     /// Tasks a pass completed.
     pub completed: usize,
-    /// Verifications that could not be decided and will be tried again.
+    /// Tasks sent back to their worker with the findings.
+    pub returned: usize,
+    /// Tasks that went to the owner as an exception.
+    pub escalated: usize,
+    /// Verifications that could not be decided yet; their wait is stored.
     pub deferred: usize,
     /// Verdicts dropped because the work changed while it was checked.
     pub voided: usize,
@@ -83,32 +43,19 @@ pub struct DispatchReport {
 }
 
 /// Runs one pass. Does nothing when verification is off.
-pub async fn dispatch(
-    env: &Env<'_>,
-    reviewer: &dyn Reviewer,
-    backoff: &Backoff,
-) -> Result<DispatchReport> {
+pub async fn dispatch(env: &Env<'_>, reviewer: &dyn Reviewer) -> Result<DispatchReport> {
     let mut report = DispatchReport::default();
     if env.cfg.mode == VerificationMode::Off {
         return Ok(report);
     }
     let cfg = env.cfg.clone();
+    let now = chrono::Utc::now().timestamp();
     let queue = env
         .db
-        .with_conn(move |c| t::verification_candidates(c, &cfg))?;
-    backoff.retain_only(&queue);
+        .with_conn(move |c| t::verification_candidates(c, &cfg, now))?;
     report.queued = queue.len();
 
-    let now = Instant::now();
-    let mut ready: Vec<&t::Candidate> = Vec::new();
-    for c in &queue {
-        if backoff.waiting(c, now) {
-            report.backed_off += 1;
-        } else if ready.len() < MAX_PER_PASS {
-            ready.push(c);
-        }
-    }
-
+    let ready: Vec<&t::Candidate> = queue.iter().take(MAX_PER_PASS).collect();
     for batch in ready.chunks(env.cfg.parallelism()) {
         let allow_review = review_allowed(env)?;
         let runs = batch
@@ -117,35 +64,44 @@ pub async fn dispatch(
         for (c, result) in join_all(runs).await {
             report.attempted += 1;
             match result {
-                Ok(Finished::Recorded { completed, .. }) => {
+                Ok(Finished::Recorded { moved, .. }) => {
                     report.recorded += 1;
-                    if completed {
-                        report.completed += 1;
+                    match moved {
+                        Moved::Completed => report.completed += 1,
+                        Moved::Returned => report.returned += 1,
+                        Moved::Escalated => report.escalated += 1,
+                        Moved::Nothing => {}
                     }
                 }
-                Ok(Finished::Deferred {
-                    retry_after_secs, ..
-                }) => {
-                    report.deferred += 1;
-                    backoff.defer(c, retry_after_secs, Instant::now());
-                }
+                Ok(Finished::Deferred { .. }) => report.deferred += 1,
                 Ok(Finished::Voided { reason }) => {
                     report.voided += 1;
                     tracing::info!(task = %c.task.display_id, %reason, "verify-dispatch: verdict voided");
                 }
                 Err(e) => {
-                    // A task that cannot be read is retried after a while, not every minute.
-                    backoff.defer(c, ERROR_RETRY_SECS, Instant::now());
                     report.errors.push(format!("{}: {e:#}", c.task.display_id));
+                    // A task that cannot be read is retried after a while, not every minute.
+                    let (id, reason) = (c.task.id.clone(), format!("could not be verified: {e:#}"));
+                    let stored = env.db.with_conn(move |conn| {
+                        t::record_wait(
+                            conn,
+                            &id,
+                            t::WAIT_VERIFIER,
+                            &reason,
+                            ERROR_RETRY_SECS,
+                            chrono::Utc::now().timestamp(),
+                        )
+                        .map(|_| ())
+                    });
+                    if let Err(e) = stored {
+                        tracing::warn!(error = %e, "verify-dispatch: could not store the wait");
+                    }
                 }
             }
         }
     }
     Ok(report)
 }
-
-/// How long to leave a task whose verification failed to run.
-const ERROR_RETRY_SECS: u64 = 300;
 
 /// Whether a reviewer may be called for the next batch. In enforce mode always (the monthly
 /// ceiling is what limits it). In shadow mode only until the sample is used, so a try of E2 prices

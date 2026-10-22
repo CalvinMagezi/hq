@@ -3340,6 +3340,7 @@ async fn task_get_shows_how_a_task_was_verified() {
                 applied: false,
                 canary: false,
                 submission: None,
+                waiting_for: None,
             },
         )
         .map(|_| ())
@@ -4672,4 +4673,185 @@ fn only_project_relative_checkpoint_paths_reach_the_scope() {
     ]});
     super::tools_lease::hide_machine_paths(&mut resume);
     assert_eq!(resume["files"], json!(["src/lib.rs", "docs/a b.md"]));
+}
+
+/// Tools over a database file inside the vault, so the owner-notice writes land where the test
+/// can read them.
+fn tools_over_file_db(
+    vault_path: &std::path::Path,
+    verification: hq_core::config::VerificationConfig,
+    gh: Arc<dyn crate::tasks::verify::GitHubRead>,
+) -> Vec<Box<dyn HqTool>> {
+    let db = Arc::new(Database::open(&vault_path.join("_data").join("vault.db")).unwrap());
+    let vault = Arc::new(VaultClient::new(vault_path.to_path_buf()).unwrap());
+    let settings = hq_core::config::TasksConfig {
+        verification,
+        ..Default::default()
+    };
+    crate::tasks::build_task_tools(vault_path.to_path_buf(), vault, db, settings, None, gh)
+}
+
+fn pending_value_items(vault_path: &std::path::Path) -> usize {
+    let value_db = Database::open(&vault_path.join("_data").join("vault.db")).unwrap();
+    hq_db::value_items::list_by_state(&value_db, hq_core::types::ValueState::Pending)
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+async fn the_owner_is_asked_to_review_only_what_hq_will_not_verify() {
+    use hq_core::config::{VerificationConfig, VerificationMode};
+    for (mode, asked) in [
+        (VerificationMode::Off, 1),
+        (VerificationMode::Shadow, 1),
+        (VerificationMode::Enforce, 0),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = tools_over_file_db(
+            dir.path(),
+            VerificationConfig {
+                mode,
+                ..Default::default()
+            },
+            Arc::new(crate::tasks::verify::remote::fake::FakeGitHub::default()),
+        );
+        let task = call_tool(&tools, "task_create", json!({ "title": "Write the note" }))
+            .await
+            .unwrap();
+        let claim = call_tool(
+            &tools,
+            "task_claim",
+            json!({ "task_id": task["display_id"], "actor": "builder" }),
+        )
+        .await
+        .unwrap();
+        call_tool(
+            &tools,
+            "task_release",
+            json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "done" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(pending_value_items(dir.path()), asked, "{mode:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_code_task_handed_over_with_nothing_to_verify_is_told_what_to_link() {
+    use crate::tasks::verify::remote::fake::FakeGitHub;
+    use hq_core::config::{ReleaseCheck, VerificationConfig, VerificationMode};
+    let dir = tempfile::tempdir().unwrap();
+    let gh = FakeGitHub::default().with("repos/example/repo/pulls/7", json!({}));
+    let tools = tools_over_file_db(
+        dir.path(),
+        VerificationConfig {
+            mode: VerificationMode::Enforce,
+            release_check: ReleaseCheck::Enforce,
+            ..Default::default()
+        },
+        Arc::new(gh),
+    );
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Fix the guard", "tags": ["code"] }),
+    )
+    .await
+    .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+
+    // Refused, with the exact call to make, and the agent keeps its lease.
+    let refused = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "pushed" }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("task_link_add") && refused.contains(&id),
+        "{refused}"
+    );
+    let still = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(still["status"], "in_progress");
+    assert_eq!(pending_value_items(dir.path()), 0);
+
+    // task_update is held to the same rule.
+    let update = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "ready_for_review", "lease": claim["lease"] }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(update.contains("task_link_add"), "{update}");
+
+    // Linked, it goes through.
+    call_tool(
+        &tools,
+        "task_link_add",
+        json!({ "task_id": id, "kind": "pr", "ref": "example/repo#7", "direction": "produced" }),
+    )
+    .await
+    .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "pushed" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(released["task"]["status"], "ready_for_review");
+}
+
+#[tokio::test]
+async fn under_warn_the_handover_goes_through_with_what_to_link() {
+    use crate::tasks::verify::remote::fake::FakeGitHub;
+    use hq_core::config::{VerificationConfig, VerificationMode};
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tools_over_file_db(
+        dir.path(),
+        VerificationConfig {
+            mode: VerificationMode::Enforce,
+            ..Default::default()
+        },
+        Arc::new(FakeGitHub::default()),
+    );
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Fix the guard", "tags": ["code"] }),
+    )
+    .await
+    .unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": task["display_id"], "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "pushed" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(released["task"]["status"], "ready_for_review");
+    assert!(
+        released["warnings"].to_string().contains("task_link_add"),
+        "{released}"
+    );
 }

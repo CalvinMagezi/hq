@@ -30,7 +30,10 @@ CREATE TABLE IF NOT EXISTS task_verdicts (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     -- The task_events id of the move into review the verdict is about. Timestamps are only
     -- accurate to the second, so a verdict is tied to a submission by this id and never by time.
-    submission INTEGER
+    submission INTEGER,
+    -- Who acts next when the verdict is not a pass: worker, ci, verifier, budget or owner.
+    waiting_for TEXT CHECK (waiting_for IS NULL
+        OR waiting_for IN ('worker', 'ci', 'verifier', 'budget', 'owner'))
 );
 CREATE INDEX IF NOT EXISTS idx_task_verdicts_task ON task_verdicts(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_verdicts_recent ON task_verdicts(created_at);
@@ -56,3 +59,20 @@ CREATE TABLE IF NOT EXISTS task_verification_policy (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 INSERT OR IGNORE INTO task_verification_policy (id, config) VALUES (1, '{}');
+
+-- A task in review that could not be decided yet, and why: checks still running, a reviewer that
+-- gave no answer, a spent ceiling. No verdict is recorded for it, so this row is what says who or
+-- what it is waiting on and when to look again. One row per task; a row for an earlier
+-- submission is ignored.
+CREATE TABLE IF NOT EXISTS task_verification_waits (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+    submission INTEGER,
+    waiting_for TEXT NOT NULL
+        CHECK (waiting_for IN ('worker', 'ci', 'verifier', 'budget', 'owner')),
+    reason TEXT NOT NULL DEFAULT '',
+    -- Looks of this submission that ended in a wait.
+    tries INTEGER NOT NULL DEFAULT 1,
+    -- Unix seconds before which it is not looked at again.
+    retry_at INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

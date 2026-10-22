@@ -183,7 +183,7 @@ fn completed(f: &Finished) -> bool {
     matches!(
         f,
         Finished::Recorded {
-            completed: true,
+            moved: Moved::Completed,
             ..
         }
     )
@@ -303,18 +303,17 @@ async fn deterministic_failures_land_without_a_reviewer_configured() {
     w.cfg.reviewer_monthly_ceiling_usd = None;
     let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
     let done = w.verify(&reviewer).await;
-    let Finished::Recorded {
-        verdict, completed, ..
-    } = done
-    else {
+    let Finished::Recorded { verdict, moved, .. } = done else {
         panic!("expected a recorded verdict");
     };
     assert_eq!(verdict.verdict, "fail");
-    assert!(
-        !completed && verdict.reasons.contains("failed"),
-        "{}",
-        verdict.reasons
+    assert!(verdict.reasons.contains("failed"), "{}", verdict.reasons);
+    assert_eq!(
+        moved,
+        Moved::Returned,
+        "a failed task goes back to its worker"
     );
+    assert_eq!(get(&w.db).status, t::STATUS_TO_DO);
     assert_eq!(reviewer.calls(), 0);
 }
 
@@ -329,19 +328,18 @@ async fn a_review_that_cites_nothing_or_an_unrecorded_fact_does_not_pass() {
         .to_string();
         let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("claude-x", &answer)]);
         let done = w.verify(&reviewer).await;
-        let Finished::Recorded {
-            verdict, completed, ..
-        } = done
-        else {
+        let Finished::Recorded { verdict, moved, .. } = done else {
             panic!("expected a recorded verdict, got {done:?}");
         };
         assert_eq!(verdict.verdict, "inconclusive", "{ids}");
         assert!(
-            !completed && verdict.reasons.contains("without citing"),
+            verdict.reasons.contains("without citing"),
             "{}",
             verdict.reasons
         );
-        assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
+        // Not shown, so not passed: back to the worker to make it demonstrable.
+        assert_eq!(moved, Moved::Returned);
+        assert_eq!(get(&w.db).status, t::STATUS_TO_DO);
     }
 }
 
@@ -350,13 +348,10 @@ async fn a_failed_criterion_fails_the_task_with_the_reviewers_reason() {
     let w = World::code(merged_pr_github(CLEAN_DIFF));
     let answer = w.answer("fail", &["pr_state"], &[]).await;
     let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("claude-x", &answer)]);
-    let Finished::Recorded {
-        verdict, completed, ..
-    } = w.verify(&reviewer).await
-    else {
+    let Finished::Recorded { verdict, moved, .. } = w.verify(&reviewer).await else {
         panic!("expected a verdict");
     };
-    assert!(!completed);
+    assert!(moved != Moved::Completed);
     assert_eq!(verdict.verdict, "fail");
     assert!(
         verdict.reasons.contains("closed jobs refuse applications"),
@@ -549,7 +544,7 @@ async fn nothing_to_inspect_is_inconclusive_and_sent_back_to_the_worker() {
     let Finished::Recorded {
         verdict,
         waiting_for,
-        completed,
+        moved,
     } = w.verify(&reviewer).await
     else {
         panic!("expected a verdict");
@@ -557,10 +552,13 @@ async fn nothing_to_inspect_is_inconclusive_and_sent_back_to_the_worker() {
     assert_eq!(verdict.verdict, "inconclusive");
     assert_eq!(waiting_for, Some(WaitingFor::Worker));
     assert!(
-        !completed && verdict.reasons.contains("nothing to inspect"),
+        verdict.reasons.contains("nothing to inspect"),
         "{}",
         verdict.reasons
     );
+    // Never completed, and sent back with what to link.
+    assert_eq!(moved, Moved::Returned);
+    assert_eq!(get(&w.db).status, t::STATUS_TO_DO);
     assert_eq!(verdict.artifact, "none");
     assert_eq!(reviewer.calls(), 0);
 }
@@ -796,15 +794,12 @@ async fn a_flag_the_reviewer_does_not_justify_fails_and_one_it_ignores_is_inconc
             reply("openai/gpt-5", &unjustified),
         ],
     );
-    let Finished::Recorded {
-        verdict, completed, ..
-    } = w.verify(&reviewers).await
-    else {
+    let Finished::Recorded { verdict, moved, .. } = w.verify(&reviewers).await else {
         panic!("expected a verdict");
     };
     assert_eq!(verdict.verdict, "fail");
     assert!(
-        !completed && verdict.reasons.contains("weakens a check without a reason"),
+        moved != Moved::Completed && verdict.reasons.contains("weakens a check without a reason"),
         "{}",
         verdict.reasons
     );
@@ -866,7 +861,7 @@ async fn a_completed_or_already_verified_task_is_not_in_the_queue() {
     let w = World::code(merged_pr_github(CLEAN_DIFF));
     let cfg = w.cfg.clone();
     let queued = |db: &Database| {
-        db.with_conn(|c| t::verification_candidates(c, &cfg))
+        db.with_conn(|c| t::verification_candidates(c, &cfg, chrono::Utc::now().timestamp()))
             .unwrap()
             .len()
     };
@@ -884,14 +879,10 @@ async fn a_completed_or_already_verified_task_is_not_in_the_queue() {
 
 // ---- dispatch ----
 
-use super::dispatch::{Backoff, dispatch};
+use super::dispatch::dispatch;
 
-async fn run_pass(
-    w: &World,
-    reviewer: &ScriptedReviewer,
-    backoff: &Backoff,
-) -> super::dispatch::DispatchReport {
-    dispatch(&w.env(), reviewer, backoff).await.unwrap()
+async fn run_pass(w: &World, reviewer: &ScriptedReviewer) -> super::dispatch::DispatchReport {
+    dispatch(&w.env(), reviewer).await.unwrap()
 }
 
 #[tokio::test]
@@ -899,7 +890,7 @@ async fn dispatch_does_nothing_while_verification_is_off() {
     let mut w = World::code(merged_pr_github(CLEAN_DIFF));
     w.cfg.mode = VerificationMode::Off;
     let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
-    let report = run_pass(&w, &reviewer, &Backoff::new()).await;
+    let report = run_pass(&w, &reviewer).await;
     assert_eq!(report, Default::default());
     assert!(verdicts(&w.db).is_empty());
     assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
@@ -916,9 +907,8 @@ async fn a_pass_completes_the_waiting_tasks_and_leaves_an_empty_queue() {
         )
         .await;
     let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
-    let backoff = Backoff::new();
 
-    let report = run_pass(&w, &reviewer, &backoff).await;
+    let report = run_pass(&w, &reviewer).await;
     assert_eq!(
         (
             report.queued,
@@ -931,7 +921,7 @@ async fn a_pass_completes_the_waiting_tasks_and_leaves_an_empty_queue() {
     );
     assert_eq!(get(&w.db).status, t::STATUS_COMPLETE);
 
-    let again = run_pass(&w, &reviewer, &backoff).await;
+    let again = run_pass(&w, &reviewer).await;
     assert_eq!((again.queued, again.attempted), (0, 0));
     assert_eq!(reviewer.calls(), 1, "a verified task is not reviewed again");
 }
@@ -942,29 +932,35 @@ async fn a_deferred_task_waits_out_its_retry_but_a_resubmission_is_looked_at_at_
     // No ceiling: the task needs a reviewer, which is deferred, not failed.
     w.cfg.reviewer_monthly_ceiling_usd = None;
     let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
-    let backoff = Backoff::new();
 
-    let first = run_pass(&w, &reviewer, &backoff).await;
+    let first = run_pass(&w, &reviewer).await;
     assert_eq!(
         (first.attempted, first.deferred, first.recorded),
         (1, 1, 0),
         "{first:?}"
     );
     assert!(verdicts(&w.db).is_empty(), "a deferral records nothing");
+    let wait =
+        w.db.with_conn(|c| t::current_wait(c, "tk-1"))
+            .unwrap()
+            .unwrap();
+    assert_eq!((wait.waiting_for.as_str(), wait.tries), ("budget", 1));
+    assert!(wait.reason.contains("ceiling"), "{}", wait.reason);
 
-    let second = run_pass(&w, &reviewer, &backoff).await;
-    assert_eq!(
-        (second.queued, second.backed_off, second.attempted),
-        (1, 1, 0),
-        "{second:?}"
-    );
+    let second = run_pass(&w, &reviewer).await;
+    assert_eq!((second.queued, second.attempted), (0, 0), "{second:?}");
 
     // The worker sends it back and submits again: a new submission is not in any wait.
     set_status(&w.db, t::STATUS_IN_PROGRESS, "worker");
     set_status(&w.db, t::STATUS_READY_FOR_REVIEW, "worker");
-    let third = run_pass(&w, &reviewer, &backoff).await;
-    assert_eq!((third.backed_off, third.attempted), (0, 1), "{third:?}");
+    let third = run_pass(&w, &reviewer).await;
+    assert_eq!((third.queued, third.attempted), (1, 1), "{third:?}");
     assert_eq!(reviewer.calls(), 0);
+    let wait =
+        w.db.with_conn(|c| t::current_wait(c, "tk-1"))
+            .unwrap()
+            .unwrap();
+    assert_eq!(wait.tries, 1, "a new submission counts from one");
 }
 
 #[tokio::test]
@@ -982,7 +978,7 @@ async fn shadow_mode_records_what_it_would_decide_and_moves_nothing() {
         .await;
     let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
 
-    let report = run_pass(&w, &reviewer, &Backoff::new()).await;
+    let report = run_pass(&w, &reviewer).await;
     assert_eq!((report.recorded, report.completed), (1, 0), "{report:?}");
     assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
     let v = &verdicts(&w.db)[0];
@@ -1002,7 +998,7 @@ async fn shadow_mode_stops_calling_the_reviewer_once_its_sample_is_used() {
     sync(&w.db, &w.cfg);
     let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
 
-    let report = run_pass(&w, &reviewer, &Backoff::new()).await;
+    let report = run_pass(&w, &reviewer).await;
     assert_eq!(report.recorded, 1, "{report:?}");
     assert_eq!(reviewer.calls(), 0);
     let v = &verdicts(&w.db)[0];
@@ -1030,4 +1026,197 @@ async fn a_verdict_about_work_that_was_submitted_again_during_the_check_is_dropp
     .unwrap();
     assert!(matches!(recorded, Finished::Voided { .. }), "{recorded:?}");
     assert!(verdicts(&w.db).is_empty());
+}
+
+fn failing_checks_github() -> FakeGitHub {
+    FakeGitHub::default()
+        .with(
+            "repos/example/repo/pulls/7",
+            json!({"state": "closed", "merged": true, "head": {"sha": "abc123"}, "base": {"ref": "main"},
+                   "user": {"login": "dev"}, "changed_files": 1, "mergeable": null}),
+        )
+        .with(
+            "repos/example/repo/commits/abc123/check-runs?per_page=100",
+            json!({"check_runs": [{"name": "test", "status": "completed", "conclusion": "failure"}]}),
+        )
+        .with_diff("example/repo", 7, CLEAN_DIFF, false)
+}
+
+#[tokio::test]
+async fn a_failing_task_is_sent_back_with_findings_and_the_third_failure_goes_to_the_owner() {
+    let w = World::code(failing_checks_github());
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
+    let mut seen = Vec::new();
+    for round in 0..3 {
+        if round > 0 {
+            set_status(&w.db, t::STATUS_IN_PROGRESS, "worker");
+            set_status(&w.db, t::STATUS_READY_FOR_REVIEW, "worker");
+        }
+        let report = run_pass(&w, &reviewer).await;
+        seen.push((report.returned, report.escalated, get(&w.db).status));
+    }
+    assert_eq!(
+        seen,
+        [
+            (1, 0, t::STATUS_TO_DO.to_string()),
+            (1, 0, t::STATUS_TO_DO.to_string()),
+            (0, 1, t::STATUS_BLOCKED.to_string()),
+        ]
+    );
+    let task = get(&w.db);
+    assert_eq!(task.waiting_on.as_deref(), Some("owner"));
+    let checkpoint =
+        w.db.with_conn(|c| t::latest_checkpoint(c, "tk-1"))
+            .unwrap()
+            .unwrap();
+    assert!(
+        checkpoint.summary.contains("failed"),
+        "{}",
+        checkpoint.summary
+    );
+    assert_eq!(verdicts(&w.db).len(), 3);
+    assert!(
+        verdicts(&w.db)
+            .iter()
+            .all(|v| v.waiting_for.as_deref() == Some("worker"))
+    );
+}
+
+#[tokio::test]
+async fn nothing_is_sent_back_while_verification_only_watches() {
+    let mut w = World::code(failing_checks_github());
+    w.cfg.mode = VerificationMode::Shadow;
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
+    let report = run_pass(&w, &reviewer).await;
+    assert_eq!((report.recorded, report.returned), (1, 0), "{report:?}");
+    assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
+}
+
+// ---- the whole loop, through the tools an agent uses ----
+
+fn tools_for(w: &World) -> Vec<Box<dyn crate::registry::HqTool>> {
+    let settings = hq_core::config::TasksConfig {
+        verification: w.cfg.clone(),
+        ..Default::default()
+    };
+    crate::tasks::build_task_tools(
+        w.vault.path().to_path_buf(),
+        Arc::new(hq_vault::VaultClient::new(w.vault.path().to_path_buf()).unwrap()),
+        Arc::new(w.db.clone()),
+        settings,
+        None,
+        Arc::new(super::remote::fake::FakeGitHub::default()),
+    )
+}
+
+async fn tool(
+    tools: &[Box<dyn crate::registry::HqTool>],
+    name: &str,
+    args: Value,
+) -> anyhow::Result<Value> {
+    tools
+        .iter()
+        .find(|t| t.name() == name)
+        .unwrap()
+        .execute(args)
+        .await
+}
+
+#[tokio::test]
+async fn work_is_sent_back_once_then_passes_and_the_owner_is_never_asked() {
+    // The first submission, made by the worker, fails on a red check.
+    let w = World::code(failing_checks_github());
+    w.db.with_conn(|c| {
+        t::update_task(
+            c,
+            "tk-1",
+            &t::TaskPatch {
+                assignees: Some(vec!["worker".into()]),
+                ..Default::default()
+            },
+            None,
+        )
+    })
+    .unwrap();
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
+    let first = run_pass(&w, &reviewer).await;
+    assert_eq!((first.returned, first.completed), (1, 0), "{first:?}");
+
+    // Anyone looking at the task is told who acts next.
+    let tools = tools_for(&w);
+    let sent_back = tool(&tools, "task_get", json!({"id": "tk-1"}))
+        .await
+        .unwrap();
+    assert_eq!(sent_back["waiting_for"]["who"], "worker", "{sent_back}");
+    assert!(
+        sent_back["waiting_for"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("failed")
+    );
+
+    // The worker's next task_next hands it back with what to fix.
+    let next = tool(&tools, "task_next", json!({"actor": "worker"}))
+        .await
+        .unwrap();
+    assert_eq!(next["task"]["id"], "tk-1", "{next}");
+    let resume = next["resume"].to_string();
+    assert!(
+        resume.contains("did not pass") && resume.contains("failed"),
+        "{resume}"
+    );
+
+    // It fixes the problem and hands the work over again, saying complete, as agents do.
+    let released = tool(
+        &tools,
+        "task_release",
+        json!({"lease": next["lease"], "status": "complete", "summary": "fixed the failing test"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(released["task"]["status"], "ready_for_review");
+    assert_eq!(released["verification_queued"], true);
+    let queued = tool(&tools, "task_get", json!({"id": "tk-1"}))
+        .await
+        .unwrap();
+    assert_eq!(queued["waiting_for"]["who"], "verifier", "{queued}");
+
+    // Now the checks are green and a reviewer passes it: HQ completes it, not the worker.
+    let green = merged_pr_github(CLEAN_DIFF);
+    let env = Env {
+        db: &w.db,
+        gh: &green,
+        vault_path: w.vault.path(),
+        cfg: &w.cfg,
+        route_tags: true,
+    };
+    let ev = gather(&env, &get(&w.db)).await.unwrap();
+    let ids: Vec<String> = ["pr_state", "required_checks", "diff_excerpt"]
+        .iter()
+        .filter_map(|k| ev.log.of_kind(k).next().map(|o| o.id.clone()))
+        .collect();
+    let answer = answer_json(&ev.contract.criteria, "pass", &ids, &[]);
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
+    let second = dispatch(&env, &reviewer).await.unwrap();
+    assert_eq!((second.completed, second.returned), (1, 0), "{second:?}");
+
+    let done = get(&w.db);
+    assert_eq!(done.status, t::STATUS_COMPLETE);
+    let finished = tool(&tools, "task_get", json!({"id": "tk-1"}))
+        .await
+        .unwrap();
+    assert!(finished["waiting_for"].is_null(), "{finished}");
+    let all = verdicts(&w.db);
+    assert_eq!(all.len(), 2, "one return, one pass");
+    assert_eq!(all[0].verdict, "pass");
+    assert_eq!(all[1].waiting_for.as_deref(), Some("worker"));
+    // Every completion says who made it: a verifier, never the worker.
+    let events = w.db.with_conn(|c| t::list_task_events(c, "tk-1")).unwrap();
+    let completer = events.last().unwrap().actor.clone().unwrap();
+    assert!(completer.starts_with("verify:"), "{completer}");
+    assert_eq!(
+        w.db.with_conn(|c| t::rejections(c, "tk-1")).unwrap(),
+        1,
+        "the reopen count survives completion"
+    );
 }
