@@ -97,6 +97,7 @@ class ShellActivity : ComponentActivity() {
         closePages()
         requested = link.place
         applyLink(link)
+        intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)?.let(chat.actions.onDraft)
     }
 
     /** The link an intent carries (an hq:// link, from a notification, a widget or another app), or the place a debug start names. */
@@ -155,7 +156,10 @@ class ShellActivity : ComponentActivity() {
         val badge = intent.getIntExtra("badge", 0)
         val fixtureName = intent.getStringExtra("fixture")
         // A rotation or a restore runs onCreate again with the launch intent; the link was applied the first time.
-        if (savedInstanceState == null) linkOf(intent)?.let(::applyLink)
+        if (savedInstanceState == null) {
+            linkOf(intent)?.let(::applyLink)
+            intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)?.let(chat.actions.onDraft)
+        }
         if (fixtureName == "a-alerts") sampleAlerts()
         val notesFixture = notesFixture(fixtureName)
         val inboxFixture = inboxFixture(fixtureName)

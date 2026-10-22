@@ -51,6 +51,12 @@ final class Alerts {
                 if (!problem.equals(lastProblem)) Log.w(HubService.TAG, "alert poll failed: " + problem);
                 lastProblem = problem;
             }
+            // Notes and tasks saved while HQ was down go out as soon as it answers.
+            try {
+                example.hq.spike.capture.OutboxSender.flushNow(c);
+            } catch (RuntimeException e) {
+                Log.w(HubService.TAG, "outbox flush failed: " + e.getClass().getSimpleName());
+            }
             try {
                 Thread.sleep(POLL_MS);
             } catch (InterruptedException e) {
