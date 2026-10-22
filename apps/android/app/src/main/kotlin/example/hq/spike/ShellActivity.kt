@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -47,6 +48,9 @@ import example.hq.spike.ui.inbox.InboxViewModel
 import example.hq.spike.ui.inbox.inboxFixture
 import example.hq.spike.ui.notes.NotesHome
 import example.hq.spike.ui.search.SearchScreen
+import example.hq.spike.ui.webhost.LocalOpenWeb
+import example.hq.spike.ui.webhost.WebHostScreen
+import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.search.SearchUi
 import example.hq.spike.ui.search.SearchViewModel
 import example.hq.spike.ui.tasks.QuickAddSheet
@@ -98,6 +102,9 @@ class ShellActivity : ComponentActivity() {
     /** A place asked for by a tapped notification while the app is already open; the shell takes it and clears it. */
     private var requested by mutableStateOf<Place?>(null)
 
+    /** The web page shown in the host screen over everything, or null. */
+    private var web by mutableStateOf<WebPage?>(null)
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -129,6 +136,7 @@ class ShellActivity : ComponentActivity() {
             Place.Notes -> { t.path?.let(notes::openNote); if (t.search) notes.actions.onOpenSearch() }
             Place.Helpers -> t.id?.let(helpers::openSession)
         }
+        t.web?.let { WebPage.fromSlug(it) }?.let { web = it }
         t.screen?.let { name ->
             val page = SettingsPage.entries.firstOrNull { it.name.equals(name, true) } ?: return@let
             settings.actions.onOpen()
@@ -146,6 +154,8 @@ class ShellActivity : ComponentActivity() {
 
     /** Pages and sheets open over the shell would hide the place a tapped notification asks for. */
     private fun closePages() {
+        web = null
+        search.actions.onClose()
         notes.closeAll()
         inbox.actions.onDetails(null)
         tasks.actions.onClose()
@@ -246,7 +256,7 @@ class ShellActivity : ComponentActivity() {
             val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; "x-failed" -> Startup.DidNotStart; else -> null }
             val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
             val startup = startupFixture ?: if (fixture == null) StartupWords.decide(status, firstDone) else Startup.None
-            HqTheme {
+            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }) {
                 if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
                 else if (startup == Startup.DidNotStart) DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
                 else HqShell(
@@ -256,7 +266,7 @@ class ShellActivity : ComponentActivity() {
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions); SearchHost(searchState) },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
@@ -267,7 +277,7 @@ class ShellActivity : ComponentActivity() {
                         else -> NotBuilt(place)
                     }
                 }
-            }
+            } }
         }
     }
 

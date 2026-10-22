@@ -95,9 +95,12 @@ function SetupRedirect() {
   const navigate = useNavigate()
   useEffect(() => {
     if (window.location.pathname === '/setup') return
+    // The Android app has its own first-run screens; its host shows the page it asked for.
+    if (readEmbedFlag()) return
     fetchSetupStatus()
       .then((status) => {
-        if (shouldRedirectToSetup(status)) void navigate({ to: '/setup' })
+        // Replaces the page it left, so Back from setup does not return to a page that sends the visitor straight back.
+        if (shouldRedirectToSetup(status)) void navigate({ to: '/setup', replace: true })
       })
       .catch(() => undefined)
   }, [navigate])

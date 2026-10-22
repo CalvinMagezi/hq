@@ -67,6 +67,8 @@ import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
+import example.hq.spike.ui.webhost.LocalOpenWeb
+import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.delay
 
@@ -668,7 +670,9 @@ private fun Spending(ui: SettingsUi) {
             Label("By AI service")
             Facts(services)
         }
-        Text("Changing a limit, and the full usage page, are in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        val openWeb = LocalOpenWeb.current
+        Text("Changing a limit is in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        TextLink("Open the full usage page", Mts.BrandBlue) { openWeb(WebPage.Usage) }
     }
 }
 

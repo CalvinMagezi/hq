@@ -67,7 +67,7 @@ class LinksTest {
     }
 
     @Test fun whatIsNotOursOrNotALinkDoesNothing() {
-        for (other in listOf(null, "", "  ", "https://example.com", "hq:/chat", "hq://", "hq://unknown/x", "hq://x", "not a url", "hq://[bad", "javascript:alert(1)", "hq:chat", "hq:///x", "hq://web/usage")) {
+        for (other in listOf(null, "", "  ", "https://example.com", "hq:/chat", "hq://", "hq://unknown/x", "hq://x", "not a url", "hq://[bad", "javascript:alert(1)", "hq:chat", "hq:///x", "hq://web", "hq://web/settings", "hq://web/tasks", "hq://web/tasks?view=list", "hq://web/../usage")) {
             assertNull(other.toString(), Links.parse(other))
         }
     }
@@ -77,5 +77,14 @@ class LinksTest {
             Links.parse(odd)
         }
         assertNotNull(Links.parse("hq://chat?x=1"))
+    }
+
+    @Test fun aWebLinkNamesOnlyOneOfTheFourPagesTheHostShows() {
+        assertEquals("usage", Links.parse("hq://web/usage")?.web)
+        assertEquals("home", Links.parse("hq://web/vault")?.web)
+        assertEquals("home", Links.parse("hq://web/Home")?.web)
+        assertEquals("board", Links.parse("hq://web/tasks?view=board")?.web)
+        assertEquals("timeline", Links.parse("hq://web/timeline")?.web)
+        assertEquals("timeline", Links.parse("hq://web/tasks?view=timeline")?.web)
     }
 }

@@ -60,6 +60,8 @@ import example.hq.spike.ui.chat.SheetFrame
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
+import example.hq.spike.ui.webhost.LocalOpenWeb
+import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.theme.Mts
 import java.time.LocalDate
 import kotlinx.coroutines.delay
@@ -130,6 +132,21 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
                 if (onAll) AllRow(shown[it], ui.today, shown[it].id in ui.workingIds, ui.selected, ui.chip != AllChip.Archived, actions) else TaskRow(shown[it], ui.today, actions)
             }
             if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
+        }
+        if (onAll && ui.loaded) item(key = "web") { WebViews() }
+    }
+}
+
+/** The end of the All tab: the web app's Board and Timeline, shown in the app's own screen. */
+@Composable
+private fun WebViews() {
+    val open = LocalOpenWeb.current
+    Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        listOf(WebPage.Board to "Board", WebPage.Timeline to "Timeline").forEach { (page, label) ->
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { open(page) }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
+                Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
         }
     }
 }
