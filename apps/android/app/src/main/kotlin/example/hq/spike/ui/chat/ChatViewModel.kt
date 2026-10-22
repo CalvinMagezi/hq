@@ -307,6 +307,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { loadMessages(id) }
     }
 
+    /** Opens a chat a link names, but only one that is in the list: an unknown id would blank the open chat and send the next message to nothing. */
+    fun openLinked(id: String) {
+        if (_state.value.chats.any { it.id == id }) { openThread(id); return }
+        viewModelScope.launch {
+            refreshChats()
+            if (_state.value.chats.any { it.id == id }) openThread(id) else _state.update { it.copy(notice = Notice(CHAT_GONE)) }
+        }
+    }
+
     private suspend fun loadMessages(id: String) {
         val page = try { client.messages(id) } catch (e: HqUnavailable) { return }
         val shown = page.sortedBy { it.createdAt }.map(::toUi)
@@ -454,5 +463,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val UNDO_MS = 5_000L
         const val MAX_ATTACHED = 10
         const val NOTE_GONE = "That note is not in your notes any more"
+        const val CHAT_GONE = "That chat is not in your list"
     }
 }

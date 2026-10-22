@@ -82,6 +82,14 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = fixed
     }
 
+    /** Opens one item on its own page, once the list has it: a notification or a link can arrive before the first read. */
+    fun openItem(id: String) {
+        viewModelScope.launch {
+            if (_state.value.needs.none { it.id == id }) refresh()
+            _state.value.needs.firstOrNull { it.id == id }?.let { card -> _state.update { it.copy(details = card) } }
+        }
+    }
+
     /** How many things are waiting on the owner, for the badge on the nav bar. */
     val badge: Int get() = _state.value.shownNeeds.size
 

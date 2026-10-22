@@ -245,6 +245,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Opens the task with this id, as [openRef] does for a short id. */
+    fun openById(id: String, onMissing: () -> Unit) {
+        viewModelScope.launch {
+            val task = _state.value.tasks.firstOrNull { it.id == id } ?: run { refresh(); _state.value.tasks.firstOrNull { it.id == id } }
+            if (task != null) open(task) else { say("Could not find that task."); onMissing() }
+        }
+    }
+
     private fun open(t: TaskItem) {
         _state.update { it.copy(detail = TaskDetail(t)) }
         viewModelScope.launch {
