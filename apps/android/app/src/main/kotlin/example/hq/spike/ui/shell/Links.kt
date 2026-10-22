@@ -22,7 +22,7 @@ object Links {
     private const val MAX_PATH = 512
     private val ID = Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 
-    val SETTINGS_SCREENS = setOf("home", "safety", "keys", "messaging", "claude", "devices", "spending", "about", "background", "keeprunning", "notifications")
+    val SETTINGS_SCREENS = setOf("home", "safety", "keys", "messaging", "claude", "devices", "spending", "about", "background", "keeprunning", "notifications", "origins", "connectedtools", "computers")
 
     /** Never throws. Null for anything that is not one of our links, so a stray or hostile link does nothing at all. */
     fun parse(raw: String?): LinkTarget? {

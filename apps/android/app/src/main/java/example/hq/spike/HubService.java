@@ -29,7 +29,7 @@ import java.util.function.Supplier;
 public class HubService extends Service {
     static final String TAG = "HQHUB";
     static final String CHANNEL = "hub";
-    static final int PORT = 5678;
+    public static final int PORT = 5678;
     private static final int NOTIFICATION_ID = 1;
     private static final long BACKOFF_MIN_MS = 2_000;
     private static final long BACKOFF_MAX_MS = 60_000;

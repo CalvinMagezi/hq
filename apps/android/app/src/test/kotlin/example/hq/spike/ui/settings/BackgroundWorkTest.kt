@@ -61,4 +61,38 @@ class BackgroundWorkTest {
         assertTrue(RestartWatch(null).back(true, "2000"))
         assertFalse(RestartWatch(null).back(true, null))
     }
+
+    private val settings = JSONObject("""{"safety":{"web_allowed_origins":["https://hq.example.ts.net","http://localhost:5678"]},"agent_host":{"default_host":"mac-mini","hosts":["mac-mini","native"]},"integrations":{"remote_mcp":[{"name":"diagrams","host":"example.com","live_user_turn_only":true},{"name":"search","host":"search.example.com","live_user_turn_only":false}]}}""")
+
+    @Test fun theSafetyCountsOpenTheirListsWhenTheyHaveRows() {
+        val safety = SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Safety)
+        assertEquals(SettingsPage.Origins, safety.first { it.title.startsWith("Addresses") }.opens)
+        assertEquals(SettingsPage.Computers, SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Helpers).first { it.title == "Computers" }.opens)
+        assertEquals(SettingsPage.ConnectedTools, SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Tools).first { it.title == "Connected tools" }.opens)
+        val none = JSONObject("""{"safety":{"web_allowed_origins":[]},"integrations":{"remote_mcp":[]},"agent_host":{"hosts":[]}}""")
+        assertEquals(null, SettingsWords.safetyRows(none, SettingsWords.SafetyTab.Tools).first { it.title == "Connected tools" }.opens)
+    }
+
+    @Test fun theListsReadTheirRows() {
+        assertEquals(listOf("https://hq.example.ts.net", "http://localhost:5678"), SettingsWords.originRows(settings))
+        val tools = SettingsWords.toolRows(settings)
+        assertEquals("diagrams", tools[0].title)
+        assertEquals("example.com\nUsed only while you are in the chat.", tools[0].text)
+        assertEquals("search.example.com", tools[1].text)
+        assertEquals(listOf("mac-mini" to "Default", "This phone" to null), SettingsWords.computerRows(settings).map { it.title to it.text })
+        assertEquals(emptyList<String>(), SettingsWords.originRows(null))
+    }
+
+    @Test fun diagnosticsSayWhatRunsAndWhereItServes() {
+        val on = SettingsWords.diagnostics("hub \u00b7 build 1", true, JSONObject("""{"status":"ok"}"""), 5678)
+        assertEquals("AgentHQ hub build hub \u00b7 build 1\nRun mode: Active: relays and scheduler on. Serving this device on 127.0.0.1:5678\nHealth: {\"status\":\"ok\"}\n", on)
+        assertEquals("AgentHQ hub build x\nRun mode: Standby: web app only. Serving this device on 127.0.0.1:5678\nHealth: no answer\n", SettingsWords.diagnostics("x", false, null, 5678))
+    }
+
+    @Test fun theHomeRowAdmitsThereIsNoBackup() {
+        val row = SettingsWords.home(SettingsSnapshot(), java.time.Instant.EPOCH).flatMap { it.rows }.first { it.page == SettingsPage.About }
+        assertEquals("Backup and about", row.title)
+        assertEquals("No backup yet", row.status)
+        assertTrue(row.warn)
+    }
 }

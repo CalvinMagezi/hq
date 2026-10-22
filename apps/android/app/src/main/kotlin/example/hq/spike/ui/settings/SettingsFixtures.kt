@@ -17,8 +17,8 @@ fun settingsFixture(name: String?): SettingsUi? {
           {"name":"deepseek","kind":"openai-compatible","model":"deepseek-flash","endpoint_host":"api.deepseek.com","primary":false,"fallback_position":2}]},
         "limits":{"chat_turn_timeout_secs":600,"turn_ack_timeout_secs":270,"background_turn_max_days":5,"background_progress_secs":300},
         "safety":{"bash_sandbox":"required","bash_network":false,"skills_write_approval":false,"web_allowed_origins":["https://hq.example.ts.net"]},
-        "agent_host":{"default_host":"mac-mini","hosts":["mac-mini"],"sandbox_mode":"process","idle_reap_hours":6,"drive_new_watches":false,"driver_checkin_minutes":5,"driver_nudge_budget":3,"driver_no_progress_limit":4},
-        "integrations":{"remote_mcp":[],"searxng_host":null,"disk_watchdog_enabled":true}}""",
+        "agent_host":{"default_host":"mac-mini","hosts":["mac-mini","native"],"sandbox_mode":"process","idle_reap_hours":6,"drive_new_watches":false,"driver_checkin_minutes":5,"driver_nudge_budget":3,"driver_no_progress_limit":4},
+        "integrations":{"remote_mcp":[{"name":"diagrams","host":"example.com","live_user_turn_only":true},{"name":"search","host":"search.example.com","live_user_turn_only":false}],"searxng_host":null,"disk_watchdog_enabled":true}}""",
     )
     val chat = JSONObject(
         """{"telegram":{"token_set":true,"enabled":true,"owner":{"paired":true},"bot":{"username":"example_bot"},"relay":{"status":"connected","current":true}},"discord":{"token_set":true,"enabled":true,"relay":{"status":"connected","current":false}}}""",
@@ -68,6 +68,10 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-background-restarting" -> base.copy(stack = listOf(SettingsPage.Background), restarting = true)
         "s-spend" -> base.copy(stack = listOf(SettingsPage.Spending))
         "s-spend-exceeded" -> base.copy(stack = listOf(SettingsPage.Spending), snap = base.snap.copy(budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":5.2,"pct":104,"state":"exceeded","resets_at":${future(1_800)}}]}"""), forecast = JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}""")))
+        "s-origins" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.Origins))
+        "s-tools" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.ConnectedTools))
+        "s-computers" -> base.copy(stack = listOf(SettingsPage.Safety, SettingsPage.Computers))
+        "s-restart-ask" -> base.copy(stack = listOf(SettingsPage.About), askRestart = true)
         "s-about" -> base.copy(stack = listOf(SettingsPage.About))
         "s-down" -> base.copy(stack = listOf(SettingsPage.Keys), snap = SettingsSnapshot(), loaded = true)
         else -> null

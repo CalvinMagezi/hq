@@ -25,14 +25,14 @@ data class SettingsSnapshot(
     val forecast: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
 data class HomeGroup(val title: String, val rows: List<HomeRow>)
 
 /** A line on a read-only page: a title with its value, and a sentence that says what it means. */
-data class FactRow(val title: String, val value: String, val text: String? = null, val good: Boolean = false)
+data class FactRow(val title: String, val value: String, val text: String? = null, val good: Boolean = false, val opens: SettingsPage? = null)
 
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
@@ -152,7 +152,7 @@ object SettingsWords {
         HomeGroup(
             "Your data", listOf(
                 HomeRow(SettingsPage.Spending, "gauge", "Spending limits", spendingStatus(snap.budgets)),
-                HomeRow(SettingsPage.About, "arch", "About", aboutStatus(snap.health)),
+                HomeRow(SettingsPage.About, "arch", "Backup and about", NO_BACKUP, warn = true),
             ),
         ),
     ))
@@ -160,6 +160,9 @@ object SettingsWords {
     /** Until the first read has finished, the rows that come from HQ say so, rather than "Not answering". */
     private fun withChecking(loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
         if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { it.copy(status = "Checking…") }) }
+
+    /** No route says whether a backup was made, so this stays until one does; it is never inferred. */
+    const val NO_BACKUP = "No backup yet"
 
     fun aboutStatus(h: JSONObject?): String = h?.text("version")?.let { "HQ $it" } ?: if (h == null) NOT_ANSWERED else "HQ is running"
 
@@ -185,6 +188,26 @@ object SettingsWords {
     /** The computer a helper runs on: the phone itself is "native" in the config. */
     private fun computerName(host: String) = if (host == "native" || host == "local") "This phone" else host
 
+    /** A count that opens its list, unless there is nothing in it to open. */
+    private fun countRow(title: String, n: Int, page: SettingsPage, text: String? = null) = FactRow(title, "$n", text, opens = if (n > 0) page else null)
+
+    /** The web addresses allowed to open HQ, one per row. */
+    fun originRows(s: JSONObject?): List<String> = s.obj("safety").arr("web_allowed_origins").let { a -> if (a == null) emptyList() else (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }
+
+    /** Each tool server HQ can call: its name, where it lives, and when it is used. */
+    fun toolRows(s: JSONObject?): List<FactRow> = s.obj("integrations").arr("remote_mcp").items().map {
+        val lines = listOfNotNull(it.text("host"), "Used only while you are in the chat.".takeIf { _ -> it.optBoolean("live_user_turn_only") })
+        FactRow(it.text("name") ?: "Tool", "", lines.joinToString("\n").ifBlank { null })
+    }
+
+    /** The computers helpers can run on; the default one says so. */
+    fun computerRows(s: JSONObject?): List<FactRow> {
+        val host = s.obj("agent_host")
+        val default = host.text("default_host")
+        val a = host.arr("hosts") ?: return emptyList()
+        return (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf { it.isNotBlank() } }.map { FactRow(computerName(it), "", if (it == default) "Default" else null) }
+    }
+
     fun safetyRows(s: JSONObject?, tab: SafetyTab): List<FactRow> {
         if (s == null) return emptyList()
         val safety = s.obj("safety")
@@ -196,7 +219,7 @@ object SettingsWords {
                 FactRow("Run commands in a safe box", sandbox(safety.text("bash_sandbox").orEmpty()), "Fences in the commands a helper runs, when the phone can."),
                 FactRow("Commands can use the internet", yesNo(safety?.optBoolean("bash_network", true) ?: true), "Lets those commands download things and reach websites."),
                 FactRow("Ask me before HQ changes its skills", yesNo(safety?.optBoolean("skills_write_approval") == true), "When on, a change to one of HQ's skills waits for your yes."),
-                FactRow("Addresses allowed to open HQ", "${safety.arr("web_allowed_origins")?.length() ?: 0}", "The web addresses that may show HQ's screens."),
+                countRow("Addresses allowed to open HQ", safety.arr("web_allowed_origins")?.length() ?: 0, SettingsPage.Origins, "The web addresses that may show HQ's screens."),
             )
             SafetyTab.Time -> listOf(
                 FactRow("Longest time for one reply", secs(limits?.optInt("chat_turn_timeout_secs") ?: 0)),
@@ -206,7 +229,7 @@ object SettingsWords {
             )
             SafetyTab.Helpers -> listOf(
                 FactRow("Default computer", host.text("default_host")?.let(::computerName) ?: "None set"),
-                FactRow("Computers", "${host.arr("hosts")?.length() ?: 0}"),
+                countRow("Computers", host.arr("hosts")?.length() ?: 0, SettingsPage.Computers),
                 FactRow("Safe box for helpers", sandbox(host.text("sandbox_mode").orEmpty())),
                 FactRow("Stop idle helpers after", host?.optInt("idle_reap_hours")?.let { if (it <= 0) "Never" else "$it h" } ?: "Never"),
                 FactRow("New helpers: HQ answers their questions", yesNo(host?.optBoolean("drive_new_watches") == true)),
@@ -215,7 +238,7 @@ object SettingsWords {
                 FactRow("Stop answering a helper that makes no progress after", "${host?.optInt("driver_no_progress_limit") ?: 0} turns", "HQ stops answering its questions for you. The helper itself keeps running."),
             )
             SafetyTab.Tools -> listOf(
-                FactRow("Connected tools", "${integ.arr("remote_mcp")?.length() ?: 0}"),
+                countRow("Connected tools", integ.arr("remote_mcp")?.length() ?: 0, SettingsPage.ConnectedTools),
                 FactRow("Search server", integ.text("searxng_host") ?: "Built in"),
                 FactRow("Disk space check", onOff(integ?.optBoolean("disk_watchdog_enabled") == true)),
             )
@@ -347,6 +370,15 @@ object SettingsWords {
     }
 
     data class ModeWords(val title: String, val body: String, val confirm: String)
+
+    val RESTART_WORDS = ModeWords("Restart HQ?", "HQ stops for a moment and starts again. Anything it is answering right now is cut off.", "Restart")
+
+    /** The text "Copy diagnostics" puts on the clipboard: the build, what runs, where it serves, and what HQ says about itself. */
+    fun diagnostics(build: String, active: Boolean, health: JSONObject?, port: Int): String = buildString {
+        appendLine("AgentHQ hub build $build")
+        appendLine("Run mode: ${if (active) "Active: relays and scheduler on" else "Standby: web app only"}. Serving this device on 127.0.0.1:$port")
+        appendLine("Health: ${health?.toString() ?: "no answer"}")
+    }
 
     /** What the dialog says before the run mode changes: what stops or starts, and that hq restarts for a moment. */
     fun modeDialog(toActive: Boolean) = if (toActive) {

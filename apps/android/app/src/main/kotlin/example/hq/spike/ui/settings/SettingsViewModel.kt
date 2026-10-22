@@ -43,6 +43,8 @@ data class SettingsUi(
     val now: Instant = Instant.now(),
     /** The run mode the owner is being asked to confirm (true is Active), or null when no dialog is open. */
     val askMode: Boolean? = null,
+    /** The owner is being asked to confirm a restart of hq. */
+    val askRestart: Boolean = false,
     /** hq is restarting for a new run mode; the choices are off until it is back. */
     val restarting: Boolean = false,
     /** What Android says about keeping AgentHQ running and about its notifications; read again whenever Settings is refreshed. */
@@ -63,6 +65,8 @@ class SettingsActions(
     val onMode: (Boolean) -> Unit = {},
     val onModeCancel: () -> Unit = {},
     val onModeConfirm: () -> Unit = {},
+    val onRestart: (Boolean) -> Unit = {},
+    val onRestartConfirm: () -> Unit = {},
     val onFix: (PhoneFix) -> Unit = {},
     val onChannel: (String) -> Unit = {},
     val onAnswers: (Boolean) -> Unit = {},
@@ -87,6 +91,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onMode = { toActive -> _state.update { if (it.restarting || toActive == (it.mode == "active")) it else it.copy(askMode = toActive) } },
         onModeCancel = { _state.update { it.copy(askMode = null) } },
         onModeConfirm = ::confirmMode,
+        onRestart = { ask -> _state.update { if (it.restarting) it else it.copy(askRestart = ask) } },
+        onRestartConfirm = ::confirmRestart,
         onFix = ::fix,
         onChannel = ::openChannel,
         onAnswers = { on -> AlertPoster.setAnswersAllowed(ctx(), on); _state.update { it.copy(notif = it.notif.copy(answers = on)) } },
@@ -94,7 +100,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     /** Closes Settings and every page inside it. */
-    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null) }
+    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false) }
 
     fun freeze(fixed: SettingsUi) {
         frozen = true
@@ -103,7 +109,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Opens Settings on its home page. What is on it comes from [refreshNow], which the page runs while it is showing. */
     private fun open() {
-        _state.update { it.copy(open = true, stack = emptyList(), line = null, askMode = null, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts() }
+        _state.update { it.copy(open = true, stack = emptyList(), line = null, askMode = null, askRestart = false, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts() }
     }
 
     /**
@@ -275,6 +281,21 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         return if (waitForHq(again)) null else RESTART_TIMEOUT_LINE
     }
 
+    /** Stops hq and waits for it to answer again, with the mode left as it is. */
+    private fun confirmRestart() {
+        if (_state.value.restarting) return
+        _state.update { it.copy(askRestart = false, restarting = true) }
+        viewModelScope.launch {
+            val said = withContext(Dispatchers.IO) {
+                val before = startStamp().second
+                HubService.restartHq()
+                if (waitForHq(before)) "HQ restarted." else RESTART_TIMEOUT_LINE
+            }
+            _state.update { it.copy(restarting = false, line = said).withFacts() }
+            refreshNow()
+        }
+    }
+
     private suspend fun waitForHq(before: String?): Boolean {
         val watch = RestartWatch(before)
         val end = SystemClock.elapsedRealtime() + RestartWatch.TIMEOUT_MS
@@ -292,13 +313,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun copyDiagnostics() {
         val s = _state.value
-        val text = buildString {
-            appendLine("AgentHQ hub build ${s.build}")
-            appendLine("Run mode: ${s.mode}")
-            appendLine("Health: ${s.snap.health?.toString() ?: "no answer"}")
-        }
         val cm = ctx().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        cm.setPrimaryClip(android.content.ClipData.newPlainText("HQ diagnostics", text))
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("HQ diagnostics", SettingsWords.diagnostics(s.build, s.mode == "active", s.snap.health, HubService.PORT)))
         _state.update { it.copy(line = "Copied.") }
     }
 

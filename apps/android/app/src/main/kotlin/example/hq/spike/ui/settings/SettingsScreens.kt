@@ -48,6 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -58,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import example.hq.spike.ui.chat.blocks.IconAction
+import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
@@ -95,10 +98,13 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Claude -> "Connect Claude"
     SettingsPage.Devices -> "Other devices"
     SettingsPage.Spending -> "Spending limits"
-    SettingsPage.About -> "About"
+    SettingsPage.About -> "Backup and about"
     SettingsPage.Background -> "Background work"
     SettingsPage.KeepRunning -> "Keep running"
     SettingsPage.Notifications -> "Notifications"
+    SettingsPage.Origins -> "Allowed addresses"
+    SettingsPage.ConnectedTools -> "Connected tools"
+    SettingsPage.Computers -> "Computers"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -131,9 +137,13 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Background -> Background(ui, actions)
                 SettingsPage.KeepRunning -> KeepRunning(ui, actions)
                 SettingsPage.Notifications -> Notifications(ui, actions)
+                SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
+                SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
+                SettingsPage.Computers -> ReadOnlyList(ui, "No computer is listed.") { Facts(SettingsWords.computerRows(ui.snap.settings)) }
             }
         }
-        ui.askMode?.let { ModeDialog(it, actions) }
+        ui.askMode?.let { ConfirmDialog(SettingsWords.modeDialog(it), actions.onModeCancel, actions.onModeConfirm) }
+        if (ui.askRestart) ConfirmDialog(SettingsWords.RESTART_WORDS, { actions.onRestart(false) }, actions.onRestartConfirm)
         ui.line?.let { Snack(it, actions.onDismissLine, Modifier.align(Alignment.BottomCenter)) }
     }
 }
@@ -192,19 +202,21 @@ private fun NavRow(row: HomeRow, first: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Fact(row: FactRow, first: Boolean) {
+private fun Fact(row: FactRow, first: Boolean, onOpen: (SettingsPage) -> Unit = {}) {
     if (!first) Divider()
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    val tap = row.opens?.let { page -> Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { onOpen(page) } } ?: Modifier
+    Column(Modifier.fillMaxWidth().then(tap).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(row.title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
             Text(row.value, style = HqType.BodySm, color = if (row.good) Mts.BrandGreen else Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.widthIn(max = VALUE_MAX))
+            if (row.opens != null) Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
         }
         row.text?.let { Text(it, style = SmallText, color = Mts.InkMuted) }
     }
 }
 
 @Composable
-private fun Facts(rows: List<FactRow>) = Group { rows.forEachIndexed { i, r -> Fact(r, i == 0) } }
+private fun Facts(rows: List<FactRow>, onOpen: (SettingsPage) -> Unit = {}) = Group { rows.forEachIndexed { i, r -> Fact(r, i == 0, onOpen) } }
 
 @Composable
 private fun Waiting(ui: SettingsUi) {
@@ -260,7 +272,7 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
         Page {
             Notice("Read only. You can change these in the config file on this phone.")
             val rows = SettingsWords.safetyRows(ui.snap.settings, ui.safetyTab)
-            Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) Unanswered(ui, "settings", false) else Facts(rows) }
+            Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) Unanswered(ui, "settings", false) else Facts(rows, actions.onPage) }
         }
     }
 }
@@ -493,19 +505,18 @@ private fun ModeCard(title: String, text: String, selected: Boolean, enabled: Bo
     }
 }
 
-/** Says what stops or starts before the run mode changes, over the whole of Settings. Back and a tap outside cancel. */
+/** Says what stops or starts before something that restarts hq, over the whole of Settings. Back and a tap outside cancel. */
 @Composable
-private fun ModeDialog(toActive: Boolean, actions: SettingsActions) {
-    val words = SettingsWords.modeDialog(toActive)
-    BackHandler(onBack = actions.onModeCancel)
+private fun ConfirmDialog(words: SettingsWords.ModeWords, onCancel: () -> Unit, onConfirm: () -> Unit) {
+    BackHandler(onBack = onCancel)
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = actions.onModeCancel))
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onCancel))
         Column(Modifier.padding(start = 24.dp, top = 270.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp)) {
             Text(words.title, style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
             Text(words.body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 20.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                DialogButton("Cancel", actions.onModeCancel)
-                DialogButton(words.confirm, actions.onModeConfirm)
+                DialogButton("Cancel", onCancel)
+                DialogButton(words.confirm, onConfirm)
             }
         }
     }
@@ -624,7 +635,7 @@ private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
 @Composable
 private fun About(ui: SettingsUi, actions: SettingsActions) {
     Page {
-        Notice("Backup is set in the config file on this phone. If the app is uninstalled or the phone is lost, your notes and tasks go with it unless a backup was made.", HqIcons.Warning, warn = true)
+        BackupCard()
         Label("About")
         Facts(
             listOf(
@@ -639,6 +650,52 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
                 Icon(HqIcons.Copy, null, Modifier.size(22.dp), tint = Mts.Ink)
                 Text("Copy diagnostics", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
             }
+            Divider()
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !ui.restarting, role = Role.Button) { actions.onRestart(true) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (ui.restarting) "Restarting HQ\u2026" else "Restart HQ", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+                if (ui.restarting) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
         }
     }
+}
+
+/** The backup is not something the app can set up yet, so the card says so and its button is drawn but off. */
+@Composable
+private fun BackupCard() {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(HqIcons.Warning, null, Modifier.size(22.dp), tint = Mts.Amber)
+            Text("Backup is not set up", style = HqType.BodyBold, color = Mts.Amber)
+        }
+        Text("If the app is uninstalled or the phone is lost, your notes and tasks go with it. Backup today runs from the config file.", style = HqType.BodySm, color = Mts.Ink)
+        Row(
+            Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).padding(horizontal = 24.dp).semantics { disabled(); contentDescription = "Set up backup, needs a decision" },
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Set up backup", style = HqType.BodySmBold, color = Mts.Ink)
+            Box(Modifier.heightIn(min = 24.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, Mts.Line, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                Text("Needs a decision", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+            }
+        }
+    }
+}
+
+/** A read-only list pushed from a Safety row: the standing notice, then its rows. */
+@Composable
+private fun ReadOnlyList(ui: SettingsUi, empty: String, rows: @Composable () -> Unit) {
+    Page {
+        Notice("Read only. You can change these in the config file on this phone.")
+        if (ui.snap.settings == null) Unanswered(ui, "settings", false)
+        else Box(Modifier.padding(top = 12.dp)) { Column { rows() } }
+    }
+}
+
+/** An address or other literal text, as it is written. */
+@Composable
+private fun MonoRow(text: String) {
+    Group { Text(text, style = HqType.BodySm.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = Mts.Ink, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) }
 }
