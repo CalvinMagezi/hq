@@ -7,6 +7,7 @@ import type {
   Briefing,
   Calibration,
   QueueHealth,
+  Rollout,
   SweepDetail,
   TaskVerification,
   VerificationStatus,
@@ -14,6 +15,7 @@ import type {
 import { AuditCardView, AuditStackView } from './AuditSheet'
 import { BriefingCardView } from './BriefingCard'
 import { QueueHealthPanel } from './QueueHealthPanel'
+import { RolloutPanel } from './RolloutPanel'
 import { ScopePickerView, SweepBodyView } from './SweepSheet'
 import { TaskVerificationView } from './TaskVerification'
 import { VerificationBarView } from './VerificationBar'
@@ -46,12 +48,27 @@ const calibration = (over: Partial<Calibration> = {}): Calibration => ({
   ...over,
 })
 
+const rollout = (over: Partial<Rollout> = {}): Rollout => ({
+  stage: 'shadow',
+  stage_label: 'Shadow: verdicts are recorded and nothing moves',
+  next: { label: 'Enforce tier 0 (notes, research, planning)', change: 'tasks.verification.mode: enforce, with enforce_tiers: [0]' },
+  gates: [
+    { label: 'Enough tier 0 verdicts compared with what happened next', met: false, detail: '4 of 30 compared: 4 agreed' },
+    { label: 'The backlog has been read by a sweep', met: true, detail: 'nothing is waiting for review' },
+  ],
+  ready: false,
+  warnings: [],
+  shadow: [],
+  ...over,
+})
+
 const status = (over: Partial<VerificationStatus> = {}): VerificationStatus => ({
   mode: 'enforce',
   autonomy_gate: 'demote',
   confirm_over: 25,
   calibration: calibration(),
   queue: health({ backlog: { owner: 3, verifier: 12, ci: 2 } }),
+  rollout: rollout(),
   holds: 0,
   active_sweeps: 0,
   ...over,
@@ -101,6 +118,40 @@ test('the queue panel puts alerts first and says why anything is deferred', () =
   expect(html).toContain('the monthly reviewer ceiling is used up')
   expect(html).toContain('3</span> tasks (waiting for budget)')
   expect(renderToString(<QueueHealthPanel health={health()} />)).toContain('Nothing is waiting on anyone.')
+})
+
+test('the rollout section says where verification is, puts the unmet conditions first and names the one setting', () => {
+  const html = renderToString(<QueueHealthPanel health={health()} rollout={rollout()} />)
+  expect(html).toContain('Turning it on')
+  expect(html).toContain('Shadow: verdicts are recorded and nothing moves')
+  expect(html).toContain('One condition is not met yet.')
+  expect(html.indexOf('Enough tier 0 verdicts')).toBeLessThan(html.indexOf('The backlog has been read by a sweep'))
+  expect(html).toContain('tasks.verification.mode: enforce, with enforce_tiers: [0]')
+})
+
+test('a rollout with every condition met says so, and one with nothing next says nothing about a next step', () => {
+  const ready = renderToString(<RolloutPanel rollout={rollout({ ready: true, gates: [] })} />)
+  expect(ready).toContain('Every condition is met. This is the one setting to change.')
+  const done = renderToString(
+    <RolloutPanel rollout={rollout({ stage: 'all_tiers', stage_label: 'Enforcing every tier', next: null, gates: [], ready: true })} />
+  )
+  expect(done).toContain('Enforcing every tier')
+  expect(done).not.toContain('Next:')
+  expect(done).not.toContain('Setting:')
+})
+
+test('a withdrawn calibration shows as a warning above the next step', () => {
+  const html = renderToString(
+    <RolloutPanel rollout={rollout({ warnings: ['tier 0 is enforced but its calibration is withdrawn (3 of 20 audits disagreed)'] })} />
+  )
+  expect(html.indexOf('calibration is withdrawn')).toBeLessThan(html.indexOf('Next:'))
+})
+
+test('the bar opens onto the rollout when the queue panel is open', () => {
+  const html = renderToString(
+    <VerificationBarView status={status()} healthOpen onToggleHealth={noop} onVerifyNow={noop} onAudit={noop} />
+  )
+  expect(html).toContain('Turning it on')
 })
 
 const briefing = (over: Partial<Briefing> = {}): Briefing => ({

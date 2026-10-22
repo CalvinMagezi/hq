@@ -52,6 +52,7 @@ fn render(
     let (arg, note) = (opts.arg.clone(), opts.note.clone());
     match sub {
         "status" | "" => status(db, cfg, json, out),
+        "rollout" => rollout(db, cfg, json, out),
         "audits" => audits(db, json, out),
         "holds" => holds(db, json, out),
         "queue" => queue(db, cfg, json, out),
@@ -144,10 +145,14 @@ fn render(
     }
 }
 
-const HELP: [(&str, &str); 10] = [
+const HELP: [(&str, &str); 11] = [
     (
         "status",
         "Mode, who tasks are waiting on, and whether the verifier has earned its autonomy",
+    ),
+    (
+        "rollout",
+        "Where turning verification on stands, what the next step waits for, and the one setting that takes it",
     ),
     ("audits", "Completed tasks waiting for your agree or not"),
     (
@@ -180,6 +185,76 @@ const HELP: [(&str, &str); 10] = [
         "Clear a queue in one go: plan [--initiative X] [--since DATE], list, show|run|pause|cancel|apply|undo <id> (apply --confirm)",
     ),
 ];
+
+fn rollout(
+    db: &Database,
+    cfg: &hq_core::config::VerificationConfig,
+    json: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let r = db.with_conn(|c| t::rollout(c, cfg))?;
+    if json {
+        writeln!(out, "{}", serde_json::to_string_pretty(&r)?)?;
+        return Ok(());
+    }
+    writeln!(out, "Rollout: {}\n", r.stage_label)?;
+    for w in &r.warnings {
+        writeln!(out, "Warning: {w}")?;
+    }
+    if !r.warnings.is_empty() {
+        writeln!(out)?;
+    }
+    if r.shadow.iter().any(|s| s.compared > 0) {
+        writeln!(
+            out,
+            "Shadow verdicts next to what someone else then did with the work:"
+        )?;
+        for s in r.shadow.iter().filter(|s| s.compared > 0) {
+            writeln!(
+                out,
+                "  Tier {}: {} compared, {} agreed, {} would have completed work that was sent back, {} would have held back work that was accepted{}",
+                s.tier,
+                s.compared,
+                s.agreed,
+                s.false_passes,
+                s.false_rejects,
+                s.false_pass_upper
+                    .map(|u| format!(" (false passes at most {:.0}%)", u * 100.0))
+                    .unwrap_or_default()
+            )?;
+        }
+        writeln!(out)?;
+    }
+    let Some(next) = &r.next else {
+        writeln!(out, "Every tier is enforced. Nothing is left to turn on.")?;
+        return Ok(());
+    };
+    writeln!(out, "Next: {}", next.label)?;
+    for g in &r.gates {
+        let mark = if g.met { "[x]" } else { "[ ]" };
+        writeln!(out, "  {mark} {}\n        {}", g.label, g.detail)?;
+    }
+    let open = r.gates.iter().filter(|g| !g.met).count();
+    if open == 0 {
+        writeln!(
+            out,
+            "\nEvery condition is met. The change is: {}",
+            next.change
+        )?;
+    } else {
+        writeln!(
+            out,
+            "\n{open} {} not met yet. The change, when they are: {}",
+            if open == 1 {
+                "condition is"
+            } else {
+                "conditions are"
+            },
+            next.change
+        )?;
+    }
+    Ok(())
+}
 
 fn percent(rate: Option<f64>) -> String {
     rate.map_or_else(|| "no data".to_string(), |r| format!("{:.0}%", r * 100.0))
@@ -725,12 +800,57 @@ mod tests {
     }
 
     #[test]
+    fn rollout_on_an_install_with_verification_off_offers_shadow() {
+        let db = Database::open_memory().unwrap();
+        let text = run_to_string(&db, "rollout", None, None);
+        assert!(text.contains("Rollout: Off: nothing is verified"), "{text}");
+        assert!(
+            text.contains("Next: Turn verification on in shadow mode"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Every condition is met. The change is: tasks.verification.mode: shadow"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn rollout_in_shadow_lists_what_is_missing_and_the_setting_that_takes_the_step() {
+        let db = Database::open_memory().unwrap();
+        let cfg = hq_core::config::VerificationConfig {
+            mode: hq_core::config::VerificationMode::Shadow,
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        render(&db, &cfg, &opts("rollout", None), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("Next: Enforce tier 0"), "{text}");
+        assert!(
+            text.contains("[ ] Enough tier 0 verdicts compared"),
+            "{text}"
+        );
+        assert!(text.contains("0 of 30 compared"), "{text}");
+        assert!(text.contains("[ ] A reviewer is configured"), "{text}");
+        assert!(text.contains("conditions are not met yet"), "{text}");
+        assert!(text.contains("enforce_tiers: [0]"), "{text}");
+
+        let mut o = opts("rollout", None);
+        o.json = true;
+        let mut out = Vec::new();
+        render(&db, &cfg, &o, &mut out).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["stage"], "shadow");
+        assert_eq!(v["ready"], false);
+        assert_eq!(v["shadow"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
     fn the_help_lists_every_verb() {
         let db = Database::open_memory().unwrap();
         let help = run_to_string(&db, "help", None, None);
         for verb in [
-            "status", "audits", "pull", "agree", "disagree", "holds", "veto", "sweep", "briefing",
-            "queue",
+            "status", "rollout", "audits", "pull", "agree", "disagree", "holds", "veto", "sweep",
+            "briefing", "queue",
         ] {
             assert!(help.contains(verb), "{verb} missing from:\n{help}");
         }

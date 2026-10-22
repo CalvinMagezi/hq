@@ -2,7 +2,9 @@
 
 Status: implemented on the branch that carries this plan (work streams 0 to 6 and 8 to 10), described for
 operators in `docs/TASK_VERIFICATION.md`. WS7, the rollout on a live instance, is a sequence of decisions for the
-owner, taken from the numbers `hq verify status` prints, and is deliberately not automated. Where the build differs
+owner and is deliberately not automated; what the build supplies is `hq verify rollout`, which says where an instance
+stands, compares shadow-mode verdicts with what independent people then did (shadow completes nothing, so it has no
+audits to learn from), and names the one setting that takes the next step once its conditions are met. Where the build differs
 from this text: the report and the owner commands are `hq verify` (not `hq tasks verification`); an inconclusive
 verdict that waits on the worker returns the task to `to_do` like a fail, rather than blocking it (decision 4);
 `waiting_for` is stored, so a restart forgets nothing; tasks that entered review before enforcement began are left to
@@ -451,7 +453,12 @@ nothing outside this plan (it finds nine sites today):
 **WS7. Rollout.** Shadow on the live instance (E1 on everything, E2 on a bounded
 sample to price the rest), a plan-only sweep over the existing backlog and one
 apply, then `enforce` for tier 0, then tier 1 once calibration passes, then
-tier 2. Accept: each step gated on the WS5 numbers, not on elapsed time.
+tier 2. Accept: each step gated on the WS5 numbers, not on elapsed time. Built as `hq verify rollout`
+(`crates/hq-db/src/tasks/rollout.rs`, `shadow.rs`): the step is open when the verdicts shadow mode recorded for that
+tier agree often enough with what someone other than the worker then did, the reviewer catches planted defects,
+the tiers already enforced have earned their autonomy and the backlog has been planned by a sweep. The live steps
+(turning shadow on, the one apply, each tier) are the owner's, and so is the last one: running the gate over this
+plan's own tasks, `hq verify sweep plan --initiative <this plan's initiative>`.
 
 **WS8. Sweeps and on-demand verification.** Persisted sweeps with plan, run,
 pause, cancel, apply and undo; the bucket policy; the sweep id on every change;

@@ -111,7 +111,7 @@ enum Commands {
 
     /// How far HQ's verification of finished tasks can be trusted, the audits you answer, and sweeps that clear a queue
     Verify {
-        /// status (default), audits, pull [n], agree <id>, disagree <id>, holds, veto <task>, briefing [hours], queue or sweep <verb>
+        /// status (default), rollout, audits, pull [n], agree <id>, disagree <id>, holds, veto <task>, briefing [hours], queue or sweep <verb>
         #[arg(default_value = "status")]
         sub: String,
         /// A count (pull), an audit id (agree, disagree), a task (veto) or a sweep verb

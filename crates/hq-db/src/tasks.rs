@@ -395,7 +395,11 @@ mod queue;
 mod refs;
 mod reverify;
 mod rework;
+mod rollout;
+#[cfg(test)]
+mod rollout_tests;
 mod rows;
+mod shadow;
 mod stale;
 mod sweeps;
 #[cfg(test)]
@@ -420,8 +424,10 @@ pub use queue::*;
 pub use refs::*;
 pub use reverify::*;
 pub use rework::*;
+pub use rollout::*;
 use rows::*;
 pub use rows::{list_task_events, validate_date};
+pub use shadow::*;
 pub use stale::*;
 pub use sweeps::*;
 pub use time::*;

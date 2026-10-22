@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { Calibration, QueueHealth, SweepEstimate, TierCalibration } from '~/lib/verificationApi'
+import type { Calibration, QueueHealth, Rollout, SweepEstimate, TierCalibration } from '~/lib/verificationApi'
 import {
   ageLabel,
   auditEstimate,
@@ -11,6 +11,7 @@ import {
   levelLabel,
   pickScope,
   queueLines,
+  rolloutView,
   scopeLabel,
   sweepProgress,
   sweepStage,
@@ -171,4 +172,26 @@ test('the screens stay out of the way while verification is off', () => {
   expect(verificationActive(undefined)).toBe(false)
   expect(verificationActive('shadow')).toBe(true)
   expect(verificationActive('enforce')).toBe(true)
+})
+
+test('rolloutView lists the unmet conditions first and counts them', () => {
+  const r: Rollout = {
+    stage: 'tier_0',
+    stage_label: 'Enforcing tier 0',
+    next: { label: 'Also enforce tier 1 (code with a pull request)', change: 'tasks.verification.enforce_tiers: [0, 1]' },
+    gates: [
+      { label: 'a', met: true, detail: '' },
+      { label: 'b', met: false, detail: '' },
+      { label: 'c', met: false, detail: '' },
+    ],
+    ready: false,
+    warnings: [],
+    shadow: [],
+  }
+  const v = rolloutView(r)
+  expect(v.gates.map((g) => g.label)).toEqual(['b', 'c', 'a'])
+  expect(v.next?.verdict).toBe('2 conditions are not met yet.')
+  expect(rolloutView({ ...r, gates: [{ label: 'a', met: false, detail: '' }] }).next?.verdict).toBe('One condition is not met yet.')
+  expect(rolloutView({ ...r, ready: true, gates: [] }).next?.verdict).toContain('Every condition is met')
+  expect(rolloutView({ ...r, next: null, ready: true, gates: [] }).next).toBeNull()
 })

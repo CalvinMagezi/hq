@@ -890,14 +890,33 @@ mod tests {
             "there is one policy row"
         );
 
-        // The rollback documented in docs/plans/native-tasks.md.
+        // The rollback documented in docs/plans/native-tasks.md: 097, then 096, then 095.
         conn.execute_batch(
-            "DROP TRIGGER task_verdicts_no_delete;
+            "DROP TABLE task_reverify_requests;
+             DROP TABLE task_verification_skips;
+             DROP TABLE task_sweep_items;
+             DROP TABLE task_sweeps;
+             ALTER TABLE task_verification_policy DROP COLUMN enforcing_since;
+             DROP TABLE task_veto_holds;
+             DROP TABLE task_canary_runs;
+             DROP TABLE task_audits;
+             DROP TABLE task_verification_waits;
+             DROP TRIGGER task_verdicts_no_delete;
              DROP TRIGGER task_verdicts_no_update;
              DROP TABLE task_verdicts;
              DROP TABLE task_verification_policy;",
         )
         .unwrap();
+        let left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'task_verdict%' \
+                 OR name LIKE 'task_verification%' OR name LIKE 'task_sweep%' \
+                 OR name IN ('task_audits', 'task_canary_runs', 'task_veto_holds', 'task_reverify_requests')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0, "the documented rollback leaves nothing behind");
         let title: String = conn
             .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
             .unwrap();

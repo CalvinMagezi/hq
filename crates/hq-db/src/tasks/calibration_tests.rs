@@ -13,7 +13,13 @@ fn cfg() -> VerificationConfig {
 }
 
 /// A task HQ completed: submitted by a worker, passed by a verifier under `config`.
-fn verified(db: &Database, initiative: &str, id: &str, tier: u8, config: &str) -> Verdict {
+pub(super) fn verified(
+    db: &Database,
+    initiative: &str,
+    id: &str,
+    tier: u8,
+    config: &str,
+) -> Verdict {
     make(db, id, initiative, None).unwrap();
     move_to(db, id, STATUS_IN_PROGRESS).unwrap();
     move_to(db, id, STATUS_READY_FOR_REVIEW).unwrap();
@@ -65,7 +71,7 @@ fn verified(db: &Database, initiative: &str, id: &str, tier: u8, config: &str) -
     v
 }
 
-fn answered(db: &Database, id: &str, agrees: bool) {
+pub(super) fn answered(db: &Database, id: &str, agrees: bool) {
     db.with_conn(|c| answer_audit(c, id, agrees, "", "owner"))
         .unwrap();
 }

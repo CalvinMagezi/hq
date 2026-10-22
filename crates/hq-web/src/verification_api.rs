@@ -43,6 +43,7 @@ pub(crate) async fn status_handler(State(state): State<Arc<WsState>>) -> Respons
             "confirm_over": cfg.sweep_confirm_over,
             "calibration": t::calibration(c, &cfg)?,
             "queue": t::queue_health(c, &cfg)?,
+            "rollout": t::rollout(c, &cfg)?,
             "holds": t::list_holds(c)?.len(),
             "active_sweeps": t::active_sweeps(c)?.len(),
         }))
@@ -561,6 +562,14 @@ mod tests {
         assert_eq!(body["mode"], "off");
         assert_eq!(body["calibration"]["tiers"][1]["state"], "insufficient");
         assert_eq!(body["active_sweeps"], 0);
+        assert_eq!(body["rollout"]["stage"], "off");
+        assert!(
+            body["rollout"]["next"]["change"]
+                .as_str()
+                .unwrap()
+                .contains("mode: shadow"),
+            "{body}"
+        );
 
         submit(&state);
         let (status, body) = call(

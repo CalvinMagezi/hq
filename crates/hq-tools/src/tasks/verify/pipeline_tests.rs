@@ -1967,6 +1967,67 @@ mod sweeps {
     }
 
     #[tokio::test]
+    async fn applying_a_tier_two_pass_opens_a_veto_window_and_undo_closes_it() {
+        let w = World::code(merged_pr_github(SKIP_DIFF));
+        let sweep = plan(&w).await;
+        // The plan cannot see the skipped test: the diff is read when the task is reviewed.
+        assert_eq!(items(&w.db, &sweep.id)[0].tier, 1);
+        start(&w, &sweep.id);
+        let answer = w
+            .answer(
+                "pass",
+                &["pr_state", "required_checks"],
+                &[("skipped_test", true)],
+            )
+            .await;
+        let two = ScriptedReviewer::new(
+            &["a", "b"],
+            vec![reply("claude-x", &answer), reply("openai/gpt-5", &answer)],
+        );
+        advance_sweeps(&w.env(), &two, 50).await.unwrap();
+        assert_eq!(
+            bucket(&w.db, &sweep.id, "tk-1"),
+            t::BUCKET_NEEDS_YOU,
+            "a tier 2 pass waits for the owner's window, whatever tier the plan guessed"
+        );
+        assert_eq!(two.calls(), 2, "two model families judged the tier 2 task");
+
+        w.db.with_conn(|c| t::request_apply(c, &w.cfg, &sweep.id, false))
+            .unwrap();
+        let idle = ScriptedReviewer::new(&["a", "b"], vec![]);
+        advance_sweeps(&w.env(), &idle, 50).await.unwrap();
+
+        // The sweep did not complete it: it opened the same window a single verification does.
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_APPLIED);
+        assert_eq!(status_of(&w.db, "tk-1"), t::STATUS_READY_FOR_REVIEW);
+        let hold = w.db.with_conn(|c| t::get_hold(c, "tk-1")).unwrap().unwrap();
+        assert!(hold.release_at > chrono::Utc::now().timestamp() + 23 * 3600);
+        let note = w.db.with_conn(|c| t::list_comments(c, "tk-1")).unwrap();
+        assert!(
+            note.last().unwrap().body.contains("hq verify veto"),
+            "{:?}",
+            note.last().map(|n| &n.body)
+        );
+
+        // Undo closes the window and keeps the task out of automatic verification.
+        let report = w.db.with_conn(|c| undo_sweep(c, &sweep.id)).unwrap();
+        assert!(report.left_alone.is_empty(), "{:?}", report.left_alone);
+        assert!(
+            w.db.with_conn(|c| t::get_hold(c, "tk-1"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(status_of(&w.db, "tk-1"), t::STATUS_READY_FOR_REVIEW);
+        assert!(w.db.with_conn(|c| t::is_skipped(c, "tk-1")).unwrap());
+        release_due_holds(&w.env()).await.unwrap();
+        assert_eq!(
+            status_of(&w.db, "tk-1"),
+            t::STATUS_READY_FOR_REVIEW,
+            "an undone window completes nothing later"
+        );
+    }
+
+    #[tokio::test]
     async fn work_that_changed_between_the_run_and_the_apply_is_not_applied() {
         let mut w = queue();
         let sweep = plan(&w).await;

@@ -57,12 +57,44 @@ export interface QueueHealth {
   alerts: string[]
 }
 
+export type RolloutStage = 'off' | 'shadow' | 'tier_0' | 'tier_1' | 'all_tiers'
+
+/** One condition for the next step of turning verification on. */
+export interface RolloutGate {
+  label: string
+  met: boolean
+  /** The numbers behind it, in a sentence. */
+  detail: string
+}
+
+/** Shadow verdicts of one tier next to what someone else then did with the work. */
+export interface ShadowTier {
+  tier: number
+  compared: number
+  agreed: number
+  false_passes: number
+  false_rejects: number
+  false_pass_upper: number | null
+}
+
+export interface Rollout {
+  stage: RolloutStage
+  stage_label: string
+  /** The next step and the setting that takes it; null once every tier is enforced. */
+  next: { label: string; change: string } | null
+  gates: RolloutGate[]
+  ready: boolean
+  warnings: string[]
+  shadow: ShadowTier[]
+}
+
 export interface VerificationStatus {
   mode: VerificationMode
   autonomy_gate: 'off' | 'demote' | 'require'
   confirm_over: number
   calibration: Calibration
   queue: QueueHealth
+  rollout: Rollout
   holds: number
   active_sweeps: number
 }

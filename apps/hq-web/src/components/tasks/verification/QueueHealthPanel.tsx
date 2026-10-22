@@ -1,9 +1,10 @@
 import { AlertTriangle } from 'lucide-react'
-import type { QueueHealth } from '~/lib/verificationApi'
+import type { QueueHealth, Rollout } from '~/lib/verificationApi'
+import { RolloutPanel } from './RolloutPanel'
 import { WAITING_LABEL, queueLines, waitingChips } from './verification'
 
 /** Backlog by who it waits on, the sentences that matter, and why anything is deferred. */
-export function QueueHealthPanel({ health }: { health: QueueHealth }) {
+export function QueueHealthPanel({ health, rollout }: { health: QueueHealth; rollout?: Rollout }) {
   const chips = waitingChips(health.backlog)
   const lines = queueLines(health)
   const alerts = health.alerts.length
@@ -41,6 +42,7 @@ export function QueueHealthPanel({ health }: { health: QueueHealth }) {
           </ul>
         </div>
       )}
+      {rollout && <RolloutPanel rollout={rollout} />}
     </div>
   )
 }

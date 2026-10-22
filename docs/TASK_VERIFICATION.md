@@ -123,18 +123,34 @@ it happens. This runs after the fact.
 
 ## Turning it on
 
-Roll it out in steps and let the numbers, not the calendar, decide when to move to the next.
+Roll it out in steps and let the numbers, not the calendar, decide when to move to the next. `hq verify rollout`
+(and the Turning it on section of the queue panel on the tasks page) says where you are, what the next step waits
+for, and the one setting that takes it. It changes nothing itself.
 
-1. **Shadow.** `tasks.verification.mode: shadow`. Every task in review gets a verdict that moves nothing. Compare
-   with what you and the agents then did. Reviewer (model) runs stay off until you set a ceiling, so shadow costs
-   nothing but machine reads; `shadow_e2_sample` bounds how many reviews run to price the rest.
-2. **Set a reviewer budget** if you want a model to judge criteria: `reviewer_monthly_ceiling_usd`. Without one,
-   only deterministic checks run, which already settle a failing check, a missing artifact and an unread source.
-3. **Audit.** `hq verify pull 20` draws completed work for you to check. `hq verify agree <id>` or
-   `hq verify disagree <id> --note "..."`.
-4. **Enforce a tier.** `mode: enforce` with `enforce_tiers: [0]`, then `[0, 1]`, then `[0, 1, 2]`.
-5. **Watch `hq verify status`.** It says, per tier, whether auto-completion is earned, has too little data
-   (with the counts), or has been withdrawn and why.
+1. **Set a reviewer budget first** (`reviewer_monthly_ceiling_usd`). Every tier needs a review to pass, so without
+   one a shadow verdict can fail a task but never pass it, and the numbers below would say nothing about false
+   passes. It also lets the canaries run: planted defects and clean controls put to the reviewer, which is how its
+   judgement is tested.
+2. **Shadow.** `tasks.verification.mode: shadow`. Every task in review gets a verdict that moves nothing;
+   `shadow_e2_sample` bounds how many reviewer runs it spends to price the rest.
+3. **Let shadow compare itself.** Shadow completes nothing, so there are no completed tasks to audit yet. What there
+   is: your own decisions. For each verdict, `rollout` looks at the first thing that happened to that submission
+   afterwards, if someone other than its worker (or HQ) did it. Accepted work the verifier would have passed is an
+   agreement; work you sent back that it would have passed is a **false pass**, the dangerous kind; work you
+   accepted that it would have held back is a false reject. A move with no recorded person says nothing and is not
+   counted. Keep reviewing the way you do now and the numbers build up.
+4. **Read the backlog once.** `hq verify sweep plan` reads everything waiting without a model and without moving
+   anything. Run and apply it when the groups look right (see Clearing a queue).
+5. **Enforce a tier when `hq verify rollout` says every condition is met.** For tier 0 that is: enough verdicts
+   compared (`autonomy_min_audits`, 30 by default), their false passes rare enough
+   (`autonomy_max_disagreement`, 10% as an upper bound at 95% confidence), the reviewer catching planted defects
+   (`autonomy_min_catch_rate`), and the backlog read. Set `mode: enforce` with `enforce_tiers: [0]`. Tier 1 then
+   waits on tier 0 having earned its autonomy from your audits (`hq verify pull 20`, `hq verify agree <id>` or
+   `hq verify disagree <id> --note "..."`), and tier 2 on tier 1.
+6. **Watch `hq verify status`.** It says, per tier, whether auto-completion is earned, has too little data
+   (with the counts), or has been withdrawn and why. `rollout` repeats a withdrawn tier as a warning.
+7. **Last, run the gate over its own plan.** `hq verify sweep plan --initiative <the verification initiative>`,
+   run, apply, so the tasks that built this are completed the way every other task now is.
 
 ```yaml
 tasks:
@@ -202,6 +218,7 @@ Changing the reviewer models starts a new record, because trust earned by one re
 
 ```bash
 hq verify               # mode, who tasks are waiting on, calibration per tier
+hq verify rollout       # where turning it on stands, what the next step waits for, the setting that takes it
 hq verify audits        # completed tasks waiting for your agree or not
 hq verify pull 20       # draw more audits now
 hq verify agree <id>

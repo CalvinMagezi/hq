@@ -477,17 +477,24 @@ async fn apply_item(env: &Env<'_>, sweep: &t::Sweep, item: &t::SweepItem) -> Res
         Ok(task) => task,
         Err(why) => return Ok(Applied::Stale(format!("not applied: {why}"))),
     };
+    let Some(verdict_id) = item.verdict_id.clone() else {
+        return Ok(Applied::Kept("left where it is".into()));
+    };
+    let Some(verdict) = env.db.with_conn(move |c| t::get_verdict(c, &verdict_id))? else {
+        return Ok(Applied::Kept("its verdict is gone".into()));
+    };
+    // The verdict's tier is the one that counts: a diff scan can raise a task to tier 2 only once
+    // it is reviewed, after the plan was made.
+    let held_pass = item.bucket == t::BUCKET_NEEDS_YOU
+        && verdict.verdict == t::VERDICT_PASS
+        && verdict.tier >= t::MAX_TIER;
     let moves = matches!(
         item.bucket.as_str(),
         t::BUCKET_PASSED | t::BUCKET_FAILED | t::BUCKET_NO_ARTIFACT
-    ) || (item.bucket == t::BUCKET_NEEDS_YOU && item.tier >= t::MAX_TIER);
-    let Some(verdict_id) = item.verdict_id.clone().filter(|_| moves) else {
+    ) || held_pass;
+    if !moves {
         return Ok(Applied::Kept("left where it is".into()));
-    };
-    let id = verdict_id.clone();
-    let Some(verdict) = env.db.with_conn(move |c| t::get_verdict(c, &id))? else {
-        return Ok(Applied::Kept("its verdict is gone".into()));
-    };
+    }
     let verifier = format!("verify:sweep-{}", sweep.id);
     let (max_attempts, veto_hours, route_tags, vault_path) = (
         env.cfg.max_attempts,
@@ -506,7 +513,10 @@ async fn apply_item(env: &Env<'_>, sweep: &t::Sweep, item: &t::SweepItem) -> Res
         if let Some(why) = still_current(env, &currency).await {
             return Ok(Applied::Stale(format!("not applied: {why}")));
         }
-        let (sweep_id, hold) = (sweep.id.clone(), item.tier >= t::MAX_TIER && veto_hours > 0);
+        let (sweep_id, hold) = (
+            sweep.id.clone(),
+            verdict.tier >= t::MAX_TIER && veto_hours > 0,
+        );
         let task_id = task.id.clone();
         let outcome = env.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {

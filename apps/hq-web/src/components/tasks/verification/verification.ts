@@ -6,6 +6,7 @@ import type {
   Calibration,
   Criterion,
   QueueHealth,
+  Rollout,
   SweepBucket,
   SweepEstimate,
   SweepAction,
@@ -269,3 +270,32 @@ export function queueLines(h: QueueHealth): string[] {
 
 /** Whether the screens have anything to say: with verification off they stay out of the way. */
 export const verificationActive = (mode: string | undefined): boolean => mode === 'shadow' || mode === 'enforce'
+
+export interface RolloutView {
+  /** Where the instance is, as a sentence. */
+  stage: string
+  warnings: string[]
+  /** The next step, or null when every tier is enforced. */
+  next: { label: string; change: string; verdict: string } | null
+  /** Unmet conditions first: they are what the owner can act on. */
+  gates: Rollout['gates']
+}
+
+/** What the "turning it on" section says: where this is, whether the next step is open, what is missing. */
+export function rolloutView(r: Rollout): RolloutView {
+  const open = r.gates.filter((g) => !g.met).length
+  const verdict =
+    r.next === null
+      ? ''
+      : r.ready
+        ? 'Every condition is met. This is the one setting to change.'
+        : open === 1
+          ? 'One condition is not met yet.'
+          : `${open} conditions are not met yet.`
+  return {
+    stage: r.stage_label,
+    warnings: r.warnings,
+    next: r.next ? { ...r.next, verdict } : null,
+    gates: [...r.gates.filter((g) => !g.met), ...r.gates.filter((g) => g.met)],
+  }
+}

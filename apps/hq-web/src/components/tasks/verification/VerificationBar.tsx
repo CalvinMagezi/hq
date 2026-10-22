@@ -64,7 +64,7 @@ export function VerificationBarView({ status, healthOpen, onToggleHealth, onVeri
           </button>
         </div>
       </div>
-      {healthOpen && <QueueHealthPanel health={status.queue} />}
+      {healthOpen && <QueueHealthPanel health={status.queue} rollout={status.rollout} />}
     </section>
   )
 }
