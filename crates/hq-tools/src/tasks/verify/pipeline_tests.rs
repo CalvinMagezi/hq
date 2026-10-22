@@ -1454,6 +1454,35 @@ async fn nothing_is_sent_back_while_verification_only_watches() {
     assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
 }
 
+#[test]
+fn tools_built_by_a_process_that_read_no_config_leave_the_owners_policy_alone() {
+    let w = World::code(merged_pr_github(CLEAN_DIFF));
+    let mode = |db: &Database| db.with_conn(t::verification_policy).unwrap().mode;
+    assert_eq!(mode(&w.db), VerificationMode::Enforce);
+    // A process under another user, or with a half-saved file, holds only defaults, and the
+    // defaults say verification is off.
+    let build = |record: bool| {
+        crate::tasks::build_task_tools(
+            w.vault.path().to_path_buf(),
+            Arc::new(hq_vault::VaultClient::new(w.vault.path().to_path_buf()).unwrap()),
+            Arc::new(w.db.clone()),
+            hq_core::config::TasksConfig::default(),
+            None,
+            Arc::new(super::remote::fake::FakeGitHub::default()),
+            record,
+        )
+    };
+    drop(build(false));
+    assert_eq!(
+        mode(&w.db),
+        VerificationMode::Enforce,
+        "it did not write its defaults over the policy"
+    );
+    // One that did read a configuration records it, turning verification off included.
+    drop(build(true));
+    assert_eq!(mode(&w.db), VerificationMode::Off);
+}
+
 // ---- the whole loop, through the tools an agent uses ----
 
 fn tools_for(w: &World) -> Vec<Box<dyn crate::registry::HqTool>> {
