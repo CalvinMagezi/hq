@@ -170,6 +170,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     private fun json(body: JSONObject) = body.toString().toRequestBody("application/json".toMediaType())
 
+    /** The tasks in progress, newest first, with their count: what the Tasks widget shows. */
+    suspend fun inProgress(limit: Int): Pair<List<example.hq.spike.capture.TaskLine>, Int> = send(authed("/api/tasks?status=in_progress&top_level_only=true&limit=$limit").build()) { text ->
+        val o = JSONObject(text)
+        val rows = o.optJSONArray("tasks").objects().map { example.hq.spike.capture.TaskLine(it.getString("id"), example.hq.spike.capture.Widgets.numberOf(it.optString("display_id", "")), it.optString("title", "")) }
+        rows to o.optInt("total", rows.size)
+    }
+
     /** The helpers working on a task now (a lease that has not ended). */
     suspend fun liveWorkSessions(): List<WorkSession> = send(authed("/api/work-sessions?days=1").build()) { text ->
         JSONObject(text).optJSONArray("work_sessions").objects().filter { it.isNull("ended_at") || !it.has("ended_at") }

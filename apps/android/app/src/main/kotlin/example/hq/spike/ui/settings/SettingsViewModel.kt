@@ -14,6 +14,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.AlertPoster
 import example.hq.spike.HubService
+import example.hq.spike.capture.CapturePrefs
+import example.hq.spike.capture.CaptureWidget
+import example.hq.spike.capture.NeedsYouWidget
+import example.hq.spike.capture.Outbox
+import example.hq.spike.capture.OutboxSender
+import example.hq.spike.capture.TasksWidget
+import example.hq.spike.capture.Widgets
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
 import java.io.File
@@ -50,6 +57,7 @@ data class SettingsUi(
     /** What Android says about keeping AgentHQ running and about its notifications; read again whenever Settings is refreshed. */
     val keep: KeepFacts = KeepFacts(),
     val notif: NotifFacts = NotifFacts(),
+    val capture: CaptureFacts = CaptureFacts(),
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 }
@@ -70,6 +78,11 @@ class SettingsActions(
     val onFix: (PhoneFix) -> Unit = {},
     val onChannel: (String) -> Unit = {},
     val onAnswers: (Boolean) -> Unit = {},
+    val onShareOpens: (String) -> Unit = {},
+    val onShowTitles: (Boolean) -> Unit = {},
+    val onAddWidget: (Int) -> Unit = {},
+    val onSendNow: (String) -> Unit = {},
+    val onDiscard: (String) -> Unit = {},
     /** One read of everything Settings shows; the page calls it every few seconds while it is showing and the app is in front. */
     val onRefresh: suspend () -> Unit = {},
 )
@@ -95,6 +108,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onRestartConfirm = ::confirmRestart,
         onFix = ::fix,
         onChannel = ::openChannel,
+        onShareOpens = { v -> CapturePrefs.setShareOpens(ctx(), v); _state.update { it.copy(capture = it.capture.copy(shareOpens = v)) } },
+        onShowTitles = { on -> CapturePrefs.setShowTitles(ctx(), on); Widgets.renderAll(ctx()); _state.update { it.copy(capture = it.capture.copy(showTitles = on)) } },
+        onAddWidget = ::addWidget, onSendNow = ::sendNow, onDiscard = { id -> Outbox.of(ctx()).remove(id); _state.update { it.copy(capture = captureFacts(), phone = phoneRows()) } },
         onAnswers = { on -> AlertPoster.setAnswersAllowed(ctx(), on); _state.update { it.copy(notif = it.notif.copy(answers = on)) } },
         onRefresh = ::refreshNow,
     )
@@ -172,11 +188,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
             HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(it, Instant.now()).checked.any { r -> !r.ok } }),
             HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else "Needs you ${if (on(AlertPoster.NEEDS)) "on" else "off"} · Updates ${if (on(AlertPoster.UPDATES)) "on" else "off"}", warn = !allowed),
-            HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
+            HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
         )
     }
 
-    private fun SettingsUi.withFacts(): SettingsUi = if (frozen) this else copy(keep = keepFacts(), notif = notifFacts())
+    private fun SettingsUi.withFacts(): SettingsUi = if (frozen) this else copy(keep = keepFacts(), notif = notifFacts(), capture = captureFacts())
 
     /** What Android says about this app staying alive: the battery setting, permission auto-removal, notifications, and the last time it stopped it. */
     private var keepCache: Pair<Long, KeepFacts>? = null
@@ -206,6 +222,25 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private fun lastAndroidStop(am: ActivityManager, pkg: String): LastStop? =
         am.getHistoricalProcessExitReasons(pkg, 0, EXIT_SCAN).firstOrNull { PhoneWords.androidStopped(it.reason) }?.let { LastStop(it.reason, Instant.ofEpochMilli(it.timestamp)) }
+
+    private fun captureFacts() = CaptureFacts(CapturePrefs.shareOpens(ctx()), CapturePrefs.showTitles(ctx()), Outbox.of(ctx()).all())
+
+    private val widgetKinds = listOf<Class<*>>(CaptureWidget::class.java, NeedsYouWidget::class.java, TasksWidget::class.java)
+
+    /** Asks the launcher to put one of the three widgets on the home screen, which it confirms itself. */
+    private fun addWidget(which: Int) {
+        val ok = Widgets.pin(ctx(), widgetKinds[which])
+        if (!ok) _state.update { it.copy(line = "Your launcher cannot add it from here. Press and hold the home screen and choose Widgets.") }
+    }
+
+    /** Tries one saved item again now, then reads what is left. */
+    private fun sendNow(id: String) {
+        Outbox.of(ctx()).retry(id)
+        viewModelScope.launch(Dispatchers.IO) {
+            OutboxSender.flushNow(ctx())
+            _state.update { it.copy(capture = captureFacts(), phone = phoneRows()) }
+        }
+    }
 
     private fun notifFacts(): NotifFacts {
         val nm = ctx().getSystemService(NotificationManager::class.java)

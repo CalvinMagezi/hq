@@ -105,6 +105,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Origins -> "Allowed addresses"
     SettingsPage.ConnectedTools -> "Connected tools"
     SettingsPage.Computers -> "Computers"
+    SettingsPage.CaptureWidgets -> "Capture and widgets"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -137,6 +138,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Background -> Background(ui, actions)
                 SettingsPage.KeepRunning -> KeepRunning(ui, actions)
                 SettingsPage.Notifications -> Notifications(ui, actions)
+                SettingsPage.CaptureWidgets -> CaptureWidgets(ui, actions)
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
                 SettingsPage.Computers -> ReadOnlyList(ui, "No computer is listed.") { Facts(SettingsWords.computerRows(ui.snap.settings)) }
@@ -625,6 +627,68 @@ private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
                         uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line,
                     ),
                 )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- capture and widgets
+
+@Composable
+private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
+    val c = ui.capture
+    Page {
+        Label("Share sheet opens on")
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(Triple("note", "Note", "Notebooks/Inbox"), Triple("task", "Task", "Personal \u00b7 Inbox"), Triple("last", "The last one I used", "")).forEach { (key, title, end) ->
+                val on = c.shareOpens == key
+                val shape = RoundedCornerShape(12.dp)
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 50.dp).clip(shape).background(Mts.Surface100).border(1.dp, if (on) Mts.BrandGreen else Mts.Line, shape).selectable(selected = on, role = Role.RadioButton) { actions.onShareOpens(key) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(22.dp).border(2.dp, if (on) Mts.BrandGreen else Mts.Line, CircleShape), contentAlignment = Alignment.Center) { if (on) Box(Modifier.size(13.dp).background(Mts.BrandGreen, CircleShape)) }
+                    Text(title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+                    if (end.isNotEmpty()) Text(end, style = HqType.BodySm, color = Mts.InkMuted)
+                }
+            }
+        }
+        Label("Widgets")
+        Group {
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Show titles in Needs you", style = HqType.BodyBold, color = Mts.Ink)
+                    Text("Off: the widget shows a count only. Titles can be read on a locked screen.", style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                Switch(
+                    checked = c.showTitles, onCheckedChange = actions.onShowTitles,
+                    colors = SwitchDefaults.colors(checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen, uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line),
+                )
+            }
+        }
+        Group {
+            listOf("Capture", "Needs you", "Tasks").forEachIndexed { i, name ->
+                if (i > 0) Divider()
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(name, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+                    Box(Modifier.heightIn(min = 40.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button) { actions.onAddWidget(i) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text("Add", style = HqType.BodySmBold, color = Mts.Ink) }
+                }
+            }
+        }
+        if (c.waiting.isNotEmpty()) {
+            Label("Waiting to send")
+            Group {
+                c.waiting.forEachIndexed { i, q ->
+                    if (i > 0) Divider()
+                    Column(Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 4.dp)) {
+                        Text(q.title.ifBlank { "Untitled" }, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(PhoneWords.queuedLine(q), style = HqType.BodySm, color = if (q.failure != null) Mts.Amber else Mts.InkMuted)
+                        Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                            DialogButton("Send now") { actions.onSendNow(q.id) }
+                            DialogButton("Discard") { actions.onDiscard(q.id) }
+                        }
+                    }
+                }
             }
         }
     }

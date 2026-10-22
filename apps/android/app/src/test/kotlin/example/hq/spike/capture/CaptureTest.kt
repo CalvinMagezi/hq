@@ -80,4 +80,9 @@ class CaptureTest {
         file.delete()
         assertEquals(0, Outbox(file).all().size)
     }
+
+    @Test fun aWidgetRowShowsTheLastPartOfTheDisplayId() {
+        assertEquals("061", Widgets.numberOf("PERSONAL-INBOX-061"))
+        assertEquals("T1", Widgets.numberOf("T1"))
+    }
 }

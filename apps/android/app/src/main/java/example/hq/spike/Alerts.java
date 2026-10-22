@@ -51,9 +51,10 @@ final class Alerts {
                 if (!problem.equals(lastProblem)) Log.w(HubService.TAG, "alert poll failed: " + problem);
                 lastProblem = problem;
             }
-            // Notes and tasks saved while HQ was down go out as soon as it answers.
+            // Notes and tasks saved while HQ was down go out as soon as it answers; the widgets learn what is in progress.
             try {
                 example.hq.spike.capture.OutboxSender.flushNow(c);
+                example.hq.spike.capture.Widgets.refreshTasks(c);
             } catch (RuntimeException e) {
                 Log.w(HubService.TAG, "outbox flush failed: " + e.getClass().getSimpleName());
             }
@@ -67,6 +68,13 @@ final class Alerts {
 
     private static void poll(Context c) throws IOException, JSONException {
         Map<String, JSONObject> items = fetch(c);
+        String newest = null;
+        for (JSONObject item : items.values()) { newest = item.optString("title", ""); break; }
+        try {
+            example.hq.spike.capture.Widgets.needs(c, items.size(), newest);
+        } catch (RuntimeException e) {
+            Log.w(HubService.TAG, "widget update failed: " + e.getClass().getSimpleName());
+        }
         SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String stored = prefs.getString(SEEN, null);
         List<String> seen = stored == null || stored.isEmpty() ? new ArrayList<String>() : Arrays.asList(stored.split(SEP));

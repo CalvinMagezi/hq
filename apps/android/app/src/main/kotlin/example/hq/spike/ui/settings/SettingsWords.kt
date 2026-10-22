@@ -25,7 +25,7 @@ data class SettingsSnapshot(
     val forecast: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
