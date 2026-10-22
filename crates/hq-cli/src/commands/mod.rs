@@ -55,6 +55,8 @@ pub mod mcp_serve;
 pub mod memory;
 pub mod models;
 pub mod net;
+#[cfg(all(unix, feature = "tunnel"))]
+pub mod net_tunnel;
 pub mod notify_restart;
 pub mod onboard;
 pub mod pair;

@@ -5,6 +5,12 @@ edition.workspace = true
 license.workspace = true
 description = "A userspace WireGuard peer for a phone: serves fixed loopback ports to tunnel peers and forwards fixed loopback ports into the tunnel, with no VpnService and no root"
 
+[features]
+default = ["keygen"]
+# Making a private key needs the key generator that `hq net` carries. A build that only runs a
+# tunnel from a key it was given can leave it out.
+keygen = ["hq-net/tools"]
+
 [dependencies]
 # Exact versions: the protocol and the TCP stack are the security-relevant parts of this crate,
 # so they move only when someone has read the changelog.

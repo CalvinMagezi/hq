@@ -67,10 +67,20 @@ jobs:
       - name: clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # The userspace tunnel commands are behind a feature the workspace run above leaves off; the
+      # phone build turns it on, so it is linted and tested here too.
+      - name: clippy (tunnel feature)
+        run: cargo clippy -p hq-cli --all-targets --features tunnel --locked -- -D warnings
+
       - name: test
         env:
           HQ_REQUIRE_BUILT_APP: "1"
         run: cargo test --workspace --locked
+
+      - name: test (tunnel feature)
+        run: |
+          cargo test -p hq-cli --features tunnel --locked --test net_tunnel
+          cargo test -p hq-cli --features tunnel --locked --bin hq -- net_args
 
   rust-macos:
     name: Rust (macOS build)
@@ -91,7 +101,9 @@ jobs:
       # The macOS binary ships in every release; a Linux-only call in a dependency or in our
       # code compiles on Linux CI and breaks only here.
       - name: Compile the CLI
-        run: cargo check -p hq-cli --all-targets --locked
+        run: |
+          cargo check -p hq-cli --all-targets --locked
+          cargo check -p hq-cli --all-targets --features tunnel --locked
 
   rust-windows:
     name: Rust (Windows build, smoke)

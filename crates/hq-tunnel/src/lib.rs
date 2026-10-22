@@ -6,7 +6,9 @@
 
 pub mod config;
 pub mod error;
+mod fsutil;
 pub mod join;
+pub mod keyin;
 mod packet;
 pub mod pipe;
 pub mod run;
@@ -14,6 +16,7 @@ pub mod secret;
 pub mod session;
 pub mod stack;
 pub mod status;
+pub mod store;
 mod timers;
 
 pub use error::{Error, Result};

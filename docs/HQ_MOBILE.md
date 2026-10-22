@@ -78,6 +78,12 @@ To build by hand, point the C compiler, archiver and linker for the target at th
 `aarch64-linux-android26-clang` and `llvm-ar`, then run
 `cargo build -p hq-cli --profile release-small --target aarch64-linux-android --locked`.
 
+The Android build also turns on the `tunnel` feature (`--features tunnel`), which adds `hq net
+tunnel`: the phone as a userspace WireGuard peer with no system VPN slot. It is off in every other
+build, nothing starts it on its own, and the app that runs it is separate work. The commands, the
+files and the security notes are in `docs/PRIVATE_NETWORK.md` ("A phone without the WireGuard app")
+and `docs/security/NETWORK.md`, section 9.
+
 ## Not part of this edition
 
 The app that runs this binary as a foreground service and shows the web app in a WebView, backup

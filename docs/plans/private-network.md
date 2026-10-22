@@ -420,6 +420,13 @@ Native Bridge work, and is not part of this plan.
 - Budget phones from Tecno, Infinix and itel ship a per-app power manager that can stop background apps,
   a VPN service included. The Phase 2 phone task tests the tunnel on the Android tablet first and on a
   budget phone if one can be had, and the phone guide lists the per-brand setting that keeps it alive.
+- As built (2026-10-21): the optional userspace peer is the `hq-tunnel` crate and the `hq net tunnel`
+  commands, behind the `tunnel` feature. Deviations from the first plan, each for a reason found in
+  review: the serve and reach maps live in `~/.hq/tunnel/maps.toml`, not in `config.yaml`, so no
+  setting, environment variable or `config_manage` call reaches them and import can remove them
+  without rewriting the user's whole config; the join text is stored as `join.conf` (it is WireGuard
+  text, not TOML); the control channel has two lines, `network-changed` and `quit`; the status gained
+  a state `idle`. Not done: the Kotlin supervisor, a run on a phone, the Docker integration test.
 - A code rule that follows: everything that needs root (the privileged applier, its systemd path unit,
   the part of `hq net` that applies peers) is gated with `cfg(target_os = "linux")`, never `cfg(unix)`,
   so a build for Android or any other unix target never contains it. `hq-gate` is `cfg(unix)` and

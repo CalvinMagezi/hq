@@ -628,11 +628,7 @@ pub fn valid_label(label: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-/// The range `--keepalive` accepts besides 0. Below the floor a device would wake the radio
-/// constantly; above the ceiling the carrier closes the path first. `hq-tunnel` refuses any
-/// other value in a join text, so the two must agree.
-pub const KEEPALIVE_MIN_SECS: u16 = 10;
-pub const KEEPALIVE_MAX_SECS: u16 = 300;
+pub use crate::keepalive::{KEEPALIVE_MAX_SECS, KEEPALIVE_MIN_SECS};
 
 pub struct NewPeer<'a> {
     pub label: &'a str,
@@ -659,8 +655,7 @@ pub fn add_peer(
         );
     }
     if let Some(secs) = new.keepalive
-        && secs != 0
-        && !(KEEPALIVE_MIN_SECS..=KEEPALIVE_MAX_SECS).contains(&secs)
+        && !crate::keepalive::is_allowed(secs)
     {
         return fail(format!(
             "--keepalive is 0 (none) or {KEEPALIVE_MIN_SECS} to {KEEPALIVE_MAX_SECS} seconds"

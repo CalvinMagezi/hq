@@ -9,6 +9,7 @@ fn ctx(network: bool) -> SandboxContext {
         writable: vec![PathBuf::from("/home/u"), PathBuf::from("/work/repo")],
         masked_files: vec![PathBuf::from("/home/u/.ssh/id_ed25519")],
         readonly_files: vec![PathBuf::from("/home/u/.ssh/authorized_keys")],
+        readonly_dirs: vec![PathBuf::from("/home/u/.hq/tunnel")],
         network,
         read_only: false,
     }
@@ -159,6 +160,7 @@ fn run_wrapped(backend: &Backend, dir: &Path, secret: &Path, command: &str) -> (
         writable: vec![dir.to_path_buf()],
         masked_files: vec![secret.to_path_buf()],
         readonly_files: Vec::new(),
+        readonly_dirs: Vec::new(),
         network: false,
         read_only: false,
     };
@@ -204,6 +206,59 @@ async fn seatbelt_allows_work_but_blocks_masked_reads() {
     let read = format!("cat '{}'", secret.display());
     let (ok, out) = run_wrapped(backend, &root, &secret, &read);
     assert!(!ok && !out.contains("top-secret"));
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn seatbelt_lets_a_command_read_a_read_only_directory_but_not_write_into_it() {
+    let backend = available_backend().expect("sandbox-exec ships with macOS");
+    let (_guard, root, _secret) = secret_fixture();
+    let plane = root.join("plane");
+    std::fs::create_dir(&plane).unwrap();
+    std::fs::write(plane.join("maps.toml"), "unchanged").unwrap();
+    let ctx = SandboxContext {
+        cwd: root.clone(),
+        writable: vec![root.clone()],
+        masked_files: Vec::new(),
+        readonly_files: Vec::new(),
+        readonly_dirs: vec![plane.clone()],
+        network: false,
+        read_only: false,
+    };
+    let run = |command: &str| {
+        let Launch::Wrapped { program, args } = wrap(backend, &ctx, command) else {
+            panic!("expected a wrapped launch");
+        };
+        let out = std::process::Command::new(program)
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    };
+    // Positive control: the rest of the writable root still works, and the directory can be read.
+    let (ok, out) = run(&format!(
+        "echo ok > outside.txt && cat '{}'",
+        plane.join("maps.toml").display()
+    ));
+    assert!(ok && out.contains("unchanged"), "{out}");
+    // A new file, an overwrite and a rename into it are all refused.
+    for command in [
+        format!("echo planted > '{}'", plane.join("new.toml").display()),
+        format!("echo planted > '{}'", plane.join("maps.toml").display()),
+        format!("mv outside.txt '{}'", plane.join("moved.toml").display()),
+    ] {
+        let (ok, _) = run(&command);
+        assert!(!ok, "{command} succeeded");
+    }
+    assert_eq!(
+        std::fs::read_to_string(plane.join("maps.toml")).unwrap(),
+        "unchanged"
+    );
+    assert!(!plane.join("new.toml").exists() && !plane.join("moved.toml").exists());
 }
 
 #[cfg(target_os = "macos")]
@@ -391,6 +446,54 @@ fn gate_keys_are_masked_and_the_gate_authorized_keys_file_is_read_only() {
         read_only
             .iter()
             .any(|p| p.ends_with(".hq/gate_authorized_keys"))
+    );
+}
+
+#[test]
+fn the_private_planes_secrets_are_masked_and_its_directories_are_read_only() {
+    let home = tempfile::tempdir().unwrap();
+    for (dir, files) in [
+        (".hq/net", &["hub.key", "peers.toml", "net.toml"][..]),
+        (".hq/tunnel", &["key", "join.conf", "maps.toml"][..]),
+    ] {
+        std::fs::create_dir_all(home.path().join(dir)).unwrap();
+        for file in files {
+            std::fs::write(home.path().join(dir).join(file), "x").unwrap();
+        }
+    }
+    let masked = existing_canonical(masked_files(Some(home.path())));
+    for secret in [
+        ".hq/net/hub.key",
+        ".hq/net/peers.toml",
+        ".hq/tunnel/key",
+        ".hq/tunnel/join.conf",
+    ] {
+        assert!(masked.iter().any(|p| p.ends_with(secret)), "{secret}");
+    }
+    for open in [".hq/net/net.toml", ".hq/tunnel/maps.toml"] {
+        assert!(
+            !masked.iter().any(|p| p.ends_with(open)),
+            "{open} may be read"
+        );
+    }
+    let dirs = existing_canonical(readonly_dirs(Some(home.path())));
+    assert!(dirs.iter().any(|p| p.ends_with(".hq/net")));
+    assert!(dirs.iter().any(|p| p.ends_with(".hq/tunnel")));
+    // The rules that enforce it, for both backends.
+    let ctx = SandboxContext {
+        readonly_dirs: dirs.clone(),
+        ..ctx(true)
+    };
+    let profile = seatbelt_profile(&ctx);
+    assert!(profile.contains("(deny file-write* (subpath"), "{profile}");
+    let args = strings(&bwrap_args(&ctx, "true"));
+    let tunnel = dirs.iter().find(|p| p.ends_with(".hq/tunnel")).unwrap();
+    let tunnel = tunnel.to_string_lossy().into_owned();
+    let bound = position(&args, &["--ro-bind", &tunnel, &tunnel]).expect("a read-only bind");
+    let home_bind = position(&args, &["--bind", "/home/u", "/home/u"]).unwrap();
+    assert!(
+        bound > home_bind,
+        "the read-only bind comes after the writable one"
     );
 }
 
