@@ -201,6 +201,9 @@ async fn sweep_revoked(
 ) {
     loop {
         tokio::time::sleep(REVOKE_SWEEP).await;
+        if !registry.is_readable() {
+            continue;
+        }
         let stale: Vec<EndpointId> = admitted
             .lock()
             .unwrap_or_else(|e| e.into_inner())

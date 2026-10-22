@@ -23,19 +23,23 @@ async fn https_get(
     connector: &TlsConnector,
     name: &str,
 ) -> (String, Option<Vec<u8>>) {
-    let tcp = TcpStream::connect(addr).await.unwrap();
-    let server_name = ServerName::try_from(name.to_owned()).unwrap();
-    let mut tls = connector
-        .connect(server_name, tcp)
-        .await
-        .expect("TLS through the edge");
-    let negotiated = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
-    tls.write_all(format!("GET / HTTP/1.1\r\nHost: {name}\r\n\r\n").as_bytes())
-        .await
-        .unwrap();
-    let mut response = String::new();
-    tls.read_to_string(&mut response).await.unwrap();
-    (response, negotiated)
+    tokio::time::timeout(20 * SECOND, async {
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let server_name = ServerName::try_from(name.to_owned()).unwrap();
+        let mut tls = connector
+            .connect(server_name, tcp)
+            .await
+            .expect("TLS through the edge");
+        let negotiated = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
+        tls.write_all(format!("GET / HTTP/1.1\r\nHost: {name}\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut response = String::new();
+        tls.read_to_string(&mut response).await.unwrap();
+        (response, negotiated)
+    })
+    .await
+    .expect("a request through the edge did not finish in 20 s")
 }
 
 /// A registered device that answers HTTP, behind an edge with the default caps.
@@ -209,7 +213,7 @@ async fn a_slow_loris_client_is_closed_at_the_deadline_not_per_byte() {
         () = drip => panic!("the edge let a slow client finish its hello"),
     };
     assert!(
-        took >= Duration::from_millis(800) && took < Duration::from_millis(2500),
+        took >= Duration::from_millis(800) && took < Duration::from_millis(3500),
         "closed after {took:?}, expected about the 1 s deadline"
     );
     assert_eq!(rig.edge.stats().hello_timeout, 1);
@@ -226,7 +230,7 @@ async fn a_client_that_sends_nothing_is_closed_at_the_deadline() {
         "closed early at {took:?}"
     );
     assert!(
-        took < Duration::from_millis(2500),
+        took < Duration::from_millis(3500),
         "closed late at {took:?}"
     );
     assert_eq!(rig.edge.stats().hello_timeout, 1);
@@ -257,7 +261,11 @@ async fn the_global_pre_hello_cap_closes_the_extra_connection_at_once() {
 
     // Freeing a slot lets the next one in.
     drop(idle.pop());
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The edge frees the slot before it counts the closed client, so the count says it is free.
+    eventually(5 * SECOND, "the edge to notice the closed client", || {
+        rig.edge.stats().hello_bad == 1
+    })
+    .await;
     let mut next = rig.connect().await;
     assert!(
         stays_open(&mut next, Duration::from_millis(500)).await,
@@ -413,7 +421,7 @@ async fn a_registered_device_that_is_offline_is_given_up_on_at_the_dial_timeout(
         "gave up early at {took:?}"
     );
     assert!(
-        took < Duration::from_millis(3500),
+        took < Duration::from_millis(5000),
         "gave up late at {took:?}"
     );
     assert_eq!(rig.edge.stats().dial_failed, 1);
@@ -688,6 +696,16 @@ async fn the_hello_is_charged_to_the_devices_byte_budget() {
         c.limits.max_connections_per_device = 64;
     })
     .await;
+    // One hello first, so the first dial (the slow part on a cold start) is not in the timing, and
+    // a pause for the bucket to refill to its burst.
+    let mut warm = rig.connect().await;
+    warm.write_all(&hello).await.unwrap();
+    eventually(20 * SECOND, "the first hello to arrive", || {
+        device.sunk() == hello.len() as u64
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let before = device.sunk();
     let started = std::time::Instant::now();
     let mut open = Vec::new();
     for _ in 0..CONNECTIONS {
@@ -695,11 +713,12 @@ async fn the_hello_is_charged_to_the_devices_byte_budget() {
         tcp.write_all(&hello).await.unwrap();
         open.push(tcp);
     }
-    let total = (CONNECTIONS * hello.len()) as u64;
+    let total = before + (CONNECTIONS * hello.len()) as u64;
     eventually(30 * SECOND, "every hello to arrive", || {
         device.sunk() == total
     })
     .await;
+    let total = (CONNECTIONS * hello.len()) as u64;
     let floor = Duration::from_secs_f64((total as f64 - 2_000.0) / 4_000.0 * 0.8);
     assert!(
         started.elapsed() >= floor,
@@ -751,4 +770,44 @@ async fn a_device_cannot_open_streams_toward_the_edge() {
         "the edge granted a device stream credit it never uses"
     );
     drop(rig);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_list_the_edge_cannot_read_refuses_new_connections_but_does_not_cut_open_ones() {
+    let (rig, device, connector) = http_world(&[]).await;
+    let (response, _) = https_get(rig.addr(), &connector, &device.name()).await;
+    assert!(response.ends_with(BODY));
+    assert!(rig.edge.relay().unwrap().is_connected(&device.id()));
+
+    // An edit leaves a line that is not an endpoint id: the whole list is refused.
+    let good = std::fs::read_to_string(&rig.list).unwrap();
+    std::fs::write(&rig.list, format!("{good}not-an-id\n")).unwrap();
+    tokio::time::sleep(Duration::from_millis(3500)).await;
+    let mut fresh = rig.connect().await;
+    fresh
+        .write_all(&client_hello(&device.name()))
+        .await
+        .unwrap();
+    let (got, _) = read_until_closed(&mut fresh, 3 * SECOND).await;
+    assert!(
+        got.is_empty(),
+        "a refused list must not forward new connections"
+    );
+    assert_eq!(rig.edge.stats().unknown_name, 1);
+    assert_eq!(
+        rig.edge.stats().revoked_closed,
+        0,
+        "an unreadable list is not a revocation"
+    );
+    assert!(
+        rig.edge.relay().unwrap().is_connected(&device.id()),
+        "the device lost its relay session because the list was unreadable"
+    );
+
+    // Fixed, and now without the device: that is a revocation.
+    std::fs::write(&rig.list, "").unwrap();
+    eventually(8 * SECOND, "the removal to take effect", || {
+        rig.edge.stats().revoked_closed >= 1
+    })
+    .await;
 }

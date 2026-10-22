@@ -29,12 +29,18 @@ pub struct Registered {
 }
 
 /// The lookup the forwarder and the co-hosted relay make. Implementations answer from memory or a
-/// cache: both are called on every connection, and `lookup` again every second per open one.
+/// cache: both are called on every connection, and a sweep asks about every known device each second.
 pub trait Registry: Send + Sync + 'static {
     /// The device whose name label is `label` (see [`device_label`]), if it is registered.
     fn lookup(&self, label: &str) -> Option<Registered>;
     /// Whether `id` is a registered device (the relay admits only these and the edge itself).
     fn is_registered(&self, id: &EndpointId) -> bool;
+    /// Whether the registry could be read completely. While it cannot, `lookup` and
+    /// `is_registered` answer "no" to everyone (new connections are refused), but the sweeps that
+    /// close connections to devices that have left must not read that as a mass revocation.
+    fn is_readable(&self) -> bool {
+        true
+    }
 }
 
 /// The DNS label a device is reached at: the first [`LABEL_BYTES`] bytes of its endpoint id as
@@ -110,7 +116,7 @@ impl AllowlistFile {
         })
     }
 
-    fn with_fresh<T>(&self, f: impl FnOnce(&Snapshot) -> T) -> T {
+    fn with_fresh<T>(&self, f: impl FnOnce(&Snapshot, bool) -> T) -> T {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.checked.elapsed() >= RELOAD_EVERY {
             match read_snapshot(&self.path, self.owner) {
@@ -129,17 +135,21 @@ impl AllowlistFile {
             }
             state.checked = Instant::now();
         }
-        f(&state.snapshot)
+        f(&state.snapshot, state.last_error.is_none())
     }
 }
 
 impl Registry for AllowlistFile {
     fn lookup(&self, label: &str) -> Option<Registered> {
-        self.with_fresh(|s| s.by_label.get(label).cloned())
+        self.with_fresh(|s, _| s.by_label.get(label).cloned())
     }
 
     fn is_registered(&self, id: &EndpointId) -> bool {
-        self.with_fresh(|s| s.ids.contains(id))
+        self.with_fresh(|s, _| s.ids.contains(id))
+    }
+
+    fn is_readable(&self) -> bool {
+        self.with_fresh(|_, readable| readable)
     }
 }
 
@@ -291,7 +301,11 @@ pub fn revoke_device(path: &Path, id: &EndpointId) -> Result<bool, ListError> {
     // SAFETY: geteuid has no preconditions and cannot fail.
     let owner = unsafe { libc::geteuid() };
     read_entries(path, owner)?;
-    let text = std::fs::read_to_string(path)?;
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
     let mut kept = String::new();
     let mut removed = false;
     for raw in text.lines() {
@@ -309,14 +323,16 @@ pub fn revoke_device(path: &Path, id: &EndpointId) -> Result<bool, ListError> {
         kept.push('\n');
     }
     if removed {
+        // A fresh file each time, written whole and synced before it replaces the list.
         let tmp = path.with_extension("tmp");
+        let _ = std::fs::remove_file(&tmp);
         let mut file = std::fs::OpenOptions::new()
             .write(true)
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .mode(PRIVATE_FILE_MODE)
             .open(&tmp)?;
         file.write_all(kept.as_bytes())?;
+        file.sync_all()?;
         std::fs::rename(&tmp, path)?;
     }
     Ok(removed)
@@ -449,6 +465,33 @@ mod tests {
             ids,
             vec![a, c],
             "the new id must not vanish into the comment"
+        );
+    }
+
+    #[test]
+    fn revoking_from_a_list_that_does_not_exist_says_not_found_not_an_io_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!revoke_device(&dir.path().join("devices.txt"), &id()).unwrap());
+    }
+
+    #[test]
+    fn a_fifo_in_place_of_the_list_is_refused_and_does_not_hang() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.txt");
+        let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        // SAFETY: c_path is a valid NUL-terminated path for the duration of the call.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(matches!(
+                AllowlistFile::open(&path),
+                Err(ListError::NotPlain(_))
+            ));
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)),
+            Ok(true),
+            "opening a FIFO must fail, not block"
         );
     }
 

@@ -33,13 +33,15 @@ pub enum PipeEnd {
     Closed,
     /// No bytes moved for the idle timeout.
     Idle,
-    /// The cancel future completed: the device was revoked or the edge is stopping.
+    /// The cancel future completed: the edge is stopping.
     Cancelled,
 }
 
 /// Copies `client` to `device` and back until both directions end, the connection goes idle, or
 /// `cancel` completes. Dropping the streams afterwards closes them. A side that reaches end of
-/// input is shut down (its peer sees end of input) while the other direction carries on.
+/// input is shut down (its peer sees end of input) while the other direction carries on. A read
+/// error means the connection is broken and ends the pipe; a write error ends only the direction
+/// it happened in, so a device that stops listening can still finish its reply.
 pub async fn pipe<CR, CW, DR, DW>(
     (client_read, client_write): (CR, CW),
     (device_read, device_write): (DR, DW),
@@ -58,15 +60,16 @@ where
     let to_device = copy(client_read, device_write, bucket, started, &last_activity);
     let to_client = copy(device_read, client_write, bucket, started, &last_activity);
     tokio::select! {
-        // Both sides finishing cleanly, or either one failing: a broken side ends the pipe at once
-        // and dropping the halves closes the other, instead of waiting for it to notice.
+        // Both directions finishing, or either side failing to read: a broken connection ends the
+        // pipe at once and dropping the halves closes the other, instead of waiting for it.
         _ = async { tokio::try_join!(to_device, to_client) } => PipeEnd::Closed,
         () = idle_watch(started, &last_activity, limits.idle) => PipeEnd::Idle,
         () = cancel => PipeEnd::Cancelled,
     }
 }
 
-/// Copies until `from` ends (`Ok`, after shutting `to` down) or either side fails (`Err`).
+/// Copies until `from` ends (`Ok`, after shutting `to` down), `to` stops accepting data (`Ok`: only
+/// this direction is over) or `from` fails (`Err`: the connection is broken).
 async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     mut from: R,
     mut to: W,
@@ -88,7 +91,7 @@ async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             bucket.take(n).await;
         }
         if to.write_all(&buf[..n]).await.is_err() {
-            return Err(());
+            return Ok(());
         }
         touch(started, last_activity);
     }
@@ -121,6 +124,25 @@ mod tests {
         task::{Context, Poll},
     };
     use tokio::io::{ReadBuf, duplex, split};
+
+    /// A writer that refuses everything, as a peer that has stopped listening does.
+    struct Refusing;
+
+    impl AsyncWrite for Refusing {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            Poll::Ready(Err(io::Error::other("the device stopped listening")))
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
 
     /// A reader that fails at once, as a broken connection does.
     struct Failing;
@@ -247,5 +269,32 @@ mod tests {
             ended.expect("the pipe waited for a silent client"),
             PipeEnd::Closed
         );
+    }
+
+    #[tokio::test]
+    async fn a_device_that_stops_listening_can_still_finish_its_reply() {
+        // The client sends more after the device stopped reading (an upload the device answered
+        // early). The write toward the device fails; the reply must still reach the client.
+        let (mut client, client_inner) = duplex(1024);
+        let (mut device_side, device_inner) = duplex(1024);
+        let (device_read, _unused_write) = split(device_inner);
+        let handle = tokio::spawn(async move {
+            pipe(
+                split(client_inner),
+                (device_read, Refusing),
+                limits(None),
+                std::future::pending(),
+            )
+            .await
+        });
+        client.write_all(b"more upload").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        device_side.write_all(b"early reply").await.unwrap();
+        device_side.shutdown().await.unwrap();
+        let mut got = Vec::new();
+        client.read_to_end(&mut got).await.unwrap_or(0);
+        assert_eq!(got, b"early reply");
+        drop(client);
+        assert_eq!(handle.await.unwrap(), PipeEnd::Closed);
     }
 }

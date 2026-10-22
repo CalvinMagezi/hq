@@ -32,7 +32,7 @@ use crate::{
     relay::{RelayHost, RelayParams, RelayTls},
 };
 
-/// How often an open connection checks that its device is still registered.
+/// How often the sweep checks that every device with a connection is still registered.
 const REVOKE_CHECK: Duration = Duration::from_secs(1);
 /// How long to wait for the relay's loopback listener.
 const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -334,6 +334,11 @@ async fn sweep_revoked(shared: Arc<Shared>) {
         tokio::select! {
             () = tokio::time::sleep(REVOKE_CHECK) => {}
             _ = shutdown.changed() => return,
+        }
+        // An unreadable list answers "no" to everyone; that is a reason to refuse new connections,
+        // not to cut the ones that are open.
+        if !shared.registry.is_readable() {
+            continue;
         }
         let stale: Vec<(EndpointId, Arc<DeviceState>)> = {
             let devices = shared.devices.lock().unwrap_or_else(|e| e.into_inner());

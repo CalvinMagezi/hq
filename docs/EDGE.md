@@ -77,8 +77,10 @@ the `hq` binary on that machine (`deploy/install.sh`, or the Docker image below)
    The list is a text file (`~/.hq/edge/devices.txt`, mode 0600, owned by the user running the edge,
    in a directory only that user can write to, one `<endpoint id> [relay URL]` per line). Change it
    with `hq edge allow` and `hq edge revoke`, or replace it atomically (write a new file, then `mv`
-   it into place): an editor that saves in place can leave a half-written file for a moment, and a
-   list the edge cannot read completely is treated as empty until the next check. A list with a bad line, a wrong mode or owner, or two
+   it into place): an editor that saves in place can leave a half-written file for a moment. While
+   the list cannot be read completely, the edge refuses new connections and leaves open ones alone;
+   once it reads again, a device that is no longer on it is cut. Run one `hq edge` list command at a
+   time: allow and revoke read the file and write it back without a lock. A list with a bad line, a wrong mode or owner, or two
    devices that share a name label is refused as a whole, and then nothing is forwarded. Registration
    by scanning a QR code replaces `hq edge allow` when the pairing protocol lands; the forwarder reads
    the list through the `hq_edge::Registry` trait and does not change.
