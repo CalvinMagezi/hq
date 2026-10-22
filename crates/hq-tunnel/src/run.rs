@@ -14,6 +14,7 @@ use crate::status::{
     EventLog, MAX_EVENT_LOG_BYTES, STATUS_VERSION, Status, open_fd_count, process_rss_kb, unix_now,
     write_atomic,
 };
+use crate::throttle::RefusalBudget;
 use crate::timers::{self, Inputs};
 use std::io::ErrorKind;
 use std::io::{Read, Write};
@@ -73,6 +74,8 @@ pub struct Summary {
     pub wakeups: u64,
     /// Datagrams the session turned away (bad MAC, unknown receiver, a replay).
     pub refused: u64,
+    /// How many times reading the socket was stopped for turning away too many datagrams.
+    pub read_pauses: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -230,6 +233,8 @@ struct Peer {
     /// went a moment ago, which a change of network wants.
     handshake_when_resolved: Option<bool>,
     refused_total: u64,
+    /// Limits how many refusals the loop spends time on; see `throttle`.
+    refusals: RefusalBudget,
     refused_last: Option<String>,
     refused_logged: u64,
     refused_logged_at: Instant,
@@ -352,6 +357,9 @@ impl Peer {
     }
 
     fn receive(&mut self, now: Instant) {
+        if self.refusals.paused(now) {
+            return;
+        }
         let mut buf = [0u8; DATAGRAM_BYTES];
         for _ in 0..MAX_DATAGRAMS_PER_WAKE {
             let (n, from) = match self.udp.recv_from(&mut buf) {
@@ -368,6 +376,7 @@ impl Peer {
             self.session
                 .decapsulate(Some(from.ip()), &buf[..n], &mut out);
             self.refused_total += out.refused.len() as u64;
+            let stop = self.refusals.charge(now, out.refused.len());
             if out.refused.is_empty()
                 && is_handshake_message(&buf[..n])
                 && !out.replies.iter().any(|r| is_cookie_reply(r))
@@ -387,6 +396,11 @@ impl Peer {
             }
             for packet in out.packets {
                 self.stack.ingress(&packet);
+            }
+            if stop {
+                // The rest of the flood waits in the kernel's buffer, which drops what does not fit.
+                self.status_dirty = true;
+                return;
             }
         }
     }
@@ -512,8 +526,8 @@ impl Peer {
         {
             let last = self.refused_last.as_deref().unwrap_or("");
             self.log(&format!(
-                "{} datagram(s) refused so far, last: {last}",
-                self.refused_total
+                "{} datagram(s) refused so far, reading paused {} time(s), last: {last}",
+                self.refused_total, self.refusals.pauses
             ));
             self.refused_logged = self.refused_total;
             self.refused_logged_at = now;
@@ -541,6 +555,7 @@ impl Peer {
             udp_rx_bytes: self.rx_bytes,
             suspended_s: (suspended_total() - self.suspended0).max(0.0),
             wakeups: self.wakeups,
+            read_pauses: self.refusals.pauses,
             rss_kb: process_rss_kb(),
             open_fds: open_fd_count(),
             error: self.last_error.clone(),
@@ -601,6 +616,7 @@ pub fn run(mut opts: RunOptions) -> Result<Summary> {
         refused_last: None,
         refused_logged: 0,
         refused_logged_at: now,
+        refusals: RefusalBudget::new(now),
         status_dirty: false,
         written_state: "connecting",
         session,
@@ -642,6 +658,7 @@ pub fn run(mut opts: RunOptions) -> Result<Summary> {
         exit,
         wakeups: peer.wakeups,
         refused: peer.refused_total,
+        read_pauses: peer.refusals.pauses,
     })
 }
 
@@ -736,7 +753,11 @@ fn wait_set(peer: &Peer, listeners: &[ReachListener]) -> (Vec<libc::pollfd>, Opt
         events,
         revents: 0,
     };
-    let mut fds = vec![watch(peer.udp.as_raw_fd(), libc::POLLIN)];
+    // A socket that is being left alone stays out of the set: it would report data forever.
+    let mut fds = Vec::new();
+    if !peer.refusals.paused(Instant::now()) {
+        fds.push(watch(peer.udp.as_raw_fd(), libc::POLLIN));
+    }
     if peer.resolver.in_flight {
         fds.push(watch(peer.resolver.fd(), libc::POLLIN));
     }
@@ -761,6 +782,7 @@ fn sleep_for(peer: &mut Peer, schedule: &Schedule, listeners: &[ReachListener]) 
     let now = Instant::now();
     let mut due = vec![schedule.next_wg.saturating_duration_since(now)];
     due.extend(peer.stack.poll_delay(now));
+    due.extend(peer.refusals.resumes_in(now));
     if peer.endpoint.is_none() && !peer.resolver.in_flight {
         due.push(peer.next_resolve.saturating_duration_since(now));
     }

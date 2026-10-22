@@ -524,6 +524,56 @@ fn datagrams_from_anyone_but_the_endpoint_never_reach_the_session() {
 }
 
 #[test]
+fn a_flood_that_carries_the_endpoints_address_is_not_read_flat_out() {
+    // How long the flood lasts, and the fewest datagrams that make it a flood on any machine.
+    const FLOOD_FOR: Duration = Duration::from_millis(1_500);
+    const AT_LEAST: u64 = 20_000;
+    let target = echo_server();
+    let mut r = rig(
+        &serve_to(target, B_ADDR),
+        "",
+        true,
+        "vpn.example.com:51820",
+        true,
+    );
+    echo_through(&mut r, b"warm up");
+    // Sent from the hub's own address and port, so the connected socket lets all of it in. Read
+    // flat out that is hundreds of thousands of refusals a second; the loop must stop reading.
+    let junk = r.b.udp.try_clone().unwrap();
+    let to = r.b.reply_to;
+    let sender = thread::spawn(move || {
+        let end = Instant::now() + FLOOD_FOR;
+        let mut sent = 0u64;
+        let mut datagram = [9u8; 100];
+        while Instant::now() < end {
+            datagram[4..12].copy_from_slice(&sent.to_be_bytes());
+            if junk.send_to(&datagram, to).is_ok() {
+                sent += 1;
+            }
+        }
+        sent
+    });
+    r.b.drive(FLOOD_FOR + Duration::from_millis(300), |_| false);
+    let sent = sender.join().unwrap();
+    assert!(sent > AT_LEAST, "only {sent} datagrams: not a flood");
+    echo_through(&mut r, b"alive after the flood");
+    let summary = r.finish();
+    assert!(summary.read_pauses >= 1, "reading never stopped");
+    assert!(
+        summary.wakeups < 400,
+        "{} wakeups, {} pauses, {} refused for {sent} datagrams: the flood was read flat out",
+        summary.wakeups,
+        summary.read_pauses,
+        summary.refused
+    );
+    assert!(
+        summary.refused < sent / 2,
+        "{} refused of {sent}: most of the flood should have been left in the kernel",
+        summary.refused
+    );
+}
+
+#[test]
 fn a_flood_from_the_endpoint_costs_the_log_one_summary_not_a_line_each() {
     let target = echo_server();
     let mut r = rig(

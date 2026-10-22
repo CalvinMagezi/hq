@@ -43,6 +43,9 @@ pub struct Status {
     /// How many times the loop has woken since it started; an idle tunnel adds about one per
     /// keepalive, so a number that climbs fast is a loop that is spinning.
     pub wakeups: u64,
+    /// How many times the peer stopped reading its socket because it was turning away datagrams
+    /// faster than a hub ever causes. Not zero means something is flooding it.
+    pub read_pauses: u64,
     /// Resident memory in kilobytes and open descriptors, where `/proc` says (Linux and Android).
     pub rss_kb: Option<u64>,
     pub open_fds: Option<u64>,
@@ -169,6 +172,7 @@ mod tests {
             udp_rx_bytes: 20,
             suspended_s: 0.0,
             wakeups: 0,
+            read_pauses: 0,
             rss_kb: None,
             open_fds: None,
             error: None,
