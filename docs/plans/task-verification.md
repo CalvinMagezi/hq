@@ -1,6 +1,11 @@
 # Task verification: completion without a person in the queue
 
-Status: approved 2026-10-22 (see "Decisions"). Nothing here is built.
+Status: approved 2026-10-22 (see "Decisions"). Work streams 0 to 6 are built and described for
+operators in `docs/TASK_VERIFICATION.md`. Not built: WS7 (rollout on a live instance), WS8 (sweeps),
+WS9 (briefing and queue health) and WS10 (web and phone surfaces). Where the build differs from this
+text: the report and the audit commands are `hq verify` (not `hq tasks verification`); an inconclusive
+verdict that waits on the worker returns the task to `to_do` like a fail, rather than blocking it
+(decision 4); and `waiting_for` is stored, so a restart forgets nothing.
 
 One person cannot review every task that several agents finish. This plan takes
 the owner out of per-task review and replaces it with a gate that moves a task
@@ -430,7 +435,7 @@ a fail then pass cycle; a code task released with no findable artifact gets a
 reply naming what to link; the owner receives no item for a clean pass.
 
 **WS5. Calibration.** Canary generator, audit digest (push floor) and stratified
-audit selection (pull), escapes, autonomy gate, `hq tasks verification` report. Accept: a seeded bad verifier is demoted by the
+audit selection (pull), escapes, autonomy gate, `hq verify` report. Accept: a seeded bad verifier is demoted by the
 canaries within the configured window; the report prints counts and "insufficient
 data" correctly.
 

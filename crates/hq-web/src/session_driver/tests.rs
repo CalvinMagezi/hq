@@ -606,7 +606,8 @@ fn a_driver_prompt_carries_the_goal_and_the_escalation_limits() {
     assert!(prompt.contains("has not shown the goal is met"));
     assert!(prompt.contains("harness_session_logs"));
     assert!(prompt.contains("approve it with `harness_session_send` keys"));
-    assert!(prompt.contains("Never mark the task complete"));
+    assert!(prompt.contains("Do not mark the task complete yourself"));
+    assert!(prompt.contains("or HQ does when its own checks of the work pass"));
     assert!(prompt.contains("credentials"));
     assert!(prompt.contains("waiting at a prompt"));
 }

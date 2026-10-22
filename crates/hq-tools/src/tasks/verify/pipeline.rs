@@ -100,6 +100,42 @@ pub struct Currency {
     pub notes: Vec<(String, String)>,
 }
 
+impl Currency {
+    /// The form stored with a veto window, to compare against when it closes.
+    pub fn to_json(&self) -> Value {
+        json!({
+            "prs": self.prs.iter().map(|(r, n, sha)| json!([r, n, sha])).collect::<Vec<_>>(),
+            "notes": self.notes.iter().map(|(p, h)| json!([p, h])).collect::<Vec<_>>(),
+        })
+    }
+
+    pub fn from_json(v: &Value) -> Self {
+        let prs = v["prs"]
+            .as_array()
+            .map(|all| {
+                all.iter()
+                    .filter_map(|p| {
+                        Some((
+                            p[0].as_str()?.to_string(),
+                            p[1].as_u64()?,
+                            p[2].as_str().map(String::from),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let notes = v["notes"]
+            .as_array()
+            .map(|all| {
+                all.iter()
+                    .filter_map(|n| Some((n[0].as_str()?.to_string(), n[1].as_str()?.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { prs, notes }
+    }
+}
+
 /// Everything gathered about a task.
 #[derive(Debug)]
 pub struct Evidence {
@@ -666,6 +702,8 @@ pub enum Moved {
     Returned,
     /// Blocked on the owner, as one exception.
     Escalated,
+    /// Tier 2: verified and approved, but the task waits out its veto window before it completes.
+    Held,
 }
 
 /// What came of applying a resolution.
@@ -687,8 +725,8 @@ pub enum Finished {
 }
 
 /// Whether the artifacts are still the ones that were verified.
-async fn still_current(env: &Env<'_>, ev: &Evidence) -> Option<String> {
-    for (repo, number, sha) in &ev.currency.prs {
+async fn still_current(env: &Env<'_>, currency: &Currency) -> Option<String> {
+    for (repo, number, sha) in &currency.prs {
         let Some(sha) = sha else { continue };
         match env
             .gh
@@ -706,7 +744,7 @@ async fn still_current(env: &Env<'_>, ev: &Evidence) -> Option<String> {
             Err(e) => return Some(format!("{repo}#{number} could not be read again ({e})")),
         }
     }
-    for (path, hash) in &ev.currency.notes {
+    for (path, hash) in &currency.notes {
         match std::fs::read_to_string(env.vault_path.join(path)) {
             Ok(raw) if &hq_db::search::content_hash(&raw) == hash => {}
             Ok(_) => return Some(format!("{path} was edited since it was checked")),
@@ -826,8 +864,22 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
         None => (reasons, waiting_for),
     };
     let applies = verdict == t::VERDICT_PASS && enforced && held.is_none();
+    // Tier 2 work is approved now and completed when its veto window closes.
+    let hold_for = (applies && ev.tier >= t::MAX_TIER && env.cfg.veto_hours > 0)
+        .then(|| i64::from(env.cfg.veto_hours) * 3600);
+    let release_at = hold_for.map(|secs| chrono::Utc::now().timestamp().saturating_add(secs));
+    let (reasons, waiting_for) = match release_at {
+        Some(at) => (
+            format!(
+                "{reasons}\nTier 2: it completes at {} UTC unless the owner vetoes it first.",
+                clock(at)
+            ),
+            Some(WaitingFor::Owner),
+        ),
+        None => (reasons, waiting_for),
+    };
     let sends_back = enforced && waiting_for == Some(WaitingFor::Worker);
-    if applies && let Some(reason) = still_current(env, ev).await {
+    if applies && let Some(reason) = still_current(env, &ev.currency).await {
         return Ok(Finished::Voided { reason });
     }
 
@@ -840,6 +892,7 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
     let max_attempts = env.cfg.max_attempts;
     let vault_path = env.vault_path;
     let findings = reasons.clone();
+    let currency_snapshot = ev.currency.to_json();
     let verifier_config = t::verifier_config_key(
         &env.cfg.reviewers(),
         ev.log.of_kind("reviewer_run").next().is_some(),
@@ -882,6 +935,26 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
             };
             let recorded = t::record_verdict(c, &new)?;
             t::clear_wait(c, &task_id)?;
+            if let Some(at) = release_at {
+                t::create_hold(c, &task_id, &recorded.id, at, &currency_snapshot)?;
+                t::add_comment(
+                    c,
+                    &task_id,
+                    "verifier",
+                    &format!(
+                        "Verified by HQ ({} evidence, tier {}, artifact {}). Because this is tier 2 it \
+                         completes at {} UTC unless you veto it first: `hq verify veto {}`.",
+                        recorded.level,
+                        recorded.tier,
+                        recorded.artifact,
+                        clock(at),
+                        t::get_task(c, &task_id)?.map(|t| t.display_id).unwrap_or_default()
+                    ),
+                    None,
+                )?;
+                let task = t::get_task(c, &task_id)?;
+                return Ok(Ok((recorded, Moved::Held, task.map(|t| (t, Vec::new())))));
+            }
             if applies {
                 let ctx = t::WriteCtx {
                     actor: Some(&verifier),
@@ -937,6 +1010,14 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
                     crate::tasks::notify_owner_exception(vault_path.to_path_buf(), task, findings)
                         .await;
                 }
+                (Moved::Held, Some((task, _))) => {
+                    crate::tasks::notify_veto_window(
+                        vault_path.to_path_buf(),
+                        task,
+                        release_at.map(clock).unwrap_or_default(),
+                    )
+                    .await;
+                }
                 _ => {}
             }
             // A task returned to its worker may unblock nothing, but its worker should hear of it.
@@ -946,6 +1027,147 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
                 waiting_for,
             })
         }
+    }
+}
+
+/// `YYYY-MM-DD HH:MM` for unix seconds.
+fn clock(secs: i64) -> String {
+    chrono::DateTime::from_timestamp(secs, 0)
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// What closing the windows that are due came to.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Released {
+    /// Tasks completed because their window passed without a veto.
+    pub completed: usize,
+    /// Tasks whose artifact changed during the window, sent back to be checked again.
+    pub changed: usize,
+}
+
+/// Completes the tier 2 tasks whose veto window has closed, after checking that the pull requests
+/// and notes the verdict was about are still the ones it was about. A task that changed meanwhile
+/// is sent back with a verdict that says so, never completed on a stale one. A task the owner
+/// already completed, vetoed or that was submitted again is left alone.
+pub async fn release_due_holds(env: &Env<'_>) -> Result<Released> {
+    let mut out = Released::default();
+    if env.cfg.mode != VerificationMode::Enforce {
+        return Ok(out);
+    }
+    let now = chrono::Utc::now().timestamp();
+    let due = env.db.with_conn(move |c| t::due_holds(c, now))?;
+    for hold in due {
+        let currency = Currency::from_json(&hold.currency);
+        let stale = still_current(env, &currency).await;
+        let (max_attempts, route_tags, vault_path) =
+            (env.cfg.max_attempts, env.route_tags, env.vault_path);
+        let verifier = new_verifier_id();
+        let outcome = env.db.with_conn(move |c| {
+            t::in_write_tx(c, |c| {
+                let Some(task) = t::get_task(c, &hold.task_id)? else {
+                    t::clear_hold(c, &hold.task_id)?;
+                    return Ok(None);
+                };
+                // Completed by the owner, vetoed, or submitted again: the window is moot.
+                if task.status != t::STATUS_READY_FOR_REVIEW
+                    || t::review_marker(c, &task.id)? != hold.submission
+                {
+                    t::clear_hold(c, &task.id)?;
+                    return Ok(None);
+                }
+                let Some(approved) = t::get_verdict(c, &hold.verdict_id)? else {
+                    t::clear_hold(c, &task.id)?;
+                    return Ok(None);
+                };
+                t::clear_hold(c, &task.id)?;
+                if let Some(why) = stale {
+                    let observations = json!([{
+                        "id": "o1",
+                        "source": "hq",
+                        "kind": "veto_window",
+                        "fact": format!("{why} during the veto window"),
+                        "ok": false,
+                    }]);
+                    let reasons = format!(
+                        "The verified result changed during the veto window ({why}), so it is checked again."
+                    );
+                    t::record_verdict(
+                        c,
+                        &t::NewVerdict {
+                            task_id: &task.id,
+                            artifact: &approved.artifact,
+                            contract_hash: &approved.contract_hash,
+                            tier: approved.tier,
+                            verdict: t::VERDICT_INCONCLUSIVE,
+                            level: t::LEVEL_NONE,
+                            verifier: &verifier,
+                            independence: "none",
+                            observations: &observations,
+                            criteria: &json!([]),
+                            reasons: &reasons,
+                            applied: false,
+                            canary: false,
+                            submission: hold.submission,
+                            waiting_for: Some(WaitingFor::Worker.as_str()),
+                            verifier_config: &approved.verifier_config,
+                        },
+                    )?;
+                    t::send_back(c, &task.id, &verifier, &reasons, max_attempts)?;
+                    return Ok(Some((Released::default().with_changed(), None)));
+                }
+                let ctx = t::WriteCtx {
+                    actor: Some(&verifier),
+                    verdict_id: Some(&approved.id),
+                    ..Default::default()
+                };
+                let done = t::update_task_as(
+                    c,
+                    &task.id,
+                    &t::TaskPatch {
+                        status: Some(t::STATUS_COMPLETE.to_string()),
+                        ..Default::default()
+                    },
+                    Some(t::STATUS_READY_FOR_REVIEW),
+                    &ctx,
+                )?;
+                t::add_comment(
+                    c,
+                    &task.id,
+                    "verifier",
+                    &format!(
+                        "The veto window closed without a veto. {}",
+                        completion_note(&approved)
+                    ),
+                    None,
+                )?;
+                let unblocked = crate::tasks::unblocked_by_transition(
+                    c,
+                    Some(t::STATUS_READY_FOR_REVIEW),
+                    &done,
+                )?;
+                Ok(Some((Released::default().with_completed(), Some((done, unblocked)))))
+            })
+        })?;
+        if let Some((counts, follow_up)) = outcome {
+            out.completed += counts.completed;
+            out.changed += counts.changed;
+            if let Some((task, unblocked)) = follow_up {
+                crate::tasks::notify_unblocked(vault_path, &task, &unblocked, route_tags);
+            }
+        }
+    }
+    Ok(out)
+}
+
+impl Released {
+    fn with_completed(mut self) -> Self {
+        self.completed = 1;
+        self
+    }
+    fn with_changed(mut self) -> Self {
+        self.changed = 1;
+        self
     }
 }
 

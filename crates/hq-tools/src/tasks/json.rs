@@ -216,6 +216,8 @@ pub const TASK_EXCEPTION_SOURCE: &str = "task_needs_owner";
 /// The value source of a tier whose auto-completion was held back by what the audits and canaries
 /// show.
 pub const TASK_AUTONOMY_SOURCE: &str = "task_autonomy";
+/// The value source of a tier 2 task inside its veto window.
+pub const TASK_VETO_SOURCE: &str = "task_veto_window";
 /// The value source of the weekly audit digest.
 pub const TASK_AUDIT_SOURCE: &str = "task_audit_digest";
 
@@ -277,5 +279,27 @@ pub async fn notify_audit_digest(vault_path: PathBuf, selected: usize, open: usi
         .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
     if let Err(e) = emitted {
         tracing::warn!(error = %e, "task-notify: failed to emit the audit digest");
+    }
+}
+
+/// Best-effort: tells the owner a tier 2 task passed verification and completes at `release` (UTC)
+/// unless vetoed. One item per task, web-only; it is the owner's chance to say no, not a request
+/// to review.
+pub async fn notify_veto_window(vault_path: PathBuf, task: t::Task, release: String) {
+    let item = hq_core::types::ValueItem::new(
+        TASK_VETO_SOURCE,
+        hq_core::types::ValueKind::ActionNeeded,
+        format!("{} completes at {release} UTC unless you veto it", task.display_id),
+        format!(
+            "{}\n\nHQ verified this tier 2 task. If it should not be done, run `hq verify veto {}` before then.",
+            task.title, task.display_id
+        ),
+    )
+    .with_dedup_key(format!("task-veto-{}", task.id));
+    let db_path = vault_path.join("_data").join("vault.db");
+    let emitted = hq_db::Database::open(&db_path)
+        .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
+    if let Err(e) = emitted {
+        tracing::warn!(error = %e, "task-notify: failed to emit the veto window item");
     }
 }

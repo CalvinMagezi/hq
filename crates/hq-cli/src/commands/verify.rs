@@ -45,6 +45,18 @@ fn render(
     match sub {
         "status" | "" => status(db, cfg, json, out),
         "audits" => audits(db, json, out),
+        "holds" => holds(db, json, out),
+        "veto" => {
+            let Some(task) = arg else {
+                bail!("usage: hq verify veto <task> [--note <why>]");
+            };
+            db.with_conn(|c| t::veto_hold(c, &task, note.as_deref().unwrap_or_default(), "owner"))?;
+            writeln!(
+                out,
+                "Vetoed. {task} is back in to_do with your note on its thread."
+            )?;
+            Ok(())
+        }
         "pull" => {
             let count = match arg {
                 Some(n) => n
@@ -93,32 +105,40 @@ fn render(
         _ => {
             writeln!(
                 out,
-                "Usage: hq verify [status|audits|pull [n]|agree <id>|disagree <id> [--note ..]]\n"
+                "Usage: hq verify [status|audits|pull [n]|agree <id>|disagree <id>|holds|veto <task>]\n"
             )?;
-            writeln!(
-                out,
-                "  status     Mode, who tasks are waiting on, and whether the verifier has earned its autonomy"
-            )?;
-            writeln!(
-                out,
-                "  audits     Completed tasks waiting for your agree or not"
-            )?;
-            writeln!(
-                out,
-                "  pull [n]   Draw more audits now, favouring what has the least data (default {DEFAULT_PULL})"
-            )?;
-            writeln!(
-                out,
-                "  agree      You agree HQ was right to complete the task"
-            )?;
-            writeln!(
-                out,
-                "  disagree   You do not: the task is reopened and counts against the verifier"
-            )?;
+            for (verb, what) in HELP {
+                writeln!(out, "  {verb:<10} {what}")?;
+            }
             Ok(())
         }
     }
 }
+
+const HELP: [(&str, &str); 7] = [
+    (
+        "status",
+        "Mode, who tasks are waiting on, and whether the verifier has earned its autonomy",
+    ),
+    ("audits", "Completed tasks waiting for your agree or not"),
+    (
+        "pull [n]",
+        "Draw more audits now, favouring what has the least data (default 10)",
+    ),
+    ("agree", "You agree HQ was right to complete the task"),
+    (
+        "disagree",
+        "You do not: the task is reopened and counts against the verifier (--note says why)",
+    ),
+    (
+        "holds",
+        "Tier 2 tasks that passed and complete when their veto window closes",
+    ),
+    (
+        "veto",
+        "Reverse one of those inside its window (--note says why)",
+    ),
+];
 
 fn percent(rate: Option<f64>) -> String {
     rate.map_or_else(|| "no data".to_string(), |r| format!("{:.0}%", r * 100.0))
@@ -184,6 +204,13 @@ fn status(
             writeln!(out, "    {why}")?;
         }
     }
+    let windows = db.with_conn(t::list_holds)?.len();
+    if windows > 0 {
+        writeln!(
+            out,
+            "\n{windows} tier 2 tasks are inside their veto window: hq verify holds"
+        )?;
+    }
     if cal.open_audits > 0 {
         writeln!(
             out,
@@ -191,6 +218,34 @@ fn status(
             cal.open_audits
         )?;
     }
+    Ok(())
+}
+
+fn holds(db: &Database, json: bool, out: &mut dyn Write) -> Result<()> {
+    let open = db.with_conn(t::list_holds)?;
+    if json {
+        writeln!(out, "{}", serde_json::to_string_pretty(&open)?)?;
+        return Ok(());
+    }
+    if open.is_empty() {
+        writeln!(out, "No tier 2 task is inside a veto window.")?;
+        return Ok(());
+    }
+    for h in &open {
+        let task = db.with_conn(|c| t::get_task(c, &h.task_id))?;
+        let (display, title) = task.map_or_else(
+            || (h.task_id.clone(), String::new()),
+            |task| (task.display_id, task.title),
+        );
+        let at = chrono::DateTime::from_timestamp(h.release_at, 0)
+            .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default();
+        writeln!(
+            out,
+            "{display}: {title}\n    completes at {at} UTC unless vetoed"
+        )?;
+    }
+    writeln!(out, "\nhq verify veto <task> --note \"what is wrong\"")?;
     Ok(())
 }
 
@@ -284,6 +339,38 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("number of audits"), "{err}");
+    }
+
+    #[test]
+    fn a_veto_needs_a_task_with_an_open_window() {
+        let db = Database::open_memory().unwrap();
+        assert!(run_to_string(&db, "holds", None, None).contains("No tier 2 task"));
+        let mut out = Vec::new();
+        let cfg = hq_core::config::VerificationConfig::default();
+        let err = render(&db, &cfg, "veto", None, None, false, &mut out).unwrap_err();
+        assert!(err.to_string().contains("usage: hq verify veto"), "{err}");
+        let err = render(
+            &db,
+            &cfg,
+            "veto",
+            Some("TK-9".into()),
+            None,
+            false,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("no task"), "{err}");
+    }
+
+    #[test]
+    fn the_help_lists_every_verb() {
+        let db = Database::open_memory().unwrap();
+        let help = run_to_string(&db, "help", None, None);
+        for verb in [
+            "status", "audits", "pull", "agree", "disagree", "holds", "veto",
+        ] {
+            assert!(help.contains(verb), "{verb} missing from:\n{help}");
+        }
     }
 
     #[test]

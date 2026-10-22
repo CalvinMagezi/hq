@@ -22,6 +22,7 @@ pub const WEB_ONLY_SOURCES: &[&str] = &[
     "task_ready_for_review",
     "task_needs_owner",
     "task_autonomy",
+    "task_veto_window",
     "task_audit_digest",
     "task_stale_digest",
     "skill_review",

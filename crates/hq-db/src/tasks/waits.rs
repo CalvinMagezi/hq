@@ -148,6 +148,17 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
                     "waiting for you to review it",
                 ));
             }
+            if let Some(hold) = get_hold(conn, &task.id)? {
+                return Ok(WaitingState::new(
+                    WAIT_OWNER,
+                    format!(
+                        "tier 2: it completes at {} UTC unless you veto it",
+                        chrono::DateTime::from_timestamp(hold.release_at, 0)
+                            .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_default()
+                    ),
+                ));
+            }
             if let Some(wait) = current_wait(conn, &task.id)? {
                 return Ok(WaitingState::new(&wait.waiting_for, wait.reason));
             }

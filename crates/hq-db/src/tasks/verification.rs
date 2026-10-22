@@ -448,6 +448,17 @@ pub fn list_verdicts(conn: &Connection, task_id: &str, limit: usize) -> Result<V
 
 /// A verdict that may complete `task`: a pass, applied, with a level, about the submission the
 /// task is in now (so one for an earlier submission cannot complete reworked work).
+/// One verdict by id.
+pub fn get_verdict(conn: &Connection, id: &str) -> Result<Option<Verdict>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {VERDICT_COLS} FROM task_verdicts WHERE id = ?1"),
+            params![id],
+            row_to_verdict,
+        )
+        .optional()?)
+}
+
 fn verdict_allows_completion(conn: &Connection, task: &Task, verdict_id: &str) -> Result<bool> {
     let Some(v) = conn
         .query_row(

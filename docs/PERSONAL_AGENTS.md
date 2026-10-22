@@ -24,8 +24,10 @@ HQ treats a personal agent as a guest it supervises, not as part of itself:
   state folder (`~/.hermes` or `~/.openclaw`) is writable, your credential folders and HQ's
   own folder are not, and network access goes through an egress allowlist with no default
   model provider on it.
-- **It never marks their work done.** A run that ends moves its task to ready for review.
-  A person reads the output and completes the task, or not.
+- **It does not mark their work done itself.** A run that ends moves its task to ready for
+  review. You read the output and complete the task, or not. If you have turned on task
+  verification (`docs/TASK_VERIFICATION.md`), HQ checks the evidence instead and completes what
+  passes, so you read only the exceptions.
 
 ## Before you start
 

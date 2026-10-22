@@ -90,7 +90,7 @@ fn log(report: &DispatchReport) {
     for error in &report.errors {
         tracing::warn!(%error, "verify-dispatch: a task could not be verified");
     }
-    if report.attempted == 0 {
+    if report.attempted == 0 && report.released == 0 && report.changed_in_window == 0 {
         return;
     }
     tracing::info!(
@@ -100,6 +100,8 @@ fn log(report: &DispatchReport) {
         completed = report.completed,
         returned = report.returned,
         escalated = report.escalated,
+        held = report.held,
+        released = report.released,
         deferred = report.deferred,
         voided = report.voided,
         "verify-dispatch: pass done"

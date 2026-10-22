@@ -401,6 +401,7 @@ mod time;
 mod verification;
 #[cfg(test)]
 mod verification_tests;
+mod veto;
 mod waits;
 
 pub use archive::*;
@@ -419,4 +420,5 @@ pub use rows::{list_task_events, validate_date};
 pub use stale::*;
 pub use time::*;
 pub use verification::*;
+pub use veto::*;
 pub use waits::*;

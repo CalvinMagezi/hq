@@ -2,8 +2,10 @@
 //! that pull the tasks assigned to them and run each one as a single bounded
 //! job in the host. Assignment is the trigger, the harness's one-shot command
 //! is the run, and the process ending is the completion signal (the
-//! supervisor records `RunEnded`, which puts the task into review). A person
-//! signs off; HQ never completes a task. See `docs/plans/agentic-stack.md`.
+//! supervisor records `RunEnded`, which puts the task into review). A run never
+//! completes its own task: the owner does, or, once `tasks.verification` is enforced,
+//! HQ's verifier does when evidence the run could not write says it is done
+//! (`docs/TASK_VERIFICATION.md`). See `docs/plans/agentic-stack.md`.
 
 use super::category::{HarnessCategory, Purpose};
 use super::launch::{Launch, launch_session};

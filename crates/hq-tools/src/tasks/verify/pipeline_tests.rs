@@ -22,6 +22,9 @@ fn enforce() -> VerificationConfig {
     VerificationConfig {
         mode: VerificationMode::Enforce,
         reviewer_monthly_ceiling_usd: Some(50.0),
+        // Canaries are drawn by chance; the tests about them turn the rate up, the rest keep
+        // the reviewer's call count exact.
+        canary_rate: 0.0,
         ..Default::default()
     }
 }
@@ -560,7 +563,7 @@ async fn nothing_to_inspect_is_inconclusive_and_sent_back_to_the_worker() {
         "{}",
         verdict.reasons
     );
-    // Never completed, and sent back with what to link.
+    // Not completed, and sent back with what to link.
     assert_eq!(moved, Moved::Returned);
     assert_eq!(get(&w.db).status, t::STATUS_TO_DO);
     assert_eq!(verdict.artifact, "none");
@@ -772,13 +775,246 @@ async fn a_flag_on_the_change_raises_the_tier_and_needs_two_model_families() {
         vec![reply("claude-x", &one), reply("openai/gpt-5", &one)],
     );
     let done = w.verify(&two).await;
-    assert!(completed(&done), "{done:?}");
+    assert!(
+        matches!(
+            &done,
+            Finished::Recorded {
+                moved: Moved::Held,
+                ..
+            }
+        ),
+        "tier 2 is approved now and completes when its veto window closes: {done:?}"
+    );
     let v = &verdicts(&w.db)[0];
     assert_eq!(
         (v.tier, v.independence.as_str(), v.level.as_str()),
         (2, "different_model", "machine_peer")
     );
     assert_eq!(two.calls(), 2);
+}
+
+/// A tier 2 task (a skipped test in the change) verified by two model families.
+async fn held_tier_two(w: &World) -> Finished {
+    let one = w
+        .answer(
+            "pass",
+            &["pr_state", "required_checks"],
+            &[("skipped_test", true)],
+        )
+        .await;
+    let two = ScriptedReviewer::new(
+        &["a", "b"],
+        vec![reply("claude-x", &one), reply("openai/gpt-5", &one)],
+    );
+    w.verify(&two).await
+}
+
+fn close_the_window(w: &World) {
+    w.db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_veto_holds SET release_at = release_at - 100000",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_tier_two_pass_waits_in_the_owners_list_then_completes_when_its_window_closes() {
+    let w = World::code(merged_pr_github(SKIP_DIFF));
+    let done = held_tier_two(&w).await;
+    assert!(
+        matches!(
+            &done,
+            Finished::Recorded {
+                moved: Moved::Held,
+                waiting_for: Some(WaitingFor::Owner),
+                ..
+            }
+        ),
+        "{done:?}"
+    );
+    let task = get(&w.db);
+    assert_eq!(task.status, t::STATUS_READY_FOR_REVIEW, "not complete yet");
+    let hold = w.db.with_conn(|c| t::get_hold(c, "tk-1")).unwrap().unwrap();
+    assert!(hold.release_at > chrono::Utc::now().timestamp() + 23 * 3600);
+    assert_eq!(
+        hold.currency["prs"][0][2], "abc123",
+        "what the verdict was about"
+    );
+    let state =
+        w.db.with_conn(|c| t::waiting_state(c, &task))
+            .unwrap()
+            .unwrap();
+    assert_eq!(state.who, "owner");
+    assert!(state.reason.contains("veto"), "{}", state.reason);
+    let note = w.db.with_conn(|c| t::list_comments(c, "tk-1")).unwrap();
+    assert!(
+        note.last().unwrap().body.contains("hq verify veto"),
+        "{}",
+        note.last().unwrap().body
+    );
+    // It left the verification queue: nothing is asked of the reviewer again.
+    let again = run_pass(&w, &ScriptedReviewer::new(&["a"], vec![])).await;
+    assert_eq!(
+        (again.queued, again.released, again.held),
+        (0, 0, 0),
+        "{again:?}"
+    );
+
+    // Still inside the window: nothing completes it.
+    assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
+
+    // Window closes with no veto: HQ completes it, attributed to a verifier, and says so.
+    close_the_window(&w);
+    let released = run_pass(&w, &ScriptedReviewer::new(&["a"], vec![])).await;
+    assert_eq!(
+        (released.released, released.changed_in_window),
+        (1, 0),
+        "{released:?}"
+    );
+    assert_eq!(get(&w.db).status, t::STATUS_COMPLETE);
+    assert!(
+        w.db.with_conn(|c| t::get_hold(c, "tk-1"))
+            .unwrap()
+            .is_none()
+    );
+    let events = w.db.with_conn(|c| t::list_task_events(c, "tk-1")).unwrap();
+    assert!(
+        events
+            .last()
+            .unwrap()
+            .actor
+            .clone()
+            .unwrap()
+            .starts_with("verify:")
+    );
+    let comments = w.db.with_conn(|c| t::list_comments(c, "tk-1")).unwrap();
+    assert!(
+        comments
+            .last()
+            .unwrap()
+            .body
+            .contains("closed without a veto"),
+        "{}",
+        comments.last().unwrap().body
+    );
+}
+
+#[tokio::test]
+async fn a_vetoed_tier_two_task_goes_back_with_the_reason_and_counts_against_the_verifier() {
+    let w = World::code(merged_pr_github(SKIP_DIFF));
+    held_tier_two(&w).await;
+    w.db.with_conn(|c| t::veto_hold(c, "tk-1", "the migration also needs a backfill", "owner"))
+        .unwrap();
+    let task = get(&w.db);
+    assert_eq!(task.status, t::STATUS_TO_DO);
+    assert!(
+        w.db.with_conn(|c| t::get_hold(c, "tk-1"))
+            .unwrap()
+            .is_none()
+    );
+    let checkpoint =
+        w.db.with_conn(|c| t::latest_checkpoint(c, "tk-1"))
+            .unwrap()
+            .unwrap();
+    assert!(
+        checkpoint.summary.contains("backfill"),
+        "{}",
+        checkpoint.summary
+    );
+    let audit: (String, String) =
+        w.db.with_conn(|c| {
+            c.query_row(
+                "SELECT source, answer FROM task_audits WHERE task_id = 'tk-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(Into::into)
+        })
+        .unwrap();
+    assert_eq!(audit, ("veto".to_string(), "disagree".to_string()));
+    // A second veto, or one on a task with no window, is refused.
+    assert!(
+        w.db.with_conn(|c| t::veto_hold(c, "tk-1", "", "owner"))
+            .is_err()
+    );
+    // Nothing is left for the clock to complete.
+    close_the_window(&w);
+    let after = run_pass(&w, &ScriptedReviewer::new(&["a"], vec![])).await;
+    assert_eq!(after.released, 0);
+    assert_eq!(get(&w.db).status, t::STATUS_TO_DO);
+}
+
+#[tokio::test]
+async fn work_that_changed_during_the_window_is_checked_again_not_completed_on_a_stale_verdict() {
+    let mut w = World::code(merged_pr_github(SKIP_DIFF));
+    held_tier_two(&w).await;
+    close_the_window(&w);
+    // The pull request gets a new head commit while the window is open.
+    w.gh = Arc::new(
+        FakeGitHub::default().with(
+            "repos/example/repo/pulls/7",
+            json!({"state": "closed", "merged": true, "head": {"sha": "fff999"}, "base": {"ref": "main"},
+                   "user": {"login": "dev"}, "changed_files": 1, "mergeable": null}),
+        ),
+    );
+    let released = run_pass(&w, &ScriptedReviewer::new(&["a"], vec![])).await;
+    assert_eq!(
+        (released.released, released.changed_in_window),
+        (0, 1),
+        "{released:?}"
+    );
+    let task = get(&w.db);
+    assert_eq!(
+        task.status,
+        t::STATUS_TO_DO,
+        "sent back to be done and checked again"
+    );
+    let last = verdicts(&w.db).into_iter().next().unwrap();
+    assert!(
+        last.reasons.contains("new head commit") && last.verdict == "inconclusive",
+        "{}",
+        last.reasons
+    );
+}
+
+#[tokio::test]
+async fn a_task_the_owner_completed_in_the_window_is_left_alone_and_zero_hours_means_no_window() {
+    let w = World::code(merged_pr_github(SKIP_DIFF));
+    held_tier_two(&w).await;
+    // The owner completes it early from the board.
+    w.db.with_conn(|c| {
+        t::update_task_as(
+            c,
+            "tk-1",
+            &t::TaskPatch {
+                status: Some(t::STATUS_COMPLETE.into()),
+                ..Default::default()
+            },
+            None,
+            &t::WriteCtx {
+                actor: Some("owner"),
+                owner: true,
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
+    close_the_window(&w);
+    let after = run_pass(&w, &ScriptedReviewer::new(&["a"], vec![])).await;
+    assert_eq!(after.released, 0, "{after:?}");
+    assert!(
+        w.db.with_conn(|c| t::get_hold(c, "tk-1"))
+            .unwrap()
+            .is_none()
+    );
+
+    let mut none = World::code(merged_pr_github(SKIP_DIFF));
+    none.cfg.veto_hours = 0;
+    sync(&none.db, &none.cfg);
+    assert!(completed(&held_tier_two(&none).await));
 }
 
 #[tokio::test]

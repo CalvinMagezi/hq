@@ -174,6 +174,7 @@ pub fn purge_task(conn: &Connection, id: &str, actor: &str) -> Result<Vec<String
                 "task_events",
                 "task_work_sessions",
                 "task_checkpoints",
+                "task_veto_holds",
                 "task_audits",
                 "task_verdicts",
                 "task_verification_waits",

@@ -75,8 +75,12 @@ linking a running session counts as a launch in the table below, and linking one
 already ended only records the link. Each event leaves a comment on the task, and the web Tasks view picks it up at
 once. Comments never quote the agent's screen: pane text is untrusted input, and task
 comments are read back as trusted, so they point at `harness_session_logs` instead.
-Status moves only from the states listed here, and HQ never sets `complete`: the agent
-saying it is done is not verification, so a person decides.
+Status moves only from the states listed here, and the supervisor never sets `complete`: the
+agent saying it is done is not verification. With `tasks.verification` off, the owner decides.
+With it enforced, HQ's verifier completes a task only from evidence the session could not write
+(a merged pull request with green required checks, a note's content hash, a probed URL) and
+sends it back to the agent with the findings when that evidence is missing or says otherwise
+(`docs/TASK_VERIFICATION.md`).
 
 | Event | Task status | Notification |
 |-------|-------------|--------------|
@@ -597,8 +601,9 @@ stack:
 is short, quotes the last paragraph on its screen, where a CLI prints the error it stopped on
 (on a host that reports no code, output on
   screen counts as a finished run and a blank screen as a crash). A run is never resumed:
-  fix the cause, then assign the task again or `hq stack run`. A person reads the output
-  (`harness_session_logs`) and marks the task complete, or not. A monitor's or reviewer's run
+  fix the cause, then assign the task again or `hq stack run`. You read the output
+  (`harness_session_logs`) and complete the task, or not; with task verification on, HQ
+  checks the evidence and completes what passes. A monitor's or reviewer's run
   comments and never moves the task, as its interactive turns do.
 - **Limits.** `runs_per_day` is counted over a rolling 24 hours. A run past `run_minutes` is
   stopped and its task blocked with the reason. A launch that fails leaves one comment on the

@@ -454,6 +454,7 @@ pub fn escapes(conn: &Connection, tier: u8, verifier_config: &str) -> Result<i64
          WHERE v.canary = 0 AND v.verdict = ?1 AND v.applied = 1 AND v.level <> ?2 \
            AND v.tier = ?3 AND v.verifier_config = ?4 \
            AND v.created_at >= datetime('now', ?5) \
+           AND NOT EXISTS (SELECT 1 FROM task_veto_holds h WHERE h.task_id = t.id) \
            AND (t.status <> 'complete' \
                 OR EXISTS (SELECT 1 FROM task_links l JOIN task_tags g \
                              ON g.task_id = l.task_id AND lower(g.tag) = 'regression' \

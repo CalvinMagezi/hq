@@ -111,12 +111,12 @@ enum Commands {
 
     /// How far HQ's verification of finished tasks can be trusted, and the audits you answer to find out
     Verify {
-        /// status (default), audits, pull [n], agree <id> or disagree <id>
+        /// status (default), audits, pull [n], agree <id>, disagree <id>, holds or veto <task>
         #[arg(default_value = "status")]
         sub: String,
-        /// A count (pull) or an audit id (agree, disagree)
+        /// A count (pull), an audit id (agree, disagree) or a task (veto)
         arg: Option<String>,
-        /// Why you disagree (disagree)
+        /// Why you disagree or veto (disagree, veto)
         #[arg(long)]
         note: Option<String>,
         /// Print JSON (status, audits)

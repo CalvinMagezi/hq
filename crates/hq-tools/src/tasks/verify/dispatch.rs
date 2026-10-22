@@ -6,7 +6,7 @@
 //! in the database with its retry time, so a long queue of such tasks does not take every pass,
 //! a restart forgets nothing, and the web server can say what each task is waiting on.
 
-use super::pipeline::{Env, Finished, Moved, verify_task};
+use super::pipeline::{Env, Finished, Moved, release_due_holds, verify_task};
 use super::reviewer::Reviewer;
 use anyhow::Result;
 use futures::future::join_all;
@@ -34,6 +34,12 @@ pub struct DispatchReport {
     pub returned: usize,
     /// Tasks that went to the owner as an exception.
     pub escalated: usize,
+    /// Tier 2 tasks that entered their veto window.
+    pub held: usize,
+    /// Tier 2 tasks completed because their window closed without a veto.
+    pub released: usize,
+    /// Tier 2 tasks whose artifact changed in the window and were sent back.
+    pub changed_in_window: usize,
     /// Verifications that could not be decided yet; their wait is stored.
     pub deferred: usize,
     /// Verdicts dropped because the work changed while it was checked.
@@ -49,6 +55,14 @@ pub async fn dispatch(env: &Env<'_>, reviewer: &dyn Reviewer) -> Result<Dispatch
     let mut report = DispatchReport::default();
     if env.cfg.mode == VerificationMode::Off {
         return Ok(report);
+    }
+    // Windows that have closed come first: they are waiting on the clock, not on a reviewer.
+    match release_due_holds(env).await {
+        Ok(released) => {
+            report.released = released.completed;
+            report.changed_in_window = released.changed;
+        }
+        Err(e) => report.errors.push(format!("veto windows: {e:#}")),
     }
     let cfg = env.cfg.clone();
     let now = chrono::Utc::now().timestamp();
@@ -80,6 +94,7 @@ pub async fn dispatch(env: &Env<'_>, reviewer: &dyn Reviewer) -> Result<Dispatch
                         Moved::Completed => report.completed += 1,
                         Moved::Returned => report.returned += 1,
                         Moved::Escalated => report.escalated += 1,
+                        Moved::Held => report.held += 1,
                         Moved::Nothing => {}
                     }
                 }

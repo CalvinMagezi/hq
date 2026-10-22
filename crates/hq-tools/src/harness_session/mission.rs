@@ -1,7 +1,9 @@
 //! Ties a harness session to the HQ task it works on. The task is the durable
 //! mission record: each lifecycle event leaves a comment on it and moves its
-//! status forward, but only from a state the event expects. HQ never marks a
-//! task complete; that verdict belongs to whoever reviews the work.
+//! status forward, but only from a state the event expects. The supervisor never
+//! marks a task complete: a session saying it is done is not evidence. The owner
+//! completes it, or, once `tasks.verification` is enforced, the verifier does
+//! (`crate::tasks::verify`) from facts the session could not write.
 //!
 //! Every caller writes here right after winning the registry claim for the
 //! event (`claim_state_alert`, `set_status_exited_if_running`), so a daemon

@@ -56,9 +56,11 @@ impl HqTool for TaskCreateTool {
     fn description(&self) -> &str {
         "Create a task: something to do and track to completion. Knowledge and notes belong in the vault, \
          not here (task_create_from_note promotes a note). Say who it is for in `assignees` and what it is \
-         about in `tags`. Optional: parent_id for a sub-task, depends_on, start_date and due_date, \
-         estimate_minutes, `links` to what it came from, external_id so a retry is safe. The reply lists \
-         similar open tasks if there are any. Several at once: task_create_many."
+         about in `tags`. Put an `Acceptance` section in the description, one checkable line per thing \
+         that must be true when it is done: finished work is judged against those lines. Optional: parent_id \
+         for a sub-task, depends_on, start_date and due_date, estimate_minutes, `links` to what it came \
+         from, external_id so a retry is safe. The reply lists similar open tasks if there are any. Several \
+         at once: task_create_many."
     }
     fn parameters(&self) -> Value {
         json!({

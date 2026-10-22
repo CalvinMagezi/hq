@@ -2,13 +2,14 @@
 --
 -- task_audits: tasks HQ completed that the owner is asked to check, one tap each: agree or not.
 -- A disagreement reopens the task and counts against the verifier configuration that made it.
--- source is 'push' (the weekly floor), 'pull' (the owner asked for more) or 'second_opinion' (a
--- fresh verifier was asked and disagreed with the first).
+-- source is 'push' (the weekly floor), 'pull' (the owner asked for more), 'second_opinion' (a
+-- fresh verifier was asked and disagreed with the first) or 'veto' (the owner reversed a tier 2
+-- verdict inside its window).
 CREATE TABLE IF NOT EXISTS task_audits (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id),
     verdict_id TEXT NOT NULL REFERENCES task_verdicts(id),
-    source TEXT NOT NULL CHECK (source IN ('push', 'pull', 'second_opinion')),
+    source TEXT NOT NULL CHECK (source IN ('push', 'pull', 'second_opinion', 'veto')),
     tier INTEGER NOT NULL CHECK (tier BETWEEN 0 AND 2),
     verifier_config TEXT NOT NULL DEFAULT '',
     selected_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -38,3 +39,18 @@ CREATE TABLE IF NOT EXISTS task_canary_runs (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_task_canary_runs_config ON task_canary_runs(verifier_config, created_at);
+
+-- Tier 2 work passes through a window before it completes: the verdict is recorded and approved,
+-- the task stays in review waiting on the owner, and it completes when release_at passes unless
+-- the owner vetoes it first. The currency snapshot is what the verdict was about (pull request
+-- head commits, note hashes), checked again before the task completes. One row per task.
+CREATE TABLE IF NOT EXISTS task_veto_holds (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+    verdict_id TEXT NOT NULL REFERENCES task_verdicts(id),
+    submission INTEGER,
+    -- Unix seconds.
+    release_at INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_veto_holds_release ON task_veto_holds(release_at);
