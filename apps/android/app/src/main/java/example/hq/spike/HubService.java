@@ -62,11 +62,15 @@ public class HubService extends Service {
     }
 
     private static final AtomicLong lastRecovery = new AtomicLong(-RECOVER_MIN_GAP_MS);
-    private static volatile Runnable tokenListener;
+    private static final java.util.concurrent.CopyOnWriteArraySet<Runnable> tokenListeners = new java.util.concurrent.CopyOnWriteArraySet<>();
 
-    /** The visible web page asks to hear when the token is replaced, so it can sign in again with the new one. */
-    static void setTokenListener(Runnable r) {
-        tokenListener = r;
+    /** A visible web page asks to hear when the token is replaced, so it can sign in again with the new one. Each page adds its own and removes only that one. */
+    public static void addTokenListener(Runnable r) {
+        tokenListeners.add(r);
+    }
+
+    public static void removeTokenListener(Runnable r) {
+        tokenListeners.remove(r);
     }
 
     /**
@@ -75,15 +79,22 @@ public class HubService extends Service {
      * RECOVER_MIN_GAP_MS, so a 401 with another cause cannot make hq restart over and over.
      */
     public static void recoverToken(Context c) {
+        recoverToken(c, false);
+    }
+
+    /** [force] is for a deliberate sign-out of everything: the app caused the 401, so the five minute guard against a loop does not apply. */
+    public static void recoverToken(Context c, boolean force) {
         long now = SystemClock.elapsedRealtime();
         long last = lastRecovery.get();
-        if (now - last < RECOVER_MIN_GAP_MS || !lastRecovery.compareAndSet(last, now)) return;
+        if (!force && (now - last < RECOVER_MIN_GAP_MS || !lastRecovery.compareAndSet(last, now))) return;
+        if (force) lastRecovery.set(now);
         try {
             SecretStore.replaceWebToken(c);
             Log.w(TAG, "web token was signed out, replaced it and restarting hq");
             restartHq();
-            Runnable heard = tokenListener;
-            if (heard != null) heard.run();
+            for (Runnable heard : tokenListeners) {
+                try { heard.run(); } catch (RuntimeException e) { Log.w(TAG, "a token listener failed: " + e); }
+            }
         } catch (RuntimeException e) {
             lastRecovery.set(last);
             Log.e(TAG, "could not replace the web token: " + e);
@@ -150,6 +161,25 @@ public class HubService extends Service {
                 .setContentText(text).setSmallIcon(statIcon(this)).build();
     }
 
+    private static final String PREFS = "hub";
+    private static final String LAST_START = "last_start";
+    private static final String LAST_EXIT = "last_exit";
+
+    private android.content.SharedPreferences hubPrefs() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE);
+    }
+
+    /** When hq was last launched (epoch millis), or 0 if it never was; what the "HQ did not start" screen reports. */
+    public static long lastStart(Context c) {
+        return c.getSharedPreferences(PREFS, MODE_PRIVATE).getLong(LAST_START, 0);
+    }
+
+    /** The exit code of the hq run that ended last, or null while it has not ended. */
+    public static Integer lastExit(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences(PREFS, MODE_PRIVATE);
+        return p.contains(LAST_EXIT) ? p.getInt(LAST_EXIT, 0) : null;
+    }
+
     /** Restarts a child with exponential backoff; a null command means "not configured", so it is skipped. */
     private void supervise(int gen, String name, Supplier<ProcessBuilder> command, boolean isHq) {
         long backoff = BACKOFF_MIN_MS;
@@ -168,9 +198,11 @@ public class HubService extends Service {
                 Process p = launch(gen, pb, isHq);
                 if (p == null) return;
                 Log.i(TAG, name + " started");
+                if (isHq) hubPrefs().edit().putLong(LAST_START, System.currentTimeMillis()).remove(LAST_EXIT).apply();
                 int rc = p.waitFor();
                 ranMs = System.currentTimeMillis() - t0;
                 Log.w(TAG, name + " exited rc=" + rc + " after " + ranMs / 1000 + " s");
+                if (isHq) hubPrefs().edit().putInt(LAST_EXIT, rc).apply();
             } catch (InterruptedException e) {
                 return;
             } catch (Exception | LinkageError e) {
@@ -210,6 +242,7 @@ public class HubService extends Service {
      */
     private ProcessBuilder hqProcess() {
         SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
+        WebAssets.sync(this);
         boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
         childActive = active;
         Log.i(TAG, "hq mode: " + (active ? "active (daemon, relays)" : "standby (web only)"));

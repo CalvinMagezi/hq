@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, FileText, AlertCircle, Loader2, Copy, Check, Folder, ArrowRight } from 'lucide-react'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
+import { useBackClosesLayer } from '~/lib/backLayer'
 import { fetchNoteForDrawer, type NoteDetailResponse } from '~/lib/vaultApi'
 import { MarkdownViewer } from './MarkdownViewer'
 
 export function VaultNoteDrawer() {
   const { open, notePath, closeNote } = useVaultNoteStore()
+  useBackClosesLayer(open, closeNote)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<NoteDetailResponse | null>(null)

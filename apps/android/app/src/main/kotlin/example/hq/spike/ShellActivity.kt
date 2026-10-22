@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -46,7 +47,25 @@ import example.hq.spike.ui.inbox.InboxUi
 import example.hq.spike.ui.inbox.InboxViewModel
 import example.hq.spike.ui.inbox.inboxFixture
 import example.hq.spike.ui.notes.NotesHome
+import example.hq.spike.ui.search.SearchScreen
+import example.hq.spike.ui.webhost.LocalOpenWeb
+import example.hq.spike.ui.webhost.WebHostScreen
+import example.hq.spike.ui.webhost.WebPage
+import example.hq.spike.ui.search.SearchUi
+import example.hq.spike.ui.search.SearchViewModel
 import example.hq.spike.ui.tasks.QuickAddSheet
+import example.hq.spike.ui.tasks.BriefingPage
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import example.hq.spike.ui.theme.Mts
+import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.tasks.TasksLogic
+import example.hq.spike.ui.tasks.TaskTab
+import example.hq.spike.ui.tasks.TaskScope
+import example.hq.spike.ui.tasks.TaskFilters
+import example.hq.spike.ui.tasks.TaskFilterWords
+import example.hq.spike.ui.tasks.TaskFilterSheet
 import example.hq.spike.ui.tasks.TaskPage
 import example.hq.spike.ui.tasks.TasksScreen
 import example.hq.spike.ui.tasks.TasksUi
@@ -61,6 +80,14 @@ import example.hq.spike.ui.chat.chatFixture
 import example.hq.spike.ui.shell.HqShell
 import example.hq.spike.ui.shell.LinkTarget
 import example.hq.spike.ui.shell.Links
+import androidx.compose.runtime.remember
+import example.hq.spike.ui.settings.PhoneFix
+import example.hq.spike.ui.settings.PhoneIntents
+import example.hq.spike.ui.startup.DidNotStartScreen
+import example.hq.spike.ui.startup.StartingScreen
+import example.hq.spike.ui.startup.StartupWords
+import example.hq.spike.ui.startup.Startup
+import example.hq.spike.ui.startup.FirstLaunch
 import example.hq.spike.ui.usage.ChipTarget
 import example.hq.spike.ui.usage.UsageViewModel
 import example.hq.spike.ui.usage.balanceFixture
@@ -82,16 +109,23 @@ class ShellActivity : ComponentActivity() {
     private val helpers: HelpersViewModel by viewModels()
     private val settings: SettingsViewModel by viewModels()
     private val usage: UsageViewModel by viewModels()
+    private val search: SearchViewModel by viewModels()
 
     /** A place asked for by a tapped notification while the app is already open; the shell takes it and clears it. */
     private var requested by mutableStateOf<Place?>(null)
+
+    /** The web page shown in the host screen over everything, or null. */
+    private var web by mutableStateOf<WebPage?>(null)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         val link = linkOf(intent) ?: return
+        // Shared text is kept even when the pages cannot be closed: it joins the chat's draft, and nothing typed there is lost.
+        val shared = intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)
+        shared?.let(chat::addToDraft)
         if (hasUnsavedWork()) {
-            Toast.makeText(this, UNSAVED_WORK, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, if (shared != null) SHARED_KEPT else UNSAVED_WORK, Toast.LENGTH_LONG).show()
             return
         }
         closePages()
@@ -114,6 +148,7 @@ class ShellActivity : ComponentActivity() {
             Place.Notes -> { t.path?.let(notes::openNote); if (t.search) notes.actions.onOpenSearch() }
             Place.Helpers -> t.id?.let(helpers::openSession)
         }
+        t.web?.let { WebPage.fromSlug(it) }?.let { web = it }
         t.screen?.let { name ->
             val page = SettingsPage.entries.firstOrNull { it.name.equals(name, true) } ?: return@let
             settings.actions.onOpen()
@@ -131,6 +166,8 @@ class ShellActivity : ComponentActivity() {
 
     /** Pages and sheets open over the shell would hide the place a tapped notification asks for. */
     private fun closePages() {
+        web = null
+        search.actions.onClose()
         notes.closeAll()
         inbox.actions.onDetails(null)
         tasks.actions.onClose()
@@ -142,10 +179,51 @@ class ShellActivity : ComponentActivity() {
         chat.actions.onCloseChats()
     }
 
+    private fun openCapture() {
+        startActivity(Intent(this, example.hq.spike.capture.CaptureActivity::class.java))
+    }
+
+    /** "Try again": make sure the service that runs hq is up and start counting the wait from now. */
+    private fun tryStartAgain() {
+        HqServices.get(applicationContext).restartWait()
+        HqServices.ensureHubRunning(this)
+    }
+
+    private fun openBatterySettings() {
+        // Samsung's own page first, then the battery optimisation list and app info: what stops an app is the optimisation, not Battery Saver.
+        PhoneIntents.startFirst(this, PhoneIntents.tries(this, PhoneFix.SleepingApps).take(1) + PhoneIntents.tries(this, PhoneFix.Battery))
+    }
+
+    /** Puts the two lines on the screen, the build, the mode and the end of hq's log on the clipboard, with anything token-like blanked. */
+    private fun copyStartDetails() {
+        val active = (java.io.File(filesDir, "mode").takeIf { it.length() <= MODE_FILE_MAX }?.readText()?.trim() ?: "") == "active"
+        val log = StartupWords.cleanLog(tailOf(java.io.File(filesDir, "hq.log")))
+        val build = packageManager.getPackageInfo(packageName, 0).let { "${it.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build ${if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) it.longVersionCode else it.versionCode.toLong()}" }
+        val text = StartupWords.details(build, active, StartupWords.failedLines(HubService.lastStart(this), HubService.lastExit(this)), log)
+        (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
+        android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun tailOf(f: java.io.File): List<String> = try {
+        java.io.RandomAccessFile(f, "r").use { r ->
+            val from = (r.length() - TAIL_BYTES).coerceAtLeast(0)
+            r.seek(from)
+            val bytes = ByteArray((r.length() - from).toInt()).also { r.readFully(it) }
+            String(bytes, Charsets.UTF_8).lines().drop(if (from > 0) 1 else 0).filter { it.isNotBlank() }
+        }
+    } catch (e: java.io.IOException) { emptyList() }
+
     private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        web?.let { outState.putString(STATE_WEB, it.slug) }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A rotation keeps the web page open; it loads again from its start.
+        web = WebPage.fromSlug(savedInstanceState?.getString(STATE_WEB))
         HqServices.ensureHubRunning(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -155,7 +233,10 @@ class ShellActivity : ComponentActivity() {
         val badge = intent.getIntExtra("badge", 0)
         val fixtureName = intent.getStringExtra("fixture")
         // A rotation or a restore runs onCreate again with the launch intent; the link was applied the first time.
-        if (savedInstanceState == null) linkOf(intent)?.let(::applyLink)
+        if (savedInstanceState == null) {
+            linkOf(intent)?.let(::applyLink)
+            intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)?.let(chat.actions.onDraft)
+        }
         if (fixtureName == "a-alerts") sampleAlerts()
         val notesFixture = notesFixture(fixtureName)
         val inboxFixture = inboxFixture(fixtureName)
@@ -178,6 +259,7 @@ class ShellActivity : ComponentActivity() {
             val tasksState by tasks.state.collectAsStateWithLifecycle()
             val helpersState by helpers.state.collectAsStateWithLifecycle()
             val settingsState by settings.state.collectAsStateWithLifecycle()
+            val searchState by search.state.collectAsStateWithLifecycle()
             val balance by usage.chip.collectAsStateWithLifecycle()
             val offlineSince = chatState.offlineSince
             val now by produceState(System.currentTimeMillis(), offlineSince) {
@@ -190,18 +272,27 @@ class ShellActivity : ComponentActivity() {
                 offlineSince != null && now - offlineSince >= OFFLINE_GRACE_MS -> HqStatus.Saved(ChatTime.short(offlineSince, now))
                 else -> HqStatus.Live
             }
-            HqTheme {
-                HqShell(
+            val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; "x-failed" -> Startup.DidNotStart; else -> null }
+            val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
+            val startup = startupFixture ?: if (fixture == null) StartupWords.decide(status, firstDone) else Startup.None
+            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }) {
+                if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
+                else if (startup == Startup.DidNotStart) DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
+                else HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
-                    onSearch = { notes.actions.onOpenSearch() }, onSettings = settings.actions.onOpen,
+                    onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen,
+                    subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
+                    topActions = { place ->
+                        if (place == Place.Tasks && tasksState.tab == TaskTab.All) IconButton({ tasks.actions.onFilter(true) }, Modifier.size(48.dp)) { Icon(HqIcons.Filter, "Filter", Modifier.size(24.dp), tint = if (tasksState.scope == TaskScope.Everything) Mts.Ink else Mts.BrandGreen) }
+                    },
                     balance = if (shown is HqStatus.Starting) null else balance,
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions) },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
                 ) { place ->
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions)
+                        Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)
@@ -209,7 +300,7 @@ class ShellActivity : ComponentActivity() {
                         else -> NotBuilt(place)
                     }
                 }
-            }
+            } }
         }
     }
 
@@ -217,6 +308,19 @@ class ShellActivity : ComponentActivity() {
     private fun NotesPlace(notesState: NotesUi) {
         val go = LocalGoTo.current
         NotesHome(notesState, notes.actions, onAskHq = { go(Place.Chat); chat.actions.onDraft("Write me a note about ") })
+    }
+
+    /** Search sits over everything but a chosen result: the screen closes first, then the note, task or chat opens in its own place. */
+    @androidx.compose.runtime.Composable
+    private fun SearchHost(searchState: SearchUi) {
+        if (!searchState.open) return
+        val go = LocalGoTo.current
+        SearchScreen(
+            searchState, search.actions,
+            onNote = { path -> search.actions.onClose(); notes.openNote(path) },
+            onTask = { t -> search.actions.onClose(); go(Place.Tasks); tasks.openById(t.id) { } },
+            onChat = { c -> search.actions.onClose(); go(Place.Chat); chat.actions.onOpenChat(c.id) },
+        )
     }
 
     /** Posts three sample notifications, for checking their words and buttons against the design with no hq. */
@@ -278,12 +382,20 @@ class ShellActivity : ComponentActivity() {
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasks.actions) }
+        if (tasksState.filterOpen) TaskFilterSheet(tasksState, tasks.actions)
+        tasksState.briefing?.let { b ->
+            BriefingPage(b, onClose = { tasks.actions.onBriefing(false) }, onRetry = { tasks.actions.onBriefing(true) }, onTask = { t -> tasks.actions.onBriefing(false); tasks.openById(t.id) { } }, onNote = { path -> tasks.actions.onBriefing(false); notes.openNote(path) })
+        }
         HelperOverlays(helpersState, helpers.actions)
     }
 
     private companion object {
+        const val STATE_WEB = "web"
         const val STATUS_TICK_MS = 5_000L
         const val OFFLINE_GRACE_MS = 5_000L
+        const val MODE_FILE_MAX = 64L
+        const val TAIL_BYTES = 16_384L
         const val UNSAVED_WORK = "Finish or discard what you are writing first"
+        const val SHARED_KEPT = "Added to your chat message. Finish what you are writing first to open it."
     }
 }
