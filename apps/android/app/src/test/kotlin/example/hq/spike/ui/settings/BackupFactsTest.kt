@@ -32,13 +32,15 @@ class BackupFactsTest {
     }
 
     @Test fun aWorkingBackupSaysWhenAndHowOften() {
-        val c = BackupWords.card(BackupFacts(on, BackupStatus(true, "", 3155, 0), hoursAgo(5)), now)
+        val c = BackupWords.card(BackupFacts(on, BackupStatus(true, "", 3155, 0, "/x/hq-backup-A.hqbak"), hoursAgo(5), "hq-backup-A.hqbak"), now)
         assertEquals(BackupWords.Tone.Good, c.tone)
         assertEquals("Backup is on", c.title)
         assertEquals("Last backup 5 h ago, 3155 files. A new one is made every 24 hours and the newest 7 are kept.", c.body)
         assertEquals(false, c.offerSetUp)
         assertEquals("Last backup 1 d ago, 10 files. A new one is made every 24 hours and the newest 7 are kept. 3 files were left out.",
-            BackupWords.card(BackupFacts(on, BackupStatus(true, "", 10, 3), hoursAgo(30)), now).body)
+            BackupWords.card(BackupFacts(on, BackupStatus(true, "", 10, 3, "/x/hq-backup-A.hqbak"), hoursAgo(30), "hq-backup-A.hqbak"), now).body)
+        assertEquals("Last backup 5 h ago. A new one is made every 24 hours and the newest 7 are kept.",
+            BackupWords.card(BackupFacts(on, BackupStatus(true, "", 3155, 0, "/x/hq-backup-OLD.hqbak"), hoursAgo(5), "hq-backup-B.hqbak"), now).body)
     }
 
     @Test fun aFailedOrOldOrMissingBackupIsSaidPlainly() {

@@ -9,10 +9,10 @@ import org.json.JSONObject
 data class BackupConfig(val enabled: Boolean, val everyHours: Int, val keep: Int, val dir: String?)
 
 /** What HQ wrote in `backup-status.json` about the last scheduled backup it tried. */
-data class BackupStatus(val ok: Boolean, val message: String, val files: Int, val leftOut: Int)
+data class BackupStatus(val ok: Boolean, val message: String, val files: Int, val leftOut: Int, val path: String = "")
 
-/** [newestMs] is the newest backup file in the folder, however it was made. */
-data class BackupFacts(val config: BackupConfig? = null, val status: BackupStatus? = null, val newestMs: Long? = null)
+/** [newestMs] and [newestName] are the newest backup file in the folder, however it was made. */
+data class BackupFacts(val config: BackupConfig? = null, val status: BackupStatus? = null, val newestMs: Long? = null, val newestName: String? = null)
 
 object BackupWords {
     enum class Tone { Good, Warn }
@@ -42,7 +42,7 @@ object BackupWords {
 
     fun parseStatus(json: String): BackupStatus? = try {
         val o = JSONObject(json)
-        BackupStatus(o.optBoolean("ok"), o.optString("message"), o.optInt("files"), o.optInt("left_out"))
+        BackupStatus(o.optBoolean("ok"), o.optString("message"), o.optInt("files"), o.optInt("left_out"), o.optString("path"))
     } catch (e: JSONException) { null }
 
     fun card(f: BackupFacts, now: Instant): Card {
@@ -55,8 +55,10 @@ object BackupWords {
         val hours = Duration.between(Instant.ofEpochMilli(newest), now).toHours().coerceAtLeast(0)
         val last = "Last backup ${ago(hours)}"
         if (hours >= c.everyHours * STALE_FACTOR) return Card(Tone.Warn, "The last backup is old", "$last. $plan", offerSetUp = false)
-        val files = status?.takeIf { it.files > 0 }?.let { ", ${it.files} files" }.orEmpty()
-        val left = status?.takeIf { it.leftOut > 0 }?.let { " ${it.leftOut} files were left out." }.orEmpty()
+        // The file counts belong to the backup the status file names, so they are shown only when that is the newest one.
+        val ofNewest = status?.takeIf { f.newestName != null && it.path.substringAfterLast('/') == f.newestName }
+        val files = ofNewest?.takeIf { it.files > 0 }?.let { ", ${it.files} files" }.orEmpty()
+        val left = ofNewest?.takeIf { it.leftOut > 0 }?.let { " ${it.leftOut} files were left out." }.orEmpty()
         return Card(Tone.Good, "Backup is on", "$last$files. $plan$left", offerSetUp = false)
     }
 

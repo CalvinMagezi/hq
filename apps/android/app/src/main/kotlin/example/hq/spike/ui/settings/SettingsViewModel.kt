@@ -283,8 +283,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val config = runCatching { BackupWords.parseConfig(java.io.File(files, "hqhome/config.yaml").readText()) }.getOrNull()
         val dir = config?.dir?.let { java.io.File(it) }?.takeIf { runCatching { it.canonicalPath.startsWith(files.canonicalPath + "/") }.getOrDefault(false) } ?: java.io.File(files, "backups")
         val status = runCatching { BackupWords.parseStatus(java.io.File(dir, "backup-status.json").readText()) }.getOrNull()
-        val newest = dir.listFiles { f -> f.name.startsWith("hq-backup-") && f.name.endsWith(".hqbak") }?.maxOfOrNull { it.lastModified() }
-        return BackupFacts(config, status, newest)
+        val newest = dir.listFiles { f -> f.name.startsWith("hq-backup-") && f.name.endsWith(".hqbak") }?.maxByOrNull { it.lastModified() }
+        return BackupFacts(config, status, newest?.lastModified(), newest?.name)
     }
 
     private fun readKeepFacts(): KeepFacts {
