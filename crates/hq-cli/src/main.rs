@@ -7,6 +7,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod android_runtime;
 mod commands;
 mod render;
 use commands::backup::{BackupCommand, RestoreArgs};
@@ -624,6 +625,7 @@ fn project_scope(path: Option<String>) -> commands::mcp::Scope {
 }
 
 fn main() -> Result<()> {
+    android_runtime::init();
     // Load .env files BEFORE spawning any tokio threads, so set_var is safe.
     // `update` and `update-db` run as root from a timer: a .env in the current
     // directory must not be able to redirect them.
@@ -782,6 +784,9 @@ fn init_tracing() {
     let is_tunnel_run = args.get(1).is_some_and(|a| a == "net")
         && args.iter().any(|a| a == "tunnel")
         && args.iter().any(|a| a == "run");
+    // `hq bridge run` talks to the phone app in JSON lines on stdout; its logs must stay out of it.
+    let is_bridge_run =
+        args.get(1).is_some_and(|a| a == "bridge") && args.get(2).is_some_and(|a| a == "run");
     // `hq task` and `--json` print data for another program: logs go to stderr, quietly.
     let before_dashes = args.iter().skip(1).take_while(|a| *a != "--");
     let is_data = before_dashes.clone().take(4).any(|a| a == "task")
@@ -792,14 +797,14 @@ fn init_tracing() {
         || (args.get(1).is_some_and(|a| a == "web") && before_dashes.clone().any(|a| a == "link"));
     let default_level = if is_chat || is_tunnel_run {
         "off"
-    } else if is_data {
+    } else if is_data || is_bridge_run {
         "warn"
     } else {
         "info"
     };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
-    if is_mcp || is_data || is_tunnel_run {
+    if is_mcp || is_data || is_tunnel_run || is_bridge_run {
         fmt()
             .with_env_filter(filter)
             .with_target(false)

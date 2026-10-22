@@ -8,6 +8,7 @@
 
 pub mod bridge;
 pub mod code;
+pub mod dns;
 pub mod host;
 pub mod join;
 pub mod key;
@@ -17,9 +18,9 @@ pub mod ticket;
 pub mod wire;
 
 pub use bridge::{
-    Bridge, BridgeConfig, PeerStream, SERVICE_ALPN, StreamHandler, echo, echo_handler,
+    Bridge, BridgeConfig, PeerStream, SERVICE_ALPN, StreamHandler, echo, echo_handler, path_kind,
 };
 pub use host::{Joiner, OpenTicket, PairRequest, PairingSpec, Registrar, Tuning};
-pub use iroh::{EndpointId, RelayMode};
+pub use iroh::{EndpointId, RelayMode, endpoint::Connection};
 pub use join::{JoinOptions, JoinResult, Joined};
 pub use ticket::{LINK_SCHEME, Purpose, Ticket};
