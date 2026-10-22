@@ -33,6 +33,11 @@ class AnswerReceiver : BroadcastReceiver() {
         val kind = intent.getStringExtra(KIND)
         val title = intent.getStringExtra(TITLE).orEmpty()
         val excerpt = intent.getStringExtra(EXCERPT).orEmpty().lines()
+        // Cards posted before the owner turned answers off still carry their buttons.
+        if (!AlertPoster.answersAllowed(context)) {
+            context.getSystemService(NotificationManager::class.java).notify(AlertPoster.notificationId(id), say(context, AnswerWords.answersOff, null))
+            return
+        }
         // A second tap before the card has changed would send the same key twice.
         if (!inFlight.add(id)) return
         val pending = goAsync()
@@ -55,9 +60,8 @@ class AnswerReceiver : BroadcastReceiver() {
                         nm.notify(nid, say(context, AnswerWords.Say("Not sent", HelperWords.checkWords(check)), null))
                         return@Thread
                     }
-                    // Counted as sent before the call: an answer that timed out may still have reached the helper, and a retry would press the key again.
-                    keySent = true
-                    post("/api/harness-sessions/$session/send", JSONObject().put("keys", JSONArray().put(key)), context, deadline)
+                    // Counted as sent once the request has gone out: an answer that then timed out may still have reached the helper, and a retry would press the key again.
+                    post("/api/harness-sessions/$session/send", JSONObject().put("keys", JSONArray().put(key)), context, deadline) { keySent = true }
                 }
                 post("/api/notifications/$id/action", JSONObject().put("action", answer), context, deadline)
                 val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -89,7 +93,7 @@ class AnswerReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun post(path: String, body: JSONObject, c: Context, deadline: Long) {
+    private fun post(path: String, body: JSONObject, c: Context, deadline: Long, afterWrite: () -> Unit = {}) {
         val h = URL("http://127.0.0.1:${HubService.PORT}$path").openConnection() as HttpURLConnection
         try {
             h.requestMethod = "POST"
@@ -100,6 +104,7 @@ class AnswerReceiver : BroadcastReceiver() {
             h.setRequestProperty("X-HQ-Client", "android")
             h.setRequestProperty("Content-Type", "application/json")
             h.outputStream.use { it.write(body.toString().toByteArray()) }
+            afterWrite()
             if (h.responseCode !in 200..299) throw java.io.IOException("status ${h.responseCode}")
         } finally {
             h.disconnect()

@@ -9,6 +9,7 @@ object AnswerWords {
 
     val sending = Say("Sending your answer…", null)
     val failed = Say("Couldn't send your answer", "HQ didn't reply. It may be restarting.")
+    val answersOff = Say("Answers from notifications are off", "Open the app to answer.")
     val sentNotRecorded = Say("Answer sent", "HQ did not record it. Open the app to check.")
 
     /** The helper's name from the title its question carried ("Claude needs your OK"); null when the title is not one of those. */

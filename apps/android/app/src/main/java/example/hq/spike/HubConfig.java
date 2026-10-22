@@ -115,8 +115,12 @@ final class HubConfig {
     /** Writes the run mode so a reader sees the old text or the new one, never part of it: a temp file beside it, then a rename over it. */
     static void writeMode(Path file, boolean active) throws IOException {
         Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-        Files.write(tmp, (active ? MODE_ACTIVE : "standby").getBytes(StandardCharsets.UTF_8));
-        Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        try {
+            Files.write(tmp, (active ? MODE_ACTIVE : "standby").getBytes(StandardCharsets.UTF_8));
+            Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     /** Standby serves the web app only; active is the daemon with relays, which serves it too. Supervised keeps the sign-in token out of the log. */

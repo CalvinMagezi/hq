@@ -35,6 +35,15 @@ public class HubConfigCheck {
         assert !HubConfig.isActive(new String(Files.readAllBytes(mode), StandardCharsets.UTF_8));
         assert !Files.exists(dir.resolve("mode.tmp")) : "no temp file is left";
         Files.delete(mode);
+        // A target that cannot be replaced (here a folder with something in it) fails, and leaves no temp file behind.
+        Files.createDirectory(mode);
+        Files.write(mode.resolve("x"), new byte[] {1});
+        boolean failed = false;
+        try { HubConfig.writeMode(mode, true); } catch (IOException expected) { failed = true; }
+        assert failed : "an unwritable mode is an error";
+        assert !Files.exists(dir.resolve("mode.tmp")) : "a failed write leaves no temp file";
+        Files.delete(mode.resolve("x"));
+        Files.delete(mode);
         Files.delete(dir);
     }
 

@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -33,6 +34,7 @@ public class HubService extends Service {
     private static final long BACKOFF_MIN_MS = 2_000;
     private static final long BACKOFF_MAX_MS = 60_000;
     private static final long STABLE_RUN_MS = 60_000;
+    private static final long FORCE_STOP_AFTER_MS = 20_000;
     private static final long MAX_LOG_BYTES = 5L << 20;
     private static final long RECOVER_MIN_GAP_MS = 5 * 60 * 1000L;
     private static final String SIGN_IN_MARK = "#token=";
@@ -94,9 +96,20 @@ public class HubService extends Service {
      */
     public static void restartHq() {
         synchronized (LOCK) {
-            restartAsked = true;
             Process p = hqProc;
-            if (p != null) p.destroy();
+            if (p == null || !p.isAlive()) return;
+            restartAsked = true;
+            p.destroy();
+            // hq shuts down in about ten seconds; one that has not gone by then is killed, or the old mode would keep running.
+            Thread killer = new Thread(() -> {
+                try {
+                    if (!p.waitFor(FORCE_STOP_AFTER_MS, TimeUnit.MILLISECONDS)) p.destroyForcibly();
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "hq-stop");
+            killer.setDaemon(true);
+            killer.start();
         }
     }
 

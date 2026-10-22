@@ -33,4 +33,8 @@ class AnswerWordsTest {
         assertEquals("Sending your answer…", AnswerWords.sending.title)
         assertNull(AnswerWords.sending.body)
     }
+
+    @Test fun answersTurnedOffSayWhereToAnswer() {
+        assertEquals(AnswerWords.Say("Answers from notifications are off", "Open the app to answer."), AnswerWords.answersOff)
+    }
 }

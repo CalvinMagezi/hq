@@ -597,6 +597,10 @@ private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
         }
         Text("Each opens that channel in Android settings. Turning Needs you off means approvals only wait in the Inbox.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
         Label("Buttons on notifications")
+        if (!n.buttonsSupported) {
+            Text("Buttons on notifications need Android 12 or newer. On this phone approvals wait in the Inbox.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp))
+            return@Page
+        }
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {

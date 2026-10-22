@@ -94,7 +94,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     /** Closes Settings and every page inside it. */
-    fun close() = _state.update { it.copy(open = false, stack = emptyList()) }
+    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null) }
 
     fun freeze(fixed: SettingsUi) {
         frozen = true
@@ -103,7 +103,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Opens Settings on its home page. What is on it comes from [refreshNow], which the page runs while it is showing. */
     private fun open() {
-        _state.update { it.copy(open = true, stack = emptyList(), line = null, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts() }
+        _state.update { it.copy(open = true, stack = emptyList(), line = null, askMode = null, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts() }
     }
 
     /**
@@ -173,7 +173,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private fun SettingsUi.withFacts(): SettingsUi = if (frozen) this else copy(keep = keepFacts(), notif = notifFacts())
 
     /** What Android says about this app staying alive: the battery setting, permission auto-removal, notifications, and the last time it stopped it. */
+    private var keepCache: Pair<Long, KeepFacts>? = null
+
+    /** The same reading for a few seconds, so the several places a refresh asks do not each ask Android. */
     private fun keepFacts(): KeepFacts {
+        val now = SystemClock.elapsedRealtime()
+        keepCache?.let { (at, facts) -> if (now - at < KEEP_CACHE_MS) return facts }
+        return readKeepFacts().also { keepCache = now to it }
+    }
+
+    private fun readKeepFacts(): KeepFacts {
         val c = ctx()
         val pkg = c.packageName
         val am = c.getSystemService(ActivityManager::class.java)
@@ -196,15 +205,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val nm = ctx().getSystemService(NotificationManager::class.java)
         val channels = listOf(AlertPoster.NEEDS, AlertPoster.UPDATES, HUB_CHANNEL).mapNotNull { nm.getNotificationChannel(it) }
             .map { ChannelFacts(it.id, it.name.toString(), it.importance, it.sound != null) }
-        return NotifFacts(nm.areNotificationsEnabled(), channels, AlertPoster.answersAllowed(ctx()))
+        return NotifFacts(nm.areNotificationsEnabled(), channels, AlertPoster.answersAllowed(ctx()), buttonsSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
     }
 
     /** Opens the Android page that changes a setting the owner was told about; a page this phone does not have is tried past, never a crash. */
     private fun fix(what: PhoneFix) {
+        keepCache = null
         val c = ctx()
         val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}"))
         val tries = when (what) {
-            PhoneFix.Battery -> listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), details)
+            PhoneFix.Battery -> if (_state.value.keep.backgroundRestricted) listOf(details) else listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), details)
             PhoneFix.AutoRevoke -> listOf(Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS, Uri.parse("package:${c.packageName}")), details)
             PhoneFix.Notifications -> listOf(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName), details)
             PhoneFix.SleepingApps -> listOf(Intent().setClassName(SAMSUNG_BATTERY_PACKAGE, SAMSUNG_BATTERY_PAGE), Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS), details)
@@ -247,21 +257,22 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.restarting) return
         _state.update { it.copy(askMode = null, restarting = true) }
         viewModelScope.launch {
-            val ok = withContext(Dispatchers.IO) { switchAndWait(toActive) }
-            _state.update { it.copy(restarting = false, mode = modeOf(), phone = phoneRows(), line = if (ok) null else RESTART_TIMEOUT_LINE).withFacts() }
+            val problem = withContext(Dispatchers.IO) { switchAndWait(toActive) }
+            _state.update { it.copy(restarting = false, mode = modeOf(), phone = phoneRows(), line = problem).withFacts() }
             refreshNow()
         }
     }
 
-    private suspend fun switchAndWait(toActive: Boolean): Boolean {
+    /** Null when hq is back running the chosen mode; otherwise the line that says what went wrong. */
+    private suspend fun switchAndWait(toActive: Boolean): String? {
         val before = startStamp().second
-        try { HubService.switchMode(ctx(), toActive) } catch (e: java.io.IOException) { return false }
-        if (!waitForHq(before)) return false
-        if (HubService.childActive() == toActive) return true
+        try { HubService.switchMode(ctx(), toActive) } catch (e: java.io.IOException) { return SAVE_FAILED_LINE }
+        if (!waitForHq(before)) return RESTART_TIMEOUT_LINE
+        if (HubService.childActive() == toActive) return null
         // The switch landed while hq was starting with the old mode: restart once more so it reads the file.
         val again = startStamp().second
         HubService.restartHq()
-        return waitForHq(again)
+        return if (waitForHq(again)) null else RESTART_TIMEOUT_LINE
     }
 
     private suspend fun waitForHq(before: String?): Boolean {
@@ -297,6 +308,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         const val HUB_CHANNEL = "hub"
         const val SAMSUNG_BATTERY_PACKAGE = "com.samsung.android.lool"
         const val SAMSUNG_BATTERY_PAGE = "com.samsung.android.sm.battery.ui.BatteryActivity"
+        const val SAVE_FAILED_LINE = "Could not save the setting."
+        const val KEEP_CACHE_MS = 5_000L
         const val RESTART_TIMEOUT_LINE = "HQ did not come back within two minutes."
     }
 }

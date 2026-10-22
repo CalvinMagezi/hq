@@ -24,7 +24,8 @@ data class KeepPage(val noticeTitle: String, val notice: String, val warn: Boole
 
 data class ChannelFacts(val id: String, val name: String, val importance: Int, val sound: Boolean)
 
-data class NotifFacts(val allowed: Boolean = true, val channels: List<ChannelFacts> = emptyList(), val answers: Boolean = true)
+/** [buttonsSupported] is false where Android cannot ask for an unlock on a notification button (before Android 12), so the switch would do nothing. */
+data class NotifFacts(val allowed: Boolean = true, val channels: List<ChannelFacts> = emptyList(), val answers: Boolean = true, val buttonsSupported: Boolean = true)
 
 /** The phone pages under Settings (Keep running, Notifications): only what Android can say, and where it cannot, saying so. */
 object PhoneWords {
