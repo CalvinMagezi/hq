@@ -41,7 +41,9 @@ android {
     defaultConfig {
         // The id and the signing key must stay as they are: the installed phone keeps its vault, its
         // Keystore key and its sessions only if an update has the same id and the same signature.
-        applicationId = "example.hq.spike"
+        // -Phq.appId= installs a second copy beside the real app for a test on a phone (its own data, its own
+        // Keystore key); it is never a release id. Leave it out for the build that updates the installed app.
+        applicationId = providers.gradleProperty("hq.appId").getOrElse("example.hq.spike")
         minSdk = 26
         targetSdk = 35
         versionCode = 1

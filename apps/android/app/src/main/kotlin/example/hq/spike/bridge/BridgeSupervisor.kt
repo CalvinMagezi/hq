@@ -44,6 +44,8 @@ object BridgeSupervisor {
     private val writes = Executors.newSingleThreadExecutor { r -> Thread(r, "bridge-writer").apply { isDaemon = true } }
 
     @Volatile private var process: Process? = null
+    /** Off only for a measurement (see PairingActivity): the bridge then never hears of a network change. */
+    @Volatile var watchNetwork = true
     private var appContext: Context? = null
 
     fun isEnabled(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, false)
@@ -126,7 +128,10 @@ object BridgeSupervisor {
             return
         }
         process = child
-        val net = NetworkWatcher(context) { networkChanged() }
+        val net = NetworkWatcher(context) {
+            Log.i(TAG, if (watchNetwork) "network changed, telling the bridge" else "network changed, not telling the bridge (measurement)")
+            if (watchNetwork) networkChanged()
+        }
         try {
             net.start()
             BufferedReader(InputStreamReader(child.inputStream, Charsets.UTF_8)).use { reader ->
@@ -155,7 +160,9 @@ object BridgeSupervisor {
     private fun launch(context: Context): Process {
         val lib = File(context.applicationInfo.nativeLibraryDir, "libhq.so")
         val home = File(context.filesDir, "hqhome").apply { mkdirs() }
-        val cmd = listOf(lib.path, "bridge", "run", "--relay", relay(context), "--name", deviceName())
+        val relay = relay(context)
+        // With a relay, a ticket needs no addresses: the code is much smaller and shows no IP address.
+        val cmd = listOf(lib.path, "bridge", "run", "--relay", relay, "--name", deviceName()) + if (relay == "none") emptyList() else listOf("--no-addrs")
         val pb = ProcessBuilder(cmd)
         // No credentials: the bridge needs the vault database and its own key, nothing else.
         pb.environment().apply {

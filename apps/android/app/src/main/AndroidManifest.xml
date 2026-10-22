@@ -26,6 +26,7 @@
       </intent-filter>
     </activity>
     <activity android:name=".ui.pairing.PairingActivity" android:exported="true" android:permission="android.permission.DUMP" android:launchMode="singleTop" android:enableOnBackInvokedCallback="true" android:theme="@style/Theme.AgentHQ.Shell" android:windowSoftInputMode="adjustResize"/>
+    <activity android:name=".ui.connect.ConnectClaudeActivity" android:exported="true" android:permission="android.permission.DUMP" android:enableOnBackInvokedCallback="true" android:theme="@style/Theme.AgentHQ.Shell"/>
     <activity android:name=".ui.pairing.PairLinkActivity" android:exported="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity="">
       <intent-filter>
         <action android:name="android.intent.action.VIEW"/>

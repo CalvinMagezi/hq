@@ -49,6 +49,8 @@ const KEEP_INTERVAL: Duration = Duration::from_secs(1);
 /// and not as a loss.
 const KEEP_ECHO_LIMIT: Duration = Duration::from_secs(40);
 const SLOW_ECHO: Duration = Duration::from_millis(1500);
+/// How long a fresh probe may take after a network change before the connection is given up.
+const PROBE_LIMIT: Duration = Duration::from_millis(1500);
 
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -515,6 +517,7 @@ impl Control {
 
     async fn run_keep(self: Arc<Self>, id: String) {
         let begun = Instant::now();
+        let mut changes = self.network.subscribe();
         let mut conn: Option<Connection> = None;
         let mut last_ok = Instant::now();
         loop {
@@ -522,11 +525,7 @@ impl Control {
                 Some(c) => c,
                 None => match self.dial(&id, DIAL_WINDOW).await {
                     Ok(c) => {
-                        eprintln!(
-                            "keep t={:.1}s connected path={}",
-                            begun.elapsed().as_secs_f32(),
-                            path_kind(&c)
-                        );
+                        keep_trace(begun, &format!("connected path={}", path_kind(&c)));
                         c
                     }
                     Err(e) => {
@@ -537,14 +536,11 @@ impl Control {
                 },
             };
             let t = Instant::now();
-            match timeout(KEEP_ECHO_LIMIT, echo(&c, b"keep")).await {
-                Ok(Ok(())) => {
-                    let rtt = t.elapsed();
-                    eprintln!(
-                        "keep t={:.1}s rtt={}ms path={}",
-                        begun.elapsed().as_secs_f32(),
-                        rtt.as_millis(),
-                        path_kind(&c)
+            match echo_unless_stale(&c, &mut changes).await {
+                Some(rtt) => {
+                    keep_trace(
+                        begun,
+                        &format!("rtt={}ms path={}", rtt.as_millis(), path_kind(&c)),
                     );
                     if rtt >= SLOW_ECHO {
                         self.emit(json!({
@@ -556,8 +552,8 @@ impl Control {
                     last_ok = Instant::now();
                     conn = Some(c);
                 }
-                _ => {
-                    eprintln!("keep t={:.1}s lost", begun.elapsed().as_secs_f32());
+                None => {
+                    keep_trace(begun, "lost");
                     self.emit(json!({
                         "event": "keep", "id": id, "state": "down",
                         "down_ms": last_ok.elapsed().as_millis() as u64,
@@ -568,6 +564,43 @@ impl Control {
             sleep(KEEP_INTERVAL).await;
         }
     }
+}
+
+/// One echo on `conn`. When the network changes while it waits, a fresh probe says whether the
+/// connection is still good: the old path of a connection may be dead for many seconds before
+/// the transport gives up on it, but a new connection is made in about a second. A probe that
+/// is not answered closes the connection and returns `None`, so the caller dials again.
+async fn echo_unless_stale(
+    conn: &Connection,
+    changes: &mut watch::Receiver<u64>,
+) -> Option<Duration> {
+    let began = Instant::now();
+    let call = timeout(KEEP_ECHO_LIMIT, echo(conn, b"keep"));
+    tokio::pin!(call);
+    loop {
+        tokio::select! {
+            done = &mut call => return matches!(done, Ok(Ok(()))).then(|| began.elapsed()),
+            Ok(()) = changes.changed() => {
+                let probe = timeout(PROBE_LIMIT, echo(conn, b"probe")).await;
+                if !matches!(probe, Ok(Ok(()))) {
+                    conn.close(0u32.into(), b"network changed");
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// One line of the `keep` trace on standard error: the wall clock in milliseconds (so it lines up
+/// with a network switch made from outside), then the time since `keep` began.
+fn keep_trace(begun: Instant, what: &str) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    eprintln!(
+        "keep ts={now} t={:.1}s {what}",
+        begun.elapsed().as_secs_f32()
+    );
 }
 
 const MIN_TTL: Duration = Duration::from_secs(10);
@@ -594,6 +627,10 @@ mod tests {
 
     impl Side {
         async fn new(name: &str) -> Self {
+            Self::with_handler(name, echo_handler()).await
+        }
+
+        async fn with_handler(name: &str, handler: hq_bridge::StreamHandler) -> Self {
             let dir = tempfile::tempdir().unwrap();
             let db = Database::open_memory().unwrap();
             let bridge = Bridge::start(
@@ -606,7 +643,7 @@ mod tests {
                     advertise: vec![],
                 },
                 db.clone(),
-                Some(echo_handler()),
+                Some(handler),
             )
             .await
             .unwrap();
@@ -676,6 +713,25 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string()
+    }
+
+    /// A paired pair of machines: returns the host's id and the phone's.
+    async fn pair_up(host: &mut Side, phone: &mut Side) -> (String, String) {
+        let digits = start_pairing(host, phone).await;
+        host.until("request").await;
+        host.send(json!({"cmd": "digits", "value": digits})).await;
+        phone.until("joined").await;
+        (host.id().await, phone.id().await)
+    }
+
+    /// A service that takes a stream and never answers it: a connection whose path has gone quiet.
+    fn silent_handler() -> hq_bridge::StreamHandler {
+        Arc::new(|stream: hq_bridge::PeerStream| {
+            Box::pin(async move {
+                let _held = stream;
+                sleep(Duration::from_secs(120)).await;
+            })
+        })
     }
 
     #[tokio::test]
@@ -808,5 +864,47 @@ mod tests {
         let Side { commands, task, .. } = side;
         drop(commands);
         timeout(GIVE_UP, task).await.unwrap().unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_network_change_ends_a_stalled_connection_without_waiting_for_the_echo_limit() {
+        let mut host = Side::with_handler("desk", silent_handler()).await;
+        let mut phone = Side::new("phone").await;
+        let (host_id, _) = pair_up(&mut host, &mut phone).await;
+
+        phone.send(json!({"cmd": "keep", "id": host_id})).await;
+        sleep(Duration::from_secs(2)).await;
+        let changed = Instant::now();
+        phone.send(json!({"cmd": "network_change"})).await;
+        let down = phone.until("keep").await;
+        assert_eq!(down["state"], "down", "{down}");
+        // The echo limit is 40 s; a network change cuts a stalled call down to the probe's limit.
+        assert!(
+            changed.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            changed.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_network_change_leaves_a_healthy_connection_alone() {
+        let mut host = Side::new("desk").await;
+        let mut phone = Side::new("phone").await;
+        let (host_id, _) = pair_up(&mut host, &mut phone).await;
+
+        phone.send(json!({"cmd": "keep", "id": host_id})).await;
+        sleep(Duration::from_secs(2)).await;
+        phone.send(json!({"cmd": "network_change"})).await;
+        sleep(Duration::from_secs(4)).await;
+        phone.send(json!({"cmd": "keep_stop"})).await;
+        phone.send(json!({"cmd": "status"})).await;
+        // A healthy connection answers the probe: no loss is reported between the change and now.
+        loop {
+            let event = phone.next().await;
+            assert_ne!(event["event"], "keep", "{event}");
+            if event["event"] == "status" {
+                break;
+            }
+        }
     }
 }

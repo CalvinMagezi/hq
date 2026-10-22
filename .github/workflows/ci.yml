@@ -83,7 +83,7 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: test (bridge feature)
-        run: cargo test -p hq-cli --features bridge --locked --bin hq -- bridge_commands
+        run: cargo test -p hq-cli --features bridge --locked --bin hq -- bridge_commands bridge_control
 
       - name: test (tunnel feature)
         run: |

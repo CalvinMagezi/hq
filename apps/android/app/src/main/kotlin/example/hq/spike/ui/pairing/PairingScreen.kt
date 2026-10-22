@@ -110,7 +110,7 @@ private fun title(s: PairingScreen) = when (s) {
 }
 
 @Composable
-private fun TopBar(title: String, onBack: () -> Unit) {
+internal fun TopBar(title: String, onBack: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = onBack)
         Text(title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
@@ -118,18 +118,18 @@ private fun TopBar(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun Page(content: @Composable () -> Unit) {
+internal fun Page(content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) { content() }
 }
 
 @Composable
-private fun Body(text: String, modifier: Modifier = Modifier) = Text(text, style = HqType.Body, color = Mts.InkMuted, modifier = modifier)
+internal fun Body(text: String, modifier: Modifier = Modifier) = Text(text, style = HqType.Body, color = Mts.InkMuted, modifier = modifier)
 
 @Composable
-private fun Label(text: String) = Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
+internal fun Label(text: String) = Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(top = 24.dp, bottom = 8.dp))
 
 @Composable
-private fun Button(text: String, primary: Boolean = true, enabled: Boolean = true, tag: String = text, onClick: () -> Unit) {
+internal fun PillButton(text: String, primary: Boolean = true, enabled: Boolean = true, tag: String = text, onClick: () -> Unit) {
     val background = if (primary) Mts.BrandGreen else Mts.Surface200
     val ink = if (primary) Mts.OnGreen else Mts.Ink
     Box(
@@ -141,7 +141,7 @@ private fun Button(text: String, primary: Boolean = true, enabled: Boolean = tru
 }
 
 @Composable
-private fun Notice(text: String, modifier: Modifier, onDismiss: () -> Unit) {
+internal fun Notice(text: String, modifier: Modifier, onDismiss: () -> Unit) {
     LaunchedEffect(text) { delay(NOTICE_MS); onDismiss() }
     Row(modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = HqType.BodySm, color = Mts.Surface100)
@@ -171,11 +171,11 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
         }
         PairingWords.relayLine(bridge.relay)?.let { Text(it, style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp)) }
         Spacer(Modifier.height(20.dp))
-        Button("Show a code", tag = "show-code") { vm.showCode() }
+        PillButton("Show a code", tag = "show-code") { vm.showCode() }
         Spacer(Modifier.height(12.dp))
-        Button("Scan a code", primary = false, tag = "scan-code") { vm.go(PairingScreen.Scan) }
+        PillButton("Scan a code", primary = false, tag = "scan-code") { vm.go(PairingScreen.Scan) }
         Spacer(Modifier.height(12.dp))
-        Button("Paste a link", primary = false, tag = "paste-link") { vm.go(PairingScreen.Paste) }
+        PillButton("Paste a link", primary = false, tag = "paste-link") { vm.go(PairingScreen.Paste) }
         Label("Paired with this phone")
         val peers = bridge.peers
         when {
@@ -228,7 +228,7 @@ private fun Show(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
                 Body(PairingWords.wants(request.name, request.joiner), Modifier.testTag("wants"))
                 DigitsField(ui.typed, vm::typeDigits)
                 Spacer(Modifier.height(16.dp))
-                Button("Pair", enabled = ui.typed.length == PairingWords.DIGITS_LENGTH, tag = "pair-digits") { vm.submitDigits() }
+                PillButton("Pair", enabled = ui.typed.length == PairingWords.DIGITS_LENGTH, tag = "pair-digits") { vm.submitDigits() }
             }
             ticket != null -> {
                 Body(PairingWords.SHOW_HELP)
@@ -236,16 +236,16 @@ private fun Show(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
                 QrImage(ticket.link)
                 Text(PairingWords.countdown(ticket.endsAt - now), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("countdown"), textAlign = TextAlign.Center)
                 Spacer(Modifier.height(12.dp))
-                Button("Copy the link", primary = false, tag = "copy-link") { copy(context, ticket.link) }
+                PillButton("Copy the link", primary = false, tag = "copy-link") { copy(context, ticket.link) }
                 Spacer(Modifier.height(12.dp))
-                Button("Cancel", primary = false, tag = "cancel-code") { vm.home() }
+                PillButton("Cancel", primary = false, tag = "cancel-code") { vm.home() }
             }
             end != null -> {
                 Body(PairingWords.ended(end), Modifier.testTag("ended"))
                 Spacer(Modifier.height(16.dp))
-                Button("Show a new code", tag = "show-new") { vm.showCode() }
+                PillButton("Show a new code", tag = "show-new") { vm.showCode() }
                 Spacer(Modifier.height(12.dp))
-                Button("Done", primary = false, tag = "done") { vm.home() }
+                PillButton("Done", primary = false, tag = "done") { vm.home() }
             }
             else -> Body(if (bridge.running) "Making a code…" else "Starting…")
         }
@@ -303,7 +303,7 @@ private fun Scan(vm: PairingViewModel, ui: PairingUi) {
         } else {
             Body(if (asked) PairingWords.CAMERA_NEEDED else "Asking for the camera…")
             Spacer(Modifier.height(16.dp))
-            Button("Paste a link instead", tag = "paste-instead") { vm.go(PairingScreen.Paste) }
+            PillButton("Paste a link instead", tag = "paste-instead") { vm.go(PairingScreen.Paste) }
         }
     }
 }
@@ -326,7 +326,7 @@ private fun Paste(vm: PairingViewModel, ui: PairingUi) {
             },
         )
         Spacer(Modifier.height(16.dp))
-        Button("Pair", enabled = ui.link.isNotBlank(), tag = "pair-link") { vm.joinText(ui.link) }
+        PillButton("Pair", enabled = ui.link.isNotBlank(), tag = "pair-link") { vm.joinText(ui.link) }
     }
 }
 
@@ -335,9 +335,9 @@ private fun Confirm(vm: PairingViewModel, ui: PairingUi) {
     Page {
         Body(PairingWords.CONFIRM_BODY)
         Spacer(Modifier.height(24.dp))
-        Button("Pair", tag = "confirm-pair") { vm.startJoin(ui.link) }
+        PillButton("Pair", tag = "confirm-pair") { vm.startJoin(ui.link) }
         Spacer(Modifier.height(12.dp))
-        Button("Cancel", primary = false, tag = "confirm-cancel") { vm.home() }
+        PillButton("Cancel", primary = false, tag = "confirm-cancel") { vm.home() }
     }
 }
 
@@ -353,12 +353,12 @@ private fun Joining(vm: PairingViewModel, bridge: BridgeState) {
             is JoinState.Done -> {
                 Body(PairingWords.joined(join.name, join.id), Modifier.testTag("joined"))
                 Spacer(Modifier.height(16.dp))
-                Button("Done", tag = "joined-done") { vm.home() }
+                PillButton("Done", tag = "joined-done") { vm.home() }
             }
             is JoinState.Failed -> {
                 Body(join.why, Modifier.testTag("join-failed"))
                 Spacer(Modifier.height(16.dp))
-                Button("Back", tag = "join-back") { vm.home() }
+                PillButton("Back", tag = "join-back") { vm.home() }
             }
         }
     }

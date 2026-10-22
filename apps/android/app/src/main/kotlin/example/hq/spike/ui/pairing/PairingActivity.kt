@@ -8,6 +8,8 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import example.hq.spike.bridge.BridgeSupervisor
+import example.hq.spike.bridge.BridgeWire
 import example.hq.spike.ui.theme.HqTheme
 
 /**
@@ -36,6 +38,7 @@ class PairingActivity : ComponentActivity() {
 
     private fun handle(intent: Intent) {
         intent.getStringExtra(EXTRA_LINK)?.let(vm::confirmLink)
+        diagnostics(intent)
         when (intent.getStringExtra(EXTRA_SCREEN)) {
             "show" -> vm.showCode()
             "scan" -> vm.go(PairingScreen.Scan)
@@ -43,7 +46,19 @@ class PairingActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * For measuring with `adb` (this activity needs a permission only `adb` holds): `--es keep <device id>`
+     * holds a connection to a paired device and traces its round trips into files/bridge.log, and
+     * `--ez watch false` stops the app from reporting network changes, for a before and after.
+     */
+    private fun diagnostics(intent: Intent) {
+        if (intent.hasExtra(EXTRA_WATCH)) BridgeSupervisor.watchNetwork = intent.getBooleanExtra(EXTRA_WATCH, true)
+        intent.getStringExtra(EXTRA_KEEP)?.let { BridgeSupervisor.send(if (it.isBlank()) BridgeWire.keepStop() else BridgeWire.keep(it)) }
+    }
+
     companion object {
+        const val EXTRA_KEEP = "keep"
+        const val EXTRA_WATCH = "watch"
         const val EXTRA_LINK = "link"
         /** `adb shell am start -n example.hq.spike/.ui.pairing.PairingActivity --es screen show` opens a screen directly. */
         const val EXTRA_SCREEN = "screen"

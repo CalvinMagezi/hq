@@ -156,6 +156,13 @@ private fun Snack(text: String, onDismiss: () -> Unit, modifier: Modifier) {
     }
 }
 
+/** A row that opens one of the app's own full screens (pairing, Connect Claude). */
+@Composable
+private fun OpenScreen(text: String, screen: Class<*>) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Text(text, style = HqType.BodyBold, color = Mts.BrandBlue, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { context.startActivity(android.content.Intent(context, screen)) }.padding(horizontal = 20.dp, vertical = 16.dp))
+}
+
 @Composable
 private fun Page(content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) { content() }
@@ -401,7 +408,8 @@ private fun Claude(ui: SettingsUi) {
                 }
             }
         }
-        Text("Opening the connection window and disconnecting are done in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        Text("Disconnecting is done in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        OpenScreen("Open the connection window", example.hq.spike.ui.connect.ConnectClaudeActivity::class.java)
     }
 }
 
@@ -424,6 +432,7 @@ private fun Devices(ui: SettingsUi) {
             }
         }
         Text("Signing in another device and signing devices out are done in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        OpenScreen("Pair a device with a QR code", example.hq.spike.ui.pairing.PairingActivity::class.java)
     }
 }
 
