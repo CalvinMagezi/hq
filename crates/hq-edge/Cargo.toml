@@ -5,7 +5,14 @@ edition.workspace = true
 license.workspace = true
 description = "hq edge: a blind public forwarder that routes TLS connections by server name to a paired device over iroh"
 
+[features]
+# `hq edge invite`: devices register by scanning the edge's QR code (the pairing protocol under
+# the name `hq/register/*`). Off by default so a build of the forwarder alone stays small.
+invite = ["dep:hq-bridge", "dep:serde_json"]
+
 [dependencies]
+hq-bridge = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 # Pinned: the wire behavior of iroh and its relay is what the device side is tested against.
 iroh = "=1.4.1"
 iroh-relay = { version = "=1.4.1", features = ["server"] }

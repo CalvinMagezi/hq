@@ -12,35 +12,9 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tokio_rustls::{TlsConnector, rustls::pki_types::ServerName};
+use tokio_rustls::TlsConnector;
 
 const SECOND: Duration = Duration::from_secs(1);
-
-/// A TLS client for `name` going through the edge at `addr`: returns the HTTP response and the
-/// ALPN protocol it negotiated.
-async fn https_get(
-    addr: SocketAddr,
-    connector: &TlsConnector,
-    name: &str,
-) -> (String, Option<Vec<u8>>) {
-    tokio::time::timeout(20 * SECOND, async {
-        let tcp = TcpStream::connect(addr).await.unwrap();
-        let server_name = ServerName::try_from(name.to_owned()).unwrap();
-        let mut tls = connector
-            .connect(server_name, tcp)
-            .await
-            .expect("TLS through the edge");
-        let negotiated = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
-        tls.write_all(format!("GET / HTTP/1.1\r\nHost: {name}\r\n\r\n").as_bytes())
-            .await
-            .unwrap();
-        let mut response = String::new();
-        tls.read_to_string(&mut response).await.unwrap();
-        (response, negotiated)
-    })
-    .await
-    .expect("a request through the edge did not finish in 20 s")
-}
 
 /// A registered device that answers HTTP, behind an edge with the default caps.
 async fn http_world(alpn: &[&[u8]]) -> (Rig, Device, TlsConnector) {
@@ -81,6 +55,153 @@ async fn a_tls_client_reaches_the_device_behind_the_nat_through_the_edge() {
         device.strangers.load(std::sync::atomic::Ordering::SeqCst),
         0
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_connection_that_stops_answering_is_replaced_within_one_dial_budget() {
+    let (rig, device, connector) = http_world(&[]).await;
+    let (first, _) = https_get(rig.addr(), &connector, &device.name()).await;
+    assert!(first.ends_with(BODY));
+    assert_eq!(device.connections.lock().unwrap().len(), 1);
+
+    // The device's network changes: the connection the edge holds is still open, but nothing on
+    // it is answered any more. A new connection from the edge works.
+    device
+        .silent_upto
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let (second, _) = https_get(rig.addr(), &connector, &device.name()).await;
+    let took = started.elapsed();
+    assert!(second.ends_with(BODY), "got {second:?}");
+    assert!(
+        took < Duration::from_secs(8),
+        "the stale connection cost {took:?}: the redial must fit in the 10 s dial budget"
+    );
+    assert_eq!(rig.edge.stats().redialed, 1);
+    assert_eq!(device.connections.lock().unwrap().len(), 2);
+
+    // The edge keeps using the new connection: no more waiting, no more redials.
+    let (third, _) = https_get(rig.addr(), &connector, &device.name()).await;
+    assert!(third.ends_with(BODY));
+    assert_eq!(rig.edge.stats().redialed, 1);
+    assert_eq!(device.connections.lock().unwrap().len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_that_goes_down_costs_one_redial_and_then_the_dial_budget_not_a_loop() {
+    let (rig, device, connector) = http_world(&[]).await;
+    let (first, _) = https_get(rig.addr(), &connector, &device.name()).await;
+    assert!(first.ends_with(BODY));
+    // Every connection, old and new, stops answering: the device is down but its endpoint is up.
+    device
+        .silent_upto
+        .store(u64::MAX, std::sync::atomic::Ordering::SeqCst);
+    let mut tcp = rig.connect().await;
+    tcp.write_all(&client_hello(&device.name())).await.unwrap();
+    let (got, took) = read_until_closed(&mut tcp, 14 * SECOND).await;
+    assert!(got.is_empty());
+    assert!(
+        took < Duration::from_secs(12),
+        "given up at {took:?}, expected within the 10 s dial budget"
+    );
+    let stats = rig.edge.stats();
+    assert_eq!(stats.redialed, 1, "{stats:?}");
+    assert_eq!(stats.dial_failed, 1, "{stats:?}");
+    // One held connection retried once on one fresh connection: two connections, two streams
+    // (the successful first request plus this one's retry makes three).
+    assert_eq!(device.connections.lock().unwrap().len(), 2);
+    assert_eq!(device.streams(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_that_refuses_a_client_does_not_cost_the_connection_the_edge_holds() {
+    let (rig, device, hello) = raw_world(Behavior::Refuse, |_| {}).await;
+    for _ in 0..3 {
+        let mut tcp = rig.connect().await;
+        tcp.write_all(&hello).await.unwrap();
+        let (got, took) = read_until_closed(&mut tcp, 6 * SECOND).await;
+        assert!(got.is_empty());
+        assert!(took < Duration::from_secs(3), "refusal took {took:?}");
+    }
+    // A refusal is an answer: the path is fine, so nothing was redialed or replaced.
+    assert_eq!(rig.edge.stats().redialed, 0);
+    assert_eq!(device.connections.lock().unwrap().len(), 1);
+    assert_eq!(device.streams(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_a_device_also_cuts_a_connection_the_edge_had_put_aside() {
+    let (rig, device, hello) = raw_world(Behavior::Greet, |_| {}).await;
+    // Client A is greeted and stays open on the first connection.
+    let mut a = rig.connect().await;
+    a.write_all(&hello).await.unwrap();
+    let mut byte = [0u8; 1];
+    tokio::time::timeout(10 * SECOND, a.read_exact(&mut byte))
+        .await
+        .expect("the greeting")
+        .unwrap();
+
+    // The first connection stops answering new streams. Client B finds that out, the edge puts
+    // the connection aside and serves B on a fresh one. A is still running on the old one.
+    device
+        .silent_upto
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+    let mut b = rig.connect().await;
+    b.write_all(&hello).await.unwrap();
+    tokio::time::timeout(10 * SECOND, b.read_exact(&mut byte))
+        .await
+        .expect("B's greeting on the fresh connection")
+        .unwrap();
+    assert_eq!(rig.edge.stats().redialed, 1);
+    assert!(
+        stays_open(&mut a, Duration::from_millis(500)).await,
+        "putting the old connection aside must not cut the clients still on it"
+    );
+
+    assert!(revoke_device(&rig.list, &device.id()).unwrap());
+    let (_, took_a) = read_until_closed(&mut a, 8 * SECOND).await;
+    let (_, took_b) = read_until_closed(&mut b, 8 * SECOND).await;
+    assert!(
+        took_a < Duration::from_secs(5),
+        "A was cut after {took_a:?}"
+    );
+    assert!(
+        took_b < Duration::from_secs(5),
+        "B was cut after {took_b:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_revoked_while_a_client_waits_on_its_stale_connection_is_not_dialed_again() {
+    let (rig, device, hello) = raw_world(Behavior::Greet, |_| {}).await;
+    let mut a = rig.connect().await;
+    a.write_all(&hello).await.unwrap();
+    let mut byte = [0u8; 1];
+    tokio::time::timeout(10 * SECOND, a.read_exact(&mut byte))
+        .await
+        .expect("the greeting")
+        .unwrap();
+    device
+        .silent_upto
+        .store(1, std::sync::atomic::Ordering::SeqCst);
+
+    // B waits on the held connection, which is silent; the device is revoked meanwhile.
+    let mut b = rig.connect().await;
+    b.write_all(&hello).await.unwrap();
+    eventually(
+        5 * SECOND,
+        "B's hello to reach the stale connection",
+        || device.streams() == 2,
+    )
+    .await;
+    assert!(revoke_device(&rig.list, &device.id()).unwrap());
+    let (got, took) = read_until_closed(&mut b, 8 * SECOND).await;
+    assert!(got.is_empty());
+    assert!(took < Duration::from_secs(5), "B was held for {took:?}");
+    // No fresh connection was dialed for a device that is no longer registered.
+    assert_eq!(device.connections.lock().unwrap().len(), 1);
+    assert_eq!(rig.edge.stats().redialed, 0);
+    let _ = a;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -386,7 +507,7 @@ async fn the_byte_rate_limit_slows_a_device_down() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_idle_forwarded_connection_is_closed_after_the_idle_timeout() {
-    let (rig, device, hello) = raw_world(Behavior::Hold, |c| c.limits.idle_timeout_secs = 1).await;
+    let (rig, device, hello) = raw_world(Behavior::Greet, |c| c.limits.idle_timeout_secs = 1).await;
     let mut tcp = rig.connect().await;
     tcp.write_all(&hello).await.unwrap();
     eventually(10 * SECOND, "the connection to reach the device", || {
@@ -429,13 +550,14 @@ async fn a_registered_device_that_is_offline_is_given_up_on_at_the_dial_timeout(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn revoking_a_device_cuts_its_open_connections_and_refuses_new_ones() {
-    let (rig, device, hello) = raw_world(Behavior::Hold, |_| {}).await;
+    let (rig, device, hello) = raw_world(Behavior::Greet, |_| {}).await;
     let mut tcp = rig.connect().await;
     tcp.write_all(&hello).await.unwrap();
-    eventually(10 * SECOND, "the connection to reach the device", || {
-        device.streams() == 1
-    })
-    .await;
+    let mut greeting = [0u8; 1];
+    tokio::time::timeout(10 * SECOND, tcp.read_exact(&mut greeting))
+        .await
+        .expect("the device's greeting")
+        .unwrap();
     assert!(stays_open(&mut tcp, Duration::from_millis(500)).await);
 
     assert!(revoke_device(&rig.list, &device.id()).unwrap());

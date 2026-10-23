@@ -49,6 +49,19 @@ pub struct EdgeConfig {
     pub relay_url: Option<String>,
     /// The relay the edge can host for the household.
     pub relay: RelayHostConfig,
+    /// Relays other than the edge's own that a device may be dialed through. A device that
+    /// registers can name its home relay, and the edge will connect to whatever is recorded, so
+    /// only a relay named here is recorded; any other is ignored and the device is dialed through
+    /// the edge's own relay. Empty by default.
+    pub device_relays: Vec<String>,
+    /// Where `hq edge invite` listens while an invitation is open (UDP). The edge's own relay
+    /// admits only registered devices, so the device that scans the QR code reaches the
+    /// invitation directly: open this port in the firewall while inviting, or leave it at port 0
+    /// and the one printed with the QR code.
+    pub invite_bind: SocketAddr,
+    /// Addresses to put in the invitation when the machine's own are not the ones a device can
+    /// reach (a cloud machine behind NAT: its public `ip:port`, with `invite_bind` fixed).
+    pub invite_advertise: Vec<SocketAddr>,
     pub limits: LimitsConfig,
 }
 
@@ -89,8 +102,14 @@ pub struct LimitsConfig {
     pub burst_bytes: u64,
     /// A forwarded connection with no bytes either way for this long is closed.
     pub idle_timeout_secs: u64,
-    /// How long to wait for the device to accept a stream.
+    /// How long to wait for the device to accept a stream, and in all to set up one forwarded
+    /// connection, redialing included.
     pub dial_timeout_secs: u64,
+    /// How long a connection the edge already holds has to answer a new client's first flight
+    /// before it is replaced. A path that died (a phone changed network) leaves the connection
+    /// looking alive until QUIC's own timeout, which is far longer than this. At most half of
+    /// `dial_timeout_secs` is used, so a redial always has time left.
+    pub reply_timeout_secs: u64,
     /// Concurrent connections to the co-hosted relay.
     pub max_relay_connections: usize,
 }
@@ -105,6 +124,9 @@ impl Default for EdgeConfig {
             iroh_bind: SocketAddr::from(([0, 0, 0, 0], 0)),
             relay_url: None,
             relay: RelayHostConfig::default(),
+            device_relays: Vec::new(),
+            invite_bind: SocketAddr::from(([0, 0, 0, 0], 0)),
+            invite_advertise: Vec::new(),
             limits: LimitsConfig::default(),
         }
     }
@@ -133,6 +155,7 @@ impl Default for LimitsConfig {
             burst_bytes: MIB,
             idle_timeout_secs: 120,
             dial_timeout_secs: 10,
+            reply_timeout_secs: 3,
             max_relay_connections: 128,
         }
     }
@@ -147,6 +170,9 @@ impl LimitsConfig {
     }
     pub fn dial_timeout(&self) -> Duration {
         Duration::from_secs(self.dial_timeout_secs)
+    }
+    pub fn reply_timeout(&self) -> Duration {
+        Duration::from_secs(self.reply_timeout_secs)
     }
 }
 
@@ -218,6 +244,7 @@ impl EdgeConfig {
             ("hello_timeout_secs", limits.hello_timeout_secs),
             ("idle_timeout_secs", limits.idle_timeout_secs),
             ("dial_timeout_secs", limits.dial_timeout_secs),
+            ("reply_timeout_secs", limits.reply_timeout_secs),
         ];
         for (name, value) in seconds {
             if value == 0 || value > MAX_SECONDS {
@@ -231,6 +258,10 @@ impl EdgeConfig {
             if value == 0 || value > MAX_BYTES {
                 bail!("edge.limits.{name} must be between 1 and {MAX_BYTES}");
             }
+        }
+        for url in &self.device_relays {
+            url.parse::<iroh::RelayUrl>()
+                .with_context(|| format!("edge.device_relays: {url} is not a relay URL"))?;
         }
         if let Some(url) = &self.relay_url {
             url.parse::<iroh::RelayUrl>()

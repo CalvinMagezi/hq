@@ -180,7 +180,7 @@ pub async fn run(config: &HqConfig, action: BridgeAction) -> Result<()> {
 }
 
 /// The person types the digits shown on the other device, so a habitual "y" cannot pair it.
-async fn typed_digits_match(expected: &str) -> bool {
+pub(crate) async fn typed_digits_match(expected: &str) -> bool {
     use std::io::Write;
     print!(
         "Type the {} digits shown on the other device (empty to decline): ",
