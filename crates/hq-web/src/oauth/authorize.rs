@@ -99,6 +99,11 @@ pub(crate) async fn authorize(
     if !on_origin(&headers, &settings.consent) {
         return StatusCode::NOT_FOUND.into_response();
     }
+    // A plain-http consent origin is the device's own loopback address, which a proxy on the same
+    // machine can reach by rewriting `Host`; a forwarded request is not the owner's own browser.
+    if settings.consent.starts_with("http://") && crate::auth::forwarded(&headers) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let now = super::now();
     let armed = state.db.with_conn(|c| store::armed_until(c, now));
     if !matches!(armed, Ok(Some(_))) {
@@ -154,7 +159,16 @@ pub(crate) fn on_origin(headers: &HeaderMap, origin: &str) -> bool {
         .and_then(|v| v.to_str().ok())
         .map(|h| h.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    host.strip_suffix(default_port).unwrap_or(&host) == authority
+    // The default port may be left off the origin, never added to one that already names a port.
+    let default_form = !has_port(authority) && host.strip_suffix(default_port) == Some(authority);
+    host == authority || default_form
+}
+
+/// Whether an origin's authority ends in `:<digits>` (an IPv6 literal's colons are not a port).
+fn has_port(authority: &str) -> bool {
+    authority
+        .rsplit_once(':')
+        .is_some_and(|(_, port)| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn not_armed() -> Response {

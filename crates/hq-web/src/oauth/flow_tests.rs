@@ -323,6 +323,14 @@ async fn a_loopback_consent_origin_runs_the_flow_with_a_cookie_that_needs_no_htt
         assert_eq!(status, StatusCode::NOT_FOUND, "{host}");
     }
 
+    // A proxy on the same machine can send the loopback `Host`; what it forwarded is refused.
+    let mut proxied = authorize_req_at("127.0.0.1:5799");
+    proxied
+        .headers_mut()
+        .insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+    let (status, _, _, _) = send_full(&app, proxied).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
     let (status, location, cookie, _) = send_full(&app, authorize_req_at("127.0.0.1:5799")).await;
     assert_eq!(status, StatusCode::FOUND);
     let cookie = cookie.expect("a binder cookie");

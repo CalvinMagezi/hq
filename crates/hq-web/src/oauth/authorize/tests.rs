@@ -161,6 +161,14 @@ fn a_loopback_http_consent_origin_matches_only_its_own_authority() {
     assert!(on_origin(&with_host("localhost"), "http://localhost"));
     assert!(on_origin(&with_host("localhost:80"), "http://localhost"));
     assert!(!on_origin(&with_host("localhost:443"), "http://localhost"));
+    // A default port is never added to an origin that already names a port.
+    assert!(!on_origin(&with_host("127.0.0.1:5799:80"), consent));
+    assert!(!on_origin(
+        &with_host("hq.example.ts.net:8443:443"),
+        "https://hq.example.ts.net:8443"
+    ));
+    assert!(on_origin(&with_host("[::1]"), "http://[::1]"));
+    assert!(on_origin(&with_host("[::1]:80"), "http://[::1]"));
     assert!(!on_origin(
         &with_host("hq.example.com:80"),
         "https://hq.example.com"

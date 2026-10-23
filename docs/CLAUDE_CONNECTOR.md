@@ -27,7 +27,11 @@ default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
      can use plain `http://127.0.0.1:<port>`, `http://[::1]:<port>` or `http://localhost:<port>`
      instead: the only plain-http origins accepted, since the connection never leaves the device
      (the request cookie then drops its `Secure` attribute, which WebKit refuses over http).
-     Whether claude.ai sends your browser to such an address is an open test; the runbook is
+     Prefer `127.0.0.1`: `localhost` can resolve to `::1`, where another user of the machine
+     may be listening. HQ answers `/oauth/authorize` on such an origin only for a request that
+     carries no reverse-proxy header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`,
+     `X-Real-IP`), so a proxy on the same machine that rewrites `Host` to this address does not
+     open it. Whether claude.ai sends your browser to such an address is an open test; the runbook is
      `docs/plans/native-bridge/w6-claude-run.md`.
 2. **Configure HQ** (`~/.hq/config.yaml` or `/opt/hq/config.yaml`) and restart it:
 

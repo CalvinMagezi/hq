@@ -26,8 +26,9 @@ config and restart the host.";
 
 /// What the screen says about the consent page being served on this app's own address.
 pub const CONSENT_NOT_LOCAL: &str = "The consent page is served here on the app's own address, but HQ \
-tells Claude to send your browser to the authorization address in its config, which must be an \
-https origin. Consent on this app's loopback address needs that to be allowed (workstream W6).";
+tells Claude to send your browser to the authorization address in its config. Set \
+mcp_connector.authorize_url to this app's own address (http://127.0.0.1 and its port) to approve \
+here.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -250,7 +250,10 @@ TCP listener for it; the pairing work should point the same assertions at the re
   `127.0.0.1`, `[::1]` or `localhost` (no other http origin parses), for a browser on the same
   device; the request's `Host` must equal that authority exactly, so the public name, another
   port and a DNS-rebound name never reach `/oauth/authorize`, and the request cookie then drops
-  `Secure` (it keeps `HttpOnly`, `SameSite=Strict` and its path). Whether claude.ai sends a
+  `Secure` (it keeps `HttpOnly`, `SameSite=Strict` and its path). A request carrying a
+  reverse-proxy header is refused on that origin, because a proxy on the same machine can rewrite
+  `Host` to the loopback authority; prefer `127.0.0.1` over `localhost`, which can resolve to
+  `::1` where another local user may listen. Whether claude.ai sends a
   browser to an `authorization_endpoint` private to the device is the open test
   (`docs/plans/native-bridge/w6-claude-run.md`). If it refuses, the public-name consent page has
   to be added to the allow-list together with its own arming-window protections, a separate

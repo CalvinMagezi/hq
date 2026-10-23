@@ -213,13 +213,14 @@ async fn a_certificate_is_ordered_through_the_forwarder_and_the_connector_answer
     );
 
     // Nothing else of the server is on the name: the consent page, the owner's API, the web UI.
+    // The gate answers these itself (its body), not the router behind it.
     for path in ["/oauth/authorize", "/api/oauth/connector", "/", "/connect"] {
         let reply = chain.get(path).await;
         assert_eq!(reply.status, 404, "{path}: {reply:?}");
+        assert_eq!(reply.body, "Not found", "{path}: {reply:?}");
     }
 
     assert!(chain.bridge.reached_edge.load(Ordering::SeqCst) >= 1);
-    assert_eq!(chain.bridge.reached_service.load(Ordering::SeqCst), 0);
     chain.serving.abort();
 }
 
@@ -239,8 +240,8 @@ async fn a_device_that_forgets_its_edge_stops_answering_through_it() {
     assert!(forgot.had_record);
 
     // The edge may hold a connection it has not noticed is closed; it redials, and the device
-    // refuses an edge it has no record of, so the handshake never completes.
-    let served_before = chain.bridge.reached_edge.load(Ordering::SeqCst);
+    // refuses an edge it has no record of. The edge then closes the client, so the handshake ends
+    // in an error well before the timeout (a timeout would mean something else held it up).
     let config = client_config(&chain.ca.root, &[b"http/1.1"]);
     let handshake = tokio::time::timeout(
         GONE,
@@ -248,13 +249,9 @@ async fn a_device_that_forgets_its_edge_stops_answering_through_it() {
     )
     .await;
     assert!(
-        !matches!(handshake, Ok(Ok(_))),
-        "the edge still reached the door after the device forgot it"
-    );
-    assert_eq!(
-        chain.bridge.reached_edge.load(Ordering::SeqCst),
-        served_before,
-        "no further edge connection was served"
+        matches!(handshake, Ok(Err(_))),
+        "expected the edge to close the client: {:?}",
+        handshake.as_ref().map(|r| r.is_ok())
     );
     chain.serving.abort();
 }
