@@ -150,6 +150,10 @@ A registration adds no row to `bridge_peers`: an edge is not a peer that may ope
 device. W1 stores the card and the info itself. A pairing ticket cannot finish a registration and a
 registration ticket cannot finish a pairing; both are covered by tests.
 
+The macOS app ([DESKTOP.md](DESKTOP.md)) is the first graphical host: it shows the QR code, takes
+the six digits typed by the person and revokes through the one running `Bridge`, using only this
+library.
+
 ## What listens, and when
 
 | Listener | When |

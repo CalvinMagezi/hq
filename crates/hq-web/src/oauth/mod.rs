@@ -197,6 +197,7 @@ mod tests {
             public_url: Some("https://hq.example.com".into()),
             authorize_url: None,
             default_scope: None,
+            ..Default::default()
         };
         // Pinned, not read from the machine: CI runs this under an ambient Lite profile.
         let mut state = WsState::new(vault.path().to_path_buf(), None)
