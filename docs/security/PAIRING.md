@@ -330,3 +330,33 @@ phone"). What that adds, and what it does not.
 - **The confirmation screen is only as good as the person reading it.** A convincing prompt to "pair"
   from a page the owner trusts is a social attack no screen can stop. The owner still has to type the
   digits on the machine that showed the code, so a stranger's link alone pairs nothing.
+
+## 13. The edge protocol on the device (W6)
+
+A device registered with an `hq edge` (`docs/EDGE.md`) lets that edge open streams on a second
+protocol name, `hq/edge/1`, and pipes each to the connector door on loopback. The edge sees only
+TLS bytes; the device ends TLS itself (`docs/security/CONNECTOR_TLS.md`). The gate treats the two
+protocol names as two lists.
+
+| # | Who | Tries | What happens | Test |
+|---|---|---|---|---|
+| E1 | A stranger, or a paired peer | Opens `hq/edge/1` | Closed at the handshake, no handler ran: only the id in `bridge_edge` is admitted, read from the database on every handshake and failing closed | `nobody_but_the_registered_edge_may_open_the_edge_protocol` |
+| E2 | The edge | Opens `hq/bridge/1` | Refused: it is not a paired peer, and registering adds none | `the_edge_cannot_use_the_service_protocol_and_a_peer_cannot_use_the_edge_one` |
+| E3 | A device with no edge door | Is dialed on `hq/edge/1` | The protocol is not offered at all | `a_bridge_without_an_edge_door_does_not_speak_the_edge_protocol` |
+| E4 | A rogue or compromised edge | Names this device something else at registration (another device's name) | Nothing is recorded: the name must be `<label>.<domain>` with the label this device's own key gives it and a plain DNS domain. The domain itself is whatever the edge serves devices under; that is the edge's to say | `an_edge_that_names_the_device_wrongly_registers_nothing`, `bridge::tests::a_name_that_is_not_this_devices_own_label_under_a_plain_domain_is_refused`, `the_domain_comes_from_the_name_and_is_not_cut_short` |
+| E5 | The person | Forgets the edge, here or in another process | Open connections are closed at once from here; from another process the next stream on an open connection is refused and closes it | `forgetting_the_edge_closes_its_open_connection_and_refuses_the_next`, `an_edge_cleared_by_another_process_gets_no_more_streams_on_an_open_connection` |
+| E6 | The edge, or whoever holds its key | Opens many streams to exhaust the device | At most 64 piped at once (`max_streams`); extra streams are dropped and counted; each piped stream ends on 150 s of silence | `streams_over_the_cap_are_dropped_and_counted` |
+| E7 | The edge, or a caller of the library | Aims the pipe at another address | The target is an absolute socket path or a loopback address with a fixed port, checked by `Bridge::start_with_edge_door` itself (not only by the CLI); the stream carries bytes only | `door::tests::the_edge_can_only_be_pointed_at_a_socket_path_or_a_loopback_port`, `a_door_the_edge_must_not_be_pointed_at_is_refused_at_start` |
+| E8 | A pairing ticket | Registers a device with an edge, or the reverse | Refused by `Bridge::register` and `Bridge::join`, and by the protocol name | `a_pairing_ticket_cannot_register_a_device` |
+
+| E9 | Another local user or app | Binds the door's address first so the forwarded bytes (and the CA's validation) reach it | The door is a unix socket in a private directory (owner, no group or other write, never a link) with a `0600` socket; a loopback TCP port is an explicit opt-in because it cannot be defended. A bind that fails is retried and reported | `listener::tests::*`, `the_default_unix_door_gets_its_own_certificate_and_serves_the_connector` |
+| E10 | A hostile edge | Offers a relay such as `http://127.0.0.1:6379` or an internal name | Only a plain https URL on a DNS name is kept (not an address, `localhost`, `.local`, `.internal`, no port or credentials, 253 characters at most); anything else fails the registration | `bridge::tests::only_a_plain_https_relay_on_a_name_is_adopted` |
+| E11 | A pasted link | Swaps the real edge for another | `hq bridge register` refuses while an edge is registered unless `--replace` is given; replacing closes the old edge's connections | `registering_with_another_edge_closes_the_one_it_replaces` |
+| E12 | The CLI in another process | Forgets the edge while a connection is open in this one | Each open connection rechecks the record every second and on every stream; `Bridge::forget_edge` sweeps the edge's connections whether or not a record was left | `forgetting_sweeps_the_edges_connections_even_when_another_process_cleared_the_record` |
+
+Residual risks: the edge learns when a device is online and how much it moves (it sees the TLS server
+name and sizes, never content), and a stolen edge key lets its holder open streams to the connector
+door, where TLS, the path filter and OAuth still stand in the way. The piped stream is plain bytes
+to a loopback port: any bug in the door is reachable by the edge, which is why the door is the
+connector's own gate (`docs/security/CONNECTOR_TLS.md`) and nothing else.
+

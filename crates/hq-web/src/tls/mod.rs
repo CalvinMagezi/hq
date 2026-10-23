@@ -11,6 +11,7 @@ mod acceptor;
 mod acme;
 mod certs;
 mod gate;
+mod listener;
 mod renew;
 mod store;
 #[cfg(test)]
@@ -20,6 +21,7 @@ pub use acceptor::{ConnectorAcceptor, MAX_CONNECTIONS, Served, Timeouts};
 pub use gate::{
     CONNECTOR_PATHS, is_connector_path, is_connector_territory, refuse_connector_paths,
 };
+pub(crate) use listener::spawn_door;
 
 use crate::WsState;
 use acme::{AcmeHttp, AcmeIssuer, AcmeSettings, Fresh, issued_from_bundle};

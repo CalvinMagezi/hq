@@ -51,10 +51,33 @@ mcp_connector:
   so a staging certificate is never found after a switch to production. Neither secret file is
   ever logged or shown: the types that hold them print as nothing, and the status carries only the
   name, the expiry and a one-line reason.
-- The module opens no listener. Whoever owns the stream source (the edge bridge) calls
-  `ConnectorTls::serve(stream)` once per connection and spawns `ConnectorTls::run()` once.
-  `run()` orders a certificate when there is none and again two thirds of the way through each
-  one, and needs `serve` taking connections: the CA's validation arrives on it.
+- The module itself opens no listener: whoever owns the stream source calls
+  `ConnectorTls::serve(stream)` once per connection and spawns `ConnectorTls::run()` once. `run()`
+  orders a certificate when there is none and again two thirds of the way through each one, and
+  needs `serve` taking connections: the CA's validation arrives on it. The server does this in one
+  place, `create_router` (so `hq start` and `hq web` behave the same): when `tls` is on and valid
+  it listens on `tls.door_listen` and calls `serve` for each connection (`tls/listener.rs`).
+- That listener is a unix socket in a directory only this user can enter: the default is
+  `<vault>/_data/connector_door/door.sock`, the directory is created `0700`, must belong to the
+  user and not be writable by others (never a symlink), the socket is `0600`, a stale socket from a
+  crash is replaced and anything else at the path is left alone. The process that holds the
+  forwarder's iroh streams (`hq bridge serve` or `run`, a separate process on a phone) is the only
+  thing meant to connect. A TCP port is not the default because a port can be bound by anyone on
+  the machine: whoever wins that race receives the forwarded bytes, including the CA's validation
+  (`acme-tls/1` passes through the edge), could order a certificate for the device's name and end
+  TLS in its place. A loopback `ip:port` with a fixed port is still possible as an explicit opt-in
+  (`door_listen`) for a machine with one user. A bind that fails is retried every few seconds and
+  logged, never left silent. The door starts with the router, before the main port is bound, so a
+  server whose main bind fails still has its door; and started before the bridge it orders its
+  first certificate while the forwarder cannot reach it yet, which fails once and waits (15
+  minutes) before the next order: start the bridge first, or restart the server after registering.
+- Whoever can connect to the socket speaks TLS to the same door and meets the same gate and
+  OAuth as the internet would; every request is marked as coming through the door, so a local
+  peer is never mistaken for a trusted local caller. It is on whenever TLS is, not only while a
+  connection window is armed: calls and refreshes for an existing grant must work at any time, and
+  arming guards `/oauth/authorize`, which this door does not serve at all. A local process that
+  can reach the socket shares the door's connection pools with Claude's calls and can crowd them;
+  the socket's mode keeps that to the owner's own processes.
 
 ## What the forwarder must hand over
 
@@ -94,9 +117,8 @@ Everything Caddy or a tunnel used to do in front of HQ happens here, on every re
    they are two documents; the protected-resource document is also served at its `/mcp` suffix,
    which clients try first.) The consent side (`/oauth/authorize`, `/connect`,
    `/api/oauth/requests/*`) is not served on this name, so the arming window cannot be probed or
-   filled from the internet. Whether a public name serves a consent page at all is decided with
-   the connector-on-the-bridge work. `/mcp/`, `//mcp`, `/%6Dcp`, `/.well-known/../api/tree` and
-   everything else are 404s.
+   filled from the internet. The public name serves no consent page at all (see "Not covered").
+   `/mcp/`, `//mcp`, `/%6Dcp`, `/.well-known/../api/tree` and everything else are 404s.
 2. **Host.** `Host` and, for HTTP/2, `:authority` must each be exactly the connector's name.
    Two `Host` headers, or a disagreement, is a 404. The door then sets `Host` to the canonical
    value, which also gives HTTP/2 requests the header the handlers read. A client that names a
@@ -224,9 +246,18 @@ TCP listener for it; the pairing work should point the same assertions at the re
   lasts; only the forwarder can tell the flood from clients.
 - **A finalized order whose download times out** makes a new order and key next time, spending
   one of the five certificates a week (`TECHDEBT.md`).
-- **The consent page on the public name.** Not served here. If claude.ai refuses an
-  `authorization_endpoint` private to the phone, the public-name consent page has to be added to
-  the allow-list together with its own arming-window protections.
+- **The consent page on the public name.** Not served here. `authorize_url` may be plain http on
+  `127.0.0.1`, `[::1]` or `localhost` (no other http origin parses), for a browser on the same
+  device; the request's `Host` must equal that authority exactly, so the public name, another
+  port and a DNS-rebound name never reach `/oauth/authorize`, and the request cookie then drops
+  `Secure` (it keeps `HttpOnly`, `SameSite=Strict` and its path). A request carrying a
+  reverse-proxy header is refused on that origin, because a proxy on the same machine can rewrite
+  `Host` to the loopback authority; prefer `127.0.0.1` over `localhost`, which can resolve to
+  `::1` where another local user may listen. Whether claude.ai sends a
+  browser to an `authorization_endpoint` private to the device is the open test
+  (`docs/plans/native-bridge/w6-claude-run.md`). If it refuses, the public-name consent page has
+  to be added to the allow-list together with its own arming-window protections, a separate
+  design and review.
 - **The forwarder.** It sees who connects, when and how much, never the content. Its own limits
   and registration are its own document.
 - **Certificate Transparency.** Every certificate for the name is public in CT logs, so the name

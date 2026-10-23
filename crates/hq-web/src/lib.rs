@@ -82,6 +82,9 @@ pub struct WsState {
     pub(crate) ws_tickets: Arc<auth::WsTickets>,
     /// The claude.ai connector's origins, when `mcp_connector` is on and valid.
     pub(crate) connector: Option<hq_core::config::ConnectorSettings>,
+    /// The connector's configuration as it was when the connector was configured, kept for the
+    /// TLS door (`tls::spawn_door`), which needs its `tls` section.
+    pub(crate) connector_cfg: Option<hq_core::config::McpConnectorConfig>,
     /// Abort handles for in-flight chat turns, keyed by thread id. A "stop"
     /// WS message aborts the turn's driver task, which drops the harness
     /// stream and finalizes the turn.
@@ -126,6 +129,7 @@ impl WsState {
             web_bind_is_loopback,
             ws_tickets: Arc::new(auth::WsTickets::default()),
             connector: None,
+            connector_cfg: None,
             active_chat_turns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             web_push: None,
             device_codes: device_auth::DeviceCodes::default(),
@@ -188,10 +192,12 @@ impl WsState {
         cfg: &hq_core::config::McpConnectorConfig,
     ) -> Result<(), String> {
         self.connector = None;
+        self.connector_cfg = None;
         if cfg.enabled && self.profile().is_lite() {
             return Err("mcp_connector is not available under profile: lite".into());
         }
         self.connector = cfg.settings(self.web_auth_token.as_deref())?;
+        self.connector_cfg = self.connector.is_some().then(|| cfg.clone());
         Ok(())
     }
 
@@ -587,7 +593,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/.well-known/{*rest}", axum::routing::any(not_found_json))
         .route("/mcp", axum::routing::post(mcp_http::mcp_handler));
 
-    router
+    let app = router
         // Hashed build chunks: a missing one must 404, not come back as the HTML shell.
         .nest_service("/assets", ServeDir::new(static_dir.join("assets")))
         // The PWA: static files, and index.html for every client-side route.
@@ -620,7 +626,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             security_headers::content_security_policy(&static_dir),
             security_headers::set_security_headers,
         ))
-        .with_state(state)
+        .with_state(state.clone());
+    // The connector's TLS door serves this same router (a second one would start the watchers
+    // above twice). It is a no-op unless `mcp_connector.tls` is on.
+    tls::spawn_door(&state, app.clone());
+    app
 }
 
 /// CORS grants read access only to origins the origin guard would let through.

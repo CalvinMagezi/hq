@@ -16,7 +16,7 @@ telegram = ["hq-relay/telegram"]
 tunnel = ["dep:hq-tunnel", "dep:libc", "dep:zeroize"]
 # `hq bridge`: pair machines with a QR code and reach them by key over iroh. Off by default, and
 # nothing listens until a command is run. Unix only: the dependencies are not pulled on Windows.
-bridge = ["dep:hq-bridge"]
+bridge = ["dep:hq-bridge", "hq-edge/invite"]
 
 [dependencies]
 hq-core = { workspace = true }

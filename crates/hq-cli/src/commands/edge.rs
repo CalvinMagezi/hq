@@ -20,6 +20,13 @@ pub enum EdgeAction {
     Revoke { id: String },
     /// List the allowed devices and the name each is reached at
     List,
+    /// Show a QR code and link for one device to scan; type the six digits it shows and it is
+    /// added to the list under its name (needs a build with the `bridge` feature)
+    Invite {
+        /// How long the invitation works, in seconds
+        #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u64).range(10..=3600))]
+        ttl: u64,
+    },
 }
 
 #[cfg(all(unix, not(target_os = "android")))]
@@ -84,7 +91,98 @@ mod supported {
                 }
                 Ok(())
             }
+            EdgeAction::Invite { ttl } => invite(config, std::time::Duration::from_secs(ttl)).await,
         }
+    }
+
+    #[cfg(not(feature = "bridge"))]
+    async fn invite(_config: EdgeConfig, _ttl: std::time::Duration) -> Result<()> {
+        bail!(
+            "this build of hq cannot invite devices by QR code: build with `--features bridge`, or add a device with `hq edge allow <id>`"
+        )
+    }
+
+    /// Shows the invitation and waits for one device; the person types the digits the device shows.
+    #[cfg(feature = "bridge")]
+    async fn invite(config: EdgeConfig, ttl: std::time::Duration) -> Result<()> {
+        use hq_bridge::{Tuning, code::printable, qr};
+        const SHOWN_CHARS: usize = 120;
+        let spec = hq_edge::default_invite_spec(
+            &config,
+            Tuning {
+                ttl,
+                ..Tuning::default()
+            },
+        )?;
+        let mut open = hq_edge::open_invite(&config, spec).await?;
+        let link = open.ticket.link();
+        println!(
+            "This edge: {} ({})",
+            hq_edge::edge_id(&config.key_path())?,
+            config.domain
+        );
+        println!(
+            "\nScan this on the device that should be reached through this edge, or give it the text below ({} s, one use):\n",
+            ttl.as_secs()
+        );
+        if let Some(art) = qr::render(&link) {
+            println!("{art}");
+        }
+        println!("{link}\n");
+        if config.invite_bind.port() == 0 {
+            println!(
+                "The invitation listens on a random UDP port. If the device cannot connect, set edge.invite_bind to a fixed port, open it in this machine's firewall, and (behind NAT) list the public address in edge.invite_advertise.\n"
+            );
+        } else {
+            println!(
+                "The device must be able to reach UDP {} on this machine while the invitation is open.\n",
+                config.invite_bind
+            );
+        }
+        let request = tokio::select! {
+            request = open.requests.recv() => request,
+            _ = tokio::signal::ctrl_c() => None,
+        };
+        let Some(request) = request else {
+            println!("No device registered: the invitation ended.");
+            return Ok(());
+        };
+        println!(
+            "\"{}\" ({}) wants to be reached through this edge.",
+            printable(&request.name, SHOWN_CHARS),
+            request.joiner
+        );
+        let accept = crate::commands::bridge::typed_digits_match(&request.sas).await;
+        let delivered = request.decide.send(accept).is_ok();
+        if !delivered {
+            println!("Too late: the device gave up waiting. Nothing was registered.");
+        } else if !accept {
+            println!("Declined {}.", request.joiner);
+        }
+        // The answer reaches the device first; the list is written after it. Wait for the
+        // invitation to end, then say what the list says, not what was hoped.
+        tokio::select! {
+            _ = open.closed() => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
+        if delivered && accept {
+            let listed = list_devices(&config.allowlist_path())
+                .map(|devices| devices.iter().any(|d| d.id == request.joiner))
+                .unwrap_or(false);
+            if listed {
+                println!(
+                    "Registered {}. It is reached at {}.",
+                    request.joiner,
+                    device_name(&config, &request.joiner)
+                );
+            } else {
+                println!(
+                    "The device was accepted but is not on the list: see the warnings above, or add it with `hq edge allow {}`.",
+                    request.joiner
+                );
+            }
+        }
+        Ok(())
     }
 
     fn device_name(config: &EdgeConfig, id: &iroh::EndpointId) -> String {

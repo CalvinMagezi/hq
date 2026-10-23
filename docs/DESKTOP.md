@@ -70,10 +70,12 @@ into claude.ai, and **Allow a new connection** opens the ten-minute window.
 
 The consent page (`/connect`) and its API are served on the app's own address, so no tailnet name
 is needed to open them in a browser on this Mac. One piece is still open and belongs to
-workstream W6: HQ tells Claude to send your browser to `mcp_connector.authorize_url`, which today
-must be an https origin, so Claude will not yet send you to the app's loopback address. The
-screen says when that is the case. To approve on the app's address once that is allowed, get a
-sign-in link from the screen and open it in the browser first.
+workstream W6: HQ tells Claude to send your browser to `mcp_connector.authorize_url`. That may now
+be the app's own loopback address (`http://127.0.0.1:<port>`, the only plain-http origin HQ
+accepts), but whether claude.ai follows such an `authorization_endpoint` is still a test to run
+against a real account (`docs/plans/native-bridge/w6-claude-run.md`). The screen says when the
+advertised origin is not the app's own. To approve on the app's address, get a sign-in link from
+the screen and open it in the browser first.
 
 ## Building it
 

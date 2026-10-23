@@ -1359,3 +1359,102 @@ async fn a_full_door_still_answers_the_cas_validation() {
     tls.challenge_slot().disarm();
     drop(held);
 }
+
+/// Waits for the certificate loop the server starts to get one, then fetches the protected
+/// resource document through `addr` (where the CA's validation also arrives).
+async fn assert_door_orders_and_serves(
+    tls: &std::sync::Arc<ConnectorTls>,
+    ca: &super::test_ca::TestCa,
+    addr: std::net::SocketAddr,
+) {
+    assert_eq!(tls.status().state, TlsState::NoCertificate);
+    let started = std::time::Instant::now();
+    while tls.status().state != TlsState::Valid {
+        assert!(
+            started.elapsed() < Duration::from_secs(45),
+            "no certificate after 45 s: {:?}",
+            tls.status()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let reply = exchange(
+        Target {
+            addr,
+            root: &ca.root,
+            sni: HOST,
+        },
+        "GET",
+        Some(HOST),
+        "/.well-known/oauth-protected-resource",
+        &[],
+        "",
+    )
+    .await;
+    assert_eq!(reply.status, 200, "{reply:?}");
+    assert!(reply.body.contains(HOST), "{reply:?}");
+}
+
+#[tokio::test]
+async fn the_tcp_door_gets_its_own_certificate_through_itself_and_serves_the_connector() {
+    let w = world();
+    // The CA must know where to dial before the door exists, so the port is picked first.
+    let addr = {
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        probe.local_addr().unwrap()
+    };
+    let ca = std::sync::Arc::new(super::test_ca::TestCa::start(addr).await);
+    let store_dir = tempfile::TempDir::new().unwrap();
+    let tls = std::sync::Arc::new(build_tls(&w, &ca, &store_dir, |_| {}));
+    let serving = tokio::spawn(crate::tls::listener::serve_door(
+        tls.clone(),
+        hq_core::config::DoorTarget::Tcp(addr),
+    ));
+    assert_door_orders_and_serves(&tls, &ca, addr).await;
+    serving.abort();
+}
+
+/// What the bridge does: a TCP port the test CA and the client dial, piped to the unix socket.
+#[cfg(unix)]
+async fn tcp_to_unix(socket: std::path::PathBuf) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut tcp, _)) = listener.accept().await else {
+                return;
+            };
+            let socket = socket.clone();
+            tokio::spawn(async move {
+                if let Ok(mut unix) = tokio::net::UnixStream::connect(socket).await {
+                    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut unix).await;
+                }
+            });
+        }
+    });
+    addr
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_default_unix_door_gets_its_own_certificate_and_serves_the_connector() {
+    let w = world();
+    let socket = hq_core::config::DoorListen::Default.resolve(w._vault.path());
+    let hq_core::config::DoorTarget::Unix(socket) = socket else {
+        panic!("the default door is a unix socket")
+    };
+    let addr = tcp_to_unix(socket.clone()).await;
+    let ca = std::sync::Arc::new(super::test_ca::TestCa::start(addr).await);
+    let store_dir = tempfile::TempDir::new().unwrap();
+    let tls = std::sync::Arc::new(build_tls(&w, &ca, &store_dir, |_| {}));
+    let serving = tokio::spawn(crate::tls::listener::serve_door(
+        tls.clone(),
+        hq_core::config::DoorTarget::Unix(socket.clone()),
+    ));
+    assert_door_orders_and_serves(&tls, &ca, addr).await;
+
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&socket), 0o600, "the socket is private");
+    assert_eq!(mode(socket.parent().unwrap()), 0o700, "so is its directory");
+    serving.abort();
+}

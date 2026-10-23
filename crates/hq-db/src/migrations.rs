@@ -362,6 +362,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "098_bridge_pairing",
         include_str!("../sql/098_bridge_pairing.sql"),
     ),
+    (
+        "099_bridge_edge",
+        include_str!("../sql/099_bridge_edge.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

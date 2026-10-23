@@ -47,7 +47,8 @@ pub use instance::*;
 pub use llm::*;
 pub use mcp_connector::{
     ACME_DIRECTORY_LETSENCRYPT, ACME_DIRECTORY_LETSENCRYPT_STAGING, CONNECTOR_SCOPES,
-    ConnectorSettings, ConnectorTlsConfig, ConnectorTlsSettings, McpConnectorConfig,
+    ConnectorSettings, ConnectorTlsConfig, ConnectorTlsSettings, DOOR_DIR, DOOR_SOCKET_FILE,
+    DoorListen, DoorTarget, McpConnectorConfig,
 };
 pub use memory::*;
 pub use profile::{

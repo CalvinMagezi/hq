@@ -142,3 +142,39 @@ fn authorize_answers_only_on_the_consent_origin() {
         "https://hq.example.com"
     ));
 }
+
+#[test]
+fn a_loopback_http_consent_origin_matches_only_its_own_authority() {
+    let with_host = |h: &str| {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, h.parse().unwrap());
+        headers
+    };
+    let consent = "http://127.0.0.1:5799";
+    assert!(on_origin(&with_host("127.0.0.1:5799"), consent));
+    assert!(!on_origin(&with_host("127.0.0.1:5800"), consent));
+    assert!(!on_origin(&with_host("127.0.0.1"), consent));
+    assert!(!on_origin(&with_host("localhost:5799"), consent));
+    assert!(!on_origin(&with_host("hq.example.com"), consent));
+    assert!(on_origin(&with_host("[::1]:5799"), "http://[::1]:5799"));
+    // The default port may be left off for http as for https, but not borrowed from the other.
+    assert!(on_origin(&with_host("localhost"), "http://localhost"));
+    assert!(on_origin(&with_host("localhost:80"), "http://localhost"));
+    assert!(!on_origin(&with_host("localhost:443"), "http://localhost"));
+    // A default port is never added to an origin that already names a port.
+    assert!(!on_origin(&with_host("127.0.0.1:5799:80"), consent));
+    assert!(!on_origin(
+        &with_host("hq.example.ts.net:8443:443"),
+        "https://hq.example.ts.net:8443"
+    ));
+    assert!(on_origin(&with_host("[::1]"), "http://[::1]"));
+    assert!(on_origin(&with_host("[::1]:80"), "http://[::1]"));
+    assert!(!on_origin(
+        &with_host("hq.example.com:80"),
+        "https://hq.example.com"
+    ));
+    assert!(!on_origin(
+        &with_host("hq.example.com"),
+        "ftp://hq.example.com"
+    ));
+}

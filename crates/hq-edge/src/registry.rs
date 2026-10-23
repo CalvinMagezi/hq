@@ -258,9 +258,36 @@ fn parse(text: &str) -> Result<Vec<Registered>, ListError> {
     Ok(entries)
 }
 
+/// Serializes the writers of the list (`hq edge allow`, `hq edge revoke`, and an invitation's
+/// relay record): each reads the list, changes it and writes it back, so two at once could lose
+/// one change. Readers take no lock; they see either the old file or the new one.
+struct WriteLock(#[allow(dead_code)] std::fs::File);
+
+impl WriteLock {
+    fn take(path: &Path) -> Result<Self, ListError> {
+        use std::os::fd::AsRawFd;
+        if let Some(dir) = path.parent() {
+            ensure_private_dir(dir).map_err(|e| std::io::Error::other(e.to_string()))?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .custom_flags(libc::O_NOFOLLOW)
+            .mode(PRIVATE_FILE_MODE)
+            .open(path.with_extension("lock"))?;
+        // SAFETY: flock takes a file descriptor this process owns and has no other preconditions.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        Ok(Self(file))
+    }
+}
+
 /// Adds a device to the list at `path`, which `hq edge allow` calls. The existing list must be
 /// valid and the device new and without a name collision.
 pub fn allow_device(path: &Path, device: Registered) -> Result<(), ListError> {
+    let _lock = WriteLock::take(path)?;
     // SAFETY: geteuid has no preconditions and cannot fail.
     let owner = unsafe { libc::geteuid() };
     let mut entries = read_entries(path, owner)?;
@@ -298,6 +325,7 @@ pub fn allow_device(path: &Path, device: Registered) -> Result<(), ListError> {
 /// Removes a device from the list. Returns whether it was there. Open connections to it are cut
 /// within a second.
 pub fn revoke_device(path: &Path, id: &EndpointId) -> Result<bool, ListError> {
+    let _lock = WriteLock::take(path)?;
     // SAFETY: geteuid has no preconditions and cannot fail.
     let owner = unsafe { libc::geteuid() };
     read_entries(path, owner)?;
@@ -323,19 +351,75 @@ pub fn revoke_device(path: &Path, id: &EndpointId) -> Result<bool, ListError> {
         kept.push('\n');
     }
     if removed {
-        // A fresh file each time, written whole and synced before it replaces the list.
-        let tmp = path.with_extension("tmp");
-        let _ = std::fs::remove_file(&tmp);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(PRIVATE_FILE_MODE)
-            .open(&tmp)?;
-        file.write_all(kept.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&tmp, path)?;
+        replace_file(path, kept.as_bytes())?;
     }
     Ok(removed)
+}
+
+/// Records the relay a registered device uses as its home, replacing the one on its line (and
+/// keeping a trailing `#` note). Returns whether the device was on the list. Written the way a
+/// revoke is: a whole new file, synced, then renamed over the list, so a reader never sees half
+/// of it, and under the writers' lock.
+pub fn set_device_relay(
+    path: &Path,
+    id: &EndpointId,
+    relay: Option<&RelayUrl>,
+) -> Result<bool, ListError> {
+    let _lock = WriteLock::take(path)?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let owner = unsafe { libc::geteuid() };
+    read_entries(path, owner)?;
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
+    let mut out = String::new();
+    let mut found = false;
+    for raw in text.lines() {
+        let first = raw
+            .split('#')
+            .next()
+            .unwrap_or("")
+            .split_whitespace()
+            .next();
+        if first.is_some_and(|f| f.parse::<EndpointId>().is_ok_and(|line_id| line_id == *id)) {
+            found = true;
+            out.push_str(&id.to_string());
+            if let Some(relay) = relay {
+                out.push(' ');
+                out.push_str(&relay.to_string());
+            }
+            // The operator's note on the line stays.
+            if let Some(at) = raw.find('#') {
+                out.push(' ');
+                out.push_str(&raw[at..]);
+            }
+            out.push('\n');
+            continue;
+        }
+        out.push_str(raw);
+        out.push('\n');
+    }
+    if found {
+        replace_file(path, out.as_bytes())?;
+    }
+    Ok(found)
+}
+
+/// A fresh file written whole and synced before it replaces the list.
+fn replace_file(path: &Path, bytes: &[u8]) -> Result<(), ListError> {
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(PRIVATE_FILE_MODE)
+        .open(&tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 /// Reads the list for display (`hq edge list`).
