@@ -50,6 +50,83 @@ pub struct ConnectorTlsConfig {
     /// registers no account until this is `true`.
     #[serde(default)]
     pub agree_to_ca_terms: bool,
+
+    /// Where this machine takes the connector's connections from the bridge. Unset: a unix
+    /// socket in a directory only this user can enter (`<vault>/_data/connector_door/door.sock`).
+    /// An absolute path (or `unix:/path`) names another socket. A loopback `ip:port` with a fixed
+    /// port is allowed as an opt-in, but any local process can bind a port first, so another user
+    /// or app on the machine could take the forwarded connections (including the CA's validation
+    /// of the certificate); use it only on a machine with one user. The process that holds the
+    /// forwarder's streams (`hq bridge serve` or `run`, a separate process on a phone) connects
+    /// here, and nothing else should.
+    #[serde(default)]
+    pub door_listen: Option<String>,
+}
+
+/// The directory (under `<vault>/_data`) and file the connector's TLS door listens on when
+/// `door_listen` is unset. The bridge's forwarder resolves the same default, so a registered
+/// device needs no setting for it.
+pub const DOOR_DIR: &str = "connector_door";
+pub const DOOR_SOCKET_FILE: &str = "door.sock";
+
+/// Where the connector's TLS door takes the bridge's streams, as configured.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoorListen {
+    /// A unix socket in `<vault>/_data/connector_door/`, a directory only this user can enter.
+    Default,
+    /// A unix socket at this absolute path, in a directory this user owns and others cannot write.
+    Unix(std::path::PathBuf),
+    /// A loopback address with a fixed port. Weaker: see `McpConnectorConfig::tls.door_listen`.
+    Tcp(std::net::SocketAddr),
+}
+
+/// A door address with the vault known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoorTarget {
+    Unix(std::path::PathBuf),
+    Tcp(std::net::SocketAddr),
+}
+
+impl DoorListen {
+    /// Reads `mcp_connector.tls.door_listen` or `--edge-door`: nothing means the default, a path
+    /// starting with `/` (or `unix:`) a unix socket, anything else a loopback `ip:port` with a
+    /// fixed port.
+    pub fn parse(text: Option<&str>) -> Result<Self, String> {
+        let text = text.map(str::trim).filter(|t| !t.is_empty());
+        let Some(text) = text else {
+            return Ok(Self::Default);
+        };
+        if let Some(path) = text
+            .strip_prefix("unix:")
+            .or(text.starts_with('/').then_some(text))
+        {
+            let path = std::path::PathBuf::from(path);
+            if !path.is_absolute() || path.file_name().is_none() {
+                return Err(format!("{text:?} is not an absolute socket path"));
+            }
+            return Ok(Self::Unix(path));
+        }
+        let addr: std::net::SocketAddr = text.parse().map_err(|_| {
+            format!("{text:?} is not a socket path (starting with /) or a loopback ip:port")
+        })?;
+        if !addr.ip().is_loopback() || addr.port() == 0 {
+            return Err(format!(
+                "{text:?} must be a loopback address with a fixed port, or a socket path"
+            ));
+        }
+        Ok(Self::Tcp(addr))
+    }
+
+    /// The address to listen on or connect to, with the vault's `_data` directory filled in.
+    pub fn resolve(&self, vault: &std::path::Path) -> DoorTarget {
+        match self {
+            Self::Default => {
+                DoorTarget::Unix(vault.join("_data").join(DOOR_DIR).join(DOOR_SOCKET_FILE))
+            }
+            Self::Unix(path) => DoorTarget::Unix(path.clone()),
+            Self::Tcp(addr) => DoorTarget::Tcp(*addr),
+        }
+    }
 }
 
 /// The ACME directory a bare `letsencrypt` means.
@@ -85,6 +162,8 @@ pub struct ConnectorTlsSettings {
     pub authority: String,
     pub directory_url: String,
     pub contact_email: Option<String>,
+    /// Where the TLS door takes the bridge's streams.
+    pub door_listen: DoorListen,
 }
 
 impl McpConnectorConfig {
@@ -149,11 +228,14 @@ impl McpConnectorConfig {
             .filter(|e| !e.is_empty())
             .map(|e| contact_address(e).map(str::to_string))
             .transpose()?;
+        let door_listen = DoorListen::parse(self.tls.door_listen.as_deref())
+            .map_err(|e| format!("mcp_connector.tls.door_listen: {e}"))?;
         Ok(Some(ConnectorTlsSettings {
             host,
             authority,
             directory_url,
             contact_email,
+            door_listen,
         }))
     }
 
@@ -366,6 +448,61 @@ mod tests {
         assert_eq!(t.authority, "dev1.edge.example.com");
         assert_eq!(t.directory_url, ACME_DIRECTORY_LETSENCRYPT);
         assert_eq!(t.contact_email, None);
+    }
+
+    #[test]
+    fn the_door_is_a_private_socket_unless_a_loopback_port_is_asked_for() {
+        let c = with_tls("https://hq.example.com", tls_on());
+        assert_eq!(
+            c.tls_settings(Some("t")).unwrap().unwrap().door_listen,
+            DoorListen::Default
+        );
+        let vault = std::path::Path::new("/vault");
+        assert_eq!(
+            DoorListen::Default.resolve(vault),
+            DoorTarget::Unix("/vault/_data/connector_door/door.sock".into())
+        );
+        for (door, expected) in [
+            (
+                "/run/hq/door.sock",
+                Some(DoorListen::Unix("/run/hq/door.sock".into())),
+            ),
+            (
+                "unix:/run/hq/door.sock",
+                Some(DoorListen::Unix("/run/hq/door.sock".into())),
+            ),
+            (
+                "127.0.0.1:7001",
+                Some(DoorListen::Tcp("127.0.0.1:7001".parse().unwrap())),
+            ),
+            (
+                "[::1]:7001",
+                Some(DoorListen::Tcp("[::1]:7001".parse().unwrap())),
+            ),
+            ("0.0.0.0:5679", None),
+            ("192.168.1.9:5679", None),
+            ("[::]:5679", None),
+            ("127.0.0.1:0", None),
+            ("localhost:5679", None),
+            ("127.0.0.1", None),
+            ("relative/door.sock", None),
+            ("unix:relative.sock", None),
+            ("/", None),
+        ] {
+            let tls = ConnectorTlsConfig {
+                door_listen: Some(door.into()),
+                ..tls_on()
+            };
+            let got = with_tls("https://hq.example.com", tls)
+                .tls_settings(Some("t"))
+                .map(|t| t.map(|t| t.door_listen));
+            match expected {
+                Some(want) => assert_eq!(got, Ok(Some(want)), "{door}"),
+                None => assert!(got.is_err(), "{door}: {got:?}"),
+            }
+        }
+        // An empty setting is the default, as everywhere else.
+        assert_eq!(DoorListen::parse(Some("  ")), Ok(DoorListen::Default));
     }
 
     #[test]

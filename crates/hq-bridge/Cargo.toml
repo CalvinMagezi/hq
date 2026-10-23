@@ -20,6 +20,7 @@ tracing = { workspace = true }
 data-encoding = "2"
 qrcodegen = "1.8"
 subtle = "2"
+url = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

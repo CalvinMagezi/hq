@@ -5,10 +5,10 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use hq_bridge::{
-    Bridge, BridgeConfig, EndpointId, JoinResult, RelayMode, Ticket, Tuning, code::printable, echo,
-    echo_handler, qr,
+    Bridge, BridgeConfig, EdgeDoor, EndpointId, JoinResult, RelayMode, Ticket, Tuning,
+    code::printable, echo, echo_handler, qr,
 };
-use hq_core::config::HqConfig;
+use hq_core::config::{DoorListen, DoorTarget, HqConfig};
 use hq_db::{Database, bridge as peers};
 use std::{
     net::SocketAddr,
@@ -30,9 +30,16 @@ const LINK_READ_MAX: u64 = 4_096;
 #[derive(Args, Clone)]
 pub struct NetArgs {
     /// How the two machines find each other besides a direct path: none (the default), default
-    /// (n0's public relays, meant for development and testing only) or a relay URL
+    /// (n0's public relays, meant for development and testing only), auto (the relay of the edge
+    /// this device registered with, else none) or a relay URL
     #[arg(long, default_value = "none")]
     relay: String,
+    /// Where the registered edge's streams are piped when this machine serves: a unix socket path
+    /// or a loopback ip:port. By default the connector door (`mcp_connector.tls.door_listen`, else
+    /// a private socket under the vault's `_data/connector_door`). `off` does not accept the edge
+    /// protocol at all
+    #[arg(long, value_name = "PATH|ADDR|off")]
+    edge_door: Option<String>,
     /// Where this machine listens (repeatable; default: every address, any port)
     #[arg(long)]
     bind: Vec<SocketAddr>,
@@ -68,6 +75,26 @@ pub enum BridgeAction {
         #[command(flatten)]
         net: NetArgs,
     },
+    /// Register this device with an `hq edge`: scan or paste the link its `hq edge invite` shows.
+    /// The person at the edge types the six digits this machine shows. Afterwards the edge can
+    /// reach this device's connector door, and nothing else
+    Register {
+        /// The link. Leave it out, or give -, to paste it on standard input
+        link: Option<String>,
+        /// Replace the edge this device is already registered with. Without it, a registered
+        /// device is left as it is: a pasted link must not swap the real edge for another
+        #[arg(long)]
+        replace: bool,
+        #[command(flatten)]
+        net: NetArgs,
+    },
+    /// Show the edge this device is registered with
+    Edge {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Forget the edge. A running `serve` stops serving it at its next stream
+    ForgetEdge,
     /// Keep this machine reachable by its paired peers until interrupted (echo service)
     Serve {
         #[command(flatten)]
@@ -122,6 +149,17 @@ fn set_private(dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// `auto` becomes the registered edge's relay, or `none` when there is no edge or it has none.
+/// Everything else is as given.
+fn resolve_relay(text: &str, db: &Database) -> Result<String> {
+    if text != "auto" {
+        return Ok(text.to_string());
+    }
+    Ok(peers::edge_get(db)?
+        .and_then(|edge| edge.relay)
+        .unwrap_or_else(|| "none".to_string()))
+}
+
 fn relay_mode(text: &str) -> Result<RelayMode> {
     match text {
         "none" => Ok(RelayMode::Disabled),
@@ -145,23 +183,57 @@ fn device_name(net: &NetArgs) -> String {
         .unwrap_or_else(|| std::env::var("HOSTNAME").unwrap_or_else(|_| DEFAULT_NAME.to_string()))
 }
 
+/// Where a serving machine pipes the registered edge's streams: `--edge-door`, else the connector
+/// door's address from the config, else its default (a private socket under the vault). Only the
+/// connector's door: a socket path or a loopback address with a fixed port, nothing else on this
+/// machine or beyond it.
+fn edge_door(net: &NetArgs) -> Result<Option<EdgeDoor>> {
+    edge_door_with(net, HqConfig::load().ok().as_ref())
+}
+
+/// [`edge_door`] with the configuration given, so a test does not read the machine's own.
+fn edge_door_with(net: &NetArgs, config: Option<&HqConfig>) -> Result<Option<EdgeDoor>> {
+    if net.edge_door.as_deref() == Some("off") {
+        return Ok(None);
+    }
+    let asked = net
+        .edge_door
+        .clone()
+        .or_else(|| config.and_then(|c| c.mcp_connector.tls.door_listen.clone()));
+    let listen = DoorListen::parse(asked.as_deref()).map_err(|e| anyhow!("--edge-door: {e}"))?;
+    let vault = config.map(|c| c.vault_path.clone()).unwrap_or_else(|| {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".hq")
+            .join("vault")
+    });
+    let target = match listen.resolve(&vault) {
+        DoorTarget::Unix(path) => hq_bridge::DoorTarget::Unix(path),
+        DoorTarget::Tcp(addr) => hq_bridge::DoorTarget::Tcp(addr),
+    };
+    Ok(Some(EdgeDoor::new(target)))
+}
+
 async fn start(net: &NetArgs, db: Database, serve: bool) -> Result<Bridge> {
     let bind: Vec<SocketAddr> = if net.bind.is_empty() {
         vec![DEFAULT_BIND.parse()?]
     } else {
         net.bind.clone()
     };
-    Bridge::start(
+    let relay = relay_mode(&resolve_relay(&net.relay, &db)?)?;
+    let door = if serve { edge_door(net)? } else { None };
+    Bridge::start_with_edge_door(
         BridgeConfig {
             key: key_path(net)?,
             bind,
-            relay: relay_mode(&net.relay)?,
+            relay,
             name: device_name(net),
             with_addrs: !net.no_addrs,
             advertise: Vec::new(),
         },
         db,
         serve.then(echo_handler),
+        door,
     )
     .await
 }
@@ -171,6 +243,11 @@ pub async fn run(config: &HqConfig, action: BridgeAction) -> Result<()> {
     match action {
         BridgeAction::Pair { net, ttl } => pair(&net, db, Duration::from_secs(ttl)).await,
         BridgeAction::Join { link, net } => join(&net, db, &read_link(link)?).await,
+        BridgeAction::Register { link, replace, net } => {
+            register(&net, db, &read_link(link)?, replace).await
+        }
+        BridgeAction::Edge { json } => show_edge(&db, json),
+        BridgeAction::ForgetEdge => forget_edge(&db),
         BridgeAction::Serve { net } => serve(&net, db).await,
         BridgeAction::Run { net } => run_control(&net, db).await,
         BridgeAction::Ping { peer, count, net } => ping(&net, db, &peer, count).await,
@@ -287,6 +364,80 @@ async fn join(net: &NetArgs, db: Database, link: &str) -> Result<()> {
     Ok(())
 }
 
+/// Registers with an edge and says what that gives this device, and what it does not yet.
+async fn register(net: &NetArgs, db: Database, link: &str, replace: bool) -> Result<()> {
+    let ticket = Ticket::parse(link)?;
+    if let Some(current) = peers::edge_get(&db)?
+        && !replace
+    {
+        bail!(
+            "this device is already registered with {} ({}). To register with another edge instead, run this again with --replace; `hq bridge forget-edge` removes the current one",
+            printable(&current.domain, SHOWN_CHARS),
+            current.id
+        );
+    }
+    let bridge = start(net, db.clone(), false).await?;
+    let result = bridge
+        .register(&ticket, &Tuning::default(), |sas| {
+            println!(
+                "Digits: {sas}   (type them on the edge machine; it registers this device only if they match)"
+            );
+        })
+        .await;
+    bridge.shutdown().await;
+    match result? {
+        JoinResult::Paired(joined) => {
+            let edge = peers::edge_get(&db)?
+                .ok_or_else(|| anyhow!("the edge was accepted but is not recorded"))?;
+            println!(
+                "Registered with the edge \"{}\" ({}).",
+                printable(&joined.card.name, SHOWN_CHARS),
+                edge.id
+            );
+            println!("This device is reached at https://{}.", edge.hostname);
+            println!(
+                "To let Claude connect, enable the connector's TLS door for that name: see docs/CLAUDE_CONNECTOR.md. Run `hq bridge serve --relay auto` to stay reachable."
+            );
+        }
+        JoinResult::Refused(why) => bail!("refused: {why}"),
+        JoinResult::Declined { .. } => bail!("the edge did not accept"),
+    }
+    Ok(())
+}
+
+fn show_edge(db: &Database, json: bool) -> Result<()> {
+    let edge = peers::edge_get(db)?;
+    if json {
+        let out = edge.map(|e| {
+            serde_json::json!({
+                "id": e.id, "domain": e.domain, "hostname": e.hostname,
+                "relay": e.relay, "registered_at": e.registered_at,
+            })
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+    match edge {
+        Some(e) => println!(
+            "Registered with {} ({}); reached at https://{}",
+            printable(&e.domain, SHOWN_CHARS),
+            e.id,
+            e.hostname
+        ),
+        None => println!("Not registered with an edge."),
+    }
+    Ok(())
+}
+
+fn forget_edge(db: &Database) -> Result<()> {
+    if peers::edge_clear(db)? {
+        println!("Forgot the edge. A machine serving it stops at its next stream.");
+    } else {
+        println!("Not registered with an edge.");
+    }
+    Ok(())
+}
+
 async fn serve(net: &NetArgs, db: Database) -> Result<()> {
     let bridge = start(net, db, true).await?;
     println!("Serving paired peers as {}; ctrl-c to stop.", bridge.id());
@@ -296,16 +447,10 @@ async fn serve(net: &NetArgs, db: Database) -> Result<()> {
 }
 
 async fn run_control(net: &NetArgs, db: Database) -> Result<()> {
+    let relay = resolve_relay(&net.relay, &db)?;
     let bridge = start(net, db, true).await?;
     let input = tokio::io::BufReader::new(tokio::io::stdin());
-    super::bridge_control::serve(
-        bridge,
-        net.relay.clone(),
-        device_name(net),
-        input,
-        tokio::io::stdout(),
-    )
-    .await
+    super::bridge_control::serve(bridge, relay, device_name(net), input, tokio::io::stdout()).await
 }
 
 async fn ping(net: &NetArgs, db: Database, peer: &str, count: usize) -> Result<()> {
@@ -372,4 +517,105 @@ fn revoke(db: &Database, id: &str) -> Result<()> {
         println!("{id} is not an active peer.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn net(relay: &str, edge_door: Option<&str>) -> NetArgs {
+        NetArgs {
+            relay: relay.into(),
+            edge_door: edge_door.map(Into::into),
+            bind: Vec::new(),
+            key: None,
+            name: None,
+            no_addrs: false,
+        }
+    }
+
+    #[test]
+    fn the_edge_and_the_device_agree_on_the_protocol_name_and_the_label() {
+        assert_eq!(hq_bridge::EDGE_ALPN, hq_edge::EDGE_ALPN);
+        assert_eq!(hq_bridge::LABEL_BYTES, hq_edge::LABEL_BYTES);
+        let dir = tempfile::tempdir().unwrap();
+        let id = hq_bridge::key::load_or_create_key(&dir.path().join("k"))
+            .unwrap()
+            .public();
+        assert_eq!(hq_bridge::device_label(&id), hq_edge::device_label(&id));
+    }
+
+    #[test]
+    fn the_edge_door_is_a_socket_path_or_a_loopback_port_or_off() {
+        assert!(
+            edge_door_with(&net("none", Some("off")), None)
+                .unwrap()
+                .is_none()
+        );
+        for ok in [
+            "127.0.0.1:7001",
+            "[::1]:7001",
+            "/run/hq/door.sock",
+            "unix:/run/hq/door.sock",
+        ] {
+            assert!(
+                edge_door_with(&net("none", Some(ok)), None)
+                    .unwrap()
+                    .is_some(),
+                "{ok}"
+            );
+        }
+        for bad in [
+            "0.0.0.0:5679",
+            "192.168.1.9:5679",
+            "[::]:5679",
+            "127.0.0.1:0",
+            "127.0.0.1",
+            "localhost:5679",
+            "relative.sock",
+        ] {
+            assert!(
+                edge_door_with(&net("none", Some(bad)), None).is_err(),
+                "{bad}"
+            );
+        }
+        // Left alone it is the connector door's default: a private socket, the same one the web
+        // server listens on.
+        let default = edge_door_with(&net("none", None), None)
+            .unwrap()
+            .unwrap()
+            .target;
+        assert!(
+            matches!(&default, hq_bridge::DoorTarget::Unix(p)
+                if p.ends_with("connector_door/door.sock")),
+            "{default:?}"
+        );
+    }
+
+    #[test]
+    fn relay_auto_follows_the_registered_edge_and_nothing_else_changes() {
+        let db = Database::open_memory().unwrap();
+        assert_eq!(resolve_relay("auto", &db).unwrap(), "none");
+        peers::edge_set(&db, "ed01", "edge.example.com", "aa.edge.example.com", None).unwrap();
+        assert_eq!(
+            resolve_relay("auto", &db).unwrap(),
+            "none",
+            "an edge with no relay"
+        );
+        peers::edge_set(
+            &db,
+            "ed01",
+            "edge.example.com",
+            "aa.edge.example.com",
+            Some("https://relay.edge.example.com/"),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_relay("auto", &db).unwrap(),
+            "https://relay.edge.example.com/"
+        );
+        for as_given in ["none", "default", "https://other.example.org"] {
+            assert_eq!(resolve_relay(as_given, &db).unwrap(), as_given);
+        }
+    }
 }
