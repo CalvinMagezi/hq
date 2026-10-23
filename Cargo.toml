@@ -25,8 +25,12 @@ members = [
     "crates/hq-backup",
     "crates/hq-host",
     "crates/hq-sandbox",
-
+    "crates/hq-desktop",
 ]
+
+# The Tauri shell pulls in a web view and its system libraries, which the Linux CI job does not
+# have, so it is its own workspace. Everything it does that can be tested lives in hq-desktop.
+exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.9.1"
@@ -156,6 +160,7 @@ hq-gate = { path = "crates/hq-gate" }
 hq-bridge = { path = "crates/hq-bridge" }
 hq-net = { path = "crates/hq-net" }
 hq-tunnel = { path = "crates/hq-tunnel" }
+hq-desktop = { path = "crates/hq-desktop" }
 hq-edge = { path = "crates/hq-edge" }
 
 

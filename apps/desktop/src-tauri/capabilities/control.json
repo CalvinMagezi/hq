@@ -1,0 +1,31 @@
+{
+  "identifier": "control",
+  "description": "The control window: its own commands and event listening, nothing else. The web window gets no capability, so it has no way to call the app.",
+  "windows": [
+    "control"
+  ],
+  "permissions": [
+    "allow-startup-warning",
+    "allow-host-status",
+    "allow-host-start",
+    "allow-host-stop",
+    "allow-settings-get",
+    "allow-settings-save",
+    "allow-open-main-window",
+    "allow-open-in-browser",
+    "allow-pairing-start",
+    "allow-pairing-stop",
+    "allow-pairing-begin",
+    "allow-pairing-cancel",
+    "allow-pairing-snapshot",
+    "allow-pairing-submit",
+    "allow-pairing-decline",
+    "allow-pairing-revoke",
+    "allow-connect-status",
+    "allow-connect-arm",
+    "allow-connect-disarm",
+    "allow-connect-sign-in-link",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

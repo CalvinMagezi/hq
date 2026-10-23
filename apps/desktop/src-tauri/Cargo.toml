@@ -1,0 +1,35 @@
+[package]
+name = "hq-desktop-app"
+version = "0.9.1"
+edition = "2024"
+license = "MIT"
+description = "The macOS desktop app: a thin Tauri shell over hq-desktop"
+publish = false
+
+# Its own workspace: the web view and its system libraries are not in the Linux CI job, and
+# `cargo test --workspace` must stay fast. Everything testable lives in crates/hq-desktop.
+[workspace]
+
+[[bin]]
+name = "hq-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.3", default-features = false , features = [] }
+
+[dependencies]
+hq-desktop = { path = "../../../crates/hq-desktop" }
+hq-core = { path = "../../../crates/hq-core" }
+tauri = { version = "=2.12.4", default-features = false, features = ["wry", "compression"] }
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Same as the main workspace: debug builds run proof-of-work code in ring too slowly otherwise.
+[profile.dev.package.ring]
+opt-level = 3
