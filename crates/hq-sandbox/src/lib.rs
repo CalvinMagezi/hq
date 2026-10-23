@@ -72,6 +72,11 @@ pub struct Relay {
 pub struct AgentSandbox {
     /// Working directory of the agent; always writable.
     pub project: PathBuf,
+    /// Writes are allowed everywhere except where the lists below say otherwise,
+    /// and the machine's real devices stay available (a GPU, KVM, FUSE). `project`
+    /// and `writable` then have nothing left to allow. Without it the filesystem
+    /// is read-only apart from `project`, `writable` and `writable_files`.
+    pub open_filesystem: bool,
     /// Directories the agent may write under (besides `project`).
     pub writable: Vec<PathBuf>,
     /// Files the agent may write, with their temporary siblings
@@ -81,6 +86,11 @@ pub struct AgentSandbox {
     pub readonly_files: Vec<PathBuf>,
     /// Directories inside a writable root that must stay read-only.
     pub readonly_subpaths: Vec<PathBuf>,
+    /// Directories that must not be renamed or removed, only because something
+    /// protected lies below them: moving the parent would put the protected path
+    /// out of reach of every rule that names it. Seatbelt matches paths, so it
+    /// needs the rule; bubblewrap does not, a mount stays with its directory.
+    pub pinned_dirs: Vec<PathBuf>,
     /// Programs the agent may not start (macOS: a way out of the sandbox).
     pub denied_programs: Vec<PathBuf>,
     /// Mach services the agent may not look up (macOS).
@@ -151,27 +161,30 @@ pub fn wrap(
 /// The sandbox-exec profile. Rules later in the profile win, so the broad
 /// denials come first and the narrow allowances after them.
 pub fn seatbelt_profile(s: &AgentSandbox) -> String {
-    let mut p = String::from("(version 1)(allow default)(deny file-write*)");
+    let mut p = String::from("(version 1)(allow default)");
 
-    let subpaths: Vec<String> = std::iter::once(&s.project)
-        .chain(&s.writable)
-        .map(|d| format!("(subpath {})", sbpl_string(d)))
-        .collect();
-    let files: Vec<String> = s
-        .writable_files
-        .iter()
-        .flat_map(|f| {
-            [
-                format!("(literal {})", sbpl_string(f)),
-                format!("(regex #\"^{}\\..*\")", regex_escape(f)),
-            ]
-        })
-        .collect();
-    p.push_str(&format!(
-        "(allow file-write* {} {})",
-        subpaths.join(" "),
-        files.join(" ")
-    ));
+    if !s.open_filesystem {
+        p.push_str("(deny file-write*)");
+        let subpaths: Vec<String> = std::iter::once(&s.project)
+            .chain(&s.writable)
+            .map(|d| format!("(subpath {})", sbpl_string(d)))
+            .collect();
+        let files: Vec<String> = s
+            .writable_files
+            .iter()
+            .flat_map(|f| {
+                [
+                    format!("(literal {})", sbpl_string(f)),
+                    format!("(regex #\"^{}\\..*\")", regex_escape(f)),
+                ]
+            })
+            .collect();
+        p.push_str(&format!(
+            "(allow file-write* {} {})",
+            subpaths.join(" "),
+            files.join(" ")
+        ));
+    }
 
     if !s.readonly_files.is_empty() {
         p.push_str(&format!(
@@ -182,6 +195,14 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
     for dir in &s.readonly_subpaths {
         p.push_str(&format!(
             "(deny file-write* (subpath {}))",
+            sbpl_string(dir)
+        ));
+    }
+    // Only the directory itself: renaming or removing it needs `file-write-unlink`
+    // on its own path, while creating things inside it is judged by their paths.
+    for dir in &s.pinned_dirs {
+        p.push_str(&format!(
+            "(deny file-write-unlink (literal {}))",
             sbpl_string(dir)
         ));
     }
@@ -286,21 +307,25 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
         } => Some((*port, relay)),
         _ => None,
     };
-    let mut args: Vec<OsString> = [
-        "--ro-bind",
-        "/",
-        "/",
-        "--dev",
-        "/dev",
-        "--proc",
-        "/proc",
-        "--unshare-pid",
-        "--die-with-parent",
-        "--new-session",
-    ]
-    .iter()
-    .map(OsString::from)
-    .collect();
+    // An open filesystem binds the real root writable and then the real /dev over
+    // it (a plain bind drops device access); the rules below carve out what stays
+    // protected. Otherwise the root is read-only with a minimal /dev.
+    let base: &[&str] = if s.open_filesystem {
+        &["--bind", "/", "/", "--dev-bind", "/dev", "/dev"]
+    } else {
+        &["--ro-bind", "/", "/", "--dev", "/dev"]
+    };
+    let mut args: Vec<OsString> = base
+        .iter()
+        .chain(&[
+            "--proc",
+            "/proc",
+            "--unshare-pid",
+            "--die-with-parent",
+            "--new-session",
+        ])
+        .map(OsString::from)
+        .collect();
     for dir in &s.private_tmp {
         args.extend(["--tmpfs".into(), dir.into()]);
     }

@@ -7,10 +7,12 @@ use std::process::{Command, Stdio};
 fn sandbox(project: &Path) -> AgentSandbox {
     AgentSandbox {
         project: project.to_path_buf(),
+        open_filesystem: false,
         writable: vec![],
         writable_files: vec![],
         readonly_files: vec![],
         readonly_subpaths: vec![],
+        pinned_dirs: vec![],
         denied_programs: vec![],
         denied_services: vec![],
         masked_files: vec![],
@@ -619,4 +621,157 @@ fn bubblewrap_with_a_relay_unshares_the_network_and_starts_the_relay_first() {
         ]
     );
     assert_eq!(&tail[8..], ["/bin/sh", "-c", "true"]);
+}
+
+#[test]
+fn an_open_filesystem_writes_anywhere_but_keeps_what_the_rules_protect() {
+    let backend = need_backend!();
+    let h = host();
+    let outside = tempfile::tempdir().unwrap().keep().canonicalize().unwrap();
+    std::fs::write(outside.join("pinned.cfg"), "ORIGINAL").unwrap();
+    std::fs::create_dir(outside.join("locked")).unwrap();
+    let mut s = hiding(&h);
+    s.open_filesystem = true;
+    s.readonly_files = vec![outside.join("pinned.cfg")];
+    s.readonly_subpaths = vec![outside.join("locked")];
+    let out = inside(
+        backend,
+        &s,
+        &format!(
+            "echo a > {o}/free.txt && echo FREE-OK; echo b >> {o}/pinned.cfg; \
+             echo c > {o}/locked/x; cat {d}/operator.token; echo DONE",
+            o = outside.display(),
+            d = h.dir.display()
+        ),
+    );
+    assert!(
+        out.contains("FREE-OK") && outside.join("free.txt").exists(),
+        "a write outside the project should land: {out}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.join("pinned.cfg")).unwrap(),
+        "ORIGINAL",
+        "a read-only file stays read-only: {out}"
+    );
+    assert!(!outside.join("locked/x").exists(), "{out}");
+    assert!(
+        !out.contains("OPERATOR-TOKEN"),
+        "hiding still applies: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&outside);
+}
+
+#[test]
+fn an_open_filesystem_leaves_the_network_and_shared_directories_alone() {
+    let backend = need_backend!();
+    let h = host();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        while let Ok((mut c, _)) = listener.accept() {
+            let _ = c.write_all(b"reached");
+        }
+    });
+    let shared = tempfile::tempdir().unwrap();
+    std::fs::write(shared.path().join("f"), "SHARED-DATA").unwrap();
+    let mut s = sandbox(&h.project);
+    s.open_filesystem = true;
+    let out = inside(
+        backend,
+        &s,
+        &format!(
+            "python3 -c \"import socket; c=socket.create_connection(('127.0.0.1',{port})); print(c.recv(20).decode())\"; cat {}/f",
+            shared.path().display()
+        ),
+    );
+    assert!(
+        out.contains("reached"),
+        "loopback is the machine's own: {out}"
+    );
+    assert!(out.contains("SHARED-DATA"), "{out}");
+}
+
+#[test]
+fn moving_a_parent_cannot_expose_a_hidden_directory() {
+    let backend = need_backend!();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let parent = root.join("config");
+    let hidden = parent.join("gh");
+    std::fs::create_dir_all(&hidden).unwrap();
+    std::fs::write(hidden.join("hosts.yml"), "GH-TOKEN").unwrap();
+    let project = root.join("project");
+    std::fs::create_dir(&project).unwrap();
+    let mut s = sandbox(&project);
+    s.open_filesystem = true;
+    s.hidden_dirs = vec![HiddenDir {
+        dir: hidden.clone(),
+        allow: vec![],
+    }];
+    s.readonly_subpaths = vec![hidden.clone()];
+    s.pinned_dirs = vec![parent.clone()];
+    let moved = root.join("moved");
+    let out = inside(
+        backend,
+        &s,
+        &format!(
+            "mkdir {p}/sibling && echo SIBLING-OK; mv {p} {m}; cat {m}/gh/hosts.yml; cat {p}/gh/hosts.yml; echo DONE",
+            p = parent.display(),
+            m = moved.display()
+        ),
+    );
+    assert!(!out.contains("GH-TOKEN"), "{out}");
+    assert!(
+        out.contains("SIBLING-OK"),
+        "pinning a directory must not stop work inside it: {out}"
+    );
+}
+
+#[test]
+fn an_open_filesystem_binds_the_real_root_and_devices_writable() {
+    let mut s = sandbox(Path::new("/p"));
+    s.open_filesystem = true;
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let has = |seq: &[&str]| args.windows(seq.len()).any(|w| w == seq);
+    assert!(has(&["--bind", "/", "/"]), "{args:?}");
+    assert!(has(&["--dev-bind", "/dev", "/dev"]), "{args:?}");
+    assert!(!args.contains(&"--ro-bind".to_string()), "{args:?}");
+    assert!(
+        !args.contains(&"--unshare-net".to_string()),
+        "the network is the machine's own: {args:?}"
+    );
+    s.open_filesystem = false;
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    assert!(args.windows(3).any(|w| w == ["--ro-bind", "/", "/"]));
+    assert!(args.windows(2).any(|w| w == ["--dev", "/dev"]));
+}
+
+#[test]
+fn an_open_seatbelt_profile_has_no_blanket_write_denial_but_keeps_every_carve_out() {
+    let mut s = sandbox(Path::new("/proj"));
+    s.open_filesystem = true;
+    s.readonly_files = vec!["/h/.zshrc".into()];
+    s.readonly_subpaths = vec!["/h/.hq".into()];
+    s.pinned_dirs = vec!["/h/.config".into()];
+    s.hidden_dirs = vec![HiddenDir {
+        dir: "/h/.config/gh".into(),
+        allow: vec![],
+    }];
+    let p = seatbelt_profile(&s);
+    assert!(!p.contains("(deny file-write*)"), "{p}");
+    assert!(!p.contains("(allow file-write*"), "{p}");
+    assert!(p.contains("(deny file-write* (literal \"/h/.zshrc\"))"));
+    assert!(p.contains("(deny file-write* (subpath \"/h/.hq\"))"));
+    assert!(p.contains("(deny file-write-unlink (literal \"/h/.config\"))"));
+    assert!(p.contains("(deny file-read-data (subpath \"/h/.config/gh\"))"));
+    s.open_filesystem = false;
+    assert!(seatbelt_profile(&s).contains("(deny file-write*)(allow file-write*"));
 }

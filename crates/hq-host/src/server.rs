@@ -956,6 +956,7 @@ fn info_json(i: &PaneInfo) -> Value {
         "rule": i.rule,
         "cwd": i.cwd.to_string_lossy(),
         "sandbox": i.sandbox,
+        "sandbox_profile": i.sandbox_profile,
         "pid": i.pid,
         "status": status,
         "exit_code": exit_code,

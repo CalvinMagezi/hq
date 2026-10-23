@@ -119,6 +119,8 @@ pub struct PaneInfo {
     pub cwd: PathBuf,
     /// `process` or `none`; what the agent is confined by.
     pub sandbox: &'static str,
+    /// `strict` or `open` for a process sandbox, empty for none.
+    pub sandbox_profile: &'static str,
     pub pid: Option<u32>,
     pub status: PaneStatus,
     pub rows: u16,
@@ -484,7 +486,7 @@ impl Host {
         let (exec, egress_port) = match confined {
             Some(c) => {
                 env.extend(c.env);
-                (Some(c.argv), Some(c.egress_port))
+                (Some(c.argv), c.egress_port)
             }
             None => (None, None),
         };
@@ -1183,6 +1185,11 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
             .as_ref()
             .map_or(Mode::None, |s| s.mode)
             .as_str(),
+        sandbox_profile: pane
+            .sandbox
+            .as_ref()
+            .filter(|s| s.mode == Mode::Process)
+            .map_or("", |s| s.profile.as_str()),
         pid: pane.pid,
         status: pane.status(),
         rows,

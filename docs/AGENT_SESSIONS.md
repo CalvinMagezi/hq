@@ -533,12 +533,12 @@ hq sessions spawn hermes --purpose review --task FR-053 --observe hs-codex-4d5e6
 
 Security, which is the point of running these agents through the host at all:
 
-- They are confined like every other agent: the process sandbox, a private copy of the
-  temporary directories, no read of the host's token or your credential directories, and an
-  egress allowlist. Their own state lives in `~/.hermes` or `~/.openclaw`, which
-  is writable for them and hidden from other agents. They reach whichever model provider you
-  configured for them, so add that provider's host to `agent_host.sandbox.allow_domains`; HQ
-  ships no default for it.
+- They are confined like every other agent: the process sandbox and no read of the host's token
+  or your credential directories. Under `profile: strict` that also means a private copy of the
+  temporary directories and an egress allowlist, and their own state in `~/.hermes` or
+  `~/.openclaw` is writable for them and hidden from other agents. They reach whichever model
+  provider you configured for them; under `strict` add that provider's host to
+  `agent_host.sandbox.allow_domains`, as HQ ships no default for it.
 - They get no HQ session token and no MCP configuration. HQ never wires itself into a
   general-purpose agent's own tool loop; what reaches the agent is what HQ types into it, and
   what comes back is read from its screen, which `harness_session_logs` treats as untrusted.
@@ -615,8 +615,8 @@ is short, quotes the last paragraph on its screen, where a CLI prints the error 
   and the day's count.
 
 What a specialist never gets: an HQ token, MCP wiring, a coding task, or the right to complete
-a task. What it keeps: the sandbox, its own state directory, and the egress allowlist, so add
-its model provider's host to `agent_host.sandbox.allow_domains`. The one-shot arguments are
+a task. What it keeps: the sandbox, its own state directory, and under `profile: strict` the
+egress allowlist, so add its model provider's host to `agent_host.sandbox.allow_domains`. The one-shot arguments are
 the ones each project documents and have not been run against a live install here.
 
 ## Custom harness profiles
@@ -735,7 +735,8 @@ machine as you, scoped to the host's own API and to one source address. Conseque
 | `gate_denied` | The call used a method the gate does not allow. |
 | `agent_not_ready` at spawn | Agent is at a dialog. Read the screen from the spawn result and answer with `keys`. |
 | Spawn fails with `cannot sandbox the agent` | No sandbox program works on that machine (install `bubblewrap` on Linux, allow user namespaces on Ubuntu 24.04), or the project directory contains your home. |
-| An agent's MCP server or plugin is missing | The sandbox refused its host; see the egress log and add it to `agent_host.sandbox.allow_domains`. |
+| An agent's MCP server or plugin is missing | Under `profile: strict` the sandbox refused its host; see the egress log and add it to `agent_host.sandbox.allow_domains`. The default `open` profile has no allowlist, so look at the plugin's own log. |
+| `git` over ssh, `gh`, `aws` or `kubectl` fails inside an agent | The credential stores are hidden from agents by default. Set `agent_host.sandbox.hide_credentials: false`, or reveal one directory to one kind of agent with `agent_readable`. See [AGENT_HOST.md](AGENT_HOST.md). |
 | Spawned Claude replies `Login expired` | The user account on that host is not logged in to that CLI. |
 | A stack specialist starts nothing | `hq stack list` shows its `problem` (a coding harness, an unknown purpose, a profile without `one_shot_args`), its queue is empty (`task_next` for that name, less code-shaped work), a run is up, or its `runs_per_day` budget is spent. A task whose run could not start is left a comment and tried again after 30 minutes. |
 | A stack run ended and its task is blocked | The process exited non-zero (a crash or a refused login). Its last screen is in `harness_session_logs`; fix the cause, then assign the task to the specialist again or `hq stack run <name> <task>`. |

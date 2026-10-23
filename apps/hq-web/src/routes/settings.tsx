@@ -192,7 +192,12 @@ function CodingAgentsSection({ host: h }: { host: HqSettings['agent_host'] }) {
         <>
           <Row label="Default host">{h.default_host}</Row>
           <Row label="Hosts">{h.hosts.length ? h.hosts.join(', ') : 'this machine only'}</Row>
-          <Row label="Agent sandbox"><Flag on={h.sandbox_mode === 'process'} />{h.sandbox_extra_domains ? ` · ${h.sandbox_extra_domains} extra allowed sites` : ''}</Row>
+          <Row label="Agent sandbox">
+            <Flag on={h.sandbox_mode === 'process'} />
+            {h.sandbox_mode === 'process' ? ` · ${h.sandbox_profile ?? 'strict'} profile` : ''}
+            {h.sandbox_mode === 'process' && h.sandbox_profile === 'open' && h.sandbox_hide_credentials === false ? ' · credential stores visible' : ''}
+            {h.sandbox_profile !== 'open' && h.sandbox_extra_domains ? ` · ${h.sandbox_extra_domains} extra allowed sites` : ''}
+          </Row>
           <Row label="Stop idle sessions after">{h.idle_reap_hours ? `${h.idle_reap_hours} h` : 'never'}</Row>
           <Row label="New watches drive"><Flag on={h.drive_new_watches} /></Row>
           <Row label="Driver check-in">{h.driver_checkin_minutes} min</Row>

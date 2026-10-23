@@ -124,6 +124,11 @@ pub(crate) fn settings_view(config: &HqConfig, env_set: &dyn Fn(&str) -> bool) -
                 hq_core::config::SandboxMode::Process => "process",
                 hq_core::config::SandboxMode::None => "none",
             },
+            "sandbox_profile": match config.agent_host.sandbox.profile {
+                hq_core::config::SandboxProfile::Open => "open",
+                hq_core::config::SandboxProfile::Strict => "strict",
+            },
+            "sandbox_hide_credentials": config.agent_host.sandbox.hide_credentials,
             "sandbox_extra_domains": config.agent_host.sandbox.allow_domains.len(),
             "idle_reap_hours": config.agent_host.idle_reap_hours,
             "drive_new_watches": config.agent_host.drive_new_watches,

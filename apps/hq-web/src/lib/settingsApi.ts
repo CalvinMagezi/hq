@@ -15,6 +15,9 @@ export interface AgentHostSettings {
   default_host: string
   hosts: string[]
   sandbox_mode: string
+  /** `open` or `strict`; absent from a gateway that predates profiles, which applies strict. */
+  sandbox_profile?: string
+  sandbox_hide_credentials?: boolean
   sandbox_extra_domains: number
   idle_reap_hours: number
   drive_new_watches: boolean

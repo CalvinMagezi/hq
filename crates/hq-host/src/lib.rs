@@ -95,7 +95,7 @@ pub use relay::{run_relay, sandbox_init};
 #[cfg(unix)]
 pub use report::{STALE_WORKING_AFTER, combine as combine_state, state_for};
 #[cfg(unix)]
-pub use sandbox::{Allow, Mode as SandboxMode, SandboxSpec};
+pub use sandbox::{Allow, Mode as SandboxMode, Profile as SandboxProfile, SandboxSpec};
 #[cfg(unix)]
 pub use server::{Limits, Server, StopHandle, agent_socket_path, socket_path};
 #[cfg(unix)]

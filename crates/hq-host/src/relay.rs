@@ -6,7 +6,7 @@
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::Arc;
@@ -90,6 +90,7 @@ pub fn serve_bridge(path: &Path, port: u16, stop: Arc<AtomicBool>) -> std::io::R
     let listener = UnixListener::bind(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
     listener.set_nonblocking(true)?;
+    let ours = std::fs::metadata(path)?.ino();
     let path = path.to_path_buf();
     std::thread::Builder::new()
         .name("egress-bridge".into())
@@ -107,7 +108,11 @@ pub fn serve_bridge(path: &Path, port: u16, stop: Arc<AtomicBool>) -> std::io::R
                     Err(_) => std::thread::sleep(ACCEPT_POLL),
                 }
             }
-            let _ = std::fs::remove_file(&path);
+            // The path is the agent's name, so a relaunch under the same name binds a new
+            // socket there while this thread is still asleep. Only remove our own.
+            if std::fs::metadata(&path).is_ok_and(|m| m.ino() == ours) {
+                let _ = std::fs::remove_file(&path);
+            }
         })?;
     Ok(())
 }
@@ -142,4 +147,41 @@ pub fn sandbox_init(port: u16, unix: &Path, argv: &[String]) -> std::io::Error {
         std::thread::sleep(ACCEPT_POLL);
     }
     std::process::Command::new(program).args(args).exec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn gone(path: &Path) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while path.exists() {
+            if std::time::Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(ACCEPT_POLL);
+        }
+        true
+    }
+
+    #[test]
+    fn a_stopped_bridge_does_not_remove_the_socket_of_one_started_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("eg.sock");
+        let (first, second) = (
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        serve_bridge(&path, 1, first.clone()).unwrap();
+        // The same agent name is launched again and the new bridge takes over the path.
+        serve_bridge(&path, 1, second.clone()).unwrap();
+        first.store(true, Ordering::SeqCst);
+        // The old bridge notices its stop flag one poll later, which is when it used to
+        // remove whatever was at the path.
+        std::thread::sleep(ACCEPT_POLL * 4);
+        assert!(path.exists(), "the new bridge's socket was removed");
+        UnixStream::connect(&path).expect("the new bridge still accepts connections");
+        second.store(true, Ordering::SeqCst);
+        assert!(gone(&path), "a stopped bridge leaves its own socket behind");
+    }
 }
