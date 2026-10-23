@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.SystemClock;
 import android.util.Log;
+import example.hq.spike.bridge.BridgeSupervisor;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -152,6 +153,8 @@ public class HubService extends Service {
             new Thread(() -> supervise(gen, "caddy", this::caddyProcess, false), "caddy-supervisor").start();
             new Thread(() -> Alerts.watch(getApplicationContext(), () -> gen == generation.get()), "alerts").start();
         }
+        // Does nothing until the owner has turned paired devices on (the pairing screen).
+        BridgeSupervisor.INSTANCE.start(getApplicationContext());
         return START_STICKY;
     }
 
@@ -320,6 +323,7 @@ public class HubService extends Service {
             if (hqProc != null) hqProc.destroy();
             if (caddyProc != null) caddyProc.destroy();
         }
+        BridgeSupervisor.INSTANCE.stop();
         super.onDestroy();
     }
 

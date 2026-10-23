@@ -90,6 +90,13 @@ pub enum BridgeAction {
         #[arg(long)]
         json: bool,
     },
+    /// The phone app's helper: keep this machine reachable by its paired peers and take commands
+    /// as JSON lines on standard input, answering on standard output (`docs/HQ_MOBILE.md`). It
+    /// ends when its input does. Not meant to be typed by hand
+    Run {
+        #[command(flatten)]
+        net: NetArgs,
+    },
     /// Revoke a peer. A running `serve` stops serving it at its next request; the bridge of a
     /// running daemon closes its connections at once when it revokes through its own API
     Revoke { id: String },
@@ -119,7 +126,9 @@ fn relay_mode(text: &str) -> Result<RelayMode> {
     match text {
         "none" => Ok(RelayMode::Disabled),
         "default" => {
-            eprintln!(
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr(),
                 "note: n0's public relays are for development and testing, not for production."
             );
             Ok(RelayMode::Default)
@@ -128,6 +137,12 @@ fn relay_mode(text: &str) -> Result<RelayMode> {
             .parse()
             .context("--relay is none, default or a relay URL")?])),
     }
+}
+
+fn device_name(net: &NetArgs) -> String {
+    net.name
+        .clone()
+        .unwrap_or_else(|| std::env::var("HOSTNAME").unwrap_or_else(|_| DEFAULT_NAME.to_string()))
 }
 
 async fn start(net: &NetArgs, db: Database, serve: bool) -> Result<Bridge> {
@@ -141,9 +156,7 @@ async fn start(net: &NetArgs, db: Database, serve: bool) -> Result<Bridge> {
             key: key_path(net)?,
             bind,
             relay: relay_mode(&net.relay)?,
-            name: net.name.clone().unwrap_or_else(|| {
-                std::env::var("HOSTNAME").unwrap_or_else(|_| DEFAULT_NAME.to_string())
-            }),
+            name: device_name(net),
             with_addrs: !net.no_addrs,
             advertise: Vec::new(),
         },
@@ -159,6 +172,7 @@ pub async fn run(config: &HqConfig, action: BridgeAction) -> Result<()> {
         BridgeAction::Pair { net, ttl } => pair(&net, db, Duration::from_secs(ttl)).await,
         BridgeAction::Join { link, net } => join(&net, db, &read_link(link)?).await,
         BridgeAction::Serve { net } => serve(&net, db).await,
+        BridgeAction::Run { net } => run_control(&net, db).await,
         BridgeAction::Ping { peer, count, net } => ping(&net, db, &peer, count).await,
         BridgeAction::Peers { all, json } => list(&db, all, json),
         BridgeAction::Revoke { id } => revoke(&db, &id),
@@ -279,6 +293,19 @@ async fn serve(net: &NetArgs, db: Database) -> Result<()> {
     tokio::signal::ctrl_c().await?;
     bridge.shutdown().await;
     Ok(())
+}
+
+async fn run_control(net: &NetArgs, db: Database) -> Result<()> {
+    let bridge = start(net, db, true).await?;
+    let input = tokio::io::BufReader::new(tokio::io::stdin());
+    super::bridge_control::serve(
+        bridge,
+        net.relay.clone(),
+        device_name(net),
+        input,
+        tokio::io::stdout(),
+    )
+    .await
 }
 
 async fn ping(net: &NetArgs, db: Database, peer: &str, count: usize) -> Result<()> {

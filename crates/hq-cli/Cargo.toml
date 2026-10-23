@@ -81,6 +81,10 @@ hq-bridge = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 zeroize = { version = "1", optional = true }
 
+# The phone app runs `hq` as a child process, which has no JVM. See `android_runtime.rs`.
+[target.'cfg(target_os = "android")'.dependencies]
+ndk-context = "=0.1.1"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 

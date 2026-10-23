@@ -3386,6 +3386,7 @@ dependencies = [
  "iroh",
  "libc",
  "mimalloc",
+ "ndk-context",
  "openssl-sys",
  "reqwest 0.12.28",
  "rpassword",

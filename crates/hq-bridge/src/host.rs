@@ -569,6 +569,7 @@ impl OpenTicket {
         };
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(SecretKey::generate())
+            .dns_resolver(crate::dns::resolver())
             .relay_mode(spec.relay.clone())
             .clear_ip_transports()
             .hooks(gate);

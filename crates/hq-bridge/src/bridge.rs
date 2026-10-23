@@ -278,6 +278,7 @@ impl Bridge {
         let key = load_or_create_key(&cfg.key)?;
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(key)
+            .dns_resolver(crate::dns::resolver())
             .relay_mode(cfg.relay.clone())
             .clear_ip_transports()
             .hooks(ServiceGate { db: db.clone() });
@@ -430,6 +431,18 @@ impl Bridge {
             let _ = router.shutdown().await;
         }
         self.endpoint.close().await;
+    }
+}
+
+/// "direct" when the selected path of a connection is an IP address, "relay" when it goes through
+/// a relay, "none" while there is no selected path.
+pub fn path_kind(conn: &Connection) -> &'static str {
+    let paths = conn.paths();
+    let selected = paths.iter().find(|p| p.is_selected());
+    match selected.as_ref().map(|p| p.remote_addr()) {
+        Some(iroh::TransportAddr::Ip(_)) => "direct",
+        Some(iroh::TransportAddr::Relay(_)) => "relay",
+        _ => "none",
     }
 }
 

@@ -43,6 +43,7 @@ hq bridge serve                  # on either machine: stay reachable (an echo se
 hq bridge peers                  # who is paired
 hq bridge ping <peer id>         # connect by key alone and time a few round trips
 hq bridge revoke <peer id>       # take a peer off the list
+hq bridge run                    # the phone app's helper: JSON lines on stdin and stdout, see docs/HQ_MOBILE.md
 ```
 
 `--relay none` (the default) uses direct paths only, which is what two machines on one network
@@ -82,8 +83,9 @@ it:
 </intent-filter>
 ```
 
-The camera's behavior with this link has not been tried yet (the spike's camera opened nothing for
-plain text).
+The app handles it (`PairLinkActivity`): the link opens a confirmation screen and nothing is dialed
+until the owner presses Pair. A VIEW intent for it was tried on an emulator and a phone; the stock
+Camera app itself has not been tried yet (the spike's camera opened nothing for plain text).
 
 ## Using the library
 
@@ -159,6 +161,9 @@ library.
 | Long-term endpoint (one UDP socket) | Between `Bridge::start` with a handler and `shutdown`. `hq bridge serve` runs it until interrupted |
 | Throwaway endpoint (one UDP socket per ticket) | From `open_ticket` until the ticket is used, expired or burned. `hq bridge pair` runs it until then |
 
+`hq bridge run` is both: the long-term endpoint for as long as it runs, and one throwaway endpoint while
+a ticket is open. The Android app starts it only after the owner turned paired devices on.
+
 Without a handler, `Bridge::start` binds a socket to dial out but accepts no protocol. The commands
 `join`, `ping`, `peers` and `revoke` never accept a connection.
 
@@ -168,8 +173,12 @@ Without a handler, `Bridge::start` binds a socket to dial out but accepts no pro
 cargo test -p hq-db bridge
 cargo test -p hq-bridge                       # unit tests and the loopback end-to-end tests
 cargo clippy -p hq-cli --all-targets --features bridge -- -D warnings
-cargo test -p hq-cli --features bridge --bin hq -- bridge_commands
+cargo test -p hq-cli --features bridge --bin hq -- bridge_commands bridge_control
 ```
+
+`bridge_control` drives two machines through the JSON-line control channel the phone app uses (pairing with
+typed digits, wrong digits, ping, revoke, probe and redial). The Android side has JVM unit tests
+(`cd apps/android && ./gradlew :app:testDebugUnitTest`).
 
 The end-to-end tests use real iroh endpoints on loopback with no relay, the real migrated schema,
 and `::1` as a second source address. They need no network. The spike's tests carry over: its

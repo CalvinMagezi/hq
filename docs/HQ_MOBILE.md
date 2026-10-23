@@ -84,8 +84,84 @@ build, nothing starts it on its own, and the app that runs it is separate work. 
 files and the security notes are in `docs/PRIVATE_NETWORK.md` ("A phone without the WireGuard app")
 and `docs/security/NETWORK.md`, section 9.
 
+It turns on the `bridge` feature too (`--features tunnel,bridge`), which adds `hq bridge`, the QR
+pairing of `docs/PAIRING.md`. The app drives it through `hq bridge run`, described next.
+
+## The bridge on the phone
+
+The phone can pair with another machine of its owner by QR code and then be reached by key, with no
+account and no VPN (`docs/PAIRING.md`, `docs/security/PAIRING.md`). The app has three parts for it,
+all new files (`apps/android/.../bridge/`, `ui/pairing/`, `ui/connect/`):
+
+- **`hq bridge run`**, a child process of the hub service. It owns the iroh endpoint and the paired
+  list. The app talks to it in JSON lines on its standard input and output: no socket, no port,
+  so nothing but the app can reach it, and it ends when the app's end of the pipe closes.
+- **The pairing screen** (`PairingActivity`): show a code, scan one with the camera, paste a link,
+  type the six digits, list the paired devices, remove one. Removing closes that device's open
+  connection at once.
+- **The `hqpair://` link handler** (`PairLinkActivity`): a QR code read by the stock camera, or a link
+  in a browser, opens the app on a confirmation screen. Nothing is dialed until the owner presses Pair,
+  because anyone can send a link.
+
+**Off by default.** The child binds a UDP socket and accepts paired devices, so it runs only after the
+owner turned "Paired devices" on in the pairing screen. Showing a code or scanning one starts it for that
+pairing only; it is remembered (and the hub service starts it again with the app) once a pairing succeeds,
+and leaving the screen without one stops it again. A link the owner confirmed but that failed therefore
+leaves the phone as it was. Turning the switch off stops the child, and kills it if it has not gone in
+three seconds.
+
+**The relay.** Pairing and reconnecting need a relay to find the direct path from behind a phone's
+address translation. The default is n0's public relays (`--relay default`), which are for development and
+testing, not production; a release uses a relay the household runs (the `hq edge` co-hosted relay).
+Put `none`, `default` or a relay URL on one line in `files/bridge_relay` to change it. With a relay the
+ticket carries no IP addresses (`--no-addrs`), which makes the QR code about half the size.
+
+**The control protocol.** One JSON object per line. Commands, from the app: `open` (show a ticket;
+`ttl_secs` optional), `cancel`, `digits` (the digits the person typed for a waiting device), `join` (a
+link), `peers`, `revoke`, `network_change`, `ping`, `keep`, `keep_stop`, `quit`. `cancel` ends the
+ticket on show and a join in progress. Events, from `hq`:
+`ready`, `ticket`, `request` (a device waits for digits: its name and id, never the digits),
+`decision` (paired once the device is on the list, declined, or too late), `ticket_closed`, `digits` (what the phone shows while it
+joins), `joined`, `join_failed`, `peers`, `revoked`, `ping`, `keep`, `error`, `bye`. The six digits
+are compared inside `hq`: the app forwards what was typed and never learns the right answer, so a
+"yes" button cannot be built on it. Unknown events are skipped, so a newer `hq` does not break an older
+app. The code is `crates/hq-cli/src/commands/bridge_control.rs` (the loop works over any reader and
+writer and is tested end to end with two machines) and `apps/android/.../bridge/BridgeWire.kt`.
+
+**Why a child process needed a fix.** iroh reads Android's DNS servers through JNI (`ndk-context`),
+and a child process has no JVM. The call panics, the release profiles abort on panic, so the first
+endpoint bind ended `hq` with SIGABRT (measured on an Android 16 emulator; the spike's unwinding build only
+printed the panic). `hq` now sets a null `ndk-context` on Android (`crates/hq-cli/src/android_runtime.rs`;
+`netdev`, which also asks, checks it and skips what needs the JVM) and gives every bridge endpoint a
+resolver that asks `getaddrinfo` first and iroh's public resolvers second (`hq_bridge::dns`), so the
+JNI read is never reached. A new iroh endpoint anywhere in `hq` must be given that resolver.
+
+**Network changes.** Android does not tell native code when the network changes. The app watches the
+internet networks that are not a VPN (`NetworkWatcher`; the default network is the VPN on a phone that has
+one, and does not change when Wi-Fi gives way to mobile data under it) and sends `network_change`, which
+calls `Endpoint::network_change`. A connection that `hq bridge run` holds also gets a probe when the
+network changes while a call waits, and is dropped and dialed again if the probe goes unanswered for 1.5 s
+(a Wi-Fi to mobile data switch went from about 17.5 s of silence to 4 to 6 s on a phone). See
+`docs/plans/native-bridge/w4-measurements.md`, and for `keep`, the diagnostic that holds a connection to a
+paired device and traces its round trips into `files/bridge.log` (a line a second until it is stopped).
+
+**Keeping the connection with the app in the background.** The bridge child lives inside the existing
+foreground service, so it runs for as long as `hq` does. What a sleeping phone then does is in
+`docs/plans/native-bridge/w4-measurements.md` and in the risk section of
+`docs/plans/native-bridge-sprint.md`.
+
+**Connect Claude** (`ConnectClaudeActivity`) shows the address to give claude.ai and an Arm button
+(`POST /api/oauth/connector/arm`, the same window the web app opens). The address is what hq reports once
+`mcp_connector` is on. Until the edge and the device's own TLS (workstreams W1 and W2) are merged, a
+stand-in address in `files/connector_url` shows the screen with one; Arm stays off for a stand-in.
+
+Diagnostics for `adb`, on the pairing screen's intent (it needs a permission only `adb` holds):
+`--es keep <device id>` starts the `keep` trace, `--es keep ""` stops it, `--ez watch false` stops the app
+from reporting network changes (for a before and after), `--es screen show|scan|paste` opens a screen.
+`-Phq.appId=<id>` builds a copy that installs beside the real app for a phone test; it is never a release id.
+
 ## Not part of this edition
 
 The app that runs this binary as a foreground service and shows the web app in a WebView, backup
-and restore, a way for other devices to reach a phone, and an updater for Android. They are
-separate work; the profile only makes the binary behave correctly once something runs it.
+and restore, and an updater for Android. They are separate work; the profile only makes the binary
+behave correctly once something runs it. A way for other devices to reach a phone is the bridge above.

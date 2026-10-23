@@ -41,7 +41,9 @@ android {
     defaultConfig {
         // The id and the signing key must stay as they are: the installed phone keeps its vault, its
         // Keystore key and its sessions only if an update has the same id and the same signature.
-        applicationId = "example.hq.spike"
+        // -Phq.appId= installs a second copy beside the real app for a test on a phone (its own data, its own
+        // Keystore key); it is never a release id. Leave it out for the build that updates the installed app.
+        applicationId = providers.gradleProperty("hq.appId").getOrElse("example.hq.spike")
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -111,6 +113,13 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    // Scanning a pairing code: CameraX (Apache-2.0, no Google Play services) reads the camera and ZXing
+    // (Apache-2.0) decodes the QR code. No ML Kit.
+    implementation("androidx.camera:camera-core:1.4.2")
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("com.google.zxing:core:3.5.3")
 
     testImplementation("junit:junit:4.13.2")
     // The platform's org.json is a stub in JVM unit tests.

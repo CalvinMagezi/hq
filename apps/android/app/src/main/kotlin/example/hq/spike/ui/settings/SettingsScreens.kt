@@ -179,6 +179,13 @@ private fun Snack(text: String, onDismiss: () -> Unit, modifier: Modifier) {
     }
 }
 
+/** A row that opens one of the app's own full screens (pairing, Connect Claude). */
+@Composable
+private fun OpenScreen(text: String, screen: Class<*>) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Text(text, style = HqType.BodyBold, color = Mts.BrandBlue, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { context.startActivity(android.content.Intent(context, screen)) }.padding(horizontal = 20.dp, vertical = 16.dp))
+}
+
 @Composable
 private fun Page(content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) { content() }
@@ -609,6 +616,8 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
         while (code != null) { value = (code.expiresAt - Instant.now().epochSecond).coerceAtLeast(0); delay(1_000) }
     }
     Page {
+        // Pairing does not need the web app to be up, so its row comes before the check for it.
+        OpenScreen("Pair a device with a QR code", example.hq.spike.ui.pairing.PairingActivity::class.java)
         val d = ui.snap.devices
         if (Unanswered(ui, "devices", d != null) || d == null) return@Page
         val shape = RoundedCornerShape(12.dp)

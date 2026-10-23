@@ -56,10 +56,31 @@ device (the phone): rustls ends TLS, hq-web serves /mcp, the OAuth endpoints and
 ## The risk to settle first
 
 A phone as the only hub must answer Anthropic's discovery calls (about 10 s) while it sleeps. The
-sleep row measured so far proves little: the phone was charging and the process ran as the `adb` shell
-user. W4 measures a foreground service under real Doze. If it cannot hold, the stated fallback is that
-an always-on paired desktop (or the Linux binary) carries the connector, and the phone stays ground
-zero for everything else. The plan does not promise "phone only" until that measurement says so.
+sleep row measured so far proved little: the phone was charging and the process ran as the `adb` shell
+user. W4 measured the real app process as a foreground service
+(`docs/plans/native-bridge/w4-measurements.md`, section 4).
+
+**Result (2026-10-22, partly settled).** Doze does not cut off a foreground service: in forced deep
+idle the system's own view of the app was `effective=NONE` where other apps read `DOZE`, and a cold dial
+from a second machine connected in 0.17 to 0.24 s at +10 s, +5 min and +10 min, against a budget of
+about 10 s. No battery exemption was needed. What this does **not** show is the processor suspending:
+the phone was on a USB cable and Samsung's ambient display held a wake lock, so it never slept. The
+unplugged, dark-display, hour-and-night row is left to W8 ("in-app Doze"), with the steps written in the
+measurements file. Until it is run, the plan does not promise "phone only".
+
+**The fallback, specified.** If an unplugged phone cannot answer in time, an always-on paired machine
+carries the connector and the phone stays ground zero for everything else:
+
+- The edge registers the always-on machine (a desktop with the Native Bridge or the Linux `hq`
+  binary) as the device behind the connector name, instead of the phone. Registration is the same
+  exchange, scanned on that machine.
+- `hq-web` on that machine serves the connector's `/mcp` and OAuth paths as the phone would have, so
+  nothing in W2 changes. It reaches the phone's notes and tasks over the bridge when the phone is awake and
+  answers from its own vault copy when it is not.
+- The Connect Claude screen on the phone then shows the address of the machine, and arming happens on
+  the machine's consent page (or the phone's, over the bridge: a W6 decision).
+- Cost: the connector is only as available as that machine, and the vault copy has to be kept in step
+  (a sync question outside this sprint, so the first version would serve what that machine already holds).
 
 ## Done means (the fresh-install run)
 
