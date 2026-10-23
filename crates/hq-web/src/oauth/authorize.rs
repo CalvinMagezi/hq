@@ -133,15 +133,20 @@ pub(crate) async fn authorize(
         resource: &resource,
         scope: checked.scope,
     };
-    store_request(&state, &new, now)
+    store_request(&state, &new, now, settings.consent.starts_with("https://"))
 }
 
 const INVALID: &str = "This connection request is not valid";
 const HTTPS_DEFAULT_PORT: &str = ":443";
+const HTTP_DEFAULT_PORT: &str = ":80";
 
-/// Whether the request's `Host` is the given https origin's authority.
+/// Whether the request's `Host` is the given origin's authority (https, or http on loopback).
 pub(crate) fn on_origin(headers: &HeaderMap, origin: &str) -> bool {
-    let Some(authority) = origin.strip_prefix("https://") else {
+    let (authority, default_port) = if let Some(a) = origin.strip_prefix("https://") {
+        (a, HTTPS_DEFAULT_PORT)
+    } else if let Some(a) = origin.strip_prefix("http://") {
+        (a, HTTP_DEFAULT_PORT)
+    } else {
         return false;
     };
     let host = headers
@@ -149,7 +154,7 @@ pub(crate) fn on_origin(headers: &HeaderMap, origin: &str) -> bool {
         .and_then(|v| v.to_str().ok())
         .map(|h| h.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    host.strip_suffix(HTTPS_DEFAULT_PORT).unwrap_or(&host) == authority
+    host.strip_suffix(default_port).unwrap_or(&host) == authority
 }
 
 fn not_armed() -> Response {
@@ -162,7 +167,12 @@ fn not_armed() -> Response {
 }
 
 /// Stores the request bound to a fresh cookie in this browser and sends it to the consent page.
-fn store_request(state: &WsState, new: &store::NewRequest, now: i64) -> Response {
+fn store_request(
+    state: &WsState,
+    new: &store::NewRequest,
+    now: i64,
+    secure_cookie: bool,
+) -> Response {
     let binder = format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
@@ -176,7 +186,10 @@ fn store_request(state: &WsState, new: &store::NewRequest, now: i64) -> Response
             StatusCode::FOUND,
             [
                 (header::LOCATION, format!("/connect?request={id}")),
-                (header::SET_COOKIE, super::consent::binder_cookie(&binder)),
+                (
+                    header::SET_COOKIE,
+                    super::consent::binder_cookie(&binder, secure_cookie),
+                ),
             ],
         )
             .into_response(),

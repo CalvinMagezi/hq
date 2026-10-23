@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use tower::ServiceExt;
 
+const CONSENT: &str = "https://hq.example.ts.net";
 const CLIENT: &str = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 const REDIRECT: &str = "https://claude.ai/api/mcp/auth_callback";
 const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
@@ -50,10 +51,10 @@ impl HqTool for EchoArgs {
     }
 }
 
-fn settings() -> hq_core::config::ConnectorSettings {
+fn settings(consent: &str) -> hq_core::config::ConnectorSettings {
     hq_core::config::ConnectorSettings {
         public: "https://hq.example.com".into(),
-        consent: "https://hq.example.ts.net".into(),
+        consent: consent.into(),
         default_scope: "read_only".into(),
     }
 }
@@ -68,6 +69,10 @@ fn app() -> axum::Router {
 /// The router, its state for reaching the database and vault, and the vault directory, which
 /// lives as long as the caller holds it.
 fn app_and_db() -> (axum::Router, Arc<WsState>, tempfile::TempDir) {
+    app_and_db_consenting_at(CONSENT)
+}
+
+fn app_and_db_consenting_at(consent: &str) -> (axum::Router, Arc<WsState>, tempfile::TempDir) {
     super::cimd::remember(super::cimd::ClientMetadata {
         client_id: CLIENT.into(),
         client_name: "Claude".into(),
@@ -87,7 +92,7 @@ fn app_and_db() -> (axum::Router, Arc<WsState>, tempfile::TempDir) {
     let vault = tempfile::TempDir::new().unwrap();
     let mut state =
         WsState::new(vault.path().to_path_buf(), None).with_registry(Arc::new(registry));
-    state.connector = Some(settings());
+    state.connector = Some(settings(consent));
     let state = Arc::new(state);
     let app = routes(axum::Router::new(), &state)
         .route("/mcp", axum::routing::post(crate::mcp_http::mcp_handler))
@@ -153,8 +158,12 @@ fn get(path: &str) -> Request<Body> {
 
 /// The browser's request to the consent origin, as claude.ai sends it there.
 fn authorize_req() -> Request<Body> {
+    authorize_req_at("hq.example.ts.net")
+}
+
+fn authorize_req_at(host: &str) -> Request<Body> {
     Request::get(authorize_path())
-        .header("host", "hq.example.ts.net")
+        .header("host", host)
         .body(Body::empty())
         .unwrap()
 }
@@ -286,6 +295,58 @@ async fn claude_connects_calls_a_tool_in_scope_refreshes_and_is_revoked() {
     assert_eq!(status, StatusCode::OK);
     let (status, _, _) = send(&app, mcp(&new_access, call("vault_search"))).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_loopback_consent_origin_runs_the_flow_with_a_cookie_that_needs_no_https() {
+    const LOOPBACK: &str = "http://127.0.0.1:5799";
+    let (app, _, _vault) = app_and_db_consenting_at(LOOPBACK);
+    let (status, _, meta) = send(&app, get(AUTHORIZATION_SERVER_PATH)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        meta["authorization_endpoint"],
+        format!("{LOOPBACK}/oauth/authorize")
+    );
+    assert_eq!(meta["issuer"], "https://hq.example.com");
+
+    let (status, _, _) = send(&app, post_json("/api/oauth/connector/arm", json!({}))).await;
+    assert_eq!(status, StatusCode::OK);
+    // Only the exact loopback authority answers: not the public name, not another port, not the
+    // same address with the port left off, and not another loopback name.
+    for host in [
+        "hq.example.com",
+        "127.0.0.1:5800",
+        "127.0.0.1",
+        "localhost:5799",
+    ] {
+        let (status, _, _, _) = send_full(&app, authorize_req_at(host)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{host}");
+    }
+
+    let (status, location, cookie, _) = send_full(&app, authorize_req_at("127.0.0.1:5799")).await;
+    assert_eq!(status, StatusCode::FOUND);
+    let cookie = cookie.expect("a binder cookie");
+    for attr in ["HttpOnly", "SameSite=Strict", "Path=/api/oauth/requests"] {
+        assert!(cookie.contains(attr), "{cookie}");
+    }
+    assert!(!cookie.contains("Secure"), "{cookie}");
+    let id = location.unwrap();
+    let id = id.strip_prefix("/connect?request=").unwrap().to_string();
+
+    let approve = post_json(
+        &format!("/api/oauth/requests/{id}/approve"),
+        json!({"scope": "read_only", "label": "Claude on this device"}),
+    );
+    let (status, _, decided) = send(&app, with_cookie(approve, &cookie)).await;
+    assert_eq!(status, StatusCode::OK, "{decided}");
+    let redirect = url::Url::parse(decided["redirect"].as_str().unwrap()).unwrap();
+    let code = redirect
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .map(|(_, v)| v.into_owned())
+        .unwrap();
+    let (status, tokens) = exchange(&app, &code).await;
+    assert_eq!(status, StatusCode::OK, "{tokens}");
 }
 
 #[tokio::test]
