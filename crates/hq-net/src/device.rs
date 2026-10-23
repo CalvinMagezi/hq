@@ -125,7 +125,24 @@ mod tests {
         assert!(text.contains("Endpoint = vpn.example.com:51820\n"));
         assert_eq!(text.matches("AllowedIPs").count(), 1);
         assert!(!text.contains("0.0.0.0"), "never a full tunnel");
-        assert!(!text.contains("/0"));
+        assert!(!has_zero_length_route(&text), "never a /0 route");
+    }
+
+    /// The keys in the text are random base64, which can contain "/0" by chance, so only the
+    /// lines that hold routes and addresses are checked for a zero-length prefix.
+    fn has_zero_length_route(text: &str) -> bool {
+        text.lines()
+            .filter(|l| l.starts_with("AllowedIPs") || l.starts_with("Address"))
+            .any(|l| l.contains("/0"))
+    }
+
+    #[test]
+    fn a_key_that_happens_to_contain_slash_zero_is_not_taken_for_a_route() {
+        let mut net = sample_net();
+        net.hub_public_key = format!("{}/0=", "A".repeat(41));
+        let text = config_text(&net, &record(Kind::Laptop, None)).unwrap();
+        assert!(text.contains("/0="), "the key is in the text");
+        assert!(!has_zero_length_route(&text));
     }
 
     #[test]
