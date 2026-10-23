@@ -69,6 +69,7 @@ mcp_connector:
     enabled: true
     agree_to_ca_terms: true            # accepts the CA's subscriber agreement for you
     acme_directory: letsencrypt        # or letsencrypt-staging while testing
+    door_listen: null                  # optional: where the bridge hands the edge's streams to HQ
 ```
 
 - `public_url` must be a domain name the forwarder routes to this device; HQ gets a certificate
@@ -76,10 +77,20 @@ mcp_connector:
   thirds of the way through its life.
 - `authorize_url` is required here: the consent page is never served on this origin, so it must
   be on a private one.
-- Off by default; not available under `profile: lite`. **Not usable from `hq start` yet:** the
-  TLS door exists and is tested in `crates/hq-web/src/tls/`, but nothing builds it or feeds it
-  connections until the forwarder and the pairing bridge are wired in (the Native Bridge sprint,
-  `docs/plans/native-bridge-sprint.md`). Until then use Caddy, a tunnel or Funnel as above.
+- Off by default; not available under `profile: lite`. With `tls.enabled`, `hq start` and `hq web`
+  open the door's listener (`door_listen`) and keep the certificate fresh. By default it is a unix
+  socket, `<vault>/_data/connector_door/door.sock`, in a directory only your user can enter (an
+  absolute path in `door_listen` names another; a loopback `ip:port` is allowed as an opt-in, but
+  another user or app on the machine could bind the port first and take the forwarded
+  connections, including the CA's validation of the certificate, so use it only on a machine with
+  one user). It is on whenever TLS is, not only while a connection window is armed: Claude's calls
+  and token refreshes for an existing grant must work at any time, and the window guards
+  `/oauth/authorize` alone. A bind that fails (a wrong directory mode, something else at the path)
+  is reported and tried again every few seconds. The bridge (`hq bridge serve` or `run`) pipes
+  the registered edge's streams to that socket; register the device with the edge first
+  (`hq bridge register <link>`, `docs/PAIRING.md`). The consent origin (`authorize_url`) for a
+  device with no private name is the next change of the Native Bridge sprint
+  (`docs/plans/native-bridge-sprint.md`); until then use Caddy, a tunnel or Funnel as above.
 - The CA limits how many certificates one domain may get a week; a rate-limited first order waits
   and says when it will try again. Keep the saved certificate: it is in `_data/connector_tls/`.
 - Details, the checks on every request, and what the forwarder must hand over:

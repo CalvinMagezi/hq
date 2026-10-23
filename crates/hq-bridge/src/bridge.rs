@@ -4,6 +4,7 @@
 //! The long-term endpoint never speaks the pairing protocol. Pairing runs on a throwaway endpoint
 //! per ticket (`host.rs`); this endpoint serves one protocol, to peers on the paired list.
 
+use crate::door::{EDGE_ALPN, EdgeDoor, EdgeService, LABEL_BYTES};
 use crate::host::{self, OpenTicket, PairingSpec, Registrar, Tuning};
 use crate::join::{self, JoinOptions, JoinResult, target_from};
 use crate::key::load_or_create_key;
@@ -35,7 +36,7 @@ use std::{
 /// What paired peers speak to each other after pairing.
 pub const SERVICE_ALPN: &[u8] = b"hq/bridge/1";
 const REJECT_UNPAIRED: u32 = 403;
-const REJECT_REVOKED: u32 = 403;
+pub(crate) const REJECT_REVOKED: u32 = 403;
 const MAX_ECHO_BYTES: usize = 64 * 1024;
 const ONLINE_WAIT: Duration = Duration::from_secs(5);
 
@@ -76,7 +77,7 @@ pub struct BridgeConfig {
 
 /// Connections that are open right now, by the peer behind them, so a revoke can reach them.
 #[derive(Default)]
-struct Live {
+pub(crate) struct Live {
     next: AtomicU64,
     conns: Mutex<HashMap<EndpointId, Vec<(u64, WeakConnectionHandle)>>>,
 }
@@ -84,7 +85,7 @@ struct Live {
 impl Live {
     /// Remembers a connection (weakly: dropping it still closes it). Handles whose connection is
     /// gone are dropped here, so connections nobody unregisters do not pile up.
-    fn register(&self, id: EndpointId, conn: WeakConnectionHandle) -> u64 {
+    pub(crate) fn register(&self, id: EndpointId, conn: WeakConnectionHandle) -> u64 {
         let token = self.next.fetch_add(1, Ordering::SeqCst);
         let mut conns = self.conns.lock().unwrap();
         conns.retain(|_, list| {
@@ -105,8 +106,24 @@ impl Live {
         }
     }
 
+    /// Closes every open connection of every id. Returns how many were still alive.
+    pub(crate) fn close_every(&self) -> usize {
+        let handles: Vec<WeakConnectionHandle> = self
+            .conns
+            .lock()
+            .unwrap()
+            .values()
+            .flat_map(|l| l.iter().map(|(_, c)| c.clone()))
+            .collect();
+        handles
+            .into_iter()
+            .filter_map(|h| h.upgrade())
+            .map(|c| c.close(REJECT_REVOKED.into(), b"revoked"))
+            .count()
+    }
+
     /// Closes every open connection of `id`. Returns how many were still alive.
-    fn close_all(&self, id: &EndpointId) -> usize {
+    pub(crate) fn close_all(&self, id: &EndpointId) -> usize {
         let handles: Vec<WeakConnectionHandle> = self
             .conns
             .lock()
@@ -122,10 +139,16 @@ impl Live {
     }
 }
 
-struct LiveGuard {
+pub(crate) struct LiveGuard {
     live: Arc<Live>,
     id: EndpointId,
     token: u64,
+}
+
+impl LiveGuard {
+    pub(crate) fn new(live: Arc<Live>, id: EndpointId, token: u64) -> Self {
+        Self { live, id, token }
+    }
 }
 
 impl Drop for LiveGuard {
@@ -138,6 +161,14 @@ impl Drop for LiveGuard {
 async fn still_paired(db: &Database, id: EndpointId) -> bool {
     let db = db.clone();
     tokio::task::spawn_blocking(move || peers::is_paired(&db, &id.to_string()).unwrap_or(false))
+        .await
+        .unwrap_or(false)
+}
+
+/// Whether `id` is the edge this device registered with. Any failure is "no": the gate fails closed.
+pub(crate) async fn still_edge(db: &Database, id: EndpointId) -> bool {
+    let db = db.clone();
+    tokio::task::spawn_blocking(move || peers::is_edge(&db, &id.to_string()).unwrap_or(false))
         .await
         .unwrap_or(false)
 }
@@ -158,7 +189,16 @@ impl EndpointHooks for ServiceGate {
         if conn.side().is_client() {
             return AfterHandshakeOutcome::accept();
         }
-        if conn.alpn() == SERVICE_ALPN && still_paired(&self.db, conn.remote_id()).await {
+        // Two protocols, two lists: a paired peer may not open the edge protocol and the edge may
+        // not open the service protocol, so neither can borrow the other's door.
+        let allowed = if conn.alpn() == SERVICE_ALPN {
+            still_paired(&self.db, conn.remote_id()).await
+        } else if conn.alpn() == EDGE_ALPN {
+            still_edge(&self.db, conn.remote_id()).await
+        } else {
+            false
+        };
+        if allowed {
             return AfterHandshakeOutcome::accept();
         }
         AfterHandshakeOutcome::Reject {
@@ -249,6 +289,15 @@ impl Registrar for PeerRegistrar {
     }
 }
 
+/// What forgetting the edge did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ForgotEdge {
+    /// Whether an edge was on record.
+    pub had_record: bool,
+    /// How many of the edge's connections were open here and are now closed.
+    pub closed: usize,
+}
+
 pub struct Bridge {
     endpoint: Endpoint,
     db: Database,
@@ -260,6 +309,13 @@ pub struct Bridge {
     advertise: Vec<SocketAddr>,
     /// Connections that reached the service handler; the rest were closed at the gate.
     pub reached_service: Arc<AtomicU64>,
+    /// The edge's connections, kept apart from the paired peers' so that forgetting the edge
+    /// sweeps exactly those, whatever the record says.
+    edge_live: Arc<Live>,
+    /// Connections from the registered edge that reached the edge handler.
+    pub reached_edge: Arc<AtomicU64>,
+    /// Edge streams dropped because the device's stream cap was full.
+    pub edge_over_cap: Arc<AtomicU64>,
     _router: Option<Router>,
 }
 
@@ -275,6 +331,21 @@ impl Bridge {
         db: Database,
         handler: Option<StreamHandler>,
     ) -> Result<Self> {
+        Self::start_with_edge_door(cfg, db, handler, None).await
+    }
+
+    /// Like [`Bridge::start`], and with an `edge_door` it also accepts the edge protocol from the
+    /// edge this device registered with (and from no other peer), piping each stream to the
+    /// connector door on loopback. Without one, the edge protocol is not accepted at all.
+    pub async fn start_with_edge_door(
+        cfg: BridgeConfig,
+        db: Database,
+        handler: Option<StreamHandler>,
+        edge_door: Option<EdgeDoor>,
+    ) -> Result<Self> {
+        if let Some(door) = &edge_door {
+            door.validate()?;
+        }
         let key = load_or_create_key(&cfg.key)?;
         let mut builder = Endpoint::builder(presets::Minimal)
             .secret_key(key)
@@ -290,10 +361,14 @@ impl Bridge {
             let _ = tokio::time::timeout(ONLINE_WAIT, endpoint.online()).await;
         }
         let live = Arc::new(Live::default());
+        let edge_live = Arc::new(Live::default());
         let reached_service = Arc::new(AtomicU64::new(0));
-        let router = handler.map(|handler| {
-            Router::builder(endpoint.clone())
-                .accept(
+        let reached_edge = Arc::new(AtomicU64::new(0));
+        let edge_over_cap = Arc::new(AtomicU64::new(0));
+        let router = (handler.is_some() || edge_door.is_some()).then(|| {
+            let mut builder = Router::builder(endpoint.clone());
+            if let Some(handler) = handler {
+                builder = builder.accept(
                     SERVICE_ALPN,
                     Service {
                         db: db.clone(),
@@ -301,8 +376,22 @@ impl Bridge {
                         handler,
                         reached: reached_service.clone(),
                     },
-                )
-                .spawn()
+                );
+            }
+            if let Some(door) = edge_door {
+                builder = builder.accept(
+                    EDGE_ALPN,
+                    EdgeService {
+                        db: db.clone(),
+                        live: edge_live.clone(),
+                        permits: Arc::new(tokio::sync::Semaphore::new(door.max_streams)),
+                        door,
+                        reached: reached_edge.clone(),
+                        over_cap: edge_over_cap.clone(),
+                    },
+                );
+            }
+            builder.spawn()
         });
         Ok(Self {
             endpoint,
@@ -314,6 +403,9 @@ impl Bridge {
             with_addrs: cfg.with_addrs,
             advertise: cfg.advertise,
             reached_service,
+            edge_live,
+            reached_edge,
+            edge_over_cap,
             _router: router,
         })
     }
@@ -395,6 +487,59 @@ impl Bridge {
         Ok(result)
     }
 
+    /// Registers this device with the `hq edge` that shows `ticket` and records it as this
+    /// device's edge. The edge tells the device the name it is reached at; that name must be the
+    /// one this device's key gives it under the edge's domain, so an edge cannot hand over
+    /// another device's name or an unrelated one. Nothing is recorded unless the person at the
+    /// edge typed the right digits and the answer checks out.
+    pub async fn register(
+        &self,
+        ticket: &Ticket,
+        tuning: &Tuning,
+        show_sas: impl FnOnce(&str),
+    ) -> Result<JoinResult> {
+        if ticket.k != Purpose::Register {
+            bail!("this ticket pairs two machines; it does not register a device with an edge");
+        }
+        // The edge dials this device through a relay it can see in its own list; the addresses
+        // are left out, since the edge sees the one this connection came from anyway.
+        let mut opts = JoinOptions::new(&self.name, self.card().relays, Vec::new());
+        opts.hello_timeout = tuning.hello_timeout;
+        opts.decision_timeout = tuning.decision_timeout;
+        let result = join::join(&self.endpoint, ticket, &opts, show_sas).await?;
+        if let JoinResult::Paired(joined) = &result {
+            let record = edge_record(&self.id(), &joined.card, joined.info.as_ref())?;
+            let db = self.db.clone();
+            tokio::task::spawn_blocking(move || {
+                peers::edge_set(
+                    &db,
+                    &record.id,
+                    &record.domain,
+                    &record.hostname,
+                    record.relay.as_deref(),
+                )
+            })
+            .await
+            .context("recording the edge")??;
+            // A device has one edge: the connections of the one this replaced are closed.
+            self.edge_live.close_every();
+        }
+        Ok(result)
+    }
+
+    /// Forgets the edge and closes every connection the edge protocol has open, at once. Returns
+    /// whether there was an edge on record. It sweeps even when none is: another process (the
+    /// CLI) may have cleared the record while a connection was open here, and this is how that
+    /// connection is closed.
+    pub async fn forget_edge(&self) -> Result<ForgotEdge> {
+        let db = self.db.clone();
+        let had_record = tokio::task::spawn_blocking(move || peers::edge_clear(&db)).await??;
+        Ok(ForgotEdge {
+            had_record,
+            closed: self.edge_live.close_every(),
+        })
+    }
+
     /// Connects to a paired peer by key alone: no code, no ticket.
     pub async fn connect(&self, peer: &str) -> Result<Connection> {
         let id: EndpointId = peer
@@ -434,6 +579,106 @@ impl Bridge {
     }
 }
 
+/// What the edge told a device about itself, checked: the edge's id, the name this device is
+/// reached at and the relay it offers. The name must be `<label>.<domain>` where the label is the
+/// one this device's own key gives it (so an edge cannot hand over another device's name) and the
+/// domain is a plain DNS name; the domain is whatever the edge serves devices under. The relay
+/// must be a plain https URL on a name, never an address, because it becomes a home relay this
+/// device connects to.
+fn edge_record(
+    me: &EndpointId,
+    card: &Card,
+    info: Option<&serde_json::Value>,
+) -> Result<peers::EdgeRecord> {
+    let id: EndpointId = card
+        .id
+        .parse()
+        .map_err(|_| anyhow!("the edge's card names no machine"))?;
+    let told = info
+        .and_then(|i| i.get("hostname"))
+        .and_then(|h| h.as_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| anyhow!("the edge did not say what name this device is reached at"))?;
+    let (label, domain) = told
+        .split_once('.')
+        .ok_or_else(|| anyhow!("the edge's name for this device is not a domain name"))?;
+    if label != device_label(me) {
+        bail!(
+            "the edge named this device {label}.{domain}, which is not the name its key gives it: not registering"
+        );
+    }
+    if !is_plain_dns_name(domain) {
+        bail!("the edge's domain is not a plain DNS name");
+    }
+    let relay = info
+        .and_then(|i| i.get("relay"))
+        .and_then(|r| r.as_str())
+        .map(plain_https_relay)
+        .transpose()?;
+    Ok(peers::EdgeRecord {
+        id: id.to_string(),
+        domain: domain.to_string(),
+        hostname: told.clone(),
+        relay,
+        registered_at: 0,
+    })
+}
+
+/// Lowercase letters, digits and hyphens in dot-separated labels, at least two of them, 253
+/// characters at most.
+fn is_plain_dns_name(name: &str) -> bool {
+    name.len() <= 253
+        && name.split('.').count() >= 2
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+}
+
+/// A relay URL the device may adopt: https on a DNS name (not an address, not `localhost`, not a
+/// name that stays on the local network), no credentials, the default port, at most 253
+/// characters. Anything else is refused rather than dialed.
+fn plain_https_relay(text: &str) -> Result<String> {
+    let bad = || anyhow!("the edge offered a relay this device will not use");
+    if text.len() > 253 {
+        return Err(bad());
+    }
+    let url = url::Url::parse(text).map_err(|_| bad())?;
+    let host = match url.host() {
+        Some(url::Host::Domain(d)) => d.to_ascii_lowercase(),
+        _ => return Err(bad()),
+    };
+    let local = host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".internal")
+        || host.ends_with('.') && host.trim_end_matches('.').ends_with("localhost");
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || local
+        || !host.contains('.')
+        || !is_plain_dns_name(host.trim_end_matches('.'))
+    {
+        return Err(bad());
+    }
+    Ok(url.to_string())
+}
+
+/// The DNS label an edge reaches a device at: the first [`LABEL_BYTES`] bytes of its id, as hex.
+pub fn device_label(id: &EndpointId) -> String {
+    id.as_bytes()[..LABEL_BYTES]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 /// "direct" when the selected path of a connection is an IP address, "relay" when it goes through
 /// a relay, "none" while there is no selected path.
 pub fn path_kind(conn: &Connection) -> &'static str {
@@ -456,4 +701,99 @@ pub async fn echo(conn: &Connection, message: &[u8]) -> Result<()> {
         bail!("the echo came back different");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iroh::SecretKey;
+
+    fn me() -> EndpointId {
+        SecretKey::generate().public()
+    }
+
+    fn card(edge: &EndpointId) -> Card {
+        Card {
+            id: edge.to_string(),
+            name: "whatever the edge calls itself".into(),
+            relays: vec![],
+            addrs: vec![],
+        }
+    }
+
+    fn told(me: &EndpointId, rest: &str) -> serde_json::Value {
+        serde_json::json!({ "hostname": format!("{}.{rest}", device_label(me)) })
+    }
+
+    #[test]
+    fn the_domain_comes_from_the_name_and_is_not_cut_short() {
+        let (me, edge) = (me(), me());
+        let long = format!("{}.example.com", "a".repeat(60));
+        let record = edge_record(&me, &card(&edge), Some(&told(&me, &long))).unwrap();
+        assert_eq!(
+            record.domain, long,
+            "a domain longer than a card name allows"
+        );
+        assert_eq!(record.hostname, format!("{}.{long}", device_label(&me)));
+        let upper = told(&me, "EDGE.Example.COM");
+        let record = edge_record(&me, &card(&edge), Some(&upper)).unwrap();
+        assert_eq!(record.domain, "edge.example.com");
+    }
+
+    #[test]
+    fn a_name_that_is_not_this_devices_own_label_under_a_plain_domain_is_refused() {
+        let (me, other, edge) = (me(), me(), me());
+        let wrong_label = told(&other, "edge.example.com");
+        assert!(edge_record(&me, &card(&edge), Some(&wrong_label)).is_err());
+        for bad in [
+            json_host(&me, "edge"),
+            json_host(&me, "-edge.example.com"),
+            json_host(&me, "edge..example.com"),
+            json_host(&me, "edge.example.com."),
+            json_host(&me, "ed ge.example.com"),
+            json_host(&me, "edge.exämple.com"),
+            json_host(&me, &format!("{}.com", "a".repeat(64))),
+        ] {
+            assert!(edge_record(&me, &card(&edge), Some(&bad)).is_err(), "{bad}");
+        }
+        assert!(edge_record(&me, &card(&edge), None).is_err());
+        assert!(edge_record(&me, &card(&edge), Some(&serde_json::json!({}))).is_err());
+        assert!(edge_record(&me, &card(&edge), Some(&serde_json::json!({"hostname": 7}))).is_err());
+    }
+
+    fn json_host(me: &EndpointId, rest: &str) -> serde_json::Value {
+        told(me, rest)
+    }
+
+    #[test]
+    fn only_a_plain_https_relay_on_a_name_is_adopted() {
+        for ok in [
+            "https://relay.edge.example.com",
+            "https://relay.edge.example.com/",
+            "HTTPS://Relay.Edge.Example.com",
+        ] {
+            assert!(plain_https_relay(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "http://relay.edge.example.com",
+            "https://127.0.0.1",
+            "https://169.254.169.254",
+            "https://10.0.0.5",
+            "https://[::1]",
+            "https://localhost",
+            "https://localhost.",
+            "https://x.localhost",
+            "https://printer.local",
+            "https://db.internal",
+            "https://relay",
+            "https://relay.edge.example.com:6379",
+            "https://user:pw@relay.edge.example.com",
+            "ftp://relay.edge.example.com",
+            "relay.edge.example.com",
+            "",
+        ] {
+            assert!(plain_https_relay(bad).is_err(), "{bad}");
+        }
+        assert!(plain_https_relay(&format!("https://{}.com", "a".repeat(250))).is_err());
+    }
 }

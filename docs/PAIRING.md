@@ -154,12 +154,36 @@ The macOS app ([DESKTOP.md](DESKTOP.md)) is the first graphical host: it shows t
 the six digits typed by the person and revokes through the one running `Bridge`, using only this
 library.
 
+### Registering this device with an `hq edge`
+
+The device side of the registration above. `hq bridge register <link>` (or `Bridge::register`)
+joins the edge's invitation, shows six digits for the person at the edge to type, and on success
+records the edge: its id, its domain, the name this device is reached at and the relay it offered
+(`hq bridge edge` shows it, `hq bridge forget-edge` clears it, `hq_db::bridge::edge_get` and
+`edge_set` are the table). The name must be `<label>.<domain>` where the label is the first 8
+bytes of this device's own id in hex and the domain a plain DNS name the edge serves devices under, so
+an edge cannot hand over another device's name; otherwise nothing is recorded. The relay the edge
+offers is kept only when it is a plain https URL on a name (not an address, `localhost` or a local
+name, no port or credentials), because `--relay auto` makes it this device's home relay. A device
+that is already registered is left alone unless `--replace` is given.
+
+A serving bridge (`hq bridge serve`, `run`; `Bridge::start_with_edge_door`) accepts the edge
+protocol `hq/edge/1` from the registered edge and from no one else, and pipes each stream it opens
+to the connector door (`--edge-door`: a socket path or a loopback `ip:port`; default
+`mcp_connector.tls.door_listen`, else a private socket under the vault's
+`_data/connector_door/`; `off` turns the protocol away entirely). Paired peers speak `hq/bridge/1` and
+cannot open the edge protocol; the edge cannot open the service protocol. Forgetting the edge cuts
+its open connections (at once through `Bridge::forget_edge`; from another process at its next
+stream). `--relay auto` uses the registered edge's relay, so the edge can find this device.
+
 ## What listens, and when
 
 | Listener | When |
 |---|---|
 | Long-term endpoint (one UDP socket) | Between `Bridge::start` with a handler and `shutdown`. `hq bridge serve` runs it until interrupted |
 | Throwaway endpoint (one UDP socket per ticket) | From `open_ticket` until the ticket is used, expired or burned. `hq bridge pair` runs it until then |
+| The edge protocol on the long-term endpoint | Whenever a serving bridge has an edge door (the default); the gate admits only the registered edge. `--edge-door off` removes it |
+| Connection to the connector door | One per stream the edge opens, made by the bridge, to the door's socket (or opted-in loopback port) only |
 
 `hq bridge run` is both: the long-term endpoint for as long as it runs, and one throwaway endpoint while
 a ticket is open. The Android app starts it only after the owner turned paired devices on.

@@ -55,3 +55,7 @@ hyper = { version = "1", features = ["client"] }
 rcgen = { version = "=0.14.10", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
 tower = { workspace = true, features = ["util"] }
 tokio-tungstenite = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# The connector door's socket directory must belong to the user running the server.
+libc = "0.2"

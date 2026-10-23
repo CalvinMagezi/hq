@@ -115,6 +115,74 @@ pub fn touch(db: &Database, id: &str) -> Result<()> {
     })
 }
 
+/// The `hq edge` this device is registered with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeRecord {
+    /// The edge's endpoint id, lowercase hex.
+    pub id: String,
+    pub domain: String,
+    /// The name this device is reached at through the edge.
+    pub hostname: String,
+    pub relay: Option<String>,
+    pub registered_at: i64,
+}
+
+/// Records the edge this device registered with, replacing any other: a device has one.
+pub fn edge_set(
+    db: &Database,
+    id: &str,
+    domain: &str,
+    hostname: &str,
+    relay: Option<&str>,
+) -> Result<()> {
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO bridge_edge (slot, id, domain, hostname, relay, registered_at) \
+             VALUES (1, ?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(slot) DO UPDATE SET id = excluded.id, domain = excluded.domain, \
+             hostname = excluded.hostname, relay = excluded.relay, \
+             registered_at = excluded.registered_at",
+            params![id, domain, hostname, relay, now()],
+        )?;
+        Ok(())
+    })
+}
+
+pub fn edge_get(db: &Database) -> Result<Option<EdgeRecord>> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT id, domain, hostname, relay, registered_at FROM bridge_edge WHERE slot = 1",
+            [],
+            |r| {
+                Ok(EdgeRecord {
+                    id: r.get(0)?,
+                    domain: r.get(1)?,
+                    hostname: r.get(2)?,
+                    relay: r.get(3)?,
+                    registered_at: r.get(4)?,
+                })
+            },
+        )
+        .optional()?)
+    })
+}
+
+/// Whether `id` is the registered edge. The gate treats an error as "no".
+pub fn is_edge(db: &Database, id: &str) -> Result<bool> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM bridge_edge WHERE slot = 1 AND id = ?1)",
+            params![id],
+            |r| r.get(0),
+        )?)
+    })
+}
+
+/// Forgets the edge. Returns whether there was one.
+pub fn edge_clear(db: &Database) -> Result<bool> {
+    db.with_conn(|c| Ok(c.execute("DELETE FROM bridge_edge WHERE slot = 1", [])? > 0))
+}
+
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Peer> {
     Ok(Peer {
         id: r.get(0)?,
@@ -161,6 +229,52 @@ mod tests {
     use super::*;
 
     const ID: &str = "aa11";
+
+    #[test]
+    fn a_device_has_one_edge_and_registering_again_replaces_it() {
+        let db = Database::open_memory().unwrap();
+        assert_eq!(edge_get(&db).unwrap(), None);
+        assert!(!is_edge(&db, "ed01").unwrap());
+        assert!(!edge_clear(&db).unwrap(), "nothing to forget");
+
+        edge_set(&db, "ed01", "edge.example.com", "aa.edge.example.com", None).unwrap();
+        assert!(is_edge(&db, "ed01").unwrap());
+        assert!(!is_edge(&db, "ed02").unwrap());
+        let first = edge_get(&db).unwrap().unwrap();
+        assert_eq!(first.hostname, "aa.edge.example.com");
+        assert_eq!(first.relay, None);
+
+        edge_set(
+            &db,
+            "ed02",
+            "other.example.org",
+            "aa.other.example.org",
+            Some("https://relay.other.example.org"),
+        )
+        .unwrap();
+        assert!(
+            !is_edge(&db, "ed01").unwrap(),
+            "the old edge lost its place"
+        );
+        assert!(is_edge(&db, "ed02").unwrap());
+        assert_eq!(
+            edge_get(&db).unwrap().unwrap().relay.as_deref(),
+            Some("https://relay.other.example.org")
+        );
+
+        assert!(edge_clear(&db).unwrap());
+        assert_eq!(edge_get(&db).unwrap(), None);
+        assert!(!is_edge(&db, "ed02").unwrap());
+    }
+
+    #[test]
+    fn an_edge_is_not_a_paired_peer_and_a_peer_is_not_the_edge() {
+        let db = Database::open_memory().unwrap();
+        edge_set(&db, "ed01", "edge.example.com", "aa.edge.example.com", None).unwrap();
+        add_peer(&db, "aa11", "phone", &[], &[]).unwrap();
+        assert!(!is_paired(&db, "ed01").unwrap());
+        assert!(!is_edge(&db, "aa11").unwrap());
+    }
 
     #[test]
     fn a_paired_peer_is_known_until_it_is_revoked() {

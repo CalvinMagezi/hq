@@ -3348,6 +3348,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -3847,6 +3848,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "instant-acme",
+ "libc",
  "rcgen",
  "reqwest 0.12.28",
  "ring",
