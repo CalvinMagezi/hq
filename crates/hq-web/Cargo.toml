@@ -47,6 +47,9 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 url = { workspace = true }
+# The connector's whole path in one test: the forwarder, the device side and the door.
+hq-edge = { workspace = true }
+hq-bridge = { workspace = true }
 hq-core = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 time = "0.3"

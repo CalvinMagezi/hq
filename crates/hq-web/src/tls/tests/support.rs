@@ -37,26 +37,31 @@ pub fn world() -> World {
 }
 
 pub fn world_with(profile: hq_core::config::Profile) -> World {
-    build_world(profile, Some(CONSENT_HOST))
+    build_world(profile, HOST, Some(CONSENT_HOST))
+}
+
+/// A server whose connector is reached at `host`, as when the name comes from a device's id.
+pub fn world_at(host: &str) -> World {
+    build_world(hq_core::config::Profile::Full, host, Some(CONSENT_HOST))
 }
 
 /// A server whose consent page is on the public name, as with no `authorize_url`.
 pub fn world_single_origin() -> World {
-    build_world(hq_core::config::Profile::Full, Some(HOST))
+    build_world(hq_core::config::Profile::Full, HOST, Some(HOST))
 }
 
 /// A server whose connector is not configured: no OAuth routes, no door possible.
 pub fn world_without_connector() -> World {
-    build_world(hq_core::config::Profile::Full, None)
+    build_world(hq_core::config::Profile::Full, HOST, None)
 }
 
-fn build_world(profile: hq_core::config::Profile, consent: Option<&str>) -> World {
+fn build_world(profile: hq_core::config::Profile, host: &str, consent: Option<&str>) -> World {
     let vault = tempfile::TempDir::new().unwrap();
     let mut state = WsState::new(vault.path().to_path_buf(), None).with_profile(profile);
     state.web_auth_token = Some(WEB_TOKEN.into());
     if let Some(consent) = consent {
         state.connector = Some(hq_core::config::ConnectorSettings {
-            public: format!("https://{HOST}"),
+            public: format!("https://{host}"),
             consent: format!("https://{consent}"),
             default_scope: "read_only".into(),
         });
@@ -164,16 +169,26 @@ pub fn build_tls(
     store_dir: &tempfile::TempDir,
     tweak: impl FnOnce(&mut ConnectorTls),
 ) -> ConnectorTls {
+    build_tls_for(HOST, world, ca, store_dir, tweak)
+}
+
+pub fn build_tls_for(
+    host: &str,
+    world: &World,
+    ca: &TestCa,
+    store_dir: &tempfile::TempDir,
+    tweak: impl FnOnce(&mut ConnectorTls),
+) -> ConnectorTls {
     let mut tls = ConnectorTls::from_parts(Parts {
         acme: AcmeSettings {
-            host: HOST.into(),
+            host: host.into(),
             directory_url: ca.directory_url.clone(),
             contact_email: Some("owner@example.com".into()),
             agreed_to_terms: true,
         },
         http: AcmeHttp::new(reqwest::Client::new()),
         store: PrivateDir::at(store_dir.path().join("connector_tls")),
-        gate: Gate::new(HOST, live_grant_check(&world.state)),
+        gate: Gate::new(host, live_grant_check(&world.state)),
         router: world.router.clone(),
     })
     .unwrap();
