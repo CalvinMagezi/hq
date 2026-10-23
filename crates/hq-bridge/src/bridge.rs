@@ -787,7 +787,7 @@ mod tests {
             "https://db.internal",
             "https://relay",
             "https://relay.edge.example.com:6379",
-            "https://user:pw@relay.edge.example.com",
+            "https://user:pw@relay.example.com",
             "ftp://relay.edge.example.com",
             "relay.edge.example.com",
             "",

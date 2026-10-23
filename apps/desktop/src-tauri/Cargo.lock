@@ -1884,6 +1884,7 @@ dependencies = [
  "subtle",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
