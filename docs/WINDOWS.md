@@ -143,9 +143,9 @@ address is the one the other HQ connects to. Then pair as for any machine:
   `hq host status`.
 - `cannot sandbox the agent` when starting a session: `bubblewrap` is missing, or the sysctl in step 1
   is not set. `bwrap --ro-bind / / true` should print nothing.
-- A coding agent sandboxed on Linux can read and write only its project, its own config directory
-  and the temporary directories. Paths that do not exist yet (a `.mcp.json` a project lacks) cannot be
-  protected; see [AGENT_HOST.md](AGENT_HOST.md).
-- Windows itself is not reachable from the agents: they see only Ubuntu. Files on `C:\` are under
-  `/mnt/c`, which the sandbox treats as read-only system area unless you add them in
-  `agent_host.sandbox.writable`.
+- A coding agent sandboxed on Linux reads and writes freely by default (the `open` profile) but
+  cannot reach HQ's own files or your credential directories. Paths that do not exist yet (a
+  `~/.zshrc` you do not have) cannot be protected; see [AGENT_HOST.md](AGENT_HOST.md).
+- Windows itself is reachable only as far as WSL2 shares it: files on `C:\` are under `/mnt/c`.
+  Under `agent_host.sandbox.profile: strict` that is a read-only system area unless you add it
+  to `agent_host.sandbox.writable`.

@@ -64,9 +64,11 @@ or the `host_check` tool. When it says `reachable`, start a session with `host: 
 does not, it names the likely cause.
 
 The key can start any command as you on that machine, like an ssh login, so only pair machines you
-control. Agents there run in a sandbox: they cannot read the host's own files or your credentials
-directories, and they reach only the sites the HQ allows (`agent_host.sandbox.allow_domains`; denied sites
-are logged so you can add what you need).
+control. Agents there run in a sandbox: they cannot read the host's own files, `~/.hq` or your
+credentials directories, but otherwise work as you would in a terminal on that machine. For agents
+nobody watches, set `agent_host.sandbox.profile: strict`: they then reach only the sites the HQ
+allows (`agent_host.sandbox.allow_domains`; denied sites are logged so you can add what you need)
+and read and write only a short list of paths. See [AGENT_HOST.md](AGENT_HOST.md).
 
 ## Windows
 

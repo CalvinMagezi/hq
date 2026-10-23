@@ -324,12 +324,17 @@ fn status(dir: &std::path::Path) -> Result<()> {
     let agents = client.call("agent.list", json!({}))?;
     for a in agents["agents"].as_array().into_iter().flatten() {
         let text = |k: &str| a[k].as_str().unwrap_or("-").to_string();
+        // `process/open`, `process/strict` or `none`; an older host sends no profile.
+        let sandbox = match a["sandbox_profile"].as_str() {
+            Some(profile) if !profile.is_empty() => format!("{}/{profile}", text("sandbox")),
+            _ => text("sandbox"),
+        };
         println!(
-            "{:<28} {:<8} {:<9} sandbox={:<8} idle {}s, up {}s",
+            "{:<28} {:<8} {:<9} sandbox={:<14} idle {}s, up {}s",
             text("name"),
             text("agent"),
             text("state"),
-            text("sandbox"),
+            sandbox,
             a["quiet_ms"].as_u64().unwrap_or(0) / 1000,
             a["age_ms"].as_u64().unwrap_or(0) / 1000,
         );

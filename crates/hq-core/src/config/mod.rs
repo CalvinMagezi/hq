@@ -28,7 +28,7 @@ pub use agent::*;
 pub use agent_host::{
     AgentHostConfig, HarnessProfileConfig, HostTransport, LOCAL_HOST, MAX_LAUNCH_BOUND_SECS,
     MIN_LAUNCH_BOUND_SECS, NATIVE_HOST, RemoteHostConfig, SandboxConfig, SandboxMode,
-    native_host_dir,
+    SandboxProfile, native_host_dir,
 };
 pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
 pub use backup::BackupConfig;

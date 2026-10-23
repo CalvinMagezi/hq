@@ -183,7 +183,74 @@ token and the scope check only keep an honest agent in its lane.
 `agent.spawn` takes a `sandbox`; HQ sends one for every launch on a built-in
 host (`agent_host.sandbox`, default mode `process`). In process mode the host wraps
 the agent in `sandbox-exec` (macOS) or `bwrap` (Linux) and refuses to start it
-when that is not possible. The agent:
+when that is not possible. How much it takes away depends on the profile,
+`agent_host.sandbox.profile`:
+
+- `open` (the default): the agent works as you would in a terminal. What is walled off is
+  HQ itself, other accounts' logins and, by default, your credential stores.
+- `strict`: a narrow allowlist for reads, writes and the network, for agents nobody is
+  watching and machines that hold more than you want them to see.
+
+```yaml
+agent_host:
+  sandbox:
+    profile: open          # or strict
+    hide_credentials: true # open only; false lets agents use ~/.ssh, gh, aws, ...
+```
+
+The host's own gate (`hq host serve` refuses unsandboxed agents) looks at the mode, so an
+`open` agent counts as sandboxed. A host that predates profiles ignores the setting and
+applies the strict policy; HQ sends the strict allowlist along in either case so such a host
+still reaches the model. `hq host status` shows each agent as `process/open`, `process/strict`
+or `none`.
+
+#### The open profile
+
+An open agent can read and write anything your user can, use the machine's network directly
+(no proxy and no allowlist, so a package registry, a git remote, a database or a dev server on
+localhost, and a Docker socket all work), share `/tmp`, `/var/tmp` and `/run`, and use the
+machine's devices. `git push -u`, a repository's own hook installer, `brew install`,
+`cargo install` and `npm install` behave as they do in your terminal.
+
+What it cannot do:
+
+- **Reach HQ's control plane.** It cannot read or write the host directory except its own
+  `agent.sock`, hook and MCP files (the operator token and every other session's token live
+  there), or `~/.hq`.
+- **See other processes' environments** (`ps eww`, `/proc/<pid>/environ`), which hold the
+  daemon's and the other agents' tokens. The price is that `ps`, `lsof` and `kill` show only
+  the agent's own processes: a server an earlier session left running is invisible, so pick
+  another port.
+- **Read other accounts.** Other Claude profiles (`~/.claude-<name>`); the default `~/.claude`
+  and `~/.claude.json` when a launch profile sets its own `CLAUDE_CONFIG_DIR`; and the login
+  and history directories of the other coding agents (`~/.codex`, `~/.gemini`, `~/.cursor`,
+  `~/.hermes` and so on). Each agent keeps its own and none can read another's.
+- **Read or write the credential stores** (by default): `~/.ssh`, `~/.gnupg`, `~/.aws`,
+  `~/.kube`, `~/.docker`, `~/.config/gh`, `~/.netrc`, `~/.npmrc` and `~/.git-credentials`.
+  This is the one default kept on purpose: anything an agent can read it can send anywhere,
+  and a prompt-injected agent would use your keys as readily as you would. The cost is that
+  `git` over ssh, `gh`, `aws` and `kubectl` do not work from an agent until you allow them.
+  `hide_credentials: false` lifts it for every agent. `agent_readable` reveals one
+  directory, read-only, to one kind of agent without that.
+- **Write the files your own tools run later, outside the sandbox**: shell startup files
+  (`~/.zshrc`, `~/.bashrc`, `~/.profile` and the others), `~/.gitconfig` and `~/.config/git`,
+  login items (`~/.config/autostart`, `~/.config/systemd/user`, `~/Library/LaunchAgents`),
+  `~/.claude.json`, and Claude's `settings*.json` and `hooks` in its config directory. A
+  project's own `.git/hooks`, `.git/config`, `.mcp.json` and `.claude/settings.json` are
+  writable.
+- **Start `open`, `osascript` or `launchctl`** (macOS), or look up the launcher service. An app
+  started that way runs outside the sandbox.
+
+This is a wall around HQ, not a boundary against an agent that means harm. It reaches
+everything else you can, and a prompt-injected agent can read a file and send it anywhere.
+The guard against that is the agent's own permission mode and classifier, as in your terminal.
+Under bubblewrap a path that does not exist cannot be protected (an agent can create a
+`~/.zshrc` you do not have); Seatbelt denies it either way. `allow_domains`, `writable`,
+`readable` and `loopback_ports` do nothing under this profile.
+
+#### The strict profile
+
+The agent:
 
 - cannot read the run directory except `host.sock` and its own hook and MCP
   files, nor `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube` or `~/.hq`;
@@ -203,7 +270,7 @@ when that is not possible. The agent:
   the host it asked for. Every decision is logged
   (`agent.egress`); a denied host shows up there so you can add it.
 
-Two opt-in settings widen this for one machine's own needs:
+Two opt-in settings widen the strict profile for one machine's own needs:
 
 ```yaml
 agent_host:
@@ -234,7 +301,7 @@ Paths use the agent machine's absolute paths; one that does not exist there is
 skipped.
 
 The host itself decides whether the sandbox is optional. `hq host serve` refuses
-to start any agent that is not under the process sandbox, whoever asks over the
+to start any agent that is not under the process sandbox (either profile), whoever asks over the
 socket or through the gate; start it with `--allow-unsandboxed` to lift that, and
 `agent_host.sandbox.mode: none` in HQ only matters then.
 
@@ -245,7 +312,7 @@ tells you, and the conversation can be resumed. `hq host status` lists every
 agent with its state, sandbox mode, idle time and age. A busy agent is never
 reaped.
 
-Each agent also gets what it needs to be that agent: its own login and history directory
+Under the strict profile each agent also gets what it needs to be that agent: its own login and history directory
 (`~/.gemini` for Antigravity, `~/.codex`, `~/.cursor`, `~/.copilot`, `~/.pi`, `~/.hermes`,
 `~/.openclaw` and so on, and never another agent's) and the HTTPS hosts it
 signs in and reaches its models through. Those defaults are verified for Claude Code and
@@ -255,16 +322,16 @@ and the general-purpose agents hermes and openclaw) add the provider's host to
 configuration; a general-purpose agent is never wired into HQ that way.
 
 The sandbox policy is kept in `session.json` and applied again on restore.
-`agent.list` shows each agent's mode and `host.status` counts agents running
+`agent.list` shows each agent's mode and profile and `host.status` counts agents running
 with `none`.
 
-The agent cannot write `~/.claude/settings*.json`, `~/.claude/hooks`, or in its
+A strict agent cannot write `~/.claude/settings*.json`, `~/.claude/hooks`, or in its
 project `.git/hooks`, `.git/config`, `.mcp.json` and `.claude/settings*.json`,
 where it could plant code you run later outside the sandbox, and it cannot start
-`open`, `osascript` or `launchctl`. The host refuses to start an agent in a
+`open`, `osascript` or `launchctl`. The host refuses to start a strict agent in a
 directory that contains your home, the host directory or a secret directory.
 
-What it does not stop: the agent still reads and writes your project and
+What the strict profile does not stop: the agent still reads and writes your project and
 `~/.claude` (outside the read-only files above); on macOS the Keychain stays reachable because Claude Code keeps its
 login there; your own MCP servers, plugins and connectors are refused until you
 allow their hosts; a kernel flaw or an allowed domain is out of scope. On Linux
@@ -282,8 +349,9 @@ refuses a host directory that is not owned by you and private to you.
 
 ### Agent compatibility
 
-What each agent needed to start under the sandbox, and whether it has been run signed in end to
-end. A launch that fails for a reason on this list is a known quirk, not a new bug. Login state is
+What each agent needed to start under the strict sandbox, and whether it has been run signed in end to
+end. Under the open profile none of the state directories or hosts below need listing; the agent
+only needs its login. A launch that fails for a reason on this list is a known quirk, not a new bug. Login state is
 the user's: HQ cannot sign an agent in for you, and an agent with no login shows its own sign-in
 screen.
 

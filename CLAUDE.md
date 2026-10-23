@@ -79,7 +79,11 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   agents" in `docs/AGENT_SESSIONS.md`, plan in `docs/plans/agentic-stack.md`. `crates/hq-tools/src/agent_host/`
   (to be renamed) holds the client: `NativeBackend` talks to the host on this
   machine, or to one on another machine over SSH through a key pinned to
-  `hq host gate`. Agents run in a process sandbox with an egress allowlist.
+  `hq host gate`. Agents run in a process sandbox whose profile is
+  `agent_host.sandbox.profile`: `open` (default) walls off only HQ itself (host tokens, `~/.hq`,
+  other processes' environments, other Claude accounts, credential stores unless
+  `hide_credentials: false`) and leaves the rest of the machine and its network to the agent;
+  `strict` adds an egress allowlist and read and write allowlists (`crates/hq-host/src/sandbox.rs`).
   `hq host join` / `hq host add` / the `host_add` tool pair a machine.
   `harness_session_*`, the read-only `host_list`/`host_agents`/`host_read`
   tools and `host_send` sit on top. The host sends state changes as events; the

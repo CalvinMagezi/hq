@@ -162,26 +162,63 @@ pub enum SandboxMode {
     None,
 }
 
+/// How tightly the process sandbox confines an agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxProfile {
+    /// The agent works as you would in a terminal: the whole filesystem to read
+    /// and write, the machine's own network, shared temporary directories. What it
+    /// cannot reach is HQ itself (the host's tokens, `~/.hq`, other processes'
+    /// environments), other accounts' logins (other Claude profiles, other coding
+    /// agents), your credential stores unless `hide_credentials` is off, and the few
+    /// files your own tools run later (shell startup files, git's global config,
+    /// Claude's settings and hooks).
+    #[default]
+    Open,
+    /// Reads under your home limited to a list, writes limited to the project,
+    /// caches and the agent's own state, a private `/tmp`, and a network that is a
+    /// proxy with a domain allowlist (`allow_domains`). For agents you do not
+    /// watch and machines that hold more than you want them to see.
+    Strict,
+}
+
 /// Sandbox settings for sessions on the built-in host (local or remote).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxConfig {
     #[serde(default)]
     pub mode: SandboxMode,
 
+    /// How tightly `mode: process` confines an agent. `open` (the default) keeps
+    /// only HQ's own control plane out of reach; `strict` is the narrow policy
+    /// that `allow_domains`, `writable`, `readable` and `loopback_ports` below
+    /// shape. An older host that does not know profiles applies `strict`.
+    #[serde(default)]
+    pub profile: SandboxProfile,
+
+    /// Keep `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.kube`, `~/.docker`, `~/.gnupg`,
+    /// `~/.netrc`, `~/.npmrc` and `~/.git-credentials` out of the agent's reach.
+    /// Default true. Only the `open` profile reads this: `strict` always hides them.
+    /// Turn it off when agents should push over ssh, use `gh`, `aws` or `kubectl`
+    /// as you do; anything a prompt-injected agent can read it can send anywhere.
+    #[serde(default = "default_hide_credentials")]
+    pub hide_credentials: bool,
+
     /// Hosts an agent may reach besides `api.anthropic.com` and the HQ MCP
     /// endpoint, as `name` or `name:port` (`*.example.com` allows subdomains).
     /// Denied requests are logged with the host, so add what you see there.
+    /// Only the `strict` profile has a proxy to apply this to.
     #[serde(default)]
     pub allow_domains: Vec<String>,
 
     /// Directories agents may write under besides their project, `~/.claude`
-    /// and the temporary directories.
+    /// and the temporary directories. Only the `strict` profile limits writes.
     #[serde(default)]
     pub writable: Vec<String>,
 
     /// Paths under your home directory agents may read besides the built-in
     /// tool and shell configuration locations (a directory such as `~/.nvm`).
-    /// Everything else under home is unreadable to them.
+    /// Everything else under home is unreadable to them. Only the `strict`
+    /// profile limits reads.
     #[serde(default)]
     pub readable: Vec<String>,
 
@@ -196,6 +233,25 @@ pub struct SandboxConfig {
     /// platform; a direct connection (any protocol) only under macOS.
     #[serde(default)]
     pub loopback_ports: Vec<u16>,
+}
+
+fn default_hide_credentials() -> bool {
+    true
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            mode: SandboxMode::default(),
+            profile: SandboxProfile::default(),
+            hide_credentials: default_hide_credentials(),
+            allow_domains: Vec::new(),
+            writable: Vec::new(),
+            readable: Vec::new(),
+            agent_readable: BTreeMap::new(),
+            loopback_ports: Vec::new(),
+        }
+    }
 }
 
 /// A launcher built on a built-in harness. It inherits that harness's resume,

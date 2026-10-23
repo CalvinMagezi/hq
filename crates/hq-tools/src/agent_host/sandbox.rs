@@ -1,6 +1,6 @@
 //! The sandbox request HQ sends with every launch on a built-in host.
 
-use hq_core::config::{AgentHostConfig, SandboxMode};
+use hq_core::config::{AgentHostConfig, SandboxMode, SandboxProfile};
 use serde_json::{Value, json};
 
 /// The API host Claude Code needs to work at all.
@@ -69,8 +69,16 @@ pub(super) fn plan(cfg: &AgentHostConfig) -> Value {
             }
         }
     }
+    // The strict policy's own settings go along under either profile: a host that
+    // predates profiles ignores the two new keys and applies the strict policy, and
+    // needs the allowlist for the agent to reach its model at all.
     json!({
         "mode": "process",
+        "profile": match sandbox.profile {
+            SandboxProfile::Open => "open",
+            SandboxProfile::Strict => "strict",
+        },
+        "hide_credentials": sandbox.hide_credentials,
         "allow": allow,
         "writable": sandbox.writable,
         "readable": sandbox.readable,
@@ -220,6 +228,29 @@ mod tests {
         assert_eq!(idle_ttl_secs(&c), Some(24 * 3600));
         c.idle_reap_hours = 0;
         assert_eq!(idle_ttl_secs(&c), None);
+    }
+
+    #[test]
+    fn the_open_profile_is_sent_by_default_with_the_strict_settings_beside_it() {
+        let p = plan(&cfg());
+        assert_eq!(p["profile"], "open");
+        assert_eq!(p["hide_credentials"], true);
+        // A host that predates profiles ignores both keys and applies the strict
+        // policy, which cannot reach the model without this entry.
+        assert_eq!(
+            p["allow"],
+            json!([{ "host": "api.anthropic.com", "ports": [443] }])
+        );
+    }
+
+    #[test]
+    fn a_strict_profile_and_shared_credentials_are_sent_as_configured() {
+        let mut c = cfg();
+        c.sandbox.profile = SandboxProfile::Strict;
+        c.sandbox.hide_credentials = false;
+        let p = plan(&c);
+        assert_eq!(p["profile"], "strict");
+        assert_eq!(p["hide_credentials"], false);
     }
 
     #[test]

@@ -15,15 +15,7 @@ use std::path::{Path, PathBuf};
 /// HQ's own directory under HOME, which no setting reveals.
 const HQ_HOME_DIR: &str = ".hq";
 /// Directories under HOME that hold credentials and have no place in an agent.
-const SECRET_HOME_DIRS: &[&str] = &[
-    ".ssh",
-    ".gnupg",
-    ".aws",
-    ".kube",
-    ".hq",
-    ".docker",
-    ".config/gh",
-];
+const SECRET_HOME_DIRS: &[&str] = &[".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config/gh"];
 /// What an agent may read under HOME. Everything else there is unreadable, so a
 /// token or note the operator keeps in some other directory cannot be read and
 /// sent to an allowed host. Tool installs, shell and git configuration, and the
@@ -86,6 +78,29 @@ const PROJECT_READONLY: &[&str] = &[
     ".claude/settings.local.json",
     ".claude/hooks",
 ];
+/// The open profile's one guard on writes: what the operator's own tools run
+/// from later, outside the sandbox, and so what an agent could plant code in to
+/// get past the wall around HQ's directory. Nothing an agent needs for
+/// development lives here. Paths that do not exist are skipped under bubblewrap.
+const OPEN_READONLY_HOME_FILES: &[&str] = &[
+    ".bashrc",
+    ".bash_profile",
+    ".bash_login",
+    ".bash_logout",
+    ".profile",
+    ".zshenv",
+    ".zprofile",
+    ".zshrc",
+    ".zlogin",
+    ".zlogout",
+    ".gitconfig",
+];
+const OPEN_READONLY_HOME_DIRS: &[&str] = &[
+    ".config/git",
+    ".config/autostart",
+    ".config/systemd/user",
+    "Library/LaunchAgents",
+];
 /// Ways out of Seatbelt: starting an app outside it, or scheduling one.
 const DENIED_PROGRAMS: &[&str] = &[
     "/usr/bin/open",
@@ -93,10 +108,14 @@ const DENIED_PROGRAMS: &[&str] = &[
     "/bin/launchctl",
     "/usr/bin/launchctl",
 ];
+/// The strict profile also denies DNS: names are resolved by its proxy, so a
+/// lookup from inside could only be a way to carry data out.
 const DENIED_SERVICES: &[&str] = &[
     "com.apple.coreservices.launchservicesd",
     "com.apple.dnssd.service",
 ];
+/// The open profile resolves names itself, so DNS stays; the launcher stays denied.
+const DENIED_SERVICES_OPEN: &[&str] = &["com.apple.coreservices.launchservicesd"];
 /// What Claude Code needs to write under HOME, besides the project.
 /// `~/.claude.json` is deliberately not writable: it holds MCP server commands the
 /// operator's own Claude runs later. The host records trust for the project itself.
@@ -182,6 +201,41 @@ impl Mode {
     }
 }
 
+/// How tightly a sandboxed agent is confined.
+///
+/// A request that names no profile is `strict`, the only policy there was before
+/// profiles, so a client that predates them keeps what it asked for. HQ itself
+/// always names one (`agent_host.sandbox.profile`, `open` by default).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Profile {
+    /// Reads under HOME limited to a list, writes to the project, caches and the
+    /// agent's own state, a private `/tmp`, no view of other processes, and a
+    /// network that is a proxy with a domain allowlist.
+    #[default]
+    Strict,
+    /// The agent works as the user would in a terminal: the whole filesystem to
+    /// read and write, the machine's own network, shared `/tmp` and devices. What
+    /// stays out of reach is HQ itself: the host directory with its tokens,
+    /// `~/.hq`, other processes' environments, other Claude accounts, and (unless
+    /// `hide_credentials` is off) the credential stores. A few files the user's own
+    /// tools run later, such as shell startup files, stay read-only.
+    Open,
+}
+
+impl Profile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Profile::Strict => "strict",
+            Profile::Open => "open",
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
 /// One host an agent may reach.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Allow {
@@ -196,6 +250,16 @@ pub struct Allow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxSpec {
     pub mode: Mode,
+    /// How tightly the agent is confined; see [`Profile`].
+    #[serde(default)]
+    pub profile: Profile,
+    /// Keep `~/.ssh`, `~/.aws`, `~/.config/gh` and the other credential stores
+    /// (and `~/.netrc`, `~/.npmrc`) out of the agent's reach. Only the open
+    /// profile can turn this off; the strict one always hides them. `~/.hq` and
+    /// other Claude accounts stay hidden either way.
+    #[serde(default = "yes")]
+    pub hide_credentials: bool,
+    /// Hosts the agent may reach (strict only; the open profile has no proxy).
     #[serde(default)]
     pub allow: Vec<Allow>,
     /// Extra directories the agent may write under.
@@ -217,6 +281,8 @@ impl SandboxSpec {
     pub fn none() -> Self {
         Self {
             mode: Mode::None,
+            profile: Profile::default(),
+            hide_credentials: true,
             allow: Vec::new(),
             writable: Vec::new(),
             readable: Vec::new(),
@@ -239,11 +305,12 @@ pub(crate) struct Bridge {
 }
 
 /// The command to run and the variables to add for a sandboxed agent, plus the
-/// egress port to close when it exits.
+/// egress port to close when it exits (none under the open profile, which has no
+/// proxy).
 pub(crate) struct Confined {
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
-    pub egress_port: u16,
+    pub egress_port: Option<u16>,
 }
 
 fn rules(allow: &[Allow]) -> Vec<Rule> {
@@ -297,21 +364,206 @@ fn home() -> Option<PathBuf> {
         .filter(|h| h.is_absolute())
 }
 
+/// The launch a policy is for, beyond the spec.
+struct Target<'a> {
+    name: &'a str,
+    cwd: &'a Path,
+    run_dir: &'a Path,
+    claude: &'a ClaudeConfig,
+    /// The user's home directory, resolved.
+    home: &'a Path,
+    /// The agent's kind, as the tables here name it.
+    kind: Option<&'a str>,
+    /// The sandbox program is bubblewrap, which can only mount over a path that exists.
+    bwrap: bool,
+}
+
+/// What both profiles keep out of an agent's hands: the host directory (the
+/// operator token and every agent's own token), HQ's directory, the credential
+/// stores (unless the open profile turns that off), other Claude accounts, and the
+/// Claude config files the user's own Claude runs code from later.
+struct Wall {
+    project: PathBuf,
+    run_dir: PathBuf,
+    /// The agent socket: the one way back into the host an agent has.
+    socket: PathBuf,
+    /// Every directory hidden or revealed, whichever it is.
+    secret_dirs: Vec<PathBuf>,
+    /// The ones the spec names for this agent, readable and never writable.
+    revealed: Vec<PathBuf>,
+    /// The paths the spec names for this agent, resolved.
+    agent_readable: Vec<PathBuf>,
+    hidden: Vec<HiddenDir>,
+    masked_files: Vec<PathBuf>,
+    claude_files: Vec<PathBuf>,
+    claude_dirs: Vec<PathBuf>,
+}
+
+fn under(base: &Path, names: &[&str]) -> Vec<PathBuf> {
+    names.iter().map(|n| base.join(n)).collect()
+}
+
+/// The login and history directories of every coding agent but this one. Two kinds
+/// that share a directory (Antigravity's two names) do not hide it from each other.
+fn other_agent_state_dirs(home: &Path, kind: Option<&str>) -> Vec<PathBuf> {
+    let own: Vec<&str> = AGENT_STATE_DIRS
+        .iter()
+        .filter(|(k, _)| Some(*k) == kind)
+        .flat_map(|(_, dirs)| dirs.iter().copied())
+        .collect();
+    AGENT_STATE_DIRS
+        .iter()
+        .flat_map(|(_, dirs)| dirs.iter().copied())
+        .filter(|dir| !own.contains(dir))
+        .map(|dir| home.join(dir))
+        .collect()
+}
+
+fn wall(spec: &SandboxSpec, t: &Target, bridge: Option<&Bridge>) -> Result<Wall, HostError> {
+    let home = t.home;
+    let claude_dir: &Path = &t.claude.dir;
+    // The strict profile reads nothing under HOME that it does not list, so it
+    // always hides these; the setting is the open profile's.
+    let hide_credentials = spec.hide_credentials || spec.profile == Profile::Strict;
+    let run_dir = t
+        .run_dir
+        .canonicalize()
+        .map_err(|e| HostError::Io(format!("the host directory: {e}")))?;
+    let project = t
+        .cwd
+        .canonicalize()
+        .map_err(|e| HostError::Io(format!("the working directory: {e}")))?;
+    let other_profiles = std::fs::read_dir(home)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(OTHER_PROFILE_PREFIX)
+        })
+        .map(|e| e.path())
+        .filter(|p| p.canonicalize().ok().as_deref() != Some(claude_dir));
+    // With a profile's own config directory, the default ~/.claude is another account.
+    let default_dir = (!t.claude.is_default).then(|| home.join(DEFAULT_CLAUDE_DIR));
+    let credentials = if hide_credentials {
+        under(home, SECRET_HOME_DIRS)
+    } else {
+        Vec::new()
+    };
+    // The strict profile cannot read them anyway, as it reads nothing under HOME that
+    // it does not list; the open profile hides the other agents' logins by name.
+    let other_agents = if spec.profile == Profile::Open {
+        other_agent_state_dirs(home, t.kind)
+    } else {
+        Vec::new()
+    };
+    let secret_dirs = canonical(
+        credentials
+            .into_iter()
+            .chain([home.join(HQ_HOME_DIR)])
+            .chain(other_profiles)
+            .chain(default_dir)
+            .chain(other_agents),
+    );
+    // `confine` keeps only this agent's entries.
+    let agent_readable = canonical(spec.agent_readable.values().flatten().cloned());
+    // HQ's own directory holds the operator's tokens and is never revealed.
+    let hq_dir = home.join(HQ_HOME_DIR);
+    let hq_dir = hq_dir.canonicalize().unwrap_or(hq_dir);
+    let revealed: Vec<PathBuf> = secret_dirs
+        .iter()
+        .filter(|d| agent_readable.contains(d) && **d != hq_dir)
+        .cloned()
+        .collect();
+    let own_files = [
+        run_dir.join("hooks").join(format!("{}.json", t.name)),
+        run_dir.join("mcp").join(format!("{}.json", t.name)),
+    ];
+    let socket = server::agent_socket_path(&run_dir);
+    let mut allow = canonical(own_files);
+    allow.push(socket.clone());
+    allow.extend(bridge.map(|b| b.socket.clone()));
+    // A bubblewrap bind needs the file to exist.
+    allow.retain(|p| !t.bwrap || p.exists());
+    let mut hidden = vec![HiddenDir {
+        dir: run_dir.clone(),
+        allow,
+    }];
+    hidden.extend(
+        secret_dirs
+            .iter()
+            .filter(|d| !revealed.contains(d))
+            .map(|dir| HiddenDir {
+                dir: dir.clone(),
+                allow: Vec::new(),
+            }),
+    );
+    Ok(Wall {
+        project,
+        run_dir,
+        socket,
+        secret_dirs,
+        revealed,
+        agent_readable,
+        hidden,
+        masked_files: if hide_credentials {
+            under(home, SECRET_HOME_FILES)
+        } else {
+            Vec::new()
+        },
+        claude_files: CLAUDE_DIR_READONLY_FILES
+            .iter()
+            .map(|f| claude_dir.join(f))
+            .collect(),
+        claude_dirs: CLAUDE_DIR_READONLY_DIRS
+            .iter()
+            .map(|d| claude_dir.join(d))
+            .collect(),
+    })
+}
+
+/// The policy for one agent. `port` is its egress listener, which only the strict
+/// profile has.
 fn policy(
     spec: &SandboxSpec,
-    name: &str,
-    cwd: &Path,
-    run_dir: &Path,
-    port: u16,
-    claude: &ClaudeConfig,
+    t: &Target,
+    port: Option<u16>,
     bridge: Option<&Bridge>,
 ) -> Result<AgentSandbox, HostError> {
-    let claude_dir: &Path = &claude.dir;
-    let default_claude = claude.is_default;
-    let home = home().ok_or_else(|| HostError::Io("HOME is not set".into()))?;
-    let home = home.canonicalize().unwrap_or(home);
-    let under = |names: &[&str]| names.iter().map(|n| home.join(n)).collect::<Vec<_>>();
-    let bwrap = bridge.is_some();
+    let wall = wall(spec, t, bridge)?;
+    match (spec.profile, port) {
+        (Profile::Open, _) => Ok(open_policy(t, wall)),
+        (Profile::Strict, Some(port)) => strict_policy(spec, t, wall, port, bridge),
+        (Profile::Strict, None) => Err(HostError::Sandbox(
+            "the strict profile needs an egress listener".into(),
+        )),
+    }
+}
+
+fn strict_policy(
+    spec: &SandboxSpec,
+    t: &Target,
+    wall: Wall,
+    port: u16,
+    bridge: Option<&Bridge>,
+) -> Result<AgentSandbox, HostError> {
+    let home = t.home;
+    let bwrap = t.bwrap;
+    let claude_dir: &Path = &t.claude.dir;
+    let default_claude = t.claude.is_default;
+    let Wall {
+        project,
+        run_dir,
+        socket,
+        secret_dirs,
+        revealed,
+        agent_readable,
+        hidden,
+        masked_files,
+        claude_files,
+        claude_dirs,
+    } = wall;
     let private_tmp = if bwrap {
         canonical(PRIVATE_TMP_ROOTS.iter().map(PathBuf::from))
     } else {
@@ -325,53 +577,18 @@ fn policy(
     let tmp = std::env::temp_dir();
     let own_tmp = canonical([tmp])
         .into_iter()
-        .filter(|t| !private_tmp.iter().any(|p| t.starts_with(p)));
+        .filter(|d| !private_tmp.iter().any(|p| d.starts_with(p)));
     let writable = canonical(
-        under(HOME_WRITABLE)
+        under(home, HOME_WRITABLE)
             .into_iter()
             .chain([claude_dir.to_path_buf()])
             .chain(shared_tmp)
             .chain(own_tmp)
             .chain(spec.writable.iter().cloned()),
     );
-    let run_dir = run_dir
-        .canonicalize()
-        .map_err(|e| HostError::Io(format!("the host directory: {e}")))?;
-    let project = cwd
-        .canonicalize()
-        .map_err(|e| HostError::Io(format!("the working directory: {e}")))?;
-    let other_profiles = std::fs::read_dir(&home)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with(OTHER_PROFILE_PREFIX)
-        })
-        .map(|e| e.path())
-        .filter(|p| p.canonicalize().ok().as_deref() != Some(claude_dir));
-    // With a profile's own config directory, the default ~/.claude is another account.
-    let default_dir = (!default_claude).then(|| home.join(DEFAULT_CLAUDE_DIR));
-    let secret_dirs = canonical(
-        under(SECRET_HOME_DIRS)
-            .into_iter()
-            .chain(other_profiles)
-            .chain(default_dir),
-    );
-    // `confine` keeps only this agent's entries.
-    let agent_readable = canonical(spec.agent_readable.values().flatten().cloned());
-    // HQ's own directory holds the operator's tokens and is never revealed.
-    let hq_dir = home.join(HQ_HOME_DIR);
-    let hq_dir = hq_dir.canonicalize().unwrap_or(hq_dir);
-    let revealed: Vec<PathBuf> = secret_dirs
-        .iter()
-        .filter(|d| agent_readable.contains(d) && **d != hq_dir)
-        .cloned()
-        .collect();
     // A writable root that contains HOME, the run directory or a secret directory
     // would let the agent rename or rewrite them, which no read rule survives.
-    let guarded = [home.clone(), run_dir.clone()]
+    let guarded = [home.to_path_buf(), run_dir.clone()]
         .into_iter()
         .chain(secret_dirs.iter().cloned());
     for root in std::iter::once(&project).chain(&writable) {
@@ -402,39 +619,7 @@ fn policy(
             inside.display()
         )));
     }
-    let own_files = [
-        run_dir.join("hooks").join(format!("{name}.json")),
-        run_dir.join("mcp").join(format!("{name}.json")),
-    ];
-    let socket = server::agent_socket_path(&run_dir);
-    let mut allow = canonical(own_files);
-    allow.push(socket.clone());
-    allow.extend(bridge.map(|b| b.socket.clone()));
-    // A bubblewrap bind needs the file to exist.
-    allow.retain(|p| !bwrap || p.exists());
-    let mut hidden = vec![HiddenDir {
-        dir: run_dir,
-        allow,
-    }];
-    hidden.extend(
-        secret_dirs
-            .into_iter()
-            .filter(|d| !revealed.contains(d))
-            .map(|dir| HiddenDir {
-                dir,
-                allow: Vec::new(),
-            }),
-    );
-    let under_project = |names: &[&str]| names.iter().map(|n| project.join(n)).collect::<Vec<_>>();
-    let home_files: Vec<PathBuf> = CLAUDE_DIR_READONLY_FILES
-        .iter()
-        .map(|f| claude_dir.join(f))
-        .collect();
-    let home_dirs: Vec<PathBuf> = CLAUDE_DIR_READONLY_DIRS
-        .iter()
-        .map(|d| claude_dir.join(d))
-        .collect();
-    let (project_files, project_dirs): (Vec<_>, Vec<_>) = under_project(PROJECT_READONLY)
+    let (project_files, project_dirs): (Vec<_>, Vec<_>) = under(&project, PROJECT_READONLY)
         .into_iter()
         .partition(|p| p.extension().is_some() || p.ends_with("config"));
     // Seatbelt denies writes to a path whether or not it exists; a bubblewrap
@@ -444,7 +629,7 @@ fn policy(
     };
     let macos = cfg!(target_os = "macos");
     let read_allow = canonical(
-        under(HOME_READABLE)
+        under(home, HOME_READABLE)
             .into_iter()
             .chain([claude_dir.to_path_buf()])
             .chain(default_claude.then(|| home.join(".claude.json")))
@@ -456,16 +641,18 @@ fn policy(
     );
     Ok(AgentSandbox {
         project,
+        open_filesystem: false,
         writable,
         writable_files: Vec::new(),
-        readonly_files: keep(home_files.into_iter().chain(project_files).collect()),
+        readonly_files: keep(claude_files.into_iter().chain(project_files).collect()),
         readonly_subpaths: keep(
-            home_dirs
+            claude_dirs
                 .into_iter()
                 .chain(project_dirs)
                 .chain(revealed)
                 .collect(),
         ),
+        pinned_dirs: Vec::new(),
         denied_programs: if macos {
             DENIED_PROGRAMS.iter().map(PathBuf::from).collect()
         } else {
@@ -476,13 +663,13 @@ fn policy(
         } else {
             Vec::new()
         },
-        masked_files: keep(under(SECRET_HOME_FILES)),
+        masked_files: keep(masked_files),
         hidden_dirs: hidden,
         private_tmp,
         read_restrictions: outer_restrictions(&read_allow)
             .into_iter()
             .chain([ReadRestriction {
-                root: home.clone(),
+                root: home.to_path_buf(),
                 allow: read_allow,
             }])
             .collect(),
@@ -505,6 +692,117 @@ fn policy(
             },
         },
     })
+}
+
+/// The open profile: what the user could do in a terminal, except reach HQ
+/// itself. No proxy, no read limits, no private temporary directories, writes
+/// anywhere. What is left is the wall (see [`Wall`]), the short read-only list of
+/// files the user's own tools run later, and the other processes' environments,
+/// which hold the daemon's and the other agents' tokens.
+fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
+    let home = t.home;
+    let bwrap = t.bwrap;
+    let Wall {
+        project,
+        revealed,
+        hidden,
+        masked_files,
+        claude_files,
+        claude_dirs,
+        ..
+    } = wall;
+    let keep = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
+        with_link_targets(paths)
+            .into_iter()
+            .filter(|p| !bwrap || p.exists())
+            .collect()
+    };
+    let mut files = claude_files;
+    files.extend(under(home, OPEN_READONLY_HOME_FILES));
+    // The default account's trust file lies beside its directory, not in it: its own
+    // to read but not write, and another account's to neither.
+    let mut masked_files = masked_files;
+    let default_json = home.join(".claude.json");
+    if t.claude.is_default {
+        files.push(default_json);
+    } else {
+        masked_files.push(default_json);
+    }
+    let mut dirs = claude_dirs;
+    dirs.extend(under(home, OPEN_READONLY_HOME_DIRS));
+    dirs.extend(revealed);
+    let mut pinned_dirs = Vec::new();
+    if !bwrap {
+        // Seatbelt hides a path by refusing reads of it, so with every write allowed
+        // the hidden directories must be closed to writes too, and so must the
+        // directories above them. Under bubblewrap a hidden directory is a mount
+        // over an empty one, which cannot be renamed, written or carried off.
+        dirs.extend(hidden.iter().map(|h| h.dir.clone()));
+        pinned_dirs = pinned_parents(&hidden, home);
+    }
+    let macos = cfg!(target_os = "macos");
+    AgentSandbox {
+        project,
+        open_filesystem: true,
+        writable: Vec::new(),
+        writable_files: Vec::new(),
+        readonly_files: keep(files),
+        readonly_subpaths: keep(dirs),
+        pinned_dirs,
+        denied_programs: if macos {
+            DENIED_PROGRAMS.iter().map(PathBuf::from).collect()
+        } else {
+            Vec::new()
+        },
+        denied_services: if macos {
+            DENIED_SERVICES_OPEN.iter().map(|s| s.to_string()).collect()
+        } else {
+            Vec::new()
+        },
+        masked_files: keep(masked_files),
+        hidden_dirs: hidden,
+        private_tmp: Vec::new(),
+        read_restrictions: Vec::new(),
+        hide_other_processes: true,
+        network: Network::Full,
+    }
+}
+
+/// The paths, and for any that is a symlink where it leads: Seatbelt judges the
+/// resolved path, so a rule on a dotfile linked into a dotfiles repo has to name
+/// the repo's copy too.
+fn with_link_targets(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for path in paths {
+        if let Ok(real) = path.canonicalize()
+            && real != path
+        {
+            out.push(real);
+        }
+        out.push(path);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The directories above each hidden one, up to but not including HOME (or the
+/// filesystem root): moving one would carry the hidden directory out from under
+/// the rule that names it.
+fn pinned_parents(hidden: &[HiddenDir], home: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = hidden
+        .iter()
+        .flat_map(|h| {
+            h.dir
+                .ancestors()
+                .skip(1)
+                .take_while(|a| *a != home && a.parent().is_some())
+                .map(Path::to_path_buf)
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 #[cfg(target_os = "macos")]
@@ -545,9 +843,9 @@ pub(crate) struct Launch<'a> {
     pub helper: Option<&'a Path>,
 }
 
-/// Opens the agent's egress listener and wraps `argv` in the platform sandbox.
-/// Fails closed: no sandbox program, or a policy the platform cannot enforce,
-/// is an error, never an unsandboxed start.
+/// Wraps `argv` in the platform sandbox, and under the strict profile opens the
+/// agent's egress listener first. Fails closed: no sandbox program, or a policy
+/// the platform cannot enforce, is an error, never an unsandboxed start.
 pub(crate) fn confine(
     egress: &Egress,
     spec: &SandboxSpec,
@@ -576,20 +874,22 @@ pub(crate) fn confine(
     let backend = backend()
         .ok_or_else(|| refuse("no sandbox program (sandbox-exec or bwrap) on this machine"))?;
     let claude = claude_config(env);
-    // The agent's own state directories are writable (created if its first run has
-    // not made them yet, so there is something to allow).
+    let strict = spec.profile == Profile::Strict;
+    // Under the strict profile the agent's own state directories are writable
+    // (created if its first run has not made them yet, so there is something to
+    // allow). The open profile writes anywhere and has no proxy to list hosts in.
     let mut own_spec = spec.clone();
     let kind = agent.map(agent_kind);
     own_spec
         .agent_readable
         .retain(|k, _| Some(agent_kind(k)) == kind);
-    if matches!(backend, Backend::Bwrap(_)) && !own_spec.loopback_ports.is_empty() {
+    if strict && matches!(backend, Backend::Bwrap(_)) && !own_spec.loopback_ports.is_empty() {
         eprintln!(
             "hq host: loopback ports {:?} are not opened under bubblewrap; HTTP to them still goes through the proxy",
             own_spec.loopback_ports
         );
     }
-    if let Some(kind) = kind {
+    if strict && let Some(kind) = kind {
         if let Some((_, dirs)) = AGENT_STATE_DIRS.iter().find(|(k, _)| *k == kind) {
             let home = home().ok_or_else(|| refuse("HOME is not set"))?;
             for dir in dirs.iter().map(|d| home.join(d)) {
@@ -618,35 +918,64 @@ pub(crate) fn confine(
     }
     // A bubblewrap sandbox has no network, so it reaches the proxy through a unix
     // socket in the host directory that a relay inside turns back into loopback.
-    let bridge = match backend {
-        Backend::Bwrap(_) => Some(Bridge {
-            program: match helper {
-                Some(path) => path.to_path_buf(),
-                None => std::env::current_exe()
-                    .map_err(|e| HostError::Io(format!("this binary: {e}")))?,
-            },
-            socket: run_dir
-                .canonicalize()
-                .map_err(|e| HostError::Io(format!("the host directory: {e}")))?
-                .join(format!("eg-{name}.sock")),
-        }),
-        Backend::SandboxExec(_) => None,
+    // The open profile keeps the machine's own network and has neither.
+    let (bridge, port) = if strict {
+        let bridge = match backend {
+            Backend::Bwrap(_) => Some(Bridge {
+                program: match helper {
+                    Some(path) => path.to_path_buf(),
+                    None => std::env::current_exe()
+                        .map_err(|e| HostError::Io(format!("this binary: {e}")))?,
+                },
+                socket: run_dir
+                    .canonicalize()
+                    .map_err(|e| HostError::Io(format!("the host directory: {e}")))?
+                    .join(format!("eg-{name}.sock")),
+            }),
+            Backend::SandboxExec(_) => None,
+        };
+        let port = egress
+            .open_with_bridge(
+                name,
+                rules(&spec.allow),
+                bridge.as_ref().map(|b| b.socket.as_path()),
+            )
+            .map_err(|e| HostError::Io(format!("the egress listener: {e}")))?;
+        (bridge, Some(port))
+    } else {
+        (None, None)
     };
-    let port = egress
-        .open_with_bridge(
-            name,
-            rules(&spec.allow),
-            bridge.as_ref().map(|b| b.socket.as_path()),
-        )
-        .map_err(|e| HostError::Io(format!("the egress listener: {e}")))?;
+    let close_listener = || {
+        if let Some(port) = port {
+            egress.close_port(name, port);
+        }
+    };
+    let home_path = match home() {
+        Some(h) => h.canonicalize().unwrap_or(h),
+        None => {
+            close_listener();
+            return Err(HostError::Io("HOME is not set".into()));
+        }
+    };
     let wrapped = claude
         .ok_or_else(|| HostError::Io("HOME is not set".into()))
-        .and_then(|c| policy(spec, name, cwd, run_dir, port, &c, bridge.as_ref()))
+        .and_then(|claude| {
+            let target = Target {
+                name,
+                cwd,
+                run_dir,
+                claude: &claude,
+                home: &home_path,
+                kind,
+                bwrap: matches!(backend, Backend::Bwrap(_)),
+            };
+            policy(spec, &target, port, bridge.as_ref())
+        })
         .and_then(|policy| wrap(backend, &policy, argv).map_err(|e| refuse(&e.to_string())));
     let wrapped = match wrapped {
         Ok(w) => w,
         Err(e) => {
-            egress.close_port(name, port);
+            close_listener();
             return Err(e);
         }
     };
@@ -659,18 +988,20 @@ pub(crate) fn confine(
     let argv = match argv {
         Ok(a) => a,
         Err(e) => {
-            egress.close_port(name, port);
+            close_listener();
             return Err(e);
         }
     };
-    let url = format!("http://127.0.0.1:{port}");
-    let mut env: Vec<(String, String)> = PROXY_ENV_NAMES
-        .iter()
-        .map(|n| (n.to_string(), url.clone()))
-        .collect();
+    let mut env: Vec<(String, String)> = Vec::new();
+    if let Some(port) = port {
+        let url = format!("http://127.0.0.1:{port}");
+        env.extend(PROXY_ENV_NAMES.iter().map(|n| (n.to_string(), url.clone())));
+    }
     env.push(("DISABLE_AUTOUPDATER".into(), "1".into()));
-    // Node's fetch ignores HTTPS_PROXY unless told to read it; without this cursor and pi go direct, are denied, and report "fetch failed".
-    env.push((NODE_PROXY_SWITCH.into(), "1".into()));
+    if port.is_some() {
+        // Node's fetch ignores HTTPS_PROXY unless told to read it; without this cursor and pi go direct, are denied, and report "fetch failed".
+        env.push((NODE_PROXY_SWITCH.into(), "1".into()));
+    }
     Ok(Confined {
         argv,
         env,
@@ -761,6 +1092,442 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(broken.path().join(".claude.json")).unwrap(),
             "{not json"
+        );
+    }
+
+    const SECRET: &str = "TOP-SECRET-VALUE";
+
+    /// A home directory shaped like a real one, a host directory and a project,
+    /// all under one temporary root. Not under the system temporary directory:
+    /// bubblewrap gives agents a private copy of that, and the strict profile
+    /// refuses a host directory there.
+    struct Fixture {
+        _tmp: tempfile::TempDir,
+        root: PathBuf,
+        home: PathBuf,
+        run_dir: PathBuf,
+        project: PathBuf,
+    }
+
+    fn fixture() -> Fixture {
+        let tmp = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let home = root.join("home");
+        let run_dir = root.join("run");
+        let project = root.join("project");
+        for dir in [
+            home.join(".hq"),
+            home.join(".ssh"),
+            home.join(".aws"),
+            home.join(".config/gh"),
+            home.join(".config/git"),
+            home.join(".claude"),
+            home.join(".claude-work"),
+            home.join(".codex"),
+            home.join(".gemini"),
+            run_dir.join("mcp"),
+            run_dir.join("hooks"),
+            project.join(".git/hooks"),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        for (path, text) in [
+            (home.join(".hq/operator.token"), SECRET),
+            (home.join(".ssh/id_test"), SECRET),
+            (home.join(".config/gh/hosts.yml"), SECRET),
+            (home.join(".claude-work/credentials.json"), SECRET),
+            (home.join(".codex/auth.json"), SECRET),
+            (home.join(".gemini/oauth.json"), SECRET),
+            (home.join(".npmrc"), SECRET),
+            (home.join("notes.txt"), SECRET),
+            (home.join(".zshrc"), "# rc"),
+            (home.join(".gitconfig"), "[user]"),
+            (home.join(".config/git/config"), "[core]"),
+            (home.join(".claude.json"), "{}"),
+            (home.join(".claude/settings.json"), "{}"),
+            (run_dir.join("operator.token"), SECRET),
+            (run_dir.join("mcp/a.json"), "OWN"),
+            (run_dir.join("mcp/b.json"), SECRET),
+            (run_dir.join("hooks/a.json"), "{}"),
+            (project.join(".git/config"), "[core]"),
+            (project.join(".mcp.json"), "{}"),
+        ] {
+            std::fs::write(path, text).unwrap();
+        }
+        Fixture {
+            _tmp: tmp,
+            root,
+            home,
+            run_dir,
+            project,
+        }
+    }
+
+    impl Fixture {
+        fn claude(&self) -> ClaudeConfig {
+            ClaudeConfig {
+                dir: self.home.join(".claude"),
+                json_dir: self.home.clone(),
+                is_default: true,
+            }
+        }
+
+        fn target<'a>(&'a self, claude: &'a ClaudeConfig, bwrap: bool) -> Target<'a> {
+            self.target_as(claude, bwrap, Some("claude"))
+        }
+
+        fn target_as<'a>(
+            &'a self,
+            claude: &'a ClaudeConfig,
+            bwrap: bool,
+            kind: Option<&'a str>,
+        ) -> Target<'a> {
+            Target {
+                name: "a",
+                cwd: &self.project,
+                run_dir: &self.run_dir,
+                claude,
+                home: &self.home,
+                kind,
+                bwrap,
+            }
+        }
+    }
+
+    fn spec_with(profile: Profile) -> SandboxSpec {
+        SandboxSpec {
+            mode: Mode::Process,
+            profile,
+            ..SandboxSpec::none()
+        }
+    }
+
+    fn hidden_dirs(s: &AgentSandbox) -> Vec<&Path> {
+        s.hidden_dirs.iter().map(|h| h.dir.as_path()).collect()
+    }
+
+    #[test]
+    fn a_request_that_names_no_profile_is_strict_and_hides_credentials() {
+        let spec: SandboxSpec = serde_json::from_value(serde_json::json!({"mode": "process"}))
+            .expect("a request from a client that predates profiles");
+        assert_eq!(spec.profile, Profile::Strict);
+        assert!(spec.hide_credentials);
+        let spec: SandboxSpec = serde_json::from_value(serde_json::json!({
+            "mode": "process", "profile": "open", "hide_credentials": false
+        }))
+        .unwrap();
+        assert_eq!(spec.profile, Profile::Open);
+        assert!(!spec.hide_credentials);
+    }
+
+    #[test]
+    fn the_open_policy_walls_off_hq_and_the_credentials_and_limits_nothing_else() {
+        let f = fixture();
+        let claude = f.claude();
+        for bwrap in [true, false] {
+            let s = policy(
+                &spec_with(Profile::Open),
+                &f.target(&claude, bwrap),
+                None,
+                None,
+            )
+            .unwrap();
+            assert!(s.open_filesystem);
+            assert_eq!(s.network, Network::Full, "no proxy, no relay");
+            assert!(s.read_restrictions.is_empty() && s.private_tmp.is_empty());
+            assert!(s.writable.is_empty(), "nothing to allow when all is open");
+            assert!(s.hide_other_processes, "their environments hold tokens");
+            let hidden = hidden_dirs(&s);
+            for dir in [
+                ".hq",
+                ".ssh",
+                ".aws",
+                ".config/gh",
+                ".claude-work",
+                ".codex",
+                ".gemini",
+            ] {
+                assert!(hidden.contains(&f.home.join(dir).as_path()), "{dir} hidden");
+            }
+            assert!(hidden.contains(&f.run_dir.as_path()));
+            assert!(!hidden.contains(&f.home.join(".config").as_path()));
+            assert!(!hidden.contains(&f.home.as_path()));
+            assert!(s.masked_files.contains(&f.home.join(".npmrc")));
+            // The only files protected from writes are the ones the user's own tools
+            // run later; nothing of the project is.
+            for file in [
+                ".zshrc",
+                ".gitconfig",
+                ".claude.json",
+                ".claude/settings.json",
+            ] {
+                assert!(
+                    s.readonly_files.contains(&f.home.join(file)),
+                    "{file} read-only"
+                );
+            }
+            assert!(s.readonly_subpaths.contains(&f.home.join(".config/git")));
+            assert!(
+                !s.readonly_files
+                    .iter()
+                    .chain(&s.readonly_subpaths)
+                    .any(|p| p.starts_with(&f.project)),
+                "the project's own .git/hooks, .git/config and .mcp.json stay writable"
+            );
+            // Seatbelt needs the hidden directories closed to writes and their parents
+            // pinned; a bubblewrap mount needs neither.
+            assert_eq!(s.pinned_dirs.is_empty(), bwrap, "{:?}", s.pinned_dirs);
+            assert_eq!(s.readonly_subpaths.contains(&f.run_dir), !bwrap);
+            if !bwrap {
+                assert!(s.pinned_dirs.contains(&f.home.join(".config")));
+                assert!(
+                    !s.pinned_dirs.contains(&f.home),
+                    "home itself is not pinned"
+                );
+            }
+            hq_sandbox::bwrap_args(&s, &["true".to_string()]).expect("no relay is needed");
+        }
+    }
+
+    #[test]
+    fn the_strict_policy_is_the_one_it_always_was() {
+        let f = fixture();
+        let claude = f.claude();
+        let s = policy(
+            &spec_with(Profile::Strict),
+            &f.target(&claude, false),
+            Some(18080),
+            None,
+        )
+        .unwrap();
+        assert!(!s.open_filesystem && s.pinned_dirs.is_empty());
+        assert!(matches!(s.network, Network::Proxy { port: 18080, .. }));
+        assert!(s.read_restrictions.iter().any(|r| r.root == f.home));
+        assert!(s.readonly_files.contains(&f.project.join(".git/config")));
+        let err = policy(
+            &spec_with(Profile::Strict),
+            &f.target(&claude, false),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("egress listener"), "{err}");
+    }
+
+    #[test]
+    fn credential_hiding_can_be_turned_off_for_the_open_profile_only() {
+        let f = fixture();
+        let claude = f.claude();
+        let mut open = spec_with(Profile::Open);
+        open.hide_credentials = false;
+        let s = policy(&open, &f.target(&claude, false), None, None).unwrap();
+        let hidden = hidden_dirs(&s);
+        for dir in [".ssh", ".aws", ".config/gh"] {
+            assert!(!hidden.contains(&f.home.join(dir).as_path()), "{dir}");
+        }
+        assert!(s.masked_files.is_empty());
+        // HQ's own directory and other accounts stay hidden whatever the setting says.
+        for dir in [".hq", ".claude-work"] {
+            assert!(hidden.contains(&f.home.join(dir).as_path()), "{dir}");
+        }
+        let mut strict = spec_with(Profile::Strict);
+        strict.hide_credentials = false;
+        let s = policy(&strict, &f.target(&claude, false), Some(18080), None).unwrap();
+        assert!(hidden_dirs(&s).contains(&f.home.join(".ssh").as_path()));
+        assert!(s.masked_files.contains(&f.home.join(".npmrc")));
+    }
+
+    #[test]
+    fn a_credential_store_named_for_the_agent_is_read_only_under_the_open_profile() {
+        let f = fixture();
+        let claude = f.claude();
+        let mut spec = spec_with(Profile::Open);
+        spec.agent_readable.insert(
+            "claude".into(),
+            vec![f.home.join(".config/gh"), f.home.join(".hq")],
+        );
+        let s = policy(&spec, &f.target(&claude, false), None, None).unwrap();
+        let hidden = hidden_dirs(&s);
+        assert!(!hidden.contains(&f.home.join(".config/gh").as_path()));
+        assert!(s.readonly_subpaths.contains(&f.home.join(".config/gh")));
+        assert!(
+            hidden.contains(&f.home.join(".hq").as_path()),
+            "HQ's directory is never revealed"
+        );
+    }
+
+    #[test]
+    fn each_agent_sees_its_own_login_directory_and_no_other_agents() {
+        let f = fixture();
+        let claude = f.claude();
+        let hidden_for = |kind: Option<&str>| -> Vec<PathBuf> {
+            let s = policy(
+                &spec_with(Profile::Open),
+                &f.target_as(&claude, false, kind),
+                None,
+                None,
+            )
+            .unwrap();
+            s.hidden_dirs.into_iter().map(|h| h.dir).collect()
+        };
+        let codex = f.home.join(".codex");
+        let gemini = f.home.join(".gemini");
+        let as_claude = hidden_for(Some("claude"));
+        assert!(as_claude.contains(&codex) && as_claude.contains(&gemini));
+        let as_codex = hidden_for(Some("codex"));
+        assert!(!as_codex.contains(&codex) && as_codex.contains(&gemini));
+        // Antigravity goes by two names and one directory.
+        for name in ["agy", "antigravity"] {
+            let as_agy = hidden_for(Some(agent_kind(name)));
+            assert!(
+                !as_agy.contains(&gemini) && as_agy.contains(&codex),
+                "{name}"
+            );
+        }
+        let nobody = hidden_for(None);
+        assert!(nobody.contains(&codex) && nobody.contains(&gemini));
+        // The strict profile reads nothing under HOME it does not list, so it has no list.
+        let s = policy(
+            &spec_with(Profile::Strict),
+            &f.target_as(&claude, false, Some("claude")),
+            Some(18080),
+            None,
+        )
+        .unwrap();
+        assert!(!hidden_dirs(&s).contains(&codex.as_path()));
+    }
+
+    #[test]
+    fn a_launch_profile_loses_the_default_accounts_directory_and_trust_file() {
+        let f = fixture();
+        let own = ClaudeConfig {
+            dir: f.home.join(".claude-work"),
+            json_dir: f.home.join(".claude-work"),
+            is_default: false,
+        };
+        let s = policy(
+            &spec_with(Profile::Open),
+            &f.target(&own, false),
+            None,
+            None,
+        )
+        .unwrap();
+        let hidden = hidden_dirs(&s);
+        assert!(hidden.contains(&f.home.join(".claude").as_path()));
+        assert!(
+            !hidden.contains(&f.home.join(".claude-work").as_path()),
+            "its own directory stays"
+        );
+        assert!(
+            s.masked_files.contains(&f.home.join(".claude.json")),
+            "the default account's trust file is neither readable nor writable"
+        );
+        assert!(!s.readonly_files.contains(&f.home.join(".claude.json")));
+        // The default account's own file is read-only to it, not masked.
+        let default = f.claude();
+        let s = policy(
+            &spec_with(Profile::Open),
+            &f.target(&default, false),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(s.readonly_files.contains(&f.home.join(".claude.json")));
+        assert!(!s.masked_files.contains(&f.home.join(".claude.json")));
+    }
+
+    #[test]
+    fn the_open_profile_enforced_by_the_real_sandbox() {
+        let Some(backend) = hq_sandbox::backend() else {
+            return;
+        };
+        let f = fixture();
+        let claude = f.claude();
+        let bwrap = matches!(backend, Backend::Bwrap(_));
+        let s = policy(
+            &spec_with(Profile::Open),
+            &f.target(&claude, bwrap),
+            None,
+            None,
+        )
+        .unwrap();
+        let (home, run, project, root) = (
+            f.home.display(),
+            f.run_dir.display(),
+            f.project.display(),
+            f.root.display(),
+        );
+        let shared = std::env::temp_dir().join(format!("hq-host-open-{}", std::process::id()));
+        let script = format!(
+            "t() {{ if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }}; \
+             sees() {{ grep -q {SECRET} \"$1\"; }}; \
+             t hq_token 'sees {home}/.hq/operator.token'; t host_token 'sees {run}/operator.token'; \
+             t sibling_mcp 'sees {run}/mcp/b.json'; t own_mcp 'grep -q OWN {run}/mcp/a.json'; \
+             t ssh_key 'sees {home}/.ssh/id_test'; t gh_token 'sees {home}/.config/gh/hosts.yml'; \
+             t npmrc 'sees {home}/.npmrc'; t other_account 'sees {home}/.claude-work/credentials.json'; \
+             t other_agent 'sees {home}/.codex/auth.json'; t other_agent_too 'sees {home}/.gemini/oauth.json'; \
+             t read_home 'sees {home}/notes.txt'; \
+             t write_home 'echo x > {home}/new.txt'; t write_outside 'echo x > {root}/outside.txt'; \
+             t write_zshrc 'echo x >> {home}/.zshrc'; t write_gitconfig 'echo x >> {home}/.gitconfig'; \
+             t write_git_dir 'echo x > {home}/.config/git/config'; \
+             t write_settings 'echo x > {home}/.claude/settings.json'; t write_claude 'echo x > {home}/.claude/history'; \
+             t write_hook 'echo x > {project}/.git/hooks/pre-commit'; t write_git_config 'echo x >> {project}/.git/config'; \
+             t write_mcp 'echo x > {project}/.mcp.json'; \
+             t write_hq 'echo x > {home}/.hq/new'; t write_run 'echo x > {run}/new'; \
+             mv {home}/.config {home}/.config.moved 2>/dev/null; t moved_gh 'sees {home}/.config.moved/gh/hosts.yml'; \
+             t shared_tmp 'echo x > {shared}'; echo DONE",
+            shared = shared.display()
+        );
+        let wrapped = hq_sandbox::wrap(backend, &s, &["sh".into(), "-c".into(), script])
+            .expect("the policy can be enforced here");
+        let out = std::process::Command::new(&wrapped.program)
+            .args(&wrapped.args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the sandbox program starts");
+        let out = String::from_utf8_lossy(&out.stdout).into_owned();
+        let wrote_shared = shared.exists();
+        let _ = std::fs::remove_file(&shared);
+        assert!(out.contains("DONE"), "{out}");
+        for (probe, allowed) in [
+            ("hq_token", false),
+            ("host_token", false),
+            ("sibling_mcp", false),
+            ("own_mcp", true),
+            ("ssh_key", false),
+            ("gh_token", false),
+            ("npmrc", false),
+            ("other_account", false),
+            ("other_agent", false),
+            ("other_agent_too", false),
+            ("read_home", true),
+            ("write_home", true),
+            ("write_outside", true),
+            ("write_zshrc", false),
+            ("write_gitconfig", false),
+            ("write_git_dir", false),
+            ("write_settings", false),
+            ("write_claude", true),
+            ("write_hook", true),
+            ("write_git_config", true),
+            ("write_mcp", true),
+            ("moved_gh", false),
+            ("shared_tmp", true),
+        ] {
+            let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
+            assert!(out.contains(&want), "expected {want}; got:\n{out}");
+        }
+        assert!(wrote_shared, "the temporary directory is the machine's own");
+        // Seatbelt refuses a write into a hidden directory; bubblewrap lets it land
+        // in the empty mount that hides it. Either way the real one is untouched.
+        assert!(!f.home.join(".hq/new").exists(), "a write reached ~/.hq");
+        assert!(
+            !f.run_dir.join("new").exists(),
+            "a write reached the host dir"
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.home.join(".zshrc")).unwrap(),
+            "# rc"
         );
     }
 }

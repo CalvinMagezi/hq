@@ -22,8 +22,8 @@ On top of that the agent gets what HQ passes in the spawn request:
 - The `env:` of the harness profile it was started with (`agent_host.harness_profiles`).
   These values are written into `config.yaml` as plain text, so use them for non-secret
   settings such as `CLAUDE_CONFIG_DIR`, not for keys.
-- In process-sandbox mode, the proxy variables that point its HTTP clients at its egress
-  proxy, and `DISABLE_AUTOUPDATER`.
+- In process-sandbox mode, `DISABLE_AUTOUPDATER`, and under the strict profile also the proxy
+  variables that point its HTTP clients at its egress proxy. The open profile has no proxy.
 
 ## What to do about it
 
@@ -33,7 +33,10 @@ On top of that the agent gets what HQ passes in the spawn request:
    `0600`. Anything the wrapper exports is visible to that agent.
 2. Leave the sandbox on (`agent_host.sandbox.mode: process`, the default). It also hides your
    credentials directories (`~/.ssh`, `~/.aws`, `~/.config/gh` and others), other Claude
-   profiles, and the host's own token files, which the environment allowlist cannot do.
+   profiles, `~/.hq` and the host's own token files, which the environment allowlist cannot do.
+   Under the default `open` profile that is all it hides, and `hide_credentials: false` takes the
+   credentials directories off the list; anything an agent can read it can send anywhere, since
+   its network is the machine's own. Use `profile: strict` for agents nobody watches.
 3. If agents of different trust levels share a machine, run them as separate OS users with
    separate hosts and point the untrusted harnesses at that host (`agent_host.default_host`
    and `agent_host.hosts`). File modes do not separate two agents running as the same user.

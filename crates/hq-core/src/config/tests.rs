@@ -545,3 +545,41 @@ mod web_login_link_tests {
         );
     }
 }
+
+#[test]
+fn the_agent_sandbox_is_open_by_default_and_hides_credentials() {
+    let cfg = crate::HqConfig::default();
+    let sandbox = &cfg.agent_host.sandbox;
+    assert_eq!(sandbox.mode, crate::config::SandboxMode::Process);
+    assert_eq!(sandbox.profile, crate::config::SandboxProfile::Open);
+    assert!(sandbox.hide_credentials);
+}
+
+#[test]
+fn the_agent_sandbox_profile_and_credentials_setting_load_from_yaml() {
+    let dir = tempfile::tempdir().unwrap();
+    for (text, profile, hide) in [
+        (
+            "agent_host:\n  sandbox:\n    profile: strict\n",
+            crate::config::SandboxProfile::Strict,
+            true,
+        ),
+        (
+            "agent_host:\n  sandbox:\n    profile: open\n    hide_credentials: false\n",
+            crate::config::SandboxProfile::Open,
+            false,
+        ),
+        (
+            // A config written before profiles keeps loading and gets the default.
+            "agent_host:\n  sandbox:\n    allow_domains: [example.com]\n",
+            crate::config::SandboxProfile::Open,
+            true,
+        ),
+    ] {
+        let path = dir.path().join("c.yaml");
+        std::fs::write(&path, text).unwrap();
+        let cfg = crate::HqConfig::load_from_path(&path).unwrap();
+        assert_eq!(cfg.agent_host.sandbox.profile, profile, "{text}");
+        assert_eq!(cfg.agent_host.sandbox.hide_credentials, hide, "{text}");
+    }
+}
