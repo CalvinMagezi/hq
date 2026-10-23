@@ -23,7 +23,16 @@ default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
    - `authorize_url` (recommended): a private https origin for the consent page, such as your
      tailnet name (`https://hq.example.ts.net`). Your browser can load it; the internet cannot.
      HQ answers its sign-in page only on this origin, so nobody outside can see when a
-     connection window is open or fill it with requests.
+     connection window is open or fill it with requests. A browser on the same device as HQ
+     can use plain `http://127.0.0.1:<port>`, `http://[::1]:<port>` or `http://localhost:<port>`
+     instead: the only plain-http origins accepted, since the connection never leaves the device
+     (the request cookie then drops its `Secure` attribute, which WebKit refuses over http).
+     Prefer `127.0.0.1`: `localhost` can resolve to `::1`, where another user of the machine
+     may be listening. HQ answers `/oauth/authorize` on such an origin only for a request that
+     carries no reverse-proxy header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`,
+     `X-Real-IP`), so a proxy on the same machine that rewrites `Host` to this address does not
+     open it. Whether claude.ai sends your browser to such an address is an open test; the runbook is
+     `docs/plans/native-bridge/w6-claude-run.md`.
 2. **Configure HQ** (`~/.hq/config.yaml` or `/opt/hq/config.yaml`) and restart it:
 
    ```yaml
@@ -34,7 +43,7 @@ default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
      default_scope: read_only        # preselected on the consent page: read_only | tasks | full
    ```
 
-   If the connector cannot start (no web token, a URL that is not a bare https origin, or
+   If the connector cannot start (no web token, a URL that is not a bare origin, or
    `profile: lite`), HQ logs why and leaves it off. `hq connector status` shows the reason.
 3. **Publish only the machine endpoints**: `/mcp`, `/oauth/token`, `/oauth/revoke` and the three
    `/.well-known/oauth-*` documents. `deploy/Caddyfile.connector` does this with Caddy and also
@@ -89,8 +98,10 @@ mcp_connector:
   is reported and tried again every few seconds. The bridge (`hq bridge serve` or `run`) pipes
   the registered edge's streams to that socket; register the device with the edge first
   (`hq bridge register <link>`, `docs/PAIRING.md`). The consent origin (`authorize_url`) for a
-  device with no private name is the next change of the Native Bridge sprint
-  (`docs/plans/native-bridge-sprint.md`); until then use Caddy, a tunnel or Funnel as above.
+  device with no private https name can be its own loopback address (see step 1 above);
+  `docs/plans/native-bridge/w6-claude-run.md` is the run that tests it against a real claude.ai
+  account. Until that passes, a private https name (a tailnet name, Caddy or a tunnel) is the
+  tested choice.
 - The CA limits how many certificates one domain may get a week; a rate-limited first order waits
   and says when it will try again. Keep the saved certificate: it is in `_data/connector_tls/`.
 - Details, the checks on every request, and what the forwarder must hand over:

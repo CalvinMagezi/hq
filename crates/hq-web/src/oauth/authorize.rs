@@ -99,6 +99,11 @@ pub(crate) async fn authorize(
     if !on_origin(&headers, &settings.consent) {
         return StatusCode::NOT_FOUND.into_response();
     }
+    // A plain-http consent origin is the device's own loopback address, which a proxy on the same
+    // machine can reach by rewriting `Host`; a forwarded request is not the owner's own browser.
+    if settings.consent.starts_with("http://") && crate::auth::forwarded(&headers) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let now = super::now();
     let armed = state.db.with_conn(|c| store::armed_until(c, now));
     if !matches!(armed, Ok(Some(_))) {
@@ -133,15 +138,20 @@ pub(crate) async fn authorize(
         resource: &resource,
         scope: checked.scope,
     };
-    store_request(&state, &new, now)
+    store_request(&state, &new, now, settings.consent.starts_with("https://"))
 }
 
 const INVALID: &str = "This connection request is not valid";
 const HTTPS_DEFAULT_PORT: &str = ":443";
+const HTTP_DEFAULT_PORT: &str = ":80";
 
-/// Whether the request's `Host` is the given https origin's authority.
+/// Whether the request's `Host` is the given origin's authority (https, or http on loopback).
 pub(crate) fn on_origin(headers: &HeaderMap, origin: &str) -> bool {
-    let Some(authority) = origin.strip_prefix("https://") else {
+    let (authority, default_port) = if let Some(a) = origin.strip_prefix("https://") {
+        (a, HTTPS_DEFAULT_PORT)
+    } else if let Some(a) = origin.strip_prefix("http://") {
+        (a, HTTP_DEFAULT_PORT)
+    } else {
         return false;
     };
     let host = headers
@@ -149,7 +159,16 @@ pub(crate) fn on_origin(headers: &HeaderMap, origin: &str) -> bool {
         .and_then(|v| v.to_str().ok())
         .map(|h| h.trim().to_ascii_lowercase())
         .unwrap_or_default();
-    host.strip_suffix(HTTPS_DEFAULT_PORT).unwrap_or(&host) == authority
+    // The default port may be left off the origin, never added to one that already names a port.
+    let default_form = !has_port(authority) && host.strip_suffix(default_port) == Some(authority);
+    host == authority || default_form
+}
+
+/// Whether an origin's authority ends in `:<digits>` (an IPv6 literal's colons are not a port).
+fn has_port(authority: &str) -> bool {
+    authority
+        .rsplit_once(':')
+        .is_some_and(|(_, port)| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn not_armed() -> Response {
@@ -162,7 +181,12 @@ fn not_armed() -> Response {
 }
 
 /// Stores the request bound to a fresh cookie in this browser and sends it to the consent page.
-fn store_request(state: &WsState, new: &store::NewRequest, now: i64) -> Response {
+fn store_request(
+    state: &WsState,
+    new: &store::NewRequest,
+    now: i64,
+    secure_cookie: bool,
+) -> Response {
     let binder = format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
@@ -176,7 +200,10 @@ fn store_request(state: &WsState, new: &store::NewRequest, now: i64) -> Response
             StatusCode::FOUND,
             [
                 (header::LOCATION, format!("/connect?request={id}")),
-                (header::SET_COOKIE, super::consent::binder_cookie(&binder)),
+                (
+                    header::SET_COOKIE,
+                    super::consent::binder_cookie(&binder, secure_cookie),
+                ),
             ],
         )
             .into_response(),

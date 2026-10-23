@@ -109,14 +109,14 @@ window uses, and the address the consent page is served on.
 
 ## 6. Open items
 
-- **Consent on the app's own address is not complete.** The proxy serves `/connect`, the consent
-  API and `/oauth/authorize`. But `mcp_connector.authorize_url` must be an https origin, HQ matches
-  the request's `Host` against it before it answers `/oauth/authorize`, and the request cookie is
-  `Secure`; whether WebKit keeps a `Secure` cookie from `http://127.0.0.1` is not verified. So
-  Claude is not yet sent to the loopback address. Allowing a loopback http consent origin touches
-  `mcp_connector.rs`, which the device-side TLS change also edits, and the question whether
-  claude.ai accepts such an `authorization_endpoint` is W6's test. The Connect Claude screen says
-  this when it applies.
+- **Consent on the app's own address is only half tested.** The proxy serves `/connect`, the
+  consent API and `/oauth/authorize`. `mcp_connector.authorize_url` now accepts plain http on
+  `127.0.0.1`, `[::1]` and `localhost` (nothing else), HQ matches the request's `Host` against it
+  before it answers `/oauth/authorize`, and the request cookie drops `Secure` on such an origin
+  because WebKit refuses a `Secure` cookie over http. What is not verified is whether claude.ai
+  sends a browser to such an `authorization_endpoint`; that is the W6 run
+  (`docs/plans/native-bridge/w6-claude-run.md`). The Connect Claude screen says when the
+  advertised origin is not the app's own.
 - **No address for Claude yet.** The connector address is whatever `mcp_connector.public_url`
   says; the device name from `hq edge` and the TLS door come with W1 and W2.
 - **The web token is at rest in the HQ window's storage** (WebKit's data store for the app's

@@ -119,6 +119,22 @@ iOS, Windows native, an open project-run edge, DCR in the connector, removing `h
 
 Verified: Anthropic calls connectors from its cloud for every client; MCP tunnels are an Enterprise
 research preview; n0's public relays are not for production; the OAuth server is merged and the Mobile
-profile allows it; pairing and reconnects measured on a real phone (Spike F README). Not verified: that
-claude.ai accepts a phone-private authorization endpoint; that a sleeping phone answers in time;
-ACME through the passthrough end to end; the edge under load.
+profile allows it; pairing and reconnects measured on a real phone (Spike F README); on loopback, with
+a test CA, ACME validation and Claude's calls travel a real `hq edge`, a real device bridge and the
+real connector door (`cargo test -p hq-web --lib tls::tests::chain`). Not verified: that claude.ai
+accepts a phone-private authorization endpoint (HQ now allows plain http on `127.0.0.1`, `[::1]` and
+`localhost` for it; the run is `docs/plans/native-bridge/w6-claude-run.md`); that a sleeping phone
+answers in time; ACME through the passthrough on the real internet with a real CA; the edge under load.
+
+## W6 learnings
+
+- The door must outlive the test that makes it: the chain test's first version dropped the vault
+  directory that holds the door's socket, and only the first connection (the CA's, made before the
+  drop) worked. Keep the world alive for as long as the door serves.
+- The door orders its own certificate as soon as it serves, so a test that also calls `order_now`
+  races it: the CA holds one challenge at a time and the second order fails validation.
+- Forgetting the edge on the device is enforced twice (the record is cleared, so the gate refuses
+  the next stream; open connections are closed). The chain test only fails when the record stays, so
+  closing connections has its own test in `crates/hq-bridge/tests/edge_door.rs`.
+- Nothing shows the owner the connector certificate's state yet; the real run reads files and logs
+  (`TECHDEBT.md`).

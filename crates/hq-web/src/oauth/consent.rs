@@ -24,9 +24,12 @@ const GONE: &str = "this request has expired, was already answered, or was start
                     browser; press Connect in Claude again from this one";
 
 /// `Set-Cookie` for a request's binder: unreadable by scripts, sent only to the request routes.
-pub(crate) fn binder_cookie(binder: &str) -> String {
+/// `Secure` is left off only for a plain-http loopback consent origin, where WebKit drops a
+/// `Secure` cookie and the connection never leaves the device.
+pub(crate) fn binder_cookie(binder: &str, secure: bool) -> String {
+    let secure = if secure { " Secure;" } else { "" };
     format!(
-        "{BINDER_COOKIE}={binder}; Path=/api/oauth/requests; HttpOnly; Secure; \
+        "{BINDER_COOKIE}={binder}; Path=/api/oauth/requests; HttpOnly;{secure} \
          SameSite=Strict; Max-Age={BINDER_MAX_AGE_SECS}"
     )
 }

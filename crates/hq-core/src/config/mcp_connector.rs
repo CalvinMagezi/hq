@@ -12,8 +12,10 @@ pub struct McpConnectorConfig {
     #[serde(default)]
     pub public_url: Option<String>,
 
-    /// A private https origin, such as a tailnet name, that serves the consent page to the
-    /// owner's browser. Unset: the consent page is on `public_url`.
+    /// A private origin, such as a tailnet name, that serves the consent page to the owner's
+    /// browser: https, or plain http on `127.0.0.1`, `[::1]` or `localhost` for a browser on the
+    /// same device as HQ (the connection never leaves it). Unset: the consent page is on
+    /// `public_url`.
     #[serde(default)]
     pub authorize_url: Option<String>,
 
@@ -260,7 +262,7 @@ impl McpConnectorConfig {
         let public =
             https_origin(raw_public).map_err(|e| format!("mcp_connector.public_url: {e}"))?;
         let consent = match self.authorize_url.as_deref() {
-            Some(u) => https_origin(u).map_err(|e| format!("mcp_connector.authorize_url: {e}"))?,
+            Some(u) => origin(u, true).map_err(|e| format!("mcp_connector.authorize_url: {e}"))?,
             None => public.clone(),
         };
         let default_scope = self
@@ -297,9 +299,24 @@ fn contact_address(raw: &str) -> Result<&str, String> {
 
 /// An https origin with no path, query, fragment or credentials, normalised for comparison.
 fn https_origin(raw: &str) -> Result<String, String> {
+    origin(raw, false)
+}
+
+/// Hosts a browser on the same device reaches HQ at; plain http is accepted only for these.
+const LOOPBACK_HOSTS: [&str; 3] = ["127.0.0.1", "[::1]", "localhost"];
+
+/// `https_origin`, or with `loopback_http` also `http` on a loopback host name or address.
+fn origin(raw: &str, loopback_http: bool) -> Result<String, String> {
     let url = reqwest::Url::parse(raw.trim()).map_err(|e| format!("{raw:?} is not a URL ({e})"))?;
-    if url.scheme() != "https" {
-        return Err(format!("{raw:?} must use https"));
+    let on_loopback = url.host_str().is_some_and(|h| LOOPBACK_HOSTS.contains(&h));
+    let scheme_ok =
+        url.scheme() == "https" || (loopback_http && url.scheme() == "http" && on_loopback);
+    if !scheme_ok {
+        return Err(if loopback_http {
+            format!("{raw:?} must use https, or http on 127.0.0.1, [::1] or localhost")
+        } else {
+            format!("{raw:?} must use https")
+        });
     }
     if !url.username().is_empty() || url.password().is_some() {
         return Err(format!("{raw:?} must not carry credentials"));
@@ -397,6 +414,46 @@ mod tests {
         );
         c.default_scope = Some("handoff".into());
         assert!(c.settings(Some("t")).unwrap_err().contains("default_scope"));
+    }
+
+    #[test]
+    fn the_consent_origin_may_be_plain_http_on_loopback_and_nowhere_else() {
+        for ok in [
+            "http://127.0.0.1:5799",
+            "http://[::1]:5799",
+            "http://localhost:5799",
+            "http://LOCALHOST:5799/",
+        ] {
+            let c = cfg(Some("https://hq.example.com"), Some(ok));
+            let origins = c.settings(Some("t")).unwrap().unwrap();
+            assert_eq!(
+                origins.consent,
+                ok.trim_end_matches('/').to_ascii_lowercase()
+            );
+        }
+        for bad in [
+            "http://hq.example.ts.net:8443",
+            "http://localhost.:5799",
+            "http://x.localhost:5799",
+            "http://127.0.0.1.nip.io:5799",
+            "http://0.0.0.0:5799",
+            "http://10.0.0.5:5799",
+            "http://user:pw@127.0.0.1:5799",
+            "http://127.0.0.1:5799/connect",
+            "http://127.0.0.1:5799/?a=1",
+            "ws://127.0.0.1:5799",
+        ] {
+            let err = cfg(Some("https://hq.example.com"), Some(bad))
+                .settings(Some("t"))
+                .unwrap_err();
+            assert!(err.contains("authorize_url"), "{bad}: {err}");
+        }
+        // The public name Claude reaches is never plain http, loopback or not.
+        assert!(
+            cfg(Some("http://127.0.0.1:5799"), None)
+                .settings(Some("t"))
+                .is_err()
+        );
     }
 
     #[test]

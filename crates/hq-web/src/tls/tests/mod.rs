@@ -1,3 +1,5 @@
+#[cfg(unix)]
+mod chain;
 mod door;
 mod doors;
 mod pebble;

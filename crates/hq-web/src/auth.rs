@@ -30,6 +30,11 @@ const FORWARDING_HEADERS: [&str; 5] = [
     "tailscale-user-login",
 ];
 
+/// Whether a reverse proxy forwarded this request (it added one of the proxy headers).
+pub(crate) fn forwarded(headers: &HeaderMap) -> bool {
+    FORWARDING_HEADERS.iter().any(|h| headers.contains_key(*h))
+}
+
 /// How long a socket ticket stays redeemable. Long enough for the browser to
 /// open the socket right after asking, short enough that a leaked URL is dead.
 pub(crate) const WS_TICKET_TTL: Duration = Duration::from_secs(30);
@@ -128,7 +133,7 @@ pub(crate) fn tokens_match(provided: &str, expected: &str) -> bool {
 
 /// Whether the development switch may open `/mcp` for this request.
 pub(crate) fn mcp_dev_open(headers: &HeaderMap, switch_on: bool, bind_is_loopback: bool) -> bool {
-    switch_on && bind_is_loopback && !FORWARDING_HEADERS.iter().any(|h| headers.contains_key(*h))
+    switch_on && bind_is_loopback && !forwarded(headers)
 }
 
 /// Whether a request carries the web token as a Bearer header. Tokens in the

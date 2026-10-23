@@ -117,9 +117,8 @@ Everything Caddy or a tunnel used to do in front of HQ happens here, on every re
    they are two documents; the protected-resource document is also served at its `/mcp` suffix,
    which clients try first.) The consent side (`/oauth/authorize`, `/connect`,
    `/api/oauth/requests/*`) is not served on this name, so the arming window cannot be probed or
-   filled from the internet. Whether a public name serves a consent page at all is decided with
-   the connector-on-the-bridge work. `/mcp/`, `//mcp`, `/%6Dcp`, `/.well-known/../api/tree` and
-   everything else are 404s.
+   filled from the internet. The public name serves no consent page at all (see "Not covered").
+   `/mcp/`, `//mcp`, `/%6Dcp`, `/.well-known/../api/tree` and everything else are 404s.
 2. **Host.** `Host` and, for HTTP/2, `:authority` must each be exactly the connector's name.
    Two `Host` headers, or a disagreement, is a 404. The door then sets `Host` to the canonical
    value, which also gives HTTP/2 requests the header the handlers read. A client that names a
@@ -247,9 +246,18 @@ TCP listener for it; the pairing work should point the same assertions at the re
   lasts; only the forwarder can tell the flood from clients.
 - **A finalized order whose download times out** makes a new order and key next time, spending
   one of the five certificates a week (`TECHDEBT.md`).
-- **The consent page on the public name.** Not served here. If claude.ai refuses an
-  `authorization_endpoint` private to the phone, the public-name consent page has to be added to
-  the allow-list together with its own arming-window protections.
+- **The consent page on the public name.** Not served here. `authorize_url` may be plain http on
+  `127.0.0.1`, `[::1]` or `localhost` (no other http origin parses), for a browser on the same
+  device; the request's `Host` must equal that authority exactly, so the public name, another
+  port and a DNS-rebound name never reach `/oauth/authorize`, and the request cookie then drops
+  `Secure` (it keeps `HttpOnly`, `SameSite=Strict` and its path). A request carrying a
+  reverse-proxy header is refused on that origin, because a proxy on the same machine can rewrite
+  `Host` to the loopback authority; prefer `127.0.0.1` over `localhost`, which can resolve to
+  `::1` where another local user may listen. Whether claude.ai sends a
+  browser to an `authorization_endpoint` private to the device is the open test
+  (`docs/plans/native-bridge/w6-claude-run.md`). If it refuses, the public-name consent page has
+  to be added to the allow-list together with its own arming-window protections, a separate
+  design and review.
 - **The forwarder.** It sees who connects, when and how much, never the content. Its own limits
   and registration are its own document.
 - **Certificate Transparency.** Every certificate for the name is public in CT logs, so the name
