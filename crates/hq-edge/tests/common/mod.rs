@@ -25,7 +25,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tokio_rustls::{TlsAcceptor, TlsConnector, rustls};
+use tokio_rustls::{TlsAcceptor, TlsConnector, rustls, rustls::pki_types::ServerName};
 
 pub const DOMAIN: &str = "edge.test";
 pub const RELAY_NAME: &str = "relay.edge.test";
@@ -101,7 +101,11 @@ pub enum Behavior {
     Http,
     /// Accept the stream and hold it without answering.
     Hold,
-    /// Read everything, counting bytes.
+    /// Finish the stream without a byte: a device refusing the client.
+    Refuse,
+    /// Send one byte (as a TLS server's first flight would) and then hold the stream silently.
+    Greet,
+    /// Send one byte, then read everything, counting bytes.
     Sink,
 }
 
@@ -118,6 +122,9 @@ pub struct Device {
     pub strangers: Arc<AtomicU64>,
     /// The connections the edge opened to this device, kept so a test can act on them.
     pub connections: Arc<Mutex<Vec<iroh::endpoint::Connection>>>,
+    /// Connections numbered below this (in the order the edge opened them) stop answering: their
+    /// streams are accepted and held, as on a path that died while the connection stayed open.
+    pub silent_upto: Arc<AtomicU64>,
 }
 
 impl Device {
@@ -165,13 +172,15 @@ pub async fn start_device(
         alpn_seen: Arc::default(),
         strangers: Arc::default(),
         connections: Arc::default(),
+        silent_upto: Arc::default(),
     };
-    let (streams, sunk, seen, strangers, connections) = (
+    let (streams, sunk, seen, strangers, connections, silent_upto) = (
         device.streams.clone(),
         device.sunk.clone(),
         device.alpn_seen.clone(),
         device.strangers.clone(),
         device.connections.clone(),
+        device.silent_upto.clone(),
     );
     tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
@@ -181,23 +190,46 @@ pub async fn start_device(
                 conn.close(403u32.into(), b"not the edge");
                 continue;
             }
-            connections.lock().unwrap().push(conn.clone());
-            let (acceptor, streams, sunk, seen) = (
+            let index = {
+                let mut all = connections.lock().unwrap();
+                all.push(conn.clone());
+                all.len() as u64 - 1
+            };
+            let (acceptor, streams, sunk, seen, silent_upto) = (
                 acceptor.clone(),
                 streams.clone(),
                 sunk.clone(),
                 seen.clone(),
+                silent_upto.clone(),
             );
             tokio::spawn(async move {
                 let (mut held_send, mut held_recv) = (Vec::new(), Vec::new());
                 while let Ok((send, recv)) = conn.accept_bi().await {
                     streams.fetch_add(1, Ordering::SeqCst);
+                    if index < silent_upto.load(Ordering::SeqCst) {
+                        held_send.push(send);
+                        held_recv.push(recv);
+                        continue;
+                    }
                     match behavior {
                         Behavior::Hold => {
                             held_send.push(send);
                             held_recv.push(recv);
                         }
+                        Behavior::Refuse => {
+                            let mut send = send;
+                            let _ = send.finish();
+                            held_recv.push(recv);
+                        }
+                        Behavior::Greet => {
+                            let mut send = send;
+                            let _ = send.write_all(b"\x16").await;
+                            held_send.push(send);
+                            held_recv.push(recv);
+                        }
                         Behavior::Sink => {
+                            let mut send = send;
+                            let _ = send.write_all(b"\x16").await;
                             tokio::spawn(sink(recv, sunk.clone()));
                             held_send.push(send);
                         }
@@ -368,4 +400,30 @@ pub async fn eventually(limit: Duration, what: &str, mut check: impl FnMut() -> 
         assert!(started.elapsed() < limit, "timed out waiting for {what}");
         tokio::time::sleep(STEP).await;
     }
+}
+
+/// A TLS client for `name` going through the edge at `addr`: returns the HTTP response and the
+/// ALPN protocol it negotiated.
+pub async fn https_get(
+    addr: SocketAddr,
+    connector: &TlsConnector,
+    name: &str,
+) -> (String, Option<Vec<u8>>) {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let server_name = ServerName::try_from(name.to_owned()).unwrap();
+        let mut tls = connector
+            .connect(server_name, tcp)
+            .await
+            .expect("TLS through the edge");
+        let negotiated = tls.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
+        tls.write_all(format!("GET / HTTP/1.1\r\nHost: {name}\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut response = String::new();
+        tls.read_to_string(&mut response).await.unwrap();
+        (response, negotiated)
+    })
+    .await
+    .expect("a request through the edge did not finish in 20 s")
 }

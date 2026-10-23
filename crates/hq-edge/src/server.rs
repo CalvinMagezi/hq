@@ -11,12 +11,13 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey,
     endpoint::{Connection, QuicTransportConfig, RecvStream, SendStream, presets},
 };
 use tokio::{
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     sync::{Semaphore, watch},
     task::JoinHandle,
@@ -54,6 +55,7 @@ pub struct Stats {
     unknown_name: AtomicU64,
     device_busy: AtomicU64,
     dial_failed: AtomicU64,
+    redialed: AtomicU64,
     forwarded: AtomicU64,
     relay_forwarded: AtomicU64,
     ended_idle: AtomicU64,
@@ -76,6 +78,8 @@ pub struct StatsSnapshot {
     pub device_busy: u64,
     /// Closed because the device could not be reached.
     pub dial_failed: u64,
+    /// Connections to a device replaced because the one the edge held did not answer.
+    pub redialed: u64,
     pub forwarded: u64,
     pub relay_forwarded: u64,
     pub ended_idle: u64,
@@ -100,6 +104,7 @@ impl Stats {
             unknown_name: get(&self.unknown_name),
             device_busy: get(&self.device_busy),
             dial_failed: get(&self.dial_failed),
+            redialed: get(&self.redialed),
             forwarded: get(&self.forwarded),
             relay_forwarded: get(&self.relay_forwarded),
             ended_idle: get(&self.ended_idle),
@@ -115,7 +120,73 @@ struct DeviceState {
     /// One QUIC connection per device, with a stream per forwarded connection. The lock also
     /// serializes dialing, so a burst of connections dials once.
     conn: tokio::sync::Mutex<Option<Connection>>,
+    /// Connections that stopped answering and were replaced. They are kept, not closed, because
+    /// streams of other clients may still be running on them, but they stay known so that a
+    /// revoke closes them too and so they are let go once those streams must have ended.
+    retired: Mutex<Vec<(Connection, std::time::Instant)>>,
 }
+
+impl DeviceState {
+    /// The connection the edge holds to the device, if it is still open.
+    async fn live_connection(&self) -> Option<Connection> {
+        let cached = self.conn.lock().await;
+        cached
+            .as_ref()
+            .filter(|c| c.close_reason().is_none())
+            .cloned()
+    }
+
+    /// Stops using `stale` for new streams. It is not closed: streams already open on it belong to
+    /// other clients. It is remembered so a revoke reaches it, and let go after `keep`.
+    async fn retire(&self, stale: Connection, keep: Duration) {
+        {
+            let mut cached = self.conn.lock().await;
+            if cached
+                .as_ref()
+                .is_some_and(|c| c.stable_id() == stale.stable_id())
+            {
+                *cached = None;
+            }
+        }
+        let mut retired = self.retired.lock().unwrap_or_else(|e| e.into_inner());
+        retired.retain(|(_, since)| since.elapsed() < keep);
+        retired.push((stale, std::time::Instant::now()));
+    }
+
+    /// Lets go of retired connections that are older than `keep`: whatever ran on them has hit
+    /// the idle timeout by now, and the last handle's drop closes them.
+    fn prune_retired(&self, keep: Duration) {
+        let mut retired = self.retired.lock().unwrap_or_else(|e| e.into_inner());
+        retired.retain(|(_, since)| since.elapsed() < keep);
+    }
+
+    /// Closes every retired connection (the device left the registry).
+    fn close_retired(&self) -> usize {
+        let mut retired = self.retired.lock().unwrap_or_else(|e| e.into_inner());
+        let closed = retired.len();
+        for (conn, _) in retired.drain(..) {
+            conn.close(REVOKED_CODE.into(), b"revoked");
+        }
+        closed
+    }
+}
+
+/// An attempt to send the client's first flight and read the device's answer found the connection
+/// dead or silent: a path that died while the connection stayed open. Anything the device itself
+/// did (finish or reset the stream, refuse) is an answer, not this.
+struct Stale(anyhow::Error);
+
+/// A stream to a device that has answered the client's first flight.
+struct Reached {
+    send: SendStream,
+    recv: RecvStream,
+    /// The device's first bytes, already read: they go to the client before the pipe starts.
+    first: Vec<u8>,
+}
+
+/// How much of the device's first flight is read to learn that it answered. A ServerHello with a
+/// certificate chain is a few KiB; whatever is left is piped on.
+const FIRST_FLIGHT_BYTES: usize = 8 * 1024;
 
 struct RelayRoute {
     hostname: String,
@@ -348,12 +419,22 @@ async fn sweep_revoked(shared: Arc<Shared>) {
                 .map(|(id, state)| (*id, state.clone()))
                 .collect()
         };
+        let keep = shared.retired_keep();
+        {
+            let devices = shared.devices.lock().unwrap_or_else(|e| e.into_inner());
+            for state in devices.values() {
+                state.prune_retired(keep);
+            }
+        }
         for (id, state) in stale {
             // A dial in progress holds the lock; the next round will get it.
             if let Ok(mut cached) = state.conn.try_lock()
                 && let Some(conn) = cached.take()
             {
                 conn.close(REVOKED_CODE.into(), b"revoked");
+                inc(&shared.stats.revoked_closed);
+            }
+            for _ in 0..state.close_retired() {
                 inc(&shared.stats.revoked_closed);
             }
             let mut devices = shared.devices.lock().unwrap_or_else(|e| e.into_inner());
@@ -435,26 +516,28 @@ impl Shared {
                         self.limits.burst_bytes,
                     )),
                     conn: tokio::sync::Mutex::new(None),
+                    retired: Mutex::new(Vec::new()),
                 })
             })
             .clone()
     }
 
-    async fn forward_to_device(&self, tcp: TcpStream, hello: Vec<u8>, device: Registered) {
+    async fn forward_to_device(&self, mut tcp: TcpStream, hello: Vec<u8>, device: Registered) {
         let state = self.device_state(&device.id);
         let Ok(_slot) = state.slots.clone().try_acquire_owned() else {
             inc(&self.stats.device_busy);
             return;
         };
-        // Dialing, taking the hello's bytes out of the device's budget and writing it share one
-        // deadline: a device that grants no stream credit must not pin the slot and the socket.
+        // Reaching the device, its first answer and handing that to the client share one deadline:
+        // a device that grants no stream credit or never answers must not pin the slot and the
+        // socket.
         let setup = async {
-            let (mut send, recv) = self.open_stream(&state, &device).await?;
-            state.bucket.take(hello.len()).await;
-            send.write_all(&hello).await?;
-            Ok::<_, anyhow::Error>((send, recv))
+            let reached = self.reach_device(&state, &device, &hello).await?;
+            tcp.write_all(&reached.first).await?;
+            Ok::<_, anyhow::Error>(reached)
         };
-        let Ok(Ok((send, recv))) = tokio::time::timeout(self.limits.dial_timeout(), setup).await
+        let Ok(Ok(Reached { send, recv, .. })) =
+            tokio::time::timeout(self.limits.dial_timeout(), setup).await
         else {
             inc(&self.stats.dial_failed);
             return;
@@ -487,10 +570,7 @@ impl Shared {
             inc(&self.stats.dial_failed);
             return;
         };
-        if tokio::io::AsyncWriteExt::write_all(&mut upstream, &hello)
-            .await
-            .is_err()
-        {
+        if upstream.write_all(&hello).await.is_err() {
             return;
         }
         inc(&self.stats.relay_forwarded);
@@ -515,27 +595,113 @@ impl Shared {
         }
     }
 
-    /// Opens a stream to the device on its cached connection, dialing (once, under the lock) when
-    /// there is none or it has closed.
-    async fn open_stream(
+    /// How long a retired connection is remembered: whatever ran on it has hit the idle timeout
+    /// (or a dial timeout, for a stream still being set up) by then.
+    fn retired_keep(&self) -> Duration {
+        self.limits.idle_timeout() + self.limits.dial_timeout()
+    }
+
+    /// Sends the client's first flight to the device on a new stream and waits for the first bytes
+    /// of its answer. The connection the edge already holds gets `reply_timeout` to answer; if it
+    /// does not (or is found broken), it is a dead path that still looks alive, so it is put aside
+    /// and the same bytes go out again on a fresh connection. Only one retry: a fresh connection
+    /// that stays silent is the device being down, not the cache being stale. A device that
+    /// answers by finishing or resetting the stream is refusing the client, not dead, so that is
+    /// handed back as an answer and the held connection is kept.
+    async fn reach_device(
         &self,
         state: &DeviceState,
         device: &Registered,
-    ) -> Result<(SendStream, RecvStream)> {
+        hello: &[u8],
+    ) -> Result<Reached> {
+        if let Some(held) = state.live_connection().await {
+            match self
+                .hello_and_reply(state, &held, hello, self.held_reply_wait())
+                .await
+            {
+                Ok(reached) => return Ok(reached),
+                Err(Stale(e)) => {
+                    tracing::debug!("the held connection did not answer, redialing: {e:#}");
+                    // A device that was removed while this client waited is not dialed again.
+                    if !self.registry.is_registered(&device.id) {
+                        return Err(anyhow!("the device is no longer registered"));
+                    }
+                    state.retire(held, self.retired_keep()).await;
+                    inc(&self.stats.redialed);
+                }
+            }
+        }
+        let fresh = self.dial(state, device).await?;
+        self.hello_and_reply(state, &fresh, hello, self.limits.dial_timeout())
+            .await
+            .map_err(|Stale(e)| e)
+    }
+
+    /// What a connection the edge already holds gets to answer: the configured wait, but never
+    /// more than half the setup budget, so a redial always has time left.
+    fn held_reply_wait(&self) -> Duration {
+        self.limits
+            .reply_timeout()
+            .min(self.limits.dial_timeout() / 2)
+    }
+
+    /// Opens a stream, sends the first flight and reads the first bytes of the answer, all within
+    /// `wait`. The byte budget is charged first, outside the wait: a rate limit holding the
+    /// edge back is not a silent device.
+    async fn hello_and_reply(
+        &self,
+        state: &DeviceState,
+        conn: &Connection,
+        hello: &[u8],
+        wait: Duration,
+    ) -> Result<Reached, Stale> {
+        state.bucket.take(hello.len()).await;
+        let exchange = async {
+            let (mut send, mut recv) = conn.open_bi().await.map_err(|e| Stale(e.into()))?;
+            match send.write_all(hello).await {
+                Ok(()) => {}
+                Err(e) if is_connection_lost_write(&e) => return Err(Stale(e.into())),
+                // The device stopped reading: it is refusing this client. Hand back the stream.
+                Err(_) => {
+                    return Ok(Reached {
+                        send,
+                        recv,
+                        first: Vec::new(),
+                    });
+                }
+            }
+            let mut first = vec![0u8; FIRST_FLIGHT_BYTES];
+            match recv.read(&mut first).await {
+                Ok(Some(n)) => first.truncate(n),
+                // The device finished the stream or reset it without a byte: a refusal.
+                Ok(None) => first.clear(),
+                Err(e) if is_connection_lost_read(&e) => return Err(Stale(e.into())),
+                Err(_) => first.clear(),
+            }
+            Ok(Reached { send, recv, first })
+        };
+        let reached = tokio::time::timeout(wait, exchange)
+            .await
+            .map_err(|_| Stale(anyhow!("no answer within {wait:?}")))??;
+        state.bucket.take(reached.first.len()).await;
+        Ok(reached)
+    }
+
+    /// Dials the device and keeps the connection for the next client, or returns the one another
+    /// client dialed while this one waited for the lock (the lock also serializes dialing, so a
+    /// burst of connections dials once).
+    async fn dial(&self, state: &DeviceState, device: &Registered) -> Result<Connection> {
         let mut cached = state.conn.lock().await;
-        if let Some(conn) = cached.as_ref().filter(|c| c.close_reason().is_none())
-            && let Ok(streams) = conn.open_bi().await
-        {
-            return Ok(streams);
+        if let Some(conn) = cached.as_ref().filter(|c| c.close_reason().is_none()) {
+            return Ok(conn.clone());
         }
         let mut addr = EndpointAddr::new(device.id);
         if let Some(relay) = device.relay.clone().or_else(|| self.dial_relay.clone()) {
             addr = addr.with_relay_url(relay);
         }
         let conn = self.endpoint.connect(addr, EDGE_ALPN).await?;
-        let streams = conn.open_bi().await?;
-        *cached = Some(conn);
-        Ok(streams)
+        *cached = Some(conn.clone());
+        Ok(conn)
     }
 
     /// Completes when the edge is stopping.
@@ -544,6 +710,14 @@ impl Shared {
         // An error means the sender is gone, which is also a stop.
         let _ = shutdown.wait_for(|stop| *stop).await;
     }
+}
+
+fn is_connection_lost_write(e: &iroh::endpoint::WriteError) -> bool {
+    matches!(e, iroh::endpoint::WriteError::ConnectionLost(_))
+}
+
+fn is_connection_lost_read(e: &iroh::endpoint::ReadError) -> bool {
+    matches!(e, iroh::endpoint::ReadError::ConnectionLost(_))
 }
 
 struct Hello {

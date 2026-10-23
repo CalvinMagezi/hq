@@ -10,6 +10,8 @@
 mod config;
 mod hello;
 mod identity;
+#[cfg(feature = "invite")]
+mod invite;
 mod limits;
 mod pipe;
 mod registry;
@@ -19,11 +21,13 @@ mod server;
 pub use config::{EdgeConfig, LimitsConfig, RelayHostConfig};
 pub use hello::{ClientHello, HelloError, MAX_HELLO_BYTES, read_client_hello};
 pub use identity::{edge_id, load_or_create_key};
+#[cfg(feature = "invite")]
+pub use invite::{EdgeRegistrar, InviteSpec, default_invite_spec, open_invite};
 pub use limits::TokenBucket;
 pub use pipe::{PipeEnd, PipeLimits, pipe};
 pub use registry::{
     AllowlistFile, ListError, Registered, Registry, allow_device, device_label, list_devices,
-    revoke_device,
+    revoke_device, set_device_relay,
 };
 pub use relay::{RelayHost, RelayParams, RelayTls};
 pub use server::{Edge, Stats, StatsSnapshot};
