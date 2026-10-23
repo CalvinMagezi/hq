@@ -187,7 +187,7 @@ async fn a_relay_the_operator_did_not_list_is_never_recorded_whatever_it_looks_l
         "https://x.localhost",
         "https://db.internal.",
         "https://127.0.0.1.nip.io:6379",
-        "https://user:pass@listed.edge.test",
+        "https://user@listed.edge.test",
     ] {
         let key = SecretKey::generate();
         let result = invite_and_register(&rig, &key, true, vec![bad.to_string()], &config).await;
