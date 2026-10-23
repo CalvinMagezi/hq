@@ -63,7 +63,31 @@ the `hq` binary on that machine (`deploy/install.sh`, or the Docker image below)
 4. **Run it.** As a service: `deploy/edge/hq-edge.service` (a dedicated user, port 443 without root,
    the sandboxing the service needs). In Docker: `deploy/edge/Dockerfile`, with host networking (the header of the file has the `docker run` line; mount the config at `/etc/hq-edge/config.yaml`, not inside `/data`, and manage devices with `docker exec hq-edge hq edge allow <id>`).
    In a terminal: `hq edge run`.
-5. **Register a device.** On the device, run its HQ and note its endpoint id. On the edge machine:
+5. **Register a device.** Two ways. The simple one is a QR code: on the edge machine run
+
+   ```
+   hq edge invite             # shows a QR code and a link for one device, valid for 10 minutes
+   ```
+
+   and scan it with the device (the device side, the app and `hq bridge register <link>`, arrives with the next change; until then a device that wants a QR registration needs the library call in `docs/PAIRING.md`). The device
+   shows six digits; type them on the edge machine and the device is added to the list and told the
+   name it is reached at. The invitation is the pairing protocol of `docs/PAIRING.md` under another
+   protocol name, so the digits, the one-time code and the limits are the same, and the edge's own
+   endpoint is not involved (the invitation runs on a throwaway one). It needs a build with the
+   `bridge` feature; without it, use the second way.
+
+   The invitation is direct: the edge's own relay admits only registered devices, so a device that
+   is about to register cannot meet the invitation there. The QR code lists this machine's
+   addresses, and the device must reach the invitation's UDP port while it is open. By default that
+   is a random port; set `edge.invite_bind` to a fixed port (and open it in the firewall) for a
+   firewalled machine, and list the public `ip:port` in `edge.invite_advertise` when the machine
+   sits behind NAT (a cloud machine whose public address is not on its own interface).
+
+   A device that names a home relay other than the edge's own is dialed through it only if you
+   listed that relay in `edge.device_relays`; any other is ignored (the edge connects to whatever
+   is recorded, and a device chose it).
+
+   The second way is by hand: run the device's HQ, note its endpoint id, and on the edge machine:
 
    ```
    hq edge id                 # the edge's own id: give it to the device, which accepts only this peer
@@ -80,10 +104,9 @@ the `hq` binary on that machine (`deploy/install.sh`, or the Docker image below)
    it into place): an editor that saves in place can leave a half-written file for a moment. While
    the list cannot be read completely, the edge refuses new connections and leaves open ones alone;
    once it reads again, a device that is no longer on it is cut. Run one `hq edge` list command at a
-   time: allow and revoke read the file and write it back without a lock. A list with a bad line, a wrong mode or owner, or two
-   devices that share a name label is refused as a whole, and then nothing is forwarded. Registration
-   by scanning a QR code replaces `hq edge allow` when the pairing protocol lands; the forwarder reads
-   the list through the `hq_edge::Registry` trait and does not change.
+   time: allow, revoke and invite read the file and write it back without a lock. A list with a bad line, a wrong mode or owner, or two
+   devices that share a name label is refused as a whole, and then nothing is forwarded. The forwarder
+   reads the list through the `hq_edge::Registry` trait, whichever way a device got onto it.
 
 ## What the device must do
 
@@ -94,6 +117,11 @@ This is the contract W2 (the device's TLS and path filter) builds on.
   own certificate for `<label>.<edge domain>`. Closing the stream closes the client.
 - Use the edge's relay as its home relay (or have the relay URL on its `hq edge allow` line), so the
   edge can find it by key. The co-hosted relay admits the edge and registered devices only.
+- Do not enable TLS early data (0-RTT). After the edge replaces a connection that stopped answering,
+  the client's first flight can reach the device twice, once on each connection; a handshake without
+  early data makes that harmless.
+- A stream the device finishes or resets without a byte is a refusal of that client: the edge closes
+  the client and keeps its connection to the device.
 
 ## Limits
 
@@ -107,7 +135,8 @@ All defaults are in `edge.limits`; a connection that breaks a limit is closed, n
 | `max_connections_per_device` | 16 | Concurrent forwarded connections per device |
 | `bytes_per_second`, `burst_bytes` | 2 MiB, 1 MiB | A device's traffic, both directions together |
 | `idle_timeout_secs` | 120 | No bytes either way |
-| `dial_timeout_secs` | 10 | Reaching the device, opening a stream and sending the ClientHello (which is also charged to the device's byte budget) |
+| `dial_timeout_secs` | 10 | Setting up one forwarded connection: reaching the device, opening a stream, sending the ClientHello (also charged to the device's byte budget) and getting the first bytes of its answer, redialing included |
+| `reply_timeout_secs` | 3 | How long a connection the edge already holds gets to answer before it is replaced by a fresh one (at most half of `dial_timeout_secs` is used). A path that died, such as a phone that changed network, leaves the connection looking alive for far longer |
 | `max_relay_connections` | 128 | Concurrent connections to the co-hosted relay |
 
 The ClientHello is also capped at 18 KiB. The limits are per process and per device, not per client:
@@ -123,5 +152,4 @@ ids at info level, so `hq edge` starts with their filter at warn; set `RUST_LOG`
 
 ## Not in this version
 
-Registration by QR through the pairing protocol (a second ALPN) is the next piece; the allowlist file
-is the stand-in. Open registration, per-client limits and a hosted edge are out of scope on purpose.
+Open registration, per-client limits and a hosted edge are out of scope on purpose.
