@@ -65,6 +65,7 @@ pub mod net;
 pub mod net_tunnel;
 pub mod notify_restart;
 pub mod onboard;
+pub mod onboard_import;
 pub mod pair;
 pub mod profile;
 pub mod ps;
