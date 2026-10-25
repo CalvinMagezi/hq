@@ -241,6 +241,10 @@ impl AgentTool for LsTool {
         "list_dir"
     }
 
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Lists directory contents with human-readable file sizes. \
          Use find_files with a glob pattern for recursive searches."
@@ -317,5 +321,20 @@ fn format_size(bytes: u64) -> String {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
     } else {
         format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // DontAsk and Plan modes admit only read-only tools, so a search tool that forgets the flag is
+    // refused there.
+    #[test]
+    fn the_search_tools_are_read_only() {
+        let tools: [&dyn AgentTool; 3] = [&FindTool, &GrepTool, &LsTool];
+        for tool in tools {
+            assert!(tool.is_read_only(), "{} is not read-only", tool.name());
+        }
     }
 }
