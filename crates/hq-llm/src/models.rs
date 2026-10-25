@@ -192,15 +192,16 @@ pub fn calculate_cost_with_cache(
 }
 
 static KNOWN_MODELS: &[ModelInfo] = &[
-    // GitHub Copilot subscription models (routed via `gh copilot` CLI).
-    // Sonnet 5 exposes a 1M-token context window to Copilot clients.
+    // Anthropic list price, 2026-10-24. Copilot also serves this id, but subscription calls are
+    // priced flat by `cost::price_call` before this table is read, so the price only reaches
+    // metered callers such as Claude Code.
     ModelInfo {
         id: "claude-sonnet-5",
         context_window: 1_000_000,
-        input_cost_per_million: 0.0,
-        output_cost_per_million: 0.0,
-        cache_read_cost_per_million: 0.0,
-        cache_write_cost_per_million: 0.0,
+        input_cost_per_million: 2.0,
+        output_cost_per_million: 10.0,
+        cache_read_cost_per_million: 0.20,
+        cache_write_cost_per_million: 2.50,
     },
     // Anthropic: cache_read = 10% of input, cache_write = 125% of input
     ModelInfo {
@@ -743,6 +744,21 @@ mod tests {
             let info = get_model_info(id).unwrap_or_else(|| panic!("{id} is not in the registry"));
             assert!(info.input_cost_per_million > 0.0, "{id}");
         }
+    }
+
+    #[test]
+    fn claude_sonnet_5_is_metered_at_list_price_and_flat_on_a_subscription() {
+        use crate::cost::{CostSource, ProviderClass, Usage, price_call};
+        let usage = Usage {
+            input: 1_000_000,
+            output: 1_000_000,
+            ..Usage::default()
+        };
+        let metered = price_call(ProviderClass::Metered, "claude-sonnet-5", &usage);
+        assert_eq!(metered.source, CostSource::Table);
+        assert!((metered.usd - 12.0).abs() < 0.001);
+        let flat = price_call(ProviderClass::Flat, "claude-sonnet-5", &usage);
+        assert_eq!((flat.source, flat.usd), (CostSource::Flat, 0.0));
     }
 
     #[test]
