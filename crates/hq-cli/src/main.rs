@@ -75,6 +75,13 @@ enum Commands {
         /// Reset onboarding progress
         #[arg(long)]
         reset: bool,
+        /// Read an existing coding agent's state (claude) and propose spaces, initiatives,
+        /// preferences and project briefs from it
+        #[arg(long, value_name = "AGENT")]
+        from: Option<String>,
+        /// With --from: print the proposal and write nothing
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Manage long-lived agent sessions: coding agents (claude-code, cursor, opencode, antigravity, pi...)
@@ -1014,7 +1021,12 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             upgrade,
             minimal,
         } => commands::install::run(vault_path, non_interactive, upgrade, minimal).await,
-        Commands::Onboard { step, reset } => commands::onboard::run(config, step, reset).await,
+        Commands::Onboard {
+            from: Some(from),
+            dry_run,
+            ..
+        } => commands::onboard_import::run(&from, dry_run),
+        Commands::Onboard { step, reset, .. } => commands::onboard::run(config, step, reset).await,
         Commands::Sessions {
             sub,
             arg,
