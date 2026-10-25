@@ -11,7 +11,7 @@ const linuxDeps = 'sudo apt install -y build-essential pkg-config perl libssl-de
 const buildCmd = 'cargo build --release -p hq-cli';
 const pathCmd = 'install -m 755 target/release/hq "$HOME/.local/bin/hq"';
 const firstRun = 'hq install   # scaffold the vault, seed the soul, write config\nhq env       # set LLM API keys interactively\nhq doctor    # verify the setup\nhq chat      # start an interactive session';
-const webBuild = 'cd apps/hq-web && bun install && bun run build\ncp -r dist/client ../../web/dist\ncd ../..\nhq start all   # API, WebSocket and the PWA on :5678\nhq pwa         # open http://localhost:5678';
+const webBuild = '# the released UI, signed, no bun needed (any platform):\ncurl -fsSL https://agent-hq.online/install.sh | bash -s -- --web-only\n# or build it from this checkout instead:\nhq web --build\nhq start all   # API, WebSocket and the PWA on :5678';
 const mcpCmd = 'hq mcp install --target claude-code\nhq mcp status';
 
 const provision = "ssh <ssh-host> 'bash -s' < deploy/setup-vps.sh";
@@ -257,7 +257,7 @@ const pickerOptions = [
           <li class="gcard reveal"><p>Build the release binary. It is about 58 MB.</p><CodeBlock id="src-build" label="Build" code={buildCmd} /></li>
           <li class="gcard reveal"><p>Put it on your PATH. Make sure <code>~/.local/bin</code> is on it.</p><CodeBlock id="src-path" label="Install the binary" code={pathCmd} /></li>
           <li class="gcard reveal"><p>Run first-run setup.</p><CodeBlock id="src-first" label="First run" code={firstRun} /></li>
-          <li class="gcard reveal"><p>Optional: build the web UI and serve it. The server serves <code>web/dist</code> next to the vault, or the directory in <code>web_static_dir</code>.</p><CodeBlock id="src-web" label="Web UI" code={webBuild} /></li>
+          <li class="gcard reveal"><p>Optional: add the web UI. <code>--web-only</code> installs the signed release build into <code>~/.local/share/agent-hq/web/dist</code>, which HQ finds from any directory; <code>hq web --build</code> builds it from the checkout with bun.</p><CodeBlock id="src-web" label="Web UI" code={webBuild} /></li>
           <li class="gcard reveal"><p>Optional: connect an MCP client such as Claude Code.</p><CodeBlock id="src-mcp" label="MCP" code={mcpCmd} /></li>
         </ol>
       </div>
