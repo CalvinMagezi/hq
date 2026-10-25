@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use axum::{Json, extract::State, response::IntoResponse};
 use chrono::{DateTime, Utc};
 use futures::future::join_all;
-use hq_core::config::{BackendEntry, HqConfig};
+use hq_core::config::{BackendEntry, BackendKind, HqConfig};
 use hq_db::usage_ledger::{LedgerWindows, ledger_windows};
 use hq_llm::backend_chain::{ConfigCredentials, resolve_credential};
 use hq_llm::provider::LlmError;
@@ -17,6 +17,7 @@ use hq_llm::provider_usage::{
     Adapter, ProviderReading, adapter_for, read_anthropic_admin, read_deepseek, read_moonshot,
     read_openrouter,
 };
+use hq_llm::router::ANTHROPIC_API_PROVIDER;
 use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Mutex;
@@ -69,6 +70,16 @@ fn note_for(adapter: Adapter) -> Option<&'static str> {
     }
 }
 
+const ANTHROPIC_NO_ADMIN_KEY_NOTE: &str = "Anthropic reports spend only to an Admin API key. Name the variable holding one in usage_ledger.anthropic_admin_key_env to see its figure here. Until then these are HQ's own record of calls it made, so spend from other tools is not included.";
+
+/// A backend that talks to Anthropic's own API, whose spend an Admin key can read.
+fn is_anthropic_api(entry: &BackendEntry) -> bool {
+    entry.kind == BackendKind::AnthropicCompatible
+        && entry
+            .resolved_endpoint()
+            .is_some_and(|e| e.contains("://api.anthropic.com"))
+}
+
 fn row(
     entry: &BackendEntry,
     adapter: Adapter,
@@ -91,6 +102,11 @@ fn row(
         (Adapter::Subscription, None) => {
             ("subscription", None, note_for(adapter).map(str::to_string))
         }
+        (Adapter::LedgerOnly, None) if is_anthropic_api(entry) => (
+            "ledger_only",
+            None,
+            Some(ANTHROPIC_NO_ADMIN_KEY_NOTE.to_string()),
+        ),
         (Adapter::LedgerOnly, None) => ("ledger_only", None, note_for(adapter).map(str::to_string)),
         (_, None) => (
             "no_key",
@@ -216,6 +232,26 @@ async fn row_for(
     row(entry, adapter, Some(fetched), ledger)
 }
 
+/// The router's `anthropic-api` provider, which an `ANTHROPIC_API_KEY` turns on without any
+/// `backends:` entry, as a row of its own so its spend is not hidden.
+fn anthropic_api_entry(config: &HqConfig, env_key: Option<&str>) -> Option<BackendEntry> {
+    // Same test as the router's `KeyRule::NonEmpty`, so a row exists whenever the provider does.
+    let has_key = |k: Option<&str>| k.is_some_and(|k| !k.is_empty());
+    let keyed = has_key(env_key) || has_key(config.anthropic_api_key.as_deref());
+    let declared = config
+        .backends
+        .backends
+        .iter()
+        .any(|b| b.enabled && b.name == ANTHROPIC_API_PROVIDER);
+    if !keyed || declared {
+        return None;
+    }
+    serde_json::from_value(
+        json!({ "name": ANTHROPIC_API_PROVIDER, "kind": "anthropic-compatible" }),
+    )
+    .ok()
+}
+
 pub(crate) async fn usage_providers_handler(
     State(state): State<Arc<WsState>>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -225,11 +261,13 @@ pub(crate) async fn usage_providers_handler(
     };
     let creds = ConfigCredentials::from_config(&config);
     let now = Utc::now();
+    let builtin = anthropic_api_entry(&config, std::env::var("ANTHROPIC_API_KEY").ok().as_deref());
     let backends: Vec<&BackendEntry> = config
         .backends
         .backends
         .iter()
         .filter(|b| b.enabled)
+        .chain(builtin.as_ref())
         .collect();
     let mut pending = Vec::with_capacity(backends.len());
     for entry in backends {
@@ -283,6 +321,32 @@ mod tests {
         );
         assert_eq!(r.status, "refused");
         assert!(!r.note.unwrap().contains("secret detail"));
+    }
+
+    #[test]
+    fn a_key_configured_anthropic_api_gets_its_own_row_once() {
+        let config = HqConfig::default();
+        assert!(anthropic_api_entry(&config, None).is_none());
+        assert!(anthropic_api_entry(&config, Some("")).is_none());
+
+        let entry = anthropic_api_entry(&config, Some("sk-test")).expect("a row for the key");
+        assert_eq!(entry.name, ANTHROPIC_API_PROVIDER);
+        let endpoint = entry.resolved_endpoint();
+        assert_eq!(
+            adapter_for(entry.kind, endpoint.as_deref(), true),
+            Adapter::AnthropicAdmin
+        );
+        assert_eq!(
+            adapter_for(entry.kind, endpoint.as_deref(), false),
+            Adapter::LedgerOnly
+        );
+
+        let r = row(&entry, Adapter::LedgerOnly, None, ledger(0.0));
+        assert!(r.note.unwrap().contains("anthropic_admin_key_env"));
+
+        let mut declared = HqConfig::default();
+        declared.backends.backends.push(entry);
+        assert!(anthropic_api_entry(&declared, Some("sk-test")).is_none());
     }
 
     #[test]

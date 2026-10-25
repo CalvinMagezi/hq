@@ -32,6 +32,9 @@ fn select_kimi_code_key(kimi_code_env: Option<&str>, kimi_env: Option<&str>) -> 
         .map(String::from)
 }
 
+/// The router provider that serves `ANTHROPIC_API_KEY`; ledger rows for it carry this name.
+pub const ANTHROPIC_API_PROVIDER: &str = "anthropic-api";
+
 /// The config.yaml key backing an env var in `CONFIG_BACKED_KEYS`.
 /// Empty config values count as unset.
 fn config_key(cfg: Option<&hq_core::config::HqConfig>, env: &str) -> Option<String> {
@@ -277,7 +280,7 @@ const PROVIDERS: &[ProviderSpec] = &[
     // then fail with no fallback. Explicit routes only: a wildcard would forward invalid model
     // names, and an unrouted id falls back to the other providers as it always has.
     ProviderSpec {
-        name: "anthropic-api",
+        name: ANTHROPIC_API_PROVIDER,
         key: KeyRule::NonEmpty("ANTHROPIC_API_KEY"),
         client: Client::Anthropic,
         daily_token_limit: 0,
