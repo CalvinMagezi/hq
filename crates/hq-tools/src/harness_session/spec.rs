@@ -51,6 +51,9 @@ pub struct HarnessSessionSpec {
     /// left for the caller to read and answer, since some CLIs now default a
     /// trust prompt to "No, exit".
     pub trust_pattern: Option<&'static str>,
+    /// The flag that picks the CLI's model (`--model <id>`), checked against each CLI's `--help`.
+    /// `None` means HQ does not know one, so asking for a model fails instead of being ignored.
+    pub model_flag: Option<&'static str>,
 }
 
 impl HarnessSessionSpec {
@@ -85,6 +88,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "qwen",
@@ -95,6 +99,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "cursor",
@@ -106,6 +111,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: Some(r"chat[_-]id[:=]\s*([A-Za-z0-9_-]+)"),
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "pi",
@@ -116,6 +122,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "codex",
@@ -127,6 +134,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "opencode",
@@ -137,6 +145,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "kimi",
@@ -147,6 +156,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "antigravity",
@@ -160,6 +170,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         // agy asks "Do you trust the contents of this project?" on first use
         // of a cwd; default selection is "Yes, I trust this folder".
         trust_pattern: Some("trust the contents"),
+        model_flag: Some("--model"),
     },
     HarnessSessionSpec {
         harness: "github-copilot",
@@ -170,6 +181,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
+        model_flag: Some("--model"),
     },
     // General-purpose agents. Each is launched into its interactive chat the way
     // its own documentation starts it; the resume flags are not verified, so a
@@ -189,6 +201,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: Some(&["chat", "--oneshot", "-q", "{brief}"]),
         trust_pattern: None,
+        model_flag: None,
     },
     HarnessSessionSpec {
         harness: "openclaw",
@@ -204,6 +217,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         token_pattern: None,
         one_shot: Some(&["agent", "--local", "--message", "{brief}"]),
         trust_pattern: None,
+        model_flag: None,
     },
 ];
 
@@ -253,11 +267,56 @@ pub struct Harness {
     pub name: String,
     pub spec: &'static HarnessSessionSpec,
     pub profile: Option<HarnessProfileConfig>,
+    /// The model the session was asked to run, passed with the spec's `model_flag`.
+    pub model: Option<String>,
+}
+
+/// Longest model id accepted; real ids are far shorter.
+const MAX_MODEL_CHARS: usize = 128;
+
+/// A model id is passed to the CLI as one argument. It may not start with `-`, so it can never
+/// read as another flag, and holds only the characters model ids use.
+fn valid_model(model: &str) -> bool {
+    !model.is_empty()
+        && model.len() <= MAX_MODEL_CHARS
+        && !model.starts_with('-')
+        && model.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/' | '@' | '+')
+        })
 }
 
 impl Harness {
     pub fn category(&self) -> HarnessCategory {
         self.spec.category
+    }
+
+    /// This harness running `model`. Refused when the CLI has no model flag HQ knows, rather
+    /// than started on its default with the request silently dropped.
+    pub fn with_model(mut self, model: Option<&str>) -> Result<Self> {
+        let Some(model) = model.map(str::trim).filter(|m| !m.is_empty()) else {
+            return Ok(self);
+        };
+        if self.spec.model_flag.is_none() {
+            bail!(
+                "'{}' has no model flag HQ knows, so it cannot be started on '{model}'; leave model out to use its own default",
+                self.name
+            );
+        }
+        if !valid_model(model) {
+            bail!(
+                "'{model}' is not a model id (letters, digits and . _ - : / @ + only, not starting with -)"
+            );
+        }
+        self.model = Some(model.to_string());
+        Ok(self)
+    }
+
+    /// The flag and model to append to the CLI's arguments, empty when no model was asked for.
+    pub fn model_args(&self) -> Vec<String> {
+        match (self.spec.model_flag, &self.model) {
+            (Some(flag), Some(model)) => vec![flag.to_string(), model.clone()],
+            _ => Vec::new(),
+        }
     }
 
     /// Arguments for a fresh spawn: the profile's when it sets any.
@@ -300,6 +359,7 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
             name: name.to_string(),
             spec,
             profile: Some(profile.clone()),
+            model: None,
         });
     }
     match spec_for(name) {
@@ -307,6 +367,7 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
             name: spec.harness.to_string(),
             spec,
             profile: None,
+            model: None,
         }),
         None => bail!(
             "unknown session harness '{name}' (known: {})",

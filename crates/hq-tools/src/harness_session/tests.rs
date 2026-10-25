@@ -115,6 +115,65 @@ fn claude_resumes_its_own_conversation_when_the_id_is_known() {
 }
 
 #[test]
+fn a_chosen_model_is_passed_on_fresh_starts_and_resumes() {
+    let h = harness("claude-code").with_model(Some("sonnet")).unwrap();
+    let fresh = build_args(&h, "hs-x", None, false);
+    assert_eq!(fresh[fresh.len() - 2..], ["--model", "sonnet"]);
+    let resumed = build_args(&h, "hs-x", Some("conv-1"), true);
+    assert!(resumed.windows(2).any(|w| w == ["--resume", "conv-1"]));
+    assert_eq!(resumed[resumed.len() - 2..], ["--model", "sonnet"]);
+    let default = build_args(&harness("claude-code"), "hs-x", None, false);
+    assert!(!default.contains(&"--model".to_string()));
+}
+
+#[test]
+fn a_model_is_refused_for_an_agent_without_a_model_flag_or_when_it_reads_as_a_flag() {
+    let no_flag = harness("hermes").with_model(Some("gpt-5.5")).unwrap_err();
+    assert!(no_flag.to_string().contains("no model flag"), "{no_flag}");
+    for bad in ["--dangerously-skip-permissions", "a b", "x;rm"] {
+        assert!(harness("codex").with_model(Some(bad)).is_err(), "{bad}");
+    }
+    assert!(
+        harness("hermes")
+            .with_model(Some("  "))
+            .unwrap()
+            .model
+            .is_none()
+    );
+}
+
+#[test]
+fn the_model_is_kept_on_the_session_row() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-m",
+                harness: "codex",
+                label: "",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "local",
+                    agent_name: "hs-m",
+                    workspace_id: "w",
+                    pane_id: "p",
+                },
+                purpose: None,
+            },
+        )?;
+        registry::set_model(c, "hs-m", "gpt-5.5")?;
+        assert_eq!(
+            registry::get(c, "hs-m")?.unwrap().model.as_deref(),
+            Some("gpt-5.5")
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
 fn a_reported_conversation_id_becomes_the_resume_token_once() {
     let db = Arc::new(Database::open_memory().unwrap());
     db.with_conn(|c| {
@@ -517,6 +576,7 @@ fn row(host: &str, name: &str) -> HarnessSessionRow {
         parent_session_id: None,
         spawn_depth: 0,
         purpose: "code".into(),
+        model: None,
     }
 }
 
@@ -1312,6 +1372,7 @@ fn spawn_req<'a>(
         goal: GoalText::default(),
         purpose,
         observe,
+        model: None,
     }
 }
 

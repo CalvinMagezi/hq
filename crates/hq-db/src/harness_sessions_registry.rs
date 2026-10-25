@@ -74,6 +74,8 @@ pub struct HarnessSessionRow {
     /// `review` or `general` (see `PURPOSE_*`). Decides whether its lifecycle
     /// moves its task.
     pub purpose: String,
+    /// The model the session was asked to run; `None` is the harness's default.
+    pub model: Option<String>,
 }
 
 pub const ORIGIN_USER: &str = "user";
@@ -92,7 +94,7 @@ pub const PURPOSE_REVIEW: &str = "review";
 /// Most sessions one monitor or reviewer may be given to observe.
 pub const MAX_OBSERVED: usize = 10;
 
-const COLS: &str = "id, harness, label, host, agent_name, workspace_id, pane_id, cwd, status, resume_token, mission_id, created_at, updated_at, owner_thread, drive, pm_wake, last_driven_at, last_agent_status, last_seen_at, goal, done_criteria, nudges_sent, last_wake_nudges, no_progress_streak, progress_mark, drive_off_reason, keys_sent, origin, dismissals, last_dismiss_tail, parent_session_id, spawn_depth, purpose";
+const COLS: &str = "id, harness, label, host, agent_name, workspace_id, pane_id, cwd, status, resume_token, mission_id, created_at, updated_at, owner_thread, drive, pm_wake, last_driven_at, last_agent_status, last_seen_at, goal, done_criteria, nudges_sent, last_wake_nudges, no_progress_streak, progress_mark, drive_off_reason, keys_sent, origin, dismissals, last_dismiss_tail, parent_session_id, spawn_depth, purpose, model";
 
 type ChangeHook = Box<dyn Fn(&str) + Send + Sync>;
 
@@ -152,6 +154,7 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<HarnessSessionRow> {
         parent_session_id: row.get(30)?,
         spawn_depth: row.get(31)?,
         purpose: row.get(32)?,
+        model: row.get(33)?,
     })
 }
 
@@ -194,6 +197,16 @@ pub fn insert(conn: &Connection, s: &NewSession) -> Result<()> {
             s.purpose.unwrap_or(PURPOSE_CODE)
         ],
     )?;
+    Ok(())
+}
+
+/// Record the model a session was started on, so a resume or host restart asks for it again.
+pub fn set_model(conn: &Connection, id: &str, model: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE harness_sessions SET model = ?1 WHERE id = ?2",
+        params![model, id],
+    )?;
+    changed(id);
     Ok(())
 }
 

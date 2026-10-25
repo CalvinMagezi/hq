@@ -14,6 +14,16 @@ HQ runs on. Any other host is a machine you paired (see [JOIN_A_MACHINE.md](JOIN
 and is reached over ssh, which is how HQ on a VPS can run and watch agents on a laptop
 whenever the laptop is on and reachable over Tailscale.
 
+### Choosing the model
+
+`harness_session_spawn`, `harness_session_handoff` and `hq sessions spawn --model <id>` take an
+optional `model`, passed to the agent's CLI with its `--model` flag (Claude Code, Codex, Cursor,
+Pi, OpenCode, Copilot CLI, Kimi, Qwen and Antigravity all take one). The id is the CLI's own,
+for example `sonnet` or `haiku` for Claude Code. It is stored with the session, so a resume or a
+host restart starts the agent on the same model, and the result reports it as `model` (null
+means the agent's own default). An agent with no model flag HQ knows (Hermes, OpenClaw) refuses
+a model instead of starting on its default, and so does an id that could read as a flag.
+
 ## What HQ can do
 
 | Tool | Effect |

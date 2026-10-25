@@ -27,6 +27,8 @@ pub struct SpawnOpts {
     pub observe: Vec<String>,
     /// HQ task the session works on.
     pub task: Option<String>,
+    /// Model to start the agent on; `None` is its own default.
+    pub model: Option<String>,
 }
 
 pub async fn run(
@@ -44,6 +46,7 @@ pub async fn run(
         purpose,
         observe,
         task,
+        model,
     } = opts;
     let db = open_db(config)?;
     let vault = &config.vault_path;
@@ -131,6 +134,7 @@ pub async fn run(
                     goal: Default::default(),
                     purpose,
                     observe: &observe,
+                    model: model.as_deref(),
                 },
             )
             .await?;

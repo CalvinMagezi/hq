@@ -35,6 +35,7 @@ fn row(drive: bool) -> HarnessSessionRow {
         parent_session_id: None,
         spawn_depth: 0,
         purpose: "code".into(),
+        model: None,
     }
 }
 

@@ -93,6 +93,7 @@ impl HqTool for HarnessSessionSpawnTool {
             "properties": {
                 "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any agent_host.harness_profiles). Coding agents: {}. General-purpose agents: {}.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::Coding).join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent. A general-purpose agent refuses code. monitor and review sessions never move their task's status." },
+                "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
                 "observe": { "type": "array", "items": { "type": "string" }, "description": "Session ids a monitor or reviewer watches (at most 10; needs task_id). When one finishes a turn, blocks or exits, this session gets a message on its task thread, typed in when it is next idle." },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
                 "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
@@ -137,6 +138,10 @@ impl HqTool for HarnessSessionSpawnTool {
         let (goal, done) = (arg_str(&args, "goal"), arg_str(&args, "done_criteria"));
         let purpose = super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?;
         let observe = arg_str_list(&args, "observe");
+        let model = arg_str(&args, "model");
+        let model = Some(model.trim()).filter(|m| !m.is_empty());
+        // Before a start folder is chosen or made, so a refused model leaves nothing behind.
+        super::spec::resolve(&harness)?.with_model(model)?;
         let cfg = hq_core::config::HqConfig::load()?;
         if self.chat.as_ref().is_some_and(|c| c.driver_turn) {
             anyhow::bail!("a driver turn cannot start sessions; tell the user what you need");
@@ -177,6 +182,7 @@ impl HqTool for HarnessSessionSpawnTool {
                     },
                     purpose,
                     observe: &observe,
+                    model,
                 }
             };
         }
@@ -803,6 +809,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 "done_criteria": { "type": "string", "description": "Alias of acceptance" },
                 "harness": { "type": "string", "description": format!("One of: {}. A general-purpose agent ({}) refuses code work; give it purpose research, review or general.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent." },
+                "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
                 "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny." },
                 "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
                 "external_id": { "type": "string", "description": "Idempotency key for the task, unique per space. Not combinable with task_id." },
@@ -840,6 +847,9 @@ impl HqTool for HarnessSessionHandoffTool {
             .map(str::trim)
             .filter(|c| !c.is_empty());
         let (label, harness) = (arg_str(&args, "title"), arg_str(&args, "harness"));
+        let model = arg_str(&args, "model");
+        // Before a start folder is chosen or made, so a refused model leaves nothing behind.
+        super::spec::resolve(&harness)?.with_model(Some(model.trim()).filter(|m| !m.is_empty()))?;
         let bound = super::CwdBound::of(&args);
         let start =
             choose_start_dir(&host, requested, &cfg, &host_name, bound, &label, &harness).await?;
@@ -871,6 +881,7 @@ impl HqTool for HarnessSessionHandoffTool {
                     self.chat.as_ref(),
                 ),
                 drive_opted_out: args.get("drive").and_then(Value::as_bool) == Some(false),
+                model: owned("model"),
                 purpose: super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
             },
         )

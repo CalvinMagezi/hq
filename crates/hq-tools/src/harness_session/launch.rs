@@ -47,6 +47,8 @@ pub(super) fn build_args(
         args.push("--session-dir".into());
         args.push(format!("{{home}}/{PI_SESSION_DIR}/{session_id}"));
     }
+    // On resume too, so a restarted session stays on the model it was started with.
+    args.extend(harness.model_args());
     args
 }
 
@@ -434,6 +436,7 @@ pub(super) fn record_placement(
         launched.workspace_id.clone(),
         launched.pane_id.clone(),
     );
+    let model = harness.model.clone();
     let (harness, label, cwd) = (harness.name.clone(), l.label.to_string(), l.cwd.to_string());
     let (resuming, mission) = (l.resuming, l.mission_id.map(str::to_string));
     let watch = l
@@ -471,6 +474,9 @@ pub(super) fn record_placement(
         )?;
         if let Some(origin) = &origin {
             registry::set_origin(c, name, origin)?;
+        }
+        if let Some(model) = &model {
+            registry::set_model(c, name, model)?;
         }
         if let Some((parent, depth)) = &parent {
             registry::set_parent(c, name, parent, *depth)?;
@@ -581,6 +587,8 @@ pub(super) fn launch_report(
         "agent_status": settled.status.map(AgentStatus::as_str),
         "category": harness.category().as_str(),
         "purpose": l.purpose.as_str(),
+        // What HQ passed to the CLI; null means the harness picked its own default.
+        "model": harness.model,
     });
     if !l.observe.is_empty() {
         report["observing"] = json!(l.observe);
@@ -621,6 +629,8 @@ pub struct SpawnRequest<'a> {
     /// Sessions a monitor or reviewer watches: their finished turns, blocks and
     /// exits reach it as messages on its task thread. Needs `mission_id`.
     pub observe: &'a [String],
+    /// The model to start the harness on; `None` is the harness's own default.
+    pub model: Option<&'a str>,
 }
 
 /// What a caller is told when a session was given others to observe.
@@ -651,6 +661,7 @@ pub async fn spawn(
             goal: GoalText::default(),
             purpose: None,
             observe: &[],
+            model: None,
         },
     )
     .await
@@ -682,7 +693,7 @@ pub(crate) async fn spawn_on(
     host: Host,
     req: SpawnRequest<'_>,
 ) -> Result<Value> {
-    let harness = resolve(req.harness)?;
+    let harness = resolve(req.harness)?.with_model(req.model)?;
     let purpose = purpose_for(&harness, req.purpose)?;
     check_observe(req.observe, purpose, req.mission_id.is_some())?;
     // Before anything is launched, so a wrong id never costs a workspace.
