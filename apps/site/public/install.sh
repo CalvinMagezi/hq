@@ -17,6 +17,7 @@ PUBKEY_LINE="RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/"
 CHANNEL="stable"
 PREFIX="${HQ_PREFIX:-$HOME/.local/bin}"
 WEB=1
+WEB_ONLY=0
 WORK=""
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-hq"
 
@@ -26,11 +27,12 @@ cleanup() { [ -z "$WORK" ] || rm -rf "$WORK"; }
 
 usage() {
     cat <<'USAGE'
-usage: install.sh [--channel stable|main] [--prefix DIR] [--no-web]
+usage: install.sh [--channel stable|main] [--prefix DIR] [--no-web | --web-only]
 
-  --channel  release channel (default: stable)
-  --prefix   directory for the hq binary (default: ~/.local/bin, or $HQ_PREFIX)
-  --no-web   skip the web UI (installed under ~/.local/share/agent-hq/web)
+  --channel   release channel (default: stable)
+  --prefix    directory for the hq binary (default: ~/.local/bin, or $HQ_PREFIX)
+  --no-web    skip the web UI (installed under ~/.local/share/agent-hq/web)
+  --web-only  install only the web UI, for an hq built from source (any platform, no bun)
 
 The first download is verified with the minisign tool when it is installed, otherwise with
 OpenSSL 1.1.1 or newer. On macOS the system OpenSSL cannot do this, so install minisign
@@ -168,6 +170,7 @@ main() {
             --channel) [ $# -ge 2 ] || die "--channel needs a value"; CHANNEL="$2"; shift 2 ;;
             --prefix) [ $# -ge 2 ] || die "--prefix needs a value"; PREFIX="$2"; shift 2 ;;
             --no-web) WEB=0; shift ;;
+            --web-only) WEB_ONLY=1; shift ;;
             -h | --help) usage; exit 0 ;;
             *) die "unknown option: $1 (try --help)" ;;
         esac
@@ -179,7 +182,10 @@ main() {
     check_can_verify
 
     local plat release name version manifest_url tail want url
-    plat="$(platform)"
+    [ "$WEB_ONLY" -eq 0 ] || [ "$WEB" -eq 1 ] || die "--web-only and --no-web together install nothing"
+    # The web UI archive is the same for every platform, so a source build on a machine with no
+    # prebuilt binary (an Intel Mac) can still fetch it.
+    if [ "$WEB_ONLY" -eq 1 ]; then plat="web UI"; else plat="$(platform)"; fi
     release="$BASE_URL/$REPO/releases/download"
     WORK="$(mktemp -d)"
     trap cleanup EXIT
@@ -205,6 +211,14 @@ main() {
         || die "the manifest does not match the channel pointer"
     verify_signature "$WORK/manifest.json" "$WORK/manifest.json.minisig" || die "the manifest signature does not verify"
     [ "$(json_string version "$WORK/manifest.json")" = "$version" ] || die "the manifest version differs from the pointer"
+
+    if [ "$WEB_ONLY" -eq 1 ]; then
+        artifact_sha256 "hq-web-$version.tar.gz" "$WORK/manifest.json" | grep -Eq '^[0-9a-f]{64}$' \
+            || die "release $version has no web UI archive"
+        install_web "$version" "$manifest_url"
+        echo "Start HQ with your own hq binary (hq start all, or hq web); it finds the UI in $DATA_DIR/web/dist."
+        return 0
+    fi
 
     name="hq-$version-$plat.tar.gz"
     want="$(artifact_sha256 "$name" "$WORK/manifest.json")"
