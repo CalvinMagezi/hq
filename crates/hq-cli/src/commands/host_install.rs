@@ -118,6 +118,7 @@ impl LaunchAgent<'_> {
     }
 
     /// Unload the job and remove its plist. Returns whether a plist was there.
+    #[cfg(target_os = "macos")]
     pub(crate) fn uninstall(&self) -> Result<bool> {
         let home = home()?;
         let _ = run(
