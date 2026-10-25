@@ -24,15 +24,10 @@
         <key>HOME</key>
         <string>__HOME__</string>
         <key>PATH</key>
-        <string>__HOME__/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <key>GROQ_API_KEY</key>
-        <string>__GROQ_API_KEY__</string>
-        <key>CEREBRAS_API_KEY</key>
-        <string>__CEREBRAS_API_KEY__</string>
-        <key>ANTHROPIC_API_KEY</key>
-        <string>__ANTHROPIC_API_KEY__</string>
-        <key>OPENROUTER_API_KEY</key>
-        <string>__OPENROUTER_API_KEY__</string>
+        <string>__HOME__/.local/bin:__HOME__/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <!-- No API keys here: the daemon reads them from ~/.hq/config.yaml (mode 600). A key in
+             this plaintext file would also outrank the config and hide key changes made from
+             the web UI. -->
         <key>HQ_LAUNCHED_BY_LAUNCHD</key>
         <string>1</string>
     </dict>
@@ -61,7 +56,7 @@
     <key>StandardErrorPath</key>
     <string>__HOME__/Library/Logs/hq-agent.error.log</string>
 
-    <key>ProcessType</key>
-    <string>Background</string>
+    <!-- No ProcessType: `Background` left launchd holding the job at spawn on a slow disk,
+         and the host agent (com.hq.host) has never set one. -->
 </dict>
 </plist>
