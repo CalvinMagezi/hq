@@ -850,11 +850,15 @@ fn init_tracing() {
         .skip(1)
         .take_while(|a| *a != "--")
         .any(|a| a == "edge");
+    // Reports print their own findings; startup and migration logs would bury them.
+    let is_report = args
+        .get(1)
+        .is_some_and(|a| matches!(a.as_str(), "doctor" | "health" | "ps" | "status"));
     let default_level = if is_chat || is_tunnel_run {
         "off"
     } else if is_edge {
         EDGE_LOG_FILTER
-    } else if is_data || is_bridge_run {
+    } else if is_data || is_bridge_run || is_report {
         "warn"
     } else {
         "info"
