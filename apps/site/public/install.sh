@@ -61,6 +61,24 @@ platform() {
     esac
 }
 
+# Other hq binaries on PATH: an old Bun-era script fails with "env: bun: No such file", and any
+# hq earlier on PATH than the one just installed is the one that runs.
+warn_other_installs() {
+    local first other
+    first="$(command -v hq 2>/dev/null || true)"
+    if [ -n "$first" ] && [ "$first" != "$PREFIX/hq" ]; then
+        echo
+        echo "warning: $first comes before $PREFIX/hq on your PATH, so typing hq runs that one."
+    fi
+    # `type -a` lists every hq on PATH in order; only files other than the new one matter.
+    for other in $(type -ap hq 2>/dev/null | sort -u); do
+        [ "$other" = "$PREFIX/hq" ] && continue
+        if head -c 64 "$other" 2>/dev/null | grep -q 'bun'; then
+            echo "warning: $other is the old Bun-based hq; remove it with: rm '$other'"
+        fi
+    done
+}
+
 fetch() { curl --proto '=https' --tlsv1.2 -fsSL --max-time 600 -o "$2" "$1" || die "could not download $1"; }
 
 sha256_of() {
@@ -238,6 +256,7 @@ main() {
         *":$PREFIX:"*) ;;
         *) echo; echo "Add $PREFIX to your PATH, for example: export PATH=\"$PREFIX:\$PATH\"" ;;
     esac
+    warn_other_installs
     cat <<NEXT
 
 Next steps:
