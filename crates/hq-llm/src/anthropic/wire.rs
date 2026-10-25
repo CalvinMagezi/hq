@@ -75,14 +75,8 @@ pub(crate) fn build_messages_body(
             serde_json::json!(system_parts.join("\n\n")),
         );
     }
-    if let Some(temp) = req.temperature {
-        // The Messages API accepts temperature in [0.0, 1.0]; clamp so callers
-        // tuned for OpenAI's [0.0, 2.0] range don't hard-fail with a 400.
-        obj.insert(
-            "temperature".to_string(),
-            serde_json::json!(temp.clamp(0.0, 1.0)),
-        );
-    }
+    // `req.temperature` is never sent: Claude 4.7 and later reject any non-default sampling value,
+    // and API version 2026-10-21 rejects the field on every model.
     if !req.tools.is_empty() {
         let tools: Vec<serde_json::Value> = req
             .tools

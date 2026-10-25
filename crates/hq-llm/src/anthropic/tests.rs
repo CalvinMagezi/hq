@@ -140,7 +140,7 @@ fn consecutive_tool_results_coalesce_into_one_user_message() {
 }
 
 #[test]
-fn tools_and_stream_and_temperature_serialize() {
+fn tools_and_stream_serialize_and_temperature_is_dropped() {
     let req = ChatRequest {
         model: "claude".to_string(),
         messages: vec![msg(MessageRole::User, "hi")],
@@ -155,8 +155,8 @@ fn tools_and_stream_and_temperature_serialize() {
 
     let body = build_messages_body(&req, DEFAULT_MAX_TOKENS, true);
     assert_eq!(body["stream"], json!(true));
-    // Clamped from OpenAI's 2.0 ceiling to Anthropic's 1.0.
-    assert_eq!(body["temperature"], json!(1.0));
+    // Claude 4.7+ rejects sampling parameters, so a caller's temperature is dropped.
+    assert!(body.get("temperature").is_none());
     let tool = &body["tools"][0];
     assert_eq!(tool["name"], "get_weather");
     assert_eq!(tool["description"], "look up weather");

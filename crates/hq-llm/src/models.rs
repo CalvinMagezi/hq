@@ -86,7 +86,26 @@ fn pricing_candidates(model_id: &str) -> Vec<String> {
             }
         }
     }
+    // The Messages API reports `claude-haiku-5-5` for the model the registry keys as
+    // `anthropic/claude-haiku-5.5`.
+    let dotted: Vec<String> = out
+        .iter()
+        .filter_map(|c| dotted_claude_version(c))
+        .collect();
+    for candidate in dotted {
+        push(&mut out, candidate);
+    }
     out
+}
+
+/// `anthropic/claude-haiku-5-5` as `anthropic/claude-haiku-5.5`; `None` when the id does not end
+/// in a two-part numeric version.
+fn dotted_claude_version(id: &str) -> Option<String> {
+    let numeric = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let (head, minor) = id.rsplit_once('-')?;
+    let (_, major) = head.rsplit_once('-')?;
+    (id.starts_with("anthropic/claude-") && numeric(major) && numeric(minor))
+        .then(|| format!("{head}.{minor}"))
 }
 
 /// Normalize a provider-reported model id into the registry's pricing-canonical
@@ -208,7 +227,27 @@ static KNOWN_MODELS: &[ModelInfo] = &[
         cache_read_cost_per_million: 1.50,
         cache_write_cost_per_million: 18.75,
     },
+    // Anthropic list prices, 2026-10-24 (platform.claude.com/docs/en/about-claude/pricing).
+    // Cache reads on the 5.5 Opus and Sonnet are 0.05x input, not the usual 0.1x.
+    ModelInfo {
+        id: "anthropic/claude-opus-5.5",
+        context_window: 1_000_000,
+        input_cost_per_million: 4.0,
+        output_cost_per_million: 20.0,
+        cache_read_cost_per_million: 0.20,
+        cache_write_cost_per_million: 5.0,
+    },
+    ModelInfo {
+        id: "anthropic/claude-sonnet-5.5",
+        context_window: 1_000_000,
+        input_cost_per_million: 2.0,
+        output_cost_per_million: 10.0,
+        cache_read_cost_per_million: 0.10,
+        cache_write_cost_per_million: 2.50,
+    },
     // Fresh-install defaults. Prices and context from OpenRouter's catalog, 2026-10-09.
+    // ponytail: flat rate; Anthropic bills Haiku 5.5 prompts over 100K tokens at 5x, so long
+    // prompts are under-counted until pricing learns tiers.
     ModelInfo {
         id: "anthropic/claude-haiku-5.5",
         context_window: 1_000_000,
@@ -704,6 +743,21 @@ mod tests {
             let info = get_model_info(id).unwrap_or_else(|| panic!("{id} is not in the registry"));
             assert!(info.input_cost_per_million > 0.0, "{id}");
         }
+    }
+
+    #[test]
+    fn anthropic_api_ids_price_like_their_dotted_registry_entries() {
+        // What the Messages API reports and the ledger records for each 5.5 model.
+        for (api_id, input) in [
+            ("claude-haiku-5-5", 0.10),
+            ("claude-sonnet-5-5", 2.0),
+            ("claude-opus-5-5", 4.0),
+        ] {
+            let info = get_model_info(api_id).unwrap_or_else(|| panic!("{api_id} is unpriced"));
+            assert_eq!(info.input_cost_per_million, input, "{api_id}");
+        }
+        // A one-part version is not rewritten.
+        assert_eq!(dotted_claude_version("anthropic/claude-sonnet-5"), None);
     }
 
     #[test]
