@@ -6,6 +6,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     // Doctor is health plus extra sections; the summary counts failures from all of them.
     let mut issues = super::health::check(config).await;
     issues += report_backend(config).await;
+    issues += report_install();
     issues += report_skill_issues(config);
     report_bash_sandbox(config);
     report_machine_profile(config);
@@ -634,6 +635,85 @@ fn describe_backend(
     vec![config_line, vault_line, llm_line]
 }
 
+/// Bytes read from the top of an `hq` on PATH, enough for a `#!` line.
+const SHEBANG_BYTES: usize = 64;
+
+/// Every `hq` on `path` in lookup order, without repeats.
+fn hq_on_path(path: &std::ffi::OsStr) -> Vec<std::path::PathBuf> {
+    let mut seen = Vec::new();
+    for dir in std::env::split_paths(path) {
+        let candidate = dir.join("hq");
+        if candidate.is_file() && !seen.contains(&candidate) {
+            seen.push(candidate);
+        }
+    }
+    seen
+}
+
+/// Lines about the `hq` binaries on PATH: an old Bun-era script fails with "env: bun", and an hq
+/// earlier on PATH than this one is the one a shell runs. `head` reads a file's first bytes.
+fn install_lines(
+    found: &[std::path::PathBuf],
+    this: &std::path::Path,
+    head: impl Fn(&std::path::Path) -> Vec<u8>,
+) -> Vec<Line> {
+    let resolved = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let same = |p: &std::path::Path| resolved(p) == resolved(this);
+    let mut lines = Vec::new();
+    if let Some(first) = found.first().filter(|f| !same(f)) {
+        lines.push(Line(
+            "warn",
+            format!(
+                "{} comes first on PATH, so `hq` there runs that binary, not this one ({})",
+                first.display(),
+                this.display()
+            ),
+        ));
+    }
+    for path in found.iter().filter(|p| !same(p)) {
+        let top = head(path);
+        if top.starts_with(b"#!") && String::from_utf8_lossy(&top).contains("bun") {
+            lines.push(Line(
+                "FAIL",
+                format!(
+                    "{} is the old Bun-based hq; remove it (`rm {}`)",
+                    path.display(),
+                    path.display()
+                ),
+            ));
+        }
+    }
+    lines
+}
+
+fn report_install() -> usize {
+    let Some(path) = std::env::var_os("PATH") else {
+        return 0;
+    };
+    let Ok(this) = std::env::current_exe() else {
+        return 0;
+    };
+    let head = |p: &std::path::Path| {
+        use std::io::Read;
+        let mut buf = vec![0; SHEBANG_BYTES];
+        let n = std::fs::File::open(p)
+            .and_then(|mut f| f.read(&mut buf))
+            .unwrap_or(0);
+        buf.truncate(n);
+        buf
+    };
+    let lines = install_lines(&hq_on_path(&path), &this, head);
+    if lines.is_empty() {
+        return 0;
+    }
+    println!("\nInstall");
+    let fails = lines.iter().filter(|l| l.0 == "FAIL").count();
+    for Line(label, text) in lines {
+        println!("  {label}  {text}");
+    }
+    fails
+}
+
 /// The `host:port` a plain TCP probe should dial for an endpoint URL.
 fn probe_target(endpoint: &str) -> Option<String> {
     let url = reqwest::Url::parse(endpoint).ok()?;
@@ -741,6 +821,24 @@ mod tests {
 
     fn labels(lines: &[Line]) -> Vec<&'static str> {
         lines.iter().map(|l| l.0).collect()
+    }
+
+    #[test]
+    fn an_old_bun_hq_fails_and_one_earlier_on_path_warns() {
+        let this = Path::new("/new/hq");
+        let found = [
+            std::path::PathBuf::from("/old/hq"),
+            std::path::PathBuf::from("/new/hq"),
+        ];
+        let bun = |p: &Path| {
+            if p == Path::new("/old/hq") {
+                b"#!/usr/bin/env bun\n".to_vec()
+            } else {
+                Vec::new()
+            }
+        };
+        assert_eq!(labels(&install_lines(&found, this, bun)), ["warn", "FAIL"]);
+        assert!(install_lines(&found[1..], this, bun).is_empty());
     }
 
     #[test]
