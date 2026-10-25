@@ -207,6 +207,8 @@ sign_binary() {
 
 # ─── Install ──────────────────────────────────────────────────
 STABLE_SIGN=false
+# The binary a manual restart runs: always one this run just wrote, never a stale $DEST.
+SPAWN_BIN="$USER_BIN"
 
 mkdir -p "$(dirname "$USER_BIN")"
 install -m 755 "$BINARY" "$USER_BIN"
@@ -218,12 +220,20 @@ echo "Installed $USER_BIN ($(du -sh "$USER_BIN" | cut -f1))"
 # written. Without it, $DEST needs a privileged copy — do it if we happen to
 # have the rights, and say so plainly if we don't rather than exiting dirty.
 if dest_is_linked; then
+    SPAWN_BIN="$DEST"
     echo "Installed $DEST -> $USER_BIN (symlink, no copy needed)"
 elif [[ -w "$(dirname "$DEST")" || $EUID -eq 0 ]]; then
     install -m 755 "$BINARY" "$DEST"
     sign_binary "$DEST" && STABLE_SIGN=true
     record_stamp "$DEST"
+    SPAWN_BIN="$DEST"
     echo "Installed $DEST ($(du -sh "$DEST" | cut -f1))"
+elif [[ ! -e "$DEST" ]]; then
+    echo ""
+    echo "⚠️  $DEST does not exist, so only $USER_BIN was installed."
+    echo "   A daemon or MCP config that runs another path stays on its old binary."
+    echo "   Point $DEST at this build once with: sudo $0 --link"
+    echo ""
 else
     echo ""
     echo "⚠️  $DEST is root-owned and was NOT updated — it still holds the old binary."
@@ -351,6 +361,12 @@ echo
 # another, so the count only ever grew — observed twice, both times ending
 # with two daemons racing for port 5678 and the older one winning, silently
 # keeping the owner on a stale build.
+# Checked before anything is stopped: a restart that cannot start leaves HQ down.
+if [[ ! -x "$SPAWN_BIN" ]]; then
+    echo "⚠️  $SPAWN_BIN is not executable, so the running daemon was left alone." >&2
+    exit 1
+fi
+
 RUNNING_PIDS=$(pgrep -f "hq start all" || true)
 if [[ -n "$RUNNING_PIDS" ]]; then
     echo "Stopping running hq daemon(s) (pid(s) $(echo "$RUNNING_PIDS" | tr '\n' ' '))..."
@@ -373,7 +389,7 @@ ERRLOG="$USER_HOME/Library/Logs/hq-agent.error.log"
 mkdir -p "$(dirname "$LOG")"
 # nohup + setsid-style backgrounding via &; sudo -u runs as the real user so the
 # child inherits their HOME / launchd session, not root's.
-run_as_user bash -c "nohup '$DEST' start all >>'$LOG' 2>>'$ERRLOG' </dev/null &"
+run_as_user bash -c "nohup '$SPAWN_BIN' start all >>'$LOG' 2>>'$ERRLOG' </dev/null &"
 
 if wait_for_health; then
     exit 0
