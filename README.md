@@ -289,7 +289,7 @@ The `hq` binary ships the commands below. Run `hq help` for full usage.
 | `hq logs -f` | Keep streaming new lines |
 | `hq ps` | Show all managed processes |
 
-On macOS, the LaunchAgent from `scripts/install-launchagent.sh` runs `hq start all` and logs to `~/Library/Logs/hq-agent.log`, so read it with `hq logs agent`. Plain `hq logs` reads the `daemon` target (`hq-daemon.log`).
+On macOS, `hq service install` (or `scripts/install-launchagent.sh` from a checkout) installs a LaunchAgent that runs `hq start all` at login, restarts it when it exits, and logs to `~/Library/Logs/hq-agent.log`, so read it with `hq logs agent`. `hq service status` shows the job and whether `/health` answers; `hq service uninstall` removes it. Plain `hq logs` reads the `daemon` target (`hq-daemon.log`).
 
 ### Vault Operations
 
