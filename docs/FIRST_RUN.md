@@ -39,7 +39,7 @@ Open HQ in the browser the first time, using the sign-in link your setup printed
 ## When it does not appear
 
 - **A key already exists.** Open **Settings**, **Provider keys**. **Replace** or **Add** tests the new key the same way and saves it only if it works. It leaves the model choice alone, except that a first key ever moves a stock default onto that provider's low-cost model, as setup does. A provider whose key comes from the server's environment (`HQ_OPENROUTER_API_KEY`, `OPENROUTER_API_KEY`, `HQ_ANTHROPIC_API_KEY`, `ANTHROPIC_API_KEY`, `HQ_GOOGLE_AI_API_KEY` or `GEMINI_API_KEY`) shows as set by the environment and is refused (`409`), because a config write could not override it. Change those where they are set and restart. Like setup, this needs a web token.
-- **Local use without a web token.** On `localhost` with no token the screen is unavailable by design (`403`: "first-run setup needs a web token"). Run `hq env` or add `openrouter_api_key` to `~/.hq/config.yaml`.
+- **Local use without a web token.** On `localhost` with no token the screen is unavailable by design (`403`: "first-run setup needs a web token"). Run `hq env`, or `hq env set <provider>` from a script or an agent (it reads the key from standard input or `--from-env VAR`), or add the key to `~/.hq/config.yaml`. `hq doctor` sends the default model a one-token test request and says whether it answered.
 - **An older release.** Servers that installed before the screen shipped have no `/setup`. Update with `hq update --apply`, or follow the terminal route.
 
 ## Problems and fixes

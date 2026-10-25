@@ -45,6 +45,64 @@ pub fn default_provider(openrouter: bool, anthropic: bool, google: bool) -> Setu
     }
 }
 
+/// The router alias a config carries until someone picks a model.
+const ROUTER_DEFAULT_MODEL: &str = "relay";
+
+/// Which providers hold a key, in the order `default_provider` takes them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeyedProviders {
+    pub openrouter: bool,
+    pub anthropic: bool,
+    pub google: bool,
+}
+
+impl KeyedProviders {
+    fn any(self) -> bool {
+        self.openrouter || self.anthropic || self.google
+    }
+
+    fn has(self, provider: SetupProvider) -> bool {
+        match provider {
+            SetupProvider::OpenRouter => self.openrouter,
+            SetupProvider::Anthropic => self.anthropic,
+            SetupProvider::Google => self.google,
+        }
+    }
+}
+
+/// The provider whose cheap model `model` is, when it is one a setup writes.
+fn cheap_model_provider(model: &str) -> Option<SetupProvider> {
+    [
+        SetupProvider::OpenRouter,
+        SetupProvider::Anthropic,
+        SetupProvider::Google,
+    ]
+    .into_iter()
+    .find(|p| p.cheap_model() == model)
+}
+
+/// Move a default model nobody chose (the router alias, a local model, or a setup's cheap model
+/// whose provider has no key) onto the cheap model of a provider that does. Returns the new model
+/// when it changed. A model the owner picked is never touched.
+pub fn follow_keys(config: &mut HqConfig, keyed: KeyedProviders) -> Option<&'static str> {
+    if !keyed.any() {
+        return None;
+    }
+    let current = config.default_model.as_str();
+    let stock = current == ROUTER_DEFAULT_MODEL || current.starts_with("ollama/");
+    let served = match cheap_model_provider(current) {
+        Some(provider) => keyed.has(provider),
+        None if stock => false,
+        None => return None,
+    };
+    if served {
+        return None;
+    }
+    let target = default_provider(keyed.openrouter, keyed.anthropic, keyed.google).cheap_model();
+    config.default_model = target.to_string();
+    Some(target)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,5 +130,41 @@ mod tests {
         SetupProvider::Anthropic.set_key(&mut c, "k".into());
         assert_eq!(c.anthropic_api_key.as_deref(), Some("k"));
         assert!(c.openrouter_api_key.is_none() && c.google_ai_api_key.is_none());
+    }
+
+    fn with_model(model: &str) -> HqConfig {
+        HqConfig {
+            default_model: model.to_string(),
+            ..HqConfig::default()
+        }
+    }
+
+    const ANTHROPIC_ONLY: KeyedProviders = KeyedProviders {
+        openrouter: false,
+        anthropic: true,
+        google: false,
+    };
+
+    #[test]
+    fn a_stock_default_follows_the_only_key() {
+        for stock in ["relay", "ollama/qwen3:8b", CHEAP_OPENROUTER_MODEL] {
+            let mut c = with_model(stock);
+            assert_eq!(
+                follow_keys(&mut c, ANTHROPIC_ONLY),
+                Some(CHEAP_ANTHROPIC_MODEL)
+            );
+            assert_eq!(c.default_model, CHEAP_ANTHROPIC_MODEL, "{stock}");
+        }
+    }
+
+    #[test]
+    fn a_chosen_or_served_default_is_left_alone() {
+        let mut chosen = with_model("anthropic/claude-opus-5.5");
+        assert_eq!(follow_keys(&mut chosen, ANTHROPIC_ONLY), None);
+        let mut served = with_model(CHEAP_ANTHROPIC_MODEL);
+        assert_eq!(follow_keys(&mut served, ANTHROPIC_ONLY), None);
+        let mut keyless = with_model("relay");
+        assert_eq!(follow_keys(&mut keyless, KeyedProviders::default()), None);
+        assert_eq!(keyless.default_model, "relay");
     }
 }

@@ -260,6 +260,7 @@ The `hq` binary ships the commands below. Run `hq help` for full usage.
 | `hq health` | System health check |
 | `hq doctor` | Diagnose common issues |
 | `hq env` | Set up API keys interactively |
+| `hq env set <provider>` | Save one key from standard input or `--from-env VAR` (no terminal needed), then test the default model |
 | `hq version` | Show version and build info |
 | `hq update [--check\|--apply\|--pin <v>\|--rollback]` | Pull-based signed self-update (see [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md)) |
 

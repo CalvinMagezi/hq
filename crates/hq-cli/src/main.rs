@@ -32,6 +32,21 @@ struct Cli {
     vault: Option<String>,
 }
 
+/// `hq env` subcommands.
+#[derive(Subcommand)]
+enum EnvAction {
+    /// Save one provider key without the interactive walkthrough. The key is read from one line
+    /// of standard input (hidden when typed at a terminal) or from `--from-env`, then the
+    /// default model is tested.
+    Set {
+        /// openrouter, anthropic, google, cerebras, groq, deepseek or openai
+        provider: String,
+        /// Read the key from this environment variable instead of standard input
+        #[arg(long, value_name = "VAR")]
+        from_env: Option<String>,
+    },
+}
+
 #[derive(Subcommand)]
 enum Commands {
     // ─── Getting Started ─────────────────────────────────────────────
@@ -276,8 +291,11 @@ enum Commands {
     /// Restore an encrypted backup into a new or empty folder (the same as `hq backup restore`)
     Restore(RestoreArgs),
 
-    /// Set up API keys interactively
-    Env,
+    /// Set up API keys interactively, or set one with `hq env set <provider>`
+    Env {
+        #[command(subcommand)]
+        action: Option<EnvAction>,
+    },
 
     /// Tasks from a terminal (the same scope as the tasks-only MCP key), and task time reports
     #[command(alias = "tasks")]
@@ -937,7 +955,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Lite { .. }
         | Commands::Backup { .. }
         | Commands::Restore(_)
-        | Commands::Env
+        | Commands::Env { .. }
         | Commands::Task { .. }
         | Commands::Verify { .. }
         | Commands::Copilot { .. }
@@ -1104,7 +1122,10 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Backup { command } => commands::backup::run(config, command),
         Commands::Restore(args) => commands::backup::restore(config, &args),
         Commands::Pair { platform } => commands::pair::run(config, &platform),
-        Commands::Env => commands::env::run(config).await,
+        Commands::Env { action: None } => commands::env::run(config).await,
+        Commands::Env {
+            action: Some(EnvAction::Set { provider, from_env }),
+        } => commands::env::set(config, &provider, from_env.as_deref()).await,
         Commands::Task { cmd } => commands::task::run(config, cmd).await,
         Commands::Copilot {
             sub,
