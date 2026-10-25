@@ -31,14 +31,14 @@ fn home() -> Result<PathBuf> {
 }
 
 /// The binary the service will run, refused where launchd cannot read it.
-fn service_binary(home: &Path) -> Result<PathBuf> {
+pub(crate) fn service_binary(home: &Path) -> Result<PathBuf> {
     let exe = std::env::current_exe().context("finding this binary")?;
     let exe = exe.canonicalize().unwrap_or(exe);
     if cfg!(target_os = "macos") {
         for dir in PROTECTED_DIRS {
             if exe.starts_with(home.join(dir)) {
                 bail!(
-                    "{} is under ~/{dir}, which launchd jobs may not read; copy hq to ~/.local/bin and run `hq host install` from there",
+                    "{} is under ~/{dir}, which launchd jobs may not read; copy hq to ~/.local/bin and run this command from there",
                     exe.display()
                 );
             }
@@ -60,29 +60,100 @@ fn xml_escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-pub(crate) fn launchd_plist(exe: &Path, home: &Path) -> String {
-    let log = home.join("Library/Logs/hq-host.log");
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
+/// One login-session job that runs `exe` with `args` and is restarted whenever it exits. No API
+/// keys and no `ProcessType`: keys come from ~/.hq/config.yaml, and `Background` has held jobs
+/// at spawn on slow disks.
+pub(crate) struct LaunchAgent<'a> {
+    pub label: &'a str,
+    pub args: &'a [&'a str],
+    pub stdout: PathBuf,
+    pub stderr: PathBuf,
+}
+
+impl LaunchAgent<'_> {
+    pub(crate) fn plist(&self, exe: &Path, home: &Path) -> String {
+        let program: String = std::iter::once(exe.to_string_lossy().into_owned())
+            .chain(self.args.iter().map(|a| (*a).to_string()))
+            .map(|a| format!("<string>{}</string>", xml_escape(&a)))
+            .collect();
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>{LAUNCHD_LABEL}</string>
+  <key>Label</key><string>{label}</string>
   <key>ProgramArguments</key><array>
-    <string>{exe}</string><string>host</string><string>serve</string>
+    {program}
   </array>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>{path}</string>
   </dict>
+  <key>WorkingDirectory</key><string>{home}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>{log}</string>
-  <key>StandardErrorPath</key><string>{log}</string>
+  <key>StandardOutPath</key><string>{stdout}</string>
+  <key>StandardErrorPath</key><string>{stderr}</string>
 </dict></plist>
 "#,
-        exe = xml_escape(&exe.to_string_lossy()),
-        path = xml_escape(&path_env(home)),
-        log = xml_escape(&log.to_string_lossy()),
-    )
+            label = xml_escape(self.label),
+            path = xml_escape(&path_env(home)),
+            home = xml_escape(&home.to_string_lossy()),
+            stdout = xml_escape(&self.stdout.to_string_lossy()),
+            stderr = xml_escape(&self.stderr.to_string_lossy()),
+        )
+    }
+
+    pub(crate) fn plist_path(&self, home: &Path) -> PathBuf {
+        home.join("Library/LaunchAgents")
+            .join(format!("{}.plist", self.label))
+    }
+
+    /// Write the plist for this binary and (re)load it into the user's login session.
+    pub(crate) fn install(&self) -> Result<PathBuf> {
+        let home = home()?;
+        let exe = service_binary(&home)?;
+        let path = self.plist_path(&home);
+        write_private(&path, &self.plist(&exe, &home))?;
+        reload_launch_agent(&user_domain()?, self.label, &path)?;
+        Ok(path)
+    }
+
+    /// Unload the job and remove its plist. Returns whether a plist was there.
+    pub(crate) fn uninstall(&self) -> Result<bool> {
+        let home = home()?;
+        let _ = run(
+            "launchctl",
+            &["bootout", &format!("{}/{}", user_domain()?, self.label)],
+        );
+        let path = self.plist_path(&home);
+        let existed = path.exists();
+        if existed {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(existed)
+    }
+}
+
+fn host_agent(home: &Path) -> LaunchAgent<'static> {
+    let log = home.join("Library/Logs/hq-host.log");
+    LaunchAgent {
+        label: LAUNCHD_LABEL,
+        args: &["host", "serve"],
+        stdout: log.clone(),
+        stderr: log,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn launchd_plist(exe: &Path, home: &Path) -> String {
+    host_agent(home).plist(exe, home)
+}
+
+/// The launchd domain of the logged-in user, `gui/<uid>`.
+pub(crate) fn user_domain() -> Result<String> {
+    let uid = String::from_utf8(Command::new("id").arg("-u").output()?.stdout)?
+        .trim()
+        .to_string();
+    Ok(format!("gui/{uid}"))
 }
 
 pub(crate) fn systemd_unit(exe: &Path, home: &Path) -> String {
@@ -125,11 +196,11 @@ fn run(program: &str, args: &[&str]) -> Result<()> {
 /// Replaces a loaded LaunchAgent with the one at `plist`. launchd finishes
 /// unloading after `bootout` returns, and a `bootstrap` in that window fails
 /// with an I/O error, so wait for the old job to go and retry the load.
-fn reload_launch_agent(domain: &str, plist: &Path) -> Result<()> {
+fn reload_launch_agent(domain: &str, label: &str, plist: &Path) -> Result<()> {
     const POLL: std::time::Duration = std::time::Duration::from_millis(200);
     const UNLOAD_WAIT: usize = 25;
     const LOAD_TRIES: usize = 5;
-    let target = format!("{domain}/{LAUNCHD_LABEL}");
+    let target = format!("{domain}/{label}");
     let loaded = || {
         Command::new("launchctl")
             .args(["print", &target])
@@ -267,16 +338,7 @@ pub fn install() -> Result<()> {
     let exe = service_binary(&home)?;
     if cfg!(target_os = "macos") {
         sign_for_macos(&home, &exe);
-        let path = home
-            .join("Library/LaunchAgents")
-            .join(format!("{LAUNCHD_LABEL}.plist"));
-        write_private(&path, &launchd_plist(&exe, &home))?;
-        // SAFETY of the id: `id -u` is the current user's.
-        let uid = String::from_utf8(Command::new("id").arg("-u").output()?.stdout)?
-            .trim()
-            .to_string();
-        let domain = format!("gui/{uid}");
-        reload_launch_agent(&domain, &path)?;
+        let path = host_agent(&home).install()?;
         println!(
             "hq host installed as a LaunchAgent ({}); logs in ~/Library/Logs/hq-host.log",
             path.display()

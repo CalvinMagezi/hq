@@ -86,3 +86,22 @@ fn hostnames_become_valid_host_names() {
     assert_eq!(default_host_name("---"), "host-");
     assert!(default_host_name(&"a".repeat(80)).len() <= 32);
 }
+
+#[test]
+fn a_launch_agent_carries_its_arguments_and_no_keys_or_process_type() {
+    let agent = LaunchAgent {
+        label: "com.example.daemon",
+        args: &["start", "all"],
+        stdout: PathBuf::from("/h/Library/Logs/out.log"),
+        stderr: PathBuf::from("/h/Library/Logs/err.log"),
+    };
+    let plist = agent.plist(Path::new("/h/.local/bin/hq"), Path::new("/h"));
+    assert!(
+        plist.contains(
+            "<string>/h/.local/bin/hq</string><string>start</string><string>all</string>"
+        )
+    );
+    assert!(plist.contains("<string>com.example.daemon</string>"));
+    assert!(plist.contains("/h/Library/Logs/err.log"));
+    assert!(!plist.contains("API_KEY") && !plist.contains("ProcessType"));
+}
