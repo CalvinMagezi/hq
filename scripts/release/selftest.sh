@@ -19,7 +19,7 @@ mkdir "$t/web"
 echo '<html></html>' > "$t/web/index.html"
 echo '//sw' > "$t/web/sw.js"
 echo '{}' > "$t/web/manifest.json"
-platforms="linux-x86_64 linux-aarch64 darwin-aarch64"
+platforms="linux-x86_64 linux-aarch64 darwin-aarch64 darwin-x86_64"
 bin_args=()
 # Real executable headers (ELF64 little-endian with e_machine at offset 18, Mach-O 64 with
 # cputype at offset 4), then a tag line that makes each binary, and so each tarball, distinct.
@@ -28,6 +28,7 @@ fake_bin() {
         linux-x86_64) printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\002\000\076\000' ;;
         linux-aarch64) printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\002\000\267\000' ;;
         darwin-aarch64) printf '\317\372\355\376\014\000\000\001\000\000\000\000\002\000\000\000' ;;
+        darwin-x86_64) printf '\317\372\355\376\007\000\000\001\000\000\000\000\002\000\000\000' ;;
         *) echo "selftest: no fake header for $1" >&2; exit 1 ;;
     esac > "$2"
     printf '\n# %s hq %s\n' "$1" "$version" >> "$2"
@@ -64,7 +65,7 @@ for p in $platforms; do
         { echo "selftest: manifest lacks $f" >&2; exit 1; }
     grep -q "  $f\$" "$rel/SHA256SUMS" || { echo "selftest: SHA256SUMS lacks $f" >&2; exit 1; }
 done
-[ "$(jq '.artifacts | length' "$rel/manifest.json")" = 4 ] || { echo "selftest: expected 3 binaries and the web tarball" >&2; exit 1; }
+[ "$(jq '.artifacts | length' "$rel/manifest.json")" = 5 ] || { echo "selftest: expected 4 binaries and the web tarball" >&2; exit 1; }
 [ "$(jq -r .schema "$rel/manifest.json")" = 1 ] || { echo "selftest: schema must stay 1" >&2; exit 1; }
 
 expect_package_failure() {

@@ -11,7 +11,7 @@ agent you want (for example Claude Code) installed and signed in on the machine.
 ## Get `hq` on the machine
 
 Pick the newest tag on the [releases page](https://github.com/CalvinMagezi/hq/releases), then
-(`linux-x86_64`, `linux-aarch64` or `darwin-aarch64` for the platform):
+(`linux-x86_64`, `linux-aarch64`, `darwin-aarch64` or `darwin-x86_64` for the platform):
 
 ```
 V=0.9.1-main.81

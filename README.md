@@ -132,8 +132,8 @@ With Homebrew: `brew install CalvinMagezi/tap/agent-hq` (binary only).
 `curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the latest stable release, verifies its minisign
 signature and checksum, and installs `hq` into `~/.local/bin` and the web UI into
 `~/.local/share/agent-hq/web` (`hq start all` then serves it at http://localhost:5678). Prebuilt binaries
-exist for Linux x86_64, Linux aarch64 and macOS on Apple Silicon. Other
-platforms, including Intel Macs, build from source with `cargo`.
+exist for Linux x86_64, Linux aarch64 and macOS (Apple Silicon and Intel). Other
+platforms build from source with `cargo`.
 
 **Docker:** `docker run -d -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq` runs HQ with its web UI and prints a web token on first start. A Compose example and the details are in [docs/DOCKER.md](docs/DOCKER.md).
 

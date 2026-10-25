@@ -132,6 +132,10 @@ jobs:
             runner: ubuntu-22.04-arm
           - platform: darwin-aarch64
             runner: macos-14
+          # Intel Macs, cross-compiled on the Apple Silicon runner and checked under Rosetta.
+          - platform: darwin-x86_64
+            runner: macos-14
+            target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,19 +154,32 @@ jobs:
         env:
           HQ_GIT_SHA: ${{ github.sha }}
           HQ_BUILD_VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
         run: |
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
           export SOURCE_DATE_EPOCH
           HQ_UPDATE_PUBKEY=$(sed -n 2p release/minisign.pub)
           export HQ_UPDATE_PUBKEY
-          cargo build --release --locked -p hq-cli
+          if [ -n "$TARGET" ]; then
+            rustup target add "$TARGET"
+            cargo build --release --locked -p hq-cli --target "$TARGET"
+            mkdir -p target/release
+            cp "target/$TARGET/release/hq" target/release/hq
+          else
+            cargo build --release --locked -p hq-cli
+          fi
 
       - name: Check the binary reports its identity
         env:
           VERSION: ${{ needs.version.outputs.version }}
           GIT_SHA: ${{ github.sha }}
+          TARGET: ${{ matrix.target }}
         run: |
-          out=$(target/release/hq --version)
+          if [ "$TARGET" = "x86_64-apple-darwin" ]; then
+            out=$(arch -x86_64 target/release/hq --version)
+          else
+            out=$(target/release/hq --version)
+          fi
           echo "$out"
           case "$out" in *"$VERSION"*) ;; *) echo "version missing from --version" >&2; exit 1 ;; esac
           case "$out" in *"${GIT_SHA:0:7}"*) ;; *) echo "git sha missing from --version" >&2; exit 1 ;; esac
@@ -239,7 +256,7 @@ jobs:
           extra=()
           [ -z "$MIN_UPDATER" ] || extra+=(--min-updater-version "$MIN_UPDATER")
           bin_args=()
-          for platform in linux-x86_64 linux-aarch64 darwin-aarch64; do
+          for platform in linux-x86_64 linux-aarch64 darwin-aarch64 darwin-x86_64; do
             bin_args+=(--bin "$platform=hq-bins/hq-bin-$platform/hq")
           done
           bash scripts/release/package.sh --version "$VERSION" --git-sha "$GIT_SHA" --channel main \
@@ -303,7 +320,7 @@ jobs:
           [ "$(jq -r .channel "$m")" = "main" ] || { echo "manifest channel mismatch" >&2; exit 1; }
           # Exactly the expected artifacts, in the manifest and on disk, before anything is signed or uploaded.
           expected=$(printf '%s\n' \
-            "hq-$VERSION-darwin-aarch64.tar.gz" "hq-$VERSION-linux-aarch64.tar.gz" \
+            "hq-$VERSION-darwin-aarch64.tar.gz" "hq-$VERSION-darwin-x86_64.tar.gz" "hq-$VERSION-linux-aarch64.tar.gz" \
             "hq-$VERSION-linux-x86_64.tar.gz" "hq-web-$VERSION.tar.gz" | LC_ALL=C sort)
           listed=$(jq -r '.artifacts[].name' "$m" | LC_ALL=C sort)
           [ "$listed" = "$expected" ] || { echo "manifest artifacts are not the expected set:" >&2; echo "$listed" >&2; exit 1; }

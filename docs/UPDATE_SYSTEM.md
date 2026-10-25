@@ -234,9 +234,9 @@ Binary artifacts and the runners that build them:
 | linux-x86_64 | `hq-<version>-linux-x86_64.tar.gz` | `ubuntu-22.04` | glibc 2.35 floor. Required in every manifest. The name is frozen: updaters released before multi-platform builds look for exactly this name. |
 | linux-aarch64 | `hq-<version>-linux-aarch64.tar.gz` | `ubuntu-22.04-arm` | Same glibc floor. |
 | darwin-aarch64 | `hq-<version>-darwin-aarch64.tar.gz` | `macos-14` | Apple Silicon. The CLI only; servers use Linux. |
+| darwin-x86_64 | `hq-<version>-darwin-x86_64.tar.gz` | `macos-14`, cross-compiled for `x86_64-apple-darwin` | Intel Macs. Checked under Rosetta before it is packaged; CI cross-builds it on every PR. Releases before it was added have no such artifact. |
 
-`<os>` is `linux` or `darwin` and `<arch>` is `x86_64` or `aarch64`. There is no
-`darwin-x86_64` build. The updater picks the artifact for the platform it was
+`<os>` is `linux` or `darwin` and `<arch>` is `x86_64` or `aarch64`. The updater picks the artifact for the platform it was
 compiled for (`std::env::consts::OS` and `ARCH`, with `macos` written as
 `darwin`). If the manifest has no artifact for that platform it stops with an
 error naming the platform and does not block the version, because a missing

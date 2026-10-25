@@ -125,9 +125,9 @@ test("platformKey maps Node os and arch to artifact platform names", () => {
   assert.equal(platformKey("linux", "ia32"), null);
 });
 
-test("prebuilt binaries exist for Linux x64 and arm64 and Apple Silicon, not Intel Macs", () => {
-  for (const p of ["linux-x86_64", "linux-aarch64", "darwin-aarch64"]) assert.equal(hasPrebuilt(p), true, p);
-  for (const p of ["darwin-x86_64", "freebsd-x86_64", null]) assert.equal(hasPrebuilt(p), false, String(p));
+test("prebuilt binaries exist for Linux x64 and arm64 and for both Mac architectures", () => {
+  for (const p of ["linux-x86_64", "linux-aarch64", "darwin-aarch64", "darwin-x86_64"]) assert.equal(hasPrebuilt(p), true, p);
+  for (const p of ["freebsd-x86_64", null]) assert.equal(hasPrebuilt(p), false, String(p));
   assert.equal(hasPrebuiltFor("linux-x86_64"), true);
 });
 

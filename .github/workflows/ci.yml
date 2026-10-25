@@ -113,6 +113,14 @@ jobs:
           cargo check -p hq-cli --all-targets --locked
           cargo check -p hq-cli --all-targets --features tunnel --locked
 
+      # The release cross-compiles the Intel Mac binary on this runner and runs it under
+      # Rosetta; this proves both on every PR, so a release never finds out first.
+      - name: Cross-compile for Intel Macs and run it under Rosetta
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo build -p hq-cli --locked --target x86_64-apple-darwin
+          arch -x86_64 target/x86_64-apple-darwin/debug/hq --version
+
   rust-windows:
     name: Rust (Windows build, smoke)
     runs-on: windows-2022

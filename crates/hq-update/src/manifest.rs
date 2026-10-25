@@ -294,6 +294,7 @@ mod tests {
         assert_eq!(platform_name("linux", "aarch64", "gnu"), "linux-aarch64");
         assert_eq!(platform_name("macos", "aarch64", ""), "darwin-aarch64");
         assert_eq!(platform_name("macos", "x86_64", ""), "darwin-x86_64");
+        assert_eq!(platform_name("macos", "x86_64", ""), "darwin-x86_64");
         assert_eq!(platform_name("freebsd", "x86_64", ""), "freebsd-x86_64");
         assert_eq!(
             platform_name("linux", "x86_64", "musl"),
