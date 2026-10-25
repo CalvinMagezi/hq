@@ -39,7 +39,8 @@ mod wire;
 
 pub(crate) use stream::{AnthropicStreamState, drain_sse};
 pub(crate) use wire::{
-    build_messages_body, classify_anthropic_error, parse_messages_response, parse_usage,
+    add_prompt_caching, build_messages_body, classify_anthropic_error, parse_messages_response,
+    parse_usage,
 };
 
 /// Canonical base URL for the public Anthropic Messages API.
@@ -88,6 +89,17 @@ impl AnthropicProvider {
         format!("{}/messages", self.api_base)
     }
 
+    /// The Messages body for `request`. Prompt caching is turned on only for Anthropic's own API:
+    /// gateways and Copilot's Messages endpoint may reject `cache_control`.
+    fn body_for(&self, request: &ChatRequest, stream: bool) -> serde_json::Value {
+        let request = self.for_api(request);
+        let mut body = build_messages_body(&request, self.default_max_tokens, stream);
+        if self.api_base == ANTHROPIC_BASE_URL {
+            add_prompt_caching(&mut body);
+        }
+        body
+    }
+
     /// The model id the first-party API expects. Catalogs such as OpenRouter write `vendor/model`
     /// slugs with a dotted version (`anthropic/claude-haiku-5.5`), while Anthropic's own ids carry
     /// neither (`claude-haiku-5-5`). Only that host gets the rewrite: gateways and Copilot's Messages
@@ -115,8 +127,7 @@ impl LlmProvider for AnthropicProvider {
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        let request = self.for_api(request);
-        let body = build_messages_body(&request, self.default_max_tokens, false);
+        let body = self.body_for(request, false);
 
         let resp = self
             .http
@@ -170,8 +181,7 @@ impl LlmProvider for AnthropicProvider {
         &self,
         request: &ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
-        let request = self.for_api(request);
-        let body = build_messages_body(&request, self.default_max_tokens, true);
+        let body = self.body_for(request, true);
 
         let resp = self
             .http

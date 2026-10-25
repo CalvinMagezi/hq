@@ -628,3 +628,30 @@ async fn dropping_the_stream_aborts_a_hung_transport_immediately() {
          the pump task leaked the connection instead"
     );
 }
+
+#[test]
+fn prompt_caching_marks_the_last_tool_and_the_request_only_on_anthropics_own_api() {
+    let tool = |name: &str| ToolDefinition {
+        name: name.to_string(),
+        description: String::new(),
+        parameters: json!({"type": "object", "properties": {}}),
+    };
+    let req = ChatRequest {
+        model: "anthropic/claude-haiku-5.5".to_string(),
+        messages: vec![msg(MessageRole::User, "hi")],
+        tools: vec![tool("a"), tool("b")],
+        temperature: None,
+        max_tokens: None,
+    };
+    let ephemeral = json!({"type": "ephemeral"});
+
+    let body = AnthropicProvider::new("k").body_for(&req, true);
+    assert_eq!(body["cache_control"], ephemeral);
+    assert_eq!(body["tools"][1]["cache_control"], ephemeral);
+    assert!(body["tools"][0].get("cache_control").is_none());
+
+    let gateway = AnthropicProvider::new_with_base("k", "https://gateway.example.com/v1");
+    let body = gateway.body_for(&req, true);
+    assert!(body.get("cache_control").is_none());
+    assert!(body["tools"][1].get("cache_control").is_none());
+}
