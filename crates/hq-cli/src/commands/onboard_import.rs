@@ -211,7 +211,7 @@ pub fn run(from: &str, dry_run: bool) -> Result<()> {
         .filter(|e| e.path().is_dir())
         .map(|e| scan_project(&e.path()))
         .collect();
-    projects.sort_by(|a, b| b.sessions.cmp(&a.sessions));
+    projects.sort_by_key(|p| std::cmp::Reverse(p.sessions));
 
     println!(
         "\nWhat HQ would set up from {} (dry run: nothing is written)\n",
