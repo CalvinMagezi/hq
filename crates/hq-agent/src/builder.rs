@@ -25,6 +25,12 @@ pub(crate) mod prompt;
 mod provider;
 mod tools;
 
+/// The model provider a session built from `config` talks to, with no ledger attached, for
+/// one-off checks such as `hq doctor`'s live model probe.
+pub fn provider_for(config: &HqConfig) -> Result<Arc<dyn LlmProvider>> {
+    Ok(provider::resolve_backends(config, None, None)?.provider)
+}
+
 use prompt::*;
 
 /// Controls which tool tier is injected into a session.

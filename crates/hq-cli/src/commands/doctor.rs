@@ -692,6 +692,21 @@ async fn probe_primary(config: &HqConfig) -> Option<Line> {
     })
 }
 
+/// A default model nobody chose whose provider has no key, with the model `hq env` would move it to.
+fn keyless_default_line(config: &HqConfig) -> Option<Line> {
+    let keyed = super::env::keyed_providers(config, &[]);
+    let mut moved = config.clone();
+    let target = hq_core::setup_provider::follow_keys(&mut moved, keyed)?;
+    Some(Line(
+        "warn",
+        format!(
+            "default model `{}` belongs to a provider with no key; set `default_model: {target}` \
+             (what `hq env set` picks for the key you have) or add that provider's key",
+            config.default_model
+        ),
+    ))
+}
+
 async fn report_backend(config: &HqConfig) {
     println!("\nBackend");
     let config_path = HqConfig::config_read_path();
@@ -701,8 +716,15 @@ async fn report_backend(config: &HqConfig) {
         config_path.exists(),
         config.vault_path.exists(),
     );
+    let has_backend = config.backends.is_configured() || config.has_llm_key() || config.local_only;
     lines.push(copilot_credential_line(uses_copilot(config)).await);
     lines.extend(probe_primary(config).await);
+    if has_backend {
+        let result = super::model_probe::probe_default_model(config).await;
+        let (label, text) = super::model_probe::describe(&config.default_model, &result);
+        lines.push(Line(label, text));
+        lines.extend(keyless_default_line(config));
+    }
     for Line(label, text) in lines {
         println!("  {label}  {text}");
     }

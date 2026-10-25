@@ -15,6 +15,7 @@ pub mod health;
 pub mod host;
 #[cfg(unix)]
 pub mod host_install;
+pub mod model_probe;
 /// Off Unix there is no coding-agent host; the command exists so `hq host` can say so.
 #[cfg(not(unix))]
 pub mod host {

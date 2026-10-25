@@ -1,5 +1,6 @@
 use anyhow::Result;
 use hq_core::config::HqConfig;
+use hq_core::setup_provider::{KeyedProviders, follow_keys};
 use std::io::{self, BufRead, IsTerminal, Write};
 
 /// One provider key that `hq env` and `hq onboard` can prompt for.
@@ -81,6 +82,42 @@ pub(crate) fn is_set(key: &ApiKey, config: &HqConfig) -> bool {
     (key.get)(config).as_deref().is_some_and(|k| !k.is_empty())
 }
 
+/// `hq env set <provider>` names, each tied to the key it fills.
+const NAMED_KEYS: [(&str, &ApiKey); 7] = [
+    ("openrouter", &OPENROUTER),
+    ("anthropic", &ANTHROPIC),
+    ("google", &GOOGLE_AI),
+    ("cerebras", &CEREBRAS),
+    ("groq", &GROQ),
+    ("deepseek", &DEEPSEEK),
+    ("openai", &OPENAI),
+];
+
+fn env_has(names: &[&str]) -> bool {
+    names
+        .iter()
+        .any(|n| std::env::var(n).is_ok_and(|v| !v.trim().is_empty()))
+}
+
+/// Which setup providers will hold a key once `typed` is saved, the environment included.
+pub(crate) fn keyed_providers(
+    config: &HqConfig,
+    typed: &[(&'static ApiKey, String)],
+) -> KeyedProviders {
+    let has = |key: &ApiKey, env: &[&str]| {
+        is_set(key, config)
+            || env_has(env)
+            || typed
+                .iter()
+                .any(|(k, v)| std::ptr::eq(*k, key) && !v.is_empty())
+    };
+    KeyedProviders {
+        openrouter: has(&OPENROUTER, &["OPENROUTER_API_KEY"]),
+        anthropic: has(&ANTHROPIC, &["ANTHROPIC_API_KEY"]),
+        google: has(&GOOGLE_AI, &["GOOGLE_AI_API_KEY", "GEMINI_API_KEY"]),
+    }
+}
+
 /// Prompt for one key with hidden input so the secret is never echoed.
 pub(crate) fn prompt_key(
     n: usize,
@@ -116,14 +153,19 @@ pub(crate) fn save_keys(
     // written, so an env-supplied key is never baked into the plaintext file.
     let has_any_cloud =
         typed.iter().any(|(_, v)| !v.is_empty()) || ALL_KEYS.iter().any(|k| is_set(k, config));
+    let keyed = keyed_providers(config, &typed);
     let updated = HqConfig::save_patch(|c| {
         for (key, value) in typed.into_iter().filter(|(_, v)| !v.is_empty()) {
             (key.set)(c, value);
         }
-        if let Some(model) = model {
-            c.default_model = model;
-        }
         c.apply_cloud_key_flip(has_any_cloud);
+        match model {
+            Some(model) => c.default_model = model,
+            // A default nobody chose follows the keys, so it never points at a keyless provider.
+            None => {
+                follow_keys(c, keyed);
+            }
+        }
     })?;
     Ok((updated, has_any_cloud))
 }
@@ -154,7 +196,58 @@ pub async fn run(config: &HqConfig) -> Result<()> {
         println!("Cloud providers enabled (local_only: false).");
         println!("Default model: {}", updated.default_model);
     }
-    println!("Run `hq health` to verify, or `hq` to start chatting.\n");
+    report_probe(&updated).await;
+    Ok(())
+}
 
+/// Print the live test of the default model, or say why there is nothing to test yet.
+async fn report_probe(config: &HqConfig) {
+    if !config.has_llm_key() && !config.backends.is_configured() {
+        println!("No model key is set yet, so nothing was tested.\n");
+        return;
+    }
+    let result = super::model_probe::probe_default_model(config).await;
+    let (label, text) = super::model_probe::describe(&config.default_model, &result);
+    println!("{label}  {text}\n");
+}
+
+/// `hq env set <provider>`: save one key without a terminal. The key comes from `--from-env`
+/// or one line of standard input; a terminal gets a hidden prompt instead.
+pub async fn set(config: &HqConfig, provider: &str, from_env: Option<&str>) -> Result<()> {
+    let names: Vec<&str> = NAMED_KEYS.iter().map(|(n, _)| *n).collect();
+    let Some(&(_, key)) = NAMED_KEYS
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(provider))
+    else {
+        anyhow::bail!(
+            "unknown provider `{provider}`; use one of: {}",
+            names.join(", ")
+        );
+    };
+    let value = match from_env {
+        Some(var) => std::env::var(var)
+            .map_err(|_| anyhow::anyhow!("environment variable {var} is not set"))?,
+        None if io::stdin().is_terminal() => {
+            print!("{} (input hidden): ", key.label);
+            io::stdout().flush()?;
+            rpassword::read_password()?
+        }
+        None => {
+            let mut line = String::new();
+            io::stdin().read_line(&mut line)?;
+            line
+        }
+    };
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        anyhow::bail!("no key was given for {provider}");
+    }
+    let (updated, _) = save_keys(config, vec![(key, value)], None)?;
+    println!(
+        "Saved the {provider} key to {}.",
+        HqConfig::config_file_path().display()
+    );
+    println!("Default model: {}", updated.default_model);
+    report_probe(&updated).await;
     Ok(())
 }
