@@ -169,6 +169,24 @@ pub(crate) fn parse_messages_response(json: &serde_json::Value) -> Result<ChatMe
     })
 }
 
+/// Mark the prompt for caching: an explicit breakpoint after the tool list, which is large and the
+/// same on every request, and Anthropic's automatic breakpoint, which follows the conversation as
+/// it grows so each tool round trip reads the previous request's prefix.
+pub(crate) fn add_prompt_caching(body: &mut serde_json::Value) {
+    let ephemeral = serde_json::json!({"type": "ephemeral"});
+    if let Some(last_tool) = body
+        .get_mut("tools")
+        .and_then(|t| t.as_array_mut())
+        .and_then(|tools| tools.last_mut())
+        .and_then(|tool| tool.as_object_mut())
+    {
+        last_tool.insert("cache_control".to_string(), ephemeral.clone());
+    }
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("cache_control".to_string(), ephemeral);
+    }
+}
+
 /// Extract normalized `(input, output, cache_read, cache_write)` token counts
 /// from a Messages `usage` object. Missing fields default to zero.
 ///
