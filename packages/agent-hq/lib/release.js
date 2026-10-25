@@ -14,7 +14,7 @@ RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/
 
 // Release artifacts are named hq-<version>-<os>-<arch>.tar.gz. linux-x86_64 is the
 // original name and must never change; the others were added later.
-export const PREBUILT_PLATFORMS = ["linux-x86_64", "linux-aarch64", "darwin-aarch64"];
+export const PREBUILT_PLATFORMS = ["linux-x86_64", "linux-aarch64", "darwin-aarch64", "darwin-x86_64"];
 const OS_NAMES = { linux: "linux", darwin: "darwin" };
 const ARCH_NAMES = { x64: "x86_64", arm64: "aarch64" };
 

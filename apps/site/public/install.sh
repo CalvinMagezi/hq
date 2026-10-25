@@ -53,7 +53,7 @@ platform() {
             if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
                 echo "darwin-aarch64"
             else
-                die "Intel Macs have no prebuilt binary yet. Build from source: https://github.com/$REPO#install-from-source"
+                echo "darwin-x86_64"
             fi
             ;;
         MINGW*/* | MSYS*/* | CYGWIN*/*)
