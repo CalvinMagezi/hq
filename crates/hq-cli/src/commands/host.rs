@@ -316,9 +316,26 @@ fn gate_key_command(name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// A host started a moment ago (`hq host install`) writes its token and socket shortly after
+/// launch, so status keeps trying for this long before calling it not running.
+const STATUS_CONNECT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+const STATUS_CONNECT_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+fn connect_with_grace(dir: &std::path::Path) -> Result<Client> {
+    let deadline = std::time::Instant::now() + STATUS_CONNECT_WAIT;
+    loop {
+        match Client::connect(dir) {
+            Ok(client) => return Ok(client),
+            Err(e) if std::time::Instant::now() >= deadline => {
+                anyhow::bail!("host not running in {}: {e}", dir.display())
+            }
+            Err(_) => std::thread::sleep(STATUS_CONNECT_POLL),
+        }
+    }
+}
+
 fn status(dir: &std::path::Path) -> Result<()> {
-    let mut client = Client::connect(dir)
-        .map_err(|e| anyhow::anyhow!("host not running in {}: {e}", dir.display()))?;
+    let mut client = connect_with_grace(dir)?;
     let status = client.call("host.status", json!({}))?;
     println!("{}", serde_json::to_string_pretty(&status)?);
     let agents = client.call("agent.list", json!({}))?;

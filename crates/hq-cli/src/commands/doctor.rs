@@ -3,10 +3,10 @@ use hq_core::config::HqConfig;
 
 /// Diagnose common issues — comprehensive health check.
 pub async fn run(config: &HqConfig) -> Result<()> {
-    // Doctor is essentially an alias for health with extra checks
-    super::health::run(config).await?;
-    report_backend(config).await;
-    report_skill_issues(config);
+    // Doctor is health plus extra sections; the summary counts failures from all of them.
+    let mut issues = super::health::check(config).await;
+    issues += report_backend(config).await;
+    issues += report_skill_issues(config);
     report_bash_sandbox(config);
     report_machine_profile(config);
     report_search_index(config);
@@ -14,6 +14,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_import_tools();
     report_code_signature();
     report_spend_ledger(config);
+    super::health::print_summary(issues, "hq doctor");
     Ok(())
 }
 
@@ -237,7 +238,7 @@ fn report_bash_sandbox(config: &HqConfig) {
 
 /// Surface skills that can never fire. Non-fatal — `hq skills validate` is the
 /// command that exits non-zero.
-fn report_skill_issues(config: &HqConfig) {
+fn report_skill_issues(config: &HqConfig) -> usize {
     use hq_tools::skills::Severity;
 
     let skills_dir = hq_core::skills_dir(&config.vault_path);
@@ -253,7 +254,7 @@ fn report_skill_issues(config: &HqConfig) {
             "  ok  {} skills, no issues",
             hq_tools::skills::list_skills(&skills_dir).len()
         );
-        return;
+        return 0;
     }
     for issue in issues.iter().take(10) {
         let label = match issue.severity {
@@ -265,6 +266,7 @@ fn report_skill_issues(config: &HqConfig) {
     if errors > 0 {
         println!("  run `hq skills validate` for the full report");
     }
+    errors
 }
 
 /// A missing or stale machine profile means every agent prompt is guessing
@@ -707,7 +709,7 @@ fn keyless_default_line(config: &HqConfig) -> Option<Line> {
     ))
 }
 
-async fn report_backend(config: &HqConfig) {
+async fn report_backend(config: &HqConfig) -> usize {
     println!("\nBackend");
     let config_path = HqConfig::config_read_path();
     let mut lines = describe_backend(
@@ -725,9 +727,11 @@ async fn report_backend(config: &HqConfig) {
         lines.push(Line(label, text));
         lines.extend(keyless_default_line(config));
     }
+    let fails = lines.iter().filter(|l| l.0 == "FAIL").count();
     for Line(label, text) in lines {
         println!("  {label}  {text}");
     }
+    fails
 }
 
 #[cfg(test)]

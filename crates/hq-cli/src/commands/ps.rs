@@ -3,98 +3,75 @@ use hq_core::config::HqConfig;
 #[cfg(unix)]
 use std::process::Command;
 
-/// Show all managed processes.
-pub async fn run(_config: &HqConfig) -> Result<()> {
+/// The long-running parts of HQ, each found by the command line it runs as.
+#[cfg(unix)]
+const COMPONENTS: [(&str, &str); 3] = [
+    ("Daemon", "hq start"),
+    ("Host", "hq host serve"),
+    ("Web", "hq web"),
+];
+
+/// `hq web` subcommands that exit at once; only the server itself is a running component.
+#[cfg(unix)]
+const SHORT_LIVED_WEB: [&str; 3] = ["hq web status", "hq web stop", "hq web link"];
+
+/// Show the HQ processes running on this machine and whether the daemon answers.
+pub async fn run(config: &HqConfig) -> Result<()> {
     println!("\n── Agent HQ Processes ──\n");
 
-    let services = [
-        ("agent", "com.agent-hq.agent", "HQ Agent"),
-        ("relay", "com.agent-hq.discord-relay", "Discord Relay"),
-        ("relay-server", "com.agent-hq.relay-server", "Relay Server"),
-        ("telegram", "com.agent-hq.telegram", "Telegram"),
-        ("vault-sync", "com.agent-hq.vault-sync", "Vault Sync"),
-    ];
-
-    for (_id, daemon, label) in &services {
-        let pid = get_daemon_pid(daemon);
-        let padded = format!("{:<14}", label);
-        match pid {
-            Some(p) => {
-                let uptime = get_uptime(p);
-                println!("  {} PID {} (uptime: {})", padded, p, uptime);
+    #[cfg(unix)]
+    {
+        for (label, pattern) in COMPONENTS {
+            let pids = processes(pattern);
+            let padded = format!("{label:<8}");
+            if pids.is_empty() {
+                println!("  {padded} not running");
             }
-            None => {
-                println!("  {} not running", padded);
+            for pid in pids {
+                println!("  {padded} PID {pid} (uptime: {})", uptime(pid));
             }
         }
     }
+    #[cfg(not(unix))]
+    println!(
+        "  Process listing needs a Unix system; use `hq web status` and the health line below."
+    );
 
-    println!();
+    let url = format!("http://127.0.0.1:{}/health", config.ws_port);
+    let answering = reqwest::get(&url)
+        .await
+        .is_ok_and(|r| r.status().is_success());
+    let state = if answering {
+        "answering"
+    } else {
+        "not answering"
+    };
+    println!("\n  {url}: {state}\n");
     Ok(())
 }
 
-fn get_daemon_pid(daemon: &str) -> Option<u32> {
-    #[cfg(target_os = "macos")]
-    {
-        let output = Command::new("launchctl").args(["list"]).output().ok()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            if line.contains(daemon) {
-                let pid_str = line.split_whitespace().next()?;
-                if pid_str != "-" {
-                    return pid_str.parse().ok();
-                }
-            }
-        }
-    }
-
-    // Also check PID files
-    let pid_dir = if cfg!(target_os = "macos") {
-        dirs::home_dir()?.join("Library/Logs")
-    } else {
-        dirs::home_dir()?.join(".local/share/agent-hq/pids")
+/// Pids whose command line runs `pattern`, never this process.
+#[cfg(unix)]
+fn processes(pattern: &str) -> Vec<u32> {
+    let Ok(out) = Command::new("pgrep").args(["-fl", pattern]).output() else {
+        return Vec::new();
     };
-
-    let pid_file = pid_dir.join(format!("{}.pid", daemon));
-    if pid_file.exists() {
-        let pid_str = std::fs::read_to_string(&pid_file).ok()?;
-        let pid: u32 = pid_str.trim().parse().ok()?;
-        if is_alive(pid) {
-            return Some(pid);
-        }
-    }
-
-    None
+    let me = std::process::id();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| !SHORT_LIVED_WEB.iter().any(|s| line.contains(s)))
+        .filter_map(|line| line.split_whitespace().next()?.parse::<u32>().ok())
+        .filter(|pid| *pid != me)
+        .collect()
 }
 
-fn is_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        hq_core::heartbeat::is_pid_alive(pid)
-    }
-}
-
-fn get_uptime(pid: u32) -> String {
-    #[cfg(unix)]
-    {
-        Command::new("ps")
-            .args(["-o", "etime=", "-p", &pid.to_string()])
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|| "?".to_string())
-    }
-    #[cfg(not(unix))]
-    {
-        "?".to_string()
-    }
+#[cfg(unix)]
+fn uptime(pid: u32) -> String {
+    Command::new("ps")
+        .args(["-o", "etime=", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "?".to_string())
 }

@@ -8,6 +8,23 @@ use std::process::Command;
 
 /// System health check — diagnose common issues.
 pub async fn run(config: &HqConfig) -> Result<()> {
+    let issues = check(config).await;
+    print_summary(issues, "hq health");
+    Ok(())
+}
+
+/// The closing line for a report with `issues` failures.
+pub fn print_summary(issues: usize, rerun: &str) {
+    println!();
+    if issues == 0 {
+        println!("All checks passed. Run `hq` to start chatting.\n");
+    } else {
+        println!("{issues} issue(s) found. Fix the items marked FAIL and re-run `{rerun}`.\n");
+    }
+}
+
+/// Print the health checks and return how many failed.
+pub async fn check(config: &HqConfig) -> usize {
     let theme = Theme::dark();
 
     println!("\n{}", ansi::bold("Agent-HQ Health Check", &theme.primary));
@@ -125,22 +142,13 @@ pub async fn run(config: &HqConfig) -> Result<()> {
         if content.contains("agent-hq") {
             ok("MCP server configured for Claude Desktop");
         } else {
-            warn("Claude Desktop config exists but agent-hq MCP not configured — run: hq mcp");
+            dim(
+                "Claude Desktop does not list the agent-hq MCP server (`hq mcp install --target claude-desktop` adds it; other clients are not checked here)",
+            );
         }
     }
 
-    // Summary
-    println!();
-    if issues == 0 {
-        println!("All checks passed. Run `hq` to start chatting.\n");
-    } else {
-        println!(
-            "{} issue(s) found. Fix the items above and re-run `hq health`.\n",
-            issues
-        );
-    }
-
-    Ok(())
+    issues
 }
 
 fn is_port_in_use(port: u16) -> bool {
