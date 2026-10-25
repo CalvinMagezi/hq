@@ -107,6 +107,9 @@ enum Commands {
         /// HQ task (id or display id) the session works on (spawn)
         #[arg(long)]
         task: Option<String>,
+        /// Model to start the agent on, passed with its CLI's --model flag (spawn)
+        #[arg(long)]
+        model: Option<String>,
         /// Log lines to tail (logs)
         #[arg(long, default_value_t = 40)]
         lines: usize,
@@ -1021,6 +1024,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             purpose,
             observe,
             task,
+            model,
             lines,
         } => {
             commands::sessions::run(
@@ -1035,6 +1039,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
                     purpose,
                     observe,
                     task,
+                    model,
                 },
                 lines,
             )

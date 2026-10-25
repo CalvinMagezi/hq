@@ -586,8 +586,11 @@ fn the_session_registry_migration_orphans_tmux_era_running_rows() {
         .unwrap();
     conn.execute_batch(include_str!("../../sql/086_harness_session_purpose.sql"))
         .unwrap();
+    conn.execute_batch(include_str!("../../sql/100_harness_session_model.sql"))
+        .unwrap();
     let s = get(&conn, "old").unwrap().unwrap();
     assert_eq!(s.status, STATUS_ORPHANED);
+    assert_eq!(s.model, None, "a row from before models runs the default");
     assert_eq!(
         s.purpose, PURPOSE_CODE,
         "a row from before purposes is code work"

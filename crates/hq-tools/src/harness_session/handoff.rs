@@ -49,6 +49,8 @@ pub struct HandoffRequest {
     pub drive_opted_out: bool,
     /// What the session is for; `None` is the harness's default.
     pub purpose: Option<super::Purpose>,
+    /// The model to start the harness on; blank is the harness's own default.
+    pub model: String,
 }
 
 fn non_blank(s: &str) -> Option<&str> {
@@ -251,7 +253,8 @@ async fn run_handoff(
     req: HandoffRequest,
 ) -> Result<Value> {
     super::require_cwd(Some(&req.cwd))?;
-    super::resolve(&req.harness)?;
+    // Checked before a task or thread is filed, so a model the harness cannot take leaves nothing behind.
+    super::resolve(&req.harness)?.with_model(non_blank(&req.model))?;
     let _guard = HANDOFF_LOCK.lock().await;
 
     let (task, created) = resolve_or_file_task(db, &req)?;
@@ -297,6 +300,7 @@ async fn run_handoff(
             },
             purpose: req.purpose,
             observe: &[],
+            model: non_blank(&req.model),
         },
     )
     .await;

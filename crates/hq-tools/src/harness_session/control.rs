@@ -54,7 +54,7 @@ pub async fn resume(
         );
     }
     require_allowed_cwd(Some(&row.cwd))?;
-    let harness = resolve(&row.harness)?;
+    let harness = resolve(&row.harness)?.with_model(row.model.as_deref())?;
     let spec = harness.spec;
     // The row's purpose, checked as a new spawn's would be: a row this build
     // cannot read never comes back as `code` on a general-purpose agent.
@@ -799,7 +799,7 @@ pub fn refresh_restart_command(
     let Some(token) = agent.agent_session_id.as_deref() else {
         return Ok(());
     };
-    let harness = resolve(&row.harness)?;
+    let harness = resolve(&row.harness)?.with_model(row.model.as_deref())?;
     let args = build_args(&harness, &row.id, Some(token), true);
     host.update_resume(&row.agent_name, &agent.kind, args)?;
     Ok(())

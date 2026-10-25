@@ -453,6 +453,7 @@ async fn run_delegation(
             goal: crate::harness_session::GoalText::default(),
             purpose: None,
             observe: &[],
+            model: None,
         },
     )
     .await?;
