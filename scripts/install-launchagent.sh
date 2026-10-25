@@ -35,7 +35,9 @@ USER_HOME="${USER_HOME:-$HOME}"
 DOMAIN="gui/$INVOKING_UID"
 PLIST_DEST="$USER_HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$USER_HOME/Library/Logs"
-HQ_BIN="${HQ_BIN:-/usr/local/bin/hq}"
+# The hq on PATH, wherever the install put it (~/.local/bin from install.sh, ~/bin from
+# install-hq.sh, /usr/local/bin after --link); HQ_BIN overrides.
+HQ_BIN="${HQ_BIN:-$(command -v hq || echo /usr/local/bin/hq)}"
 
 # Helper: run launchctl as the invoking user. Required because launchctl
 # bootstrap/bootout/enable/kickstart all target the *caller's* per-user domain;
@@ -108,30 +110,19 @@ fi
 
 if [[ ! -x "$HQ_BIN" ]]; then
     echo "Error: hq binary not executable at $HQ_BIN" >&2
-    echo "Build + install it first:" >&2
-    echo "  ./scripts/install-hq.sh   (after a one-time: sudo ./scripts/install-hq.sh --link)" >&2
+    echo "Install hq first, or name it: HQ_BIN=/path/to/hq $0" >&2
     exit 1
 fi
 
 mkdir -p "$(dirname "$PLIST_DEST")"
 mkdir -p "$LOG_DIR"
 
-# Capture API keys from the current environment. If a key is unset, default to
-# empty string so the placeholder is replaced (not left as a literal token).
-GROQ_API_KEY="${GROQ_API_KEY:-}"
-CEREBRAS_API_KEY="${CEREBRAS_API_KEY:-}"
-ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
-OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
-
 # Substitute placeholders into the template using the *invoking user's* HOME,
-# not root's, so paths inside the plist are correct under sudo too.
+# not root's, so paths inside the plist are correct under sudo too. API keys are
+# deliberately not copied in: the daemon reads them from ~/.hq/config.yaml.
 sed \
     -e "s|__HOME__|$USER_HOME|g" \
     -e "s|__HQ_BIN__|$HQ_BIN|g" \
-    -e "s|__GROQ_API_KEY__|$GROQ_API_KEY|g" \
-    -e "s|__CEREBRAS_API_KEY__|$CEREBRAS_API_KEY|g" \
-    -e "s|__ANTHROPIC_API_KEY__|$ANTHROPIC_API_KEY|g" \
-    -e "s|__OPENROUTER_API_KEY__|$OPENROUTER_API_KEY|g" \
     "$TEMPLATE" > "$PLIST_DEST"
 
 # If we're running under sudo the new plist + log dir end up owned by root.
