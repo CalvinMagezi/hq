@@ -70,7 +70,7 @@ class HqServices private constructor(private val app: Context) {
             instance ?: HqServices(context.applicationContext).also { instance = it }
         }
 
-        /** The hub service is what runs hq. MainActivity starts it today; the shell must too, or nothing answers. */
+        /** The hub service is what runs hq. Every screen that can be the first one opened starts it, or nothing answers. */
         fun ensureHubRunning(context: Context) {
             context.startForegroundService(Intent(context, HubService::class.java))
         }
