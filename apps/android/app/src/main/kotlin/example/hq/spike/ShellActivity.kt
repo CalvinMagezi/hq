@@ -96,9 +96,9 @@ import example.hq.spike.ui.shell.Place
 import example.hq.spike.ui.theme.HqTheme
 
 /**
- * The native shell. It is not the launcher screen yet: the WebView app (MainActivity) stays the way in
- * until the places behind this bar are built. Open it with `adb shell am start -n example.hq.spike/.ShellActivity`
- * (never with -S: that force-stops the app and hq with it). Extras for checking against the design:
+ * The native shell and the launcher screen. The WebView app (MainActivity) stays as a fallback that only
+ * adb opens: `adb shell am start -n example.hq.spike/.MainActivity` (never with -S: that force-stops the
+ * app and hq with it). Extras for checking against the design:
  * `--es place notes`, `--ei badge 3`, `--es fixture empty|streaming|chats|offline|failed`.
  */
 class ShellActivity : ComponentActivity() {

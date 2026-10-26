@@ -45,9 +45,10 @@ throwaway emulator but cannot update a phone that already runs the app.
 
 `ShellActivity` is the Kotlin and Jetpack Compose app described by the mobile design (page 3): the same
 two bars on every main screen, five places (Notes, Tasks, a raised Chat button, Helpers, Inbox), Back
-from any place to Chat and then out. It is not the launcher screen yet; the WebView app (`MainActivity`)
-stays the way in until the places behind the bar are built. Open it with
-`adb shell am start -S -n example.hq.spike/.ShellActivity --es place chat --ei badge 3`.
+from any place to Chat and then out. It is the launcher screen. The WebView app (`MainActivity`) stays as a
+fallback that only adb can open: `adb shell am start -n example.hq.spike/.MainActivity`. Open the shell on
+one place with `adb shell am start -n example.hq.spike/.ShellActivity --es place chat --ei badge 3` (no `-S`:
+that force-stops the app and hq with it).
 
 Sizes, colours and type come from the design's own stylesheet, one value for one value (dp are the
 design's px): `ui/theme/HqTheme.kt` holds the MTS tokens and type styles, `ui/shell/Icons.kt` the icons
