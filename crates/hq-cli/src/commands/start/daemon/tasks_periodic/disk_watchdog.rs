@@ -102,9 +102,13 @@ async fn check_bloat_dirs(
 
 /// The repo agent-hq's own vault lives directly under, used as the default
 /// watch root when the config doesn't name any — more portable than the
-/// original script's hardcoded `~/Documents/GitHub/agent-hq`.
+/// original script's hardcoded `~/Documents/GitHub/agent-hq`. A vault directly in
+/// the home directory (`~/.vault`) has no repo around it, and walking home would
+/// reach Music, Photos and Desktop, which macOS asks about, so there is no default then.
 fn default_watch_root(vault_path: &Path) -> Option<PathBuf> {
-    vault_path.parent().map(PathBuf::from)
+    let parent = vault_path.parent()?;
+    let is_home = dirs::home_dir().is_some_and(|home| home == parent);
+    (!is_home && parent.parent().is_some()).then(|| parent.to_path_buf())
 }
 
 pub async fn run_disk_watchdog(vault_path: &Path, config: &HqConfig) -> Result<()> {
@@ -221,6 +225,13 @@ mod tests {
             default_watch_root(vault),
             Some(PathBuf::from("/home/alice/Documents/GitHub/agent-hq"))
         );
+    }
+
+    #[test]
+    fn a_vault_in_the_home_directory_or_at_the_root_has_no_default_root() {
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(default_watch_root(&home.join(".vault")), None);
+        assert_eq!(default_watch_root(Path::new("/.vault")), None);
     }
 
     #[tokio::test]
