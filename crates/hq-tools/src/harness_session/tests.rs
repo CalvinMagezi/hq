@@ -399,6 +399,55 @@ async fn launch_records_the_session_and_types_the_prompt() {
 }
 
 #[tokio::test]
+async fn copilot_gets_its_first_prompt_at_start_and_nothing_is_typed() {
+    // No "agent prompt" reply: a typed prompt would hit the script's `unexpected` arm and fail.
+    let (dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-c1", "idle"), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+
+    let report = launch_session(
+        vault.path(),
+        &db,
+        &harness("github-copilot"),
+        launch(host, "hs-c1", Some("-v fix the bug")),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(report["status"], "running");
+    let log = calls(&dir);
+    assert!(log.contains("--kind copilot"), "{log}");
+    assert!(log.contains("--interactive=-v fix the bug"), "{log}");
+    assert!(!log.contains("agent prompt"), "{log}");
+}
+
+#[tokio::test]
+async fn a_resumed_copilot_session_has_its_prompt_typed_not_passed_at_start() {
+    let (dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-c2", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let mut l = launch(host, "hs-c2", Some("carry on"));
+    l.resuming = true;
+
+    launch_session(vault.path(), &db, &harness("github-copilot"), l)
+        .await
+        .unwrap();
+
+    let log = calls(&dir);
+    assert!(!log.contains("--interactive"), "{log}");
+    assert!(log.contains("agent prompt hs-c2 carry on"), "{log}");
+}
+
+#[tokio::test]
 async fn a_delegated_session_has_its_parent_from_the_moment_it_exists() {
     let (_dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),
