@@ -331,6 +331,12 @@ async fn launch_with(
     mcp: Option<McpAccess>,
 ) -> Result<Value> {
     let profile = harness.profile.as_ref();
+    let prompt = l.prompt.filter(|p| !p.trim().is_empty());
+    // A resume is not handed the prompt at start: its prompt is a follow-up, typed in as one.
+    let prompt_at_start = match (prompt, l.one_shot, l.resuming) {
+        (Some(prompt), None, false) => harness.prompt_args(prompt),
+        _ => Vec::new(),
+    };
     let request = LaunchRequest {
         name: l.session_id.to_string(),
         kind: harness.spec.kind.to_string(),
@@ -344,7 +350,11 @@ async fn launch_with(
                     harness.name
                 )
             })?,
-            None => build_args(harness, l.session_id, l.resume_token, l.resuming),
+            None => {
+                let mut args = build_args(harness, l.session_id, l.resume_token, l.resuming);
+                args.extend(prompt_at_start.iter().cloned());
+                args
+            }
         },
         command: profile.and_then(|p| p.command.clone()),
         resume_args: match l.one_shot {
@@ -382,7 +392,7 @@ async fn launch_with(
         blocking(move || settle_startup(&host, &name, trust, &launched_for_settle)).await??;
 
     let mut note = None;
-    if let (Some(prompt), true) = (l.prompt.filter(|p| !p.trim().is_empty()), settled.ready) {
+    if let (Some(prompt), true, true) = (prompt, settled.ready, prompt_at_start.is_empty()) {
         let host = l.host.clone();
         let (name, prompt) = (l.session_id.to_string(), prompt.to_string());
         note = prompt_note(blocking(move || host.submit(&name, &prompt)).await??);

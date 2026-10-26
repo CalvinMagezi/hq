@@ -72,6 +72,10 @@ app, and list every agent on a machine with `hq host status`.
   working, and if the host reports `agent_prompt_stalled` HQ presses Enter once more and says so
   in the result. Enter on an empty input does nothing, so this is safe when the agent had
   simply finished first. Read the output before resending anything by hand.
+- **Copilot gets its first prompt at start.** Copilot CLI draws its screen, then reloads its
+  MCP servers and clears whatever was typed meanwhile, so a fresh `github-copilot` session is
+  started with `copilot --interactive=<prompt>` instead of having the prompt typed. A resume
+  still types its prompt.
 - Exit summaries use the last screen the supervisor captured while the agent was alive.
 
 ## Sessions that work on a task

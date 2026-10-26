@@ -54,6 +54,10 @@ pub struct HarnessSessionSpec {
     /// The flag that picks the CLI's model (`--model <id>`), checked against each CLI's `--help`.
     /// `None` means HQ does not know one, so asking for a model fails instead of being ignored.
     pub model_flag: Option<&'static str>,
+    /// The flag that hands the CLI its first prompt at start (`<flag>=<prompt>`). Set for a CLI
+    /// that keeps redrawing after its first screen (Copilot reloads its MCP servers) and so loses
+    /// a prompt typed into it. `None` means the prompt is typed once the screen is up.
+    pub prompt_flag: Option<&'static str>,
 }
 
 impl HarnessSessionSpec {
@@ -89,6 +93,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "qwen",
@@ -100,6 +105,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "cursor",
@@ -112,6 +118,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "pi",
@@ -123,6 +130,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "codex",
@@ -135,6 +143,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "opencode",
@@ -146,6 +155,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "kimi",
@@ -157,6 +167,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "antigravity",
@@ -171,6 +182,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         // of a cwd; default selection is "Yes, I trust this folder".
         trust_pattern: Some("trust the contents"),
         model_flag: Some("--model"),
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "github-copilot",
@@ -182,6 +194,8 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: None,
         trust_pattern: None,
         model_flag: Some("--model"),
+        // `-i/--interactive <prompt>` in `copilot --help` (1.0.100): start interactive and run it.
+        prompt_flag: Some("--interactive"),
     },
     // General-purpose agents. Each is launched into its interactive chat the way
     // its own documentation starts it; the resume flags are not verified, so a
@@ -202,6 +216,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: Some(&["chat", "--oneshot", "-q", "{brief}"]),
         trust_pattern: None,
         model_flag: None,
+        prompt_flag: None,
     },
     HarnessSessionSpec {
         harness: "openclaw",
@@ -218,6 +233,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         one_shot: Some(&["agent", "--local", "--message", "{brief}"]),
         trust_pattern: None,
         model_flag: None,
+        prompt_flag: None,
     },
 ];
 
@@ -317,6 +333,15 @@ impl Harness {
             (Some(flag), Some(model)) => vec![flag.to_string(), model.clone()],
             _ => Vec::new(),
         }
+    }
+
+    /// The first prompt as launch arguments, empty when the CLI takes no prompt at start. The
+    /// `flag=value` form keeps a prompt that starts with `-` from reading as another flag.
+    pub fn prompt_args(&self, prompt: &str) -> Vec<String> {
+        self.spec
+            .prompt_flag
+            .map(|flag| vec![format!("{flag}={prompt}")])
+            .unwrap_or_default()
     }
 
     /// Arguments for a fresh spawn: the profile's when it sets any.
