@@ -127,7 +127,7 @@ const phoneShots = [
             <path d="M150 160 C 230 160 220 210 300 210"></path>
             <path d="M150 260 C 230 260 220 210 300 210"></path>
             <path d="M150 360 C 230 360 220 210 300 210"></path>
-            <path d="M368 210 L 420 210"></path>
+            <path d="M348 210 L 420 210"></path>
           </svg>
           <span class="flow-dot fd1"></span>
           <span class="flow-dot fd2"></span>
@@ -138,12 +138,7 @@ const phoneShots = [
           <span class="ch glass-light ch2"><span class="ping ping-green"></span>Telegram</span>
           <span class="ch glass-light ch3"><span class="ping ping-blue"></span>Web app</span>
           <span class="ch glass-light ch4"><span class="ping ping-green"></span>Terminal</span>
-          <svg class="core" viewBox="0 0 136 88" aria-hidden="true" focusable="false">
-            <defs><clipPath id="core-clip"><circle cx="44" cy="44" r="44"></circle></clipPath></defs>
-            <circle class="c-blue" cx="44" cy="44" r="44"></circle>
-            <circle class="c-green" cx="92" cy="44" r="44"></circle>
-            <circle class="c-ground" cx="92" cy="44" r="44" clip-path="url(#core-clip)"></circle>
-          </svg>
+          <img class="core" src="/icons/hq-icon-192.png" alt="" width="96" height="96" decoding="async" />
           <span class="g-label core-label">One agent</span>
           {[1, 2, 3, 4, 5, 6].map((n) => <span class={`vbar vb${n}`}><span></span></span>)}
           <span class="g-label vault-label">Your vault</span>
@@ -667,7 +662,7 @@ const phoneShots = [
     animation-delay: 2.1s;
   }
   .fd5 {
-    offset-path: path('M368 210 L 420 210');
+    offset-path: path('M348 210 L 420 210');
     background: var(--brand-green);
     box-shadow: 0 0 12px var(--brand-green);
     animation-delay: 0.35s;
@@ -722,13 +717,13 @@ const phoneShots = [
   }
   .core {
     position: absolute;
-    left: 232px;
-    top: 166px;
-    width: 136px;
-    height: 88px;
-  }
-  .c-ground {
-    fill: #0e1014;
+    left: 252px;
+    top: 162px;
+    width: 96px;
+    height: 96px;
+    border-radius: 24px;
+    border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.1));
+    box-shadow: 0 0 32px rgba(0, 173, 238, 0.25), 0 0 64px rgba(34, 255, 55, 0.12);
   }
   .g-label {
     position: absolute;
