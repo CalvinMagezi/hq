@@ -56,6 +56,7 @@ const MAX_TOKEN_CHARS: usize = 16;
 
 /// The recognised words of a tesseract TSV: (text, confidence). Rows that are not words
 /// (blocks, lines) and words it gave no confidence for are left out.
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn words_from_tsv(tsv: &str) -> Vec<(String, f32)> {
     tsv.lines()
         .filter_map(|line| {
