@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { links } from '../data/site';
+import { links, REPO_BLOB } from '../data/site';
 
 const AS_OF = '2026-10-05';
 
@@ -32,7 +32,7 @@ const rows: Row[] = [
   },
   {
     topic: 'Installing',
-    hq: { text: 'Build from source with cargo. One command, npx agent-hq-cli, downloads a verified release. For Linux servers, a script installs signed releases that update themselves.', src: ['deploy docs', links.deployReadme] },
+    hq: { text: 'An install script for Linux (x86_64 and ARM) and macOS (Apple Silicon and Intel), Homebrew, npx agent-hq-cli, and a Docker image, all from signed releases. Windows gets a PowerShell installer for Full HQ in WSL2 or HQ Lite. There is also a one-form Hetzner server, servers that update themselves, and building from source with cargo.', src: ['install guide', '/install/'] },
     oc: { text: 'Install script, PowerShell installer, npm, Docker and Nix.', src: ['docs', OC_DOCS] },
     ha: { text: 'Install script, PowerShell installer and an APT route for Termux.', src: ['repo', HA] },
   },
@@ -50,7 +50,7 @@ const rows: Row[] = [
   },
   {
     topic: 'Extending it',
-    hq: { text: 'About 100 internal tools behind a two-tool MCP gateway, markdown skills, remote MCP servers bridged in. HQ is also an MCP server other agents can call.', src: ['README', links.readme] },
+    hq: { text: 'About 100 internal tools behind a two-tool MCP gateway, markdown skills, remote MCP servers bridged in. HQ is also an MCP server other agents can call, and can be added to claude.ai as a custom connector (off by default).', src: ['README', links.readme] },
     oc: { text: 'Skills, a plugin SDK for channels, providers and tools, the ClawHub marketplace, and companion apps for voice, Canvas, camera and screen.', src: ['docs', OC_DOCS] },
     ha: { text: 'Skills compatible with agentskills.io and a Skills Hub, subagents, built-in cron and an MCP client.', src: ['repo', HA] },
   },
@@ -80,7 +80,7 @@ const rows: Row[] = [
   },
   {
     topic: 'Where it runs',
-    hq: { text: 'Your machine or a VPS you run. Tailscale is the recommended way to reach the web UI. There is no hosted service.', src: ['deploy docs', links.deployReadme] },
+    hq: { text: 'A Mac or Linux machine, a VPS, Docker, or Windows (WSL2 or HQ Lite). An Android phone build is a developer preview: you build the APK yourself, and whether a sleeping, unplugged phone answers in time is not verified yet. To reach it, Tailscale is documented; hq net is a self-hosted WireGuard network (its root helper is not in release builds yet); hq edge is a public forwarder you run yourself for a device behind NAT. There is no hosted service.', src: ['mobile docs', `${REPO_BLOB}/docs/HQ_MOBILE.md`] },
     oc: { text: 'Self-hosted.', src: ['docs', OC_DOCS] },
     ha: { text: 'Local, or on serverless backends such as Modal and Daytona.', src: ['docs', HA_DOCS] },
   },

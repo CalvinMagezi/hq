@@ -2,10 +2,17 @@
 
 > Open-source, local-first AI agent hub. One Rust binary runs a chat agent on Discord, Telegram, a web app and the terminal, keeps data in a markdown vault on your own machine, and supervises coding agents such as Claude Code and Codex. MIT licensed, version 0.9.x.
 
-- [Install guide](https://agent-hq.online/install/): curl script, Homebrew, npx, Docker and server setup
+- [Install guide](https://agent-hq.online/install/): curl script (Linux x86_64 and ARM, macOS on Apple Silicon and Intel), Homebrew, npx, Docker and server setup
 - [Architecture](https://agent-hq.online/architecture/): how the daemon, vault, relays and MCP gateway fit together
 - [Windows](https://github.com/CalvinMagezi/hq/blob/main/docs/WINDOWS.md): Full HQ runs inside WSL2 (Ubuntu) with coding agents; HQ Lite is a native, no-admin edition for work computers (web app, tasks, notes, MCP). Install: `irm https://agent-hq.online/install.ps1 | iex`
 - [Add a machine that runs coding agents](https://github.com/CalvinMagezi/hq/blob/main/docs/JOIN_A_MACHINE.md): `hq host join`, `hq host add`, `hq host check`, for macOS, Linux and WSL2
+- [HQ on an Android phone](https://github.com/CalvinMagezi/hq/blob/main/docs/HQ_MOBILE.md): developer preview. You build the APK yourself (`apps/android`); it is not yet verified that a sleeping, unplugged phone answers in time
+- [macOS desktop app](https://github.com/CalvinMagezi/hq/blob/main/docs/DESKTOP.md): a small Tauri app that starts the local host, pairs devices and connects Claude. Build it yourself; it is unsigned and has no updater
+- [claude.ai connector](https://github.com/CalvinMagezi/hq/blob/main/docs/CLAUDE_CONNECTOR.md): add HQ to claude.ai and Claude Code as a custom connector. Off by default; HQ must be reachable over public HTTPS
+- [QR pairing](https://github.com/CalvinMagezi/hq/blob/main/docs/PAIRING.md): pair two machines with a QR code and six digits, then reach each other by key over iroh. In the Android build; standard release builds do not include it yet (`--features bridge`)
+- [hq edge](https://github.com/CalvinMagezi/hq/blob/main/docs/EDGE.md): a public forwarder you run yourself so a device behind NAT, such as a phone on mobile data, can answer HTTPS on a name you own. Off by default; there is no project-run edge
+- [hq net](https://github.com/CalvinMagezi/hq/blob/main/docs/PRIVATE_NETWORK.md): a self-hosted WireGuard network between your HQ server and your devices. Release builds do not include the root applier yet, so it is built from source
+- [Backup and restore](https://github.com/CalvinMagezi/hq/blob/main/docs/BACKUP.md): `hq backup` writes one encrypted file with your notes, a copy of the database and, optionally, your config; `hq restore` brings it back
 - [Compare](https://agent-hq.online/compare/): Agent HQ next to OpenClaw and Hermes Agent
 - [Security](https://agent-hq.online/security/): sandbox, signed releases, reporting a vulnerability
 - [Source code](https://github.com/CalvinMagezi/hq): repository, issues and changelog

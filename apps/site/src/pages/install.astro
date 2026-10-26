@@ -31,10 +31,16 @@ const brew = installChannels.brew;
 const docker = installChannels.docker;
 const winCmd = 'irm https://agent-hq.online/install.ps1 | iex';
 
+const scriptFlags = 'curl -fsSL https://agent-hq.online/install.sh | bash -s -- --channel main     # newest main build\ncurl -fsSL https://agent-hq.online/install.sh | bash -s -- --prefix ~/bin     # another bin directory\ncurl -fsSL https://agent-hq.online/install.sh | bash -s -- --no-web          # binary only\ncurl -fsSL https://agent-hq.online/install.sh | bash -s -- --web-only        # web app only';
+const androidHq = '# hq for the phone, with the pairing and tunnel features the app uses\n# (the recipe CI runs is .github/workflows/android.yml)\ncargo build -p hq-cli --profile release-small --target aarch64-linux-android --features tunnel,bridge --locked';
+const androidApk = 'cd apps/android\n./gradlew :app:assembleDebug \\\n  -Phq.bin=<hq aarch64-linux-android> -Phq.caddy=<caddy linux arm64> \\\n  -Phq.web=<apps/hq-web/dist/client> -Phq.keystore=<your signing key>';
+const androidInstall = 'adb install -r app/build/outputs/apk/debug/app-debug.apk';
+const androidActive = '# hq starts in standby: the web app only. For the full daemon and relays:\nadb shell "run-as example.hq.spike sh -c \'echo active > files/mode\'"\nadb shell "run-as example.hq.spike sh -c \'kill \\$(pidof libhq.so)\'"   # the app restarts hq';
+
 // The picker offers only the channels install-channels.ts marks available.
 const pickerOptions = [
-  curl.available && { id: 'script', title: curl.title, sub: 'Linux and Apple Silicon. The quickest.' },
-  brew.available && { id: 'homebrew', title: brew.title, sub: 'macOS on Apple Silicon and Linux.' },
+  curl.available && { id: 'script', title: curl.title, sub: 'Linux and macOS (Apple Silicon or Intel). The quickest.' },
+  brew.available && { id: 'homebrew', title: brew.title, sub: 'macOS (Apple Silicon or Intel) and Linux.' },
   npx.available && { id: 'npx', title: npx.title, sub: 'Needs Node 18.17 or newer.' },
   docker.available && { id: 'docker', title: docker.title, sub: 'Multi-arch image from the signed release.' },
   { id: 'windows', title: 'Windows', sub: 'Full HQ on WSL2, or HQ Lite.' },
@@ -43,7 +49,7 @@ const pickerOptions = [
 
 <Layout
   title="Install Agent HQ"
-  description="Install Agent HQ with a curl script, Homebrew, npx or Docker, set up a server with signed releases, and reach the web UI over Tailscale."
+  description="Install Agent HQ with a curl script, Homebrew, npx or Docker, on Windows, on a server with signed releases, or on an Android phone as a developer preview."
   path="/install/"
 >
   <section class="sec sec-hero" aria-labelledby="inst-h">
@@ -67,9 +73,9 @@ const pickerOptions = [
         </h1>
         <div class="rule rule-in" aria-hidden="true"></div>
         <p class="lede fade-in">
-          There are seven working ways in. The quickest is one command that downloads a verified release.
-          Building from source runs on Linux and macOS. The server path installs signed releases and updates
-          itself, and it is Linux only. Tailscale is the optional way to open the web UI from your phone.
+          The quickest way in is one command that downloads a verified release, for Linux and for Macs on
+          Apple Silicon or Intel. Windows runs it in WSL2 or as HQ Lite. The server path installs signed releases
+          and updates itself, and it is Linux only. An Android phone can host HQ as a developer preview.
         </p>
       </div>
       <nav aria-label="On this page">
@@ -80,6 +86,7 @@ const pickerOptions = [
           {docker.available && <li><a href="#docker">Docker</a></li>}
           <li><a href="#windows">Windows</a></li>
           <li><a href="#source">Build from source</a></li>
+          <li><a href="#android">Android phone (preview)</a></li>
           <li><a href="#server">Server with signed releases</a></li>
           <li><a href="#hetzner">One form on Hetzner</a></li>
           <li><a href="#tailscale">Remote access over Tailscale</a></li>
@@ -112,14 +119,20 @@ const pickerOptions = [
                 <div class="prose">
                   <p>
                     The quickest way in, with nothing to install first. It detects your platform (Linux x86_64 or ARM,
-                    or an Apple Silicon Mac), downloads the latest stable release, verifies its minisign signature and
+                    or a Mac on Apple Silicon or Intel), downloads the latest stable release, verifies its minisign signature and
                     SHA-256 checksum against the project key, and installs <code>hq</code> into
                     <code>~/.local/bin</code> and the web UI into <code>~/.local/share/agent-hq/web</code>. After
                     <code>hq start all</code> the app is at <code>http://localhost:5678</code>. It checks signatures with
                     the <code>minisign</code> tool or with OpenSSL; on a Mac, install one of them first
                     (<code>brew install minisign</code>). Read the script before you run it: <a href="/install.sh">install.sh</a>.
                   </p>
-                  <p>Then run <code>hq install</code>, add an API key with <code>hq env</code>, and check with <code>hq doctor</code>.</p>
+                  <p>
+                    Then run <code>hq install</code>, add an API key with <code>hq env</code> (or
+                    <code>hq env set &lt;provider&gt;</code>, which reads the key from standard input, for scripts and
+                    agents), and run <code>hq doctor</code>, which sends your default model a one-token test request. On
+                    a Mac, <code>hq service install</code> keeps the daemon running and starts it at login.
+                  </p>
+                  <CodeBlock id="curl-flags" label="Script options" code={scriptFlags} />
                 </div>
               </section>
             )
@@ -135,7 +148,7 @@ const pickerOptions = [
                 <button type="button" class="btn btn-accent" data-copy="brew-cmd" data-label="Copy command" aria-label="Copy command for Homebrew" hidden>Copy command</button>
                 <div class="prose">
                   <p>
-                    For macOS on Apple Silicon and Linux. The tap installs the signed stable release of <code>hq</code>
+                    For macOS on Apple Silicon or Intel, and Linux. The tap installs the signed stable release of <code>hq</code>
                     and upgrades with <code>brew upgrade agent-hq</code>. The formula is regenerated every six hours from
                     the signed release manifest, and its checksums are written only after the signature verifies. It
                     installs the binary only; the install script above also installs the web UI.
@@ -238,9 +251,10 @@ const pickerOptions = [
         </p>
         <div class="gcard reveal">
           <p class="body">
-            Chat relays need a bot token in <code>~/.hq/config.yaml</code>. Then run <code>hq pair</code> and send the
-            code from your own account, so the bot knows who the owner is. The <a href={links.readme}>README</a> has the
-            config keys.
+            Connect Telegram or Discord from the web app: <strong>Settings</strong>, then <strong>Chat apps</strong>, paste
+            the bot token and send the pairing code from your own account, so the bot knows who the owner is. From a
+            terminal, put the token in <code>~/.hq/config.yaml</code> and run <code>hq pair</code>. The
+            <a href={links.readme}>README</a> has the config keys.
           </p>
           <p class="body">
             Agent shell commands need a sandbox. On macOS that is <code>sandbox-exec</code>, which ships with the system.
@@ -261,6 +275,46 @@ const pickerOptions = [
           <li class="gcard reveal"><p>Optional: connect an MCP client such as Claude Code.</p><CodeBlock id="src-mcp" label="MCP" code={mcpCmd} /></li>
         </ol>
       </div>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" id="android" aria-labelledby="android-h">
+    <span class="orb orb-g o-tr" aria-hidden="true"></span>
+    <span class="orb orb-b o-bl slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Android 8 or newer, arm64 · developer preview</p>
+        <h2 id="android-h" class="reveal">Host HQ on an Android phone</h2>
+        <p class="lede reveal">
+          The Android app runs <code>hq</code> as a foreground service with the <code>mobile</code> profile: the daemon,
+          both chat relays and the web app, with a data saver for metered plans. It has no agent shell, because Android
+          has no sandbox HQ can use, so coding agents keep running on a laptop or server and the phone supervises them.
+          There is no published app yet: you build it, and installing it needs <code>adb</code>.
+        </p>
+      </div>
+      <ol class="steps steps-grid">
+        <li class="gcard reveal">
+          <p>Build <code>hq</code> for the phone with the features the app needs.</p>
+          <CodeBlock id="and-hq" label="hq for Android" code={androidHq} />
+        </li>
+        <li class="gcard reveal reveal-2">
+          <p>Build the APK. All four paths are required, and keep the signing key backed up: only an update signed with the same key keeps the phone's data.</p>
+          <CodeBlock id="and-apk" label="APK" code={androidApk} />
+        </li>
+        <li class="gcard reveal">
+          <p>Install it over USB debugging. Always update with <code>-r</code>; uninstalling deletes the vault.</p>
+          <CodeBlock id="and-install" label="Install" code={androidInstall} />
+        </li>
+        <li class="gcard reveal reveal-2">
+          <p>Push your model key the way the README shows (the app encrypts it under an Android Keystore key and wipes the plain copy), then switch from standby to the full daemon. Run the daemon on one machine at a time, or two of them answer the same bots.</p>
+          <CodeBlock id="and-active" label="Full HQ" code={androidActive} />
+        </li>
+      </ol>
+      <p class="body reveal">
+        Keep the phone on a charger and allow it to run in the background; the app's Keep running screen checks the
+        settings it can. The <a href={links.androidApp}>Android README</a> has the details, and
+        <a href={links.hqMobile}>the mobile edition</a> lists what differs from a laptop or server.
+      </p>
     </div>
   </section>
 
@@ -418,6 +472,10 @@ const pickerOptions = [
           <p>These do not exist today. We list them so you do not go looking, and so you know they are not promised for any date.</p>
           <ul class="facts">
             <li>Code-signed Windows builds, and coding agents on native Windows (they need WSL2 today).</li>
+            <li>A published Android app. Today you build the APK yourself, as a debug build.</li>
+            <li>Proof that a sleeping, unplugged phone always answers in time. Keep a hosting phone on a charger.</li>
+            <li>QR pairing in the standard downloads. <code>hq bridge</code> is built into the Android app only, for now.</li>
+            <li>A signed macOS desktop app. The Tauri app in the repo builds and runs, unsigned.</li>
           </ul>
         </div>
       </div>
