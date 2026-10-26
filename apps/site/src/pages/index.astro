@@ -17,6 +17,54 @@ const SCREEN_LABELS: Record<string, string> = {
   'vault-browser': 'Vault',
 };
 const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
+
+const hosts = [
+  {
+    name: 'Your laptop or desktop',
+    where: 'macOS (Apple Silicon and Intel) or Linux',
+    body: 'One command installs a signed binary and the web app. On a Mac, hq service install keeps the daemon running and starts it at login.',
+    cmd: 'curl -fsSL https://agent-hq.online/install.sh | bash',
+    tone: 'blue',
+  },
+  {
+    name: 'A server',
+    where: 'Any Linux VPS, or a Hetzner server from a short form',
+    body: 'Always on, updates itself from signed releases every ten minutes and rolls back when a health check fails. Reach it privately over Tailscale.',
+    href: '/install/#server',
+    tone: 'green',
+  },
+  {
+    name: 'Docker',
+    where: 'One container, amd64 and arm64',
+    body: 'The image runs HQ with its web app and prints a sign-in link on first start. The vault lives in a volume.',
+    cmd: 'docker run -d -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq',
+    tone: 'indigo',
+  },
+  {
+    name: 'Windows',
+    where: 'Full HQ in WSL2, or HQ Lite with no admin rights',
+    body: 'The PowerShell installer asks which one you want. Lite keeps your notes, tasks and web app, and never makes a network call it does not list.',
+    cmd: 'irm https://agent-hq.online/install.ps1 | iex',
+    tone: 'blue',
+  },
+  {
+    name: 'An Android phone',
+    where: 'Developer preview',
+    body: 'A phone in a drawer can be the always-on host: the daemon, both chat relays and the web app run on it, with a data saver for metered plans. Coding agents still run on a laptop or server, and the phone supervises them.',
+    href: '#phone-h',
+    tone: 'green',
+    preview: true,
+  },
+];
+
+const phoneShots = [
+  { id: 'chat-working', label: 'Chat', alt: 'Phone screen: a chat where HQ answers a question, then lists the steps it is taking: checked your tasks, read a note, writing the steps.' },
+  { id: 'tasks-today', label: 'Tasks', alt: 'Phone screen: the Today tab of Tasks, with tasks waiting on you, one ready to check, and work in progress.' },
+  { id: 'inbox-needs-you', label: 'Inbox', alt: 'Phone screen: the Inbox, where a coding agent asks to edit one file and HQ offers Allow once or Not now.' },
+  { id: 'helper-working', label: 'Helpers', alt: 'Phone screen: a coding agent on a Mac mini building an app, with what it has done so far and a field to tell it something.' },
+  { id: 'note-reading', label: 'Notes', alt: 'Phone screen: a note from the vault open for reading, with Ask HQ, Make a task and Pin actions.' },
+  { id: 'keep-running', label: 'Keep running', alt: 'Phone screen: Keep running, which checks the Android battery and permission settings that let HQ stay on.' },
+];
 ---
 
 <Layout
@@ -31,7 +79,7 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
     description: 'Open-source, local-first AI agent hub that supervises coding agents and keeps a markdown vault on your own machine.',
     url: SITE_URL,
     applicationCategory: 'DeveloperApplication',
-    operatingSystem: 'Linux, macOS',
+    operatingSystem: 'Linux, macOS, Windows, Android',
     license: 'https://opensource.org/license/mit',
     codeRepository: links.repo,
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
@@ -344,6 +392,88 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
     </div>
   </section>
 
+  <section class="sec" aria-labelledby="host-h">
+    <span class="orb orb-g o-tr slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-bl" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Where it runs</p>
+        <h2 id="host-h" class="reveal">Run it where it suits you</h2>
+        <p class="lede reveal">
+          HQ is one binary and a folder of markdown, so it goes wherever you have a machine that stays on.
+          Pick a host now and move later: the vault is the same everywhere.
+        </p>
+      </div>
+      <ul class="hosts list-plain">
+        {
+          hosts.map((h, i) => (
+            <li class={`gcard host reveal reveal-${(i % 3) + 1}${h.preview ? ' host-featured' : ''}`}>
+              <div class="host-top">
+                <span class={`dot dot-${h.tone === 'indigo' ? 'blue' : h.tone}`} aria-hidden="true"></span>
+                <h3>{h.name}</h3>
+                {h.preview && <span class="tag tag-green">Preview</span>}
+              </div>
+              <p class="small host-where">{h.where}</p>
+              <p class="body">{h.body}</p>
+              {h.cmd && <code class="host-cmd" tabindex="0" aria-label={`Command: ${h.cmd}`}>{h.cmd}</code>}
+              {h.href && <a class="host-link" href={h.href}>{h.preview ? 'See the phone app' : 'Server options'}</a>}
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="phone-h">
+    <span class="orb orb-i o-tl slow" aria-hidden="true"></span>
+    <span class="orb orb-g o-br" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Android app · developer preview</p>
+        <h2 id="phone-h" class="reveal">HQ on your phone, not just pointed at it</h2>
+        <p class="lede reveal">
+          The Android app runs HQ itself as a foreground service: chat, tasks, notes, an inbox of things that
+          need your OK, and the coding agents working on your other machines. Pair a laptop with a QR code,
+          and connect Claude from the phone.
+        </p>
+      </div>
+      <ul class="phones list-plain" tabindex="0" aria-label="Screens from the Android app design preview">
+        {
+          phoneShots.map((p, i) => (
+            <li class={`phone-shot reveal reveal-${(i % 3) + 1}`}>
+              <img src={`/media/phone/${p.id}.jpg`} alt={p.alt} width="519" height="1124" loading="lazy" decoding="async" />
+              <span class="small">{p.label}</span>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="small phone-note">Screens from the design preview of the native app. The app in the repo today wraps the same web app, and these screens are where it is going.</p>
+      <div class="phone-facts">
+        <div class="gcard">
+          <h3>Works today</h3>
+          <ul class="facts list-plain">
+            <li>Full HQ on a phone with the <code>mobile</code> profile: daemon, Telegram and Discord relays, web app, sub-agents</li>
+            <li>A data saver for people who pay for every megabyte</li>
+            <li>Pairing other devices with a QR code, and recovery when the network changes</li>
+            <li>Keys held in the Android Keystore, and a Connect Claude screen</li>
+          </ul>
+        </div>
+        <div class="gcard">
+          <h3>Not there yet</h3>
+          <ul class="facts list-plain">
+            <li>No published app: you build the APK yourself and install it with adb</li>
+            <li>Not yet shown that a sleeping, unplugged phone always answers in time, so keep it on a charger</li>
+            <li>No agent shell on the phone: Android has no sandbox HQ can use, so that tool is refused</li>
+          </ul>
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn" href={links.androidApp}>Build the Android app</a>
+        <a class="btn" href={links.hqMobile}>How the mobile edition differs</a>
+      </div>
+    </div>
+  </section>
+
   <section class="sec" aria-labelledby="local-h">
     <span class="orb orb-g o-tr" aria-hidden="true"></span>
     <span class="orb orb-i o-bl slow" aria-hidden="true"></span>
@@ -393,24 +523,24 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
     <div class="container install-grid">
       <div class="stack">
         <p class="eyebrow reveal">Install</p>
-        <h2 id="inst-h" class="reveal">Three commands from a clone</h2>
+        <h2 id="inst-h" class="reveal">One command to install</h2>
         <p class="lede reveal">
-          Build the binary, scaffold a vault, check the setup. You need a recent stable Rust toolchain and
-          at least one LLM API key. Servers have a separate path with signed releases.
+          A signed binary for Linux and for Macs on Apple Silicon or Intel, plus the web app. Then scaffold a
+          vault, add one model key, and let doctor send your model a real test request.
         </p>
         <ol class="isteps list-plain">
-          <li class="istep glass reveal"><span class="num num-blue">01</span><span class="istep-text"><span>Build the binary</span><code id="strip-build">cargo build --release -p hq-cli</code></span><button type="button" class="btn btn-sm" data-copy="strip-build" data-label="Copy" aria-label="Copy build command" hidden>Copy</button></li>
-          <li class="istep glass reveal reveal-2"><span class="num num-green">02</span><span class="istep-text"><span>Scaffold a vault</span><code id="strip-install">./target/release/hq install</code></span><button type="button" class="btn btn-sm" data-copy="strip-install" data-label="Copy" aria-label="Copy scaffold command" hidden>Copy</button></li>
-          <li class="istep glass reveal reveal-3"><span class="num num-indigo">03</span><span class="istep-text"><span>Check the setup</span><code id="strip-doctor">./target/release/hq doctor</code></span><button type="button" class="btn btn-sm" data-copy="strip-doctor" data-label="Copy" aria-label="Copy check command" hidden>Copy</button></li>
+          <li class="istep glass reveal"><span class="num num-blue">01</span><span class="istep-text"><span>Install</span><code id="strip-build">curl -fsSL https://agent-hq.online/install.sh | bash</code></span><button type="button" class="btn btn-sm" data-copy="strip-build" data-label="Copy" aria-label="Copy install command" hidden>Copy</button></li>
+          <li class="istep glass reveal reveal-2"><span class="num num-green">02</span><span class="istep-text"><span>Vault, config and a model key</span><code id="strip-install">hq install && hq env</code></span><button type="button" class="btn btn-sm" data-copy="strip-install" data-label="Copy" aria-label="Copy setup command" hidden>Copy</button></li>
+          <li class="istep glass reveal reveal-3"><span class="num num-indigo">03</span><span class="istep-text"><span>Check it answers</span><code id="strip-doctor">hq doctor</code></span><button type="button" class="btn btn-sm" data-copy="strip-doctor" data-label="Copy" aria-label="Copy check command" hidden>Copy</button></li>
         </ol>
         <div class="actions"><a class="btn" href="/install/">All install options</a></div>
       </div>
-      <div class="tw glass-heavy shine zoom-in" role="img" aria-label="A terminal typing the three commands: cargo build --release -p hq-cli, ./target/release/hq install, ./target/release/hq doctor.">
+      <div class="tw glass-heavy shine zoom-in" role="img" aria-label="A terminal typing the three commands: the install one-liner, hq install and hq env, then hq doctor.">
         <div class="tw-bar" aria-hidden="true"><i></i><i></i><i></i><span>~/hq</span></div>
         <div class="tw-body" aria-hidden="true">
-          <div class="tw-line"><span class="p">$</span><span class="type t1">cargo build --release -p hq-cli</span></div>
-          <div class="tw-line l2"><span class="p">$</span><span class="type t2">./target/release/hq install</span></div>
-          <div class="tw-line l3"><span class="p">$</span><span class="type t3">./target/release/hq doctor</span><span class="blink"></span></div>
+          <div class="tw-line"><span class="p">$</span><span class="type t1">curl -fsSL agent-hq.online/install.sh | bash</span></div>
+          <div class="tw-line l2"><span class="p">$</span><span class="type t2">hq install && hq env</span></div>
+          <div class="tw-line l3"><span class="p">$</span><span class="type t3">hq doctor</span><span class="blink"></span></div>
         </div>
       </div>
     </div>
@@ -432,8 +562,8 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
           </p>
           <p>
             It talks to Discord and Telegram, not Slack or WhatsApp. Signed release binaries are built for
-            Linux (x86_64 and ARM) and for Apple Silicon Macs; Intel Macs build from source. The
-            <a href={links.changelog}>changelog</a> lists every upgrade note.
+            Linux (x86_64 and ARM) and for Macs on Apple Silicon and Intel. The Android app is a developer
+            preview you build yourself. The <a href={links.changelog}>changelog</a> lists every upgrade note.
           </p>
         </div>
       </div>
@@ -1438,13 +1568,13 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
     vertical-align: bottom;
   }
   .t1 {
-    --n: 31;
+    --n: 44;
   }
   .t2 {
-    --n: 27;
+    --n: 20;
   }
   .t3 {
-    --n: 26;
+    --n: 9;
   }
   .tw-line .blink {
     margin-left: 4px;
@@ -1800,13 +1930,13 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
       animation: treeIn 6s ease-out infinite;
     }
     .t1 {
-      animation: type1 10s steps(31) infinite;
+      animation: type1 10s steps(44) infinite;
     }
     .t2 {
-      animation: type2 10s steps(27) infinite;
+      animation: type2 10s steps(20) infinite;
     }
     .t3 {
-      animation: type3 10s steps(26) infinite;
+      animation: type3 10s steps(9) infinite;
     }
     .l2 {
       animation: show2 10s steps(1) infinite;
@@ -1829,4 +1959,148 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
       }
     }
   }
+.hosts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--space-4, 16px);
+}
+.host {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.host-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.host-top h3 {
+  margin: 0;
+}
+.host-top .tag {
+  margin-left: auto;
+}
+.host-where {
+  margin: 0;
+  color: var(--ink-muted);
+}
+.host-cmd {
+  display: block;
+  margin-top: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-bg);
+  font-size: 13px;
+  line-height: 18px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.host-featured {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 2fr auto;
+  align-items: center;
+  column-gap: 24px;
+  border-color: rgba(34, 255, 55, 0.35);
+}
+.host-featured .host-where {
+  grid-row: 2;
+}
+.host-featured .body {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  margin: 0;
+}
+.host-featured .host-link {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  margin: 0;
+}
+.host-featured .host-top .tag {
+  margin-left: 0;
+}
+@media (max-width: 860px) {
+  .host-featured {
+    display: flex;
+  }
+}
+.host-link {
+  margin-top: auto;
+  font-weight: 700;
+  color: var(--text-green);
+}
+.phones {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  gap: 16px;
+}
+.phone-shot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.phone-shot img {
+  width: 100%;
+  height: auto;
+  border-radius: 22px;
+  border: 1px solid var(--hairline);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), 0 0 0 6px rgba(255, 255, 255, 0.03);
+}
+.phone-shot .small {
+  color: var(--ink-muted);
+  font-weight: 700;
+}
+.phone-note {
+  margin: 0;
+  color: var(--ink-muted);
+}
+.phone-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.phone-facts h3 {
+  margin: 0 0 10px;
+}
+.facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.facts li {
+  position: relative;
+  padding-left: 16px;
+  color: var(--ink-muted);
+}
+.facts li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--brand-blue);
+}
+@media (max-width: 1100px) {
+  .phones {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .phones {
+    grid-template-columns: repeat(6, 62%);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 8px;
+  }
+  .phone-shot {
+    scroll-snap-align: center;
+  }
+  .phone-facts {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

@@ -1,7 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import Diagram from '../components/Diagram.astro';
-import { links, REPO } from '../data/site';
+import { links, REPO, REPO_BLOB } from '../data/site';
 import {
   processModel,
   crateMap,
@@ -47,9 +47,9 @@ const sourceMap = [
 ];
 
 const crateRows = [
-  ['Binary', ['hq-cli']],
-  ['Host', ['hq-host', 'hq-sandbox']],
-  ['Services', ['hq-web', 'hq-relay', 'hq-mcp', 'hq-daemon', 'hq-update']],
+  ['Apps', ['hq-cli', 'hq-desktop']],
+  ['Host, network', ['hq-host', 'hq-sandbox', 'hq-gate', 'hq-bridge', 'hq-edge', 'hq-net', 'hq-tunnel']],
+  ['Services', ['hq-web', 'hq-relay', 'hq-mcp', 'hq-daemon', 'hq-update', 'hq-backup']],
   ['Intelligence', ['hq-agent', 'hq-tools', 'hq-memory', 'hq-convert', 'hq-export']],
   ['Foundations', ['hq-core', 'hq-vault', 'hq-db', 'hq-llm']],
 ] as const;
@@ -170,20 +170,31 @@ const updateSteps = [
           <p class="eyebrow">02</p>
           <h2 id="crates-h" class="h2-sm">Crate map</h2>
           <p>
-            The workspace is Rust edition 2024 with 17 crates and about 143,000 lines of Rust. Foundations
+            The workspace is Rust edition 2024 with 24 crates and about 289,000 lines of Rust. Foundations
             hold types, storage and the LLM clients. The agent crate holds the session loop, sub-agents,
-            governance and the context engine. Services wrap those for a transport. <code>hq-host</code> and
-            <code>hq-sandbox</code> run and confine coding agents. <code>hq-cli</code> ties them into the binary.
+            governance and the context engine. Services wrap those for a transport, and
+            <code>hq-backup</code> writes and restores encrypted backups of the vault and its database.
+            <code>hq-host</code> and <code>hq-sandbox</code> run and confine coding agents, and
+            <code>hq-gate</code> is the signed TCP transport for the host gate over a private tunnel.
+          </p>
+          <p>
+            Four crates connect devices. <code>hq-bridge</code> pairs machines with a one-time QR code and
+            reconnects them by key. <code>hq-edge</code> is a blind public forwarder that routes by TLS server
+            name to a registered device. <code>hq-net</code> sets up a private WireGuard network, and
+            <code>hq-tunnel</code> is a userspace WireGuard peer for a phone. <code>hq-cli</code> ties them into
+            the binary, and <code>hq-desktop</code> holds the macOS desktop app's logic with no GUI dependency.
           </p>
           <p>
             The stack, in short: Tokio for async, Axum and tower-http for the web server, rusqlite (bundled,
             WAL mode) for storage, rmcp for MCP, serenity for Discord, teloxide for Telegram, clap for the CLI
             and figment for configuration. LLM calls go through async-openai with a swappable base URL, which
-            is how OpenRouter, Ollama and other OpenAI-compatible backends plug in.
+            is how OpenRouter, Ollama and other OpenAI-compatible backends plug in. A direct Anthropic Messages
+            client sits beside it, with prompt caching. Every call is priced in one place, and spend shows on
+            the <code>/usage</code> page.
           </p>
         </div>
         <div class="doc-viz">
-          <div class="viz crates" role="img" aria-label="The 17 crates in five layers, lighting up from the foundations to the binary.">
+          <div class="viz crates" role="img" aria-label="The 24 crates in five layers, lighting up from the foundations to the binary.">
             {
               crateRows.map(([layer, crates], i) => (
                 <span class={`crow cr${i}`}>
@@ -449,7 +460,10 @@ const updateSteps = [
             other host is a machine you paired with <code>hq host join</code> and is reached over ssh with a
             dedicated key that is pinned to one source address and to a forced command,
             <code>hq host gate</code>, which accepts one request as JSON on stdin and refuses every method
-            outside an allowlist. Agents run in a process sandbox with an egress allowlist. That is how HQ on a
+            outside an allowlist. Agents run in a process sandbox. The default profile, <code>open</code>, walls
+            off only HQ itself: the host's tokens, <code>~/.hq</code>, other processes' environments, other
+            agents' logins and, unless you turn it off, your credential stores. <code>strict</code> adds an
+            egress allowlist and read and write allowlists. That is how HQ on a
             VPS can run and watch agents on a laptop, whenever the laptop is on and reachable. Connections are
             reused between calls, and a write is never retried because the gate may already have run it.
           </p>
@@ -469,8 +483,11 @@ const updateSteps = [
           <h3>Sessions that work on a task</h3>
           <p>
             A session can be linked to a task. Each event leaves a task comment, and the task moves from in
-            progress to ready for review or blocked as the session finishes or exits. HQ never marks a task
-            complete, because an agent saying it is done is not verification. Comments never quote the pane,
+            progress to ready for review or blocked as the session finishes or exits. By default HQ never marks
+            a task complete, because an agent saying it is done is not verification. With task verification
+            turned on (it is off by default), HQ completes a task only from evidence the agent could not have
+            written, such as a merged pull request with green checks, and measures how often it is wrong.
+            Comments never quote the pane,
             since pane text is untrusted input.
           </p>
           <h3>Handoff</h3>
@@ -535,18 +552,21 @@ const updateSteps = [
             tasks, then comments, with sub-tasks, start dates and soft dependencies. One shared write surface
             in <code>hq-db</code> backs the MCP tools (<code>task_list</code>, <code>task_create</code>,
             <code>task_update</code>, <code>task_comment_add</code> and friends), the REST API with its
-            WebSocket broadcast, and the web UI with list, board and timeline views. Tasks have no CLI command.
+            WebSocket broadcast, the web UI with list, board and timeline views, and <code>hq task</code> in the
+            CLI.
           </p>
           <p>
             Tagging a task routes it to an agent mailbox synchronously. A person's tasks live in a private space
-            that only that person's turns can read. See <a href={links.nativeTasks}>the design note</a>.
+            that only that person's turns can read. See <a href={links.nativeTasks}>the design note</a>, and
+            <a href={`${REPO_BLOB}/docs/TASK_VERIFICATION.md`}>docs/TASK_VERIFICATION.md</a> for the opt-in
+            verification.
           </p>
         </div>
         <div class="doc-viz">
-          <div class="viz kanban" role="img" aria-label="A linked task moves from in progress to ready for review. Moving it to complete is left to you.">
+          <div class="viz kanban" role="img" aria-label="A linked task moves from in progress to ready for review. Moving it to complete is left to you, unless task verification is on.">
             <span class="kcol"><span class="label">In progress</span><span class="kcard"></span></span>
             <span class="kcol"><span class="label">Ready for review</span></span>
-            <span class="kcol kcol-done"><span class="label">Complete</span><span class="small">Only you move it here</span></span>
+            <span class="kcol kcol-done"><span class="label">Complete</span><span class="small">You move it here, unless verification is on</span></span>
           </div>
         </div>
       </section>
@@ -609,7 +629,8 @@ const updateSteps = [
             Every merge to <code>main</code> runs tests, builds on an older Ubuntu image so the binary needs
             only an older glibc, and publishes a signed prerelease named like <code>0.9.1-main.6</code>. The job
             that runs repository build code never sees the signing key: a separate sign job does. Each release
-            carries a binary archive per platform (Linux x86_64, Linux ARM and Apple Silicon), the web bundle,
+            carries a binary archive per platform (Linux x86_64, Linux ARM, Apple Silicon and, since
+            <code>0.9.1-main.243</code>, Intel macOS), the web bundle,
             <code>SHA256SUMS</code>, a <code>manifest.json</code> and its <code>.minisig</code>. Channel pointers
             (<code>channel-main</code>, <code>channel-stable</code>) are small signed JSON files that say which
             release a channel currently means. Promoting to stable signs a new pointer for an existing release.
@@ -658,15 +679,51 @@ const updateSteps = [
             gated ssh key.
           </p>
           <p>
-            The only endpoint that may ever be public is <code>/mcp</code>, through a proxy that exposes
-            <code>/mcp</code> and <code>/health</code> and nothing else, with an API key set. <code>/ws</code>
+            <strong>Docker.</strong> The image <code>ghcr.io/calvinmagezi/hq</code> is assembled from the same
+            signed release artifacts as the install script, for <code>linux/amd64</code> and
+            <code>linux/arm64</code>, and runs as a non-root user with its state under <code>/data</code>. See
+            <a href={`${REPO_BLOB}/docs/DOCKER.md`}>docs/DOCKER.md</a>.
+          </p>
+          <p>
+            <strong>Windows.</strong> Full HQ runs inside WSL2. On a computer that blocks WSL2, HQ Lite runs
+            natively as one program with no administrator rights: the web app, tasks, notes and search, without
+            coding agents, chat bots or the sandbox. See <a href={links.windows}>docs/WINDOWS.md</a> and
+            <a href={`${REPO_BLOB}/docs/HQ_LITE.md`}>docs/HQ_LITE.md</a>.
+          </p>
+          <p>
+            <strong>An Android phone (developer preview).</strong> The <code>mobile</code> profile is Full HQ for
+            a machine with no shell sandbox, no <code>git</code> and no self-updater, plus a data saver. The APK
+            is one you build yourself from <code>apps/android</code>. It is not yet verified that a sleeping,
+            unplugged phone answers in time. See <a href={`${REPO_BLOB}/docs/HQ_MOBILE.md`}>docs/HQ_MOBILE.md</a>
+            and <a href={`${REPO_BLOB}/apps/android/README.md`}>apps/android/README.md</a>.
+          </p>
+          <p>
+            <strong>A device behind NAT, with <code>hq edge</code>.</strong> A public forwarder you run yourself
+            on a machine you control. It reads only the TLS server name, never decrypts, and passes the bytes
+            to the registered device over an iroh stream. TLS ends on the device, which holds its own
+            certificate. It is off by default and there is no project-run edge. See
+            <a href={`${REPO_BLOB}/docs/EDGE.md`}>docs/EDGE.md</a>.
+          </p>
+          <p>
+            <strong>A private network, with <code>hq net</code>.</strong> A WireGuard hub on a Linux server and
+            your own devices as spokes, so the web UI, <code>/mcp</code> and the host gate are reachable only
+            from devices you admitted. Release builds do not include the root applier yet, so that step builds
+            it from source. See <a href={`${REPO_BLOB}/docs/PRIVATE_NETWORK.md`}>docs/PRIVATE_NETWORK.md</a>.
+          </p>
+          <p>
+            Two shapes publish anything. A plain MCP endpoint goes through a proxy that exposes
+            <code>/mcp</code> and <code>/health</code> and nothing else, with an API key set. The claude.ai
+            connector publishes <code>/mcp</code>, <code>/oauth/token</code>, <code>/oauth/revoke</code> and the
+            <code>/.well-known/oauth-*</code> metadata documents, and the consent page stays private
+            (<a href={`${REPO_BLOB}/docs/CLAUDE_CONNECTOR.md`}>docs/CLAUDE_CONNECTOR.md</a>,
+            <a href={`${REPO_BLOB}/deploy/Caddyfile.connector`}>deploy/Caddyfile.connector</a>). <code>/ws</code>
             and <code>/api</code> must never be public. A host runs one deploy path only: the pull updater, or a
             manual build, not both. Steps are on the <a href="/install/">install page</a> and in
             <a href={links.deployReadme}>deploy/README.md</a>.
           </p>
         </div>
         <div class="doc-viz">
-          <div class="viz topo-viz" role="img" aria-label="A request travels from a phone over the tailnet to Caddy on loopback and then to HQ. Only /mcp and /health may be public.">
+          <div class="viz topo-viz" role="img" aria-label="A request travels from a phone over the tailnet to Caddy on loopback and then to HQ. Only the MCP and connector paths may be public.">
             <span class="label">VPS plus Tailscale</span>
             <span class="tp-track"><span class="tpk"></span></span>
             <span class="topo">
@@ -675,7 +732,7 @@ const updateSteps = [
               <span class="pill glass-light">Caddy 127.0.0.1</span><span class="arrow" aria-hidden="true">&#8250;</span>
               <span class="pill pill-green">HQ on loopback</span>
             </span>
-            <span class="public glass-light"><strong>Public:</strong> only <code>/mcp</code> and <code>/health</code>, with a key.</span>
+            <span class="public glass-light"><strong>Public:</strong> only <code>/mcp</code> and <code>/health</code> with a key, or the connector's OAuth paths.</span>
           </div>
           <details class="more"><summary>Full diagram and text description</summary><Diagram d={topologies} /></details>
         </div>
