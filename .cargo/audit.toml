@@ -12,4 +12,8 @@ ignore = [
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    # zstd and zstd-safe, pinned by zip 8.6.0. Unreachable; reasons in deny.toml.
+    "RUSTSEC-2026-0391",
+    "RUSTSEC-2026-0403",
+    "RUSTSEC-2026-0398",
 ]
