@@ -95,9 +95,11 @@ impl Lines {
             match self.stream.read(&mut chunk) {
                 Ok(0) => return Err(ReadError::Closed),
                 Ok(n) => self.buf.extend_from_slice(&chunk[..n]),
-                Err(e) if is_timeout(&e) => return Err(ReadError::Timeout),
-                Err(e) if is_reset(&e) => return Err(ReadError::Reset),
-                Err(e) => return Err(ReadError::Io(e.to_string())),
+                Err(e) => {
+                    if let Some(failure) = read_failure(&e) {
+                        return Err(failure);
+                    }
+                }
             }
         }
     }
@@ -120,6 +122,21 @@ impl Lines {
             None => Ok(None),
         }
     }
+}
+
+/// What a failed read means, or `None` when the read should simply be tried again: a signal that
+/// lands while a slow reply is awaited interrupts `read` with EINTR, and the reply still arrives.
+fn read_failure(e: &std::io::Error) -> Option<ReadError> {
+    if e.kind() == std::io::ErrorKind::Interrupted {
+        return None;
+    }
+    if is_timeout(e) {
+        return Some(ReadError::Timeout);
+    }
+    if is_reset(e) {
+        return Some(ReadError::Reset);
+    }
+    Some(ReadError::Io(e.to_string()))
 }
 
 /// A connection the peer tore down, on read or on write.
@@ -154,6 +171,24 @@ mod tests {
         assert_ne!(a, signed_message(&nonce, "request two"));
         assert_ne!(a, signed_message(&[8u8; NONCE_BYTES], "request one"));
         assert!(a.starts_with(b"hq-gate-v1\0"));
+    }
+
+    #[test]
+    fn an_interrupted_read_is_retried_and_other_failures_end_the_read() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(read_failure(&Error::from(ErrorKind::Interrupted)), None);
+        assert_eq!(
+            read_failure(&Error::from(ErrorKind::WouldBlock)),
+            Some(ReadError::Timeout)
+        );
+        assert_eq!(
+            read_failure(&Error::from(ErrorKind::ConnectionReset)),
+            Some(ReadError::Reset)
+        );
+        assert!(matches!(
+            read_failure(&Error::from(ErrorKind::PermissionDenied)),
+            Some(ReadError::Io(_))
+        ));
     }
 
     #[test]
