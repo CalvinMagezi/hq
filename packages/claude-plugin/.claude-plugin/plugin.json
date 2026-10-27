@@ -1,0 +1,33 @@
+{
+  "name": "agent-hq",
+  "version": "0.1.0",
+  "description": "Connects Claude Code to Agent HQ: the HQ MCP server, a session-start health check, and skills for tasks, the fleet and the vault.",
+  "author": {
+    "name": "Agent HQ"
+  },
+  "homepage": "https://github.com/CalvinMagezi/hq",
+  "repository": "https://github.com/CalvinMagezi/hq",
+  "license": "MIT",
+  "keywords": [
+    "agent-hq",
+    "mcp",
+    "tasks",
+    "vault",
+    "coding-agents"
+  ],
+  "userConfig": {
+    "hq_url": {
+      "type": "string",
+      "required": true,
+      "title": "HQ MCP URL",
+      "description": "Your HQ's MCP endpoint, for example https://hq.example.com/mcp"
+    },
+    "hq_api_key": {
+      "type": "string",
+      "required": true,
+      "sensitive": true,
+      "title": "HQ API key",
+      "description": "An HQ MCP API key (the AGENTHQ_API_KEY value set on your HQ)"
+    }
+  }
+}

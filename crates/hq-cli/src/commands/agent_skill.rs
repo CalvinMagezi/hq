@@ -292,6 +292,15 @@ mod tests {
     }
 
     #[test]
+    fn the_plugin_copy_matches_the_asset() {
+        assert_eq!(
+            include_str!("../../../../packages/claude-plugin/skills/hq-tasks/SKILL.md"),
+            SKILL_SOURCE,
+            "copy crates/hq-cli/assets/skills/hq-tasks/SKILL.md over packages/claude-plugin/skills/hq-tasks/SKILL.md"
+        );
+    }
+
+    #[test]
     fn the_skill_is_generic_and_valid() {
         let text = SKILL_SOURCE;
         // Spelled in pieces so this file does not itself trip the personal-data scan.
