@@ -300,6 +300,21 @@ mod tests {
         );
     }
 
+    // The root .gitignore drops every .mcp.json, which once left the plugin without its server.
+    #[test]
+    fn the_plugin_ships_its_mcp_server_with_the_session_header() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../packages/claude-plugin/.mcp.json"))
+                .unwrap();
+        let server = &config["mcpServers"]["agent-hq"];
+        assert_eq!(server["type"], "http");
+        assert_eq!(server["url"], "${user_config.hq_url}");
+        assert_eq!(
+            server["headers"]["x-hq-session-id"], "${HQ_SESSION_ID:-}",
+            "sessions HQ spawned must identify themselves"
+        );
+    }
+
     #[test]
     fn the_skill_is_generic_and_valid() {
         let text = SKILL_SOURCE;
