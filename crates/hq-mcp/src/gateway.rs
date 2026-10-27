@@ -196,7 +196,7 @@ pub fn create_gateway_tools_scoped(registry: &ToolRegistry, allowed: Option<&[&s
     vec![
         Tool::new(
             "hq_discover",
-            "Discover available Agent-HQ tools. Returns names, descriptions, categories, and parameter schemas. Use category and/or query to filter.",
+            "Discover available Agent-HQ tools. With no arguments, returns an index of every tool by category with a one-line summary. With category and/or query, returns the matching tools with descriptions and parameter schemas.",
             rmcp::model::object(discover_schema),
         ),
         Tool::new(
@@ -224,9 +224,48 @@ pub(crate) fn handle_discover(
         results.retain(|r| allowed.contains(&r.name.as_str()));
     }
 
-    let json_str = serde_json::to_string_pretty(&results).unwrap_or_else(|_| "[]".to_string());
+    // The whole catalog with schemas runs past 100k characters, more than a client
+    // wants by default; a bare call gets the index and narrows from there.
+    let body = if args.category.is_none() && args.query.is_none() {
+        discover_index(&results)
+    } else {
+        serde_json::to_value(&results).unwrap_or_else(|_| json!([]))
+    };
+    let json_str = serde_json::to_string_pretty(&body).unwrap_or_else(|_| "[]".to_string());
 
     Ok(CallToolResult::success(vec![ContentBlock::text(json_str)]))
+}
+
+/// Longest one-line summary the index gives a tool.
+const INDEX_SUMMARY_CHARS: usize = 100;
+
+/// Every tool by category, with a one-line summary and no parameter schemas.
+fn discover_index(results: &[hq_tools::registry::ToolSummary]) -> Value {
+    let mut categories: std::collections::BTreeMap<&str, Vec<Value>> = Default::default();
+    for t in results {
+        categories
+            .entry(t.category.as_str())
+            .or_default()
+            .push(json!({ "name": t.name, "summary": index_summary(t) }));
+    }
+    json!({
+        "next": "Call hq_discover with a category or a query for parameter schemas, or hq_call a tool by name.",
+        "tool_count": results.len(),
+        "categories": categories,
+    })
+}
+
+fn index_summary(t: &hq_tools::registry::ToolSummary) -> String {
+    let text = t.search_hint.as_deref().unwrap_or(&t.description);
+    let first = text
+        .split(". ")
+        .next()
+        .unwrap_or(text)
+        .trim_end_matches('.');
+    match first.char_indices().nth(INDEX_SUMMARY_CHARS) {
+        Some((cut, _)) => format!("{}...", &first[..cut]),
+        None => first.to_string(),
+    }
 }
 
 /// Instructions a scoped connection gets instead of the catalog: the catalog
@@ -267,7 +306,7 @@ pub fn server_instructions(registry: &ToolRegistry) -> String {
     instructions.push_str(
         "## How to use\n\
          - `hq_call(tool, args)` invokes any tool directly by name\n\
-         - `hq_discover(category?, query?)` browses tools with filtering\n\n\
+         - `hq_discover(category?, query?)` browses tools: no arguments gives the index, a category or query gives schemas\n\n\
          Prefer `hq_call` when you know which tool to use. Use `hq_discover` to explore.\n\n",
     );
     if registry.get("task_claim").is_some() {
@@ -1290,6 +1329,35 @@ mod tests {
         let text = result.content[0].as_text().unwrap().text.clone();
 
         assert!(text.contains("vault_write_note"));
+    }
+
+    #[test]
+    fn a_bare_discover_is_an_index_and_a_filter_brings_the_schemas() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DummyTool {
+            name: "vault_search",
+        }));
+        let text_of = |args: Option<&serde_json::Map<String, Value>>| {
+            let r = handle_discover(&registry, args, None).unwrap();
+            serde_json::from_str::<Value>(&r.content[0].as_text().unwrap().text).unwrap()
+        };
+
+        let index = text_of(None);
+        assert_eq!(index["tool_count"], 1);
+        let entry = &index["categories"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()[0];
+        assert_eq!(entry["name"], "vault_search");
+        assert_eq!(entry["summary"], "test tool");
+        assert!(!index.to_string().contains("parameters"));
+
+        let query = json!({"query": "vault"});
+        let found = text_of(query.as_object());
+        assert_eq!(found[0]["name"], "vault_search");
+        assert!(found[0].get("parameters").is_some());
     }
 
     #[tokio::test]
