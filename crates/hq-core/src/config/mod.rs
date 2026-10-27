@@ -156,6 +156,12 @@ pub struct HqConfig {
     #[serde(default)]
     pub web_search_peer: Option<String>,
 
+    /// Name of a `remote_mcp` entry (another HQ) that `hq task` sends its verbs to
+    /// instead of this machine's database, for a machine whose tasks live on a
+    /// server. Unset by default.
+    #[serde(default)]
+    pub task_peer: Option<String>,
+
     /// Brave Search API key — paid `web_search` fallback used when SearxNG
     /// is unset or unreachable. https://api.search.brave.com
     pub brave_api_key: Option<String>,
@@ -459,6 +465,7 @@ impl Default for HqConfig {
             searxng_url: None,
             web_search_native: true,
             web_search_peer: None,
+            task_peer: None,
             brave_api_key: None,
             default_model: default_model(),
             local_only: false,
@@ -804,6 +811,21 @@ impl HqConfig {
     pub fn web_search_peer_server(&self) -> Option<&RemoteMcpServer> {
         let name = self.web_search_peer.as_deref()?;
         self.remote_mcp.iter().find(|s| s.name == name)
+    }
+
+    /// The `remote_mcp` entry `task_peer` names. An error when `task_peer` names
+    /// no entry, so `hq task` never falls back to a local database unnoticed.
+    pub fn task_peer_server(&self) -> Result<Option<&RemoteMcpServer>, String> {
+        let Some(name) = self.task_peer.as_deref() else {
+            return Ok(None);
+        };
+        self.remote_mcp
+            .iter()
+            .find(|s| s.name == name)
+            .map(Some)
+            .ok_or_else(|| {
+                format!("task_peer names `{name}`, but no remote_mcp entry has that name")
+            })
     }
 
     /// Installed binary path. Checks `HQ_BIN_PATH` first, falls back to the

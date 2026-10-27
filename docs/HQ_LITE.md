@@ -187,7 +187,23 @@ hq copilot init --agents   # AGENTS.md instead
 `hq task` goes through the same gateway as the tasks-only MCP key, so it has that key's limits: task
 and space tools only, writes attributed to `mcp:tasks` (a lease from `hq task claim` or `hq task next`
 is named `mcp:tasks/<name>`), no routing tags, assignees or notifications, no sessions. `hq task time`
-and `hq task install-skill` run locally instead. Under Lite, `hq vault` and `hq search` hide `_system`, `_data` and the other folders the
+and `hq task install-skill` run locally instead.
+
+On a machine whose tasks live on another HQ (a laptop that only runs agents for a server), set
+`task_peer` to the name of a `remote_mcp` entry for that server. Every `hq task` verb except `time`
+and `install-skill` then goes to that server's gateway (`hq_call`) with the entry's key, which sets
+what the call may do there and who it is attributed to. A `task_peer` that names no entry is an
+error, never a silent fall back to the local database.
+
+```yaml
+task_peer: server
+remote_mcp:
+  - name: server
+    url: https://hq.example.com/mcp
+    api_key: "..."
+```
+
+Under Lite, `hq vault` and `hq search` hide `_system`, `_data` and the other folders the
 web app hides, list no note that lives behind a symlink into them, and `hq vault context` is refused. Other commands (`hq memory`, `hq config`, `hq logs`) are local administration and are not filtered; the CLI is not a boundary against someone at your keyboard, who could point it at a Full config. Output is JSON on
 standard output; logs go to standard error. A terminal agent is still an agent running commands on
 your machine: Copilot's own approval prompts are the guardrail, and if your organization blocks MCP,
