@@ -246,6 +246,20 @@ handoff key must then have a `cwd` in or under one of them (the gateway marks th
 client cannot set the marker). Left empty, treat the key as shell access to those hosts as
 described under "Security model".
 
+### Folders the owner approves
+
+A claude.ai connector, or the handoff key while `handoff_cwd_allow` lists anything, that asks for
+a `cwd` outside its folders does not get a dead end. HQ files an approval request for that folder
+on that host (your chat, the web inbox and a push notification) and tells the caller to call again
+with the same `cwd` once you answer. Approve and the folder, with everything under it, is allowed
+on that host until you revoke it; Dismiss and the caller is told you declined, and is not asked
+again until the request expires (24 hours). One caller may have at most 5 requests waiting. Home
+and root folders and anything `spawn_cwd_deny` matches are refused before any request is made.
+
+Approving is an owner action (the chat button, the web inbox or `hq queue approve`, all signed with
+the install key); no MCP key reaches it. The live grants are listed at `GET /api/session-folders`
+and revoked with `DELETE /api/session-folders/<id>`, both behind the web credential.
+
 Keys sent to a session (`keys` on `harness_session_send`, `host_send` and the REST
 endpoint) must be logical names matching `^[A-Za-z0-9][A-Za-z0-9+_-]*$`, at most 32
 characters, so a key can never be read as a host flag.

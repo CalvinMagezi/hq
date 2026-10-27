@@ -21,25 +21,53 @@ async fn choose_start_dir(
     cfg: &hq_core::config::HqConfig,
     host_name: &str,
     bound: super::CwdBound,
-    label: &str,
-    harness: &str,
+    names: (&str, &str),
+    asker: &FolderAsker<'_>,
 ) -> Result<super::StartDir> {
-    let connector_bounds;
-    let agent_host = if bound == super::CwdBound::Connector {
-        connector_bounds =
-            super::connector_folders(&cfg.agent_host, host_hq_folder(host).await.as_deref());
-        // Refused before any folder is made for it.
-        super::connector_may_spawn(&connector_bounds.handoff_cwd_allow)?;
-        &connector_bounds
+    let (label, harness) = names;
+    let granted;
+    let agent_host = if bounded_by_folders(bound, &cfg.agent_host) {
+        let mut folders = if bound == super::CwdBound::Connector {
+            super::connector_folders(&cfg.agent_host, host_hq_folder(host).await.as_deref())
+        } else {
+            cfg.agent_host.clone()
+        };
+        let grants = super::folder_request::granted_folders(
+            asker.db,
+            host.name(),
+            &asker.requester,
+            requested,
+        )?;
+        folders.handoff_cwd_allow.extend(grants);
+        granted = folders;
+        &granted
     } else {
         &cfg.agent_host
     };
+    // With no folder asked for, refused before the fallback folder is made for it.
+    if bound == super::CwdBound::Connector && requested.is_none() {
+        super::connector_may_spawn(&agent_host.handoff_cwd_allow)?;
+    }
     let vault_guard = |p: &std::path::Path| {
         super::check_cwd_outside_vault(p, host_name, &agent_host.default_host, &cfg.vault_path)
     };
     let wanted = requested
         .map(|r| super::require_cwd_in(Some(r), agent_host, bound))
-        .transpose()?;
+        .transpose()
+        .map_err(|e| match e.downcast_ref::<super::OutsideAllowedFolders>() {
+            // A folder that could never be granted is refused, not asked for.
+            Some(outside) if vault_guard(&outside.cwd).is_err() => {
+                vault_guard(&outside.cwd).err().unwrap_or(e)
+            }
+            Some(outside) => super::folder_request::ask_owner(
+                asker.vault_path,
+                asker.db,
+                host.name(),
+                &asker.requester,
+                &outside.cwd,
+            ),
+            None => e,
+        })?;
     // A folder that is not allowed is refused whether or not it exists, never quietly swapped.
     if let Some(path) = &wanted {
         vault_guard(path)?;
@@ -60,6 +88,42 @@ async fn choose_start_dir(
     super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, bound)?;
     vault_guard(&fallback.path)?;
     Ok(fallback)
+}
+
+/// What a refused folder needs to ask the owner for it.
+struct FolderAsker<'a> {
+    db: &'a hq_db::Database,
+    vault_path: &'a std::path::Path,
+    requester: String,
+}
+
+impl<'a> FolderAsker<'a> {
+    fn of(db: &'a hq_db::Database, vault_path: &'a std::path::Path, args: &Value) -> Self {
+        let requester = super::connector_label(args)
+            .map(str::to_string)
+            .unwrap_or_else(|| super::folder_request::HANDOFF_REQUESTER.to_string());
+        Self {
+            db,
+            vault_path,
+            requester,
+        }
+    }
+}
+
+/// Whether a caller is held to a folder list: a connector always, the handoff key only while
+/// `handoff_cwd_allow` lists something (empty leaves that key unrestricted).
+fn bounded_by_folders(
+    bound: super::CwdBound,
+    agent_host: &hq_core::config::AgentHostConfig,
+) -> bool {
+    match bound {
+        super::CwdBound::Any => false,
+        super::CwdBound::Connector => true,
+        super::CwdBound::Handoff => agent_host
+            .handoff_cwd_allow
+            .iter()
+            .any(|a| !a.trim().is_empty()),
+    }
 }
 
 /// The host's own HQ folder as that machine resolves it, or `None` for a host without one.
@@ -97,7 +161,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 "observe": { "type": "array", "items": { "type": "string" }, "description": "Session ids a monitor or reviewer watches (at most 10; needs task_id). When one finishes a turn, blocks or exits, this session gets a message on its task thread, typed in when it is next idle." },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
                 "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
-                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused." },
+                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request instead of starting: wait for them, then call again with the same cwd. Never start elsewhere and cd into it." },
                 "label": { "type": "string", "description": "Short human label, e.g. 'auth-refactor'", "default": "" },
                 "task_id": { "type": "string", "description": "HQ task (id or display id such as FR-053) this session works on. Must exist and not be complete. Its title and description become the goal when `goal` is omitted." },
                 "goal": { "type": "string", "description": "What the session should accomplish. HQ drives only a session with a specific goal and definition of done; without them it observes." },
@@ -155,14 +219,15 @@ impl HqTool for HarnessSessionSpawnTool {
             .map(str::trim)
             .filter(|c| !c.is_empty());
         let bound = super::CwdBound::of(&args);
+        let asker = FolderAsker::of(&self.db, &self.vault_path, &args);
         let start = choose_start_dir(
             &host_handle,
             requested,
             &cfg,
             &host,
             bound,
-            &label,
-            &harness,
+            (&label, &harness),
+            &asker,
         )
         .await?;
         macro_rules! launch {
@@ -199,8 +264,16 @@ impl HqTool for HarnessSessionSpawnTool {
         if let (Err(e), Some(asked), None) = (&report, requested, &note)
             && super::is_missing_dir_error(e)
         {
-            let fallback =
-                choose_start_dir(&host_handle, None, &cfg, &host, bound, &label, &harness).await?;
+            let fallback = choose_start_dir(
+                &host_handle,
+                None,
+                &cfg,
+                &host,
+                bound,
+                (&label, &harness),
+                &asker,
+            )
+            .await?;
             note = Some(format!(
                 "{asked} does not exist on host '{}', so the session started in {} instead.",
                 host_handle.name(),
@@ -810,7 +883,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 "harness": { "type": "string", "description": format!("One of: {}. A general-purpose agent ({}) refuses code work; give it purpose research, review or general.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent." },
                 "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
-                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny." },
+                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request instead of starting: wait for them, then call again with the same cwd. Never start elsewhere and cd into it." },
                 "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
                 "external_id": { "type": "string", "description": "Idempotency key for the task, unique per space. Not combinable with task_id." },
                 "task_id": { "type": "string", "description": "Work on this existing HQ task (id or display id) instead of filing one. Must not be complete." },
@@ -851,8 +924,17 @@ impl HqTool for HarnessSessionHandoffTool {
         // Before a start folder is chosen or made, so a refused model leaves nothing behind.
         super::spec::resolve(&harness)?.with_model(Some(model.trim()).filter(|m| !m.is_empty()))?;
         let bound = super::CwdBound::of(&args);
-        let start =
-            choose_start_dir(&host, requested, &cfg, &host_name, bound, &label, &harness).await?;
+        let asker = FolderAsker::of(&self.db, &self.vault_path, &args);
+        let start = choose_start_dir(
+            &host,
+            requested,
+            &cfg,
+            &host_name,
+            bound,
+            (&label, &harness),
+            &asker,
+        )
+        .await?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
@@ -1055,5 +1137,22 @@ mod tests {
             .to_string();
         assert!(!err.contains("is not one of them"), "{err}");
         assert!(err.contains("home or root directory"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod folder_bound_tests {
+    use super::*;
+
+    #[test]
+    fn the_handoff_key_with_an_empty_list_stays_unrestricted_and_a_connector_never_is() {
+        let mut cfg = hq_core::config::AgentHostConfig::default();
+        assert!(!bounded_by_folders(super::super::CwdBound::Handoff, &cfg));
+        assert!(!bounded_by_folders(super::super::CwdBound::Any, &cfg));
+        assert!(bounded_by_folders(super::super::CwdBound::Connector, &cfg));
+        cfg.handoff_cwd_allow = vec!["  ".into()];
+        assert!(!bounded_by_folders(super::super::CwdBound::Handoff, &cfg));
+        cfg.handoff_cwd_allow = vec!["/srv/work".into()];
+        assert!(bounded_by_folders(super::super::CwdBound::Handoff, &cfg));
     }
 }

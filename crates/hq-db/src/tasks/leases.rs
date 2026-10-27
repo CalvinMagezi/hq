@@ -109,6 +109,12 @@ pub fn clean_label(text: &str) -> String {
     kept.trim().to_string()
 }
 
+/// Whether `text` has a control or invisible character, which could make shown text read as
+/// something else.
+pub fn has_hidden_chars(text: &str) -> bool {
+    text.chars().any(|c| c.is_control() || is_invisible(c))
+}
+
 /// Zero-width, bidirectional-override and byte-order characters: they print as
 /// nothing or reorder what is around them, so a label could look like another.
 pub(super) fn is_invisible(c: char) -> bool {

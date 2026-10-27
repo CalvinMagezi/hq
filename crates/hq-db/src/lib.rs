@@ -5,6 +5,7 @@ pub mod background_turns;
 pub mod bridge;
 pub mod chat;
 pub mod copilot_usage_samples;
+pub mod folder_grants;
 pub mod harness_drive_gate;
 pub mod harness_sessions_registry;
 pub mod mcp_connector;

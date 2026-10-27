@@ -21,7 +21,10 @@ session runs with permissions skipped. It cannot send to or read the output of
 sessions (the registry does not record who started a session, so those tools
 would reach sessions the key never started), but it can start an agent anywhere
 `agent_host.spawn_cwd_deny` allows. Set `agent_host.handoff_cwd_allow` to the project
-roots it may use; leave it empty only for a key you would hand a shell. The
+roots it may use; leave it empty only for a key you would hand a shell. With the list set, a
+call for another folder files an approval request instead; only your signed approval (chat
+button, web inbox, `hq queue approve`) turns it into a grant for that folder on that host, and
+the grants are listed and revoked through owner-only web routes (`/api/session-folders`). The
 gateway tells the tool the call came in on this key, so a client cannot claim
 or drop the scope. Send the key as `Authorization: Bearer <key>` or
 `x-api-key`. With none of the variables set, every call is refused with

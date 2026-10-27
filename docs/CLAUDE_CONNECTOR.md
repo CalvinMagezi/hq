@@ -60,7 +60,10 @@ default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
      handoff_cwd_allow: [/srv/projects]
    ```
 
-   Anything outside the HQ folder and that list is refused.
+   A folder outside the HQ folder and that list is not refused outright: HQ asks you to approve
+   it (chat, web inbox, push) and Claude starts the session once you do. An approved folder stays
+   allowed on that host until you revoke it (see "Folders the owner approves" in
+   `docs/AGENT_SESSIONS.md`).
 
 ### HQ ends TLS itself
 
@@ -148,7 +151,7 @@ On top of the scope:
   keeps its tags and assignees but sends nobody a message: no agent mailbox and not your chat.
   An agent sees the task when it looks at its queue, never as something pushed at it.
 - **Coding sessions are not gated**, so Claude can drive agents for you, but only in the host's
-  HQ folder and `handoff_cwd_allow` folders, only the sessions it started (yours stay yours), and
+  HQ folder, `handoff_cwd_allow` folders and folders you approved when it asked, only the sessions it started (yours stay yours), and
   every one it starts sends you a notice with what it was told.
 - **Provenance.** Tasks Claude writes are attributed to `mcp:connector/<connection name>`.
 - **Limits and records.** 120 calls a minute per connection. Every call is logged (tool, outcome
