@@ -148,6 +148,32 @@ fn a_known_agent_settles_and_a_silent_submit_retries_enter() {
 }
 
 #[test]
+fn an_agent_that_answers_without_a_working_state_gets_no_second_enter() {
+    let host = Running::start();
+    let b = host.backend();
+    let mut req = cat("hs-answers", "claude");
+    // Answers a second after each line, like an agent HQ has no state rules for.
+    req.command = Some(
+        r#"f() { echo started; while IFS= read -r l; do sleep 1; echo "got:$l"; done; }; f"#.into(),
+    );
+    b.launch(&req).unwrap();
+    read_until(&b, "hs-answers", "started");
+
+    let outcome = b.submit("hs-answers", "hello").unwrap();
+    assert!(
+        matches!(outcome, PromptOutcome::Stalled(_)),
+        "expected Stalled, got {outcome:?}"
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    let screen = b.read("hs-answers", 50).unwrap();
+    assert_eq!(
+        screen.matches("got:").count(),
+        1,
+        "a second Enter would have sent an empty line: {screen}"
+    );
+}
+
+#[test]
 fn waiting_for_a_state_that_never_comes_times_out() {
     let host = Running::start();
     let b = host.backend();
