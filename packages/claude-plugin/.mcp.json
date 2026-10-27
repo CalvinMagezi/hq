@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "agent-hq": {
+      "type": "http",
+      "url": "${user_config.hq_url}",
+      "headers": {
+        "Authorization": "Bearer ${user_config.hq_api_key}",
+        "x-hq-session-id": "${HQ_SESSION_ID:-}"
+      }
+    }
+  }
+}
