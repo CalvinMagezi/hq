@@ -268,6 +268,36 @@ pub fn latest_engagement_by_dedup(
     })
 }
 
+/// Where the newest request with one dedup key stands, for a producer deciding whether to ask
+/// the owner (again).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestState {
+    /// No live request: send one.
+    Ask,
+    Wait,
+    Declined,
+}
+
+impl RequestState {
+    /// An expired request, answered or not, is asked again: the owner may have missed it, and a
+    /// decline lasts as long as the request does. A spent approval is asked again too.
+    pub fn from_latest(latest: Option<LatestEngagement>, now: DateTime<Utc>) -> Self {
+        let Some(latest) = latest else {
+            return Self::Ask;
+        };
+        if latest.expires_at.is_some_and(|at| at <= now) {
+            return Self::Ask;
+        }
+        let spent = latest.engagement.as_deref() == Some(ENGAGEMENT_USED);
+        match latest.state {
+            ValueState::Engaged if spent => Self::Ask,
+            ValueState::Expired => Self::Ask,
+            ValueState::Dismissed => Self::Declined,
+            _ => Self::Wait,
+        }
+    }
+}
+
 /// Items still waiting on the owner whose dedup key starts with `prefix` and that have not
 /// expired, for a producer that caps how many it has open at once.
 pub fn count_waiting_with_prefix(db: &Database, prefix: &str) -> Result<i64> {

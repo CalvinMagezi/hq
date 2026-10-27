@@ -22,6 +22,7 @@ mod provider_keys;
 mod restart_api;
 mod security_headers;
 mod session_driver;
+mod session_folders_api;
 mod sessions_api;
 mod settings_api;
 mod setup_api;
@@ -427,6 +428,15 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             axum::routing::post(tasks_api::restore_task_handler),
         )
         .route("/api/tasks/linked", get(tasks_api::tasks_linked_to_handler))
+        // Folders the owner approved for connector and handoff-key sessions. Owner only.
+        .route(
+            "/api/session-folders",
+            get(session_folders_api::list_handler),
+        )
+        .route(
+            "/api/session-folders/{id}",
+            axum::routing::delete(session_folders_api::revoke_handler),
+        )
         // Task verification: the owner's side. The web credential is the owner's; /mcp keys never
         // reach these routes.
         .route(

@@ -5,7 +5,7 @@
 use crate::WsState;
 use crate::mcp_http::{CallCaller, call_tool, rpc_ok};
 use axum::Json;
-use hq_core::types::{ValueItem, ValueKind, ValueState};
+use hq_core::types::{ValueItem, ValueKind};
 use hq_db::mcp_connector::{self as store, GrantAccess};
 use hq_db::value_items;
 use serde_json::{Value, json};
@@ -231,24 +231,14 @@ enum Gate {
 }
 
 impl Gate {
-    /// An expired request, answered or not, is asked again: the owner may have missed it, and a
-    /// decline lasts as long as the request does.
     fn from_latest(
         latest: Option<value_items::LatestEngagement>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Self {
-        let Some(latest) = latest else {
-            return Self::Ask;
-        };
-        if latest.expires_at.is_some_and(|at| at <= now) {
-            return Self::Ask;
-        }
-        let spent = latest.engagement.as_deref() == Some(value_items::ENGAGEMENT_USED);
-        match latest.state {
-            ValueState::Engaged if spent => Self::Ask,
-            ValueState::Expired => Self::Ask,
-            ValueState::Dismissed => Self::Declined,
-            _ => Self::Wait,
+        match value_items::RequestState::from_latest(latest, now) {
+            value_items::RequestState::Ask => Self::Ask,
+            value_items::RequestState::Wait => Self::Wait,
+            value_items::RequestState::Declined => Self::Declined,
         }
     }
 }

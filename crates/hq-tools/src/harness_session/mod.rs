@@ -15,6 +15,7 @@ mod connector_notice;
 mod control;
 mod cwd;
 pub mod dismiss;
+mod folder_request;
 pub mod handoff;
 mod launch;
 pub mod mission;

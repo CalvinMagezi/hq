@@ -1,4 +1,5 @@
 use super::*;
+use hq_core::types::ValueState;
 
 #[test]
 fn the_digest_ignores_key_order_and_caller_markers() {

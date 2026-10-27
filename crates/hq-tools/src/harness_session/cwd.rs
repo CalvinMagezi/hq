@@ -131,6 +131,25 @@ pub fn check_cwd_allowed(cwd: &str, deny: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// A bounded caller asked for a folder outside the ones it may use. Typed so the spawn tools can
+/// turn it into a request to the owner instead of a dead end.
+#[derive(Debug)]
+pub struct OutsideAllowedFolders {
+    pub cwd: PathBuf,
+}
+
+impl std::fmt::Display for OutsideAllowedFolders {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "cwd '{}' is outside agent_host.handoff_cwd_allow and the folders the owner approved; no session was started",
+            self.cwd.display()
+        )
+    }
+}
+
+impl std::error::Error for OutsideAllowedFolders {}
+
 /// With `allow` non-empty, the handoff key may only start sessions in or under one of its entries.
 pub fn check_handoff_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
     let entries: Vec<&str> = allow
@@ -141,10 +160,10 @@ pub fn check_handoff_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
     if entries.is_empty() || entries.iter().any(|a| cwd.starts_with(a)) {
         return Ok(());
     }
-    bail!(
-        "cwd '{}' is outside agent_host.handoff_cwd_allow, which limits the handoff key; no session was started",
-        cwd.display()
-    )
+    Err(OutsideAllowedFolders {
+        cwd: cwd.to_path_buf(),
+    }
+    .into())
 }
 
 /// Which folder list binds a caller starting a session.
@@ -174,7 +193,12 @@ impl CwdBound {
 /// A connector grant starts sessions only in folders the owner chose: an empty list means none,
 /// because a hijacked conversation must not choose where an agent with a shell runs.
 pub fn check_connector_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
-    connector_may_spawn(allow)?;
+    if connector_may_spawn(allow).is_err() {
+        return Err(OutsideAllowedFolders {
+            cwd: cwd.to_path_buf(),
+        }
+        .into());
+    }
     check_handoff_cwd(cwd, allow)
 }
 
