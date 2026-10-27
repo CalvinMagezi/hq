@@ -56,6 +56,12 @@ ignore = [
     { id = "RUSTSEC-2026-0367", reason = "zip 8.6.0 keeps SUID/SGID bits when extracting an archive to disk. Nothing calls ZipArchive::extract or ZipStreamReader::extract; see the comment above. Expires 2026-10-31." },
     { id = "RUSTSEC-2026-0368", reason = "zip 8.6.0 ZipArchive::extract creates symlinks whose targets can leave the destination directory. Nothing calls the extraction code; see the comment above. Expires 2026-10-31." },
     { id = "RUSTSEC-2026-0369", reason = "zip 8.6.0 ZipArchive::extract and ZipStreamReader::extract apply Unix permissions through symlinks. Nothing calls the extraction code; see the comment above. Expires 2026-10-31." },
+    # zstd 0.13.3 and zstd-safe 7.x, pinned by zip 8.6.0 (via docx-rs, rust_xlsxwriter,
+    # umya-spreadsheet and transmutation). The fixes need zstd 0.14.3 and zstd-safe 8.2,
+    # which zip 8 cannot take. Review with the zip ids above.
+    { id = "RUSTSEC-2026-0391", reason = "zstd context reuse across streams. zip 8.6.0 builds a new zstd::Decoder for every entry (compression.rs), so no context is reused. Expires 2026-10-31." },
+    { id = "RUSTSEC-2026-0403", reason = "zstd-safe legacy-frame decompression. The `legacy` feature is not enabled anywhere in the tree, so legacy frames are rejected. Expires 2026-10-31." },
+    { id = "RUSTSEC-2026-0398", reason = "zstd-safe Seekable::decompress. The `seekable` feature is not enabled and nothing uses the seekable format. Expires 2026-10-31." },
 ]
 
 [licenses]
