@@ -663,6 +663,7 @@ Read [`SECURITY.md`](SECURITY.md) for the policy and how to report a vulnerabili
 | Adding a machine that runs coding agents | [`docs/JOIN_A_MACHINE.md`](docs/JOIN_A_MACHINE.md) |
 | Asking HQ from MCP clients | [`docs/MCP_ASK.md`](docs/MCP_ASK.md) |
 | Connecting an agent to a VPS instance | [`docs/VPS_AGENT_CONNECT.md`](docs/VPS_AGENT_CONNECT.md) |
+| Claude Code plugin (MCP, health check, task, fleet and vault skills) | [`packages/claude-plugin/README.md`](packages/claude-plugin/README.md) |
 | Native tasks | [`docs/plans/native-tasks.md`](docs/plans/native-tasks.md) |
 | Architecture notes | [`docs/architecture/`](docs/architecture/) |
 | Agent instructions for this repo | [`CLAUDE.md`](CLAUDE.md), [`AGENTS.md`](AGENTS.md) |
