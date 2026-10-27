@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 const HOST_NAME: &str = "native";
 /// How long a prompt may go without the agent reacting before Enter is retried.
 const SUBMIT_CONFIRM: Duration = Duration::from_secs(10);
+/// How long `submit` waits for the typed text to echo before it starts counting output.
+const SUBMIT_ECHO_WITHIN: Duration = Duration::from_secs(2);
 /// A state must hold this long before a wait reports it, so a flicker is ignored.
 const STABLE_MS: u64 = 700;
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
@@ -335,6 +337,12 @@ impl NativeBackend {
         }
     }
 
+    /// Bytes the pane has printed since it started.
+    fn bytes_seen(&self, name: &str) -> Result<u64, AgentHostError> {
+        let info = self.call("agent.get", json!({ "name": name }))?;
+        Ok(info.get("bytes_seen").and_then(Value::as_u64).unwrap_or(0))
+    }
+
     /// Waits for one of `until`; a wait that times out is an `Ok(None)`.
     fn wait_for(
         &self,
@@ -574,11 +582,21 @@ impl HostBackend for NativeBackend {
 
     fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError> {
         self.call("agent.prompt", json!({ "name": target, "text": text }))?;
+        // Let the echo of the typed text land, so only output after it counts as a reaction.
+        self.drawn(target, SUBMIT_ECHO_WITHIN)?;
+        let echoed = self.bytes_seen(target)?;
         if self.wait_for(target, &REACTED, SUBMIT_CONFIRM)?.is_some() {
             return Ok(PromptOutcome::Submitted);
         }
-        // An agent that was not listening yet can swallow the Enter. On an
-        // empty input a second Enter does nothing, so the retry is safe.
+        // An agent HQ has no state rules for never reports working, so output after the echo
+        // means it took the prompt; another Enter there can send it twice (Copilot does).
+        if self.bytes_seen(target)? > echoed {
+            return Ok(PromptOutcome::Stalled(format!(
+                "{target} showed output but no working state within {}s",
+                SUBMIT_CONFIRM.as_secs()
+            )));
+        }
+        // A still screen: the agent was not listening yet and swallowed the Enter.
         self.send_keys(target, &["enter".to_string()])?;
         Ok(PromptOutcome::Resubmitted)
     }

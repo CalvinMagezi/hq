@@ -69,9 +69,11 @@ app, and list every agent on a machine with `hq host status`.
 - **Prompts are confirmed, not just sent.** `agent prompt` writes the text and Enter
   together, but a TUI that is not listening yet can swallow the Enter and leave the text in
   its input box. `harness_session_send` and the initial prompt wait for the agent to start
-  working, and if the host reports `agent_prompt_stalled` HQ presses Enter once more and says so
-  in the result. Enter on an empty input does nothing, so this is safe when the agent had
-  simply finished first. Read the output before resending anything by hand.
+  working. If it never does and the pane printed nothing after the echo of the typed text, HQ
+  presses Enter once more and says so in the result. If the pane did print something (an agent
+  HQ has no state rules for, such as Copilot CLI, never reports working), HQ leaves it alone and
+  reports the prompt as stalled, because Copilot sends the last prompt again on an empty Enter.
+  Read the output before resending anything by hand.
 - **Copilot gets its first prompt at start.** Copilot CLI draws its screen, then reloads its
   MCP servers and clears whatever was typed meanwhile, so a fresh `github-copilot` session is
   started with `copilot --interactive=<prompt>` instead of having the prompt typed. A resume
