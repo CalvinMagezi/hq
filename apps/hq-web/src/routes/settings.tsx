@@ -4,6 +4,7 @@ import { useEffect, useMemo, type ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
 import { relTime } from '~/lib/time'
+import { HqHttpError } from '~/lib/hqAuth'
 import { ChatAppsSection } from '~/components/settings/ChatAppsSection'
 import { availableTimeZones, deviceTimeZone, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
@@ -29,6 +30,14 @@ import {
   formatPerHour,
   projectionText,
 } from '~/lib/copilotUsageApi'
+import {
+  SESSION_FOLDERS_QUERY_KEY,
+  formatApprovedText,
+  listSessionFolders,
+  revokeConfirmMessage,
+  revokeSessionFolder,
+  type FolderGrant,
+} from '~/lib/sessionFoldersApi'
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -298,6 +307,66 @@ function ConnectorSection() {
   )
 }
 
+const HTTP_NOT_FOUND = 404
+
+/** An older server has no folder routes; the section then stays hidden. */
+function isMissingRoute(err: unknown): boolean {
+  return err instanceof HqHttpError && err.status === HTTP_NOT_FOUND
+}
+
+function SessionFoldersSection() {
+  const client = useQueryClient()
+  const { data, error } = useQuery({
+    queryKey: SESSION_FOLDERS_QUERY_KEY,
+    queryFn: listSessionFolders,
+    retry: (failureCount, err) => !isMissingRoute(err) && failureCount < 1,
+  })
+  const act = useMutation({
+    mutationFn: (id: number) => revokeSessionFolder(id),
+    onSettled: () => client.invalidateQueries({ queryKey: SESSION_FOLDERS_QUERY_KEY }),
+  })
+
+  if (isMissingRoute(error)) return null
+  if (!data) return null
+
+  const busy = act.isPending
+  const onRevoke = (grant: FolderGrant) => {
+    if (window.confirm(revokeConfirmMessage(grant.path, grant.host))) {
+      act.mutate(grant.id)
+    }
+  }
+
+  return (
+    <Section id="session-folders" title="Session folders">
+      <p className="py-3.5 text-sm text-neutral-300 leading-relaxed">
+        Folders you approved for coding sessions that Claude starts. Each covers the folder and everything under it on that host.
+      </p>
+      {data.grants.length === 0 ? (
+        <p className="py-3.5 text-sm text-neutral-400 border-t border-white/10">
+          No folders approved yet. When Claude asks for one, the request appears in your notifications.
+        </p>
+      ) : (
+        data.grants.map((grant) => (
+          <Row key={grant.id} label={grant.host}>
+            <span className="inline-flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
+              <span className="font-mono text-xs">{grant.path}</span>
+              <span className="text-neutral-400">{formatApprovedText(grant.approved_at, grant.requested_by)}</span>
+              <ActionButton busy={busy} onClick={() => onRevoke(grant)}>
+                Revoke
+              </ActionButton>
+            </span>
+          </Row>
+        ))
+      )}
+      {act.error && (
+        <Row label="Error" block>
+          {act.error instanceof Error ? act.error.message : 'Could not revoke session folder.'}
+        </Row>
+      )}
+    </Section>
+  )
+}
+
 /** The header clock's zone. Kept on this device, so a phone and a laptop can each have their own. */
 function ClockSection() {
   const pinned = useClockZone()
@@ -351,6 +420,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
       </Section>
       <CodingAgentsSection host={s.agent_host} />
       <ConnectorSection />
+      <SessionFoldersSection />
       <Section id="integrations" title="Integrations">
         {s.integrations.remote_mcp.length === 0 && <Row label="Remote MCP servers">none</Row>}
         {s.integrations.remote_mcp.map((m) => (
