@@ -290,7 +290,27 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
         Ok(s)
     };
     let (tool, args) = call_for(&cmd, &mut read_stdin)?;
+    let value = match config.task_peer_server().map_err(anyhow::Error::msg)? {
+        Some(peer) => call_peer(peer, tool, args).await?,
+        None => call_local(config, tool, args).await?,
+    };
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
 
+/// The verb on the HQ that `task_peer` names, through its MCP gateway. `call_for` has already
+/// limited it to task and space tools; the peer's key sets what it may do there.
+async fn call_peer(
+    peer: &hq_core::config::RemoteMcpServer,
+    tool: &str,
+    args: Value,
+) -> Result<Value> {
+    hq_tools::remote_mcp::call_named_server(peer, "hq_call", json!({ "tool": tool, "args": args }))
+        .await
+        .with_context(|| format!("task peer `{}`", peer.name))
+}
+
+async fn call_local(config: &HqConfig, tool: &str, args: Value) -> Result<Value> {
     let vault =
         Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
     let db = Arc::new(Database::open(&config.db_path()).context("failed to open database")?);
@@ -301,16 +321,14 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
         config.vault_path.join("Agents"),
         Some(config),
     );
-    let value = hq_mcp::gateway::call_tool_whole(
+    hq_mcp::gateway::call_tool_whole(
         &registry,
         tool,
         args,
         Some(hq_mcp::gateway::TASKS_ALLOWLIST),
     )
     .await
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-    println!("{}", serde_json::to_string_pretty(&value)?);
-    Ok(())
+    .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 #[cfg(test)]
@@ -401,5 +419,58 @@ mod tests {
         };
         let (_, a) = call_for(&c, &mut no_stdin).unwrap();
         assert_eq!(a["body"], "hello there");
+    }
+
+    fn peer_config(uri: &str, peer: &str) -> HqConfig {
+        let mut config = HqConfig::default();
+        config.remote_mcp.push(hq_core::config::RemoteMcpServer {
+            name: "server".into(),
+            url: format!("{uri}/mcp"),
+            api_key: Some("tasks-key".into()),
+            live_user_turn_only: true,
+        });
+        config.task_peer = Some(peer.into());
+        config
+    }
+
+    #[tokio::test]
+    async fn a_task_peer_gets_the_verb_through_its_gateway() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/mcp"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "jsonrpc": "2.0", "id": 1,
+                "result": {"content": [{"type": "text", "text": "{\"ok\":true}"}]},
+            })))
+            .mount(&server)
+            .await;
+        let config = peer_config(&server.uri(), "server");
+        let peer = config.task_peer_server().unwrap().unwrap();
+        let value = call_peer(
+            peer,
+            "task_comment_add",
+            json!({"task_id": "X-1", "body": "hi"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(value["ok"], true);
+        let req = &server.received_requests().await.unwrap()[0];
+        assert_eq!(
+            req.headers.get("authorization").unwrap(),
+            "Bearer tasks-key"
+        );
+        let body: Value = serde_json::from_slice(&req.body).unwrap();
+        assert_eq!(body["params"]["name"], "hq_call");
+        assert_eq!(body["params"]["arguments"]["tool"], "task_comment_add");
+        assert_eq!(body["params"]["arguments"]["args"]["task_id"], "X-1");
+    }
+
+    #[test]
+    fn a_task_peer_with_no_matching_entry_is_an_error_not_a_local_fallback() {
+        let config = peer_config("http://127.0.0.1:9", "missing");
+        assert!(config.task_peer_server().is_err());
+        assert!(HqConfig::default().task_peer_server().unwrap().is_none());
     }
 }

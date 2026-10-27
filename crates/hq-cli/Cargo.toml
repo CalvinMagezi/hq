@@ -92,3 +92,4 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 hq-tools = { workspace = true, features = ["test-support"] }
 hq-sandbox = { path = "../hq-sandbox" }
 tempfile = { workspace = true }
+wiremock = "0.6"
