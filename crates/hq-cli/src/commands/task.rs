@@ -289,8 +289,9 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
         }
         Ok(s)
     };
+    let peer = config.task_peer_server().map_err(anyhow::Error::msg)?;
     let (tool, args) = call_for(&cmd, &mut read_stdin)?;
-    let value = match config.task_peer_server().map_err(anyhow::Error::msg)? {
+    let value = match peer {
         Some(peer) => call_peer(peer, tool, args).await?,
         None => call_local(config, tool, args).await?,
     };
@@ -298,15 +299,32 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
     Ok(())
 }
 
-/// The verb on the HQ that `task_peer` names, through its MCP gateway. `call_for` has already
-/// limited it to task and space tools; the peer's key sets what it may do there.
+/// A peer that accepts the connection and never answers would otherwise hang the terminal.
+const PEER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The verb on the HQ that `task_peer` names, through its MCP gateway. The tasks allowlist is
+/// checked here too, because the peer's key may be wider than the tasks-only scope.
 async fn call_peer(
     peer: &hq_core::config::RemoteMcpServer,
     tool: &str,
     args: Value,
 ) -> Result<Value> {
-    hq_tools::remote_mcp::call_named_server(peer, "hq_call", json!({ "tool": tool, "args": args }))
+    if !hq_mcp::gateway::TASKS_ALLOWLIST.contains(&tool) {
+        bail!("`{tool}` is not a task tool");
+    }
+    let call = hq_tools::remote_mcp::call_named_server(
+        peer,
+        "hq_call",
+        json!({ "tool": tool, "args": args }),
+    );
+    tokio::time::timeout(PEER_TIMEOUT, call)
         .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "task peer `{}` did not answer within {PEER_TIMEOUT:?}",
+                peer.name
+            )
+        })?
         .with_context(|| format!("task peer `{}`", peer.name))
 }
 
@@ -465,6 +483,16 @@ mod tests {
         assert_eq!(body["params"]["name"], "hq_call");
         assert_eq!(body["params"]["arguments"]["tool"], "task_comment_add");
         assert_eq!(body["params"]["arguments"]["args"]["task_id"], "X-1");
+    }
+
+    #[tokio::test]
+    async fn a_task_peer_refuses_a_tool_outside_the_tasks_allowlist() {
+        let config = peer_config("http://127.0.0.1:9", "server");
+        let peer = config.task_peer_server().unwrap().unwrap();
+        let err = call_peer(peer, "vault_write_note", json!({}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not a task tool"));
     }
 
     #[test]
