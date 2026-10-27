@@ -515,7 +515,15 @@ mod tests {
         let text = listing["result"]["content"][0]["text"]
             .as_str()
             .unwrap_or("[]");
-        let tools: Vec<Value> = serde_json::from_str(text).unwrap();
+        let body: Value = serde_json::from_str(text).unwrap();
+        // A bare hq_discover answers with the index, tools grouped by category.
+        let tools: Vec<Value> = match body.get("categories").and_then(Value::as_object) {
+            Some(categories) => categories
+                .values()
+                .flat_map(|c| c.as_array().cloned().unwrap_or_default())
+                .collect(),
+            None => body.as_array().cloned().unwrap_or_default(),
+        };
         tools
             .iter()
             .map(|t| t["name"].as_str().unwrap().to_string())
