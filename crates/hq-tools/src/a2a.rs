@@ -503,16 +503,32 @@ impl HqTool for TeamRosterTool {
     }
 }
 
+/// Most members a roster lists: every running one fits (a team's live cap is lower),
+/// and the newest ended ones fill the rest.
+const ROSTER_MAX_MEMBERS: usize = 60;
+/// Longest label shown per member.
+const ROSTER_LABEL_CHARS: usize = 120;
+
 /// The team `session` belongs to, root first, each member with its task.
 pub fn roster(c: &rusqlite::Connection, session: &str) -> Result<Value> {
     if registry::get(c, session)?.is_none() {
         bail!("no harness session '{session}'");
     }
     let root = registry::tree_root(c, session)?;
+    let all = registry::tree_members(c, &root)?;
+    let total = all.len();
+    let (live, ended): (Vec<_>, Vec<_>) = all
+        .into_iter()
+        .partition(|m| m.status == registry::STATUS_RUNNING);
+    let running = live.len();
+    let room = ROSTER_MAX_MEMBERS.saturating_sub(running);
+    let mut shown = live;
+    shown.extend(ended.into_iter().rev().take(room));
+    shown.sort_by(|a, b| {
+        (a.spawn_depth, &a.created_at, &a.id).cmp(&(b.spawn_depth, &b.created_at, &b.id))
+    });
     let mut members = Vec::new();
-    let mut running = 0;
-    for m in registry::tree_members(c, &root)? {
-        running += usize::from(m.status == registry::STATUS_RUNNING);
+    for m in shown {
         let task = match m.mission_id.as_deref() {
             Some(id) => t::get_task(c, id)?.map(
                 |task| json!({ "id": task.display_id, "title": task.title, "status": task.status }),
@@ -527,13 +543,16 @@ pub fn roster(c: &rusqlite::Connection, session: &str) -> Result<Value> {
             "harness": m.harness,
             "model": m.model,
             "purpose": m.purpose,
-            "label": m.label,
+            "label": m.label.chars().take(ROSTER_LABEL_CHARS).collect::<String>(),
             "status": m.status,
             "agent_status": m.last_agent_status,
             "task": task,
         }));
     }
-    Ok(json!({ "root": root, "running": running, "members": members }))
+    let left_out = total - members.len();
+    Ok(
+        json!({ "root": root, "running": running, "members": members, "ended_not_listed": left_out }),
+    )
 }
 
 /// What a delegator asks for: the work, and which agent, model and role should do it.
@@ -550,7 +569,10 @@ pub struct Delegation {
 impl Delegation {
     pub fn from_args(args: &Value) -> Result<Self> {
         let request = Self {
-            title: sanitize(&arg_str(args, "title")),
+            title: sanitize(&arg_str(args, "title"))
+                .chars()
+                .take(SPAWN_TITLE_CHARS)
+                .collect(),
             description: sanitize(&arg_str(args, "description")),
             harness: arg_str(args, "harness").trim().to_string(),
             model: Some(arg_str(args, "model").trim().to_string()).filter(|m| !m.is_empty()),
@@ -802,9 +824,8 @@ pub struct TeamPlace {
 }
 
 /// The tasks a session may read and write: its own, that task's parent and
-/// sub-tasks, the task of the session that started it, the tasks of its running
-/// children, and the tasks of every session in its team. Empty for a session with
-/// no task.
+/// sub-tasks, the task of the session that started it, and the tasks of the running
+/// sessions in its team. Empty for a session with no task.
 pub fn task_scope(
     c: &rusqlite::Connection,
     session: &str,
@@ -829,14 +850,10 @@ pub fn task_scope(
     {
         scope.extend(parent.mission_id);
     }
-    for child in registry::running_children(c, session)? {
-        scope.extend(child.mission_id);
-    }
-    // Teammates' tasks, so a member can read and comment on the work beside its own.
+    // Running teammates' tasks (children included), so a member can read and comment
+    // on the work beside its own. An ended member's task may have moved on to other work.
     let root = registry::tree_root(c, session)?;
-    for member in registry::tree_members(c, &root)? {
-        scope.extend(member.mission_id);
-    }
+    scope.extend(registry::tree_running_tasks(c, &root)?);
     Ok(scope)
 }
 
@@ -1331,6 +1348,21 @@ mod tests {
         assert!(
             w.db.with_conn(|c| check_session_access(c, Some("hs-g1"), "hs-b"))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn an_ended_teammates_task_leaves_the_teams_scope() {
+        let w = world();
+        child_of(&w.db, "hs-a", "hs-k1", "tk-2", 1);
+        child_of(&w.db, "hs-a", "hs-k2", "tk-1", 1);
+        let scope = |who: &str| w.db.with_conn(|c| task_scope(c, who)).unwrap();
+        assert!(scope("hs-k1").contains("tk-1"), "a running teammate's task");
+        w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-k1"))
+            .unwrap();
+        assert!(
+            !scope("hs-k2").contains("tk-2"),
+            "the ended member's task may have moved on to other work"
         );
     }
 

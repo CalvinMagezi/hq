@@ -1001,6 +1001,18 @@ pub fn tree_started_since(conn: &Connection, root: &str, minutes: i64) -> Result
     )?)
 }
 
+/// The tasks of the running sessions in the team under `root`.
+pub fn tree_running_tasks(conn: &Connection, root: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!(
+        "{TEAM_CTE} SELECT DISTINCT mission_id FROM harness_sessions \
+         WHERE id IN (SELECT id FROM team) AND status = 'running' AND mission_id IS NOT NULL"
+    ))?;
+    let ids = stmt
+        .query_map(params![root], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(ids)
+}
+
 /// Whether two sessions belong to one team: the same root at the top of their chains.
 pub fn same_team(conn: &Connection, a: &str, b: &str) -> Result<bool> {
     Ok(tree_root(conn, a)? == tree_root(conn, b)?)

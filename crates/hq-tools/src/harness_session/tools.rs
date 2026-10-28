@@ -316,6 +316,13 @@ impl HarnessSessionSpawnTool {
     /// delegator's folder, where the worker will run. Only then does it become a
     /// delegation from that session.
     async fn delegate_claimed(&self, from: String, args: &Value) -> Result<Value> {
+        // A worker joins its delegator's team and sees every member, more than the
+        // handoff key may read itself, so that key cannot put one there.
+        if super::CwdBound::of(args) == super::CwdBound::Handoff {
+            anyhow::bail!(
+                "the handoff key cannot start a worker in another session's team; start a session without from_session"
+            );
+        }
         let delegator = {
             let id = from.clone();
             self.db.with_conn(move |c| registry::get(c, &id))?

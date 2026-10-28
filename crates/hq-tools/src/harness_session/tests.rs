@@ -2784,6 +2784,18 @@ async fn a_connector_claiming_a_session_still_meets_its_own_folder_fence() {
         "the claim must stop at the caller's own fence, not reach the delegation: {err}"
     );
     assert!(err.contains("/srv/private-repo"), "{err}");
+
+    let err = spawn
+        .execute(json!({
+            "harness": "claude-code",
+            "prompt": "do the thing",
+            "from_session": "hs-lead",
+            HANDOFF_SCOPE_ARG: true,
+        }))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("handoff key cannot start a worker"), "{err}");
 }
 
 #[tokio::test]
