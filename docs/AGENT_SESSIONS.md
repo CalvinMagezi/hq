@@ -400,21 +400,22 @@ session keeps running untouched and later events arrive as ordinary updates.
 the gate starts driven, bounded by the limits above. Set it to `false` for every new watch to
 start observing.
 
-### Sessions HQ spawned cannot start more sessions
+### Sessions HQ spawned start sessions only as their team
 
 Every pane HQ launches has `HQ_SESSION_ID=<session id>` in its environment. An MCP client in
 that pane can pass it on, and the gateway then marks the call as coming from an HQ-spawned
 session (the marker only adds restrictions, so the caller cannot gain anything by setting or
-omitting it). A marked call to `harness_session_spawn` or `harness_session_handoff` is refused,
-and `hq_ask` is refused in `mode: full` (`read_only` still works), with "HQ-spawned sessions
-cannot start further sessions or full-mode asks; ask the owner".
+omitting it). A marked call to `harness_session_spawn`, or one that names its session in
+`from_session`, becomes a delegation from that session: the new session is its worker, on a
+sub-task, in its folder and host, under the team limits in `agent_host.teams` (see "Delegating" in
+`docs/AGENT_MESSAGING.md`). A marked `harness_session_handoff` is refused, and `hq_ask` is refused
+in `mode: full` (`read_only` still works).
 
 - **HTTP `/mcp`**: the client config sends header `x-hq-session-id` filled from the variable.
   In the Claude Code MCP entry for `agent-hq` (verified against Claude Code 2.1.x on 2026-10-04:
   it expands the variable in HTTP headers, and a blank value arrives as an empty header):
   `"headers": {"x-hq-session-id": "${HQ_SESSION_ID:-}"}`. A blank value means no marker. A live
-  session started by HQ with this entry was refused both `hq_ask` in full mode and
-  `harness_session_spawn`. Add the header to every Claude profile's `agent-hq` entry
+  session started by HQ with this entry was refused `hq_ask` in full mode. Add the header to every Claude profile's `agent-hq` entry
   (`~/.claude.json`, and `.claude.json` in each `CLAUDE_CONFIG_DIR`); HQ does not edit client config.
 - **stdio `hq mcp`**: reads `HQ_SESSION_ID` from its own environment when the client passes it on.
 

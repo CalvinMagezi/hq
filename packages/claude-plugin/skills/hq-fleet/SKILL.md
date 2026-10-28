@@ -56,6 +56,15 @@ agent_host:
       env: { CLAUDE_CONFIG_DIR: /Users/you/.claude-work }
 ```
 
+## Inside an HQ session
+
+When `HQ_SESSION_ID` is set, HQ launched you and you lead or belong to a team. Start teammates as your workers, not as unrelated sessions:
+
+- With the session's own `hq-session` tools: `agent_delegate` with `title`, `description` (the whole brief), and optionally `harness`, `model` and `purpose` (`review` for a reviewer).
+- Through any other HQ connection: `harness_session_spawn` with `from_session` set to your `HQ_SESSION_ID`. It becomes the same delegation.
+
+A worker gets a sub-task under yours, runs in your folder and host, reports back to you when it finishes and stops when you stop. The owner limits how deep and how big a team grows and which other agents it may use; a refusal names the setting. Message a worker with `agent_message_send`. Delegate only work that is large and independent; do the rest yourself.
+
 ## Pick a lane
 
 Cheap, fast agents suit lookups and mechanical sweeps: renames, grep-and-fix, formatting, adding the same test case in many places. Stronger agents suit work that needs judgment. Keep the shared seams, the review and the commits for yourself.

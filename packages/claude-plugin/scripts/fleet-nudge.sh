@@ -30,9 +30,12 @@ if os.path.exists(mark):
     sys.exit(0)
 open(mark, "w").close()
 
+how = "harness_session_spawn with a task_id"
+if os.environ.get("HQ_SESSION_ID"):
+    how = "agent_delegate, or harness_session_spawn with from_session set to " + os.environ["HQ_SESSION_ID"]
 reason = (
     "Fleet first: a read-only lookup like this can run as an HQ harness session on a cheaper agent "
-    "(harness_session_spawn with a task_id, see the hq-fleet skill), which HQ records and the owner can watch. "
+    "(" + how + ", see the hq-fleet skill), which HQ records and the owner can watch. "
     "If no harness fits, HQ is down, or the answer is needed right now, send this same launch again and it will go through."
 )
 print(json.dumps({"hookSpecificOutput": {

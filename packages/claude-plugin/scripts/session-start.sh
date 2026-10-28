@@ -32,7 +32,11 @@ count_tasks() {
 
 if [ "$code" = "200" ]; then
   echo "HQ is reachable. Track multi-step work as HQ tasks and hold a lease while you work (hq-tasks skill)."
-  echo "Send bounded work to other agents with harness_session_spawn and a task_id (hq-fleet skill)."
+  if [ -n "${HQ_SESSION_ID:-}" ]; then
+    echo "You run inside HQ session ${HQ_SESSION_ID}, part of an HQ team. Start a teammate with agent_delegate (hq-session tools), or with harness_session_spawn and from_session \"${HQ_SESSION_ID}\" if you call HQ another way; talk to teammates with agent_message_send (hq-fleet skill)."
+  else
+    echo "Send bounded work to other agents with harness_session_spawn and a task_id (hq-fleet skill)."
+  fi
   echo "Put knowledge other sessions need in the vault, not in local memory (hq-vault skill)."
   in_progress="$(count_tasks in_progress)"
   blocked="$(count_tasks blocked)"

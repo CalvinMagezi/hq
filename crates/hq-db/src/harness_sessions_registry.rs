@@ -960,6 +960,58 @@ pub fn running_children(conn: &Connection, parent: &str) -> Result<Vec<HarnessSe
     Ok(rows)
 }
 
+/// Longest parent chain walked, a backstop against a corrupt cycle; far above any team depth.
+const MAX_CHAIN: usize = 64;
+
+/// The session at the top of `id`'s delegation chain: `id` itself when it has no parent.
+pub fn tree_root(conn: &Connection, id: &str) -> Result<String> {
+    let mut current = id.to_string();
+    for _ in 0..MAX_CHAIN {
+        let parent: Option<String> = conn
+            .query_row(
+                "SELECT parent_session_id FROM harness_sessions WHERE id = ?1",
+                params![current],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        match parent {
+            Some(p) if p != current => current = p,
+            _ => return Ok(current),
+        }
+    }
+    Ok(current)
+}
+
+/// The ids in the team under `?1`, the root included. `UNION` drops repeats, so a cycle ends.
+const TEAM_CTE: &str = "WITH RECURSIVE team(id) AS ( \
+       SELECT ?1 \
+       UNION SELECT h.id FROM harness_sessions h JOIN team ON h.parent_session_id = team.id \
+     )";
+
+/// How many sessions the team under `root` started in the last `minutes`, running or not.
+pub fn tree_started_since(conn: &Connection, root: &str, minutes: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        &format!(
+            "{TEAM_CTE} SELECT COUNT(*) FROM harness_sessions \
+             WHERE id IN (SELECT id FROM team) AND id != ?1 AND created_at >= datetime('now', ?2)"
+        ),
+        params![root, format!("-{minutes} minutes")],
+        |r| r.get(0),
+    )?)
+}
+
+/// Every session in the team under `root`, the root included, running or not, oldest first.
+pub fn tree_members(conn: &Connection, root: &str) -> Result<Vec<HarnessSessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "{TEAM_CTE} SELECT {COLS} FROM harness_sessions WHERE id IN (SELECT id FROM team) ORDER BY created_at, id"
+    ))?;
+    let rows = stmt
+        .query_map(params![root], row_to_session)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Give `observer` the sessions `observed` to watch. Each must exist; a session
 /// never observes itself. Repeats are kept once.
 pub fn add_observed(conn: &Connection, observer: &str, observed: &[String]) -> Result<()> {

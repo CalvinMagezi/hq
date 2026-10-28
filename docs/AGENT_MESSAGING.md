@@ -39,11 +39,18 @@ The recipient sees the text framed as coming from another agent:
 ## Delegating
 
 A session working on a task can hand part of it to a new session with
-`agent_delegate` (`{title, description, harness?}`). HQ files a sub-task under the
+`agent_delegate` (`{title, description, harness?, model?, purpose?}`). HQ files a sub-task under the
 delegator's task (or under that task's own parent, since sub-tasks go one level
 deep), starts a session on it in the delegator's directory and host, tells the
 worker who asked and how to report, and records the delegation on the delegator's
 task. The worker's own `task_comment_add` notes carry its session as author.
+
+The same delegation happens when a session inside an HQ pane calls
+`harness_session_spawn` through any other HQ connection: the gateway's
+`x-hq-session-id` marker, or a `from_session` argument naming the caller's own
+`HQ_SESSION_ID`, turns the spawn into a delegation from that session. `cwd`,
+`host` and `task_id` are then the team's and are ignored. Naming a session only
+adds limits, so a caller gains nothing by claiming one.
 
 When the worker finishes a turn or exits, HQ queues a message from it to the
 delegator on the worker's task thread, quoting its final reply, and the
@@ -51,12 +58,25 @@ delegator receives it the next time it is idle. A parent and a session it starte
 may message each other even though they work on different tasks, on the child's
 task thread.
 
-The worker always runs as the delegator's own agent, so it can never spend a
-different account's credit than the one the delegator is on. Delegations are taken one at a time, so two calls
-cannot both pass the limits before either worker exists.
+The worker runs as the delegator's own agent unless the owner lists others in
+`agent_host.teams.harnesses`. A profile that runs on another account spends that
+account's credit, so it is available only when the owner lists it. Delegations are
+taken one at a time, so two calls cannot both pass the limits before either worker exists.
 
-Limits: the chain is at most 2 levels deep, a session may have 20 children running
-at once, and may start 60 in an hour. Stopping a session stops the sessions
+Limits apply to the team: every session reachable through delegation from one root
+(the session a person or HQ's chat started). All are owner settings:
+
+```yaml
+agent_host:
+  teams:
+    max_depth: 3            # levels below the root; 1 makes every worker a leaf (1..=8)
+    max_live_per_tree: 8    # running sessions in the team, root included (2..=40)
+    max_live_children: 5    # running children of one session (1..=20)
+    max_spawns_per_hour: 30 # sessions the team starts per hour, ended ones included (1..=120)
+    harnesses: []           # other agents a delegator may start, e.g. [pi, copilot-lean]
+```
+
+A refusal names the setting that stopped it. Stopping a session stops the sessions
 started for it, and theirs.
 
 ## What is checked, and what is cleaned

@@ -2717,18 +2717,21 @@ async fn the_mode_tool_lets_a_driver_turn_observe_but_never_drive() {
 }
 
 #[tokio::test]
-async fn a_session_hq_spawned_cannot_spawn_or_hand_off() {
+async fn a_spawn_from_inside_a_session_is_a_delegation_and_a_handoff_is_refused() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let marked =
-        json!({"harness": "claude-code", "cwd": "/srv/x", SPAWNED_SESSION_ARG: "hs-claude-code-1"});
+    let marked = json!({"harness": "claude-code", "cwd": "/srv/x", "prompt": "fix it", SPAWNED_SESSION_ARG: "hs-claude-code-1"});
+    let named =
+        json!({"harness": "claude-code", "prompt": "fix it", "from_session": "hs-claude-code-1"});
     let spawn = tool(&db, None, "harness_session_spawn");
-    let handoff = tool(&db, None, "harness_session_handoff");
-    for err in [
-        spawn.execute(marked.clone()).await.unwrap_err(),
-        handoff.execute(marked).await.unwrap_err(),
-    ] {
-        assert_eq!(err.to_string(), SPAWNED_REFUSAL);
+    // The delegator is not a running session here, so the delegation path refuses it
+    // before anything starts; a plain launch would have failed differently.
+    for args in [marked.clone(), named] {
+        let err = spawn.execute(args).await.unwrap_err().to_string();
+        assert!(err.contains("delegating session is not running"), "{err}");
     }
+    let handoff = tool(&db, None, "harness_session_handoff");
+    let err = handoff.execute(marked).await.unwrap_err();
+    assert_eq!(err.to_string(), SPAWNED_REFUSAL);
 }
 
 #[tokio::test]

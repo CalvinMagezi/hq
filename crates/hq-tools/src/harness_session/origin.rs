@@ -41,8 +41,25 @@ pub fn caller_session(args: &Value) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
-pub const SPAWNED_REFUSAL: &str =
-    "HQ-spawned sessions cannot start further sessions or full-mode asks; ask the owner";
+pub const SPAWNED_REFUSAL: &str = "HQ-spawned sessions cannot resume, hand off or type into other sessions, or run full-mode asks; start a teammate with agent_delegate (or harness_session_spawn with from_session) and talk to it with agent_message_send";
+
+/// Argument a caller sets to say it runs inside HQ session `id` (the `HQ_SESSION_ID`
+/// its pane was launched with). It only restricts the caller: the spawn becomes a
+/// delegation from that session, under that team's limits.
+pub const FROM_SESSION_ARG: &str = "from_session";
+
+/// The session a spawn comes from: the one the gateway marked, else the one the
+/// caller named itself as.
+pub fn delegating_session(args: &Value) -> Option<String> {
+    spawned_session(args)
+        .or_else(|| {
+            args.get(FROM_SESSION_ARG)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .map(str::to_string)
+}
 
 /// The id of the HQ-spawned session this call came from, when the gateway marked it.
 pub fn spawned_session(args: &Value) -> Option<&str> {

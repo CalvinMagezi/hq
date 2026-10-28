@@ -1,6 +1,6 @@
 # Agent teams: sessions that start sessions
 
-Status: proposed. Nothing in this document is built yet.
+Status: in progress. Steps 1 and 2 are built (team limits, delegation to other agents, spawns from a session becoming delegations); the rest is proposed.
 
 The flow HQ is built for starts the conversation in HQ: the owner asks HQ for
 something, HQ starts one lead session on a task, and the lead decides how much
@@ -66,18 +66,26 @@ Agent SDK and Managed Agents multi-agent docs) and from the herdr changelog:
 
 ## Design
 
-### 1. One door, attested
+### 1. One door, steered
 
-- A Claude session HQ launches gets `disableClaudeAiConnectors: true` in the
-  private settings file the host already writes for its hooks (`hs-*.json`,
-  passed with `--settings`; verified to hide connectors in Claude Code
-  2.1.312). New config `agent_host.spawned_connectors: false` (default) keeps
-  that; `true` lets launched sessions keep the owner's claude.ai connectors
-  (their HQ calls are then the owner's, not the session's).
-- `harness_session_spawn`, `resume` and `handoff` stay refused for a marked
-  session, but the refusal names the way that works: `agent_delegate`.
-- `agent_delegate` becomes the only way a session starts a session, so there is
-  one authorization check, one parent link and one stop-with-parent rule.
+Hiding the owner's claude.ai connectors from launched sessions would close the
+side door, but it would also cut those sessions off from every other connector
+the owner relies on, so connectors stay. Instead the door leads to the same place:
+
+- A spawn from inside a session becomes a delegation. The gateway's
+  `x-hq-session-id` marker, or a `from_session` argument the caller sets to its own
+  `HQ_SESSION_ID`, makes `harness_session_spawn` run `agent_delegate`'s path: one
+  authorization check, one parent link, one stop-with-parent rule, the team's
+  limits. Naming a session only adds limits, so there is nothing to gain by
+  claiming one.
+- The plugin's session-start hook, its fleet nudge and the `hq-fleet` skill tell
+  a session with `HQ_SESSION_ID` set to start teammates that way.
+- `harness_session_resume` and `handoff` stay refused for a marked session, and
+  the refusal names `agent_delegate`.
+
+A session that ignores all of that and spawns through the connector without
+`from_session` still starts an unlinked session. That is the owner's grant being
+used as the owner's, and it is the accepted cost of keeping connectors on.
 
 ### 2. `agent_delegate`, full featured
 
@@ -187,9 +195,8 @@ supervisor's report.
 
 ## Order of work
 
-1. The side door: connector-free settings for launched Claude sessions, the
-   refusal pointing at `agent_delegate`, plugin hooks that branch on
-   `HQ_SESSION_ID`.
+1. The side door: spawns from a session become delegations, the refusal points
+   at `agent_delegate`, plugin hooks branch on `HQ_SESSION_ID`.
 2. `agent_delegate` arguments and `agent_host.teams` limits with `tree_root`.
 3. Tree scope, `team_roster`, the widened allowlist, the team folder.
 4. Brief and result contract, `owns` and `worktree`.

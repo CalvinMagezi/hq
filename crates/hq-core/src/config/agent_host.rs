@@ -148,6 +148,82 @@ pub struct AgentHostConfig {
     /// sessions until someone stops them. Applies to sessions started afterwards.
     #[serde(default = "default_idle_reap_hours")]
     pub idle_reap_hours: u64,
+
+    /// How far a team of sessions may grow when launched agents delegate work
+    /// to new sessions (`agent_delegate`).
+    #[serde(default)]
+    pub teams: TeamsConfig,
+}
+
+/// Limits on a team: every session reachable through delegation from one root
+/// (the session a person or HQ's chat started). Values are clamped on read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamsConfig {
+    /// Levels of delegation below the root (1 makes every delegated session a
+    /// leaf). Default 3, clamped to 1..=8.
+    #[serde(default = "default_team_max_depth")]
+    pub max_depth: u32,
+    /// Running sessions in one team, the root included. Default 8, clamped to 2..=40.
+    #[serde(default = "default_team_max_live")]
+    pub max_live_per_tree: u32,
+    /// Running children of one session, so one node cannot take the whole
+    /// team. Default 5, clamped to 1..=20.
+    #[serde(default = "default_team_max_children")]
+    pub max_live_children: u32,
+    /// Sessions a team may start per hour, running or ended. Default 30,
+    /// clamped to 1..=120.
+    #[serde(default = "default_team_spawns_per_hour")]
+    pub max_spawns_per_hour: u32,
+    /// Agents (built-in harnesses or `harness_profiles` names) a delegator may
+    /// start besides its own kind. Empty keeps every worker on the delegator's
+    /// own agent. A profile that runs on another account spends that account's
+    /// credit, so list one only when that is intended.
+    #[serde(default)]
+    pub harnesses: Vec<String>,
+}
+
+/// Upper bound on `max_live_children`, which callers can rely on at compile time.
+pub const TEAM_MAX_LIVE_CHILDREN_CEILING: u32 = 20;
+
+fn default_team_max_depth() -> u32 {
+    3
+}
+fn default_team_max_live() -> u32 {
+    8
+}
+fn default_team_max_children() -> u32 {
+    5
+}
+fn default_team_spawns_per_hour() -> u32 {
+    30
+}
+
+impl Default for TeamsConfig {
+    fn default() -> Self {
+        Self {
+            max_depth: default_team_max_depth(),
+            max_live_per_tree: default_team_max_live(),
+            max_live_children: default_team_max_children(),
+            max_spawns_per_hour: default_team_spawns_per_hour(),
+            harnesses: Vec::new(),
+        }
+    }
+}
+
+impl TeamsConfig {
+    pub fn depth_limit(&self) -> i64 {
+        i64::from(self.max_depth.clamp(1, 8))
+    }
+    pub fn live_per_tree(&self) -> usize {
+        self.max_live_per_tree.clamp(2, 40) as usize
+    }
+    pub fn live_children(&self) -> usize {
+        self.max_live_children
+            .clamp(1, TEAM_MAX_LIVE_CHILDREN_CEILING) as usize
+    }
+    pub fn spawns_per_hour(&self) -> i64 {
+        i64::from(self.max_spawns_per_hour.clamp(1, 120))
+    }
 }
 
 /// How agents on the built-in host are confined.
@@ -453,6 +529,7 @@ impl Default for AgentHostConfig {
             handoff_cwd_allow: Vec::new(),
             sandbox: SandboxConfig::default(),
             idle_reap_hours: default_idle_reap_hours(),
+            teams: TeamsConfig::default(),
         }
     }
 }
@@ -491,6 +568,40 @@ mod tests {
         assert_eq!(cfg.hosts["b"].transport, HostTransport::Tcp);
         assert_eq!(cfg.hosts["b"].addr.as_deref(), Some("10.77.0.2:47801"));
         assert!(cfg.hosts["b"].ssh.is_empty());
+    }
+
+    #[test]
+    fn team_limits_have_defaults_and_clamp() {
+        let cfg: AgentHostConfig = serde_yaml::from_str("{}").unwrap();
+        let t = &cfg.teams;
+        assert_eq!(
+            (
+                t.depth_limit(),
+                t.live_per_tree(),
+                t.live_children(),
+                t.spawns_per_hour()
+            ),
+            (3, 8, 5, 30)
+        );
+        assert!(
+            t.harnesses.is_empty(),
+            "workers run as their delegator by default"
+        );
+        let wild: AgentHostConfig = serde_yaml::from_str(
+            "teams:\n  max_depth: 0\n  max_live_per_tree: 999\n  max_live_children: 999\n  max_spawns_per_hour: 0\n  harnesses: [pi, copilot-lean]",
+        )
+        .unwrap();
+        let t = &wild.teams;
+        assert_eq!(
+            (
+                t.depth_limit(),
+                t.live_per_tree(),
+                t.live_children(),
+                t.spawns_per_hour()
+            ),
+            (1, 40, TEAM_MAX_LIVE_CHILDREN_CEILING as usize, 1)
+        );
+        assert_eq!(t.harnesses, ["pi", "copilot-lean"]);
     }
 
     #[test]

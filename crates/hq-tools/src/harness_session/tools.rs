@@ -166,7 +166,8 @@ impl HqTool for HarnessSessionSpawnTool {
                 "task_id": { "type": "string", "description": "HQ task (id or display id such as FR-053) this session works on. Must exist and not be complete. Its title and description become the goal when `goal` is omitted." },
                 "goal": { "type": "string", "description": "What the session should accomplish. HQ drives only a session with a specific goal and definition of done; without them it observes." },
                 "done_criteria": { "type": "string", "description": "Observable conditions that show the goal is met, e.g. a named test passing." },
-                "drive": { "type": "boolean", "description": "Web chat only. Omit to follow the default (a session no chat watched starts with Drive on, when its goal and definition of done pass the drive gate); false starts the watch with Drive off, or stops driving a session this chat already drives." }
+                "drive": { "type": "boolean", "description": "Web chat only. Omit to follow the default (a session no chat watched starts with Drive on, when its goal and definition of done pass the drive gate); false starts the watch with Drive off, or stops driving a session this chat already drives." },
+                "from_session": { "type": "string", "description": "Set this to your own HQ session id (the HQ_SESSION_ID environment variable) when you run inside a session HQ launched. The new session then joins your team as your worker: it gets a sub-task under your task, runs in your folder and host, reports back to you when it finishes, stops when you stop, and counts against the team's limits. cwd, host and task_id are then ignored." }
             },
             "required": ["harness"]
         })
@@ -175,7 +176,15 @@ impl HqTool for HarnessSessionSpawnTool {
         "harness"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        super::refuse_if_spawned(&args)?;
+        if let Some(from) = super::delegating_session(&args) {
+            return crate::a2a::delegate_from_spawn(
+                self.vault_path.clone(),
+                self.db.clone(),
+                from,
+                &args,
+            )
+            .await;
+        }
         let harness = arg_str(&args, "harness");
         if let Some(guest) = &self.family_guest {
             let canonical = |h: &str| {
