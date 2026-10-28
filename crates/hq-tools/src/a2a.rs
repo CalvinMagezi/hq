@@ -14,9 +14,10 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use crate::agent_host::AgentStatus;
-use crate::harness_session::{HarnessCategory, caller_session};
+use crate::harness_session::{HarnessCategory, Purpose, caller_session};
 use crate::registry::HqTool;
 use crate::util::arg_str;
+use hq_core::config::TeamsConfig;
 
 /// Longest message body, in characters.
 pub const MAX_MESSAGE_CHARS: usize = 8000;
@@ -24,14 +25,9 @@ pub const MAX_MESSAGE_CHARS: usize = 8000;
 pub const MAX_MESSAGES_PER_WINDOW: i64 = 60;
 pub const RATE_WINDOW_MINUTES: i64 = 60;
 
-/// How deep a chain of delegated sessions may go (a person's session is 0).
-pub const MAX_SPAWN_DEPTH: i64 = 2;
-/// Children one session may have running at once.
-pub const MAX_LIVE_CHILDREN: usize = 20;
-/// Sessions one session may start inside the rate window. Above the live cap,
-/// so a parent with every slot full can still replace children as they finish.
-pub const MAX_CHILDREN_PER_WINDOW: i64 = 60;
-const _: () = assert!(MAX_CHILDREN_PER_WINDOW as usize > MAX_LIVE_CHILDREN);
+/// The most children one session may have running, whatever the config says.
+/// The host's own caps are sized above it.
+pub const MAX_LIVE_CHILDREN: usize = hq_core::config::TEAM_MAX_LIVE_CHILDREN_CEILING as usize;
 /// The most output quoted to a parent when a child reports in.
 const REPORT_TAIL_CHARS: usize = 1500;
 
@@ -52,9 +48,14 @@ pub struct DelegateSlot {
 }
 
 /// Checks that `caller` may start another session: it is running, it works on a
-/// task to attach the work to, the chain is not too deep, it does not already have
-/// too many children running, and it is inside its hourly limit.
-pub fn authorize_delegate(db: &Database, caller: &str) -> Result<DelegateSlot> {
+/// task to attach the work to, and its team (every session under the same root)
+/// stays inside the owner's limits on depth, running sessions per node and per
+/// team, and sessions started per hour.
+pub fn authorize_delegate(
+    db: &Database,
+    caller: &str,
+    limits: &TeamsConfig,
+) -> Result<DelegateSlot> {
     let Some(parent) = running(db, caller)? else {
         bail!("the delegating session is not running");
     };
@@ -62,26 +63,41 @@ pub fn authorize_delegate(db: &Database, caller: &str) -> Result<DelegateSlot> {
         bail!("delegate from a session that works on a task: the new work is filed under it");
     };
     let depth = parent.spawn_depth + 1;
-    if depth > MAX_SPAWN_DEPTH {
+    let max_depth = limits.depth_limit();
+    if depth > max_depth {
         bail!(
-            "delegation is at most {MAX_SPAWN_DEPTH} levels deep, and this session is already at the limit"
+            "this team allows {max_depth} levels of delegation below its lead (agent_host.teams.max_depth), and this session is already at the limit; do the work yourself or report back"
         );
     }
     let id = parent.id.clone();
-    let (live, recent) = db.with_conn(move |c| {
+    let (children, live, recent) = db.with_conn(move |c| {
+        let root = registry::tree_root(c, &id)?;
+        let live = registry::tree_members(c, &root)?
+            .iter()
+            .filter(|s| s.status == registry::STATUS_RUNNING)
+            .count();
         Ok((
             registry::running_children(c, &id)?.len(),
-            registry::children_started_since(c, &id, RATE_WINDOW_MINUTES)?,
+            live,
+            registry::tree_started_since(c, &root, RATE_WINDOW_MINUTES)?,
         ))
     })?;
-    if live >= MAX_LIVE_CHILDREN {
+    let max_children = limits.live_children();
+    if children >= max_children {
         bail!(
-            "this session already has {live} running children (at most {MAX_LIVE_CHILDREN}); wait for one to finish"
+            "this session already has {children} running children (at most {max_children}, agent_host.teams.max_live_children); wait for one to finish"
         );
     }
-    if recent >= MAX_CHILDREN_PER_WINDOW {
+    let max_live = limits.live_per_tree();
+    if live >= max_live {
         bail!(
-            "rate limit: at most {MAX_CHILDREN_PER_WINDOW} delegated sessions per {RATE_WINDOW_MINUTES} minutes"
+            "this team already has {live} running sessions (at most {max_live}, agent_host.teams.max_live_per_tree); wait for one to finish"
+        );
+    }
+    let per_hour = limits.spawns_per_hour();
+    if recent >= per_hour {
+        bail!(
+            "rate limit: this team may start at most {per_hour} sessions per {RATE_WINDOW_MINUTES} minutes (agent_host.teams.max_spawns_per_hour)"
         );
     }
     Ok(DelegateSlot {
@@ -380,15 +396,17 @@ impl HqTool for AgentDelegateTool {
         "agent_delegate"
     }
     fn description(&self) -> &str {
-        "Hand a piece of your task to a new agent session. HQ files a sub-task under your task, starts a session on it in your directory, and tells it who delegated. The result comes back to you as a message when it finishes; you can also message it with agent_message_send. Limited depth, running children and rate. Only a launched agent session can use this."
+        "Hand a piece of your task to a new agent session. HQ files a sub-task under your task, starts a session on it in your directory, and tells it who delegated. The result comes back to you as a message when it finishes; you can also message it with agent_message_send. The worker may be another agent (harness) or model when the owner allows it, and a reviewer or researcher (purpose). The team's depth, size and start rate are limited by the owner. Only a launched agent session can use this."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
                 "title": { "type": "string", "description": "What the sub-task is, one line" },
-                "description": { "type": "string", "description": "Everything the worker needs: what to do and what done looks like" },
-                "harness": { "type": "string", "description": "Optional, and only your own agent kind is allowed; the worker runs as you" }
+                "description": { "type": "string", "description": "Everything the worker needs, since it sees nothing else: the objective, what done looks like, the files it owns, inputs as paths or links, and where to put its result" },
+                "harness": { "type": "string", "description": "Optional agent for the worker: your own kind by default, or one the owner listed in agent_host.teams.harnesses" },
+                "model": { "type": "string", "description": "Optional model for the worker, passed with its CLI's --model flag" },
+                "purpose": { "type": "string", "enum": ["code", "review", "research", "monitor", "general"], "description": "What the worker is for. Default: code for a coding agent. A reviewer or monitor never moves its task's status." }
             },
             "required": ["title", "description"]
         })
@@ -402,42 +420,61 @@ impl HqTool for AgentDelegateTool {
                 "agent_delegate is for launched agent sessions: connect with the session's own token"
             );
         };
-        let (title, description) = (
-            sanitize(&arg_str(&args, "title")),
-            sanitize(&arg_str(&args, "description")),
-        );
-        if title.trim().is_empty() || description.trim().is_empty() {
-            bail!("a delegation needs a title and a description");
-        }
+        let request = Delegation::from_args(&args)?;
         // The work runs on its own task, so a caller that disconnects mid-launch
         // cannot leave a started agent that no limit or stop can see.
         let (vault, db, caller) = (self.vault_path.clone(), self.db.clone(), caller.to_string());
-        let harness = arg_str(&args, "harness");
-        tokio::spawn(
-            async move { run_delegation(vault, db, caller, harness, title, description).await },
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))?
+        tokio::spawn(async move { run_delegation(vault, db, caller, request).await })
+            .await
+            .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))?
+    }
+}
+
+/// What a delegator asks for: the work, and which agent, model and role should do it.
+#[derive(Debug, Clone, Default)]
+pub struct Delegation {
+    pub title: String,
+    pub description: String,
+    /// Empty means the delegator's own agent.
+    pub harness: String,
+    pub model: Option<String>,
+    pub purpose: Option<Purpose>,
+}
+
+impl Delegation {
+    pub fn from_args(args: &Value) -> Result<Self> {
+        let request = Self {
+            title: sanitize(&arg_str(args, "title")),
+            description: sanitize(&arg_str(args, "description")),
+            harness: arg_str(args, "harness").trim().to_string(),
+            model: Some(arg_str(args, "model").trim().to_string()).filter(|m| !m.is_empty()),
+            purpose: Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
+        };
+        if request.title.trim().is_empty() || request.description.trim().is_empty() {
+            bail!("a delegation needs a title and a description");
+        }
+        Ok(request)
     }
 }
 
 /// Checks the limits, files the sub-task, starts the worker and records who it
 /// belongs to. Delegations are taken one at a time, so two calls cannot both
 /// pass the limits before either child exists.
-async fn run_delegation(
+pub async fn run_delegation(
     vault_path: std::path::PathBuf,
     db: Arc<Database>,
     caller: String,
-    requested_harness: String,
-    title: String,
-    description: String,
+    request: Delegation,
 ) -> Result<Value> {
     let _one_at_a_time = DELEGATION_LOCK.lock().await;
-    let slot = authorize_delegate(&db, &caller)?;
-    let harness = pick_harness(&requested_harness, &slot.parent.harness)?;
-    crate::harness_session::resolve(&harness)?;
-    let sub = file_subtask(&db, &slot, &caller, &title, &description)?;
-    let prompt = delegation_prompt(&slot.parent.id, &sub.display_id, &title, &description);
+    let teams = crate::harness_session::agent_host_config().teams;
+    let slot = authorize_delegate(&db, &caller, &teams)?;
+    let harness = pick_harness(&request.harness, &slot.parent.harness, &teams.harnesses)?;
+    // Before the sub-task exists, so a refused agent or model leaves nothing behind.
+    crate::harness_session::resolve(&harness)?.with_model(request.model.as_deref())?;
+    let (title, description) = (&request.title, &request.description);
+    let sub = file_subtask(&db, &slot, &caller, title, description)?;
+    let prompt = delegation_prompt(&slot.parent.id, &sub.display_id, title, description);
     let spawned = crate::harness_session::spawn_with(
         &vault_path,
         &db,
@@ -451,9 +488,9 @@ async fn run_delegation(
             watch: None,
             parent: Some((&slot.parent.id, slot.depth)),
             goal: crate::harness_session::GoalText::default(),
-            purpose: None,
+            purpose: request.purpose,
             observe: &[],
-            model: None,
+            model: request.model.as_deref(),
         },
     )
     .await?;
@@ -464,31 +501,121 @@ async fn run_delegation(
         .to_string();
     let (task, note) = (
         slot.task_id.clone(),
-        format!("Delegated {} to session {child}: {title}", sub.display_id),
+        format!(
+            "Delegated {} to session {child} ({harness}): {title}",
+            sub.display_id
+        ),
     );
     db.with_conn(move |c| t::add_comment(c, &task, &caller, &note, None))?;
     Ok(json!({
         "task_id": sub.display_id,
         "session_id": child,
+        "harness": harness,
+        "depth": slot.depth,
         "note": "the worker was told who delegated; its result comes back to you as a message when it finishes",
     }))
 }
 
+/// Longest title taken from a spawn's label, goal or prompt.
+const SPAWN_TITLE_CHARS: usize = 120;
+/// Spawn arguments that belong to the team, not the worker, when a session delegates by spawning.
+const TEAM_OWNED_SPAWN_ARGS: &[&str] = &["cwd", "host", "task_id", "observe"];
+
+/// `harness_session_spawn` called from inside a launched session: the same
+/// delegation `agent_delegate` makes, built from the spawn's own arguments.
+pub async fn delegate_from_spawn(
+    vault_path: std::path::PathBuf,
+    db: Arc<Database>,
+    from: String,
+    args: &Value,
+) -> Result<Value> {
+    let (request, ignored) = spawn_as_delegation(args)?;
+    let mut report =
+        tokio::spawn(async move { run_delegation(vault_path, db, from, request).await })
+            .await
+            .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))??;
+    if !ignored.is_empty() {
+        report["note"] = json!(format!(
+            "started as your worker on a new sub-task in your folder and host ({} ignored); its result comes back to you as a message when it finishes",
+            ignored.join(", ")
+        ));
+        report["ignored"] = json!(ignored);
+    }
+    Ok(report)
+}
+
+/// The delegation a spawn's arguments describe, and the team-owned arguments it ignores.
+fn spawn_as_delegation(args: &Value) -> Result<(Delegation, Vec<&'static str>)> {
+    let (label, goal, done, prompt) = (
+        arg_str(args, "label"),
+        arg_str(args, "goal"),
+        arg_str(args, "done_criteria"),
+        arg_str(args, "prompt"),
+    );
+    let title: String = [&label, &goal, &prompt]
+        .into_iter()
+        .find_map(|t| t.lines().map(str::trim).find(|l| !l.is_empty()))
+        .unwrap_or_default()
+        .chars()
+        .take(SPAWN_TITLE_CHARS)
+        .collect();
+    let parts = [
+        (prompt.trim(), ""),
+        (goal.trim(), "Goal: "),
+        (done.trim(), "Done when: "),
+    ];
+    let description = parts
+        .iter()
+        .filter(|(text, _)| !text.is_empty())
+        .map(|(text, lead)| format!("{lead}{text}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let request = Delegation::from_args(&json!({
+        "title": title,
+        "description": description,
+        "harness": arg_str(args, "harness"),
+        "model": arg_str(args, "model"),
+        "purpose": args.get("purpose").cloned().unwrap_or(Value::Null),
+    }))?;
+    let given = |v: &Value| !v.is_null() && v != "" && v != &json!([]);
+    let ignored = TEAM_OWNED_SPAWN_ARGS
+        .iter()
+        .copied()
+        .filter(|k| args.get(*k).is_some_and(given))
+        .collect();
+    Ok((request, ignored))
+}
+
 static DELEGATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Which agent a delegated session runs as: the delegator's own, always. A
-/// different one could be a configured account profile, which would spend another
-/// account's credit, or an agent kind not wired for delegation yet.
-fn pick_harness(requested: &str, parent: &str) -> Result<String> {
-    let want = if requested.is_empty() {
-        parent
-    } else {
-        requested
-    };
-    if want == parent {
-        return Ok(want.to_string());
+/// The one name an agent goes by, so an alias and its harness compare equal.
+fn canonical_harness(name: &str) -> &str {
+    match name {
+        "agy" => "antigravity",
+        other => other,
     }
-    bail!("a delegated session runs as the delegator's own agent ({parent}), not {want}")
+}
+
+/// Which agent a delegated session runs as: the delegator's own unless the owner
+/// listed others in `agent_host.teams.harnesses`. An unlisted profile could spend
+/// another account's credit, so only the owner opens one up.
+fn pick_harness(requested: &str, parent: &str, allowed: &[String]) -> Result<String> {
+    let same = |a: &str, b: &str| canonical_harness(a) == canonical_harness(b);
+    if requested.is_empty() || same(requested, parent) {
+        return Ok(parent.to_string());
+    }
+    if allowed.iter().any(|a| same(a, requested)) {
+        return Ok(requested.to_string());
+    }
+    if allowed.is_empty() {
+        bail!(
+            "a delegated session runs as the delegator's own agent ({parent}); the owner can allow others in agent_host.teams.harnesses"
+        );
+    }
+    bail!(
+        "{requested} is not an agent this team may start; allowed: {parent} (your own), {}",
+        allowed.join(", ")
+    )
 }
 
 /// The sub-task that holds the delegated work, filed under the delegator's task
@@ -1041,56 +1168,120 @@ mod tests {
     #[test]
     fn delegation_needs_a_running_session_with_a_task() {
         let w = world();
-        let slot = authorize_delegate(&w.db, "hs-a").unwrap();
+        let slot = authorize_delegate(&w.db, "hs-a", &TeamsConfig::default()).unwrap();
         assert_eq!((slot.task_id.as_str(), slot.depth), (w.task.as_str(), 1));
         assert!(
-            authorize_delegate(&w.db, "hs-loose").is_err(),
+            authorize_delegate(&w.db, "hs-loose", &TeamsConfig::default()).is_err(),
             "no task, nothing to file under"
         );
-        assert!(authorize_delegate(&w.db, "hs-ghost").is_err());
+        assert!(authorize_delegate(&w.db, "hs-ghost", &TeamsConfig::default()).is_err());
         w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-a"))
             .unwrap();
         assert!(
-            authorize_delegate(&w.db, "hs-a").is_err(),
+            authorize_delegate(&w.db, "hs-a", &TeamsConfig::default()).is_err(),
             "an ended session cannot delegate"
         );
     }
 
     #[test]
-    fn delegation_depth_children_and_rate_are_limited() {
+    fn the_team_depth_is_the_owners_setting() {
         let w = world();
-        // Depth: a grandchild's child would be level 3.
         child_of(&w.db, "hs-a", "hs-l1", "tk-2", 1);
         child_of(&w.db, "hs-l1", "hs-l2", "tk-2", 2);
-        let err = authorize_delegate(&w.db, "hs-l2").unwrap_err().to_string();
-        assert!(err.contains("levels deep"), "{err}");
-        assert!(
-            authorize_delegate(&w.db, "hs-l1").is_ok(),
-            "level 2 may still be started by level 1"
+        child_of(&w.db, "hs-l2", "hs-l3", "tk-2", 3);
+        let teams = TeamsConfig::default();
+        assert_eq!(
+            teams.depth_limit(),
+            3,
+            "Claude Code's own default for nesting"
         );
+        assert!(
+            authorize_delegate(&w.db, "hs-l2", &teams).is_ok(),
+            "level 3 may still be started by level 2"
+        );
+        let err = authorize_delegate(&w.db, "hs-l3", &teams)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("agent_host.teams.max_depth"), "{err}");
 
-        // Running children: hs-l1 already has one (hs-l2); the rest fill it.
-        for i in 1..MAX_LIVE_CHILDREN {
-            child_of(&w.db, "hs-l1", &format!("hs-full{i}"), "tk-2", 2);
-        }
-        let err = authorize_delegate(&w.db, "hs-l1").unwrap_err().to_string();
+        let leaves = TeamsConfig {
+            max_depth: 1,
+            ..TeamsConfig::default()
+        };
+        assert!(authorize_delegate(&w.db, "hs-a", &leaves).is_ok());
+        assert!(
+            authorize_delegate(&w.db, "hs-l1", &leaves).is_err(),
+            "depth 1 makes every delegated session a leaf"
+        );
+    }
+
+    #[test]
+    fn one_node_cannot_take_the_whole_team() {
+        let w = world();
+        let teams = TeamsConfig {
+            max_live_children: 2,
+            ..TeamsConfig::default()
+        };
+        child_of(&w.db, "hs-a", "hs-k1", "tk-2", 1);
+        child_of(&w.db, "hs-a", "hs-k2", "tk-2", 1);
+        let err = authorize_delegate(&w.db, "hs-a", &teams)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("running children"), "{err}");
-        w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-full1"))
+        assert!(
+            authorize_delegate(&w.db, "hs-k1", &teams).is_ok(),
+            "a child with room of its own may still delegate"
+        );
+        w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-k1"))
             .unwrap();
         assert!(
-            authorize_delegate(&w.db, "hs-l1").is_ok(),
+            authorize_delegate(&w.db, "hs-a", &teams).is_ok(),
             "a finished child frees a slot"
         );
+    }
 
-        // Rate: the window counts children that already ended too.
-        for i in 0..MAX_CHILDREN_PER_WINDOW {
+    #[test]
+    fn the_team_size_counts_every_level_not_one_node() {
+        let w = world();
+        let teams = TeamsConfig {
+            max_live_per_tree: 4,
+            ..TeamsConfig::default()
+        };
+        // hs-a, two children and a grandchild: four running in one team.
+        child_of(&w.db, "hs-a", "hs-k1", "tk-2", 1);
+        child_of(&w.db, "hs-a", "hs-k2", "tk-2", 1);
+        child_of(&w.db, "hs-k1", "hs-g1", "tk-2", 2);
+        for caller in ["hs-a", "hs-k2", "hs-g1"] {
+            let err = authorize_delegate(&w.db, caller, &teams)
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("max_live_per_tree"), "{caller}: {err}");
+        }
+        assert!(
+            authorize_delegate(&w.db, "hs-b", &teams).is_ok(),
+            "another team is not counted"
+        );
+    }
+
+    #[test]
+    fn the_start_rate_is_per_team_and_counts_ended_sessions() {
+        let w = world();
+        let teams = TeamsConfig {
+            max_spawns_per_hour: 3,
+            ..TeamsConfig::default()
+        };
+        child_of(&w.db, "hs-b", "hs-k1", "tk-2", 1);
+        for i in 0..2 {
             let id = format!("hs-old{i}");
-            child_of(&w.db, "hs-b", &id, "tk-2", 1);
+            child_of(&w.db, "hs-k1", &id, "tk-2", 2);
             w.db.with_conn(|c| registry::set_status_exited_if_running(c, &id))
                 .unwrap();
         }
-        let err = authorize_delegate(&w.db, "hs-b").unwrap_err().to_string();
+        let err = authorize_delegate(&w.db, "hs-b", &teams)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("rate limit"), "{err}");
+        assert!(authorize_delegate(&w.db, "hs-a", &teams).is_ok());
     }
 
     #[test]
@@ -1195,26 +1386,75 @@ mod tests {
     }
 
     #[test]
-    fn a_worker_may_use_the_default_agent_or_the_delegators_own_and_no_other_profile() {
-        assert_eq!(pick_harness("", "claude-code").unwrap(), "claude-code");
+    fn a_spawn_from_a_session_becomes_a_delegation_of_the_same_work() {
+        let (request, ignored) = spawn_as_delegation(&json!({
+            "harness": "pi",
+            "model": "haiku",
+            "purpose": "review",
+            "label": "",
+            "goal": "Check the parser\nin depth",
+            "done_criteria": "all parser tests pass",
+            "prompt": "Review crates/x/src/parse.rs",
+            "cwd": "/elsewhere",
+            "task_id": "",
+            "observe": [],
+        }))
+        .unwrap();
+        assert_eq!(request.title, "Check the parser");
         assert_eq!(
-            pick_harness("claude-code", "claude-code").unwrap(),
-            "claude-code"
+            request.description,
+            "Review crates/x/src/parse.rs\n\nGoal: Check the parser\nin depth\n\nDone when: all parser tests pass"
         );
-        // A configured account profile is not something an agent may choose.
-        assert!(pick_harness("claude-kola", "claude-code").is_err());
-        // But a delegator running as that profile may hand work to its own kind.
         assert_eq!(
-            pick_harness("claude-kola", "claude-kola").unwrap(),
-            "claude-kola"
+            (request.harness.as_str(), request.model.as_deref()),
+            ("pi", Some("haiku"))
+        );
+        assert_eq!(request.purpose, Some(Purpose::Review));
+        assert_eq!(
+            ignored,
+            vec!["cwd"],
+            "empty values are not reported as ignored"
         );
         assert!(
-            pick_harness("codex", "claude-code").is_err(),
-            "other agents are not enabled for delegation yet"
+            spawn_as_delegation(&json!({"harness": "pi"})).is_err(),
+            "a worker needs to be told what to do"
         );
-        // The default never means "the primary account" for a delegator on another one.
-        assert_eq!(pick_harness("", "claude-kola").unwrap(), "claude-kola");
-        assert!(pick_harness("claude-code", "claude-kola").is_err());
+    }
+
+    #[test]
+    fn a_worker_runs_as_the_delegator_unless_the_owner_listed_another_agent() {
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            pick_harness("", "claude-code", &none).unwrap(),
+            "claude-code"
+        );
+        assert_eq!(
+            pick_harness("claude-code", "claude-code", &none).unwrap(),
+            "claude-code"
+        );
+        let err = pick_harness("claude-kola", "claude-code", &none)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("agent_host.teams.harnesses"), "{err}");
+        // A delegator running as a profile hands work to its own kind by default.
+        assert_eq!(
+            pick_harness("", "claude-kola", &none).unwrap(),
+            "claude-kola"
+        );
+        assert!(pick_harness("claude-code", "claude-kola", &none).is_err());
+
+        let listed = vec![
+            "pi".to_string(),
+            "copilot-lean".to_string(),
+            "antigravity".to_string(),
+        ];
+        assert_eq!(pick_harness("pi", "claude-code", &listed).unwrap(), "pi");
+        assert_eq!(pick_harness("agy", "claude-code", &listed).unwrap(), "agy");
+        assert_eq!(pick_harness("antigravity", "agy", &none).unwrap(), "agy");
+        let err = pick_harness("codex", "claude-code", &listed)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("pi, copilot-lean, antigravity"), "{err}");
     }
 
     #[test]

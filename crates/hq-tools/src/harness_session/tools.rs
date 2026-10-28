@@ -166,7 +166,8 @@ impl HqTool for HarnessSessionSpawnTool {
                 "task_id": { "type": "string", "description": "HQ task (id or display id such as FR-053) this session works on. Must exist and not be complete. Its title and description become the goal when `goal` is omitted." },
                 "goal": { "type": "string", "description": "What the session should accomplish. HQ drives only a session with a specific goal and definition of done; without them it observes." },
                 "done_criteria": { "type": "string", "description": "Observable conditions that show the goal is met, e.g. a named test passing." },
-                "drive": { "type": "boolean", "description": "Web chat only. Omit to follow the default (a session no chat watched starts with Drive on, when its goal and definition of done pass the drive gate); false starts the watch with Drive off, or stops driving a session this chat already drives." }
+                "drive": { "type": "boolean", "description": "Web chat only. Omit to follow the default (a session no chat watched starts with Drive on, when its goal and definition of done pass the drive gate); false starts the watch with Drive off, or stops driving a session this chat already drives." },
+                "from_session": { "type": "string", "description": "Set this to your own HQ session id (the HQ_SESSION_ID environment variable) when you run inside a session HQ launched. The new session then joins your team as your worker: it gets a sub-task under your task, runs in your folder and host, reports back to you when it finishes, stops when you stop, and counts against the team's limits. cwd, host and task_id are then ignored." }
             },
             "required": ["harness"]
         })
@@ -175,7 +176,16 @@ impl HqTool for HarnessSessionSpawnTool {
         "harness"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        super::refuse_if_spawned(&args)?;
+        if let Some(from) = super::delegating_session(&args) {
+            // Only an agent inside a session delegates; a chat or a guest starting
+            // sessions keeps its own checks and caps below.
+            if self.chat.is_some() || self.family_guest.is_some() {
+                anyhow::bail!(
+                    "from_session is for an agent running inside an HQ session; a chat starts sessions without it"
+                );
+            }
+            return self.delegate_claimed(from, &args).await;
+        }
         let harness = arg_str(&args, "harness");
         if let Some(guest) = &self.family_guest {
             let canonical = |h: &str| {
@@ -295,6 +305,56 @@ impl HqTool for HarnessSessionSpawnTool {
         let brief = super::connector_brief(&args, &["prompt", "goal", "done_criteria"]);
         let cwd = report["cwd"].as_str().unwrap_or("unknown").to_string();
         super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &brief, &cwd);
+        Ok(report)
+    }
+}
+
+impl HarnessSessionSpawnTool {
+    /// A spawn from a caller that says it runs inside session `from`. The claim is
+    /// the caller's own word (the marker header or `from_session`), so the caller's
+    /// own checks still apply: its origin cap, and its folder fence on the
+    /// delegator's folder, where the worker will run. Only then does it become a
+    /// delegation from that session.
+    async fn delegate_claimed(&self, from: String, args: &Value) -> Result<Value> {
+        let delegator = {
+            let id = from.clone();
+            self.db.with_conn(move |c| registry::get(c, &id))?
+        }
+        .filter(|row| row.status == registry::STATUS_RUNNING)
+        .ok_or_else(|| anyhow::anyhow!("the delegating session is not running"))?;
+        let origin = super::call_origin(None, args);
+        super::check_origin_cap(&self.db, origin)?;
+        let cfg = hq_core::config::HqConfig::load()?;
+        let host_handle = crate::agent_host::host(Some(delegator.host.as_str()))?;
+        let start = choose_start_dir(
+            &host_handle,
+            Some(delegator.cwd.as_str()),
+            &cfg,
+            &delegator.host,
+            super::CwdBound::of(args),
+            (&arg_str(args, "label"), &delegator.harness),
+            &FolderAsker::of(&self.db, &self.vault_path, args),
+        )
+        .await?;
+        if start.path != std::path::Path::new(&delegator.cwd) {
+            anyhow::bail!(
+                "session {from}'s folder {} is not one this caller may start sessions in",
+                delegator.cwd
+            );
+        }
+        let report =
+            crate::a2a::delegate_from_spawn(self.vault_path.clone(), self.db.clone(), from, args)
+                .await?;
+        super::tag_origin(&self.db, &report, origin);
+        let brief = super::connector_brief(args, &["prompt", "goal", "done_criteria"]);
+        super::notify_connector_start(
+            &self.vault_path,
+            &self.db,
+            args,
+            &report,
+            &brief,
+            &delegator.cwd,
+        );
         Ok(report)
     }
 }
