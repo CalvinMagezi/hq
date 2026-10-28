@@ -75,7 +75,7 @@ fn unauthorized(
 
 /// A notification has no response in JSON-RPC, and clients such as Codex fail the connection on a body
 /// for one. A refusal is still returned so an unauthorized client learns why.
-fn answer(is_notification: bool, reply: Json<Value>) -> axum::response::Response {
+pub(crate) fn answer(is_notification: bool, reply: Json<Value>) -> axum::response::Response {
     use axum::response::IntoResponse;
     if is_notification && reply.0.get("error").is_none() {
         return axum::http::StatusCode::ACCEPTED.into_response();
@@ -217,8 +217,9 @@ fn session_for_secret(state: &WsState, secret: &str) -> Option<String> {
         .flatten()
 }
 
-/// The live connector grant an access token belongs to. A disabled connector honours none,
-/// so turning it off in config cuts every client at once.
+/// The live claude.ai grant an access token belongs to. A disabled connector honours none,
+/// so turning it off in config cuts every client at once, and a Gemini grant belongs to its
+/// own endpoint only.
 fn grant_for_secret(state: &WsState, secret: &str) -> Option<hq_db::mcp_connector::GrantAccess> {
     if state.connector.is_none() || secret.is_empty() {
         return None;
@@ -229,6 +230,7 @@ fn grant_for_secret(state: &WsState, secret: &str) -> Option<hq_db::mcp_connecto
         .with_conn(|c| hq_db::mcp_connector::grant_for_access_token(c, secret, now))
         .ok()
         .flatten()
+        .filter(|g| g.profile == hq_db::mcp_connector::Profile::Claude)
 }
 
 /// A grant's scope as a gateway allowlist; `None` is the full registry.
@@ -329,7 +331,7 @@ fn initialize_result(
 }
 
 /// The version a client asked for in `initialize`, when HQ speaks it, else the newest.
-fn negotiated_version(request: &Value) -> &'static str {
+pub(crate) fn negotiated_version(request: &Value) -> &'static str {
     let asked = request["params"]["protocolVersion"].as_str().unwrap_or("");
     PROTOCOL_VERSIONS
         .iter()
@@ -576,6 +578,7 @@ mod tests {
             public: "https://hq.example.com".into(),
             consent: "https://hq.example.com".into(),
             default_scope: "read_only".into(),
+            gemini: false,
         }));
         let res = send(&app, None, list()).await;
         assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);

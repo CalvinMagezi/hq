@@ -15,6 +15,15 @@ const CLAUDE_CALLBACKS: &[&str] = &[
     "https://claude.ai/api/mcp/auth_callback",
     "https://claude.com/api/mcp/auth_callback",
 ];
+/// Google's OAuth redirect hosts (Connected Apps OAuth guide); the path is `/r/<id>` or `/a/<id>`.
+const GOOGLE_REDIRECT_HOSTS: &[&str] = &[
+    "oauth-redirect.googleusercontent.com",
+    "oauth-redirect-sandbox.googleusercontent.com",
+    "oauth-redirect-test.googleusercontent.com",
+];
+const GOOGLE_REDIRECT_PREFIXES: &[&str] = &["/r/", "/a/"];
+/// Longest client label shown on the consent page.
+const MAX_CLIENT_LABEL_CHARS: usize = 60;
 /// PKCE verifiers are 43 to 128 characters, so an S256 challenge is exactly this long.
 const S256_CHALLENGE_LEN: usize = 43;
 const MAX_STATE_LEN: usize = 1024;
@@ -38,6 +47,32 @@ pub(crate) fn redirect_allowed(uri: &str) -> bool {
         && url.password().is_none()
 }
 
+/// Whether HQ will send a Gemini client's code to `uri`: https on one of Google's redirect
+/// hosts, under `/r/` or `/a/`, with nothing a client could use to bend where it lands.
+pub(crate) fn gemini_redirect_allowed(uri: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(uri) else {
+        return false;
+    };
+    let path = url.path();
+    let rest = GOOGLE_REDIRECT_PREFIXES
+        .iter()
+        .find_map(|p| path.strip_prefix(p))
+        .unwrap_or_default();
+    url.scheme() == "https"
+        && url
+            .host_str()
+            .is_some_and(|h| GOOGLE_REDIRECT_HOSTS.contains(&h))
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && !rest.is_empty()
+        && rest
+            .split('/')
+            .all(|seg| !seg.is_empty() && seg != "." && seg != "..")
+}
+
 fn base64url(s: &str) -> bool {
     s.bytes()
         .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
@@ -52,15 +87,34 @@ struct Checked<'a> {
     scope: &'a str,
 }
 
-fn check<'a>(q: &'a HashMap<String, String>, resource: &str) -> Result<Checked<'a>, &'static str> {
+/// Which redirects a profile accepts, and what to say when one is not.
+struct RedirectRule {
+    allowed: fn(&str) -> bool,
+    refusal: &'static str,
+}
+
+const CLAUDE_REDIRECTS: RedirectRule = RedirectRule {
+    allowed: redirect_allowed,
+    refusal: "the redirect URI is not Claude's",
+};
+const GEMINI_REDIRECTS: RedirectRule = RedirectRule {
+    allowed: gemini_redirect_allowed,
+    refusal: "the redirect URI is not Google's",
+};
+
+fn check<'a>(
+    q: &'a HashMap<String, String>,
+    resource: &str,
+    redirects: &RedirectRule,
+) -> Result<Checked<'a>, &'static str> {
     let get = |k: &str| q.get(k).map(String::as_str);
     if get("response_type") != Some("code") {
         return Err("only the authorization code flow is supported");
     }
     let client_id = get("client_id").ok_or("the request names no client")?;
     let redirect_uri = get("redirect_uri").ok_or("the request has no redirect URI")?;
-    if !redirect_allowed(redirect_uri) {
-        return Err("the redirect URI is not Claude's");
+    if !(redirects.allowed)(redirect_uri) {
+        return Err(redirects.refusal);
     }
     if get("code_challenge_method") != Some("S256") {
         return Err("PKCE with S256 is required");
@@ -109,8 +163,12 @@ pub(crate) async fn authorize(
     if !matches!(armed, Ok(Some(_))) {
         return not_armed();
     }
+    let client_id = q.get("client_id").map(String::as_str).unwrap_or_default();
+    if client_id.starts_with(store::CLIENT_PREFIX) {
+        return authorize_gemini(&state, settings, &q, now);
+    }
     let resource = settings.resource();
-    let checked = match check(&q, &resource) {
+    let checked = match check(&q, &resource, &CLAUDE_REDIRECTS) {
         Ok(c) => c,
         Err(why) => return page(StatusCode::BAD_REQUEST, INVALID, why),
     };
@@ -137,8 +195,66 @@ pub(crate) async fn authorize(
         code_challenge: checked.challenge,
         resource: &resource,
         scope: checked.scope,
+        profile: store::Profile::Claude,
     };
     store_request(&state, &new, now, settings.consent.starts_with("https://"))
+}
+
+/// A Gemini client's request: an owner-created client instead of a metadata document, Google's
+/// redirect hosts, and the Gemini resource. The secret is checked at the token endpoint.
+fn authorize_gemini(
+    state: &WsState,
+    settings: &hq_core::config::ConnectorSettings,
+    q: &HashMap<String, String>,
+    now: i64,
+) -> Response {
+    const REFUSED: &str = "This client cannot connect";
+    if !settings.gemini {
+        return page(
+            StatusCode::BAD_REQUEST,
+            REFUSED,
+            "the Gemini profile is off",
+        );
+    }
+    let resource = settings.gemini_resource();
+    let checked = match check(q, &resource, &GEMINI_REDIRECTS) {
+        Ok(c) => c,
+        Err(why) => return page(StatusCode::BAD_REQUEST, INVALID, why),
+    };
+    let client = match state
+        .db
+        .with_conn(|c| store::live_client(c, checked.client_id))
+    {
+        Ok(Some(c)) if c.profile == store::Profile::Gemini.as_str() => c,
+        Ok(_) => {
+            return page(
+                StatusCode::BAD_REQUEST,
+                REFUSED,
+                "this client is not one HQ accepts (create one with hq connector client add)",
+            );
+        }
+        Err(e) => {
+            tracing::error!("oauth: reading a client failed: {e}");
+            return page(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Something went wrong",
+                "try again",
+            );
+        }
+    };
+    let label: String = client.label.chars().take(MAX_CLIENT_LABEL_CHARS).collect();
+    let client_name = format!("Gemini ({label})");
+    let new = store::NewRequest {
+        client_id: checked.client_id,
+        client_name: &client_name,
+        redirect_uri: checked.redirect_uri,
+        state: checked.state,
+        code_challenge: checked.challenge,
+        resource: &resource,
+        scope: checked.scope,
+        profile: store::Profile::Gemini,
+    };
+    store_request(state, &new, now, settings.consent.starts_with("https://"))
 }
 
 const INVALID: &str = "This connection request is not valid";

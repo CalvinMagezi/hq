@@ -17,6 +17,7 @@ fn new_request() -> NewRequest<'static> {
         code_challenge: CHALLENGE,
         resource: RESOURCE,
         scope: "hq offline_access",
+        profile: Profile::Claude,
     }
 }
 
@@ -451,6 +452,176 @@ fn the_call_log_counts_per_grant_and_lists_newest_first() {
         )?;
         let left = recent_calls(c, None, 10)?;
         assert_eq!(left.len(), 2, "a write drops what aged out: {left:?}");
+        Ok(())
+    })
+    .unwrap();
+}
+
+const GEMINI_REDIRECT: &str = "https://oauth-redirect.googleusercontent.com/r/hq-test";
+const GEMINI_RESOURCE: &str = "https://hq.example.com/mcp/gemini/v1";
+
+/// A Gemini client, approved and exchanged with `scope` asked for on the consent page.
+fn gemini_connected(c: &Connection, scope: GrantScope) -> (NewClient, TokenPair) {
+    let client = create_client(c, "Gemini test", Profile::Gemini, NOW).unwrap();
+    arm(c, NOW + 600).unwrap();
+    let req = NewRequest {
+        client_id: &client.id,
+        client_name: "Gemini",
+        redirect_uri: GEMINI_REDIRECT,
+        state: None,
+        code_challenge: CHALLENGE,
+        resource: GEMINI_RESOURCE,
+        scope: "hq",
+        profile: Profile::Gemini,
+    };
+    let Pending::Created(id) = create_request(c, &req, BINDER, NOW).unwrap() else {
+        panic!("not stored");
+    };
+    let Approval::Issued { code, .. } =
+        approve_request(c, &id, BINDER, scope, "Gemini", NOW).unwrap()
+    else {
+        panic!("not approved");
+    };
+    let ex = CodeExchange {
+        code: &code,
+        client_id: &client.id,
+        redirect_uri: GEMINI_REDIRECT,
+        challenge: CHALLENGE,
+        resource: Some(GEMINI_RESOURCE),
+    };
+    let pair = redeem_code(c, &ex, NOW).unwrap().unwrap();
+    (client, pair)
+}
+
+#[test]
+fn a_gemini_grant_is_read_only_whatever_the_owner_picked_and_names_its_profile() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        let (_, pair) = gemini_connected(c, GrantScope::Full);
+        let access = grant_for_access_token(c, &pair.access_token, NOW)?.unwrap();
+        assert_eq!(access.grant_scope, GrantScope::ReadOnly);
+        assert_eq!(access.profile, Profile::Gemini);
+        let claude = connected(c);
+        let access = grant_for_access_token(c, &claude.access_token, NOW)?.unwrap();
+        assert_eq!(
+            access.grant_scope,
+            GrantScope::Full,
+            "Claude keeps the owner's pick"
+        );
+        assert_eq!(access.profile, Profile::Claude);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_gemini_refresh_keeps_its_token_and_reuse_never_revokes_the_grant() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        let (client, pair) = gemini_connected(c, GrantScope::ReadOnly);
+        let later = NOW + REUSE_GRACE_SECS * 10;
+        for at in [later, later + REUSE_GRACE_SECS * 10] {
+            let Refresh::Issued(next) = refresh(
+                c,
+                &pair.refresh_token,
+                &client.id,
+                Some(GEMINI_RESOURCE),
+                at,
+            )?
+            else {
+                panic!("refused at {at}");
+            };
+            assert_eq!(next.refresh_token, pair.refresh_token);
+            assert_ne!(next.access_token, pair.access_token);
+            assert!(grant_for_access_token(c, &next.access_token, at)?.is_some());
+        }
+        assert_eq!(
+            refresh(c, &pair.refresh_token, CLIENT, None, later)?,
+            Refresh::Refused,
+            "another client id"
+        );
+        let end = NOW + GRANT_MAX_SECS;
+        assert_eq!(
+            refresh(c, &pair.refresh_token, &client.id, None, end)?,
+            Refresh::Refused,
+            "never past the grant's end"
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn claude_refresh_tokens_still_rotate() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        let pair = connected(c);
+        let Refresh::Issued(next) = refresh(c, &pair.refresh_token, CLIENT, None, NOW)? else {
+            panic!("refused");
+        };
+        assert_ne!(next.refresh_token, pair.refresh_token);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_client_secret_authenticates_only_its_live_client() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        let a = create_client(c, "a", Profile::Gemini, NOW)?;
+        let b = create_client(c, "b", Profile::Gemini, NOW)?;
+        assert!(a.id.starts_with(CLIENT_PREFIX) && a.secret.starts_with(CLIENT_SECRET_PREFIX));
+        assert!(authenticate_client(c, &a.id, &a.secret)?);
+        assert!(!authenticate_client(c, &a.id, &b.secret)?);
+        assert!(!authenticate_client(c, &a.id, "")?);
+        assert!(!authenticate_client(c, "hqcl_unknown", &a.secret)?);
+        assert!(create_client(c, "x", Profile::Claude, NOW).is_err());
+        let stored: String = c.query_row(
+            "SELECT secret_hash FROM mcp_oauth_clients WHERE id = ?1",
+            params![a.id],
+            |r| r.get(0),
+        )?;
+        assert!(!stored.contains(&a.secret), "only the digest is kept");
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn revoking_a_client_ends_its_grants_and_its_secret_only() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        let (client, pair) = gemini_connected(c, GrantScope::ReadOnly);
+        let claude = connected(c);
+        assert!(revoke_client(c, &client.id, NOW)?);
+        assert!(!revoke_client(c, &client.id, NOW)?, "already revoked");
+        assert!(!authenticate_client(c, &client.id, &client.secret)?);
+        assert!(live_client(c, &client.id)?.is_none());
+        assert!(grant_for_access_token(c, &pair.access_token, NOW)?.is_none());
+        assert_eq!(
+            refresh(c, &pair.refresh_token, &client.id, None, NOW)?,
+            Refresh::Refused
+        );
+        assert!(grant_for_access_token(c, &claude.access_token, NOW)?.is_some());
+        assert_eq!(list_clients(c)?.len(), 1);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn rows_from_before_profiles_read_as_claude() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO mcp_oauth_grants (id, client_id, client_name, label, grant_scope, scope,
+                resource, created_at, expires_at)
+             VALUES ('grant-old', ?1, 'Claude', 'Claude', 'read_only', 'hq', ?2, ?3, ?4)",
+            params![CLIENT, RESOURCE, NOW, NOW + GRANT_MAX_SECS],
+        )?;
+        let grants = list_grants(c, false, NOW)?;
+        assert_eq!(grants[0].profile, "claude");
         Ok(())
     })
     .unwrap();

@@ -1,11 +1,12 @@
 //! `POST /oauth/token` and `POST /oauth/revoke`. Claude's servers call these with
 //! form-encoded bodies (RFC 6749, RFC 7009); Claude is a public client, so PKCE and the
-//! one-time refresh tokens are what bind the tokens to it.
+//! one-time refresh tokens are what bind the tokens to it. A Gemini client is confidential: it
+//! authenticates with the secret the owner created, and keeps one refresh token.
 
 use crate::WsState;
 use axum::Form;
 use axum::extract::State;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
 use hq_db::mcp_connector::{self as store, Refresh, TokenPair};
@@ -19,14 +20,102 @@ const MAX_VERIFIER_LEN: usize = 128;
 
 type Params = HashMap<String, String>;
 
-pub(crate) async fn token(State(state): State<Arc<WsState>>, Form(form): Form<Params>) -> Response {
+pub(crate) async fn token(
+    State(state): State<Arc<WsState>>,
+    headers: HeaderMap,
+    Form(form): Form<Params>,
+) -> Response {
     let now = super::now();
+    let form = match authenticated_form(&state, &headers, form) {
+        Ok(f) => f,
+        Err(Refusal::Request) => return oauth_error("invalid_request"),
+        Err(Refusal::Client) => return invalid_client(),
+    };
     match form.get("grant_type").map(String::as_str) {
         Some("authorization_code") => exchange_code(&state, &form, now),
         Some("refresh_token") => refresh(&state, &form, now),
         Some(_) => oauth_error("unsupported_grant_type"),
         None => oauth_error("invalid_request"),
     }
+}
+
+/// Why a token request was refused before its grant was looked at.
+enum Refusal {
+    Request,
+    Client,
+}
+
+/// The form with a confidential client's id in it once its secret checks out. A form from a
+/// client id HQ did not create (Claude's metadata URL) passes through untouched.
+fn authenticated_form(
+    state: &WsState,
+    headers: &HeaderMap,
+    mut form: Params,
+) -> Result<Params, Refusal> {
+    let basic = basic_credentials(headers);
+    let form_secret = form.get("client_secret").cloned();
+    if basic.is_some() && form_secret.is_some() {
+        return Err(Refusal::Request);
+    }
+    let form_id = form.get("client_id").cloned();
+    let (id, secret) = match basic {
+        Some((id, secret)) => {
+            if form_id.as_ref().is_some_and(|f| *f != id) {
+                return Err(Refusal::Request);
+            }
+            (Some(id), Some(secret))
+        }
+        None => (form_id, form_secret),
+    };
+    let Some(id) = id.filter(|id| id.starts_with(store::CLIENT_PREFIX)) else {
+        return Ok(form);
+    };
+    let gemini_on = state.connector.as_ref().is_some_and(|c| c.gemini);
+    let secret = secret.unwrap_or_default();
+    let valid = gemini_on
+        && !secret.is_empty()
+        && state
+            .db
+            .with_conn(|c| store::authenticate_client(c, &id, &secret))
+            .unwrap_or(false);
+    if !valid {
+        tracing::warn!("oauth: a registered client failed to authenticate");
+        return Err(Refusal::Client);
+    }
+    form.insert("client_id".into(), id);
+    Ok(form)
+}
+
+/// `Authorization: Basic` credentials, form-decoded as RFC 6749 section 2.3.1 requires.
+fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let encoded = value.strip_prefix("Basic ")?.trim();
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let pair = String::from_utf8(decoded).ok()?;
+    let (id, secret) = pair.split_once(':')?;
+    // A form-encoded value never holds a raw `&` or `#`, so either one is a malformed header.
+    let unescape = |s: &str| {
+        if s.contains(['&', '#']) {
+            return None;
+        }
+        let url = reqwest::Url::parse(&format!("http://form.invalid/?v={s}")).ok()?;
+        url.query_pairs().next().map(|(_, v)| v.into_owned())
+    };
+    Some((unescape(id)?, unescape(secret)?))
+}
+
+fn invalid_client() -> Response {
+    let mut res = no_store(
+        StatusCode::UNAUTHORIZED,
+        json!({ "error": "invalid_client" }),
+    );
+    res.headers_mut().insert(
+        header::WWW_AUTHENTICATE,
+        HeaderValue::from_static(r#"Basic realm="agent-hq""#),
+    );
+    res
 }
 
 /// The S256 challenge of a verifier, or `None` when the verifier breaks RFC 7636's rules.
@@ -114,9 +203,14 @@ fn announce_connection(state: &WsState, grant_id: &str, now: i64) {
     let Some(g) = grant else {
         return;
     };
+    let title = if g.profile == store::Profile::Gemini.as_str() {
+        "Gemini is connected to HQ"
+    } else {
+        "Claude is connected to HQ"
+    };
     state.notify_owner(
         super::guard::SOURCE,
-        "Claude is connected to HQ",
+        title,
         &format!(
             "\"{}\" ({}) can now reach HQ with {} access. Disconnect it any time in Settings or \
              with `hq connector revoke {}`.",

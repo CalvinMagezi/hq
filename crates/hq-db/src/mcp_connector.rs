@@ -10,6 +10,10 @@ use sha2::{Digest, Sha256};
 pub const ACCESS_PREFIX: &str = "hqo_";
 pub const REFRESH_PREFIX: &str = "hqr_";
 pub const CODE_PREFIX: &str = "hqc_";
+/// Owner-created confidential clients and their secrets. A CIMD client id is an https URL, so
+/// it can never start with this.
+pub const CLIENT_PREFIX: &str = "hqcl_";
+pub const CLIENT_SECRET_PREFIX: &str = "hqs_";
 
 pub const ACCESS_TTL_SECS: i64 = 60 * 60;
 pub const REFRESH_TTL_SECS: i64 = 30 * 24 * 60 * 60;
@@ -44,6 +48,45 @@ impl GrantScope {
             "read_only" => Some(Self::ReadOnly),
             "tasks" => Some(Self::Tasks),
             _ => None,
+        }
+    }
+}
+
+/// Which consumer a request, code or grant belongs to. Each has its own endpoint and rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Profile {
+    Claude,
+    Gemini,
+}
+
+impl Profile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Gemini => "gemini",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "claude" => Some(Self::Claude),
+            "gemini" => Some(Self::Gemini),
+            _ => None,
+        }
+    }
+
+    /// Whether this profile's refresh tokens are spent on use. Google's clients keep one
+    /// refresh token for the life of a link, so a rotated one would read as theft.
+    fn rotates_refresh_tokens(self) -> bool {
+        self == Self::Claude
+    }
+
+    /// The scope a grant may have, whatever the owner picked: Gemini is read-only for now.
+    fn clamp(self, scope: GrantScope) -> GrantScope {
+        match self {
+            Self::Claude => scope,
+            Self::Gemini => GrantScope::ReadOnly,
         }
     }
 }
@@ -118,6 +161,7 @@ pub struct NewRequest<'a> {
     pub code_challenge: &'a str,
     pub resource: &'a str,
     pub scope: &'a str,
+    pub profile: Profile,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,10 +178,11 @@ pub struct AuthRequest {
     pub expires_at: i64,
     /// The arming window it arrived in; a request from an earlier window cannot be approved.
     pub armed_until: i64,
+    pub profile: Profile,
 }
 
 const REQUEST_COLS: &str = "id, client_id, client_name, redirect_uri, state, code_challenge, \
-                            resource, scope, created_at, expires_at, armed_until";
+                            resource, scope, created_at, expires_at, armed_until, profile";
 
 /// Requests waiting at once, so an open window cannot be flooded.
 pub const MAX_PENDING_REQUESTS: i64 = 20;
@@ -155,6 +200,19 @@ fn request_from_row(r: &Row) -> rusqlite::Result<AuthRequest> {
         created_at: r.get(8)?,
         expires_at: r.get(9)?,
         armed_until: r.get(10)?,
+        profile: profile_column(r, 11)?,
+    })
+}
+
+/// A profile column; an unknown value is a corrupt row, not a Claude one.
+fn profile_column(r: &Row, idx: usize) -> rusqlite::Result<Profile> {
+    let raw: String = r.get(idx)?;
+    Profile::parse(&raw).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            idx,
+            rusqlite::types::Type::Text,
+            format!("unknown connector profile {raw:?}").into(),
+        )
     })
 }
 
@@ -189,7 +247,7 @@ pub fn create_request(
     tx.execute(
         &format!(
             "INSERT INTO mcp_oauth_requests ({REQUEST_COLS}, binder_hash)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)"
         ),
         params![
             id,
@@ -203,6 +261,7 @@ pub fn create_request(
             now,
             now + REQUEST_TTL_SECS,
             armed,
+            req.profile.as_str(),
             hash(binder)
         ],
     )?;
@@ -290,6 +349,7 @@ pub fn approve_request(
         tx.commit()?;
         return Ok(Approval::Gone);
     }
+    let grant_scope = request.profile.clamp(grant_scope);
     let code = issue_code(&tx, &request, grant_scope, label, now)?;
     disarm(&tx)?;
     tx.commit()?;
@@ -310,8 +370,8 @@ fn issue_code(
     let code = random_secret(CODE_PREFIX);
     conn.execute(
         "INSERT INTO mcp_oauth_codes (code_hash, client_id, client_name, redirect_uri,
-            code_challenge, resource, scope, grant_scope, label, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            code_challenge, resource, scope, grant_scope, label, expires_at, profile)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             hash(&code),
             req.client_id,
@@ -322,7 +382,8 @@ fn issue_code(
             req.scope,
             grant_scope.as_str(),
             label,
-            now + CODE_TTL_SECS
+            now + CODE_TTL_SECS,
+            req.profile.as_str()
         ],
     )?;
     Ok(code)
@@ -360,13 +421,14 @@ struct CodeRow {
     label: String,
     expires_at: i64,
     grant_id: Option<String>,
+    profile: String,
 }
 
 fn code_row(conn: &Connection, code_hash: &str) -> Result<Option<CodeRow>> {
     Ok(conn
         .query_row(
             "SELECT client_id, client_name, redirect_uri, code_challenge, resource, scope,
-                    grant_scope, label, expires_at, grant_id
+                    grant_scope, label, expires_at, grant_id, profile
              FROM mcp_oauth_codes WHERE code_hash = ?1",
             params![code_hash],
             |r| {
@@ -381,6 +443,7 @@ fn code_row(conn: &Connection, code_hash: &str) -> Result<Option<CodeRow>> {
                     label: r.get(7)?,
                     expires_at: r.get(8)?,
                     grant_id: r.get(9)?,
+                    profile: r.get(10)?,
                 })
             },
         )
@@ -435,11 +498,14 @@ fn create_grant(conn: &Connection, row: &CodeRow, now: i64) -> Result<String> {
     if GrantScope::parse(&row.grant_scope).is_none() {
         bail!("unknown grant scope {:?}", row.grant_scope);
     }
+    if Profile::parse(&row.profile).is_none() {
+        bail!("unknown connector profile {:?}", row.profile);
+    }
     let id = format!("grant-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     conn.execute(
         "INSERT INTO mcp_oauth_grants (id, client_id, client_name, label, grant_scope, scope,
-            resource, created_at, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            resource, created_at, expires_at, profile)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             id,
             row.client_id,
@@ -449,27 +515,72 @@ fn create_grant(conn: &Connection, row: &CodeRow, now: i64) -> Result<String> {
             row.scope,
             row.resource,
             now,
-            now + GRANT_MAX_SECS
+            now + GRANT_MAX_SECS,
+            row.profile
         ],
     )?;
     Ok(id)
 }
 
-fn issue_tokens(conn: &Connection, grant_id: &str, scope: &str, now: i64) -> Result<TokenPair> {
-    let grant_expires: i64 = conn.query_row(
+fn grant_expires_at(conn: &Connection, grant_id: &str) -> Result<i64> {
+    Ok(conn.query_row(
         "SELECT expires_at FROM mcp_oauth_grants WHERE id = ?1",
         params![grant_id],
         |r| r.get(0),
-    )?;
+    )?)
+}
+
+const INSERT_TOKEN: &str = "INSERT INTO mcp_oauth_tokens (token_hash, grant_id, kind, expires_at)
+                            VALUES (?1, ?2, ?3, ?4)";
+
+/// A new access token for the grant, and when it expires.
+fn issue_access(
+    conn: &Connection,
+    grant_id: &str,
+    grant_expires: i64,
+    now: i64,
+) -> Result<(String, i64)> {
     let access = random_secret(ACCESS_PREFIX);
-    let refresh = random_secret(REFRESH_PREFIX);
-    let insert = "INSERT INTO mcp_oauth_tokens (token_hash, grant_id, kind, expires_at)
-                  VALUES (?1, ?2, ?3, ?4)";
     let access_expires = (now + ACCESS_TTL_SECS).min(grant_expires);
     conn.execute(
-        insert,
+        INSERT_TOKEN,
         params![hash(&access), grant_id, "access", access_expires],
     )?;
+    Ok((access, access_expires))
+}
+
+/// A refresh for a profile that keeps its refresh token: a new access token, the same refresh
+/// token with its expiry pushed out, never past the grant's end.
+fn renew_access(
+    conn: &Connection,
+    grant_id: &str,
+    refresh_token: &str,
+    scope: &str,
+    now: i64,
+) -> Result<TokenPair> {
+    let grant_expires = grant_expires_at(conn, grant_id)?;
+    let (access, access_expires) = issue_access(conn, grant_id, grant_expires, now)?;
+    conn.execute(
+        "UPDATE mcp_oauth_tokens SET expires_at = ?2 WHERE token_hash = ?1 AND kind = 'refresh'",
+        params![
+            hash(refresh_token),
+            (now + REFRESH_TTL_SECS).min(grant_expires)
+        ],
+    )?;
+    Ok(TokenPair {
+        access_token: access,
+        refresh_token: refresh_token.to_string(),
+        expires_in: access_expires - now,
+        scope: scope.to_string(),
+        grant_id: grant_id.to_string(),
+    })
+}
+
+fn issue_tokens(conn: &Connection, grant_id: &str, scope: &str, now: i64) -> Result<TokenPair> {
+    let grant_expires = grant_expires_at(conn, grant_id)?;
+    let (access, access_expires) = issue_access(conn, grant_id, grant_expires, now)?;
+    let refresh = random_secret(REFRESH_PREFIX);
+    let insert = INSERT_TOKEN;
     let refresh_expires = (now + REFRESH_TTL_SECS).min(grant_expires);
     conn.execute(
         insert,
@@ -504,13 +615,14 @@ struct RefreshRow {
     scope: String,
     revoked: bool,
     grant_expires: i64,
+    profile: String,
 }
 
 fn refresh_row(conn: &Connection, token_hash: &str) -> Result<Option<RefreshRow>> {
     Ok(conn
         .query_row(
             "SELECT t.grant_id, t.expires_at, t.rotated_at, g.client_id, g.resource, g.scope,
-                    g.revoked_at IS NOT NULL, g.expires_at
+                    g.revoked_at IS NOT NULL, g.expires_at, g.profile
              FROM mcp_oauth_tokens t JOIN mcp_oauth_grants g ON g.id = t.grant_id
              WHERE t.token_hash = ?1 AND t.kind = 'refresh'",
             params![token_hash],
@@ -524,6 +636,7 @@ fn refresh_row(conn: &Connection, token_hash: &str) -> Result<Option<RefreshRow>
                     scope: r.get(5)?,
                     revoked: r.get(6)?,
                     grant_expires: r.get(7)?,
+                    profile: r.get(8)?,
                 })
             },
         )
@@ -556,8 +669,14 @@ pub fn refresh(
         && row.grant_expires > now
         && row.client_id == client_id
         && resource.is_none_or(|r| r == row.resource);
-    if !usable {
+    let Some(profile) = Profile::parse(&row.profile).filter(|_| usable) else {
         return Ok(Refresh::Refused);
+    };
+    if !profile.rotates_refresh_tokens() {
+        let tx = conn.unchecked_transaction()?;
+        let pair = renew_access(&tx, &row.grant_id, token, &row.scope, now)?;
+        tx.commit()?;
+        return Ok(Refresh::Issued(pair));
     }
     let tx = conn.unchecked_transaction()?;
     let claimed = tx.execute(
@@ -578,6 +697,7 @@ pub struct GrantAccess {
     pub grant_id: String,
     pub grant_scope: GrantScope,
     pub label: String,
+    pub profile: Profile,
 }
 
 /// Resolves a presented access token and records the grant as used.
@@ -589,20 +709,21 @@ pub fn grant_for_access_token(
     if !token.starts_with(ACCESS_PREFIX) {
         return Ok(None);
     }
-    let found: Option<(String, String, String)> = conn
+    let found: Option<(String, String, String, String)> = conn
         .query_row(
-            "SELECT g.id, g.grant_scope, g.label
+            "SELECT g.id, g.grant_scope, g.label, g.profile
              FROM mcp_oauth_tokens t JOIN mcp_oauth_grants g ON g.id = t.grant_id
              WHERE t.token_hash = ?1 AND t.kind = 'access' AND t.expires_at > ?2
                AND g.revoked_at IS NULL AND g.expires_at > ?2",
             params![hash(token), now],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .optional()?;
-    let Some((grant_id, scope, label)) = found else {
+    let Some((grant_id, scope, label, profile)) = found else {
         return Ok(None);
     };
-    let Some(grant_scope) = GrantScope::parse(&scope) else {
+    let (Some(grant_scope), Some(profile)) = (GrantScope::parse(&scope), Profile::parse(&profile))
+    else {
         return Ok(None);
     };
     conn.execute(
@@ -613,6 +734,7 @@ pub fn grant_for_access_token(
         grant_id,
         grant_scope,
         label,
+        profile,
     }))
 }
 
@@ -677,13 +799,14 @@ pub struct Grant {
     pub last_used_at: Option<i64>,
     pub revoked_at: Option<i64>,
     pub revoked_reason: Option<String>,
+    pub profile: String,
 }
 
 /// Grants, newest first: the live ones, or every grant ever made when `include_ended`.
 pub fn list_grants(conn: &Connection, include_ended: bool, now: i64) -> Result<Vec<Grant>> {
     let sql = format!(
         "SELECT id, client_id, client_name, label, grant_scope, created_at, expires_at,
-                last_used_at, revoked_at, revoked_reason
+                last_used_at, revoked_at, revoked_reason, profile
          FROM mcp_oauth_grants {} ORDER BY created_at DESC, rowid DESC",
         if include_ended {
             "WHERE ?1 IS NOT NULL"
@@ -705,10 +828,133 @@ pub fn list_grants(conn: &Connection, include_ended: bool, now: i64) -> Result<V
                 last_used_at: r.get(7)?,
                 revoked_at: r.get(8)?,
                 revoked_reason: r.get(9)?,
+                profile: r.get(10)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
     Ok(rows)
+}
+
+/// An owner-created confidential client as the owner sees it. The secret is never kept.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Client {
+    pub id: String,
+    pub label: String,
+    pub profile: String,
+    pub created_at: i64,
+    pub revoked_at: Option<i64>,
+}
+
+/// A new client's id and secret. The secret exists only here: show it once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewClient {
+    pub id: String,
+    pub secret: String,
+}
+
+/// Creates a confidential client for `profile`. Only Gemini uses them so far.
+pub fn create_client(
+    conn: &Connection,
+    label: &str,
+    profile: Profile,
+    now: i64,
+) -> Result<NewClient> {
+    if profile != Profile::Gemini {
+        bail!("only the gemini profile uses registered clients");
+    }
+    let id = format!("{CLIENT_PREFIX}{}", uuid::Uuid::new_v4().simple());
+    let secret = random_secret(CLIENT_SECRET_PREFIX);
+    conn.execute(
+        "INSERT INTO mcp_oauth_clients (id, label, profile, secret_hash, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, label, profile.as_str(), hash(&secret), now],
+    )?;
+    Ok(NewClient { id, secret })
+}
+
+/// The live client `id` names, without checking a secret: for the authorization request,
+/// where the client is identified but not yet authenticated.
+pub fn live_client(conn: &Connection, id: &str) -> Result<Option<Client>> {
+    Ok(conn
+        .query_row(
+            "SELECT id, label, profile, created_at, revoked_at FROM mcp_oauth_clients
+             WHERE id = ?1 AND revoked_at IS NULL",
+            params![id],
+            client_from_row,
+        )
+        .optional()?)
+}
+
+fn client_from_row(r: &Row) -> rusqlite::Result<Client> {
+    Ok(Client {
+        id: r.get(0)?,
+        label: r.get(1)?,
+        profile: r.get(2)?,
+        created_at: r.get(3)?,
+        revoked_at: r.get(4)?,
+    })
+}
+
+/// Whether `secret` is the live client `id`'s. Both sides are SHA-256 digests compared in
+/// constant time, so the comparison says nothing about how close a guess was.
+pub fn authenticate_client(conn: &Connection, id: &str, secret: &str) -> Result<bool> {
+    let stored: Option<String> = conn
+        .query_row(
+            "SELECT secret_hash FROM mcp_oauth_clients WHERE id = ?1 AND revoked_at IS NULL",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(stored) = stored else {
+        return Ok(false);
+    };
+    let presented = hash(secret);
+    let same = stored.len() == presented.len()
+        && stored
+            .bytes()
+            .zip(presented.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0;
+    Ok(same)
+}
+
+/// Clients, newest first, revoked ones included.
+pub fn list_clients(conn: &Connection) -> Result<Vec<Client>> {
+    let rows = conn
+        .prepare(
+            "SELECT id, label, profile, created_at, revoked_at FROM mcp_oauth_clients
+             ORDER BY created_at DESC, rowid DESC",
+        )?
+        .query_map([], client_from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
+/// Revokes a client and every grant it holds, in one transaction. False when it was unknown or
+/// already revoked.
+pub fn revoke_client(conn: &Connection, id: &str, now: i64) -> Result<bool> {
+    let tx = immediate(conn)?;
+    let changed = tx.execute(
+        "UPDATE mcp_oauth_clients SET revoked_at = ?2 WHERE id = ?1 AND revoked_at IS NULL",
+        params![id, now],
+    )?;
+    let grants: Vec<String> = tx
+        .prepare("SELECT id FROM mcp_oauth_grants WHERE client_id = ?1 AND revoked_at IS NULL")?
+        .query_map(params![id], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for grant in &grants {
+        revoke_grant(&tx, grant, "client revoked by the owner", now)?;
+    }
+    tx.execute(
+        "DELETE FROM mcp_oauth_codes WHERE client_id = ?1 AND used = 0",
+        params![id],
+    )?;
+    tx.execute(
+        "DELETE FROM mcp_oauth_requests WHERE client_id = ?1",
+        params![id],
+    )?;
+    tx.commit()?;
+    Ok(changed == 1)
 }
 
 /// How long the call log is kept.

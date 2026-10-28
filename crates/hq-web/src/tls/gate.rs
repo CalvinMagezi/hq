@@ -20,13 +20,18 @@ use std::sync::Arc;
 /// never served on this door: it belongs to the owner's browser on a private origin, and the
 /// handler that starts it trusts `Host`, which a public name must not be asked to protect.
 /// Whether a public name serves consent at all is decided with the connector-on-the-bridge work.
-pub const CONNECTOR_PATHS: [&str; 6] = [
+/// The last four are the Gemini profile's; they answer only while it is on, and 404 otherwise.
+pub const CONNECTOR_PATHS: [&str; 10] = [
     "/mcp",
     "/oauth/token",
     "/oauth/revoke",
     "/.well-known/oauth-protected-resource",
     "/.well-known/oauth-protected-resource/mcp",
     "/.well-known/oauth-authorization-server",
+    "/mcp/gemini/v1",
+    "/oauth/register",
+    "/.well-known/oauth-protected-resource/mcp/gemini/v1",
+    "/.well-known/oauth-authorization-server/gemini",
 ];
 
 /// Whether `path` is one of the connector's, byte for byte. No decoding and no normalising:

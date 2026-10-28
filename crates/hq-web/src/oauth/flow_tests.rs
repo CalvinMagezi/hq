@@ -56,6 +56,7 @@ fn settings(consent: &str) -> hq_core::config::ConnectorSettings {
         public: "https://hq.example.com".into(),
         consent: consent.into(),
         default_scope: "read_only".into(),
+        gemini: false,
     }
 }
 

@@ -48,7 +48,8 @@ pub use llm::*;
 pub use mcp_connector::{
     ACME_DIRECTORY_LETSENCRYPT, ACME_DIRECTORY_LETSENCRYPT_STAGING, CONNECTOR_SCOPES,
     ConnectorSettings, ConnectorTlsConfig, ConnectorTlsSettings, DOOR_DIR, DOOR_SOCKET_FILE,
-    DoorListen, DoorTarget, McpConnectorConfig,
+    DoorListen, DoorTarget, GEMINI_ISSUER_PATH, GEMINI_MCP_PATH, GeminiProfileConfig,
+    McpConnectorConfig,
 };
 pub use memory::*;
 pub use profile::{

@@ -37,7 +37,27 @@ pub enum ConnectorAction {
         #[arg(long, default_value_t = 30)]
         limit: i64,
     },
+    /// Clients HQ issues credentials to, for Gemini Apps (`docs/GEMINI_CONNECTOR.md`)
+    Client {
+        #[command(subcommand)]
+        action: ClientAction,
+    },
 }
+
+#[derive(Subcommand)]
+pub enum ClientAction {
+    /// Create a Gemini client and print its id and secret once
+    Add {
+        /// A name for the consent page and the grants list
+        label: String,
+    },
+    /// List clients, revoked ones included; secrets are never shown again
+    List,
+    /// Revoke a client: its secret stops working and its connections end
+    Revoke { id: String },
+}
+
+const MAX_CLIENT_LABEL_CHARS: usize = 60;
 
 pub fn run(config: &HqConfig, action: ConnectorAction) -> Result<()> {
     let db = hq_db::Database::open(&config.db_path())?;
@@ -115,10 +135,77 @@ fn run_with_output(
             }
             Ok(())
         }
+        ConnectorAction::Client { action } => client(config, db, action, now, out),
         ConnectorAction::Off => {
             let n =
                 db.with_conn(|c| store::revoke_all(c, "owner turned the connector off", now))?;
             writeln!(out, "Revoked {n} grant(s) and closed the window.")?;
+            Ok(())
+        }
+    }
+}
+
+fn client(
+    config: &HqConfig,
+    db: &hq_db::Database,
+    action: ClientAction,
+    now: i64,
+    out: &mut dyn Write,
+) -> Result<()> {
+    match action {
+        ClientAction::Add { label } => {
+            let label: String = label
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(MAX_CLIENT_LABEL_CHARS)
+                .collect();
+            if label.trim().is_empty() {
+                bail!("give the client a name");
+            }
+            let created = db.with_conn(|c| {
+                store::create_client(c, label.trim(), store::Profile::Gemini, now)
+            })?;
+            writeln!(out, "Client ID:     {}", created.id)?;
+            writeln!(out, "Client secret: {}", created.secret)?;
+            writeln!(
+                out,
+                "The secret is shown only now. Enter both in Gemini's custom app settings \
+                 (Additional settings), never in a chat or a ticket."
+            )?;
+            if !config.mcp_connector.gemini.enabled {
+                writeln!(
+                    out,
+                    "The Gemini profile is off: set mcp_connector.gemini.enabled and restart HQ."
+                )?;
+            }
+            Ok(())
+        }
+        ClientAction::List => {
+            let clients = db.with_conn(store::list_clients)?;
+            if clients.is_empty() {
+                writeln!(out, "No clients.")?;
+            }
+            for c in clients {
+                let state = c
+                    .revoked_at
+                    .map(|at| format!("revoked {}", clock(at)))
+                    .unwrap_or_else(|| "live".into());
+                writeln!(
+                    out,
+                    "{}  {}  {}  created {}  {state}",
+                    c.id,
+                    c.label,
+                    c.profile,
+                    clock(c.created_at)
+                )?;
+            }
+            Ok(())
+        }
+        ClientAction::Revoke { id } => {
+            if !db.with_conn(|c| store::revoke_client(c, &id, now))? {
+                bail!("no live client {id}; `hq connector client list` lists them");
+            }
+            writeln!(out, "Revoked {id} and every connection it held.")?;
             Ok(())
         }
     }
@@ -133,6 +220,13 @@ fn status(config: &HqConfig, db: &hq_db::Database, now: i64, out: &mut dyn Write
         Err(why) => writeln!(out, "Off: {why}")?,
         Ok(Some(s)) => {
             writeln!(out, "On. Connector URL for Claude: {}", s.resource())?;
+            if s.gemini {
+                writeln!(
+                    out,
+                    "Gemini profile on (read-only). MCP server URL for Gemini: {}",
+                    s.gemini_resource()
+                )?;
+            }
             writeln!(out, "Consent page origin: {}", s.consent)?;
             writeln!(
                 out,
@@ -272,6 +366,65 @@ mod tests {
         assert!(
             log.contains("grant-a") && log.contains("vault_search"),
             "{log}"
+        );
+    }
+
+    #[test]
+    fn a_client_is_created_once_with_its_secret_listed_without_it_and_revoked() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let mut cfg = config(true);
+        cfg.mcp_connector.gemini.enabled = true;
+        let add = |label: &str| {
+            run(
+                &cfg,
+                &db,
+                ConnectorAction::Client {
+                    action: ClientAction::Add {
+                        label: label.into(),
+                    },
+                },
+            )
+        };
+        assert!(add("  ").is_err());
+        let shown = add("Pixel").unwrap();
+        let id = shown
+            .lines()
+            .find_map(|l| l.strip_prefix("Client ID:"))
+            .unwrap()
+            .trim()
+            .to_string();
+        let secret = shown
+            .lines()
+            .find_map(|l| l.strip_prefix("Client secret:"))
+            .unwrap()
+            .trim()
+            .to_string();
+        assert!(id.starts_with(store::CLIENT_PREFIX));
+        let list = run(
+            &cfg,
+            &db,
+            ConnectorAction::Client {
+                action: ClientAction::List,
+            },
+        )
+        .unwrap();
+        assert!(list.contains(&id) && list.contains("live"), "{list}");
+        assert!(!list.contains(&secret), "the secret is never shown again");
+        let revoke = || {
+            run(
+                &cfg,
+                &db,
+                ConnectorAction::Client {
+                    action: ClientAction::Revoke { id: id.clone() },
+                },
+            )
+        };
+        assert!(revoke().is_ok());
+        assert!(revoke().is_err(), "already revoked");
+        let status = run(&cfg, &db, ConnectorAction::Status).unwrap();
+        assert!(
+            status.contains("https://hq.example.com/mcp/gemini/v1"),
+            "{status}"
         );
     }
 }

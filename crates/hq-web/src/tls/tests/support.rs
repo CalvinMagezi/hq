@@ -64,6 +64,7 @@ fn build_world(profile: hq_core::config::Profile, host: &str, consent: Option<&s
             public: format!("https://{host}"),
             consent: format!("https://{consent}"),
             default_scope: "read_only".into(),
+            gemini: false,
         });
     }
     let state = Arc::new(state);
@@ -107,6 +108,7 @@ pub fn mint_grant(state: &WsState) -> grants::TokenPair {
                 code_challenge: CHALLENGE,
                 resource: &resource,
                 scope: "hq",
+                profile: grants::Profile::Claude,
             };
             let grants::Pending::Created(id) = grants::create_request(c, &new, "binder", now)?
             else {

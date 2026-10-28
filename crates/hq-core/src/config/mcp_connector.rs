@@ -28,6 +28,19 @@ pub struct McpConnectorConfig {
     /// bytes (`hq edge`) instead of an ingress that ends TLS for it.
     #[serde(default)]
     pub tls: ConnectorTlsConfig,
+
+    /// A second, read-only profile for Gemini Apps custom MCP connections, on its own versioned
+    /// path (`docs/GEMINI_CONNECTOR.md`). Needs the connector on; off by default.
+    #[serde(default)]
+    pub gemini: GeminiProfileConfig,
+}
+
+/// The Gemini Apps profile. Clients are created with `hq connector client add`, never here, so
+/// no secret is ever in this file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GeminiProfileConfig {
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// Lets HQ end TLS itself for the connector's public name and get its certificate through
@@ -146,12 +159,29 @@ pub struct ConnectorSettings {
     pub public: String,
     pub consent: String,
     pub default_scope: String,
+    /// Whether the Gemini Apps profile's routes exist.
+    pub gemini: bool,
 }
+
+/// Where the Gemini profile's MCP endpoint lives, versioned because Google snapshots its tools.
+pub const GEMINI_MCP_PATH: &str = "/mcp/gemini/v1";
+/// The path the Gemini profile's authorization server issuer adds to the public origin.
+pub const GEMINI_ISSUER_PATH: &str = "/gemini";
 
 impl ConnectorSettings {
     /// The protected resource Claude is given tokens for.
     pub fn resource(&self) -> String {
         format!("{}/mcp", self.public)
+    }
+
+    /// The protected resource Gemini is given tokens for.
+    pub fn gemini_resource(&self) -> String {
+        format!("{}{GEMINI_MCP_PATH}", self.public)
+    }
+
+    /// The Gemini profile's issuer, distinct from Claude's so its metadata can differ.
+    pub fn gemini_issuer(&self) -> String {
+        format!("{}{GEMINI_ISSUER_PATH}", self.public)
     }
 }
 
@@ -279,6 +309,7 @@ impl McpConnectorConfig {
             public,
             consent,
             default_scope,
+            gemini: self.gemini.enabled,
         }))
     }
 }

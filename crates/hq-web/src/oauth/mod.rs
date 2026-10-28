@@ -4,6 +4,7 @@
 mod authorize;
 mod cimd;
 mod consent;
+pub(crate) mod gemini;
 pub(crate) mod guard;
 mod token;
 
@@ -26,6 +27,14 @@ pub(crate) const PROTECTED_RESOURCE_MCP_PATH: &str = "/.well-known/oauth-protect
 pub(crate) const SCOPE: &str = "hq";
 /// Where Claude reads the authorization server metadata (RFC 8414).
 pub(crate) const AUTHORIZATION_SERVER_PATH: &str = "/.well-known/oauth-authorization-server";
+/// The Gemini issuer's metadata: RFC 8414's path form for an issuer at `/gemini`.
+pub(crate) const GEMINI_AUTHORIZATION_SERVER_PATH: &str =
+    "/.well-known/oauth-authorization-server/gemini";
+/// The Gemini resource's metadata (RFC 9728, path-suffixed for `/mcp/gemini/v1`).
+pub(crate) const GEMINI_PROTECTED_RESOURCE_PATH: &str =
+    "/.well-known/oauth-protected-resource/mcp/gemini/v1";
+/// Advertised because Google's discovery requires a registration endpoint; it registers nothing.
+pub(crate) const REGISTRATION_PATH: &str = "/oauth/register";
 
 /// Unix seconds, the clock every OAuth record is kept in.
 pub(crate) fn now() -> i64 {
@@ -42,6 +51,21 @@ pub(crate) fn routes(
     if state.connector.is_none() {
         return router;
     }
+    let router = if state.connector.as_ref().is_some_and(|c| c.gemini) {
+        router
+            .route(
+                GEMINI_AUTHORIZATION_SERVER_PATH,
+                get(gemini_authorization_server),
+            )
+            .route(
+                GEMINI_PROTECTED_RESOURCE_PATH,
+                get(gemini_protected_resource),
+            )
+            .route(REGISTRATION_PATH, post(refuse_registration))
+            .route(hq_core::config::GEMINI_MCP_PATH, post(gemini::mcp_handler))
+    } else {
+        router
+    };
     router
         .route(PROTECTED_RESOURCE_PATH, get(protected_resource))
         .route(PROTECTED_RESOURCE_MCP_PATH, get(protected_resource))
@@ -93,6 +117,60 @@ fn server_metadata(s: &ConnectorSettings) -> Value {
     })
 }
 
+async fn gemini_authorization_server(State(state): State<Arc<WsState>>) -> Json<Value> {
+    let settings = state
+        .connector
+        .as_ref()
+        .expect("route registered only with a connector");
+    Json(gemini_server_metadata(settings))
+}
+
+/// Gemini's own issuer, so nothing in Claude's document changes. Same endpoints: they tell the
+/// profiles apart by client id, and a Gemini client must authenticate with its secret.
+fn gemini_server_metadata(s: &ConnectorSettings) -> Value {
+    json!({
+        "issuer": s.gemini_issuer(),
+        "authorization_endpoint": format!("{}/oauth/authorize", s.consent),
+        "token_endpoint": format!("{}/oauth/token", s.public),
+        "revocation_endpoint": format!("{}/oauth/revoke", s.public),
+        "registration_endpoint": format!("{}{REGISTRATION_PATH}", s.public),
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "revocation_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+        "scopes_supported": [SCOPE],
+    })
+}
+
+async fn gemini_protected_resource(State(state): State<Arc<WsState>>) -> Json<Value> {
+    let s = state
+        .connector
+        .as_ref()
+        .expect("route registered only with a connector");
+    Json(json!({
+        "resource": s.gemini_resource(),
+        "authorization_servers": [s.gemini_issuer()],
+        "scopes_supported": [SCOPE],
+        "bearer_methods_supported": ["header"],
+        "resource_name": "Agent HQ (read-only)",
+    }))
+}
+
+/// RFC 7591's refusal: clients are created by the owner with `hq connector client add`.
+async fn refuse_registration() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        Json(json!({
+            "error": "invalid_client_metadata",
+            "error_description": "this server does not register clients; enter the client id \
+                                  and secret the owner created",
+        })),
+    )
+        .into_response()
+}
+
 async fn protected_resource(State(state): State<Arc<WsState>>) -> Json<Value> {
     let origins = state
         .connector
@@ -118,15 +196,26 @@ pub(crate) fn www_authenticate(
     origins: Option<&ConnectorSettings>,
     secret_presented: bool,
 ) -> HeaderValue {
+    let metadata = origins.map(|o| format!("{}{PROTECTED_RESOURCE_PATH}", o.public));
+    challenge(metadata.as_deref(), secret_presented)
+}
+
+/// The challenge for a refused call to the Gemini resource, pointing at its own metadata.
+pub(crate) fn gemini_www_authenticate(
+    origins: &ConnectorSettings,
+    secret_presented: bool,
+) -> HeaderValue {
+    let metadata = format!("{}{GEMINI_PROTECTED_RESOURCE_PATH}", origins.public);
+    challenge(Some(&metadata), secret_presented)
+}
+
+fn challenge(resource_metadata: Option<&str>, secret_presented: bool) -> HeaderValue {
     let mut params = vec![r#"realm="agent-hq""#.to_string()];
     if secret_presented {
         params.push(r#"error="invalid_token""#.into());
     }
-    if let Some(o) = origins {
-        params.push(format!(
-            r#"resource_metadata="{}{PROTECTED_RESOURCE_PATH}""#,
-            o.public
-        ));
+    if let Some(url) = resource_metadata {
+        params.push(format!(r#"resource_metadata="{url}""#));
     }
     HeaderValue::from_str(&format!("Bearer {}", params.join(", ")))
         .unwrap_or_else(|_| HeaderValue::from_static("Bearer"))
@@ -144,7 +233,102 @@ mod tests {
             public: "https://hq.example.com".into(),
             consent: "https://hq.example.ts.net".into(),
             default_scope: "read_only".into(),
+            gemini: false,
         }
+    }
+
+    /// Claude's documents, byte for byte: the Gemini profile must never change them.
+    #[test]
+    fn claude_metadata_documents_are_pinned() {
+        let mut gemini_on = origins();
+        gemini_on.gemini = true;
+        for s in [origins(), gemini_on] {
+            assert_eq!(
+                server_metadata(&s),
+                json!({
+                    "issuer": "https://hq.example.com",
+                    "authorization_endpoint": "https://hq.example.ts.net/oauth/authorize",
+                    "token_endpoint": "https://hq.example.com/oauth/token",
+                    "revocation_endpoint": "https://hq.example.com/oauth/revoke",
+                    "response_types_supported": ["code"],
+                    "grant_types_supported": ["authorization_code", "refresh_token"],
+                    "code_challenge_methods_supported": ["S256"],
+                    "token_endpoint_auth_methods_supported": ["none"],
+                    "revocation_endpoint_auth_methods_supported": ["none"],
+                    "client_id_metadata_document_supported": true,
+                    "scopes_supported": ["hq", "offline_access"],
+                })
+            );
+            assert_eq!(
+                resource_metadata(&s),
+                json!({
+                    "resource": "https://hq.example.com/mcp",
+                    "authorization_servers": ["https://hq.example.com"],
+                    "scopes_supported": ["hq"],
+                    "bearer_methods_supported": ["header"],
+                    "resource_name": "Agent HQ",
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn gemini_metadata_has_its_own_issuer_secret_auth_and_a_registration_endpoint() {
+        let m = gemini_server_metadata(&origins());
+        assert_eq!(m["issuer"], "https://hq.example.com/gemini");
+        assert_eq!(m["token_endpoint"], "https://hq.example.com/oauth/token");
+        assert_eq!(
+            m["registration_endpoint"],
+            "https://hq.example.com/oauth/register"
+        );
+        assert_eq!(
+            m["token_endpoint_auth_methods_supported"],
+            json!(["client_secret_basic", "client_secret_post"])
+        );
+        assert_eq!(m["response_types_supported"], json!(["code"]));
+        assert_eq!(m["code_challenge_methods_supported"], json!(["S256"]));
+        assert!(m.get("client_id_metadata_document_supported").is_none());
+        assert_eq!(
+            gemini_www_authenticate(&origins(), false).to_str().unwrap(),
+            r#"Bearer realm="agent-hq", resource_metadata="https://hq.example.com/.well-known/oauth-protected-resource/mcp/gemini/v1""#
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_routes_exist_only_with_the_profile_on() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.connector = Some(origins());
+        let off = Arc::new(state);
+        let paths = [
+            GEMINI_AUTHORIZATION_SERVER_PATH,
+            GEMINI_PROTECTED_RESOURCE_PATH,
+        ];
+        for path in paths {
+            let router = routes(axum::Router::new(), &off).with_state(off.clone());
+            assert_eq!(
+                get(router, path).await.status(),
+                axum::http::StatusCode::NOT_FOUND,
+                "{path}"
+            );
+        }
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        let mut s = origins();
+        s.gemini = true;
+        state.connector = Some(s);
+        let on = Arc::new(state);
+        for path in paths {
+            let router = routes(axum::Router::new(), &on).with_state(on.clone());
+            let res = get(router, path).await;
+            assert_eq!(res.status(), axum::http::StatusCode::OK, "{path}");
+        }
+        let router = routes(axum::Router::new(), &on).with_state(on.clone());
+        let res = get(router, hq_core::config::GEMINI_MCP_PATH).await;
+        assert_eq!(
+            res.status(),
+            axum::http::StatusCode::METHOD_NOT_ALLOWED,
+            "GET has no stream"
+        );
     }
 
     #[test]

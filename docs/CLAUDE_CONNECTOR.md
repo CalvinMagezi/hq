@@ -4,6 +4,7 @@ HQ can be added to claude.ai (web, Desktop and mobile) and to Claude Code as a c
 A Claude conversation then reaches the same two gateway tools every other MCP client gets,
 `hq_discover` and `hq_call`, with an access level you choose when you approve it. It is off by
 default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
+A separate read-only profile for Gemini Apps can run beside it: `docs/GEMINI_CONNECTOR.md`.
 
 ## What you need
 

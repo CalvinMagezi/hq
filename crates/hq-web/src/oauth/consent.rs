@@ -167,6 +167,7 @@ pub(crate) async fn request(
             "client_id": req.client_id,
             "redirect_host": host_of(&req.redirect_uri),
             "resource": req.resource,
+            "profile": req.profile,
             "created_at": req.created_at,
             "expires_at": req.expires_at,
             "armed_until": armed_until.filter(|a| *a == req.armed_until),
@@ -213,9 +214,16 @@ pub(crate) async fn approve(
             "scope must be full, read_only or tasks",
         );
     };
-    let label = clean_label(body.label.as_deref());
     let now = super::now();
     let binder = binder(&headers);
+    // The store forces a Gemini grant to read-only; the label only needs the right default.
+    let profile = state
+        .db
+        .with_conn(|c| store::get_request(c, &id, &binder, now))
+        .ok()
+        .flatten()
+        .map_or(store::Profile::Claude, |r| r.profile);
+    let label = clean_label(body.label.as_deref(), profile);
     let decided = state
         .db
         .with_conn(|c| store::approve_request(c, &id, &binder, scope, &label, now));
@@ -252,7 +260,7 @@ pub(crate) async fn deny(
     }
 }
 
-fn clean_label(label: Option<&str>) -> String {
+fn clean_label(label: Option<&str>, profile: store::Profile) -> String {
     let label: String = label
         .unwrap_or_default()
         .chars()
@@ -261,7 +269,10 @@ fn clean_label(label: Option<&str>) -> String {
         .collect();
     let label = label.trim();
     if label.is_empty() {
-        "Claude".to_string()
+        match profile {
+            store::Profile::Claude => "Claude".to_string(),
+            store::Profile::Gemini => "Gemini".to_string(),
+        }
     } else {
         label.to_string()
     }

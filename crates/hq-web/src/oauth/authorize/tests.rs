@@ -59,11 +59,11 @@ fn only_claude_callbacks_and_loopback_callbacks_are_redirect_targets() {
 #[test]
 fn a_well_formed_request_passes() {
     let q = query(&[]);
-    let c = check(&q, RESOURCE).unwrap();
+    let c = check(&q, RESOURCE, &CLAUDE_REDIRECTS).unwrap();
     assert_eq!(c.state, Some("abc"));
     assert_eq!(c.scope, "hq offline_access");
     let bare = query(&[("resource", None), ("state", None), ("scope", None)]);
-    let c = check(&bare, RESOURCE).unwrap();
+    let c = check(&bare, RESOURCE, &CLAUDE_REDIRECTS).unwrap();
     assert_eq!(c.scope, crate::oauth::SCOPE);
 }
 
@@ -88,7 +88,10 @@ fn each_broken_field_is_refused() {
     ];
     for overrides in cases {
         let q = query(&overrides);
-        assert!(check(&q, RESOURCE).is_err(), "{overrides:?}");
+        assert!(
+            check(&q, RESOURCE, &CLAUDE_REDIRECTS).is_err(),
+            "{overrides:?}"
+        );
     }
 }
 
@@ -177,4 +180,36 @@ fn a_loopback_http_consent_origin_matches_only_its_own_authority() {
         &with_host("hq.example.com"),
         "ftp://hq.example.com"
     ));
+}
+
+#[test]
+fn gemini_redirects_are_only_googles_and_claudes_are_unchanged() {
+    for ok in [
+        "https://oauth-redirect.googleusercontent.com/r/hq-project",
+        "https://oauth-redirect-sandbox.googleusercontent.com/r/hq-project",
+        "https://oauth-redirect-test.googleusercontent.com/a/hq-project",
+    ] {
+        assert!(gemini_redirect_allowed(ok), "{ok}");
+        assert!(
+            !redirect_allowed(ok),
+            "Claude never takes a Google callback: {ok}"
+        );
+    }
+    for bad in [
+        "http://oauth-redirect.googleusercontent.com/r/x",
+        "https://oauth-redirect.googleusercontent.com:8443/r/x",
+        "https://oauth-redirect.googleusercontent.com/r/",
+        "https://oauth-redirect.googleusercontent.com/x/y",
+        "https://oauth-redirect.googleusercontent.com/r/x?next=https://evil.example",
+        "https://oauth-redirect.googleusercontent.com/r/x#f",
+        "https://user@oauth-redirect.googleusercontent.com/r/x",
+        "https://oauth-redirect.googleusercontent.com.evil.example/r/x",
+        "https://evil.example/r/x",
+        "https://claude.ai/api/mcp/auth_callback",
+        "http://127.0.0.1:3000/callback",
+        "not a url",
+    ] {
+        assert!(!gemini_redirect_allowed(bad), "{bad}");
+    }
+    assert!(redirect_allowed("https://claude.ai/api/mcp/auth_callback"));
 }
