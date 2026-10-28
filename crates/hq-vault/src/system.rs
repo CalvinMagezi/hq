@@ -151,6 +151,15 @@ pub(crate) fn write_system_file(vault_path: &Path, name: &str, content: &str) ->
 
 /// Read all system files and pinned notes into a `SystemContext`.
 pub fn get_system_context(vault_path: &Path) -> Result<SystemContext> {
+    get_system_context_keeping(vault_path, &|_, _| true)
+}
+
+/// Like [`get_system_context`], but a pinned note enters the context only when
+/// `keep(path, content)` says so (for example, only pins the owner made).
+pub fn get_system_context_keeping(
+    vault_path: &Path,
+    keep: &PinFilter<'_>,
+) -> Result<SystemContext> {
     let soul = read_system_file(vault_path, SOUL_FILE)?;
     let memory = read_system_file(vault_path, MEMORY_FILE)?;
     let preferences = read_system_file(vault_path, PREFERENCES_FILE)?;
@@ -161,7 +170,7 @@ pub fn get_system_context(vault_path: &Path) -> Result<SystemContext> {
     let config = parse_config_table(&config_raw);
 
     // Scan for pinned notes
-    let (pinned_notes, pinned_scan) = get_pinned_notes_report(vault_path)?;
+    let (pinned_notes, pinned_scan) = get_pinned_notes_report(vault_path, keep)?;
 
     Ok(SystemContext {
         soul,
@@ -182,7 +191,13 @@ const PINNED_SCAN_DIRS: &[&str] = &["Notebooks", "_system", "_plans", "_moc"];
 /// Scan [`PINNED_SCAN_DIRS`] recursively for notes with `pinned: true`, at
 /// most 10 in total, and report which directories existed vs. were missing
 /// so a caller can surface the scan instead of silently returning nothing.
-pub(crate) fn get_pinned_notes_report(vault_path: &Path) -> Result<(Vec<Note>, PinnedScanReport)> {
+/// Decides whether a pinned note (vault-relative path, raw content) is loaded.
+pub type PinFilter<'a> = dyn Fn(&str, &str) -> bool + 'a;
+
+pub(crate) fn get_pinned_notes_report(
+    vault_path: &Path,
+    keep: &PinFilter<'_>,
+) -> Result<(Vec<Note>, PinnedScanReport)> {
     let mut pinned = Vec::new();
     let mut report = PinnedScanReport::default();
 
@@ -200,13 +215,19 @@ pub(crate) fn get_pinned_notes_report(vault_path: &Path) -> Result<(Vec<Note>, P
             continue;
         }
         report.scanned.push((*dir_name).to_string());
-        collect_pinned(&dir, vault_path, &mut pinned, 10)?;
+        collect_pinned(&dir, vault_path, &mut pinned, 10, keep)?;
     }
 
     Ok((pinned, report))
 }
 
-fn collect_pinned(dir: &Path, vault_root: &Path, out: &mut Vec<Note>, limit: usize) -> Result<()> {
+fn collect_pinned(
+    dir: &Path,
+    vault_root: &Path,
+    out: &mut Vec<Note>,
+    limit: usize,
+    keep: &PinFilter<'_>,
+) -> Result<()> {
     if out.len() >= limit {
         return Ok(());
     }
@@ -226,7 +247,7 @@ fn collect_pinned(dir: &Path, vault_root: &Path, out: &mut Vec<Note>, limit: usi
         if path.is_dir() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             if !name.starts_with('.') {
-                collect_pinned(&path, vault_root, out, limit)?;
+                collect_pinned(&path, vault_root, out, limit, keep)?;
             }
         } else if path.extension().is_some_and(|ext| ext == "md") {
             // Quick check for pinned frontmatter without full parse
@@ -235,6 +256,9 @@ fn collect_pinned(dir: &Path, vault_root: &Path, out: &mut Vec<Note>, limit: usi
                 && let Ok(rel) = path.strip_prefix(vault_root)
             {
                 let rel_str = rel.to_string_lossy().to_string();
+                if !keep(&rel_str, &content) {
+                    continue;
+                }
                 if let Ok(note) = crate::notes::read_note(vault_root, &rel_str) {
                     out.push(note);
                 }
@@ -293,7 +317,7 @@ mod tests {
         )
         .unwrap();
 
-        let (pinned, report) = get_pinned_notes_report(dir.path()).unwrap();
+        let (pinned, report) = get_pinned_notes_report(dir.path(), &|_, _| true).unwrap();
         assert_eq!(pinned.len(), 1);
         assert!(report.scanned.contains(&"_system".to_string()));
     }
@@ -315,7 +339,7 @@ mod tests {
         }
         std::fs::create_dir_all(dir.path().join("_system")).unwrap();
 
-        let (pinned, report) = get_pinned_notes_report(dir.path()).unwrap();
+        let (pinned, report) = get_pinned_notes_report(dir.path(), &|_, _| true).unwrap();
         assert_eq!(pinned.len(), 10);
         assert!(report.scanned.contains(&"Notebooks".to_string()));
         assert!(

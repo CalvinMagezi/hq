@@ -225,7 +225,105 @@ impl HqTool for VaultFrontmatterUpdateTool {
     }
 }
 
-/// The four reorg tools, sharing one client and optional index DB.
+pub struct VaultPinTool {
+    vault: Arc<VaultClient>,
+    db: Option<Arc<Database>>,
+}
+
+#[async_trait]
+impl HqTool for VaultPinTool {
+    fn name(&self) -> &str {
+        "vault_pin"
+    }
+    fn description(&self) -> &str {
+        "Pin a vault note (or unpin one you pinned) so it shows in the owner's pinned notes. A note an agent pins appears there as a suggestion, marked with who pinned it; it joins HQ's own context only once the owner pins it themselves. An agent cannot unpin the owner's pins."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Relative note path" },
+                "pin": { "type": "boolean", "description": "true to pin (default), false to unpin", "default": true }
+            },
+            "required": ["path"]
+        })
+    }
+    fn category(&self) -> &str {
+        "vault"
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let path = arg_str(&args, "path");
+        let pin = args.get("pin").and_then(Value::as_bool).unwrap_or(true);
+        if !pin {
+            self.refuse_owner_pin(&path)?;
+        }
+        let (set, remove) = if pin {
+            let set = std::collections::HashMap::from([(
+                "pinned".to_string(),
+                serde_yaml::Value::Bool(true),
+            )]);
+            (set, Vec::new())
+        } else {
+            (std::collections::HashMap::new(), vec!["pinned".to_string()])
+        };
+        let vault = self.vault.clone();
+        let p = path.clone();
+        tokio::task::spawn_blocking(move || vault.update_frontmatter(&p, set, remove)).await??;
+        self.record_as_agent(&path, &args);
+        Ok(json!({
+            "path": path,
+            "pinned": pin,
+            "note": if pin {
+                "pinned; it shows in the owner's pinned notes as your suggestion until they pin it themselves"
+            } else {
+                "unpinned"
+            },
+        }))
+    }
+}
+
+/// Who a pin made through a tool is recorded as when the caller did not say: never the owner.
+const UNATTRIBUTED_PINNER: &str = "an unattributed agent";
+
+impl VaultPinTool {
+    /// Every call of this tool is an agent's, so a caller HQ could not attribute is
+    /// recorded as one rather than left unknown, which would make its pin trusted.
+    fn record_as_agent(&self, path: &str, args: &Value) {
+        let Some(db) = &self.db else { return };
+        let mut writer = crate::provenance::resolve(args, db);
+        if writer.source_kind == hq_db::provenance::SourceKind::Unknown {
+            writer.source_kind = hq_db::provenance::SourceKind::Agent;
+            writer
+                .actor_id
+                .get_or_insert_with(|| UNATTRIBUTED_PINNER.to_string());
+        }
+        crate::provenance::Recorder::new(db.clone(), self.vault.vault_path().to_path_buf())
+            .record(path, &writer);
+    }
+
+    /// A pin the owner made (any pin not suggested by an agent) is theirs to remove.
+    fn refuse_owner_pin(&self, path: &str) -> Result<()> {
+        let Some(db) = &self.db else { return Ok(()) };
+        let Ok(raw) = std::fs::read_to_string(self.vault.vault_path().join(path)) else {
+            return Ok(());
+        };
+        let pinned = hq_core::frontmatter_utils::split_frontmatter(&raw)
+            .0
+            .and_then(|fm| serde_yaml::from_str::<serde_yaml::Mapping>(fm).ok())
+            .and_then(|fm| fm.get("pinned").and_then(serde_yaml::Value::as_bool))
+            .unwrap_or(false);
+        if !pinned {
+            return Ok(());
+        }
+        let suggested = db.with_conn(|c| hq_db::provenance::pin_suggested_by(c, path, &raw))?;
+        if suggested.is_none() {
+            anyhow::bail!("{path} is pinned by the owner; only they can unpin it, in the HQ app");
+        }
+        Ok(())
+    }
+}
+
+/// The reorg tools, sharing one client and optional index DB.
 pub fn create_vault_reorg_tools(
     vault: Arc<VaultClient>,
     db: Option<Arc<Database>>,
@@ -241,6 +339,10 @@ pub fn create_vault_reorg_tools(
             db,
         }),
         Box::new(VaultFrontmatterUpdateTool {
+            vault: vault.clone(),
+            db: db_for_frontmatter.clone(),
+        }),
+        Box::new(VaultPinTool {
             vault,
             db: db_for_frontmatter,
         }),
@@ -250,6 +352,63 @@ pub fn create_vault_reorg_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_agents_pin_is_a_suggestion_and_the_owners_pin_is_theirs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Notebooks")).unwrap();
+        std::fs::write(
+            dir.path().join("Notebooks/a.md"),
+            "---\ntitle: A\n---\nbody",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("Notebooks/mine.md"),
+            "---\ntitle: Mine\npinned: true\n---\nbody",
+        )
+        .unwrap();
+        let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
+        let db = Arc::new(Database::open_memory().unwrap());
+        let tool = VaultPinTool {
+            vault: vault.clone(),
+            db: Some(db.clone()),
+        };
+        let suggested = |rel: &str| {
+            let raw = std::fs::read_to_string(dir.path().join(rel)).unwrap();
+            db.with_conn(|c| hq_db::provenance::pin_suggested_by(c, rel, &raw))
+                .unwrap()
+        };
+
+        tool.execute(json!({"path": "Notebooks/a.md"}))
+            .await
+            .unwrap();
+        let raw = std::fs::read_to_string(dir.path().join("Notebooks/a.md")).unwrap();
+        assert!(
+            raw.contains("pinned: true") && raw.ends_with("body"),
+            "{raw}"
+        );
+        assert_eq!(
+            suggested("Notebooks/a.md").as_deref(),
+            Some(UNATTRIBUTED_PINNER),
+            "a pin through the tool is never the owner's"
+        );
+        tool.execute(json!({"path": "Notebooks/a.md", "pin": false}))
+            .await
+            .unwrap();
+        assert!(
+            !std::fs::read_to_string(dir.path().join("Notebooks/a.md"))
+                .unwrap()
+                .contains("pinned")
+        );
+
+        let err = tool
+            .execute(json!({"path": "Notebooks/mine.md", "pin": false}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("pinned by the owner"), "{err}");
+        assert_eq!(suggested("Notebooks/mine.md"), None);
+    }
 
     #[test]
     fn moving_a_note_re_indexes_it_at_the_new_path_and_keeps_its_links() {

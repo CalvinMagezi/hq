@@ -16,6 +16,7 @@ interface Props {
     activePath: string | null
     onNavigate: () => void
     onUnpin: (path: string) => void
+    onKeepPin: (path: string) => void
     tree: NoteTreeNode | null
     treeLoading: boolean
     filteredTree: NoteTreeNode | null
@@ -27,7 +28,7 @@ interface Props {
 
 /** The vault file browser: filter box, pinned notes, section tabs and the tree. */
 export function VaultSidebar(p: Props) {
-    const { query, setQuery, onCollapse, pinned, pinnedExpanded, togglePinned, activePath, onNavigate, onUnpin } = p
+    const { query, setQuery, onCollapse, pinned, pinnedExpanded, togglePinned, activePath, onNavigate, onUnpin, onKeepPin } = p
     const { tree, treeLoading, filteredTree, section, setSection, expandedPaths, onToggleNode } = p
     return (
     <div className="flex flex-col h-full min-h-0">
@@ -80,6 +81,7 @@ export function VaultSidebar(p: Props) {
                 activePath={activePath}
                 onNavigate={onNavigate}
                 onUnpin={onUnpin}
+                onKeepPin={onKeepPin}
             />
         )}
 
@@ -186,10 +188,11 @@ interface PinnedSectionProps {
     activePath: string | null
     onNavigate: () => void
     onUnpin: (path: string) => void
+    onKeepPin: (path: string) => void
 }
 
 /** Pinned notes: open by default as cards, collapsed to the first three titles. */
-function PinnedSection({ pinned, pinnedExpanded, togglePinned, activePath, onNavigate, onUnpin }: PinnedSectionProps) {
+function PinnedSection({ pinned, pinnedExpanded, togglePinned, activePath, onNavigate, onUnpin, onKeepPin }: PinnedSectionProps) {
     return (
         <div className="flex-shrink-0 pb-2 px-3">
             <button
@@ -217,7 +220,7 @@ function PinnedSection({ pinned, pinnedExpanded, togglePinned, activePath, onNav
                 <div className="flex flex-col gap-2 max-h-[36vh] overflow-y-auto pb-1 pr-0.5">
                     {pinned.map((n, i) => (
                         <div key={n.path} className="stagger-item" style={{ animationDelay: `${i * 40}ms` }}>
-                            <PinnedCard note={n} isSelected={activePath === n.path} onClick={onNavigate} onUnpin={onUnpin} />
+                            <PinnedCard note={n} isSelected={activePath === n.path} onClick={onNavigate} onUnpin={onUnpin} onKeepPin={onKeepPin} />
                         </div>
                     ))}
                 </div>

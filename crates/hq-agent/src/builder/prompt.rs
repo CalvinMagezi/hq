@@ -38,7 +38,15 @@ impl SessionBuilder {
             // Full 5-layer context assembly.
             // Layers: System (soul) -> UserMessage -> Memory -> Thread -> Injections.
             // Token-budgeted via priority knapsack, with reducer pipeline fallback.
-            let sys_ctx = hq_vault::system::get_system_context(vault_path).unwrap_or_default();
+            // A pin an agent wrote is only a suggestion until the owner makes it theirs.
+            let owner_pin = |path: &str, raw: &str| match &inputs.shared_db {
+                Some(db) => db
+                    .with_conn(|c| hq_db::provenance::pin_suggested_by(c, path, raw))
+                    .map_or(true, |by| by.is_none()),
+                None => true,
+            };
+            let sys_ctx = hq_vault::system::get_system_context_keeping(vault_path, &owner_pin)
+                .unwrap_or_default();
 
             // Same soul as the relays: frontmatter stripped, with a fallback identity.
             let soul = hq_vault::system::load_soul(vault_path);

@@ -24,6 +24,7 @@ Tasks track work. Notes hold knowledge. If another session or agent will need a 
 2. `vault_patch_section` replaces one section of an existing note. `vault_append_note` adds to the end. Prefer these over rewriting the whole note.
 3. `vault_write_note` creates a note or overwrites one. Use it for a new note, not to edit an old one.
 4. `vault_frontmatter_update` changes tags, status or other frontmatter without touching the body.
+5. `vault_pin` pins a note the owner should keep in view, such as a decision or a running plan. Your pin shows in their pinned notes as a suggestion with your name, and it joins HQ's own context only once they keep it. You can unpin your own suggestions, never the owner's pins.
 
 Keep to one topic per note, with a title someone would search for. Link related notes with `[[note name]]`. State facts plainly and say where they came from.
 
