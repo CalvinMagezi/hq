@@ -1001,10 +1001,15 @@ pub fn tree_started_since(conn: &Connection, root: &str, minutes: i64) -> Result
     )?)
 }
 
-/// Every session in the team under `root`, the root included, running or not, oldest first.
+/// Whether two sessions belong to one team: the same root at the top of their chains.
+pub fn same_team(conn: &Connection, a: &str, b: &str) -> Result<bool> {
+    Ok(tree_root(conn, a)? == tree_root(conn, b)?)
+}
+
+/// Every session in the team under `root`, the root included, running or not: by depth, then oldest first.
 pub fn tree_members(conn: &Connection, root: &str) -> Result<Vec<HarnessSessionRow>> {
     let mut stmt = conn.prepare(&format!(
-        "{TEAM_CTE} SELECT {COLS} FROM harness_sessions WHERE id IN (SELECT id FROM team) ORDER BY created_at, id"
+        "{TEAM_CTE} SELECT {COLS} FROM harness_sessions WHERE id IN (SELECT id FROM team) ORDER BY spawn_depth, created_at, id"
     ))?;
     let rows = stmt
         .query_map(params![root], row_to_session)?

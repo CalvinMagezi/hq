@@ -477,7 +477,13 @@ impl HqTool for HarnessSessionLogsTool {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         super::connector_may_drive(&db, &args, &id)?;
-        tokio::task::spawn_blocking(move || super::tail_log(&db, &id, lines.clamp(1, 500))).await?
+        let caller = super::caller_session(&args).map(str::to_string);
+        tokio::task::spawn_blocking(move || {
+            // A launched agent may read the sessions of its own team.
+            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            super::tail_log(&db, &id, lines.clamp(1, 500))
+        })
+        .await?
     }
 }
 
@@ -662,7 +668,12 @@ impl HqTool for HarnessSessionWaitTool {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         let timeout = std::time::Duration::from_secs(secs.clamp(3, 300));
-        tokio::task::spawn_blocking(move || super::wait(&db, &id, &until, timeout)).await?
+        let caller = super::caller_session(&args).map(str::to_string);
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            super::wait(&db, &id, &until, timeout)
+        })
+        .await?
     }
 }
 

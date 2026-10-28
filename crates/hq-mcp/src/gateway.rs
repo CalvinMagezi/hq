@@ -123,8 +123,9 @@ pub const TASKS_ALLOWLIST: &[&str] = &[
     "space_list",
 ];
 
-/// What a launched agent may call with its own session token: the task thread
-/// it works on, and nothing that reads the wider vault or changes settings.
+/// What a launched agent may call with its own session token: its team's task
+/// threads, roster and sessions, and nothing that reads the wider vault or changes
+/// settings.
 /// An exact list, so a tool added later is denied until someone adds it here.
 pub const SESSION_ALLOWLIST: &[&str] = &[
     "task_get",
@@ -132,8 +133,11 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "task_comment_list",
     "task_comment_add",
     "harness_session_status",
+    "harness_session_logs",
+    "harness_session_wait",
     "agent_message_send",
     "agent_delegate",
+    "team_roster",
 ];
 
 /// Build the two MCP `Tool` definitions for the gateway.
