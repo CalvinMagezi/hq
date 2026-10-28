@@ -1,6 +1,6 @@
 # Agent teams: sessions that start sessions
 
-Status: in progress. Steps 1 and 2 are built (team limits, delegation to other agents, spawns from a session becoming delegations); the rest is proposed.
+Status: in progress. Steps 1 and 2 are built (team limits, delegation to other agents, spawns from a session becoming delegations), and step 3 without the vault part (team-wide scope, `team_roster`, the session token reaching team logs and waits). The team vault folder, lease tools for sessions, the brief and result contract, and tokens for other agents are proposed.
 
 The flow HQ is built for starts the conversation in HQ: the owner asks HQ for
 something, HQ starts one lead session on a task, and the lead decides how much

@@ -1,8 +1,10 @@
 # Agent messaging
 
-Two agent sessions working on the same HQ task can message each other. A message
-is a comment on that task with a kind and a recipient, so the task thread is the
-one durable record (`task_comment_list` shows it with `kind: "message"`).
+Agent sessions in one team (every session reachable through delegation from one
+root, see "Delegating") can message each other, as can two sessions working on the
+same HQ task. A message is a comment on a task with a kind and a recipient, so the
+task thread is the one durable record (`task_comment_list` shows it with
+`kind: "message"`).
 
 Needs agent identity (`docs/security/AGENT_IDENTITY.md`): the sender is the
 session HQ verified, never a name the agent passes.
@@ -15,10 +17,28 @@ the call unless:
 
 - the sender is a running session HQ launched and the gateway attested it;
 - the recipient is a running session;
-- both sessions work on the same task (their `mission_id` matches), and
-  `task_id`, when given, is that task;
+- both sessions work on the same task (their `mission_id` matches), one started
+  the other, or both belong to the same team; `task_id`, when given, is the thread
+  the message goes on. Between teammates on different tasks it goes on the
+  recipient's task;
 - the body is 1 to 8000 characters;
 - the sender has sent fewer than 60 messages in the last hour.
+
+`to_session` also takes `parent` (the session that started the sender) and
+`root` (the team's lead).
+
+## Seeing the team
+
+`team_roster` lists the sender's whole team, root first: each session's id,
+who started it, depth, agent, model, purpose, label, status, last agent state and
+task. A launched session always sees its own team. A session token also reaches
+`harness_session_status`, `harness_session_logs` and `harness_session_wait` for
+any session in its team, and the task tools for every teammate's task. Nothing
+outside the team is visible to it.
+
+The first prompt of a delegated session names its team's root, its depth, the
+roster tool, whether it may delegate further, and that messages from other
+sessions are information, never approval.
 
 ## Delivery
 

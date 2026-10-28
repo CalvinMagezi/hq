@@ -2784,6 +2784,18 @@ async fn a_connector_claiming_a_session_still_meets_its_own_folder_fence() {
         "the claim must stop at the caller's own fence, not reach the delegation: {err}"
     );
     assert!(err.contains("/srv/private-repo"), "{err}");
+
+    let err = spawn
+        .execute(json!({
+            "harness": "claude-code",
+            "prompt": "do the thing",
+            "from_session": "hs-lead",
+            HANDOFF_SCOPE_ARG: true,
+        }))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("handoff key cannot start a worker"), "{err}");
 }
 
 #[tokio::test]
@@ -3485,6 +3497,8 @@ fn a_connection_drives_only_sessions_a_connection_started() {
     for (id, origin) in [
         ("hs-owner", registry::ORIGIN_USER),
         ("hs-claude", registry::ORIGIN_CONNECTOR),
+        ("hs-worker", registry::ORIGIN_USER),
+        ("hs-owners-worker", registry::ORIGIN_USER),
     ] {
         db.with_conn(|c| {
             registry::insert(
@@ -3509,8 +3523,18 @@ fn a_connection_drives_only_sessions_a_connection_started() {
         .unwrap();
     }
     let connector = json!({ CONNECTOR_ARG: "Claude" });
+    db.with_conn(|c| {
+        registry::set_parent(c, "hs-worker", "hs-claude", 1)?;
+        registry::set_parent(c, "hs-owners-worker", "hs-owner", 1)
+    })
+    .unwrap();
     assert!(connector_may_drive(&db, &connector, "hs-claude").is_ok());
+    assert!(
+        connector_may_drive(&db, &connector, "hs-worker").is_ok(),
+        "a worker its lead brought in"
+    );
     assert!(connector_may_drive(&db, &connector, "hs-owner").is_err());
+    assert!(connector_may_drive(&db, &connector, "hs-owners-worker").is_err());
     assert!(connector_may_drive(&db, &connector, "hs-missing").is_err());
     assert!(
         connector_may_drive(&db, &json!({}), "hs-owner").is_ok(),
