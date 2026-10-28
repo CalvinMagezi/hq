@@ -588,14 +588,23 @@ fn spawn_as_delegation(args: &Value) -> Result<(Delegation, Vec<&'static str>)> 
 
 static DELEGATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// The one name an agent goes by, so an alias and its harness compare equal.
+fn canonical_harness(name: &str) -> &str {
+    match name {
+        "agy" => "antigravity",
+        other => other,
+    }
+}
+
 /// Which agent a delegated session runs as: the delegator's own unless the owner
 /// listed others in `agent_host.teams.harnesses`. An unlisted profile could spend
 /// another account's credit, so only the owner opens one up.
 fn pick_harness(requested: &str, parent: &str, allowed: &[String]) -> Result<String> {
-    if requested.is_empty() || requested == parent {
+    let same = |a: &str, b: &str| canonical_harness(a) == canonical_harness(b);
+    if requested.is_empty() || same(requested, parent) {
         return Ok(parent.to_string());
     }
-    if allowed.iter().any(|a| a == requested) {
+    if allowed.iter().any(|a| same(a, requested)) {
         return Ok(requested.to_string());
     }
     if allowed.is_empty() {
@@ -1434,12 +1443,18 @@ mod tests {
         );
         assert!(pick_harness("claude-code", "claude-kola", &none).is_err());
 
-        let listed = vec!["pi".to_string(), "copilot-lean".to_string()];
+        let listed = vec![
+            "pi".to_string(),
+            "copilot-lean".to_string(),
+            "antigravity".to_string(),
+        ];
         assert_eq!(pick_harness("pi", "claude-code", &listed).unwrap(), "pi");
+        assert_eq!(pick_harness("agy", "claude-code", &listed).unwrap(), "agy");
+        assert_eq!(pick_harness("antigravity", "agy", &none).unwrap(), "agy");
         let err = pick_harness("codex", "claude-code", &listed)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("pi, copilot-lean"), "{err}");
+        assert!(err.contains("pi, copilot-lean, antigravity"), "{err}");
     }
 
     #[test]

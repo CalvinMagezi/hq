@@ -44,8 +44,9 @@ pub fn caller_session(args: &Value) -> Option<&str> {
 pub const SPAWNED_REFUSAL: &str = "HQ-spawned sessions cannot resume, hand off or type into other sessions, or run full-mode asks; start a teammate with agent_delegate (or harness_session_spawn with from_session) and talk to it with agent_message_send";
 
 /// Argument a caller sets to say it runs inside HQ session `id` (the `HQ_SESSION_ID`
-/// its pane was launched with). It only restricts the caller: the spawn becomes a
-/// delegation from that session, under that team's limits.
+/// its pane was launched with). Nothing attests it, so the spawn becomes a delegation
+/// from that session only after the caller's own origin cap and folder fence pass for
+/// that session's folder, and then the team's limits apply on top.
 pub const FROM_SESSION_ARG: &str = "from_session";
 
 /// The session a spawn comes from: the one the gateway marked, else the one the
