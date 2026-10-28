@@ -85,6 +85,10 @@ const STRIPPED_HEADERS: [&str; 10] = [
 const FORWARDED_VALUE: &str = "by=hq-connector-tls;proto=https";
 const API_KEY_HEADER: &str = "x-api-key";
 const BEARER: &str = "Bearer ";
+const BASIC: &str = "Basic ";
+/// Where a confidential client (the Gemini profile) may send `client_secret_basic`. Nothing in
+/// HQ reads Basic as an owner's credential, and these handlers check it against the client store.
+const CLIENT_AUTH_PATHS: [&str; 2] = ["/oauth/token", "/oauth/revoke"];
 /// Access tokens start with this (`hq_db::mcp_connector::ACCESS_PREFIX`).
 const ACCESS_PREFIX: &str = hq_db::mcp_connector::ACCESS_PREFIX;
 
@@ -186,6 +190,15 @@ impl Gate {
         // Whatever arrived, at most one value leaves, so nothing downstream can read another.
         parts.headers.remove(AUTHORIZATION);
         let foreign = api_key || values.len() > 1;
+        let client_auth = CLIENT_AUTH_PATHS.contains(&parts.uri.path())
+            && values
+                .first()
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| v.starts_with(BASIC));
+        if client_auth && !foreign {
+            parts.headers.insert(AUTHORIZATION, values[0].clone());
+            return;
+        }
         let token = values.first().and_then(|v| {
             v.to_str()
                 .ok()
@@ -525,6 +538,25 @@ mod tests {
         assert!(empty.headers.get("authorization").is_none());
         let none = admitted(&g, "/mcp", &[host]).unwrap();
         assert!(none.headers.get("authorization").is_none());
+    }
+
+    #[test]
+    fn client_basic_auth_reaches_only_the_token_and_revoke_endpoints() {
+        let g = gate();
+        let host = ("host", "hq.example.com");
+        let basic = ("authorization", "Basic aGNxbF94Omhxc195");
+        for path in ["/oauth/token", "/oauth/revoke"] {
+            let kept = admitted(&g, path, &[host, basic]).unwrap();
+            assert_eq!(header(&kept, "authorization"), Some(basic.1), "{path}");
+            let with_key = admitted(&g, path, &[host, basic, ("x-api-key", "k")]).unwrap();
+            assert_ne!(header(&with_key, "authorization"), Some(basic.1), "{path}");
+            let two = admitted(&g, path, &[host, basic, ("authorization", "Basic b")]).unwrap();
+            assert_ne!(header(&two, "authorization"), Some(basic.1), "{path}");
+        }
+        for path in ["/mcp", "/mcp/gemini/v1"] {
+            let dropped = admitted(&g, path, &[host, basic]).unwrap();
+            assert!(dropped.headers.get("authorization").is_none(), "{path}");
+        }
     }
 
     #[test]

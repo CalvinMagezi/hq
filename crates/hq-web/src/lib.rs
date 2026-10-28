@@ -986,6 +986,52 @@ mod web_auth_router_tests {
         }
     }
 
+    /// The Gemini route wins over the `/mcp/{*rest}` catch-all in the real router, and only v1 exists.
+    #[tokio::test]
+    async fn the_gemini_endpoint_answers_in_the_full_router_and_other_versions_404() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.connector = Some(hq_core::config::ConnectorSettings {
+            public: "https://hq.example.com".into(),
+            consent: "https://hq.example.ts.net".into(),
+            default_scope: "read_only".into(),
+            gemini: true,
+        });
+        let app = create_router(Arc::new(state));
+        let post = |uri: &str| {
+            Request::post(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+                ))
+                .unwrap()
+        };
+        let res = app.clone().oneshot(post("/mcp/gemini/v1")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert!(
+            res.headers()["www-authenticate"]
+                .to_str()
+                .unwrap()
+                .contains("oauth-protected-resource/mcp/gemini/v1")
+        );
+        for uri in ["/mcp/gemini/v2", "/mcp/gemini"] {
+            let res = app.clone().oneshot(post(uri)).await.unwrap();
+            assert_eq!(res.status(), StatusCode::NOT_FOUND, "{uri}");
+        }
+        let res = app.clone().oneshot(post("/mcp")).await.unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::UNAUTHORIZED,
+            "Claude's endpoint is untouched"
+        );
+        assert!(
+            res.headers()["www-authenticate"]
+                .to_str()
+                .unwrap()
+                .ends_with(r#"resource_metadata="https://hq.example.com/.well-known/oauth-protected-resource""#)
+        );
+    }
+
     /// Every vault endpoint that takes a client path refuses to leave the vault.
     #[tokio::test]
     async fn vault_endpoints_reject_traversal() {

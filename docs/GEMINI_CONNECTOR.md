@@ -88,8 +88,9 @@ Owner-approved steps first. None of them is done by HQ or by this change.
      `https://developers.google.com/static/crawling/ipranges/user-triggered-fetchers-google.json`
      and `.../user-triggered-agents.json`; they change, so refresh them. Keep Claude's paths on
      Anthropic's range only.
-   - HQ ending TLS itself: the door already admits these paths (`tls/gate.rs`); the forwarder
-     needs no change, and the fence, if any, is on the forwarder's host.
+   - HQ ending TLS itself: the door already admits these paths (`tls/gate.rs`) and passes a
+     client's `Authorization: Basic` through on `/oauth/token` and `/oauth/revoke` only; the
+     forwarder needs no change, and the fence, if any, is on the forwarder's host.
    - Rollback: remove the block; `mcp_connector.gemini.enabled: false` removes the routes.
 2. **Check from outside** (any machine off your network):
    `curl -i -X POST https://hq.example.com/mcp/gemini/v1 -H 'content-type: application/json' -d '{}'`
@@ -118,6 +119,22 @@ Record what Developer Mode actually did; these are the open questions:
   fallback.
 - Whether it sent `resource`, PKCE, and which client authentication method.
 - The source addresses its calls came from.
+
+## Publishing (not needed for Developer Mode)
+
+A personal connection in Developer Mode needs none of this. Listing HQ as a Google Connected App
+for other people is a separate decision, all of it owner action in Google Connected Console:
+
+1. Get Connected Console access for your Google account.
+2. Verify the domain: Google gives a JSON challenge to serve at
+   `https://<domain>/.well-known/google-connected-apps` with `200` and no redirects. HQ does not
+   serve this path; Caddy (a `respond` for that exact path) or the door's path list would need
+   it added first.
+3. Public metadata: name, description, a square SVG logo of at least 500 px, and privacy policy
+   and terms URLs.
+4. Authentication setup in the console: the same client id and secret, and the endpoints above.
+5. Testers, then review and publication. Tool schemas are snapshotted at registration, so any
+   change to the tools goes on a new version path (`/mcp/gemini/v2`), never into v1.
 
 ## Troubleshooting
 
