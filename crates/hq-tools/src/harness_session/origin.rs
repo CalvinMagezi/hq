@@ -107,12 +107,17 @@ pub fn connector_may_drive(db: &Arc<Database>, args: &Value, session_id: &str) -
     if super::connector_label(args).is_none() {
         return Ok(());
     }
-    let row = db.with_conn(|c| registry::get(c, session_id))?;
-    if row.is_some_and(|r| r.origin == registry::ORIGIN_CONNECTOR) {
+    // A session in the team of one the connection started counts as its own, so
+    // the owner can follow every worker a lead it started brought in.
+    let root = db.with_conn(|c| {
+        let root = registry::tree_root(c, session_id)?;
+        registry::get(c, &root)
+    })?;
+    if root.is_some_and(|r| r.origin == registry::ORIGIN_CONNECTOR) {
         return Ok(());
     }
     bail!(
-        "a claude.ai connection may drive only sessions it started; {session_id} is not one of them"
+        "a claude.ai connection may drive only sessions it started and their teams; {session_id} is not one of them"
     )
 }
 

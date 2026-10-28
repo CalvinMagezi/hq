@@ -3497,6 +3497,8 @@ fn a_connection_drives_only_sessions_a_connection_started() {
     for (id, origin) in [
         ("hs-owner", registry::ORIGIN_USER),
         ("hs-claude", registry::ORIGIN_CONNECTOR),
+        ("hs-worker", registry::ORIGIN_USER),
+        ("hs-owners-worker", registry::ORIGIN_USER),
     ] {
         db.with_conn(|c| {
             registry::insert(
@@ -3521,8 +3523,18 @@ fn a_connection_drives_only_sessions_a_connection_started() {
         .unwrap();
     }
     let connector = json!({ CONNECTOR_ARG: "Claude" });
+    db.with_conn(|c| {
+        registry::set_parent(c, "hs-worker", "hs-claude", 1)?;
+        registry::set_parent(c, "hs-owners-worker", "hs-owner", 1)
+    })
+    .unwrap();
     assert!(connector_may_drive(&db, &connector, "hs-claude").is_ok());
+    assert!(
+        connector_may_drive(&db, &connector, "hs-worker").is_ok(),
+        "a worker its lead brought in"
+    );
     assert!(connector_may_drive(&db, &connector, "hs-owner").is_err());
+    assert!(connector_may_drive(&db, &connector, "hs-owners-worker").is_err());
     assert!(connector_may_drive(&db, &connector, "hs-missing").is_err());
     assert!(
         connector_may_drive(&db, &json!({}), "hs-owner").is_ok(),
