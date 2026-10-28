@@ -72,11 +72,16 @@ impl VtEmulator {
     fn page_rows(&self) -> Vec<Row> {
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();
+        let ghost_row = ghost_text_start(screen);
         screen
             .rows(0, cols)
             .enumerate()
             .map(|(i, text)| {
                 let wrapped = screen.row_wrapped(i as u16);
+                let text = match ghost_row {
+                    Some((row, col)) if row as usize == i => cells_before(screen, row, col),
+                    _ => text,
+                };
                 // A wrapped row's trailing spaces belong to the line it continues.
                 let text = if wrapped {
                     text
@@ -88,6 +93,43 @@ impl VtEmulator {
             .take(rows as usize)
             .collect()
     }
+}
+
+/// Where a suggestion the program drew but nobody typed begins: dim text from the visible cursor to the
+/// end of its row on the live page (Claude Code's suggested next prompt, a shell's autosuggestion). Typed
+/// input is never dim, so a plain read leaves it out instead of reporting it as typed. `None` when the
+/// cursor is hidden, or its row has nothing after it or anything there that is not dim.
+fn ghost_text_start(screen: &vt100::Screen) -> Option<(u16, u16)> {
+    // A hidden cursor is parked wherever the program left it, so what follows it means nothing.
+    if screen.scrollback() != 0 || screen.hide_cursor() {
+        return None;
+    }
+    let (row, col) = screen.cursor_position();
+    let (_, cols) = screen.size();
+    let mut seen = false;
+    for c in col..cols {
+        let Some(cell) = screen.cell(row, c) else {
+            break;
+        };
+        let blank = cell.contents().trim().is_empty();
+        if !blank && !cell.dim() {
+            return None;
+        }
+        seen |= !blank;
+    }
+    seen.then_some((row, col))
+}
+
+/// The text of `row` left of column `col`.
+fn cells_before(screen: &vt100::Screen, row: u16, col: u16) -> String {
+    (0..col)
+        .filter_map(|c| screen.cell(row, c))
+        .filter(|cell| !cell.is_wide_continuation())
+        .map(|cell| match cell.contents() {
+            "" => " ",
+            text => text,
+        })
+        .collect()
 }
 
 /// The widest run of blanks one cursor-forward code may stand for: a row is never wider.
@@ -255,6 +297,44 @@ mod tests {
         let mut e = VtEmulator::new(rows, cols, 1000);
         e.process(text.as_bytes());
         e
+    }
+
+    #[test]
+    fn a_dim_suggestion_after_the_cursor_is_not_read_as_typed() {
+        // Claude Code's prompt line with its suggested next prompt, cursor back at the start of it.
+        let mut emu = fed(5, 40, "\u{276f}\u{a0}\x1b[2mrun it\x1b[0m\x1b[1;3H");
+        let visible = emu.visible();
+        assert_eq!(visible[0].text, "\u{276f}", "{visible:?}");
+        let history = emu.history();
+        assert_eq!(history[0].text, "\u{276f}");
+        assert!(
+            emu.styled_history(0)[0].contains("run it"),
+            "the styled read still shows what is on screen"
+        );
+    }
+
+    #[test]
+    fn claude_codes_own_suggestion_frame_reads_as_an_empty_prompt() {
+        // The bytes Claude Code 2.1 wrote for "run it": prompt row 21, the suggestion drawn dim from
+        // home, then the visible cursor parked at its first column.
+        let frame = "\x1b[21;1H\u{276f}\u{a0}\x1b[?25l\x1b[H\r\x1b[2C\x1b[20B\x1b[2mrun it\x1b[22m\x1b[24;1H\x1b[21;3H\x1b[?25h";
+        let mut emu = fed(24, 80, frame);
+        let prompt = emu.visible().pop().unwrap();
+        assert_eq!(prompt.text, "\u{276f}");
+    }
+
+    #[test]
+    fn typed_or_partly_bright_text_after_the_cursor_is_kept() {
+        let mut typed = fed(5, 40, "\u{276f} run it\x1b[1;3H");
+        assert_eq!(typed.visible()[0].text, "\u{276f} run it");
+        let mut mixed = fed(5, 40, "\u{276f} \x1b[2mrun\x1b[0m it\x1b[1;3H");
+        assert_eq!(mixed.visible()[0].text, "\u{276f} run it");
+        // Dim text that is not after the cursor is ordinary output.
+        let mut before = fed(5, 40, "\x1b[2mthinking\x1b[0m\r\n\u{276f} ");
+        assert_eq!(before.visible()[0].text, "thinking");
+        // Nor is dim text after a cursor the program hid.
+        let mut hidden = fed(5, 40, "\x1b[2mstatus line\x1b[0m\x1b[1;1H\x1b[?25l");
+        assert_eq!(hidden.visible()[0].text, "status line");
     }
 
     #[test]
