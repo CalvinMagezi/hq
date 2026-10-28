@@ -1,12 +1,21 @@
 {
   "name": "agent-hq",
-  "owner": { "name": "Agent HQ" },
-  "metadata": { "description": "Claude Code plugins for Agent HQ, the local-first AI agent hub." },
+  "owner": {
+    "name": "Agent HQ"
+  },
+  "metadata": {
+    "description": "Claude Code plugins for Agent HQ, the local-first AI agent hub."
+  },
   "plugins": [
     {
       "name": "agent-hq",
       "source": "./packages/claude-plugin",
-      "description": "Connects Claude Code to your Agent HQ: MCP tools, a session-start health check, and skills for tasks, the fleet and the vault."
+      "description": "Session hooks and skills that keep Claude Code working through your Agent HQ: tasks, the fleet and the vault. Needs the HQ tools from agent-hq-mcp or a claude.ai connector."
+    },
+    {
+      "name": "agent-hq-mcp",
+      "source": "./packages/claude-plugin-mcp",
+      "description": "Your Agent HQ's MCP server (hq_discover, hq_call). Skip it when HQ reaches you through a claude.ai connector."
     }
   ]
 }

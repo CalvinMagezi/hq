@@ -303,9 +303,10 @@ mod tests {
     // The root .gitignore drops every .mcp.json, which once left the plugin without its server.
     #[test]
     fn the_plugin_ships_its_mcp_server_with_the_session_header() {
-        let config: serde_json::Value =
-            serde_json::from_str(include_str!("../../../../packages/claude-plugin/.mcp.json"))
-                .unwrap();
+        let config: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../packages/claude-plugin-mcp/.mcp.json"
+        ))
+        .unwrap();
         let server = &config["mcpServers"]["agent-hq"];
         assert_eq!(server["type"], "http");
         assert_eq!(server["url"], "${user_config.hq_url}");
