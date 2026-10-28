@@ -44,7 +44,8 @@ attested token is the only way in.
 Drawn from Anthropic's published guidance on multi-agent systems (the
 multi-agent research system, "Building multi-agent systems: when and how",
 multi-agent coordination patterns, Claude Code subagents and agent teams, the
-Agent SDK and Managed Agents multi-agent docs) and from the herdr changelog:
+Agent SDK and Managed Agents multi-agent docs) and from the changelog of an
+open-source terminal agent multiplexer:
 
 1. **Deterministic caps, not refusals.** Prompting only steers. Depth,
    concurrency and spend are enforced in code, at the tree, with readable errors.
@@ -62,7 +63,7 @@ Agent SDK and Managed Agents multi-agent docs) and from the herdr changelog:
    coming from another session.
 7. **Child state never leaks up.** A child that blocks blocks its own task, not
    its parent's status; nested agents never inherit or overwrite a parent's
-   identity or resume record (herdr 8ac9542, a5d5f6f, ec05328).
+   identity or resume record.
 
 ## Design
 
@@ -213,5 +214,6 @@ the whole tree.
   code and already watches every pane; a monitor agent stays an opt-in `purpose`.
 - A free-form shared scratchpad. The task thread and the team folder are
   append-only and attributed.
-- Hook-only state for Codex (herdr dropped Codex turn hooks in 0.9.5); screen
+- Hook-only state for Codex (a comparable multiplexer dropped its Codex turn
+  hooks as unreliable); screen
   detection stays the fallback.
