@@ -23,7 +23,7 @@ _pending/
 .env.*.local
 .mcp.json
 # The plugin ships its MCP config; it holds placeholders, never a key.
-!packages/claude-plugin/.mcp.json
+!packages/claude-plugin-mcp/.mcp.json
 *.pem
 *.key
 *.crt

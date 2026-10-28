@@ -1,0 +1,30 @@
+{
+  "name": "agent-hq-mcp",
+  "version": "0.1.0",
+  "description": "Adds your Agent HQ's MCP server (hq_discover and hq_call) to Claude Code. Install it next to agent-hq unless HQ already reaches you through a claude.ai connector.",
+  "author": {
+    "name": "Agent HQ"
+  },
+  "homepage": "https://github.com/CalvinMagezi/hq",
+  "repository": "https://github.com/CalvinMagezi/hq",
+  "license": "MIT",
+  "keywords": [
+    "agent-hq",
+    "mcp"
+  ],
+  "userConfig": {
+    "hq_url": {
+      "type": "string",
+      "required": true,
+      "title": "HQ MCP URL",
+      "description": "Your HQ's MCP endpoint, for example https://hq.example.com/mcp"
+    },
+    "hq_api_key": {
+      "type": "string",
+      "required": true,
+      "sensitive": true,
+      "title": "HQ API key",
+      "description": "An HQ MCP API key (the AGENTHQ_API_KEY value set on your HQ)"
+    }
+  }
+}
