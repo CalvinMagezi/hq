@@ -1,6 +1,6 @@
 {
   "name": "agent-hq",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Agent HQ habits for Claude Code: a session-start health check and task count, a fleet-first nudge, a lease reminder at the end of a turn, and skills for tasks, the fleet and the vault. Pair it with agent-hq-mcp or a claude.ai connector for the HQ tools.",
   "author": {
     "name": "Agent HQ"
