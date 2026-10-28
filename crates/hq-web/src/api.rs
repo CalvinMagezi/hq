@@ -278,7 +278,10 @@ pub(crate) async fn tree_handler(
 pub(crate) async fn pinned_handler(State(state): State<Arc<WsState>>) -> axum::response::Response {
     let vault = state.vault_path.clone();
     let lite = state.profile().is_lite();
-    match tokio::task::spawn_blocking(move || crate::vault_api::pinned_notes(&vault, lite)).await {
+    let db = state.db.clone();
+    match tokio::task::spawn_blocking(move || crate::vault_api::pinned_notes(&vault, lite, &db))
+        .await
+    {
         Ok(notes) => axum::Json(serde_json::json!({"notes": notes})).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
@@ -320,6 +323,9 @@ pub(crate) async fn pin_toggle_handler(
     match hq_vault::notes::write_atomic(&abs, new_content.as_bytes()) {
         Ok(_) => {
             crate::vault_api::record_owner_write(&state, &abs);
+            if pin {
+                crate::vault_api::accept_suggested_pin(&state, &path_param, &new_content);
+            }
             axum::Json(serde_json::json!({"success": true})).into_response()
         }
         Err(e) => ApiError::internal(e).into_response(),

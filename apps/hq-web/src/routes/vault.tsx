@@ -76,6 +76,11 @@ function VaultLayout() {
         queryClient.invalidateQueries({ queryKey: vaultKeys.pinned })
     }, [queryClient])
 
+    const handleKeepPin = useCallback(async (notePath: string) => {
+        await togglePinNote(notePath, true)
+        queryClient.invalidateQueries({ queryKey: vaultKeys.pinned })
+    }, [queryClient])
+
     const treeQuery = useQuery(noteTreeQuery(section))
     const tree = treeQuery.data?.tree ?? null
     const treeLoading = !tree && treeQuery.isPending
@@ -141,6 +146,7 @@ function VaultLayout() {
             activePath={activePath}
             onNavigate={closeSidebar}
             onUnpin={handleUnpin}
+            onKeepPin={handleKeepPin}
             tree={tree}
             treeLoading={treeLoading}
             filteredTree={filteredTree}

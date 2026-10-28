@@ -410,6 +410,35 @@ pub(crate) fn record_owner_write(state: &WsState, abs: &Path) {
         .record(&rel, &hq_tools::provenance::Writer::owner());
 }
 
+/// The owner pinning a note an agent suggested: the version on disk may still be the
+/// agent's (the pin rewrote the same bytes), so the owner accepts it, which is what
+/// lets the pin into HQ's context.
+pub(crate) fn accept_suggested_pin(state: &WsState, rel: &str, raw: &str) {
+    let suggested = state
+        .db
+        .with_conn(|c| hq_db::provenance::pin_suggested_by(c, rel, raw))
+        .ok()
+        .flatten();
+    if suggested.is_none() {
+        return;
+    }
+    let Ok(vault) = hq_vault::VaultClient::new(state.vault_path.clone()) else {
+        return;
+    };
+    let owner = hq_tools::vault::Reviewer::of_writer(&hq_tools::provenance::Writer::owner(), false);
+    if let Err(e) = hq_tools::vault::review_note(
+        &state.db,
+        &vault,
+        rel,
+        None,
+        hq_db::provenance::ReviewState::Accepted,
+        Some("pinned by the owner"),
+        &owner,
+    ) {
+        tracing::warn!(path = rel, error = %e, "could not accept a suggested pin");
+    }
+}
+
 /// At most this many exports at once: a PDF or PNG of a long note takes real memory.
 static EXPORT_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
@@ -861,12 +890,25 @@ pub(crate) fn vault_signals(vault: &Path, lite: bool) -> Value {
 }
 
 /// `GET /api/pinned`: notes with `pinned: true` under Notebooks, newest first.
-pub(crate) fn pinned_notes(vault: &Path, lite: bool) -> Vec<Value> {
+/// A note an agent pinned carries `suggestedBy` until the owner pins it themselves.
+pub(crate) fn pinned_notes(vault: &Path, lite: bool, db: &hq_db::Database) -> Vec<Value> {
     collect_notes(vault, PROJECT_ROOTS, usize::MAX, lite)
         .into_iter()
         .filter(|n| n.pinned)
         .take(PINNED_LIMIT)
-        .map(|n| n.value)
+        .map(|n| {
+            let mut value = n.value;
+            let rel = value["path"].as_str().unwrap_or_default().to_string();
+            let suggested_by = std::fs::read_to_string(vault.join(&rel))
+                .ok()
+                .and_then(|raw| {
+                    db.with_conn(|c| hq_db::provenance::pin_suggested_by(c, &rel, &raw))
+                        .ok()
+                        .flatten()
+                });
+            value["suggestedBy"] = json!(suggested_by);
+            value
+        })
         .collect()
 }
 
@@ -1165,7 +1207,23 @@ mod tests {
             "---\ntitle: a---b\npinned: true\n---\nx",
         )
         .unwrap();
-        let pinned = pinned_notes(v.path(), false);
+        let db = hq_db::Database::open_memory().unwrap();
+        // An agent wrote the current version of dash.md, so its pin is only a suggestion.
+        let raw = std::fs::read_to_string(nb.join("dash.md")).unwrap();
+        db.with_conn(|c| {
+            hq_db::provenance::record(
+                c,
+                "Notebooks/dash.md",
+                &hq_db::search::content_hash(&raw),
+                &hq_db::provenance::Attribution {
+                    actor_id: Some("hs-claude-1"),
+                    source_kind: Some(hq_db::provenance::SourceKind::Agent),
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap();
+        let pinned = pinned_notes(v.path(), false, &db);
         let mut titles: Vec<&str> = pinned
             .iter()
             .map(|n| n["title"].as_str().unwrap())
@@ -1174,6 +1232,12 @@ mod tests {
         assert_eq!(titles, vec!["Kept", "a---b"]);
         let kept = pinned.iter().find(|n| n["title"] == "Kept").unwrap();
         assert_eq!(kept["tags"], json!(["a"]));
+        assert!(
+            kept["suggestedBy"].is_null(),
+            "nobody recorded an agent writing it"
+        );
+        let suggested = pinned.iter().find(|n| n["title"] == "a---b").unwrap();
+        assert_eq!(suggested["suggestedBy"], "hs-claude-1");
     }
 
     #[test]

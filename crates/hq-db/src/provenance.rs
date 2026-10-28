@@ -284,6 +284,21 @@ pub fn current(conn: &Connection, path: &str, content_hash: &str) -> Result<Opti
     Ok(by_version(conn, path, content_hash)?.filter(|p| !p.redacted))
 }
 
+/// Who suggested a pin on this version of a note, when the version came from an
+/// agent and the owner has not accepted it: such a pin is shown to the owner but not
+/// trusted. `Reviewed` does not count, since agents may set it. `None` for the
+/// owner's own writes, accepted versions, and versions nobody recorded (edited
+/// outside HQ's tools).
+pub fn pin_suggested_by(conn: &Connection, path: &str, raw: &str) -> Result<Option<String>> {
+    let hash = crate::search::content_hash(raw);
+    let Some(p) = current(conn, path, &hash)? else {
+        return Ok(None);
+    };
+    let from_agent = matches!(p.source_kind, SourceKind::Agent | SourceKind::Generated);
+    let accepted = p.review_state == ReviewState::Accepted;
+    Ok((from_agent && !accepted).then_some(p.actor_id))
+}
+
 /// Records for a note, newest first. Redacted records are left out.
 pub fn history(conn: &Connection, path: &str, limit: usize) -> Result<Vec<Provenance>> {
     let mut stmt = conn.prepare(&format!(
@@ -455,6 +470,52 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         crate::migrations::run(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn a_pin_is_a_suggestion_only_on_an_unreviewed_agent_version() {
+        let conn = db();
+        let raw = "---\npinned: true\n---\nx";
+        let hash = crate::search::content_hash(raw);
+        assert_eq!(
+            pin_suggested_by(&conn, "n.md", raw).unwrap(),
+            None,
+            "nobody recorded it"
+        );
+        let rec = record(&conn, "n.md", &hash, &agent("hs-1", "hs-1", None)).unwrap();
+        assert_eq!(
+            pin_suggested_by(&conn, "n.md", raw).unwrap().as_deref(),
+            Some("hs-1")
+        );
+        set_review_state(&conn, rec.id, ReviewState::Accepted, "owner", None).unwrap();
+        assert_eq!(
+            pin_suggested_by(&conn, "n.md", raw).unwrap(),
+            None,
+            "the owner accepted it"
+        );
+
+        let edited = "---\npinned: true\n---\ny";
+        record(
+            &conn,
+            "n.md",
+            &crate::search::content_hash(edited),
+            &agent("hs-2", "hs-2", None),
+        )
+        .unwrap();
+        assert_eq!(
+            pin_suggested_by(&conn, "n.md", edited).unwrap().as_deref(),
+            Some("hs-2"),
+            "an agent's later edit is unreviewed again"
+        );
+        let later = current(&conn, "n.md", &crate::search::content_hash(edited))
+            .unwrap()
+            .unwrap();
+        set_review_state(&conn, later.id, ReviewState::Reviewed, "hs-3", None).unwrap();
+        assert_eq!(
+            pin_suggested_by(&conn, "n.md", edited).unwrap().as_deref(),
+            Some("hs-2"),
+            "another agent's review does not vouch for a pin"
+        );
     }
 
     fn agent<'a>(actor: &'a str, session: &'a str, task: Option<&'a str>) -> Attribution<'a> {

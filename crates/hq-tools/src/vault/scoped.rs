@@ -22,6 +22,7 @@ const PATH_WRITE_TOOLS: &[&str] = &[
     "vault_append_note",
     "vault_patch_section",
     "vault_frontmatter_update",
+    "vault_pin",
     "vault_delete",
 ];
 

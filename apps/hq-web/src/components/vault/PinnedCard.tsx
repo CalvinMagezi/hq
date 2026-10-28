@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router'
 import type { PinnedNote } from '~/lib/vaultApi'
 import { relTime } from '~/lib/time'
 
-export function PinnedCard({ note, isSelected, onClick, onUnpin }: { note: PinnedNote; isSelected: boolean; onClick?: () => void; onUnpin?: (path: string) => void }) {
+export function PinnedCard({ note, isSelected, onClick, onUnpin, onKeepPin }: { note: PinnedNote; isSelected: boolean; onClick?: () => void; onUnpin?: (path: string) => void; onKeepPin?: (path: string) => void }) {
     const folder = note.path.includes('/') ? note.path.split('/').slice(0, -1).join('/') : null
 
     return (
@@ -73,6 +73,20 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin }: { note: Pinne
                     ))}
                 </div>
             </Link>
+            {note.suggestedBy && (
+                <div className="flex items-center gap-1.5 px-3 pb-2 -mt-1 text-[9px]" style={{ color: 'var(--text-dim)' }}>
+                    <span>Suggested by {note.suggestedBy}, not yet in HQ's context.</span>
+                    {onKeepPin && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onKeepPin(note.path) }}
+                            className="underline hover:opacity-80"
+                            style={{ color: 'var(--accent-blue)' }}
+                        >
+                            Keep pin
+                        </button>
+                    )}
+                </div>
+            )}
             {onUnpin && (
                 <button
                     onClick={(e) => { e.stopPropagation(); onUnpin(note.path) }}

@@ -543,6 +543,7 @@ const VAULT_WRITE_TOOLS: &[&str] = &[
     "vault_append_note",
     "vault_patch_section",
     "vault_frontmatter_update",
+    "vault_pin",
     "vault_move",
     "vault_delete",
     "vault_import",

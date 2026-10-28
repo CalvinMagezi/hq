@@ -7,6 +7,8 @@ export interface PinnedNote {
   preview: string
   tags: string[]
   updatedAt?: string
+  /** The agent that pinned it. Such a pin stays out of HQ's context until the owner keeps it. */
+  suggestedBy?: string | null
 }
 
 export interface NoteTreeNode {
