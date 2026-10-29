@@ -521,6 +521,25 @@ Linux. A closed lid on battery still sleeps, which the docs say.
 **5.3 Placement.** `docs/AGENT_SESSIONS.md` says to run long teams on an
 always-on host, and backend work on the server host where possible.
 
+### What phase 5 built
+
+- **5.1** as designed. The outage lives in `host_outages` (migration 103): the first failed
+  poll opens it, a claim makes the alert one per outage, and the first answer ends it. The
+  alert is an action-needed item from `session-supervisor` (dedup key
+  `host-unreachable-<host>-<since>`), so it reaches the Android app and web push with no new
+  path. When the host answers, the item is retired (state `expired`, not the owner's
+  dismissal) and an FYI says it is back with how long it was gone. A silence shorter than the
+  wait says nothing. A host whose sessions were all stopped while it was silent stops being
+  polled, so its outage ends quietly. `unreachable_alert_minutes: 0` keeps tracking but never
+  alerts. `hq doctor` lists open outages and suggests `keep_awake` when one exists.
+- **5.2** as designed, with two details. On Linux the inhibitor runs `tail --pid=<host pid>`
+  so it ends with the host. An inhibitor the OS refuses (it exits non-zero) is reported once
+  and not retried, so a server without the permission does not spawn one every check. The
+  host checks every 15 seconds.
+- **5.3** in "Behavior worth knowing" in `docs/AGENT_SESSIONS.md`.
+- Not built: the `host_unreachable` and `host_back` events, which come with phase 3's event
+  log.
+
 ## Phase 6: goals that move with the work, and a decisions list
 
 **6.1 One task per plan step.**
@@ -544,11 +563,12 @@ phase 3's items and the task's `waiting_on`, not a new store.
 | Phase 0 | built | Copilot teams run with few prompts and visible blocks; folder requests block instead of going quiet |
 | Alerts, first PR | #298: the excerpt markers, a server HQ in the app, ETag on the notifications list | The phone shows agent prompts from a server HQ |
 | 4.1 to 4.3 | 1 to 2, shared with agent-teams step 4 | No shared working trees |
-| Phase 5.1 | 1 | A sleeping host is noticed |
-| Phase 1 | built | Structured answers; option buttons in the web Sessions panel (phone and web push next, in HQ-RDT-003) |
+| Phase 5 | built | A sleeping host is noticed; a laptop can stay awake while agents run |
+| Phase 1 | built | Structured answers; option buttons in the web Sessions panel |
+| HQ-RDT-003 | built | Answer buttons on the phone and in web push |
 | Phase 2 | 2 to 3 | Prompts become policy; Claude Code gets a deny list |
 | Phase 3 | 2 | Events instead of screen reads; escalations pushed |
-| 4.4, 5.2, phase 6 | 2 to 3 | One team per remote client; decisions list |
+| 4.4, phase 6 | 2 to 3 | One team per remote client; decisions list |
 
 Each PR ships with tests and, for anything touching the host, a run on a real
 host with the CLI in question. After phase 0 and 4.1, the next batch of the

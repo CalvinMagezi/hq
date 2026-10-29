@@ -682,7 +682,15 @@ The wire protocol is written out in `crates/hq-gate/src/lib.rs`.
   `agent_host.ssh_multiplex` keeps the ssh connection open between calls. State
   changes arrive as events instead of one poll a minute.
 - A laptop that is asleep or off the tailnet is skipped, not marked dead; its
-  sessions are picked up again when it answers.
+  sessions are picked up again when it answers. After
+  `agent_host.unreachable_alert_minutes` (5 by default) of silence HQ raises one alert, and
+  says when it is back.
+- `agent_host.keep_awake: while_sessions` in the laptop's own config makes `hq host serve`
+  hold a sleep assertion while at least one agent's process runs, and let go when the last
+  one ends: `caffeinate -i -w <host pid>` on macOS, `systemd-inhibit --what=sleep:idle` on
+  Linux. The assertion watches the host's pid, so a host that dies does not keep the machine
+  awake. Off by default. Closing the lid on battery still sleeps a Mac, and a Linux machine
+  that refuses the inhibitor (no permission for it) is told once on the host's stderr.
 - No terminal UI: `hq host status` on the machine and `harness_session_list` in HQ
   show every session. A session silent and not working for
   `agent_host.idle_reap_hours` (24 by default) is stopped by the host itself and can

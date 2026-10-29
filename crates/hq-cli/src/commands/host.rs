@@ -154,6 +154,7 @@ async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> 
         eprintln!("hq host could not restore {name}: {why}");
     }
     let stop = server.stop_handle();
+    let awake = keep_awake(host.clone());
     println!("hq host serving {}", socket_path(&dir).display());
     let serving = tokio::task::spawn_blocking(move || server.serve());
 
@@ -167,7 +168,62 @@ async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> 
     if let Some(gate) = gate {
         gate.shutdown();
     }
+    if let Some(awake) = awake {
+        awake.stop();
+    }
     Ok(result?)
+}
+
+/// How often the host checks whether any agent is still running, for `keep_awake`.
+const AWAKE_CHECK: Duration = Duration::from_secs(15);
+
+/// The thread that keeps the machine awake while agents run, when `agent_host.keep_awake`
+/// asks for it and this platform has a way.
+struct AwakeThread {
+    stop: std::sync::mpsc::Sender<()>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl AwakeThread {
+    fn stop(self) {
+        drop(self.stop);
+        let _ = self.thread.join();
+    }
+}
+
+fn keep_awake(host: Arc<Host>) -> Option<AwakeThread> {
+    use hq_core::config::KeepAwake as Setting;
+    let setting = hq_core::config::HqConfig::load()
+        .map(|c| c.agent_host.keep_awake)
+        .unwrap_or_default();
+    if setting == Setting::Off {
+        return None;
+    }
+    let Some(argv) = hq_host::assertion_command(std::process::id()) else {
+        eprintln!(
+            "hq host: agent_host.keep_awake is set, but this platform has no way to stay awake"
+        );
+        return None;
+    };
+    println!("hq host keeps this machine awake while agents run");
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    let thread = std::thread::spawn(move || {
+        let mut awake = hq_host::KeepAwake::new(argv);
+        loop {
+            let busy = host
+                .list()
+                .iter()
+                .any(|p| matches!(p.status, hq_host::PaneStatus::Running));
+            awake.update(busy);
+            if !matches!(
+                stopped.recv_timeout(AWAKE_CHECK),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ) {
+                break;
+            }
+        }
+    });
+    Some(AwakeThread { stop, thread })
 }
 
 /// What `agent_host` asks of the TCP gate, checked before the host starts anything. A gate that

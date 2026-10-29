@@ -19,7 +19,7 @@ pub const GATE_DENIED_EXIT: i32 = 64;
 /// not end the host), and so is `agent.report`, which belongs to the agent's own
 /// hooks on the machine where it runs. `host.lockdown` is in so HQ can stop a
 /// machine's agents from anywhere; unlocking has no method at all.
-const ALLOWED: [&str; 23] = [
+const ALLOWED: [&str; 26] = [
     "host.status",
     "host.lockdown",
     "host.workspace",
@@ -30,6 +30,9 @@ const ALLOWED: [&str; 23] = [
     "agent.list",
     "agent.get",
     "agent.read",
+    "agent.read_since",
+    "agent.pending",
+    "agent.answer",
     "agent.send_text",
     "agent.paste",
     "agent.prompt",
@@ -106,6 +109,18 @@ mod tests {
         let (m, p) = parse_request(&request("agent.get", r#"{"name":"a"}"#)).unwrap();
         assert_eq!(m, "agent.get");
         assert_eq!(p["name"], "a");
+    }
+
+    #[test]
+    fn a_paired_machines_dialogs_can_be_read_and_answered() {
+        // A server HQ drives agents on a paired laptop through this gate, so everything the
+        // session tools call must pass it: reading a dialog, answering it, following output.
+        for method in ["agent.pending", "agent.answer", "agent.read_since"] {
+            assert!(
+                parse_request(&request(method, r#"{"name":"a"}"#)).is_ok(),
+                "{method}"
+            );
+        }
     }
 
     #[test]

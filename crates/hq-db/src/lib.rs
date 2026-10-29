@@ -9,6 +9,7 @@ pub mod dialog_alerts;
 pub mod folder_grants;
 pub mod harness_drive_gate;
 pub mod harness_sessions_registry;
+pub mod host_outages;
 pub mod mcp_connector;
 pub mod migrations;
 pub mod pool;

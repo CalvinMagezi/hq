@@ -233,9 +233,30 @@ pub async fn run_session_supervisor(
         db,
         summarizer.as_ref(),
         resolve,
-        HOST_SWEEP_BUDGET,
+        Sweep {
+            host_budget: HOST_SWEEP_BUDGET,
+            unreachable_after: config.agent_host.unreachable_alert_after(),
+        },
     )
     .await
+}
+
+/// How one sweep treats its hosts.
+struct Sweep {
+    /// Time the hosts get in total.
+    host_budget: Duration,
+    /// How long a host with sessions may stay silent before the alert; `None` never alerts.
+    unreachable_after: Option<Duration>,
+}
+
+impl Sweep {
+    #[cfg(test)]
+    fn within(host_budget: Duration) -> Self {
+        Sweep {
+            host_budget,
+            unreachable_after: None,
+        }
+    }
 }
 
 fn summarizer_for(config: &HqConfig) -> Option<Summarizer> {
@@ -423,13 +444,20 @@ async fn supervise(
     db: &Database,
     summarizer: Option<&Summarizer>,
     resolve: HostResolver,
-    host_budget: Duration,
+    sweep: Sweep,
 ) -> Result<()> {
     let db_arc = Arc::new(db.clone());
     let running = db.with_conn(|c| registry::list(c, Some(registry::STATUS_RUNNING), 100))?;
-    let (rows, resolver) = (running.clone(), resolve.clone());
+    let (rows, resolver, host_budget) = (running.clone(), resolve.clone(), sweep.host_budget);
     let phase =
         tokio::task::spawn_blocking(move || gather_hosts(&rows, &resolver, host_budget)).await?;
+    hosts::watch_hosts(
+        db,
+        &phase.polled,
+        &running,
+        sweep.unreachable_after,
+        chrono::Utc::now().timestamp(),
+    );
     // Started after the host phase so a slow host cannot spend the summaries' time.
     let summary_deadline = Instant::now() + SUMMARY_SWEEP_BUDGET;
 
@@ -593,6 +621,7 @@ async fn supervise(
 }
 
 mod alerts;
+mod hosts;
 #[cfg(test)]
 #[cfg(unix)]
 mod tests;
