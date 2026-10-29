@@ -1450,9 +1450,9 @@ mod tests {
         // A full scrollback dropped "a" and "b" and took two new lines.
         let after = lines(&["c", "d", "e", "f"]);
         assert_eq!(place_cursor(&after, &cursor), Some(2));
-        // The marked pair appears twice: say so rather than pick one.
-        let twice = lines(&["", "", "x", "", ""]);
-        let blank = cursor_at(&lines(&["", ""]));
+        // The rows moved and the marked pair now appears twice: say so rather than pick one.
+        let blank = cursor_at(&lines(&["a", "b", "c", "d", "", ""]));
+        let twice = lines(&["", "", "x", "", "", "y"]);
         assert_eq!(place_cursor(&twice, &blank), None);
         assert_eq!(place_cursor(&after, "garbage"), None);
         // A cursor taken before anything scrolled off sees everything as new.
