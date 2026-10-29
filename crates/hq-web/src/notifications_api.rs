@@ -8,7 +8,7 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -38,8 +38,9 @@ pub(crate) struct NotificationMetadata {
     pub(crate) artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) score: Option<f64>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub(crate) extra: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    /// Ordered, so the same list always serializes to the same bytes (its ETag depends on it).
+    pub(crate) extra: BTreeMap<String, String>,
     /// A page of the web app the item opens, from `notify_owner`'s `link`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) link: Option<String>,
@@ -124,7 +125,7 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         (true, true) => &["approve", "reject"],
         (true, false) => &["dismiss", "acknowledge"],
     };
-    let extra = HashMap::from([
+    let extra = BTreeMap::from([
         ("source_task".to_string(), source_task),
         ("val_kind".to_string(), kind_str),
     ]);
@@ -224,6 +225,7 @@ fn record_action(
 pub(crate) async fn list_notifications_handler(
     State(state): State<Arc<WsState>>,
     Query(params): Query<ListNotificationsParams>,
+    headers: axum::http::HeaderMap,
 ) -> Response {
     let limit = params.limit.unwrap_or(50);
     match aggregate_notifications(
@@ -232,12 +234,43 @@ pub(crate) async fn list_notifications_handler(
         params.category.as_deref(),
         limit,
     ) {
-        Ok(res) => Json(res).into_response(),
+        Ok(res) => with_etag(&res, &headers),
         Err(e) => {
             warn!(error = %e, "list_notifications_handler failed");
             ApiError::internal(e).into_response()
         }
     }
+}
+
+/// The list as JSON with an ETag over its bytes. A client that sends back the ETag it holds gets
+/// 304 and no body while nothing changed, so a phone that polls a server HQ over mobile data
+/// pays a few hundred bytes a poll instead of the whole list.
+fn with_etag(res: &NotificationsResponse, headers: &axum::http::HeaderMap) -> Response {
+    use axum::http::{StatusCode, header};
+    use sha2::{Digest, Sha256};
+    let body = match serde_json::to_vec(res) {
+        Ok(body) => body,
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
+    let digest = Sha256::digest(&body);
+    let hex: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
+    let etag = format!("\"{hex}\"");
+    let held = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
+    if held {
+        return (StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response();
+    }
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/json".to_string()),
+            (header::ETAG, etag),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 pub(crate) async fn notification_action_handler(
@@ -366,6 +399,53 @@ mod tests {
         let res = aggregate_notifications(&db, Some("pending"), Some("all"), 50).unwrap();
         assert_eq!(res.notifications.len(), 1);
         assert_eq!(res.pending_approvals_count, 1);
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_list_is_a_bodiless_304_and_a_change_is_a_new_etag() {
+        use axum::http::{HeaderMap, HeaderValue, header};
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let insert = |id: &str| {
+            let id = id.to_string();
+            state
+                .db
+                .with_conn(move |c| {
+                    Ok(c.execute(
+                        "INSERT INTO value_items (id, source_task, kind, title, body, state, created_at)
+                         VALUES (?1, 't', 'action_needed', 'T', 'B', 'pending', '2026-09-25T00:00:00Z')",
+                        [id],
+                    )?)
+                })
+                .unwrap();
+        };
+        let list = |held: Option<String>| {
+            let mut headers = HeaderMap::new();
+            if let Some(tag) = held {
+                headers.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&tag).unwrap());
+            }
+            let params = ListNotificationsParams {
+                state: Some("pending".into()),
+                category: None,
+                limit: Some(30),
+            };
+            list_notifications_handler(State(state.clone()), Query(params), headers)
+        };
+        insert("first111");
+        let first = list(None).await;
+        assert_eq!(first.status(), 200);
+        let tag = first.headers()[header::ETAG].to_str().unwrap().to_string();
+        assert!(tag.starts_with('"') && tag.ends_with('"'), "{tag}");
+
+        let same = list(Some(tag.clone())).await;
+        assert_eq!(same.status(), 304);
+        let body = axum::body::to_bytes(same.into_body(), 1024).await.unwrap();
+        assert!(body.is_empty(), "a 304 carries no list");
+
+        insert("second22");
+        let changed = list(Some(tag.clone())).await;
+        assert_eq!(changed.status(), 200, "a new item is a new list");
+        assert_ne!(changed.headers()[header::ETAG].to_str().unwrap(), tag);
     }
 
     #[tokio::test]

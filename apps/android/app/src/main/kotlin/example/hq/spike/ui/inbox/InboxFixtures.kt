@@ -81,7 +81,7 @@ private fun realInbox(ago: (Long) -> String): InboxLists {
 private fun helperNotices(): InboxLists {
     fun notice(id: String, session: String, lines: List<String>) = InboxItem(
         id, "action_needed", "Harness session 'claude in hq-oss' is waiting for you",
-        "Session $session on mac-mini is blocked on a prompt or approval:\n<hq-output>\n${lines.joinToString("\n")}\n</hq-output>\nRead it with harness_session_logs.",
+        "Session $session on mac-mini is blocked on a prompt or approval:\n----- session output -----\n${lines.joinToString("\n")}\n----- end session output -----\nRead it with harness_session_logs.",
         "pending", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(3).toString(), null, "session-supervisor", null, listOf("approve", "reject"),
     )
     return inboxLists(listOf(notice("p1", "c2", example.hq.spike.ui.helpers.SHORT_COMMAND), notice("p2", "c1", example.hq.spike.ui.helpers.LONG_COMMAND)), emptyList())

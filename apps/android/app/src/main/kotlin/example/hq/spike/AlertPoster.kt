@@ -100,6 +100,25 @@ object AlertPoster {
         return PendingIntent.getActivity(c, link.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
+    /** What a tap on [card] opens: for a question from the server HQ, that HQ's own web app, since this phone's pages do not know its helpers. */
+    internal fun tapFor(c: Context, card: InboxCard): PendingIntent = if (ServerHq.isServer(card.id)) openServer(c) else open(c, linkFor(card))
+
+    /** The server HQ's notifications page in the browser, or this app's Inbox when no server is kept. */
+    internal fun openServer(c: Context): PendingIntent {
+        val address = ServerHq.address(c) ?: return open(c)
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("$address/notifications")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return PendingIntent.getActivity(c, address.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    /** One notice when the server HQ signs this phone out (Settings, Devices there, or Sign out everywhere): its questions stop arriving here. */
+    @JvmStatic
+    fun serverSignedOut(c: Context, address: String) {
+        c.getSystemService(NotificationManager::class.java).notify(
+            ID_BASE - 2,
+            simple(c, NEEDS, "Your server HQ signed this phone out", "Its questions no longer arrive here. To get them again, sign in from Settings, Notifications with a new code from $address.", open(c)),
+        )
+    }
+
     internal fun linkFor(card: InboxCard): String = when {
         card.kind == CardKind.Update -> "hq://inbox"
         card.sessionId != null -> "hq://helpers/${card.sessionId}"
@@ -114,7 +133,7 @@ object AlertPoster {
         val needs = card.kind != CardKind.Update
         val body = if (card.body.length > MAX_BODY) card.body.take(MAX_BODY) + "…" else card.body
         val b = Notification.Builder(c, if (needs) NEEDS else UPDATES).setSmallIcon(HubService.statIcon(c)).setContentTitle(card.title).setContentText(body)
-            .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(open(c, linkFor(card))).setAutoCancel(true)
+            .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(tapFor(c, card)).setAutoCancel(true)
             .setCategory(if (needs) Notification.CATEGORY_REMINDER else Notification.CATEGORY_STATUS).setVisibility(Notification.VISIBILITY_PRIVATE)
         // The lock screen shows only that something is there, never what.
         val public = Notification.Builder(c, if (needs) NEEDS else UPDATES).setSmallIcon(HubService.statIcon(c))
@@ -131,7 +150,7 @@ object AlertPoster {
             out += Notification.Action.Builder(icon, card.allowLabel, AnswerReceiver.intent(c, card, "approve")).setAuthenticationRequired(true).build()
             out += Notification.Action.Builder(icon, "Not now", AnswerReceiver.intent(c, card, "reject")).build()
         }
-        out += Notification.Action.Builder(icon, if (card.kind == CardKind.HelperStuck) "Take a look" else "Open", open(c, linkFor(card))).build()
+        out += Notification.Action.Builder(icon, if (card.kind == CardKind.HelperStuck) "Take a look" else "Open", tapFor(c, card)).build()
         return out
     }
 }

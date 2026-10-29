@@ -254,11 +254,15 @@ object HelperWords {
         AnswerCheck.BroadYes, AnswerCheck.NoCursor -> "Its highlighted choice would say yes for good, or cannot be read. Open the helper to pick the answer."
     }
 
+    /** The lines HQ's session supervisor puts around a screen excerpt (`OUTPUT_OPEN` and `OUTPUT_CLOSE` in its Rust source). */
+    const val OUTPUT_OPEN = "----- session output -----"
+    const val OUTPUT_CLOSE = "----- end session output -----"
+
     /** The lines a notice quotes from the helper's screen, between its output markers; empty when it quotes none. */
     fun excerptLines(description: String): List<String> {
         val lines = description.lines()
-        val from = lines.indexOfFirst { it.trim() == "<hq-output>" }
-        val to = lines.indexOfFirst { it.trim() == "</hq-output>" }
+        val from = lines.indexOfFirst { it.trim() == OUTPUT_OPEN }
+        val to = lines.indexOfFirst { it.trim() == OUTPUT_CLOSE }
         return if (from >= 0 && to > from) lines.subList(from + 1, to) else emptyList()
     }
 

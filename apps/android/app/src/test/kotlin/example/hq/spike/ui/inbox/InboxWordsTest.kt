@@ -14,11 +14,11 @@ class InboxWordsTest {
 
     private val blocked = """
         Session s-42 on mac-mini is blocked on a prompt or approval:
-        <hq-output>
+        ----- session output -----
         Do you want to edit Chat.dc.html?
-        1. Yes
-        2. No
-        </hq-output>
+        ❯ 1. Yes
+          2. No
+        ----- end session output -----
         Read it with `harness_session_logs`, answer with `harness_session_send`.
     """.trimIndent()
 
@@ -31,11 +31,48 @@ class InboxWordsTest {
         assertTrue(c.canAllow)
         assertEquals("Allow once", c.allowLabel)
         assertEquals("Wants to edit one file: Chat.dc.html", c.body)
-        assertEquals(listOf("Do you want to edit Chat.dc.html?", "1. Yes", "2. No"), c.excerpt)
+        assertEquals(listOf("Do you want to edit Chat.dc.html?", "❯ 1. Yes", "  2. No"), c.excerpt)
     }
 
-    private fun bashNotice(vararg command: String) = "Session s-7 on mac-mini is blocked on a prompt or approval:\n<hq-output>\n" +
-        (listOf("Bash command") + command + listOf("Do you want to proceed?", "❯ 1. Yes", "  2. No")).joinToString("\n") + "\n</hq-output>\nRead it with x"
+    /** Exactly what the session supervisor posts for a GitHub Copilot CLI dialog, screen lines as captured from Copilot 1.0.105. */
+    private fun copilotNotice(vararg dialog: String) = listOf(
+        "Session hs-github-copilot-1 on laptop is blocked on a prompt or approval:",
+        "----- session output -----",
+        "╭──────────────────────────────────────────────╮",
+        *dialog.map { "│ $it" }.toTypedArray(),
+        "│ ↑/↓ to navigate · enter to select · esc to cancel",
+        "╰──────────────────────────────────────────────╯",
+        "----- end session output -----",
+        "Read it with `harness_session_logs`, answer with `harness_session_send` (text, or `keys` such as down and enter).",
+    ).joinToString("\n")
+
+    @Test fun aCopilotCommandDialogCanBeAllowedOnceFromTheCard() {
+        val notice = copilotNotice(
+            "Create sub/a.txt", "╭────────╮", "│ mkdir -p sub && touch sub/a.txt │", "╰────────╯", "",
+            "Do you want to run this command?", "", "❯ 1. Yes", "  2. Yes, and don't ask again for `mkdir` and `touch` in this directory", "  3. No, and tell Copilot what to do differently (Esc to stop)", "",
+        )
+        val c = InboxWords.card(item("Harness session 'copilot-check' is waiting for you", notice, source = "session-supervisor"))
+        assertEquals(CardKind.HelperAsks, c.kind)
+        assertEquals("hs-github-copilot-1", c.sessionId)
+        assertTrue(c.canAllow)
+        assertEquals("Allow once", c.allowLabel)
+        assertTrue(c.body, c.body.contains("mkdir -p sub"))
+    }
+
+    /** Copilot's path dialog highlights "remember this path": Enter would widen what the session may do, so the card does not offer it. */
+    @Test fun aDialogWhoseHighlightedChoiceIsNotYesOnceIsNotAllowedFromTheCard() {
+        val notice = copilotNotice(
+            "Allow path access", "This action may read or write the following path outside the paths currently allowed for this session.",
+            "/tmp -> /private/tmp", "", "Do you want to allow this?", "", "  1. Yes", "❯ 2. Yes, and remember this path for this session", "  3. No (Esc)", "",
+        )
+        val c = InboxWords.card(item("Harness session 'copilot-check' is waiting for you", notice, source = "session-supervisor"))
+        assertEquals(CardKind.HelperAsks, c.kind)
+        assertFalse(c.canAllow)
+        assertEquals("Open helper", c.allowLabel)
+    }
+
+    private fun bashNotice(vararg command: String) = "Session s-7 on mac-mini is blocked on a prompt or approval:\n----- session output -----\n" +
+        (listOf("Bash command") + command + listOf("Do you want to proceed?", "❯ 1. Yes", "  2. No")).joinToString("\n") + "\n----- end session output -----\nRead it with x"
 
     @Test fun aShortCommandIsShownOnTheCardAndCanBeAnsweredThere() {
         val c = InboxWords.card(item("Harness session 'claude in x' is waiting for you", bashNotice("ls -la"), source = "session-supervisor"))
@@ -49,7 +86,7 @@ class InboxWordsTest {
         assertFalse(long.canAllow)
         assertEquals("Open helper", long.allowLabel)
         assertEquals("s-7", long.sessionId)
-        val plan = "Session s-8 on mac is blocked on a prompt or approval:\n<hq-output>\nWould you like to proceed?\n❯ 1. Yes, and auto-accept edits\n  2. No\n</hq-output>"
+        val plan = "Session s-8 on mac is blocked on a prompt or approval:\n----- session output -----\nWould you like to proceed?\n❯ 1. Yes, and auto-accept edits\n  2. No\n----- end session output -----"
         val p = InboxWords.card(item("Harness session 'claude in x' is waiting for you", plan, source = "session-supervisor"))
         assertFalse(p.canAllow)
         assertEquals("Open helper", p.allowLabel)

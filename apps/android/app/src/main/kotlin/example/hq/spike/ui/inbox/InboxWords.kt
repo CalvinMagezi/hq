@@ -73,8 +73,9 @@ object InboxWords {
             "is waiting for you" -> {
                 val excerpt = HelperWords.excerptLines(item.description)
                 val ask = HelperWords.blocked(excerpt)
-                // Answered from the card only when the card shows everything the owner needs to decide; otherwise the helper's own page does.
-                val inline = sessionId != null && ask != null && HelperWords.canAnswerInline(ask)
+                // Answered from the card only when the card shows everything the owner needs to decide, and Enter would take a plain
+                // yes once (the tap checks the same again on the live screen); otherwise the helper's own page does.
+                val inline = sessionId != null && ask != null && HelperWords.canAnswerInline(ask) && HelperWords.enterMeansOnce(excerpt)
                 val body = when {
                     ask == null -> if (line.isNotEmpty()) "It stopped to ask: $line" else "It stopped to ask before going on."
                     ask.kind == AskKind.Other -> "It stopped to ask: ${ask.question}"
