@@ -111,9 +111,14 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(answering = it.answering + (card.id to Answer.Sending)) }
         viewModelScope.launch {
             try {
-                // A helper is answered in its own terminal first, and only if its screen still shows the dialog this card quoted.
-                if (card.kind == CardKind.HelperAsks && card.sessionId != null && !answerHelper(card, if (allow) "enter" else "esc")) return@launch
-                client.answerNotification(card.id, if (allow) "approve" else "reject")
+                if (card.dialog != null) {
+                    // The server answers the dialog it read, and refuses one that moved on (409, handled below).
+                    client.answerDialog(card.id, if (allow) "approve" else "decline")
+                } else {
+                    // A helper is answered in its own terminal first, and only if its screen still shows the dialog this card quoted.
+                    if (card.kind == CardKind.HelperAsks && card.sessionId != null && !answerHelper(card, if (allow) "enter" else "esc")) return@launch
+                    client.answerNotification(card.id, if (allow) "approve" else "reject")
+                }
                 _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine(if (allow) "Allowed." else "Not now. Nothing was done.")) }
                 refresh()
             } catch (e: HqUnavailable) {

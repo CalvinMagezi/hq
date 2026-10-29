@@ -199,4 +199,31 @@ class InboxWordsTest {
         )
         assertEquals("Not now: Phase 5: game layer", inboxLists(emptyList(), history).done.single().title)
     }
+
+    private fun dialog(approve: String?, answered: Boolean = false) =
+        example.hq.spike.data.HqClient.AlertDialog("hs-9", 7, "path", "Do you want to allow this?", "/tmp -> /private/tmp", approve, answered)
+
+    @Test fun aDialogTheServerReadIsAnsweredThroughItNotByKeys() {
+        val c = InboxWords.card(item("Harness session 'copilot' is waiting for you", blocked, source = "session-supervisor").copy(dialog = dialog("Yes")))
+        assertEquals(CardKind.HelperAsks, c.kind)
+        assertEquals("Copilot needs your OK", c.title)
+        assertEquals("Do you want to allow this?\n/tmp -> /private/tmp", c.body)
+        assertEquals("hs-9", c.sessionId)
+        assertTrue(c.canAllow)
+        assertEquals("Allow once", c.allowLabel)
+        assertEquals(dialog("Yes"), c.dialog)
+    }
+
+    @Test fun aDialogWithNoYesOnceAnswerOffersNoAllow() {
+        val c = InboxWords.card(item("Harness session 'copilot' is waiting for you", blocked, source = "session-supervisor").copy(dialog = dialog(null)))
+        assertFalse(c.canAllow)
+        assertEquals("Open helper", c.allowLabel)
+        assertEquals(dialog(null), c.dialog)
+    }
+
+    @Test fun anAnsweredDialogFallsBackToTheQuotedScreen() {
+        val c = InboxWords.card(item("Harness session 'claude in hq-oss' is waiting for you", blocked, source = "session-supervisor").copy(dialog = dialog("Yes", answered = true)))
+        assertEquals(null, c.dialog)
+        assertEquals("s-42", c.sessionId)
+    }
 }

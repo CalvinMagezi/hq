@@ -95,6 +95,27 @@ server picks the row up within a few seconds and pushes it.
     address a client made up.
 - `crates/hq-db/src/push_subscriptions.rs` and `sql/088_web_push.sql`: the
   subscriptions table, and the `link` and `pushed_at` columns on `value_items`.
+- `crates/hq-web/src/dialog_answer.rs`: answer buttons (below).
+
+## Answering an agent's question from the notification
+
+When a coding agent waits at a dialog HQ can read, its push says what it asks (the
+question and the command or path) and has buttons: the agent's own yes-once answer
+(often just "Yes") when there is one, and Decline. A "don't ask again" or "remember"
+answer is never a button, and neither is a choice between answers (open HQ for those).
+
+The service worker has no web token. Each button carries its own token instead: an
+HMAC with the install's approval key (`approval.key` next to the HQ config, outside
+the database) over the inbox item, the dialog's number, the choice and an expiry 15
+minutes out. A click posts it to `POST /api/notifications/push-answer`, the one
+notifications route that takes no web token. The server checks the token, refuses a
+dialog that was already answered (by any device) or that the agent has moved past,
+and otherwise answers that dialog. The notification is replaced by one that says how it
+went. Chrome on macOS shows two buttons; a browser that shows none still opens HQ on a
+click.
+
+The phone app and the web app answer through `POST /api/notifications/{id}/answer` with
+the web token, under the same rules.
 - `apps/hq-web/src/lib/webPush.ts`, `components/notifications/PushToggle.tsx` and
   `sw.ts`: subscribing in the browser, the toggle, and the service worker's `push`
   handler. On every start the app re-sends its subscription, so the server keeps it after
@@ -102,7 +123,8 @@ server picks the row up within a few seconds and pushes it.
 
 ## Privacy
 
-The payload (title, a clipped body and the link) is encrypted end to end. Google, Apple,
+The payload (title, a clipped body, the link, and for an agent's question its buttons and
+their answer tokens) is encrypted end to end. Google, Apple,
 Mozilla or Microsoft see when a push is sent and roughly how big it is, not what it says.
 
 Deleting `.vault/_data/web_push_vapid.p8` makes a new key on the next start. Every

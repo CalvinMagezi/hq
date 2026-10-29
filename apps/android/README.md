@@ -76,7 +76,14 @@ takes its address (https only) and a one-time code from Settings, Devices on tha
 phone in like any other device (`ServerHq`; the device token is sealed with the app's Keystore key).
 That HQ is then asked once a minute with the ETag of its last answer, so a list that has not changed
 costs a bodiless 304 on mobile data. Its questions get the same buttons, and an answer goes back to
-the HQ that asked; tapping one opens that HQ's web app. Signing the phone out there (Settings, Devices,
+the HQ that asked; tapping one opens that HQ's web app.
+
+When HQ could read the dialog a coding agent waits at, the notification says what it asks and the
+command or path it is about, and offers **Allow once** (only when the agent has a plain yes-once
+answer) and **Decline**. The app does not read the agent's screen or type keys for these: it posts the
+choice to `/api/notifications/{id}/answer`, and the server answers that dialog and no other, never with
+a "don't ask again" option. Already answered (on another device, or the agent moved on) shows as such.
+An older server, or a dialog HQ cannot read, keeps the previous behaviour. Signing the phone out there (Settings, Devices,
 or Sign out everywhere) stops it, and the app says so once; Disconnect stops it on the phone. Alerts arrive while the app's service is running and `hq` is up, within about 20
 seconds; they need no Google services. Web push for browsers and Home Screen apps is a separate
 server setting (`web_push.enabled`) and is not needed for this app. Android 13 asks once for the

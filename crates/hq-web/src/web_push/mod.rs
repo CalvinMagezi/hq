@@ -32,6 +32,8 @@ const PUSH_TTL_SECS: u32 = 24 * 60 * 60;
 const MAX_FAILURES: i64 = 5;
 const TITLE_CHARS: usize = 120;
 const BODY_CHARS: usize = 300;
+/// A notification button's label; longer ones are cut by the browser anyway.
+const ACTION_CHARS: usize = 40;
 /// Where a tap goes when the item names no page.
 const DEFAULT_LINK: &str = "/notifications";
 
@@ -181,7 +183,10 @@ impl WebPush {
                 continue;
             }
             let urgent = matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal);
-            let delivered = self.broadcast(db, &payload(&item), urgent).await?;
+            let buttons = answer_buttons(db, &item.id);
+            let delivered = self
+                .broadcast(db, &payload(&item, buttons.as_ref()), urgent)
+                .await?;
             tracing::debug!(id = %item.id, delivered, "web push: pushed an inbox item");
             pushed += 1;
         }
@@ -189,15 +194,70 @@ impl WebPush {
     }
 }
 
-/// The JSON the service worker turns into a notification.
-pub(crate) fn payload(item: &ValueItem) -> Vec<u8> {
-    serde_json::to_vec(&serde_json::json!({
+/// A blocked session's dialog and the signing key, for a push whose buttons answer it.
+pub(crate) struct AnswerButtons {
+    alert: hq_db::dialog_alerts::DialogAlert,
+    key: Vec<u8>,
+    expires: i64,
+}
+
+/// The answer buttons for inbox item `item_id`: when it is a blocked session's alert that is not
+/// answered yet. Without the signing key there are no buttons, only the tap that opens HQ.
+fn answer_buttons(db: &hq_db::Database, item_id: &str) -> Option<AnswerButtons> {
+    let alert = hq_db::dialog_alerts::get(db, item_id).ok().flatten()?;
+    if alert.answered {
+        return None;
+    }
+    let key = hq_core::approval_key::load_or_create_key()
+        .inspect_err(|e| tracing::warn!("web push: no approval key, so no answer buttons: {e:#}"))
+        .ok()?;
+    Some(AnswerButtons {
+        alert,
+        key,
+        expires: Utc::now().timestamp() + crate::dialog_answer::TOKEN_TTL_SECS,
+    })
+}
+
+/// The JSON the service worker turns into a notification. With `buttons`, it also carries the
+/// item id, up to two actions (the yes-once option by its own label, and Decline) and a token for
+/// each, which the service worker posts to `PUSH_ANSWER_PATH` in place of the web token.
+pub(crate) fn payload(item: &ValueItem, buttons: Option<&AnswerButtons>) -> Vec<u8> {
+    use crate::dialog_answer::{Choice, token};
+    let mut body = serde_json::json!({
         "title": clip(&item.title, TITLE_CHARS),
         "body": clip(&item.body, BODY_CHARS),
         "url": item.link.as_deref().filter(|l| is_app_path(l)).unwrap_or(DEFAULT_LINK),
         "tag": format!("hq-inbox-{}", item.id),
-    }))
-    .unwrap_or_default()
+    });
+    if let Some(b) = buttons {
+        let asks: Vec<&str> = [b.alert.question.as_deref(), b.alert.command.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        if !asks.is_empty() {
+            body["body"] = serde_json::json!(clip(&asks.join("\n"), BODY_CHARS));
+        }
+        let mut actions = Vec::new();
+        let mut tokens = serde_json::Map::new();
+        if let Some(label) = b.alert.approve_label() {
+            actions.push(
+                serde_json::json!({ "action": "approve", "title": clip(label, ACTION_CHARS) }),
+            );
+            tokens.insert(
+                "approve".into(),
+                token(&b.key, &b.alert, Choice::Approve, b.expires).into(),
+            );
+        }
+        actions.push(serde_json::json!({ "action": "decline", "title": "Decline" }));
+        tokens.insert(
+            "decline".into(),
+            token(&b.key, &b.alert, Choice::Decline, b.expires).into(),
+        );
+        body["item"] = serde_json::json!(format!("val_{}", item.id));
+        body["actions"] = serde_json::json!(actions);
+        body["tokens"] = serde_json::Value::Object(tokens);
+    }
+    serde_json::to_vec(&body).unwrap_or_default()
 }
 
 /// A path on this web app, never another origin.
@@ -394,13 +454,77 @@ mod tests {
             "y".repeat(900),
         );
         item.link = Some("https://example.com".into());
-        let v: serde_json::Value = serde_json::from_slice(&payload(&item)).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&payload(&item, None)).unwrap();
         assert_eq!(v["title"].as_str().unwrap().chars().count(), TITLE_CHARS);
         assert_eq!(v["body"].as_str().unwrap().chars().count(), BODY_CHARS);
         assert_eq!(v["url"], DEFAULT_LINK);
-        assert!(payload(&item).len() < encrypt::MAX_PLAINTEXT);
+        assert!(payload(&item, None).len() < encrypt::MAX_PLAINTEXT);
         item.link = Some("/chat?thread=t1".into());
-        let v: serde_json::Value = serde_json::from_slice(&payload(&item)).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&payload(&item, None)).unwrap();
         assert_eq!(v["url"], "/chat?thread=t1");
+    }
+
+    fn path_dialog(item_id: &str, approve: Option<u32>) -> hq_db::dialog_alerts::DialogAlert {
+        hq_db::dialog_alerts::DialogAlert {
+            item_id: item_id.into(),
+            session_id: "hs-1".into(),
+            pending_seq: 7,
+            kind: "path".into(),
+            question: Some("Do you want to allow this?".into()),
+            command: Some("/tmp -> /private/tmp".into()),
+            options: vec![hq_db::dialog_alerts::DialogOption {
+                id: 1,
+                label: "Yes".into(),
+                remember: false,
+                typed: false,
+            }],
+            approve_option: approve,
+            answered: false,
+        }
+    }
+
+    #[test]
+    fn a_blocked_sessions_push_carries_two_buttons_and_a_token_for_each() {
+        let item = ValueItem::new(
+            "session-supervisor",
+            ValueKind::ActionNeeded,
+            "Harness session 'copilot' is waiting for you",
+            "Session hs-1 on laptop is blocked on a prompt or approval:\n----- session output -----",
+        );
+        let buttons = AnswerButtons {
+            alert: path_dialog(&item.id, Some(1)),
+            key: vec![3u8; 32],
+            expires: 1_800_000_900,
+        };
+        let raw = payload(&item, Some(&buttons));
+        assert!(raw.len() < encrypt::MAX_PLAINTEXT);
+        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(v["item"], format!("val_{}", item.id));
+        assert_eq!(v["actions"][0]["action"], "approve");
+        assert_eq!(v["actions"][0]["title"], "Yes");
+        assert_eq!(v["actions"][1]["action"], "decline");
+        assert_eq!(
+            v["body"], "Do you want to allow this?\n/tmp -> /private/tmp",
+            "the question, not the raw screen"
+        );
+        let approve = v["tokens"]["approve"].as_str().unwrap();
+        assert!(crate::dialog_answer::token_valid(
+            &buttons.key,
+            &buttons.alert,
+            crate::dialog_answer::Choice::Approve,
+            approve,
+            1_800_000_000,
+        ));
+
+        // No yes-once option: only Decline, and no approve token to misuse.
+        let decline_only = AnswerButtons {
+            alert: path_dialog(&item.id, None),
+            key: vec![3u8; 32],
+            expires: 1_800_000_900,
+        };
+        let v: serde_json::Value =
+            serde_json::from_slice(&payload(&item, Some(&decline_only))).unwrap();
+        assert_eq!(v["actions"].as_array().unwrap().len(), 1);
+        assert!(v["tokens"].get("approve").is_none());
     }
 }

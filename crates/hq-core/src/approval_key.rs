@@ -80,6 +80,17 @@ pub fn value_approval_message(item_id: &str) -> String {
     format!("value-approval|{item_id}")
 }
 
+/// Signs one answer (`approve` or `decline`) to the dialog behind one inbox item, valid until
+/// `expires` (Unix seconds). A web push button carries it in place of the web token.
+pub fn dialog_answer_message(
+    item_id: &str,
+    pending_seq: u64,
+    choice: &str,
+    expires: i64,
+) -> String {
+    format!("dialog-answer|{item_id}|{pending_seq}|{choice}|{expires}")
+}
+
 /// Signs the owner's approval of one self-update run at a given artifact.
 pub fn self_update_message(run_id: i64, tree: &str, binary_sha256: &str) -> String {
     format!("self-update|{run_id}|{tree}|{binary_sha256}")

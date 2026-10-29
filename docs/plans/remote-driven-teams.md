@@ -412,6 +412,58 @@ What stops it working for a team on a remote HQ:
 Folder requests (0.7) use the same buttons, so approving a folder from the phone
 starts the waiting spawn.
 
+#### Design for the answer buttons (HQ-RDT-003, after phase 1)
+
+Phase 1 gives every dialog a number and an answer route that refuses a stale one,
+so a button can answer without reading a screen.
+
+- **The alert carries the dialog.** When the supervisor raises the block
+  alert for a session whose host can read the dialog, it also records a
+  `dialog_alerts` row keyed by the inbox item: session, dialog number, kind,
+  question, command, the options, and `approve`, the one option a button may
+  pick. `approve` is chosen on the server, once, for every client: the first
+  option that neither widens permissions (`remember`) nor opens a text field,
+  preferring one whose label starts with "Yes". A dialog with no such option
+  gets no approve button.
+- **One answer route.** `POST /api/notifications/{id}/answer {choice}`, where
+  `choice` is `approve` or `decline`. It looks the row up and calls phase 1's
+  answer as the owner (`Answerer::Owner`): the host refuses a dialog that moved
+  on (409, "already answered or changed"), and the row is marked answered so a
+  second tap from another device is refused too. The inbox item is then
+  resolved, so every other device drops its card. The route never takes an
+  option id, so no client can pick a remember option or one that was never
+  offered.
+- **The phone** uses its device token (Bearer), as every other call of the app
+  does. It learns about blocks the way it does today: the foreground `HubService`
+  asks the HQ on the phone every 20 seconds and a server HQ once a minute with an
+  ETag. There is no Firebase: the app works without Google services, and a
+  backgrounded app is kept alive by its foreground service. A card reads
+  `metadata.dialog` and offers the approve option's own label, Decline and Open.
+  It no longer parses the screen excerpt or presses keys itself. An item with no
+  dialog (an older server, a dialog HQ cannot read) keeps today's excerpt path.
+- **Web push.** The payload gains the item id and up to two actions (approve,
+  decline), each with its own token: `exp.mac`, where `mac` is an HMAC-SHA-256
+  with the install's approval key (`hq_core::approval_key`, kept outside the
+  database) over `dialog-answer:<item>:<seq>:<choice>:<exp>`, and `exp` is 15
+  minutes after the push. The payload is encrypted to the subscribing browser
+  (RFC 8291), so only it sees the tokens. The service worker posts the token to
+  `POST /api/notifications/push-answer`, the one notifications path that takes
+  no web token; it checks the MAC, the expiry and that the row is unanswered,
+  then answers as above. A token answers one dialog, one way, once. The service
+  worker never holds the web token.
+- **Telegram** is not given buttons for these. Its notice stays a notice.
+
+Built as designed (migration 102, `crates/hq-web/src/dialog_answer.rs`, the
+supervisor's `record_dialog`, `sw.ts`, the app's `AnswerReceiver` and
+`InboxWords.dialogCard`). Not yet tried on a phone or in Chrome against a live
+agent. Sessions a web chat watches keep their chat-only badge; Drive answers those.
+
+What it costs: one more table, one route behind the web token, one token-checked
+route, a payload a few hundred bytes longer. What it buys: a block on any HQ is
+answered from the phone's shade or the laptop's notification in one tap, with
+no screen to read and no way to pick the wrong dialog or a "remember" option by
+accident.
+
 **3.4 Optional: a push for cloud clients.** A documented recipe, off by default:
 from the remote environment, a background command long-polls an HTTP endpoint
 (`/api/harness-sessions/events?after=…&wait=…`) with a read-only key and exits on

@@ -12,6 +12,7 @@ object AnswerWords {
     val answersOff = Say("Answers from notifications are off", "Open the app to answer.")
     val sentNotRecorded = Say("Answer sent", "HQ did not record it. Open the app to check.")
     val alreadyAnswered = Say("Already answered", "Someone answered this somewhere else.")
+    val movedOn = Say("Already answered", "It was answered somewhere else, or the helper has moved on.")
 
     /** True only when HQ's answered items positively list this one as decided; anything else (not listed, cannot tell) lets the answer go. */
     fun answeredElsewhere(id: String, history: List<Pair<String, String>>): Boolean =

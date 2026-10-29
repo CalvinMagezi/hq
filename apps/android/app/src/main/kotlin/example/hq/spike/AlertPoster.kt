@@ -62,7 +62,7 @@ object AlertPoster {
         return InboxItem(
             o.getString("id"), o.optString("kind", ""), o.optString("title", ""), o.optString("description", ""), o.optString("state", ""),
             o.optString("created_at", ""), meta?.optString("link")?.ifBlank { null }, extra?.optString("source_task")?.ifBlank { null }, extra?.optString("val_kind")?.ifBlank { null },
-            (0 until (acts?.length() ?: 0)).map { acts!!.getString(it) },
+            (0 until (acts?.length() ?: 0)).map { acts!!.getString(it) }, example.hq.spike.data.alertDialog(meta),
         )
     }
 
@@ -146,7 +146,12 @@ object AlertPoster {
     private fun actions(c: Context, card: InboxCard): List<Notification.Action> {
         val icon = Icon.createWithResource(c, HubService.statIcon(c))
         val out = mutableListOf<Notification.Action>()
-        if (card.canAllow && answersAllowed(c) && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION) {
+        val buttons = answersAllowed(c) && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION
+        if (card.dialog != null) {
+            // The server answers the dialog it read: Allow once only when it named a yes-once answer, Decline always.
+            if (buttons && card.canAllow) out += Notification.Action.Builder(icon, card.allowLabel, AnswerReceiver.intent(c, card, "approve")).setAuthenticationRequired(true).build()
+            if (buttons) out += Notification.Action.Builder(icon, "Decline", AnswerReceiver.intent(c, card, "reject")).build()
+        } else if (card.canAllow && buttons) {
             out += Notification.Action.Builder(icon, card.allowLabel, AnswerReceiver.intent(c, card, "approve")).setAuthenticationRequired(true).build()
             out += Notification.Action.Builder(icon, "Not now", AnswerReceiver.intent(c, card, "reject")).build()
         }

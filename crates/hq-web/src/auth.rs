@@ -122,7 +122,9 @@ pub(crate) fn presented_secret(headers: &HeaderMap) -> &str {
 /// the device-code exchange, which a device without the token must reach.
 pub(crate) fn web_path_is_guarded(path: &str) -> bool {
     let api = path == "/ws" || path.starts_with("/ws/") || path.starts_with("/api/");
+    // Both check a credential of their own: a one-time sign-in code, a signed answer token.
     api && path != crate::device_auth::EXCHANGE_PATH
+        && path != crate::dialog_answer::PUSH_ANSWER_PATH
 }
 
 /// Compare without an early exit, so response timing doesn't leak the token.

@@ -374,6 +374,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "101_session_folder_grants",
         include_str!("../sql/101_session_folder_grants.sql"),
     ),
+    (
+        "102_dialog_alerts",
+        include_str!("../sql/102_dialog_alerts.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
