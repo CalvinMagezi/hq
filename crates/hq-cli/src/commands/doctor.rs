@@ -872,7 +872,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn state_rule_overrides_are_named_and_a_broken_file_warns() {
-        let dir = Path::new("/home/someone/.hq/detect");
+        let dir = Path::new("/home/user/.hq/detect");
         let none = hq_host::OverrideReport::default();
         let lines = state_rule_lines(dir, &none);
         assert_eq!(labels(&lines), vec!["ok"]);
@@ -880,7 +880,7 @@ mod tests {
 
         let mixed = hq_host::OverrideReport {
             loaded: vec!["copilot".into()],
-            problems: vec!["/home/someone/.hq/detect/x.toml: expected a value".into()],
+            problems: vec!["/home/user/.hq/detect/x.toml: expected a value".into()],
         };
         let lines = state_rule_lines(dir, &mixed);
         assert_eq!(labels(&lines), vec!["ok", "warn"]);

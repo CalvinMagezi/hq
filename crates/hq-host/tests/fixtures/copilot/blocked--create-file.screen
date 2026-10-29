@@ -16,11 +16,11 @@
 │ Create file                                                                                                          │
 │ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
 │ check.txt +1 -0                                                                                                      │
-│ /Users/someone/Documents/HQ/dialog-check                                                                             │
+│ /Users/you/Documents/HQ/dialog-check                                                                             │
 │                                                                                                                      │
 │ 1 +   ok                                                                                                             │
 │                                                                                                                      │
-│ Do you want to create /Users/someone/Documents/HQ/dialog-check/check.txt?                                            │
+│ Do you want to create /Users/you/Documents/HQ/dialog-check/check.txt?                                            │
 │                                                                                                                      │
 │ ❯ 1. Yes                                                                                                             │
 │   2. Yes, and don't ask again for file operations when in this directory (~/Documents/HQ/dialog-check)               │
