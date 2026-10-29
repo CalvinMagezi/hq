@@ -522,6 +522,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(tasks_api::task_activity_handler),
         )
         .route(
+            "/api/tasks/{id}/decisions",
+            get(tasks_api::task_decisions_handler),
+        )
+        .route(
             "/api/initiatives/{id}/progress",
             get(tasks_api::initiative_progress_handler),
         )

@@ -621,6 +621,22 @@ are listed on the team's task, each with its options. Answering one (web,
 relay) sends the mapped answer to the session and records who answered. It reuses
 phase 3's items and the task's `waiting_on`, not a new store.
 
+### What phases 4.4 and 6 built
+
+- **4.4** as designed, on spawn and handoff, holding the same lock as `agent_delegate` while
+  the limits are checked and the session starts. The limit checks are `agent_delegate`'s,
+  shared (`a2a::check_tree_limits`), without its rule that the lead works on a task, which
+  belongs to filing a sub-task. The root must be the team's root; a claude.ai connection may
+  name only a team it started, the handoff key and session tokens none.
+- **6.1**: `harness_session_link` moves a running session's goal when it was on another task,
+  taking the acceptance criteria under "Acceptance criteria:" as the definition of done. Its
+  reply carries the fixed line, and `continue: true` sends it. Drive's prompt reads the goal, so
+  it follows the moved task.
+- **6.2**: `task_decisions` and `GET /api/tasks/{id}/decisions` list the open dialog alerts of
+  the task's sessions and teams (`dialog_alerts` joined to their inbox items), and the task page
+  answers them through HQ-RDT-003's route. Not built: the decisions in the task's own
+  `waiting_for`, which belongs to task verification's wait table and would mix two meanings.
+
 ## Order of work
 
 | Step | PRs | Unblocks |
@@ -633,7 +649,7 @@ phase 3's items and the task's `waiting_on`, not a new store.
 | HQ-RDT-003 | built | Answer buttons on the phone and in web push |
 | Phase 2 | built | Prompts become policy; Claude Code gets a deny list |
 | Phase 3 | built | Events instead of screen reads; escalations pushed |
-| 4.4, phase 6 | 2 to 3 | One team per remote client; decisions list |
+| 4.4, phase 6 | built | One team per remote client; decisions list |
 
 Each PR ships with tests and, for anything touching the host, a run on a real
 host with the CLI in question. After phase 0 and 4.1, the next batch of the

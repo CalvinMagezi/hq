@@ -708,6 +708,33 @@ pub(crate) async fn task_activity_handler(
     .await
 }
 
+/// `GET /api/tasks/{id}/decisions`: the dialogs this task's sessions and their teams wait on the
+/// owner for, each answered through `POST /api/notifications/{item_id}/answer`.
+pub(crate) async fn task_decisions_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if state.profile().is_lite() {
+        return Err(ApiError::NotFound("no agents run on this edition".into()));
+    }
+    let db = Arc::new(state.db.clone());
+    tokio::task::spawn_blocking(move || {
+        let task = db
+            .with_conn(|c| t::get_task(c, &id))
+            .map_err(ApiError::internal)?
+            .ok_or_else(|| ApiError::NotFound("no task found for that id".into()))?;
+        hq_tools::harness_session::decisions::for_task(
+            &db,
+            &task.id,
+            &hq_tools::harness_session::events::Reader::default(),
+        )
+        .map(Json)
+        .map_err(ApiError::internal)
+    })
+    .await
+    .map_err(ApiError::internal)?
+}
+
 /// `GET /api/initiatives/{id}/activity`: the same across an initiative's tasks.
 pub(crate) async fn initiative_activity_handler(
     State(state): State<Arc<WsState>>,
@@ -1074,6 +1101,25 @@ mod tests {
     async fn create_titled(state: &Arc<WsState>, title: &str) -> serde_json::Value {
         let body = serde_json::from_value(json!({ "title": title })).unwrap();
         body_json(create_task_handler(State(state.clone()), Json(body)).await).await
+    }
+
+    #[tokio::test]
+    async fn a_tasks_decisions_are_listed_and_a_missing_task_is_404() {
+        use axum::response::IntoResponse;
+        let state = test_state();
+        let id: String = create_titled(&state, "Team work").await["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let found = task_decisions_handler(State(state.clone()), AxumPath(id))
+            .await
+            .into_response();
+        assert_eq!(found.status(), StatusCode::OK);
+        assert_eq!(body_json(found).await["decisions"], json!([]));
+        let missing = task_decisions_handler(State(state.clone()), AxumPath("nope".into()))
+            .await
+            .into_response();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

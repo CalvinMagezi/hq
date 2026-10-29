@@ -66,6 +66,22 @@ pub fn authorize_delegate(
     let Some(task_id) = parent.mission_id.clone() else {
         bail!("delegate from a session that works on a task: the new work is filed under it");
     };
+    let depth = check_tree_limits(db, &parent, limits)?;
+    Ok(DelegateSlot {
+        parent,
+        task_id,
+        depth,
+    })
+}
+
+/// Checks that `parent` may get another child under the team's limits (depth, children per
+/// session, running sessions per team, starts per hour), and returns the child's depth. Shared
+/// by a delegation and a remote client adding a session to its team.
+pub fn check_tree_limits(
+    db: &Database,
+    parent: &HarnessSessionRow,
+    limits: &TeamsConfig,
+) -> Result<i64> {
     let depth = parent.spawn_depth + 1;
     let max_depth = limits.depth_limit();
     if depth > max_depth {
@@ -104,11 +120,7 @@ pub fn authorize_delegate(
             "rate limit: this team may start at most {per_hour} sessions per {RATE_WINDOW_MINUTES} minutes (agent_host.teams.max_spawns_per_hour)"
         );
     }
-    Ok(DelegateSlot {
-        parent,
-        task_id,
-        depth,
-    })
+    Ok(depth)
 }
 
 fn tail_of(text: &str) -> String {
@@ -772,7 +784,9 @@ fn spawn_as_delegation(args: &Value) -> Result<(Delegation, Vec<&'static str>)> 
     Ok((request, ignored))
 }
 
-static DELEGATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Taken while a session is added to a team (a delegation, or a remote client's `team`), so
+/// two starts cannot both pass the limits before either child exists.
+pub(crate) static DELEGATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The one name an agent goes by, so an alias and its harness compare equal.
 fn canonical_harness(name: &str) -> &str {

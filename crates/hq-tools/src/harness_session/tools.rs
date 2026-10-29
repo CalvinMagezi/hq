@@ -215,6 +215,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
                 "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to cwd, this session writes to. A coding session in a folder another coding session already writes in is refused unless both own paths that do not overlap (no owns means the whole folder). Use a worktree instead when they would overlap." },
                 "policy": { "type": "string", "description": "The command policy it runs under: builder or reviewer, one the owner configured under agent_host.command_policies, or none (every dialog goes to the owner). Default: builder for a coding session, reviewer for a review. A policy answers the dialogs it decides; see docs/AGENT_SESSIONS.md." },
+                "team": { "type": "string", "description": "A root session id: the new session joins that session's team as a worker under it, with the team's roster, messages between members, stop-with-root and limits. For the owner, a web chat and a claude.ai connection (on a team it started); an agent inside a session uses agent_delegate. A reviewer joining a team observes its running coding sessions unless observe names others." },
                 "observe": { "type": "array", "items": { "type": "string" }, "description": "Session ids a monitor or reviewer watches (at most 10; needs task_id). When one finishes a turn, blocks or exits, this session gets a message on its task thread, typed in when it is next idle." },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
                 "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
@@ -268,7 +269,25 @@ impl HqTool for HarnessSessionSpawnTool {
         let task_id = arg_str(&args, "task_id");
         let (goal, done) = (arg_str(&args, "goal"), arg_str(&args, "done_criteria"));
         let purpose = super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?;
-        let observe = arg_str_list(&args, "observe");
+        let mut observe = arg_str_list(&args, "observe");
+        // Joining a remote client's team: checked and held so two starts cannot both pass
+        // the team's limits.
+        let _joining = match super::team::parse(&args) {
+            Some(_) => Some(crate::a2a::DELEGATION_LOCK.lock().await),
+            None => None,
+        };
+        let team = match super::team::parse(&args) {
+            Some(root) => Some(super::team::join(&self.db, &args, &root)?),
+            None => None,
+        };
+        // A reviewer in a team watches the team's writers unless it names its own.
+        if let Some((root, _)) = &team
+            && purpose == Some(super::Purpose::Review)
+            && observe.is_empty()
+            && !task_id.trim().is_empty()
+        {
+            observe = super::team::writers(&self.db, root);
+        }
         let worktree = super::checkout::parse_worktree(&args)?;
         let owns = super::checkout::parse_owns(&args)?;
         let policy = super::policy::parse(&args);
@@ -310,7 +329,7 @@ impl HqTool for HarnessSessionSpawnTool {
                     label: &label,
                     mission_id: Some(task_id.as_str()).filter(|t| !t.is_empty()),
                     watch: self.chat.as_ref().map(|c| c.new_watch(&args)),
-                    parent: None,
+                    parent: team.as_ref().map(|(root, depth)| (root.as_str(), *depth)),
                     goal: super::GoalText {
                         goal: Some(goal.as_str()).filter(|g| !g.is_empty()),
                         done_criteria: Some(done.as_str()).filter(|d| !d.is_empty()),
@@ -863,7 +882,7 @@ impl HqTool for HarnessSessionLinkTool {
         "harness_session_link"
     }
     fn description(&self) -> &str {
-        "Link an existing harness session to an HQ task, for a session launched without task_id. From then on the supervisor records its lifecycle on that task, as harness_session_spawn does with task_id. Linking a running session moves a to_do, blocked or ready_for_review task to in_progress."
+        "Link an existing harness session to an HQ task, for a session launched without task_id, or move a session on to the next task of a plan. From then on the supervisor records its lifecycle on that task, as harness_session_spawn does with task_id. Linking a running session moves a to_do, blocked or ready_for_review task to in_progress. When the session was on another task, its goal moves to the new one (Drive reads that task, not the launch brief) and the reply has next_message, a fixed line naming the task; continue: true sends it to the session."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -871,7 +890,8 @@ impl HqTool for HarnessSessionLinkTool {
             "properties": {
                 "session_id": { "type": "string" },
                 "task_id": { "type": "string", "description": "HQ task id or display id such as FR-053. Must exist and not be complete." },
-                "drive": { "type": "boolean", "description": "Web chat only. Omit to follow the default (a session no chat watched starts with Drive on); false starts the watch with Drive off, or stops driving a session this chat already drives." }
+                "drive": { "type": "boolean", "description": "Web chat only. Omit to follow the default (a session no chat watched starts with Drive on); false starts the watch with Drive off, or stops driving a session this chat already drives." },
+                "continue": { "type": "boolean", "description": "When the session moves from another task, send it \"Continue with <task id>: <title>. Its acceptance is on the task.\" (never the task's description)" }
             },
             "required": ["session_id", "task_id"]
         })
@@ -888,8 +908,16 @@ impl HqTool for HarnessSessionLinkTool {
         }
         super::connector_may_drive(&db, &args, &id)?;
         let chat = self.chat.clone();
+        let tell = args.get("continue").and_then(Value::as_bool) == Some(true);
         tokio::task::spawn_blocking(move || {
-            super::link(&db, &id, &task, chat.as_ref().map(|c| c.new_watch(&args)))
+            super::link_with(
+                &db,
+                &id,
+                &task,
+                chat.as_ref().map(|c| c.new_watch(&args)),
+                tell,
+                chat.as_ref(),
+            )
         })
         .await?
     }
@@ -1131,6 +1159,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
                 "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to cwd, this session writes to. A coding session in a folder another coding session already writes in is refused unless both own paths that do not overlap (no owns means the whole folder). Use a worktree instead when they would overlap." },
                 "policy": { "type": "string", "description": "The command policy it runs under: builder or reviewer, one the owner configured under agent_host.command_policies, or none (every dialog goes to the owner). Default: builder for a coding session, reviewer for a review. A policy answers the dialogs it decides; see docs/AGENT_SESSIONS.md." },
+                "team": { "type": "string", "description": "A root session id: the new session joins that session's team as a worker under it, with the team's roster, messages between members, stop-with-root and limits. For the owner, a web chat and a claude.ai connection (on a team it started); an agent inside a session uses agent_delegate. A reviewer joining a team observes its running coding sessions unless observe names others." },
                 "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
                 "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request and this call waits up to 30 seconds for their answer: it starts the session if they approve, and otherwise fails with BLOCKED and starts nothing. Tell the user you are waiting, then call again with the same arguments. Never start elsewhere and cd into it." },
                 "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
@@ -1184,6 +1213,14 @@ impl HqTool for HarnessSessionHandoffTool {
             &asker,
         )
         .await?;
+        let _joining = match super::team::parse(&args) {
+            Some(_) => Some(crate::a2a::DELEGATION_LOCK.lock().await),
+            None => None,
+        };
+        let team = match super::team::parse(&args) {
+            Some(root) => Some(super::team::join(&self.db, &args, &root)?),
+            None => None,
+        };
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
@@ -1217,6 +1254,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 worktree: super::checkout::parse_worktree(&args)?,
                 owns: super::checkout::parse_owns(&args)?,
                 policy: owned("policy"),
+                team: team.clone(),
             },
         )
         .await?;
@@ -1301,6 +1339,7 @@ pub fn create_harness_session_tools(
         Box::new(HarnessSessionWaitTool { db: db.clone() }),
         Box::new(HarnessSessionPendingTool { db: db.clone() }),
         Box::new(super::events::HarnessSessionEventsTool { db: db.clone() }),
+        Box::new(super::decisions::TaskDecisionsTool { db: db.clone() }),
         Box::new(HarnessSessionAnswerTool {
             db: db.clone(),
             chat: chat.clone(),

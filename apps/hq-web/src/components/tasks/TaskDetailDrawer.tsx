@@ -10,6 +10,7 @@ import { TaskTime } from './TaskTime'
 import { TaskLinks } from './TaskLinks'
 import { TaskCheckpoint } from './TaskCheckpoint'
 import { TaskActivity } from './TaskActivity'
+import { TaskDecisions } from './TaskDecisions'
 import { TaskVerification } from './verification/TaskVerification'
 import { useIsStale } from './staleContext'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
@@ -436,6 +437,7 @@ export function TaskDetailDrawer({
             onCreateSubtask={onCreateSubtask}
           />
 
+          <TaskDecisions key={`decisions-${task.id}`} taskId={task.id} />
           <TaskVerification key={`verification-${task.id}`} task={task} onUpdate={onUpdate} />
           <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
           <TaskActivity key={`activity-${task.id}`} task={task} />
