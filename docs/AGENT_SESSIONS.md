@@ -33,6 +33,7 @@ a model instead of starting on its default, and so does an id that could read as
 | `harness_session_pending` | The dialog a blocked session waits at, as data: its number (`seq`), kind, question, command or path, folder and options. |
 | `harness_session_answer` | Answer that dialog by option (`seq` and `option`), or `decline` it, optionally with a `message` sent as the next prompt. |
 | `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. |
+| `harness_session_events` | What happened to sessions, a task or a team, as compact events after a cursor, waiting up to 45 s for the next one. See "Following sessions by events". |
 | `harness_session_logs` / `_status` / `_list` | Read output and live state. `logs` with `since` returns only what is new. |
 | `harness_session_stop` / `_resume` | Close the workspace, or continue a stopped session. |
 | `host_list` | Which hosts exist and whether each answers right now. |
@@ -114,6 +115,36 @@ app, and list every agent on a machine with `hq host status`.
   started with `copilot --interactive=<prompt>` instead of having the prompt typed. A resume
   still types its prompt.
 - Exit summaries use the last screen the supervisor captured while the agent was alive.
+
+## Following sessions by events
+
+A remote client that drives a team used to read every agent's screen to learn whether
+anything changed: about 1.5k tokens a read, a hundred and fifty reads a run. The supervisor
+now writes what happens to an event log, and `harness_session_events` reads it as one stream.
+
+- **Kinds:**
+  - `blocked`: with the dialog when HQ can read it (its number, kind, question, command and
+    options, the text capped at 300 characters).
+  - `question`: the agent asks the owner something.
+  - `unblocked`: with how long it waited.
+  - `finished` and `exited`.
+  - `commit`: sha, subject and branch (see "Agents that share a repository").
+  - `policy_decision` and `escalation`: what a command policy decided, and what it left to
+    the owner and why.
+  - `host_unreachable` and `host_back`: on each session of a host that stopped answering.
+  - `policy`, `goal` and `drive`: written when a session starts or changes.
+- **Scope:** `session_ids`, a `task_id` (the sessions working on it and their teams), or a
+  `team` (a root session id). None reads every session the caller may see.
+- **Cursor:** each reply has `next`. Pass it as `after` and the reply holds only what came
+  since, oldest first, at most `limit` (50 by default) with `more` when there is more. Without
+  `after` the reply holds the newest events and a cursor.
+- **Waiting:** `wait_secs` (at most 45, under an MCP client's 60 second limit) holds the call
+  until the first new event, so a client loops on one call instead of polling screens.
+- **Who sees what:** the owner sees every session, a claude.ai connection the teams it
+  started, and an agent with its own session token its own team. Naming a session outside
+  that is refused.
+- **Untrusted:** dialog text is the agent's own output, so reading events counts as reading
+  untrusted content, the same as `harness_session_logs`.
 
 ## Command policies
 

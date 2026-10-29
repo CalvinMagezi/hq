@@ -1300,6 +1300,7 @@ pub fn create_harness_session_tools(
         }),
         Box::new(HarnessSessionWaitTool { db: db.clone() }),
         Box::new(HarnessSessionPendingTool { db: db.clone() }),
+        Box::new(super::events::HarnessSessionEventsTool { db: db.clone() }),
         Box::new(HarnessSessionAnswerTool {
             db: db.clone(),
             chat: chat.clone(),

@@ -44,6 +44,7 @@ pub const SPARK_READONLY_ALLOWLIST: &[&str] = &[
     "session_search",
     "harness_session_list",
     "harness_session_logs",
+    "harness_session_events",
     "harness_session_status",
 ];
 
@@ -52,7 +53,7 @@ pub const SPARK_READONLY_ALLOWLIST: &[&str] = &[
 /// sessions. Starting a claude-code session runs it with permissions skipped,
 /// so this key is code-execution equivalent on every configured host; bound it
 /// with `agent_host.handoff_cwd_allow`. It cannot send to or read the output of a
-/// session (`harness_session_send`, `harness_session_logs`): the registry does
+/// session (`harness_session_send`, `harness_session_logs`, `harness_session_events`): the registry does
 /// not record who created a session, so those would reach sessions this key
 /// never started. No deletes, no vault writes, no session
 /// stop/resume/link/goal changes, no config, no tools that reach other
@@ -134,6 +135,7 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "task_comment_add",
     "harness_session_status",
     "harness_session_logs",
+    "harness_session_events",
     "harness_session_wait",
     "agent_message_send",
     "agent_delegate",
@@ -773,7 +775,8 @@ mod tests {
     #[test]
     fn handoff_scope_extends_spark_and_stays_clear_of_destructive_tools() {
         for name in SPARK_READONLY_ALLOWLIST {
-            if *name == "harness_session_logs" {
+            // Both read sessions the handoff key never started.
+            if matches!(*name, "harness_session_logs" | "harness_session_events") {
                 continue;
             }
             assert!(

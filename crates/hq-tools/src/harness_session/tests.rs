@@ -4143,3 +4143,177 @@ fn a_drive_turn_does_not_answer_a_command_dialog_a_policy_decides() {
     );
     assert!(policy::refuse_drive(&db, "hs-1", &command_dialog("question", "q", false)).is_none());
 }
+
+/// Sessions `lead` (started by a claude.ai connection, on task `task`) with a worker under it,
+/// and an unrelated `other`.
+fn event_world(db: &Database) -> String {
+    let task = a_task(db);
+    db.with_conn(|c| {
+        for id in ["hs-lead", "hs-worker", "hs-other"] {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id,
+                    harness: "claude-code",
+                    label: id,
+                    cwd: "/w",
+                    mission_id: None,
+                    placement: registry::Placement {
+                        host: "local",
+                        agent_name: id,
+                        workspace_id: "w1",
+                        pane_id: "w1:p1",
+                    },
+                    purpose: None,
+                },
+            )?;
+        }
+        registry::set_parent(c, "hs-worker", "hs-lead", 1)?;
+        registry::set_origin(c, "hs-lead", registry::ORIGIN_CONNECTOR)?;
+        registry::set_mission(c, "hs-lead", &task)?;
+        Ok(())
+    })
+    .unwrap();
+    task
+}
+
+fn kinds(v: &Value) -> Vec<String> {
+    v["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                e["session_id"].as_str().unwrap(),
+                e["kind"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_event_stream_reads_each_event_once_from_a_cursor() {
+    use events::{Reader, Scope, read};
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    let owner = Reader::default();
+    let start = read(&db, &Scope::All, &owner, None, 10, Duration::ZERO).unwrap();
+    let cursor = start["next"].as_i64().unwrap();
+    db.with_conn(|c| {
+        registry::record_event(
+            c,
+            "hs-worker",
+            "blocked",
+            "supervisor",
+            Some(r#"{"seq":3}"#),
+        )?;
+        registry::record_event(c, "hs-other", "finished", "supervisor", None)
+    })
+    .unwrap();
+    let team = Scope::Team("hs-lead".into());
+    let got = read(&db, &team, &owner, Some(cursor), 10, Duration::ZERO).unwrap();
+    assert_eq!(kinds(&got), ["hs-worker:blocked"]);
+    assert_eq!(
+        got["events"][0]["detail"]["seq"], 3,
+        "detail comes back as data"
+    );
+    let next = got["next"].as_i64().unwrap();
+    let again = read(&db, &team, &owner, Some(next), 10, Duration::ZERO).unwrap();
+    assert!(kinds(&again).is_empty());
+    assert_eq!(again["next"], next, "an empty read keeps the cursor");
+
+    let everything = read(&db, &Scope::All, &owner, Some(cursor), 1, Duration::ZERO).unwrap();
+    assert_eq!(everything["more"], true, "one at a time");
+    let started = std::time::Instant::now();
+    read(&db, &team, &owner, Some(next), 10, Duration::from_secs(1)).unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(900),
+        "it waited for an event"
+    );
+}
+
+#[test]
+fn a_task_reads_its_sessions_with_their_teams() {
+    use events::{Reader, Scope, read};
+    let db = Arc::new(Database::open_memory().unwrap());
+    let task = event_world(&db);
+    db.with_conn(|c| {
+        registry::record_event(c, "hs-lead", "finished", "supervisor", None)?;
+        registry::record_event(c, "hs-worker", "commit", "supervisor", None)?;
+        registry::record_event(c, "hs-other", "exited", "supervisor", None)
+    })
+    .unwrap();
+    let got = read(
+        &db,
+        &Scope::Task(task),
+        &Reader::default(),
+        Some(0),
+        10,
+        Duration::ZERO,
+    )
+    .unwrap();
+    assert_eq!(kinds(&got), ["hs-lead:finished", "hs-worker:commit"]);
+}
+
+#[test]
+fn a_reader_sees_only_what_it_may() {
+    use events::{Reader, Scope, read};
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    db.with_conn(|c| {
+        registry::record_event(c, "hs-worker", "blocked", "supervisor", None)?;
+        registry::record_event(c, "hs-other", "blocked", "supervisor", None)
+    })
+    .unwrap();
+    let worker = Reader {
+        caller: Some("hs-worker".into()),
+        connector: false,
+    };
+    let own = read(&db, &Scope::All, &worker, Some(0), 10, Duration::ZERO).unwrap();
+    assert_eq!(kinds(&own), ["hs-worker:blocked"], "its team only");
+    let err = read(
+        &db,
+        &Scope::Sessions(vec!["hs-other".into()]),
+        &worker,
+        Some(0),
+        10,
+        Duration::ZERO,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("its own team"), "{err}");
+
+    let connector = Reader {
+        caller: None,
+        connector: true,
+    };
+    let theirs = read(&db, &Scope::All, &connector, Some(0), 10, Duration::ZERO).unwrap();
+    assert_eq!(
+        kinds(&theirs),
+        ["hs-worker:blocked"],
+        "only teams it started"
+    );
+    assert!(
+        read(
+            &db,
+            &Scope::Sessions(vec!["hs-other".into()]),
+            &connector,
+            Some(0),
+            10,
+            Duration::ZERO
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn an_events_read_names_one_scope() {
+    use events::Scope;
+    assert_eq!(Scope::from_args(&json!({})).unwrap(), Scope::All);
+    assert_eq!(
+        Scope::from_args(&json!({ "team": "hs-1" })).unwrap(),
+        Scope::Team("hs-1".into())
+    );
+    assert!(Scope::from_args(&json!({ "team": "hs-1", "task_id": "T-1" })).is_err());
+}
