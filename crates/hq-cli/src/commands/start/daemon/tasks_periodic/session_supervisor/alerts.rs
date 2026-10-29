@@ -35,6 +35,7 @@ pub(super) fn alert_finished(
         _ => return,
     }
     let link = record_on_task(db, row, Event::Finished);
+    record_event(db, &row.id, "finished", serde_json::json!({ "seq": seq }));
     let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
     // A commit made in the turn is named, so a reviewer checks out exactly that.
     let db_arc = Arc::new(db.clone());
@@ -136,6 +137,7 @@ pub(super) fn alert_blocked(
         Ok(true) => {}
         _ => return,
     }
+    record_block(db, row, agent);
     let note = match by_policy(db, row, agent, screen, resolve) {
         PolicyStep::Answering => return,
         PolicyStep::Escalated(note) => Some(note),
@@ -185,6 +187,7 @@ fn by_policy(
             Some(policy::Acted::Escalated { reason }) => reason,
             _ => decision.why().to_string(),
         };
+        record_escalation(db, &row.id, &rules.name, dialog, &reason);
         return PolicyStep::Escalated(format!(
             "Its '{}' command policy left this to you: {reason}.",
             rules.name
@@ -200,6 +203,7 @@ fn by_policy(
     tokio::task::spawn_blocking(move || {
         match policy::act(&db2, &host, &row2, &rules, &dialog2, seq) {
             Some(policy::Acted::Escalated { reason }) => {
+                record_escalation(&db2, &row2.id, &rules.name, &dialog2, &reason);
                 let note = format!(
                     "Its '{}' command policy could not settle this: {reason}.",
                     rules.name
@@ -386,4 +390,77 @@ pub(super) fn worktree_line(released: Option<&serde_json::Value>) -> String {
         ),
         _ => String::new(),
     }
+}
+
+/// Longest question or command text an event carries; `harness_session_pending` has the rest.
+const EVENT_TEXT: usize = 300;
+
+fn capped(text: Option<&str>) -> Option<String> {
+    text.map(|t| {
+        if t.len() <= EVENT_TEXT {
+            t.to_string()
+        } else {
+            format!("{}…", &t[..t.floor_char_boundary(EVENT_TEXT)])
+        }
+    })
+}
+
+/// Appends one event to the session's log (`harness_session_events`), which
+/// `harness_session_events` reads as a stream. Logged, never raised.
+pub(super) fn record_event(db: &Database, session_id: &str, kind: &str, detail: serde_json::Value) {
+    let (id, kind_owned, detail) = (session_id.to_string(), kind.to_string(), detail.to_string());
+    if let Err(e) = db.with_conn(move |c| {
+        registry::record_event(c, &id, &kind_owned, "supervisor", Some(&detail))
+    }) {
+        tracing::warn!(session = %session_id, kind, error = %e, "session-supervisor: event not recorded");
+    }
+}
+
+/// A session blocked: `blocked`, or `question` when the agent asks the owner something, with
+/// the dialog when HQ can read it. Its text is the agent's output, capped.
+fn record_block(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
+    let dialog = agent.pending.as_deref();
+    let kind = match dialog {
+        Some(d) if d.kind == "question" => "question",
+        _ => "blocked",
+    };
+    let detail = match (dialog, agent.pending_seq) {
+        (Some(d), Some(seq)) => serde_json::json!({
+            "seq": seq,
+            "dialog": {
+                "kind": d.kind,
+                "question": capped(d.question.as_deref()),
+                "command": capped(d.command.as_deref()),
+                "options": d.options.iter().map(|o| serde_json::json!({
+                    "id": o.id,
+                    "label": capped(Some(&o.label)),
+                    "remember": o.remember,
+                })).collect::<Vec<_>>(),
+                "truncated": d.truncated,
+            },
+        }),
+        _ => serde_json::json!({ "dialog": null }),
+    };
+    record_event(db, &row.id, kind, detail);
+}
+
+/// The command policy left a dialog to the owner.
+fn record_escalation(
+    db: &Database,
+    session_id: &str,
+    policy: &str,
+    dialog: &hq_tools::agent_host::PendingDialog,
+    reason: &str,
+) {
+    record_event(
+        db,
+        session_id,
+        "escalation",
+        serde_json::json!({
+            "policy": policy,
+            "kind": dialog.kind,
+            "command": capped(dialog.command.as_deref()),
+            "reason": reason,
+        }),
+    );
 }

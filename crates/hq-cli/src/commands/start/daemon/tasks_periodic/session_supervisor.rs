@@ -311,6 +311,22 @@ fn sweep_alive(
         head,
     } = seen;
     let db_arc = Arc::new(db.clone());
+    // The previous sweep saw it blocked and this one does not: how long it waited.
+    if row.last_agent_status.as_deref() == Some(AgentStatus::Blocked.as_str())
+        && agent.status != AgentStatus::Blocked
+    {
+        let id = row.id.clone();
+        let waited = db
+            .with_conn(move |c| hq_db::session_events::blocked_for_ms(c, &id))
+            .ok()
+            .flatten();
+        record_event(
+            db,
+            &row.id,
+            "unblocked",
+            serde_json::json!({ "blocked_ms": waited, "status": agent.status.as_str() }),
+        );
+    }
     let (id, status) = (row.id.clone(), agent.status.as_str());
     if let Err(e) = db.with_conn(move |c| registry::set_seen(c, &id, status)) {
         tracing::warn!(session = %row.id, error = %e, "session-supervisor: status store failed");
@@ -558,6 +574,12 @@ async fn supervise(
         }
         let token = row.resume_token.clone();
         tracing::info!(session = %row.id, harness = %row.harness, "session-supervisor: marked exited");
+        record_event(
+            db,
+            &row.id,
+            "exited",
+            serde_json::json!({ "exit_code": exited.as_ref().and_then(|a| a.exit_code) }),
+        );
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
         // A stack specialist's run is over when its process ends. Its exit code

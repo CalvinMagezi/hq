@@ -392,6 +392,21 @@ notice per dialog, never one per sweep. Telegram is a poor place for a decision
 already has open, each with buttons that answer without opening anything. Telegram
 gets at most a plain notice. Design in "Actionable alerts" below.
 
+### What phase 3 built
+
+- **3.1** as designed, in the existing `harness_session_events` table, with `question` for a
+  dialog of kind question and `policy` for the policy a session started under. `unblocked`
+  carries the milliseconds since the last `blocked` event, measured when a sweep first sees
+  the session no longer blocked. `host_unreachable` and `host_back` are written on each
+  session of the host, at the alert and at the return.
+- **3.2** as designed, except the long-poll checks the table every 750 ms instead of waiting
+  on a change notification: the supervisor writes from the daemon, which may be another
+  process than the one serving the call. A `limit` and `more` keep a reply small; the dialog's
+  text is capped at 300 characters (`harness_session_pending` has it whole). The tool is in the
+  untrusted-source list, in the session-token scope (its team) and the read-only Spark scope,
+  and not in the handoff scope, for the same reason as `harness_session_logs`.
+- **3.3** was built with HQ-RDT-003.
+
 ### Actionable alerts: the Android app and web push
 
 What exists:
@@ -617,7 +632,7 @@ phase 3's items and the task's `waiting_on`, not a new store.
 | Phase 1 | built | Structured answers; option buttons in the web Sessions panel |
 | HQ-RDT-003 | built | Answer buttons on the phone and in web push |
 | Phase 2 | built | Prompts become policy; Claude Code gets a deny list |
-| Phase 3 | 2 | Events instead of screen reads; escalations pushed |
+| Phase 3 | built | Events instead of screen reads; escalations pushed |
 | 4.4, phase 6 | 2 to 3 | One team per remote client; decisions list |
 
 Each PR ships with tests and, for anything touching the host, a run on a real

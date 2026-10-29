@@ -1412,3 +1412,68 @@ async fn without_a_policy_every_dialog_still_goes_to_the_owner() {
     assert!(answers(tmp.path()).is_empty());
     assert_eq!(alert_count(&db), 1);
 }
+
+fn event_kinds(db: &Database, id: &str) -> Vec<(String, Option<String>)> {
+    db.with_conn(|c| registry::list_events(c, id, 20))
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.actor == "supervisor")
+        .map(|e| (e.kind, e.detail))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_session_s_life_is_written_as_events_for_the_stream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-life");
+
+    sweep(
+        tmp.path(),
+        &db,
+        &host_with_dialog(tmp.path(), "hs-life", 4),
+        None,
+    )
+    .await;
+    let dir2 = tempfile::tempdir().unwrap();
+    let working = fake_host(dir2.path(), &[("hs-life", "working", 5)], "compiling");
+    sweep(tmp.path(), &db, &working, None).await;
+    let dir3 = tempfile::tempdir().unwrap();
+    let done = fake_host(dir3.path(), &[("hs-life", "done", 6)], "All done.");
+    sweep(tmp.path(), &db, &done, None).await;
+    let dir4 = tempfile::tempdir().unwrap();
+    sweep(tmp.path(), &db, &gone_host(dir4.path()), None).await;
+
+    let events = event_kinds(&db, "hs-life");
+    let kinds: Vec<&str> = events.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(kinds, ["blocked", "unblocked", "finished", "exited"]);
+    let blocked: serde_json::Value = serde_json::from_str(events[0].1.as_deref().unwrap()).unwrap();
+    assert_eq!(blocked["seq"], 4);
+    assert_eq!(blocked["dialog"]["kind"], "path");
+    assert_eq!(blocked["dialog"]["options"][1]["remember"], true);
+    let unblocked: serde_json::Value =
+        serde_json::from_str(events[1].1.as_deref().unwrap()).unwrap();
+    assert!(unblocked["blocked_ms"].as_i64().is_some(), "{unblocked}");
+    assert_eq!(unblocked["status"], "working");
+}
+
+#[test]
+fn a_silent_host_is_an_event_on_each_of_its_sessions() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    seed(&db, "hs-b");
+    let rows = vec![row_of(&db, "hs-a"), row_of(&db, "hs-b")];
+    let silent = poll("local", Err("timed out"));
+    hosts::watch_hosts(&db, &silent, &rows, Some(Duration::ZERO), 100);
+    hosts::watch_hosts(
+        &db,
+        &poll("local", Ok(())),
+        &rows,
+        Some(Duration::ZERO),
+        400,
+    );
+    for id in ["hs-a", "hs-b"] {
+        let kinds: Vec<String> = event_kinds(&db, id).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(kinds, ["host_unreachable", "host_back"], "{id}");
+    }
+}

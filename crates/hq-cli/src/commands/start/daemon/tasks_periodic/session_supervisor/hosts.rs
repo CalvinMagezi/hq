@@ -76,6 +76,14 @@ fn host_silent(
     // The claim makes the alert one per outage, however many sweeps overlap.
     if host_outages::claim_alert(db, host, outage.since, &item.id)? {
         hq_db::value_items::emit(db, &item)?;
+        for row in rows.iter().filter(|r| r.host == host) {
+            record_event(
+                db,
+                &row.id,
+                "host_unreachable",
+                serde_json::json!({ "host": host, "minutes": outage.minutes(now) }),
+            );
+        }
         tracing::info!(%host, minutes = outage.minutes(now), "session-supervisor: host not answering, alert sent");
     }
     Ok(())
@@ -108,6 +116,14 @@ fn host_answered(
     )
     .with_dedup_key(format!("host-back-{host}-{}", outage.since));
     hq_db::value_items::emit(db, &back)?;
+    for row in rows.iter().filter(|r| r.host == host) {
+        record_event(
+            db,
+            &row.id,
+            "host_back",
+            serde_json::json!({ "host": host, "minutes": outage.minutes(now) }),
+        );
+    }
     tracing::info!(%host, minutes = outage.minutes(now), "session-supervisor: host answering again");
     Ok(())
 }
