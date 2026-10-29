@@ -7,7 +7,7 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
     # zip 8.6.0, all in archive extraction (ZipArchive::extract, ZipStreamReader::extract)
-    # that nothing here calls. Review on 2026-10-31, or when docx-rs, umya-spreadsheet and
+    # that nothing here calls. Review on 2026-11-30 (last reviewed 2026-10-29), or when docx-rs, umya-spreadsheet and
     # transmutation move to zip 9.
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
