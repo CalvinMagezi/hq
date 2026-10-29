@@ -1288,3 +1288,127 @@ async fn a_finished_turn_names_the_commit_it_made_once() {
     let body = only_body(tmp.path());
     assert!(!body.contains("committed"), "{body}");
 }
+
+/// A host whose agent waits at a command dialog for `command`; it logs every call, and an
+/// answer makes the dialog go.
+fn host_at_command(dir: &Path, name: &str, seq: u64, command: &str) -> ScriptedHost {
+    let pending = format!(
+        r#"{{"kind":"command","question":"Do you want to run this command?","command":"{command}","options":[{{"id":1,"label":"Yes"}},{{"id":2,"label":"Yes, and do not ask again for {command}","remember":true}},{{"id":3,"label":"No, and tell me what to do differently","typed":true}}]}}"#
+    );
+    let agent = format!(
+        r#"{{"agent":"codex","agent_status":"blocked","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":{seq},"pending_seq":{seq},"pending":{pending}}}"#
+    );
+    let script = format!(
+        "#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/calls.log\"\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"result\":{{\"agents\":[{agent}]}}}}' ;;\n  *\"agent read\"*) printf '%s' 'Do you want to run this command?' ;;\n  *\"agent pending\"*) printf '%s' '{{\"result\":{{\"pending_seq\":{seq},\"rule\":\"codex-command\",\"pending\":{pending}}}}}' ;;\n  *\"agent answer\"*) printf '%s' '{{\"result\":{{\"registered\":true}}}}' ;;\n  *) exit 2 ;;\nesac\n"
+    );
+    let path = dir.join(format!("host-{seq}"));
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptedHost::new(path)
+}
+
+fn with_builder(db: &Database, id: &str) {
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    db.with_conn(|c| hq_db::session_policies::record(c, id, &builder))
+        .unwrap();
+}
+
+/// Waits for the background answer to record its decision.
+async fn policy_outcome(db: &Database, id: &str) -> serde_json::Value {
+    for _ in 0..100 {
+        let events = db.with_conn(|c| registry::list_events(c, id, 10)).unwrap();
+        if let Some(e) = events.iter().find(|e| e.kind == "policy_decision") {
+            return serde_json::from_str(e.detail.as_deref().unwrap()).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the policy never decided");
+}
+
+fn answers(dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(dir.join("calls.log"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.contains("agent answer"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_command_the_policy_allows_is_answered_once_and_raises_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-ok");
+    with_builder(&db, "hs-ok");
+    let host = host_at_command(tmp.path(), "hs-ok", 5, "cargo test");
+
+    sweep(tmp.path(), &db, &host, None).await;
+    let outcome = policy_outcome(&db, "hs-ok").await;
+    assert_eq!(outcome["decision"], "allow");
+    assert_eq!(outcome["outcome"], "allowed");
+    let answered = answers(tmp.path());
+    assert_eq!(answered.len(), 1, "{answered:?}");
+    assert!(
+        answered[0].contains("--option 1"),
+        "the one-time yes, never remember: {answered:?}"
+    );
+    assert_eq!(alert_count(&db), 0, "nothing for the owner");
+}
+
+#[tokio::test]
+async fn a_command_the_policy_denies_is_declined_without_asking_anyone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-push");
+    with_builder(&db, "hs-push");
+    let host = host_at_command(tmp.path(), "hs-push", 6, "git push origin main");
+
+    sweep(tmp.path(), &db, &host, None).await;
+    let outcome = policy_outcome(&db, "hs-push").await;
+    assert_eq!(outcome["decision"], "deny");
+    assert_eq!(outcome["rule"], "git push");
+    assert!(answers(tmp.path())[0].contains("--decline"));
+    assert_eq!(alert_count(&db), 0);
+}
+
+#[tokio::test]
+async fn a_command_the_policy_does_not_name_reaches_the_owner_with_the_reason() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-curl");
+    with_builder(&db, "hs-curl");
+    let host = host_at_command(tmp.path(), "hs-curl", 7, "curl https://example.com");
+
+    sweep(tmp.path(), &db, &host, None).await;
+    assert!(answers(tmp.path()).is_empty(), "nothing is pressed");
+    assert_eq!(alert_count(&db), 1);
+    let body: String = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT body FROM value_items WHERE dedup_key = 'session-blocked-hs-curl-7'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert!(
+        body.contains("'builder' command policy left this to you")
+            && body.contains("does not name curl"),
+        "{body}"
+    );
+    let outcome = policy_outcome(&db, "hs-curl").await;
+    assert_eq!(outcome["outcome"], "escalated");
+}
+
+#[tokio::test]
+async fn without_a_policy_every_dialog_still_goes_to_the_owner() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-old");
+    let host = host_at_command(tmp.path(), "hs-old", 8, "cargo test");
+    sweep(tmp.path(), &db, &host, None).await;
+    assert!(answers(tmp.path()).is_empty());
+    assert_eq!(alert_count(&db), 1);
+}

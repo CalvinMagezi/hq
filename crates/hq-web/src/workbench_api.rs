@@ -355,6 +355,7 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
             model: None,
             worktree,
             owns: &[],
+            policy: None,
         },
     )
     .await

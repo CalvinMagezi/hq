@@ -442,7 +442,8 @@ impl HqTool for AgentDelegateTool {
                 "model": { "type": "string", "description": "Optional model for the worker, passed with its CLI's --model flag" },
                 "purpose": { "type": "string", "enum": ["code", "review", "research", "monitor", "general"], "description": "What the worker is for. Default: code for a coding agent. A reviewer or monitor never moves its task's status." },
                 "worktree": { "description": "Give the worker a git worktree of your folder's repository: true for a branch named for its sub-task (hq/<task id>), or {\"branch\": \"<name>\"} or {\"detached\": \"<commit>\"} (a reviewer). Without one it works in your folder, and a second coding worker there is refused unless their owns paths do not overlap." },
-                "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to your folder, the worker writes to. Workers in one folder must own paths that do not overlap." }
+                "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to your folder, the worker writes to. Workers in one folder must own paths that do not overlap." },
+                "policy": { "type": "string", "description": "The command policy the worker runs under: builder or reviewer, one the owner configured, or none. Default: builder for code, reviewer for review. It may not be wider than your own." }
             },
             "required": ["title", "description"]
         })
@@ -570,6 +571,8 @@ pub struct Delegation {
     pub worktree: DelegatedTree,
     /// Paths it writes to in the delegator's folder.
     pub owns: Vec<String>,
+    /// The command policy it runs under: no wider than the delegator's.
+    pub policy: Option<String>,
 }
 
 /// Where a delegated session writes.
@@ -619,6 +622,7 @@ impl Delegation {
             purpose: Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
             worktree: DelegatedTree::from_args(args)?,
             owns: crate::harness_session::checkout::parse_owns(args)?,
+            policy: crate::harness_session::policy::parse(args),
         };
         if request.title.trim().is_empty() || request.description.trim().is_empty() {
             bail!("a delegation needs a title and a description");
@@ -672,6 +676,7 @@ pub async fn run_delegation(
             model: request.model.as_deref(),
             worktree: request.worktree.base(&sub.display_id),
             owns: &request.owns,
+            policy: request.policy.as_deref(),
         },
     )
     .await?;

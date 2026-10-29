@@ -340,6 +340,32 @@ stopped by the builder having no git credentials (hidden credential stores in
 the sandbox), and a deploy by the deploy key living only in the reviewer's or
 owner's environment, through a harness profile's `env`.
 
+### What phase 2 built
+
+- **2.1** as designed, under `agent_host.command_policies`, with `allow_remove` beside
+  `deny_remove` and `scripts`. The built-ins (`hq_core::command_policy::builtins`) are generic:
+  the plan's `bun` entries are the owner's to add. The engine is in `hq-core`, so the host's
+  hook and HQ judge with the same code.
+- **2.2** as designed, with two additions. A pattern's flags may appear anywhere after its
+  words, so a trailing `--force` is caught; and git's global options and common wrappers are
+  looked through. `sudo` always escalates.
+- **2.3** as designed. "No wider" is computed: every allow of the narrower policy is covered by
+  one of the wider's, every deny of the wider's is covered by one of the narrower's, and its
+  `otherwise` and `scripts` are no looser. The policy is stored in its own table
+  (`session_policies`, migration 105) rather than a column, holding the resolved rules, so a
+  config edit never changes a running session.
+- **2.4** at launch for Copilot (the policy's denies replace the fixed list) and Claude Code (a
+  `PreToolUse` hook running `hq host policy-check`, failing closed). The hook was chosen over
+  `permissions.deny` because hooks run under `--dangerously-skip-permissions`; that the deny
+  decision holds there is from Claude Code's documentation and still needs a run against the
+  real CLI. Both agents keep starting with their tools allowed, so `otherwise: escalate` cannot
+  make them ask; it governs the dialogs they still show (paths outside the folder, and every
+  dialog of agents that ask, such as Codex). The supervisor answers off the sweep, and raises
+  the alert if the answer does not take.
+- **2.5** records every decision as a `policy_decision` event. Not built: the periodic summary
+  comment on the task, which waits for phase 3's reader.
+- **2.6** in "What actually stops each deny" in `docs/AGENT_SESSIONS.md`.
+
 ## Phase 3: events instead of polling, and decisions on the owner's phone
 
 **3.1 One event log.** The supervisor writes these kinds to the existing
@@ -590,7 +616,7 @@ phase 3's items and the task's `waiting_on`, not a new store.
 | Phase 5 | built | A sleeping host is noticed; a laptop can stay awake while agents run |
 | Phase 1 | built | Structured answers; option buttons in the web Sessions panel |
 | HQ-RDT-003 | built | Answer buttons on the phone and in web push |
-| Phase 2 | 2 to 3 | Prompts become policy; Claude Code gets a deny list |
+| Phase 2 | built | Prompts become policy; Claude Code gets a deny list |
 | Phase 3 | 2 | Events instead of screen reads; escalations pushed |
 | 4.4, phase 6 | 2 to 3 | One team per remote client; decisions list |
 

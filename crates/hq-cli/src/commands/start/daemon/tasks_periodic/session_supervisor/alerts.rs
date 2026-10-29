@@ -129,12 +129,102 @@ pub(super) fn alert_blocked(
     row: &registry::HarnessSessionRow,
     agent: &AgentInfo,
     screen: &str,
+    resolve: &HostResolver,
 ) {
     let (id, seq) = (row.id.clone(), agent.state_change_seq);
     match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
         Ok(true) => {}
         _ => return,
     }
+    let note = match by_policy(db, row, agent, screen, resolve) {
+        PolicyStep::Answering => return,
+        PolicyStep::Escalated(note) => Some(note),
+        PolicyStep::NotJudged => None,
+    };
+    raise_blocked(db, row, agent, screen, note.as_deref());
+}
+
+/// What the session's command policy did with the dialog it blocked at.
+enum PolicyStep {
+    /// It allows or denies it, and is answering it in the background.
+    Answering,
+    /// It left it to the owner; the line says why.
+    Escalated(String),
+    /// No policy, no dialog HQ can read, or a kind a policy does not judge.
+    NotJudged,
+}
+
+/// A dialog the policy decides is answered off the sweep (an answer waits for the screen),
+/// and raised after all if the answer does not take.
+fn by_policy(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+    resolve: &HostResolver,
+) -> PolicyStep {
+    use hq_core::command_policy::Decision;
+    use hq_tools::harness_session::policy;
+    let db_arc = Arc::new(db.clone());
+    let (Some(dialog), Some(seq)) = (agent.pending.as_deref(), agent.pending_seq) else {
+        return PolicyStep::NotJudged;
+    };
+    let Some(rules) = policy::of(&db_arc, &row.id) else {
+        return PolicyStep::NotJudged;
+    };
+    let Some(decision) = policy::judge(&rules, dialog, &row.cwd) else {
+        return PolicyStep::NotJudged;
+    };
+    let host = match (resolve.as_ref())(&row.host) {
+        Ok(host) => host,
+        Err(_) => return PolicyStep::NotJudged,
+    };
+    if let Decision::Escalate { .. } = decision {
+        let acted = policy::act(&db_arc, &host, row, &rules, dialog, seq);
+        let reason = match acted {
+            Some(policy::Acted::Escalated { reason }) => reason,
+            _ => decision.why().to_string(),
+        };
+        return PolicyStep::Escalated(format!(
+            "Its '{}' command policy left this to you: {reason}.",
+            rules.name
+        ));
+    }
+    let (db2, row2, agent2, screen2, dialog2) = (
+        db_arc.clone(),
+        row.clone(),
+        agent.clone(),
+        screen.to_string(),
+        dialog.clone(),
+    );
+    tokio::task::spawn_blocking(move || {
+        match policy::act(&db2, &host, &row2, &rules, &dialog2, seq) {
+            Some(policy::Acted::Escalated { reason }) => {
+                let note = format!(
+                    "Its '{}' command policy could not settle this: {reason}.",
+                    rules.name
+                );
+                raise_blocked(&db2, &row2, &agent2, &screen2, Some(&note));
+            }
+            Some(acted) => {
+                tracing::info!(session = %row2.id, ?acted, "session-supervisor: dialog answered by the command policy");
+            }
+            None => raise_blocked(&db2, &row2, &agent2, &screen2, None),
+        }
+    });
+    PolicyStep::Answering
+}
+
+/// The "waiting for you" alert for a blocked session, with `note` (what the command policy
+/// made of it) when there is one.
+fn raise_blocked(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+    note: Option<&str>,
+) {
+    let seq = agent.state_change_seq;
     let link = record_on_task(db, row, Event::Blocked);
     // A monitor hears about the block too; it can tell whoever can answer it.
     report_to_observers(
@@ -150,12 +240,13 @@ pub(super) fn alert_blocked(
     let label = session_label(row);
     let excerpt = last_lines(screen, BLOCKED_EXCERPT_LINES);
     let task_line = task_line(link.as_ref());
+    let note_line = note.map_or_else(String::new, |n| format!("\n{n}"));
     let item = ValueItem::new(
         "session-supervisor",
         ValueKind::ActionNeeded,
         format!("Harness session '{label}' is waiting for you"),
         format!(
-            "Session {} on {} is blocked on a prompt or approval:\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nRead it with `harness_session_pending` and answer with `harness_session_answer`, or with `harness_session_send` keys when HQ cannot read it.{task_line}",
+            "Session {} on {} is blocked on a prompt or approval:\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}{note_line}\nRead it with `harness_session_pending` and answer with `harness_session_answer`, or with `harness_session_send` keys when HQ cannot read it.{task_line}",
             row.id, row.host
         ),
     )

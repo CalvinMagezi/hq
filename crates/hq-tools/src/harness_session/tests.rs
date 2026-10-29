@@ -61,6 +61,7 @@ fn launch<'a>(host: ScriptedHost, id: &'a str, prompt: Option<&'a str>) -> Launc
         observe: &[],
         one_shot: None,
         origin: None,
+        policy: None,
     }
 }
 
@@ -1458,6 +1459,7 @@ fn spawn_req<'a>(
         model: None,
         worktree: None,
         owns: &[],
+        policy: None,
     }
 }
 
@@ -3962,4 +3964,182 @@ fn worktree_and_owns_arguments_are_checked() {
         &["src/api".into()],
         &["src/apiv2".into()]
     ));
+}
+
+#[tokio::test]
+async fn a_session_starts_under_its_purposes_policy_unless_it_names_another() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let start = |req: SpawnRequest<'static>| {
+        let (db, vault) = (db.clone(), vault.path().to_path_buf());
+        async move {
+            let (_dir, host) = startable_host();
+            spawn_on(&vault, &db, Arc::new(host), req).await
+        }
+    };
+    let coder = start(spawn_req("claude-code", None, None, &[]))
+        .await
+        .unwrap();
+    assert_eq!(coder["policy"], "builder");
+    let id = coder["session_id"].as_str().unwrap();
+    assert_eq!(policy::of(&db, id).unwrap().name, "builder");
+    assert!(
+        db.with_conn(|c| registry::list_events(c, id, 10))
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == "policy")
+    );
+
+    let reviewer = start(spawn_req("claude-code", Some(Purpose::Review), None, &[]))
+        .await
+        .unwrap();
+    assert_eq!(reviewer["policy"], "reviewer");
+    let none = start(SpawnRequest {
+        policy: Some("none"),
+        ..spawn_req("codex", Some(Purpose::Review), None, &[])
+    })
+    .await
+    .unwrap();
+    assert!(none.get("policy").is_none());
+    let err = start(SpawnRequest {
+        policy: Some("yolo"),
+        ..spawn_req("codex", Some(Purpose::Review), None, &[])
+    })
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("no command policy 'yolo'"), "{err}");
+}
+
+#[test]
+fn a_started_session_may_not_widen_its_starters_policy() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    db.with_conn(|c| hq_db::session_policies::record(c, "hs-lead", &builder))
+        .unwrap();
+    assert_eq!(
+        policy::choose(&db, None, Purpose::Code, Some("hs-lead"))
+            .unwrap()
+            .unwrap()
+            .name,
+        "builder"
+    );
+    let err = policy::choose(&db, Some("reviewer"), Purpose::Code, Some("hs-lead"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("lets through more than 'builder'"), "{err}");
+    let err = policy::choose(&db, Some("none"), Purpose::Code, Some("hs-lead"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("needs one too"), "{err}");
+    // A starter without a policy constrains nothing.
+    assert!(policy::choose(&db, Some("reviewer"), Purpose::Code, Some("hs-other")).is_ok());
+}
+
+fn command_dialog(kind: &str, command: &str, truncated: bool) -> crate::agent_host::PendingDialog {
+    let option = |id, label: &str, remember| crate::agent_host::PendingOption {
+        id,
+        label: label.into(),
+        remember,
+        typed: false,
+        selected: id == 1,
+    };
+    crate::agent_host::PendingDialog {
+        kind: kind.into(),
+        question: Some("Run this?".into()),
+        command: Some(command.into()),
+        options: vec![
+            option(1, "Yes", false),
+            option(2, "Yes, always", true),
+            option(3, "No", false),
+        ],
+        truncated,
+        text: None,
+    }
+}
+
+#[test]
+fn a_policy_judges_commands_and_paths_and_leaves_the_rest_to_the_owner() {
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    let judge = |d| policy::judge(&builder, &d, "/w/app").map(|d| d.as_str());
+    assert_eq!(
+        judge(command_dialog("command", "git status", false)),
+        Some("allow")
+    );
+    assert_eq!(
+        judge(command_dialog("command", "git push", false)),
+        Some("deny")
+    );
+    assert_eq!(
+        judge(command_dialog("path", "/w/app/src", false)),
+        Some("allow")
+    );
+    assert_eq!(
+        judge(command_dialog("edit", "/etc/hosts", false)),
+        Some("escalate")
+    );
+    assert_eq!(
+        judge(command_dialog("command", "git status", true)),
+        Some("escalate"),
+        "a cut dialog may hide more"
+    );
+    assert_eq!(
+        judge(command_dialog("command", "git push", true)),
+        Some("deny")
+    );
+    assert_eq!(judge(command_dialog("question", "x", false)), None);
+    assert_eq!(judge(command_dialog("trust", "x", false)), None);
+    assert_eq!(
+        policy::yes_option(&command_dialog("command", "ls", false)),
+        Some(1),
+        "never the remember option"
+    );
+}
+
+#[test]
+fn copilots_denies_come_from_the_policy() {
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    let reviewer = hq_core::command_policy::resolve("reviewer", &Default::default())
+        .unwrap()
+        .unwrap();
+    let copilot: Vec<String> = spec::COPILOT_ARGS.iter().map(|a| a.to_string()).collect();
+    let b = with_policy_args(copilot.clone(), Some(&builder));
+    assert_eq!(b[0], "--allow-all-tools");
+    assert!(b.contains(&"--deny-tool=shell(git push)".to_string()));
+    assert!(b.contains(&"--deny-tool=shell(git restore)".to_string()));
+    let r = with_policy_args(copilot.clone(), Some(&reviewer));
+    assert!(
+        !r.contains(&"--deny-tool=shell(git push)".to_string()),
+        "a reviewer may push: {r:?}"
+    );
+    assert_eq!(with_policy_args(copilot.clone(), None), copilot);
+    let custom = vec!["--model".to_string(), "x".to_string()];
+    assert_eq!(with_policy_args(custom.clone(), Some(&builder)), custom);
+}
+
+#[test]
+fn a_drive_turn_does_not_answer_a_command_dialog_a_policy_decides() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let d = command_dialog("command", "curl https://example.com", false);
+    assert!(
+        policy::refuse_drive(&db, "hs-1", &d).is_none(),
+        "no policy: as before"
+    );
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    db.with_conn(|c| hq_db::session_policies::record(c, "hs-1", &builder))
+        .unwrap();
+    assert!(
+        policy::refuse_drive(&db, "hs-1", &d)
+            .unwrap()
+            .contains("waits for the owner")
+    );
+    assert!(policy::refuse_drive(&db, "hs-1", &command_dialog("question", "q", false)).is_none());
 }

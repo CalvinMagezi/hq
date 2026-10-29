@@ -33,6 +33,8 @@ pub struct SpawnOpts {
     pub branch: Option<String>,
     /// Paths it writes to in a folder it shares.
     pub owns: Vec<String>,
+    /// The command policy to run under; `None` is its purpose's.
+    pub policy: Option<String>,
 }
 
 pub async fn run(
@@ -53,6 +55,7 @@ pub async fn run(
         model,
         branch,
         owns,
+        policy,
     } = opts;
     let db = open_db(config)?;
     let vault = &config.vault_path;
@@ -146,6 +149,7 @@ pub async fn run(
                         .filter(|b| !b.is_empty())
                         .map(hq_tools::agent_host::WorktreeBase::Branch),
                     owns: &owns,
+                    policy: policy.as_deref(),
                 },
             )
             .await?;

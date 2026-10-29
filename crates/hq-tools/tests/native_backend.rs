@@ -57,6 +57,7 @@ fn cat(name: &str, kind: &str) -> LaunchRequest {
         resume_args: None,
         mcp: None,
         start_timeout: WAIT,
+        policy: None,
     }
 }
 

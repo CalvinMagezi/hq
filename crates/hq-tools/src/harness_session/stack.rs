@@ -376,6 +376,8 @@ async fn start_run(
                 // In the row's own write: a run under the default origin would
                 // escape the one-at-a-time rule and the budget.
                 origin: Some(registry::ORIGIN_STACK),
+                // A one-shot general-purpose run has no command dialogs to judge.
+                policy: None,
             },
         )
         .await?;

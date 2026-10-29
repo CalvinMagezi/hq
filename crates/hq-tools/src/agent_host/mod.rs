@@ -306,6 +306,9 @@ pub struct LaunchRequest {
     /// delivers it, as a private config file next to the agent.
     pub mcp: Option<McpAccess>,
     pub start_timeout: Duration,
+    /// The command policy the agent starts under (`hq_core::command_policy::Policy` as JSON).
+    /// The built-in host turns it into a Claude Code hook that refuses what it denies.
+    pub policy: Option<serde_json::Value>,
 }
 
 /// The HQ endpoint and the session's own token.

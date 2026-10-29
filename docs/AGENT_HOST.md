@@ -602,6 +602,15 @@ the host's own `spawn_failed` error naming the command. The hook settings file i
 written on the remote machine by the host (`agent.hook_flags`), so hooks,
 conversation ids and resume work the same as locally.
 
+`agent.hook_flags` also takes `policy`, the command policy a Claude Code agent runs under
+(a JSON object of at most 64 KiB, which the host stores and never reads). The host writes it
+next to the hook settings (`hooks/<name>.policy.json`, 0600) and adds a `PreToolUse` hook on
+the shell tool that runs `hq host policy-check <that file>`. The hook reads the tool call on
+stdin and prints a deny decision when the policy denies the command, so a deny holds under
+`--dangerously-skip-permissions` too. It fails closed: a policy file it cannot read, or a call
+too long to read whole (256 KiB), is refused. A later `agent.hook_flags` without `policy` (a
+restart) keeps the stored one, and the file goes with the agent's other files.
+
 ### Over a private tunnel instead of ssh
 
 A host can also be reached over TCP on a private tunnel address (for example a
