@@ -38,6 +38,22 @@ pub enum HostError {
         "'{0}' is waiting at a dialog, so the text was not typed: answer the dialog with keys first"
     )]
     Blocked(String),
+    #[error("'{0}' is not waiting at a dialog this host can read")]
+    NoDialog(String),
+    #[error(
+        "'{name}' is at a different dialog now (number {current}); read it again before answering"
+    )]
+    StaleDialog { name: String, current: u64 },
+    #[error("the dialog has no option {0}")]
+    NoSuchOption(u32),
+    #[error(
+        "option {0} opens a text field instead of answering; decline the dialog and send the message as a prompt"
+    )]
+    TypedOption(u32),
+    #[error("could not tell which option the cursor is on, so nothing was pressed")]
+    NoCursor,
+    #[error("the cursor did not reach option {0}, so Enter was not pressed; read the dialog again")]
+    AnswerUnverified(u32),
 }
 
 impl HostError {
@@ -60,6 +76,12 @@ impl HostError {
             HostError::MissingEnv { .. } => "missing_env",
             HostError::LockedDown(_) => "locked_down",
             HostError::Blocked(_) => "agent_blocked",
+            HostError::NoDialog(_) => "no_dialog",
+            HostError::StaleDialog { .. } => "stale_dialog",
+            HostError::NoSuchOption(_) => "invalid_option",
+            HostError::TypedOption(_) => "typed_option",
+            HostError::NoCursor => "no_cursor",
+            HostError::AnswerUnverified(_) => "answer_unverified",
         }
     }
 }

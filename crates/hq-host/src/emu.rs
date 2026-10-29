@@ -20,6 +20,12 @@ pub trait Emulator: Send {
     fn visible(&mut self) -> Vec<Row>;
     /// Scrollback followed by the screen, oldest first, without trailing blank rows.
     fn history(&mut self) -> Vec<Row>;
+    /// The newest `limit` rows of `history`, read only as far back as needed.
+    fn recent(&mut self, limit: usize) -> Vec<Row> {
+        let mut rows = self.history();
+        rows.drain(..rows.len().saturating_sub(limit));
+        rows
+    }
     /// The newest `limit` rows of `history` (all when 0) with color and style as ANSI escape sequences,
     /// wrapped rows joined back into logical lines like the unwrapped plain read. Emulators that keep no
     /// style give plain text.
@@ -216,6 +222,33 @@ impl Emulator for VtEmulator {
         self.parser.screen_mut().set_scrollback(0);
         let mut rows: Vec<Row> = by_index.into_values().collect();
         trim_trailing_blank(&mut rows);
+        rows
+    }
+
+    fn recent(&mut self, limit: usize) -> Vec<Row> {
+        let (page, _) = self.parser.screen().size();
+        let page = page as usize;
+        self.parser.screen_mut().set_scrollback(usize::MAX);
+        let history_len = self.parser.screen().scrollback();
+        let mut by_index: BTreeMap<usize, Row> = BTreeMap::new();
+        let mut back = 0;
+        // Newest page first, stopping once `limit` rows (and the screen) are in hand.
+        loop {
+            let offset = back.min(history_len);
+            self.parser.screen_mut().set_scrollback(offset);
+            let first_index = history_len - offset;
+            for (i, row) in self.page_rows().into_iter().enumerate() {
+                by_index.entry(first_index + i).or_insert(row);
+            }
+            if offset == history_len || by_index.len() >= limit.saturating_add(page) {
+                break;
+            }
+            back += page.max(1);
+        }
+        self.parser.screen_mut().set_scrollback(0);
+        let mut rows: Vec<Row> = by_index.into_values().collect();
+        trim_trailing_blank(&mut rows);
+        rows.drain(..rows.len().saturating_sub(limit));
         rows
     }
 
@@ -429,6 +462,21 @@ mod tests {
             2 + MAX_FORWARD
         );
         assert_eq!(expand_cursor_forward("cut\x1b"), "cut\x1b");
+    }
+
+    #[test]
+    fn recent_rows_are_the_tail_of_history() {
+        let text: String = (1..=50).map(|n| format!("line{n}\r\n")).collect();
+        let mut e = fed(5, 40, &text);
+        let all = e.history();
+        let tail: Vec<String> = e.recent(12).into_iter().map(|r| r.text).collect();
+        let want: Vec<String> = all[all.len() - 12..]
+            .iter()
+            .map(|r| r.text.clone())
+            .collect();
+        assert_eq!(tail, want);
+        assert_eq!(e.recent(1000).len(), all.len());
+        assert_eq!(e.visible().len(), 4, "the screen is left at the bottom");
     }
 
     #[test]

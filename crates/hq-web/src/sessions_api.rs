@@ -201,6 +201,15 @@ fn live_session_json(
 const SANDBOX_UNAVAILABLE_CODE: &str = "sandbox_unavailable";
 const GENERIC_FAILURE: &str = "the session request failed; the server log has the details";
 const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
+/// Host refusals of an answer, each a conflict with the dialog on screen now.
+const DIALOG_CODES: &[&str] = &[
+    "no_dialog",
+    "stale_dialog",
+    "invalid_option",
+    "typed_option",
+    "no_cursor",
+    "answer_unverified",
+];
 
 /// Turn a harness_session error into the status a client can act on. The 404
 /// and 409 cases match messages HQ itself writes (there is no typed error for
@@ -223,6 +232,10 @@ pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
             tracing::warn!(error = %e, "sessions api: host unreachable");
             return ApiError::Unavailable(HOST_UNREACHABLE.into());
         }
+        // The dialog moved on or cannot take that answer: the host's own words say what to do.
+        Some(AgentHostError::Api { code, message }) if DIALOG_CODES.contains(&code.as_str()) => {
+            return ApiError::Conflict(message.clone());
+        }
         _ => {}
     }
     let msg = e.to_string();
@@ -231,6 +244,10 @@ pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
     } else if msg.contains("waiting at a dialog")
         || msg.contains("is not running")
         || msg.contains("is still running on")
+        || msg.contains("at a different dialog now")
+        || msg.contains("only the owner may pick")
+        || msg.contains("opens a text field")
+        || msg.contains("the dialog has no option")
     {
         ApiError::Conflict(msg)
     } else {
@@ -635,6 +652,85 @@ pub(crate) async fn send_handler(
     }
 }
 
+/// The dialog a session waits at, as the host read it: number, question, command, options.
+pub(crate) async fn pending_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if let Err(e) = require_row(&state, &id) {
+        return e.into_response();
+    }
+    let db = Arc::new(state.db.clone());
+    let result = tokio::task::spawn_blocking(move || harness::answer::pending(&db, &id)).await;
+    match result {
+        Ok(Ok(report)) => Json(report).into_response(),
+        Ok(Err(e)) => session_error(e).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AnswerBody {
+    /// The dialog's number, from `pending_seq`.
+    seq: u64,
+    option: Option<u32>,
+    #[serde(default)]
+    decline: bool,
+    message: Option<String>,
+}
+
+/// Answer the dialog a session waits at by option, as the user. A stale number (the agent moved
+/// on to another dialog) is refused with 409, so a tap never answers a dialog it did not show.
+pub(crate) async fn answer_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<AnswerBody>,
+) -> Response {
+    use harness::answer::{Answerer, Choice};
+    let message = body.message.filter(|m| !m.trim().is_empty());
+    if message
+        .as_deref()
+        .is_some_and(|m| m.chars().count() > MAX_SEND_CHARS)
+    {
+        return ApiError::bad_request(format!(
+            "the message is longer than {MAX_SEND_CHARS} characters"
+        ))
+        .into_response();
+    }
+    let choice = match (body.option, body.decline) {
+        (Some(option), false) => Choice::Option(option),
+        (None, true) => Choice::Decline(message),
+        _ => {
+            return ApiError::bad_request("pass exactly one of `option` or `decline: true`")
+                .into_response();
+        }
+    };
+    if let Err(e) = require_row(&state, &id) {
+        return e.into_response();
+    }
+    let db = Arc::new(state.db.clone());
+    let result = tokio::task::spawn_blocking(move || {
+        let detail = match &choice {
+            Choice::Option(o) => format!("answered dialog {} with option {o}", body.seq),
+            Choice::Decline(_) => format!("declined dialog {}", body.seq),
+        };
+        let report = harness::answer::answer(&db, &id, body.seq, choice, Answerer::Owner, None)?;
+        let audited = db.with_conn(|c| {
+            registry::record_event(c, &id, registry::EVENT_SENT, registry::ACTOR_USER, Some(&detail))
+        });
+        if let Err(e) = audited {
+            tracing::warn!(session = %id, error = %e, "sessions api: answer was delivered but not audited");
+        }
+        Ok::<_, anyhow::Error>(report)
+    })
+    .await;
+    match result {
+        Ok(Ok(report)) => Json(report).into_response(),
+        Ok(Err(e)) => session_error(e).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
 #[derive(Deserialize, Default)]
 pub(crate) struct AdoptBody {
     thread_id: Option<String>,
@@ -935,6 +1031,68 @@ mod tests {
         )
         .await;
         assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn an_answer_wants_exactly_one_of_an_option_or_decline() {
+        let state = test_state();
+        seed(&state, "hs-x", None);
+        let answer = |option: Option<u32>, decline: bool, message: Option<String>| {
+            let body = AnswerBody {
+                seq: 1,
+                option,
+                decline,
+                message,
+            };
+            answer_handler(State(state.clone()), AxumPath("hs-x".into()), Json(body))
+        };
+        assert_eq!(
+            answer(None, false, None).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            answer(Some(1), true, None).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        let long = "x".repeat(MAX_SEND_CHARS + 1);
+        assert_eq!(
+            answer(None, true, Some(long)).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+        let unknown = answer_handler(
+            State(state.clone()),
+            AxumPath("nope".into()),
+            Json(AnswerBody {
+                seq: 1,
+                option: Some(1),
+                decline: false,
+                message: None,
+            }),
+        )
+        .await;
+        assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn a_dialog_that_moved_on_is_a_conflict_not_a_server_error() {
+        let host = |code: &str| {
+            session_error(
+                AgentHostError::Api {
+                    code: code.into(),
+                    message: "x".into(),
+                }
+                .into(),
+            )
+            .status()
+        };
+        for code in DIALOG_CODES {
+            assert_eq!(host(code), StatusCode::CONFLICT, "{code}");
+        }
+        let status = |m: &str| session_error(anyhow::anyhow!(m.to_string())).status();
+        assert_eq!(
+            status("session x is at a different dialog now (number 9); read it again"),
+            StatusCode::CONFLICT
+        );
     }
 
     #[test]

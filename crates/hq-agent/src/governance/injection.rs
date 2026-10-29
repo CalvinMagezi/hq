@@ -25,15 +25,20 @@ const WATCH_STARTING_TOOLS: &[&str] = &[
     "harness_session_goal",
 ];
 
+/// Answers a harness session's dialog; a tainted turn may not pick an option that widens what
+/// the agent may do from now on.
+const DIALOG_ANSWER_TOOL: &str = "harness_session_answer";
+
 /// A tainted turn must not hand itself prompt approvals, so what it newly
-/// watches starts with Drive off; the user's switch in the web panel still works.
+/// watches starts with Drive off, and its answers to a dialog are one-time
+/// answers only; the user's switch and buttons in the web panel still work.
 pub(super) fn without_default_drive(
     tool_name: &str,
     mut args: Value,
     taint: &TaintTracker,
 ) -> Value {
     if taint.is_tainted()
-        && WATCH_STARTING_TOOLS.contains(&tool_name)
+        && (WATCH_STARTING_TOOLS.contains(&tool_name) || tool_name == DIALOG_ANSWER_TOOL)
         && let Some(obj) = args.as_object_mut()
     {
         obj.insert(
@@ -140,5 +145,37 @@ fn expand_tilde(raw: &str) -> PathBuf {
     match (raw.strip_prefix("~/"), dirs::home_dir()) {
         (Some(rest), Some(home)) => home.join(rest),
         _ => Path::new(raw).to_path_buf(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_tainted_turn_answers_a_dialog_as_untrusted_and_a_clean_one_does_not() {
+        let taint = TaintTracker::new();
+        let args = json!({ "session_id": "hs-1", "seq": 3, "option": 2 });
+        let clean = without_default_drive(DIALOG_ANSWER_TOOL, args.clone(), &taint);
+        assert!(
+            clean
+                .get(hq_tools::harness_session::UNTRUSTED_TURN_ARG)
+                .is_none()
+        );
+
+        taint.mark("harness_session_pending");
+        let marked = without_default_drive(DIALOG_ANSWER_TOOL, args.clone(), &taint);
+        assert_eq!(
+            marked[hq_tools::harness_session::UNTRUSTED_TURN_ARG],
+            true,
+            "reading the dialog is reading the agent's output"
+        );
+        let other = without_default_drive("task_get", args, &taint);
+        assert!(
+            other
+                .get(hq_tools::harness_session::UNTRUSTED_TURN_ARG)
+                .is_none()
+        );
     }
 }

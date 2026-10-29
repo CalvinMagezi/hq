@@ -792,3 +792,176 @@ fn a_host_that_requires_a_sandbox_refuses_unsandboxed_agents() {
     assert!(matches!(host.spawn(none), Err(HostError::Sandbox(_))));
     assert!(host.list().is_empty());
 }
+
+/// A Codex-style "Hooks need review" menu in plain `sh`: arrows move the
+/// cursor, Enter prints what was picked, Esc alone declines.
+const MENU: &str = r#"stty raw -echo min 0 time 3
+sel=1
+draw() {
+  printf '\033[2J\033[H\r\n  Hooks need review\r\n  1 hook is new or changed.\r\n\r\n'
+  for i in 1 2 3; do
+    case $i in 1) l='Review hooks';; 2) l='Trust all and continue';; 3) l='Continue without trusting';; esac
+    if [ "$i" = "$sel" ]; then p='›'; else p=' '; fi
+    printf '%s %s. %s\r\n' "$p" "$i" "$l"
+  done
+  printf '\r\n  Press enter to confirm or esc to go back\r\n'
+}
+key() { dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'; }
+draw
+while :; do
+  k=$(key)
+  case "$k" in
+    1b) n=$(key)
+        if [ "$n" = 5b ]; then
+          a=$(key)
+          case "$a" in 41) [ $sel -gt 1 ] && sel=$((sel-1));; 42) [ $sel -lt 3 ] && sel=$((sel+1));; esac
+          draw
+        else
+          printf '\033[2J\033[HDECLINED\r\n'; sleep 30
+        fi;;
+    0d) printf '\033[2J\033[HPICKED %s\r\n' "$sel"; sleep 30;;
+  esac
+done"#;
+
+fn blocked_menu(host: &Host, name: &str) -> (hq_host::PaneInfo, u64) {
+    host.spawn(agent(name, "codex", MENU)).unwrap();
+    let mut info = host
+        .wait_state(
+            name,
+            &[AgentState::Blocked],
+            Duration::from_millis(200),
+            WAIT,
+        )
+        .unwrap();
+    // The dialog is numbered once the host has read it.
+    wait_until("the dialog is read", || {
+        info = host.info(name).unwrap();
+        info.pending_seq.is_some()
+    });
+    let seq = info.pending_seq.unwrap();
+    (info, seq)
+}
+
+#[test]
+fn a_dialog_is_read_numbered_and_answered_by_option() {
+    let host = Host::new();
+    let (info, seq) = blocked_menu(&host, "menu");
+    let dialog = info.pending.clone().expect("the dialog is read");
+    assert_eq!(dialog.options.len(), 3);
+    assert_eq!(dialog.selected().map(|o| o.id), Some(1));
+    assert!(dialog.options[1].remember, "trust all widens permissions");
+    let announced = host.events().poll(0, Duration::ZERO);
+    assert!(
+        announced
+            .events
+            .iter()
+            .any(|e| e.name == "menu" && e.pending_seq == Some(seq)),
+        "the event that showed the dialog carries its number"
+    );
+
+    let stale = host.answer("menu", seq + 1, Some(2)).unwrap_err();
+    assert_eq!(stale.code(), "stale_dialog");
+    assert_eq!(
+        host.answer("menu", seq, Some(9)).unwrap_err().code(),
+        "invalid_option"
+    );
+
+    let answered = host.answer("menu", seq, Some(2)).unwrap();
+    assert!(answered.registered, "{answered:?}");
+    assert_ne!(answered.info.state, Some(AgentState::Blocked));
+    wait_until_read(&host, "menu", ReadSource::Visible, "PICKED 2");
+    assert_eq!(
+        host.answer("menu", seq, Some(1)).unwrap_err().code(),
+        "no_dialog"
+    );
+    host.kill("menu").unwrap();
+}
+
+#[test]
+fn a_dialog_is_declined_with_its_own_keys() {
+    let host = Host::new();
+    let (_, seq) = blocked_menu(&host, "decline");
+    let answered = host.answer("decline", seq, None).unwrap();
+    assert!(answered.registered);
+    wait_until_read(&host, "decline", ReadSource::Visible, "DECLINED");
+    host.kill("decline").unwrap();
+}
+
+#[test]
+fn a_rule_file_can_answer_by_digit() {
+    let mut detector = hq_host::Detector::builtin();
+    detector
+        .add(
+            r#"
+id = "digits"
+min_engine_version = 4
+[[rules]]
+id = "ask"
+state = "blocked"
+priority = 10
+contains = ["pick one"]
+[rules.dialog]
+kind = "question"
+top = 'Question'
+footer = 'pick one'
+option = '^\s*(?P<num>\d)\)\s+(?P<label>\S.*)$'
+answer = "digit"
+"#,
+        )
+        .unwrap();
+    let host = Host::with_detector(detector);
+    let script = r#"stty raw -echo
+printf 'Question\r\n 1) red\r\n 2) blue\r\npick one\r\n'
+k=$(dd bs=1 count=1 2>/dev/null)
+printf '\033[2J\033[HGOT %s\r\n' "$k"; sleep 30"#;
+    host.spawn(agent("digits", "digits", script)).unwrap();
+    let mut seq = None;
+    wait_until("the dialog is numbered", || {
+        seq = host.info("digits").unwrap().pending_seq;
+        seq.is_some()
+    });
+    let answered = host.answer("digits", seq.unwrap(), Some(2)).unwrap();
+    assert!(answered.registered);
+    wait_until_read(&host, "digits", ReadSource::Visible, "GOT 2");
+    host.kill("digits").unwrap();
+}
+
+#[test]
+fn reading_since_a_cursor_returns_only_what_scrolled_off_after_it() {
+    let host = Host::new();
+    let mut spec = sh(
+        "scroll",
+        "for i in $(seq 1 30); do echo line$i; done; read x; for i in $(seq 31 45); do echo line$i; done; sleep 30",
+    );
+    spec.rows = 10;
+    host.spawn(spec).unwrap();
+    wait_until_read(&host, "scroll", ReadSource::Visible, "line30");
+    let first = host.read_since("scroll", None, 100).unwrap();
+    assert!(first.lines.is_empty(), "a new cursor starts at the end");
+    assert!(first.screen.iter().any(|l| l == "line30"), "{first:?}");
+
+    host.send_text("scroll", "\n").unwrap();
+    wait_until_read(&host, "scroll", ReadSource::Visible, "line45");
+    let next = host.read_since("scroll", Some(&first.next), 100).unwrap();
+    assert!(!next.reset);
+    let new: Vec<&str> = next.lines.iter().map(String::as_str).collect();
+    assert!(
+        new.first().is_some_and(|l| l.starts_with("line2")),
+        "{new:?}"
+    );
+    assert!(new.contains(&"line35"), "{new:?}");
+    assert!(
+        !new.contains(&"line5"),
+        "only rows after the cursor: {new:?}"
+    );
+
+    let again = host.read_since("scroll", Some(&next.next), 100).unwrap();
+    assert!(again.lines.is_empty(), "nothing new: {again:?}");
+    let capped = host.read_since("scroll", Some(&first.next), 3).unwrap();
+    assert_eq!(capped.lines.len(), 3);
+    assert!(capped.skipped > 0);
+
+    let lost = host.read_since("scroll", Some("99999.00ff"), 5).unwrap();
+    assert!(lost.reset && lost.lines.len() == 5, "{lost:?}");
+    host.kill("scroll").unwrap();
+}

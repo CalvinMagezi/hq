@@ -1,6 +1,6 @@
 //! The set of agents this host runs, and the operations on them.
 
-use crate::detect::{AgentState, Detector, Input};
+use crate::detect::{AgentState, AnswerMethod, Detector, Dialog, Input, MAX_DIALOG_LINES};
 use crate::egress::{Decision, Egress};
 use crate::emu::{Row, VtEmulator};
 use crate::env::pane_env;
@@ -32,6 +32,12 @@ const MAX_SCROLLBACK_ROWS: usize = 100_000;
 const PROMPT_ENTER_DELAY: Duration = Duration::from_millis(150);
 /// How often `wait_state` looks at the screen again.
 const STATE_POLL: Duration = Duration::from_millis(100);
+/// Pause between arrow presses while an answer moves the cursor.
+const ARROW_GAP: Duration = Duration::from_millis(60);
+/// How long an answer waits for the cursor to reach the option before giving up on it.
+const CURSOR_WAIT: Duration = Duration::from_millis(1500);
+/// How long an answer waits for the dialog to go away before reporting it did not register.
+const ANSWER_SETTLE: Duration = Duration::from_secs(3);
 const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
 const BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 
@@ -116,6 +122,10 @@ pub struct PaneInfo {
     pub state: Option<AgentState>,
     /// The rule that decided the state; None when the default applied.
     pub rule: Option<String>,
+    /// The dialog the agent is waiting at, when blocked and its rule file says how to read it.
+    pub pending: Option<Arc<Dialog>>,
+    /// The number an answer to `pending` must name; it changes when the dialog does.
+    pub pending_seq: Option<u64>,
     pub cwd: PathBuf,
     /// `process` or `none`; what the agent is confined by.
     pub sandbox: &'static str,
@@ -153,6 +163,63 @@ type Registry = Arc<Mutex<BTreeMap<String, Arc<Pane>>>>;
 /// Agents restored from the state file that cannot start until their
 /// environment is supplied again.
 type Awaiting = Arc<Mutex<BTreeMap<String, PaneRecord>>>;
+
+/// What `Host::read_since` read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadSince {
+    /// Lines that scrolled off the screen since the cursor, oldest first.
+    pub lines: Vec<String>,
+    /// New lines left out because there were more than asked for (the oldest ones).
+    pub skipped: usize,
+    /// The screen now.
+    pub screen: Vec<String>,
+    /// Pass this as the cursor next time.
+    pub next: String,
+    /// The cursor could not be placed, so `lines` are the newest lines, not the new ones.
+    pub reset: bool,
+}
+
+/// A cursor after the last of `lines`: how many there are and a hash of the last two, so it can
+/// be found again after the oldest rows are dropped from a full scrollback.
+fn cursor_at(lines: &[String]) -> String {
+    format!("{}.{:016x}", lines.len(), anchor_hash(lines, lines.len()))
+}
+
+fn anchor_hash(lines: &[String], end: usize) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    lines[end.saturating_sub(2)..end].hash(&mut h);
+    h.finish()
+}
+
+/// Where `cursor` points in `lines`: at its count when the lines before it still match, else at
+/// the one place they match (the scrollback dropped rows from its top). `None` when they match
+/// nowhere or in more than one place, so a repeated pair of lines never skips output silently.
+fn place_cursor(lines: &[String], cursor: &str) -> Option<usize> {
+    let (count, hash) = cursor.split_once('.')?;
+    let count: usize = count.parse().ok()?;
+    let hash = u64::from_str_radix(hash, 16).ok()?;
+    if count == 0 {
+        return (hash == anchor_hash(lines, 0)).then_some(0);
+    }
+    if count <= lines.len() && anchor_hash(lines, count) == hash {
+        return Some(count);
+    }
+    let mut found = (2..=lines.len().min(count)).filter(|&end| anchor_hash(lines, end) == hash);
+    match (found.next(), found.next()) {
+        (Some(end), None) => Some(end),
+        _ => None,
+    }
+}
+
+/// What `Host::answer` did.
+#[derive(Debug, Clone)]
+pub struct Answered {
+    /// The dialog went away (or another took its place) after the keys were sent.
+    pub registered: bool,
+    /// The agent as it is after the answer.
+    pub info: PaneInfo,
+}
 
 /// An agent that is waiting for its environment before it can resume.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -781,7 +848,7 @@ impl Host {
                 let Some(host) = host.upgrade() else { return };
                 let names: Vec<String> = lock(&host.panes).keys().cloned().collect();
                 for name in &names {
-                    host.announce(name);
+                    let _ = host.announce(name);
                 }
                 host.reap_idle(&names);
                 drop(host);
@@ -790,30 +857,56 @@ impl Host {
         });
     }
 
-    /// Sends a `state` event if the agent's state differs from the last one
-    /// announced. A first sighting counts, so a report that lands before the
-    /// first look is not missed. The agent's change counter goes up before
-    /// `done` is set, so a reader that sees `done` also sees the number to
-    /// alert on.
-    fn announce(&self, name: &str) {
-        let Ok(pane) = self.pane(name) else { return };
-        let info = info_of(name, pane.as_ref(), &self.detector);
-        let Some(state) = info.state else { return };
+    /// Looks at the agent and sends a `state` event if its state differs from the last one
+    /// announced, or it now waits at a different dialog. A first sighting counts, so a report
+    /// that lands before the first look is not missed. The agent's change counter goes up before
+    /// `done` is set, so a reader that sees `done` also sees the number to alert on. The returned
+    /// info carries the dialog's number.
+    fn announce(&self, name: &str) -> Result<PaneInfo, HostError> {
+        let pane = self.pane(name)?;
+        let mut info = info_of(name, pane.as_ref(), &self.detector);
+        let Some(state) = info.state else {
+            return Ok(info);
+        };
         let mut announced = pane.announced();
-        if *announced == Some(state) {
-            return;
+        let dialog = info.pending.as_deref().map(Dialog::identity);
+        let known = dialog.and_then(|id| pane.dialog_seq(id));
+        if *announced == Some(state) && (dialog.is_none() || known.is_some()) {
+            info.pending_seq = known;
+            return Ok(info);
+        }
+        if let (Some(id), Some(AgentState::Blocked)) = (dialog, *announced)
+            && state == AgentState::Blocked
+            && !pane.has_dialog_seq()
+        {
+            // The block was announced before its dialog could be read: the dialog takes that
+            // event's number, so one block is one alert.
+            let seq = pane.state_seq();
+            pane.set_dialog_seq(Some((id, seq)));
+            info.pending_seq = Some(seq);
+            return Ok(info);
         }
         let before = announced.replace(state);
         if state == AgentState::Working {
             pane.set_done(false);
         }
-        let seq = self
-            .events
-            .push(name, EventKind::State, Some(state), info.rule);
+        let seq = match dialog {
+            Some(_) => self.events.push_dialog(name, state, info.rule.clone()),
+            None => self
+                .events
+                .push(name, EventKind::State, Some(state), info.rule.clone()),
+        };
         pane.set_state_seq(seq);
+        if dialog.is_some() || state != AgentState::Blocked {
+            pane.set_dialog_seq(dialog.map(|id| (id, seq)));
+        }
         if state == AgentState::Idle && before == Some(AgentState::Working) {
             pane.set_done(true);
         }
+        info.state_seq = seq;
+        info.done = pane.is_done();
+        info.pending_seq = dialog.map(|_| seq);
+        Ok(info)
     }
 
     /// Stops agents that outlived their idle limit: silent that long, and not
@@ -885,19 +978,90 @@ impl Host {
             event,
             session_id,
         );
-        self.announce(name);
-        Ok(())
+        self.announce(name).map(|_| ())
     }
 
     pub fn info(&self, name: &str) -> Result<PaneInfo, HostError> {
-        Ok(info_of(name, self.pane(name)?.as_ref(), &self.detector))
+        self.announce(name)
     }
 
     pub fn list(&self) -> Vec<PaneInfo> {
-        lock(&self.panes)
-            .iter()
-            .map(|(n, p)| info_of(n, p, &self.detector))
-            .collect()
+        let names: Vec<String> = lock(&self.panes).keys().cloned().collect();
+        names.iter().filter_map(|n| self.announce(n).ok()).collect()
+    }
+
+    /// Answers the dialog numbered `seq`: picks option `id`, or declines it when `id` is `None`.
+    /// Refused when the agent is at another dialog by now. Arrow keys move the cursor and Enter
+    /// is pressed only once the screen shows the cursor on that option. Then waits a moment for
+    /// the dialog to go away; `registered` is false when it is still there.
+    pub fn answer(&self, name: &str, seq: u64, id: Option<u32>) -> Result<Answered, HostError> {
+        self.live_pane(name)?;
+        let info = self.announce(name)?;
+        let (Some(dialog), Some(current)) = (info.pending.clone(), info.pending_seq) else {
+            return Err(HostError::NoDialog(name.to_string()));
+        };
+        if current != seq {
+            return Err(HostError::StaleDialog {
+                name: name.to_string(),
+                current,
+            });
+        }
+        match id {
+            None => self.send_keys(name, &dialog.decline)?,
+            Some(id) => self.pick(name, &dialog, id)?,
+        }
+        let deadline = Instant::now() + ANSWER_SETTLE;
+        loop {
+            std::thread::sleep(STATE_POLL);
+            let after = self.announce(name)?;
+            let gone = after.state != Some(AgentState::Blocked)
+                || after.pending_seq.is_some_and(|s| s != seq);
+            if gone || Instant::now() >= deadline {
+                return Ok(Answered {
+                    registered: gone,
+                    info: after,
+                });
+            }
+        }
+    }
+
+    fn pick(&self, name: &str, dialog: &Dialog, id: u32) -> Result<(), HostError> {
+        let target = dialog.option(id).ok_or(HostError::NoSuchOption(id))?;
+        if target.typed {
+            return Err(HostError::TypedOption(id));
+        }
+        if dialog.answer == AnswerMethod::Digit && (1..=9).contains(&id) {
+            return self.send_keys(name, &[id.to_string()]);
+        }
+        let place = |id: u32| dialog.options.iter().position(|o| o.id == id);
+        let from = dialog.selected().ok_or(HostError::NoCursor)?;
+        let (from, to) = (place(from.id), place(id));
+        let (Some(from), Some(to)) = (from, to) else {
+            return Err(HostError::NoCursor);
+        };
+        let key = if to > from { "down" } else { "up" };
+        for _ in 0..from.abs_diff(to) {
+            // One key per write: a TUI can read several escape sequences in one chunk as one key.
+            self.send_keys(name, &[key.to_string()])?;
+            std::thread::sleep(ARROW_GAP);
+        }
+        // Enter picks whatever is highlighted, so it waits until the screen shows the right one.
+        let deadline = Instant::now() + CURSOR_WAIT;
+        loop {
+            let now = self.announce(name)?;
+            let there = now.pending.as_deref().is_some_and(|d| {
+                d.identity() == dialog.identity()
+                    && d.selected()
+                        .is_some_and(|o| o.id == id && o.label == target.label)
+            });
+            if there {
+                return self.send_keys(name, &["enter".to_string()]);
+            }
+            if Instant::now() >= deadline {
+                return Err(HostError::AnswerUnverified(id));
+            }
+            std::thread::sleep(STATE_POLL);
+        }
     }
 
     /// Forgets an agent and stops its process and the processes it started.
@@ -934,6 +1098,40 @@ impl Host {
             out.drain(..out.len() - lines);
         }
         Ok(out.join("\n"))
+    }
+
+    /// Output that scrolled off the screen since `cursor`, plus the screen as it is now and the
+    /// cursor for next time. Only scrollback is final: a program redraws its screen in place, so
+    /// the screen comes whole every time. `cursor` is opaque; `None` starts one. When it cannot
+    /// be placed (the rows it marks were dropped or never existed) the reply says `reset` and
+    /// holds the newest lines instead. At most `max` lines come back, the newest.
+    pub fn read_since(
+        &self,
+        name: &str,
+        cursor: Option<&str>,
+        max: usize,
+    ) -> Result<ReadSince, HostError> {
+        let pane = self.pane(name)?;
+        let (history, visible) = pane.with_emu(|e| (e.history(), e.visible()));
+        let off_screen = history.len().saturating_sub(visible.len());
+        let scrolled = unwrap_rows(history.into_iter().take(off_screen).collect());
+        let screen = unwrap_rows(visible);
+        let (from, reset) = match cursor {
+            None => (scrolled.len(), false),
+            Some(c) => match place_cursor(&scrolled, c) {
+                Some(at) => (at, false),
+                None => (scrolled.len().saturating_sub(max), true),
+            },
+        };
+        let new = &scrolled[from.min(scrolled.len())..];
+        let skipped = new.len().saturating_sub(max);
+        Ok(ReadSince {
+            lines: new[skipped..].to_vec(),
+            skipped,
+            screen,
+            next: cursor_at(&scrolled),
+            reset,
+        })
     }
 
     fn live_pane(&self, name: &str) -> Result<Arc<Pane>, HostError> {
@@ -1154,6 +1352,23 @@ fn screen_of(pane: &Pane) -> (String, String) {
     })
 }
 
+/// The dialog `rule` recognised: from the screen when it fits there, else from the screen and as
+/// much scrollback as a dialog may take.
+fn read_dialog(
+    detector: &Detector,
+    agent: &str,
+    rule: &str,
+    emu: &mut dyn crate::emu::Emulator,
+) -> Option<Dialog> {
+    let on_screen = detector.dialog(agent, rule, &unwrap_rows(emu.visible()));
+    if on_screen.as_ref().is_some_and(|d| !d.truncated) {
+        return on_screen;
+    }
+    let (rows, _) = emu.size();
+    let recent = emu.recent(MAX_DIALOG_LINES + rows as usize);
+    detector.dialog(agent, rule, &unwrap_rows(recent))
+}
+
 fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
     let (rows, cols) = pane.size();
     let detection = pane.agent.as_deref().and_then(|agent| {
@@ -1170,6 +1385,16 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
     let reported = pane.reported();
     let (state, from_hook) =
         report::combine(reported.as_ref().map(|r| r.state), screen, pane.quiet_for());
+    // The dialog comes from the screen rule that saw it, even when a hook decided the state.
+    let pending = match (&detection, state, pane.agent.as_deref()) {
+        (Some(d), Some(AgentState::Blocked), Some(agent)) if d.state == AgentState::Blocked => {
+            d.rule.as_deref().and_then(|rule| {
+                detector.dialog_spec(agent, rule)?;
+                pane.dialog(rule, |emu| read_dialog(detector, agent, rule, emu))
+            })
+        }
+        _ => None,
+    };
     let rule = match (&reported, from_hook) {
         (Some(r), true) => Some(format!("hook:{}", r.event)),
         _ => detection.and_then(|d| d.rule),
@@ -1185,6 +1410,9 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
         title: pane.with_emu(|e| e.title()),
         state,
         rule,
+        pending,
+        // Numbered by `Host::announce`, which keeps track of which dialog is which.
+        pending_seq: None,
         cwd: pane.cwd.clone(),
         sandbox: pane
             .sandbox
@@ -1209,6 +1437,27 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lines(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn a_cursor_is_found_again_after_the_oldest_rows_are_dropped_but_never_guessed() {
+        let before = lines(&["a", "b", "c", "d"]);
+        let cursor = cursor_at(&before);
+        assert_eq!(place_cursor(&before, &cursor), Some(4));
+        // A full scrollback dropped "a" and "b" and took two new lines.
+        let after = lines(&["c", "d", "e", "f"]);
+        assert_eq!(place_cursor(&after, &cursor), Some(2));
+        // The rows moved and the marked pair now appears twice: say so rather than pick one.
+        let blank = cursor_at(&lines(&["a", "b", "c", "d", "", ""]));
+        let twice = lines(&["", "", "x", "", "", "y"]);
+        assert_eq!(place_cursor(&twice, &blank), None);
+        assert_eq!(place_cursor(&after, "garbage"), None);
+        // A cursor taken before anything scrolled off sees everything as new.
+        assert_eq!(place_cursor(&after, &cursor_at(&[])), Some(0));
+    }
 
     #[test]
     fn names_follow_the_agent_name_rule() {

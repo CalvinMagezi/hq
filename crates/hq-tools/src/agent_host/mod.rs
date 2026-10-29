@@ -37,6 +37,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use backend::{AwaitingAgent, Host, HostBackend, HostEvent, HostEvents};
+
 #[cfg(unix)]
 pub use native::{NATIVE_GATE_COMMAND, NativeBackend};
 
@@ -139,6 +140,92 @@ pub struct AgentInfo {
     /// How the process ended, when `exited` and the host says. Zero is a run
     /// that finished; anything else is a crash or a refusal.
     pub exit_code: Option<u32>,
+    /// The rule that decided the status (`hook:<event>` when the agent's own hook did).
+    pub rule: Option<String>,
+    /// The dialog a blocked agent waits at, shortened; `HostBackend::pending` reads it whole.
+    pub pending: Option<Box<PendingDialog>>,
+    /// The number an answer to `pending` must name; a new dialog gets a new one.
+    pub pending_seq: Option<u64>,
+}
+
+/// A dialog an agent waits at, as the host read it off the screen.
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+pub struct PendingDialog {
+    /// `command`, `edit`, `path`, `question`, `trust` or `other`.
+    pub kind: String,
+    pub question: Option<String>,
+    /// The command, file or path the dialog is about.
+    pub command: Option<String>,
+    pub options: Vec<PendingOption>,
+    /// Something was cut: the whole dialog was too long, or (in a listing) a field was shortened.
+    #[serde(default)]
+    pub truncated: bool,
+    /// Every line of the dialog; only in a full read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
+pub struct PendingOption {
+    pub id: u32,
+    pub label: String,
+    /// Picking it lets the agent do more from now on without asking ("don't ask again").
+    #[serde(default)]
+    pub remember: bool,
+    /// Picking it opens a text field instead of answering.
+    #[serde(default)]
+    pub typed: bool,
+    /// The cursor is on it.
+    #[serde(default)]
+    pub selected: bool,
+}
+
+impl PendingDialog {
+    pub fn option(&self, id: u32) -> Option<&PendingOption> {
+        self.options.iter().find(|o| o.id == id)
+    }
+}
+
+/// What answering a dialog did.
+#[derive(Debug, Clone)]
+pub struct AnswerOutcome {
+    /// The dialog went away, or another took its place.
+    pub registered: bool,
+    /// The agent after the answer, when the host said.
+    pub agent: Option<AgentInfo>,
+}
+
+/// Output read from a cursor: what scrolled off the screen since it, and the screen now.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct LogsSince {
+    /// Lines that scrolled off since the cursor, oldest first.
+    pub lines: Vec<String>,
+    /// New lines left out because there were more than asked for (the oldest).
+    pub skipped: usize,
+    pub screen: Vec<String>,
+    /// The cursor for the next read.
+    pub next: String,
+    /// The cursor could not be placed: `lines` are the newest lines, not the new ones.
+    pub reset: bool,
+}
+
+/// A dialog read whole, with what an answer needs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingRead {
+    /// The number an answer must name.
+    pub seq: u64,
+    /// The rule that recognised the dialog.
+    pub rule: Option<String>,
+    pub dialog: PendingDialog,
+}
+
+/// A host's `agent.pending` reply; `None` when the agent waits at no dialog.
+pub(crate) fn parse_pending(v: &serde_json::Value) -> Option<PendingRead> {
+    Some(PendingRead {
+        seq: v.get("pending_seq")?.as_u64()?,
+        rule: v.get("rule").and_then(|r| r.as_str()).map(str::to_string),
+        dialog: serde_json::from_value(v.get("pending")?.clone()).ok()?,
+    })
 }
 
 impl AgentInfo {
@@ -208,7 +295,7 @@ pub enum PromptOutcome {
     /// to confirm the turn began.
     Resubmitted,
     /// Waited until the agent settled (`idle`, `done` or `blocked`).
-    Settled(AgentInfo),
+    Settled(Box<AgentInfo>),
     /// The host saw no `working`/`blocked` activity after submission. The prompt
     /// is very likely delivered (a fast agent can finish between polls), so
     /// read the screen before resending.

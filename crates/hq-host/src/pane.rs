@@ -1,5 +1,6 @@
 //! One agent process in a pseudo-terminal, with its emulated screen.
 
+use crate::detect::Dialog;
 use crate::emu::{Emulator, Row};
 use crate::error::HostError;
 use nix::sys::signal::{Signal, killpg};
@@ -81,6 +82,14 @@ pub(crate) struct Reported {
     pub event: String,
 }
 
+/// A dialog read off the screen, and what the screen was when it was read.
+struct DialogRead {
+    bytes: u64,
+    size: (u16, u16),
+    rule: String,
+    dialog: Option<Arc<Dialog>>,
+}
+
 /// How long typing into a pane may take before the host gives up on it.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often a write waits to see whether the one ahead of it finished.
@@ -112,6 +121,10 @@ pub(crate) struct Pane {
     reported: Mutex<Option<Reported>>,
     /// The agent's own id for its conversation, as its hooks reported it.
     session_id: Mutex<Option<String>>,
+    /// The dialog last read off the screen, kept until the output or the size changes.
+    dialog_read: Mutex<Option<DialogRead>>,
+    /// The dialog the agent is waiting at, as `(identity, number)`: answers name it by number.
+    dialog_seq: Mutex<Option<(u64, u64)>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     /// A write is in flight and has not finished: the program is not reading.
     writing: Arc<AtomicBool>,
@@ -219,6 +232,8 @@ impl Pane {
             resume_argv: Mutex::new(None),
             reported: Mutex::new(None),
             session_id: Mutex::new(None),
+            dialog_read: Mutex::new(None),
+            dialog_seq: Mutex::new(None),
             writer: Arc::new(Mutex::new(writer)),
             writing: Arc::new(AtomicBool::new(false)),
             master: Mutex::new(pair.master),
@@ -364,6 +379,47 @@ impl Pane {
 
     pub(crate) fn reported(&self) -> Option<Reported> {
         lock(&self.reported).clone()
+    }
+
+    /// The dialog `rule` reads off the screen, read again only when the output or the size changed.
+    pub(crate) fn dialog(
+        &self,
+        rule: &str,
+        read: impl FnOnce(&mut dyn Emulator) -> Option<Dialog>,
+    ) -> Option<Arc<Dialog>> {
+        // Output position and size are taken under the screen lock, so the reading matches them.
+        let mut emu = lock(&self.shared.emu);
+        let (bytes, size) = (self.bytes_seen(), emu.size());
+        let mut cached = lock(&self.dialog_read);
+        if let Some(c) = cached
+            .as_ref()
+            .filter(|c| c.bytes == bytes && c.size == size && c.rule == rule)
+        {
+            return c.dialog.clone();
+        }
+        let dialog = read(emu.as_mut()).map(Arc::new);
+        *cached = Some(DialogRead {
+            bytes,
+            size,
+            rule: rule.to_string(),
+            dialog: dialog.clone(),
+        });
+        dialog
+    }
+
+    /// The number of the dialog with `identity`, if it is the one announced.
+    pub(crate) fn dialog_seq(&self, identity: u64) -> Option<u64> {
+        lock(&self.dialog_seq)
+            .filter(|(id, _)| *id == identity)
+            .map(|(_, seq)| seq)
+    }
+
+    pub(crate) fn set_dialog_seq(&self, numbered: Option<(u64, u64)>) {
+        *lock(&self.dialog_seq) = numbered;
+    }
+
+    pub(crate) fn has_dialog_seq(&self) -> bool {
+        lock(&self.dialog_seq).is_some()
     }
 
     pub(crate) fn agent_session_id(&self) -> Option<String> {

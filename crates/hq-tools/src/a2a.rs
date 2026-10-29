@@ -1099,6 +1099,9 @@ mod tests {
             agent_session_id: None,
             exited: false,
             exit_code: None,
+            rule: None,
+            pending: None,
+            pending_seq: None,
         }
     }
 

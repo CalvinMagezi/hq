@@ -130,6 +130,7 @@ mod tests {
                     kind: kind.to_string(),
                     state: state.map(str::to_string),
                     rule: None,
+                    pending_seq: None,
                 })
                 .collect(),
             last_seq: list.len() as u64,

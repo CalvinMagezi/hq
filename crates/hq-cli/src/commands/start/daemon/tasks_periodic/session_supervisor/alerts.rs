@@ -139,7 +139,7 @@ pub(super) fn alert_blocked(
         ValueKind::ActionNeeded,
         format!("Harness session '{label}' is waiting for you"),
         format!(
-            "Session {} on {} is blocked on a prompt or approval:\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nRead it with `harness_session_logs`, answer with `harness_session_send` (text, or `keys` such as down and enter).{task_line}",
+            "Session {} on {} is blocked on a prompt or approval:\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nRead it with `harness_session_pending` and answer with `harness_session_answer`, or with `harness_session_send` keys when HQ cannot read it.{task_line}",
             row.id, row.host
         ),
     )

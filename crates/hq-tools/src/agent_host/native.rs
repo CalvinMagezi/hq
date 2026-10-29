@@ -1,8 +1,8 @@
 use super::transport::Transport;
 use super::{
-    AgentHostError, AgentInfo, AgentStatus, AwaitingAgent, Host, HostBackend, HostEvent,
-    HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome, shell_line,
-    validate_keys,
+    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, Host, HostBackend,
+    HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince, PendingRead,
+    PromptOutcome, shell_line, validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -24,6 +24,8 @@ const DRAWN_QUIET_MS: u64 = 600;
 const DRAWN_POLL: Duration = Duration::from_millis(100);
 const SETTLED: [AgentStatus; 2] = [AgentStatus::Idle, AgentStatus::Blocked];
 const REACTED: [AgentStatus; 2] = [AgentStatus::Working, AgentStatus::Blocked];
+/// An answer replies once the dialog has gone, or after the host's few seconds of waiting for it.
+const ANSWER_MARGIN: Duration = Duration::from_secs(10);
 
 /// The built-in agent host, reached over its control socket. A pane's name is
 /// its workspace id and its pane id, so every host-shaped call maps onto it.
@@ -436,6 +438,12 @@ fn parse_info(v: &Value) -> Option<AgentInfo> {
         name: Some(name),
         exited,
         exit_code: v.get("exit_code").and_then(Value::as_u64).map(|c| c as u32),
+        rule: text("rule"),
+        pending: v
+            .get("pending")
+            .filter(|p| !p.is_null())
+            .and_then(|p| serde_json::from_value(p.clone()).ok()),
+        pending_seq: v.get("pending_seq").and_then(Value::as_u64),
     })
 }
 
@@ -572,7 +580,7 @@ impl HostBackend for NativeBackend {
             return Ok(PromptOutcome::Submitted);
         };
         match self.wait_for(target, &SETTLED, limit)? {
-            Some(info) => Ok(PromptOutcome::Settled(info)),
+            Some(info) => Ok(PromptOutcome::Settled(Box::new(info))),
             None => Ok(PromptOutcome::TimedOut(format!(
                 "{target} did not settle within {}s",
                 limit.as_secs()
@@ -659,6 +667,39 @@ impl HostBackend for NativeBackend {
             })
     }
 
+    fn read_since(
+        &self,
+        target: &str,
+        cursor: Option<&str>,
+        lines: usize,
+    ) -> Result<LogsSince, AgentHostError> {
+        let v = self.call(
+            "agent.read_since",
+            json!({ "name": target, "cursor": cursor, "lines": lines }),
+        )?;
+        let strings = |k: &str| -> Vec<String> {
+            v.get(k)
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|l| l.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        Ok(LogsSince {
+            lines: strings("lines"),
+            skipped: v.get("skipped").and_then(Value::as_u64).unwrap_or(0) as usize,
+            screen: strings("screen"),
+            next: v
+                .get("next")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            reset: v.get("reset").and_then(Value::as_bool).unwrap_or(false),
+        })
+    }
+
     fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError> {
         match self.call("agent.remove", json!({ "name": workspace_id })) {
             Err(AgentHostError::Api { code, .. }) if code == "agent_not_found" => Ok(()),
@@ -695,6 +736,7 @@ impl HostBackend for NativeBackend {
                                 kind: text(e, "kind")?,
                                 state: text(e, "state"),
                                 rule: text(e, "rule"),
+                                pending_seq: e.get("pending_seq").and_then(Value::as_u64),
                             })
                         })
                         .collect()
@@ -702,6 +744,32 @@ impl HostBackend for NativeBackend {
                 .unwrap_or_default(),
             last_seq: v.get("last_seq").and_then(Value::as_u64).unwrap_or(0),
             lost: v.get("lost").and_then(Value::as_bool).unwrap_or(false),
+        })
+    }
+
+    fn pending(&self, target: &str) -> Result<Option<PendingRead>, AgentHostError> {
+        let v = self.call("agent.pending", json!({ "name": target }))?;
+        Ok(super::parse_pending(&v))
+    }
+
+    fn answer(
+        &self,
+        target: &str,
+        seq: u64,
+        option: Option<u32>,
+    ) -> Result<AnswerOutcome, AgentHostError> {
+        let params = match option {
+            Some(id) => json!({ "name": target, "seq": seq, "option": id }),
+            None => json!({ "name": target, "seq": seq, "decline": true }),
+        };
+        // The host waits a few seconds for the dialog to go away before it replies.
+        let v = self.call_within("agent.answer", params, self.command_timeout + ANSWER_MARGIN)?;
+        Ok(AnswerOutcome {
+            registered: v
+                .get("registered")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            agent: v.get("agent").and_then(parse_info),
         })
     }
 

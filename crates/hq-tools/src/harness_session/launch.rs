@@ -625,7 +625,7 @@ pub(super) fn launch_report(
     if let Some(screen) = &settled.screen {
         report["blocked"] = json!({
             "screen": screen,
-            "next": "The agent is waiting at a dialog and no prompt was typed. Read the screen, then answer with harness_session_send using `keys`.",
+            "next": "The agent is waiting at a dialog and no prompt was typed. Read it with harness_session_pending and answer with harness_session_answer (or harness_session_send `keys` when HQ cannot read it).",
         });
     }
     if let Some(note) = note {

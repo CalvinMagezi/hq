@@ -6,11 +6,52 @@
 # lines: a dialog quoted higher up in the conversation never counts. Idle is
 # claimed only when the idle footer is on screen; anything the rules do not
 # recognise reads unknown, never idle.
+#
+# The [dialogs] tables say how to read a dialog once a rule has seen one: where
+# its box starts and ends, its question, its command or path, and its options.
+# Answers move the cursor with the arrow keys and check where it landed before
+# pressing Enter: Enter on whatever is highlighted can be "remember this path",
+# and the digit 3 only moves the cursor (it opens a text field).
 id = "copilot"
-version = "2026.10.29.1"
-min_engine_version = 3
+version = "2026.10.29.2"
+min_engine_version = 4
 updated_at = "2026-10-29T00:00:00Z"
 aliases = ["github-copilot"]
+
+# Run a command, create or edit a file, reach a path, trust a folder: a box at
+# the bottom with numbered options. The command or path sits in a box inside it.
+[dialogs.approval]
+kind = "other"
+kind_when = [
+  { kind = "command", line = '(?i)^\s*do you want to run this command\?' },
+  { kind = "path", line = '(?i)^\s*allow path access\s*$' },
+  { kind = "edit", line = '(?i)^\s*do you want to (?:create|edit|delete|overwrite) ' },
+  { kind = "trust", line = '(?i)\btrust (?:the files in )?this folder\b' },
+]
+top = '^╭'
+footer = '(?i)enter to select'
+question = '(?i)^\s*do you (?:want to|trust)\b'
+command_block = ['^\s+╭', '^\s+╰']
+command_line = '(?i)^\s*do you want to (?:create|edit|delete|overwrite) (.+?)\?\s*$'
+option = '^\s*(?:❯\s*)?(?P<num>\d+)\.\s+(?P<label>\S.*)$'
+selected = '^\s*❯'
+remember = '(?i)don.t ask again|\bremember\b|\balways\b'
+typed = '(?i)tell copilot what to do differently'
+answer = "arrows"
+decline = ["esc"]
+
+# "Copilot needs information." The question, then one option per line, the
+# cursor on one of them. ctrl+d declines and lets the turn go on; esc ends it.
+[dialogs.ask_user]
+kind = "question"
+top = '^─{10,}'
+footer = '(?i)enter accept'
+question = '\?\s*$'
+option = '^ (?:❯ |  )(?P<label>\S.*)$'
+selected = '^ ❯'
+typed = '(?i)type your answer'
+answer = "arrows"
+decline = ["ctrl+d"]
 
 [[rules]]
 id = "approval_dialog"
@@ -25,6 +66,7 @@ line_regex = [
   '(?i)^\s*│?\s*do you want to\b',
   '^\s*│?\s*(?:❯\s*)?\d+\.\s+\S',
 ]
+dialog = "approval"
 
 [[rules]]
 id = "ask_user_form"
@@ -34,6 +76,7 @@ region = "bottom_non_empty_lines(4)"
 visible_blocker = true
 # "Copilot needs information." The agent asked a question and waits for it.
 contains = ["enter accept", "esc cancel"]
+dialog = "ask_user"
 
 [[rules]]
 id = "menu_dialog"
@@ -44,6 +87,7 @@ visible_blocker = true
 # Any other numbered menu waiting at the bottom, such as a folder trust question.
 contains = ["enter to select", "esc to cancel"]
 line_regex = ['^\s*│?\s*❯\s*\d+\.\s+\S']
+dialog = "approval"
 
 [[rules]]
 id = "working_footer"

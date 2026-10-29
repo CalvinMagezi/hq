@@ -2,7 +2,7 @@
 //! thread per connection. A connection must say `hello` with the operator
 //! token before anything else.
 
-use crate::detect::AgentState;
+use crate::detect::{AgentState, Dialog};
 use crate::error::HostError;
 use crate::host::{Host, PaneInfo, PaneStatus, ReadSource, SpawnSpec};
 use crate::proto::{ErrorBody, MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
@@ -555,7 +555,8 @@ impl Conn {
             .iter()
             .map(|e| {
                 json!({ "seq": e.seq, "name": e.name, "kind": e.kind.as_str(),
-                        "state": e.state.map(AgentState::as_str), "rule": e.rule })
+                        "state": e.state.map(AgentState::as_str), "rule": e.rule,
+                        "pending_seq": e.pending_seq })
             })
             .collect();
         Ok(json!({ "events": events, "last_seq": poll.last_seq, "lost": poll.lost }))
@@ -635,6 +636,31 @@ impl Conn {
                 let p: Named = parse(params)?;
                 Ok(info_json(&host.info(&p.name).map_err(host_err)?))
             }
+            "agent.pending" => {
+                let p: Named = parse(params)?;
+                let info = host.info(&p.name).map_err(host_err)?;
+                Ok(json!({
+                    "state": info.state.map(AgentState::as_str),
+                    "rule": info.rule,
+                    "pending_seq": info.pending_seq,
+                    "pending": info.pending.as_deref().map(|d| dialog_json(d, true)),
+                }))
+            }
+            "agent.answer" => {
+                let p: AnswerParams = parse(params)?;
+                let choice = match (p.option, p.decline) {
+                    (Some(id), false) => Some(id),
+                    (None, true) => None,
+                    _ => {
+                        return Err(body(
+                            "invalid_params",
+                            "agent.answer takes an option or decline: true, not both",
+                        ));
+                    }
+                };
+                let answered = host.answer(&p.name, p.seq, choice).map_err(host_err)?;
+                Ok(json!({ "registered": answered.registered, "agent": info_json(&answered.info) }))
+            }
             "agent.read" => {
                 let p: ReadParams = parse(params)?;
                 let text = host
@@ -642,6 +668,29 @@ impl Conn {
                     .map_err(host_err)?;
                 let (text, truncated) = tail_that_fits(text);
                 Ok(json!({ "text": text, "truncated": truncated }))
+            }
+            "agent.read_since" => {
+                let p: ReadSinceParams = parse(params)?;
+                let max = p.lines.unwrap_or(DEFAULT_SINCE_LINES).min(MAX_SINCE_LINES);
+                let read = host
+                    .read_since(&p.name, p.cursor.as_deref(), max)
+                    .map_err(host_err)?;
+                // The reply must fit one line: drop the oldest new lines first, then screen rows.
+                let (mut lines, mut skipped, mut screen) = (read.lines, read.skipped, read.screen);
+                let size = |l: &[String], s: &[String]| {
+                    l.iter().chain(s).map(|x| x.len() + 8).sum::<usize>()
+                };
+                while size(&lines, &screen) > MAX_READ_TEXT_BYTES && !lines.is_empty() {
+                    lines.remove(0);
+                    skipped += 1;
+                }
+                while size(&lines, &screen) > MAX_READ_TEXT_BYTES && !screen.is_empty() {
+                    screen.remove(0);
+                }
+                Ok(json!({
+                    "lines": lines, "skipped": skipped, "screen": screen,
+                    "next": read.next, "reset": read.reset,
+                }))
             }
             "agent.send_text" => {
                 let p: TextParams = parse(params)?;
@@ -731,6 +780,17 @@ fn tail_that_fits(text: String) -> (String, bool) {
 #[serde(deny_unknown_fields)]
 struct Named {
     name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnswerParams {
+    name: String,
+    /// The dialog's number, from `pending_seq`.
+    seq: u64,
+    option: Option<u32>,
+    #[serde(default)]
+    decline: bool,
 }
 
 #[derive(Deserialize)]
@@ -867,6 +927,18 @@ struct ReadParams {
     lines: Option<usize>,
 }
 
+/// Lines an `agent.read_since` returns when the caller names no number, and the most it may ask for.
+const DEFAULT_SINCE_LINES: usize = 200;
+const MAX_SINCE_LINES: usize = 5_000;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadSinceParams {
+    name: String,
+    cursor: Option<String>,
+    lines: Option<usize>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TextParams {
@@ -938,6 +1010,52 @@ fn send(w: &mut UnixStream, resp: &Response) -> std::io::Result<()> {
     w.write_all(&line)
 }
 
+/// Longest question, command or option label an agent listing carries; `agent.pending` has them whole.
+const SUMMARY_CHARS: usize = 300;
+
+fn shortened(text: &str) -> (String, bool) {
+    match text.char_indices().nth(SUMMARY_CHARS) {
+        Some((cut, _)) => (format!("{}…", &text[..cut]), true),
+        None => (text.to_string(), false),
+    }
+}
+
+/// A dialog as the wire carries it. The summary in every agent listing leaves out the full text
+/// and shortens long fields, so a list of many blocked agents stays small.
+fn dialog_json(d: &Dialog, full: bool) -> Value {
+    let mut cut = d.truncated;
+    let mut short = |text: &str| {
+        if full {
+            return text.to_string();
+        }
+        let (s, was_cut) = shortened(text);
+        cut |= was_cut;
+        s
+    };
+    let question = d.question.as_deref().map(&mut short);
+    let command = d.command.as_deref().map(&mut short);
+    let options: Vec<Value> = d
+        .options
+        .iter()
+        .map(|o| {
+            json!({ "id": o.id, "label": short(&o.label), "remember": o.remember,
+                    "typed": o.typed, "selected": o.selected })
+        })
+        .collect();
+    let mut v = json!({
+        "kind": d.kind.as_str(),
+        "question": question,
+        "command": command,
+        "options": options,
+        "truncated": cut,
+    });
+    if full {
+        v["text"] = json!(d.text);
+        v["decline_keys"] = json!(d.decline);
+    }
+    v
+}
+
 fn info_json(i: &PaneInfo) -> Value {
     let (status, exit_code) = match i.status {
         PaneStatus::Running => ("running", None),
@@ -954,6 +1072,8 @@ fn info_json(i: &PaneInfo) -> Value {
         "title": i.title,
         "state": i.state.map(AgentState::as_str),
         "rule": i.rule,
+        "pending": i.pending.as_deref().map(|d| dialog_json(d, false)),
+        "pending_seq": i.pending_seq,
         "cwd": i.cwd.to_string_lossy(),
         "sandbox": i.sandbox,
         "sandbox_profile": i.sandbox_profile,

@@ -822,6 +822,9 @@ fn alive(name: &str) -> Liveness {
         agent_session_id: None,
         exited: false,
         exit_code: None,
+        rule: None,
+        pending: None,
+        pending_seq: None,
     }))
 }
 
@@ -3573,4 +3576,106 @@ fn a_connection_drives_only_sessions_a_connection_started() {
     );
     assert_eq!(call_origin(None, &connector), registry::ORIGIN_CONNECTOR);
     assert_eq!(call_origin(None, &json!({})), registry::ORIGIN_MCP);
+}
+
+/// The host's `agent.pending` reply for a Copilot path dialog numbered `seq`.
+fn pending_json(seq: u64) -> String {
+    format!(
+        r#"{{"id":"x","result":{{"state":"blocked","rule":"approval_dialog","pending_seq":{seq},"pending":{{"kind":"path","question":"Do you want to allow this?","command":"/tmp -> /private/tmp","options":[{{"id":1,"label":"Yes","remember":false,"typed":false,"selected":false}},{{"id":2,"label":"Yes, and remember this path for this session","remember":true,"typed":false,"selected":true}},{{"id":3,"label":"No (Esc)","remember":false,"typed":false,"selected":false}}],"truncated":false,"text":"Allow path access"}}}}}}"#
+    )
+}
+
+fn answer_on(
+    host: ScriptedHost,
+    seq: u64,
+    choice: answer::Choice,
+    who: answer::Answerer,
+) -> Result<Value> {
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_watched(&db, "hs-a", None);
+    let row = control::get_row(&db, "hs-a").unwrap();
+    let host: crate::agent_host::Host = Arc::new(host);
+    answer::answer_with(&db, &host, &row, seq, choice, who, None)
+}
+
+#[test]
+fn an_answer_names_the_dialog_it_read_and_the_host_presses_the_keys() {
+    let (dir, host) = fake_host(&[
+        ("agent pending", pending_json(7), None),
+        (
+            "agent answer",
+            r#"{"id":"x","result":{"registered":true}}"#.to_string(),
+            None,
+        ),
+    ]);
+    let report = answer_on(
+        host,
+        7,
+        answer::Choice::Option(1),
+        answer::Answerer::Automated("a Drive turn"),
+    )
+    .unwrap();
+    assert_eq!(report["registered"], true, "{report}");
+    assert_eq!(report["answered"]["label"], "Yes");
+    assert!(
+        calls(&dir).contains("agent answer hs-a --seq 7 --option 1"),
+        "{}",
+        calls(&dir)
+    );
+}
+
+#[test]
+fn a_stale_number_or_a_remember_option_from_an_automated_caller_presses_nothing() {
+    let replies = [
+        ("agent pending", pending_json(8), None),
+        (
+            "agent answer",
+            r#"{"id":"x","result":{"registered":true}}"#.to_string(),
+            None,
+        ),
+    ];
+    let (dir, host) = fake_host(&replies);
+    let err = answer_on(host, 7, answer::Choice::Option(1), answer::Answerer::Owner)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("different dialog now (number 8)"), "{err}");
+    assert!(!calls(&dir).contains("agent answer"));
+
+    let (dir, host) = fake_host(&replies);
+    let err = answer_on(
+        host,
+        8,
+        answer::Choice::Option(2),
+        answer::Answerer::Automated("a claude.ai connection"),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("only the owner"), "{err}");
+    assert!(!calls(&dir).contains("agent answer"));
+
+    // The owner may widen the agent's permissions.
+    let (dir, host) = fake_host(&replies);
+    answer_on(host, 8, answer::Choice::Option(2), answer::Answerer::Owner).unwrap();
+    assert!(calls(&dir).contains("agent answer hs-a --seq 8 --option 2"));
+}
+
+#[test]
+fn an_answer_the_dialog_did_not_take_says_so() {
+    let (_dir, host) = fake_host(&[
+        ("agent pending", pending_json(9), None),
+        (
+            "agent answer",
+            r#"{"id":"x","result":{"registered":false}}"#.to_string(),
+            None,
+        ),
+    ]);
+    let report = answer_on(
+        host,
+        9,
+        answer::Choice::Decline(None),
+        answer::Answerer::Owner,
+    )
+    .unwrap();
+    assert_eq!(report["not_registered"], true, "{report}");
+    assert_eq!(report["answered"], "declined");
 }

@@ -113,15 +113,17 @@ running. `agent.wait` with `until: exit` returns only after the output the
 process printed last has been read, so a read right after it sees the tail.
 
 Agent names match `[a-z][a-z0-9_-]{0,31}` and are unique. Agent info has `name`,
-`argv`, `agent`, `resumable`, `title`, `state`, `rule`, `cwd`, `pid`, `status` (`running` or `exited`), `exit_code`, `rows`,
+`argv`, `agent`, `resumable`, `title`, `state`, `rule`, `pending`, `pending_seq`, `cwd`, `pid`, `status` (`running` or `exited`), `exit_code`, `rows`,
 `cols`, `bytes_seen`, `quiet_ms`, `age_ms`. Error codes include `agent_not_found`,
 `name_taken`, `invalid_name`, `invalid_keys`, `spawn_failed`, `agent_exited`,
-`timeout`, `invalid_params`, `unknown_method`, `bad_request`.
+`agent_blocked`, `no_dialog`, `stale_dialog`, `invalid_option`, `typed_option`,
+`no_cursor`, `answer_unverified`, `timeout`, `invalid_params`, `unknown_method`,
+`bad_request`.
 
 ## Agent state
 
 When a pane is spawned with an `agent` kind that has a rule file (`claude`,
-`claude-code`, `codex` today), the host works out its state from the screen and
+`claude-code`, `codex`, `copilot` and `github-copilot` today), the host works out its state from the screen and
 the terminal title: `idle`, `working`, `blocked` or `unknown`. Agent info carries
 `state` and `rule` (the rule that decided; absent when nothing matched, which
 means idle). A kind with no rule file has no `state`. `agent.wait` with
@@ -134,6 +136,62 @@ priority decides. They are built into the binary (`crates/hq-host/src/detect/man
 there is no fetching from anywhere at run time. Screens captured from real
 Claude Code and Codex sessions, each labelled with the state the agent was really
 in, are in `crates/hq-host/tests/fixtures/` and are checked on every test run.
+
+### Dialogs as data
+
+A blocked rule can also say how to read the dialog it recognised, so a caller
+gets the question and its options instead of a screen to interpret. A rule file
+names dialog shapes in a `[dialogs.<name>]` table and a blocked rule points at one
+with `dialog = "<name>"` (or writes it inline as `[rules.dialog]`). This needs
+engine version 4. The table gives:
+
+| Key | Meaning |
+|-----|---------|
+| `kind` | `command`, `edit`, `path`, `question`, `trust` or `other`; `kind_when` refines it when a line matches |
+| `top`, `footer` | The dialog's first line, found by searching up from the footer, and its key hints (the footer must be within the last few lines) |
+| `question` | The question line; options are read only below it, so numbered lines inside a command are never options |
+| `command_block` or `command_line` | The command, file or path: the lines between two markers, or a line's first capture |
+| `option` | An option line, with a `label` capture and a `num` capture when options are numbered |
+| `selected`, `remember`, `typed` | The option the cursor is on; options that widen what the agent may do from now on ("don't ask again", "remember this path"); options that open a text field |
+| `answer`, `decline` | `arrows` (default) or `digit`, and the keys that dismiss the dialog (`esc` by default) |
+
+The dialog is read from the screen, and from up to 2000 lines of scrollback when
+it is taller than the screen, so a long heredoc arrives whole up to 32 KiB; past
+that it is cut and marked `truncated`. Box borders are stripped.
+
+Agent info carries a short `pending` (kind, question, command, options; long
+fields shortened) and `pending_seq`, the number an answer must name. A new
+dialog gets a new number and a `state` event with `pending_seq` set, even when
+the agent was already blocked; a dialog read a moment after its block was
+announced takes that event's number, so one block is one alert. The cursor
+moving within a dialog does not change it.
+
+- `agent.pending {name}` returns `{state, rule, pending_seq, pending}` with the
+  whole dialog, its `text` and its `decline_keys`.
+- `agent.answer {name, seq, option | decline: true}` answers it. A `seq` that is
+  not the current dialog's is `stale_dialog`, so an answer never lands on a
+  dialog the caller did not read. With `arrows` the host moves the cursor, waits
+  until the screen shows it on the chosen option, and only then presses Enter
+  (`answer_unverified` when it never gets there; Enter on whatever is highlighted
+  can be a "remember" option). It then waits up to 3 seconds for the dialog to
+  go and replies `{registered, agent}`; `registered: false` means it is still
+  there. A `typed` option is refused (`typed_option`): decline and send the
+  message as a prompt instead.
+
+The host does not judge who may pick which option. HQ does: only the owner may
+pick a `remember` option (see `harness_session_answer` in
+`docs/AGENT_SESSIONS.md`).
+
+### Reading from a cursor
+
+`agent.read_since {name, cursor?, lines?}` returns the lines that scrolled off
+the screen since `cursor`, the screen as it is now, and `next`, the cursor for
+the following call (no cursor starts one at the end). Only scrollback is final:
+an agent redraws its screen in place, so the screen comes whole every time, and
+one that draws a full-screen view (Copilot) scrolls nothing off. The cursor is
+opaque; when the rows it marks are gone it is placed again by content, and when
+that fails the reply says `reset` and holds the newest lines. At most `lines`
+(default 200, at most 5000) come back, newest kept, with `skipped` counting the rest.
 
 ### Done, the change counter and events
 

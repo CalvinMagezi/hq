@@ -5,10 +5,15 @@
 //! docs/provenance/herdr.md); the engine here is HQ's own. Each rule names a
 //! region of the screen and a gate of phrases or patterns. The matching rule
 //! with the highest priority decides (the earlier rule wins a tie). An agent
-//! with a rule file and no matching rule is idle.
+//! with a rule file and no matching rule is idle. A blocked rule may also say
+//! how to read its dialog (`[rules.dialog]`, see `dialog`).
 
+mod dialog;
 mod region;
 
+pub use dialog::{
+    AnswerMethod, Dialog, DialogKind, DialogOption, DialogSpec, MAX_DIALOG_BYTES, MAX_DIALOG_LINES,
+};
 use regex::Regex;
 pub use region::Input;
 use serde::{Deserialize, Serialize};
@@ -16,7 +21,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// The newest rule-file features this engine understands.
-pub const ENGINE_VERSION: u32 = 3;
+pub const ENGINE_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -71,8 +76,19 @@ struct RawManifest {
     updated_at: Option<String>,
     #[serde(default)]
     aliases: Vec<String>,
+    /// Dialog shapes several rules share, named so a rule can say `dialog = "<name>"`.
+    #[serde(default)]
+    dialogs: HashMap<String, dialog::RawDialog>,
     #[serde(default)]
     rules: Vec<RawRule>,
+}
+
+/// A rule's dialog: written inline as `[rules.dialog]`, or the name of an entry in `[dialogs]`.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawDialogRef {
+    Named(String),
+    Inline(Box<dialog::RawDialog>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +112,8 @@ struct RawRule {
     visible_working: bool,
     #[serde(default)]
     skip_state_update: bool,
+    /// How to read the dialog a blocked rule recognises (engine version 4).
+    dialog: Option<RawDialogRef>,
     #[serde(flatten)]
     gate: RawGate,
 }
@@ -137,6 +155,7 @@ struct Rule {
     priority: i32,
     region: String,
     skip_state_update: bool,
+    dialog: Option<DialogSpec>,
     gate: Gate,
 }
 
@@ -186,6 +205,19 @@ fn compile(raw: RawManifest) -> Result<(Compiled, Vec<String>), String> {
                 priority: r.priority,
                 region: r.region.clone(),
                 skip_state_update: r.skip_state_update,
+                dialog: r
+                    .dialog
+                    .as_ref()
+                    .map(|d| match d {
+                        RawDialogRef::Inline(raw) => DialogSpec::compile(raw),
+                        RawDialogRef::Named(name) => raw
+                            .dialogs
+                            .get(name)
+                            .ok_or_else(|| format!("no dialog named {name:?} in [dialogs]"))
+                            .and_then(DialogSpec::compile),
+                    })
+                    .transpose()
+                    .map_err(|e| format!("rule {}: {e}", r.id))?,
                 gate: compile_gate(&r.gate).map_err(|e| format!("rule {}: {e}", r.id))?,
             })
         })
@@ -314,6 +346,22 @@ impl Detector {
                 skip_state_update: false,
             },
         })
+    }
+
+    /// How to read the dialog behind `rule` of `agent`, when its rule file says.
+    pub fn dialog_spec(&self, agent: &str, rule: &str) -> Option<&DialogSpec> {
+        self.find(agent)?
+            .rules
+            .iter()
+            .find(|r| r.id == rule)?
+            .dialog
+            .as_ref()
+    }
+
+    /// The dialog `rule` of `agent` recognised, read from `lines` (scrollback then screen, oldest
+    /// first). `None` when the rule has no `[rules.dialog]` or the dialog cannot be found.
+    pub fn dialog(&self, agent: &str, rule: &str, lines: &[String]) -> Option<Dialog> {
+        dialog::extract(self.dialog_spec(agent, rule)?, lines)
     }
 }
 

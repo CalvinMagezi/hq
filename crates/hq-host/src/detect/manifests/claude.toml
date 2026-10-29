@@ -1,12 +1,36 @@
 # Derived from herdrdev/herdr src/detect/manifests/claude.toml at commit 3d9d2b18dab139ba226ebc5a1c9a9f2c9c3ee4df,
 # licensed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
-# Modified for Agent HQ: this header was added; the rules are unchanged.
+# Modified for Agent HQ: this header was added, and so were the [dialogs]
+# table and the `dialog = "permission"` lines on the blocked rules (not in the
+# original). What each rule matches is unchanged.
 # See NOTICE and docs/provenance/herdr.md.
 id = "claude"
-version = "2026.09.11.1"
-min_engine_version = 2
-updated_at = "2026-09-11T00:00:00Z"
+version = "2026.10.29.1"
+min_engine_version = 4
+updated_at = "2026-10-29T00:00:00Z"
 aliases = ["claude-code"]
+
+# Added by Agent HQ: how to read the dialog a blocked rule below recognises.
+# Claude draws it below a full-width rule, with the cursor (❯) on one option
+# and the key hints ("Esc to cancel") last. A numbered list's description
+# lines are not options.
+[dialogs.permission]
+kind = "other"
+kind_when = [
+  { kind = "trust", line = '(?i)trust this folder|accessing workspace' },
+  { kind = "command", line = '(?i)^\s*bash command\s*$' },
+  { kind = "edit", line = '(?i)^\s*(?:create|edit|update|write|overwrite) file\s*$' },
+]
+top = '^─{20,}\s*$'
+footer = '(?i)esc to cancel'
+question = '(?i)^\s*(?:do you want to\b|quick safety check\b)'
+command_block = ['(?i)^\s*bash command\s*$', '(?i)^\s*do you want to proceed\?']
+command_line = '(?i)^\s*do you want to (?:create|make this edit to|edit|overwrite|delete) (.+?)\?\s*$'
+option = '^ (?:❯ |  )\s*(?:(?P<num>\d+)\.\s+)?(?P<label>\S.*)$'
+selected = '^ ❯'
+remember = '(?i)don.t ask again|\balways\b|switch to accept edits|\bauto-accept\b'
+answer = "arrows"
+decline = ["esc"]
 
 [[rules]]
 id = "osc_title_working"
@@ -85,6 +109,7 @@ id = "live_blocked_form"
 state = "blocked"
 priority = 980
 region = "after_last_horizontal_rule"
+dialog = "permission"
 visible_blocker = true
 contains = ["esc to cancel"]
 any = [
@@ -103,6 +128,7 @@ id = "dynamic_workflow_prompt"
 state = "blocked"
 priority = 980
 region = "whole_recent"
+dialog = "permission"
 visible_blocker = true
 contains = ["run a dynamic workflow?", "esc to cancel"]
 
@@ -157,6 +183,7 @@ id = "bash_permission_prompt"
 state = "blocked"
 priority = 850
 region = "whole_recent"
+dialog = "permission"
 visible_blocker = true
 contains = ["do you want to proceed?"]
 any = [
@@ -187,6 +214,7 @@ id = "generic_permission_prompt"
 state = "blocked"
 priority = 840
 region = "after_last_horizontal_rule"
+dialog = "permission"
 visible_blocker = true
 contains = ["do you want to proceed?", "esc to cancel"]
 all = [
@@ -203,6 +231,7 @@ id = "legacy_no_prompt_blocker"
 state = "blocked"
 priority = 300
 region = "whole_recent"
+dialog = "permission"
 any = [
   { contains = ["do you want to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },
   { contains = ["would you like to"], any = [{ contains = ["yes"] }, { contains = ["❯"] }] },

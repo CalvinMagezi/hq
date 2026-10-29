@@ -1,4 +1,7 @@
-use super::{AgentHostError, AgentInfo, AgentStatus, LaunchRequest, Launched, PromptOutcome};
+use super::{
+    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, LaunchRequest, Launched, LogsSince,
+    PendingRead, PromptOutcome,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -49,6 +52,19 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         until: &[AgentStatus],
         timeout: Duration,
     ) -> Result<AgentInfo, AgentHostError>;
+    /// Output since `cursor` (`None` starts one): lines that scrolled off, the screen, the next
+    /// cursor. Only the built-in host keeps one.
+    fn read_since(
+        &self,
+        _target: &str,
+        _cursor: Option<&str>,
+        _lines: usize,
+    ) -> Result<LogsSince, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot read from a cursor", self.name()),
+        })
+    }
     fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError>;
     fn shell_pid(&self, pane_id: &str) -> Option<u32>;
 
@@ -69,6 +85,28 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' has no event stream", self.name()),
+        })
+    }
+
+    /// The dialog `target` waits at, read whole, with the number an answer must name. `None`
+    /// when it waits at none this host can read.
+    fn pending(&self, _target: &str) -> Result<Option<PendingRead>, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot read dialogs", self.name()),
+        })
+    }
+
+    /// Answers dialog `seq` of `target`: picks option `option`, or declines when it is `None`.
+    fn answer(
+        &self,
+        _target: &str,
+        _seq: u64,
+        _option: Option<u32>,
+    ) -> Result<AnswerOutcome, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot answer dialogs", self.name()),
         })
     }
 
@@ -159,6 +197,8 @@ pub struct HostEvent {
     pub state: Option<String>,
     /// What decided it: the rule for a state, the reason for a lockdown.
     pub rule: Option<String>,
+    /// Set when the event showed a new dialog: the number an answer to it must name.
+    pub pending_seq: Option<u64>,
 }
 
 /// What a wait for host events returned.
@@ -248,6 +288,14 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     ) -> Result<AgentInfo, AgentHostError> {
         (**self).wait(target, until, timeout)
     }
+    fn read_since(
+        &self,
+        target: &str,
+        cursor: Option<&str>,
+        lines: usize,
+    ) -> Result<LogsSince, AgentHostError> {
+        (**self).read_since(target, cursor, lines)
+    }
     fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError> {
         (**self).close_workspace(workspace_id)
     }
@@ -263,6 +311,17 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         wait: Duration,
     ) -> Result<HostEvents, AgentHostError> {
         (**self).poll_events(after, wait)
+    }
+    fn pending(&self, target: &str) -> Result<Option<PendingRead>, AgentHostError> {
+        (**self).pending(target)
+    }
+    fn answer(
+        &self,
+        target: &str,
+        seq: u64,
+        option: Option<u32>,
+    ) -> Result<AnswerOutcome, AgentHostError> {
+        (**self).answer(target, seq, option)
     }
     fn update_resume(
         &self,

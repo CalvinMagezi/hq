@@ -365,11 +365,11 @@ fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> O
         }
         Event::Steered => return None,
         Event::Blocked => format!(
-            "{who} is waiting at a dialog. HQ does not answer dialogs on its own: read it with `harness_session_logs` and answer with `harness_session_send` keys."
+            "{who} is waiting at a dialog. HQ does not answer dialogs on its own: read it with `harness_session_pending` and answer with `harness_session_answer`."
         ),
         Event::BlockedAtLaunch if moved.is_none() => return None,
         Event::BlockedAtLaunch => format!(
-            "{who} stopped at a startup dialog (such as the folder-trust prompt) before it reached its prompt, so the task's prompt was not typed and nothing is working on it. The session stays registered: read the dialog with `harness_session_logs`, answer it with `harness_session_send` keys, then send the instruction."
+            "{who} stopped at a startup dialog (such as the folder-trust prompt) before it reached its prompt, so the task's prompt was not typed and nothing is working on it. The session stays registered: read the dialog with `harness_session_pending`, answer it with `harness_session_answer`, then send the instruction."
         ),
         Event::Finished if moved.is_some() => format!(
             "{who} finished a turn, so the task is ready for review. The agent saying it is done is not verification: check the work (`harness_session_logs`) before marking the task complete."
@@ -895,7 +895,7 @@ mod tests {
         assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
         let last = comments(&db, &task).pop().unwrap();
         assert!(
-            last.contains("dialog") && last.contains("harness_session_logs"),
+            last.contains("dialog") && last.contains("harness_session_pending"),
             "{last}"
         );
     }

@@ -575,6 +575,14 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             post(sessions_api::send_handler),
         )
         .route(
+            "/api/harness-sessions/{id}/pending",
+            get(sessions_api::pending_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/answer",
+            post(sessions_api::answer_handler),
+        )
+        .route(
             "/api/harness-sessions/{id}/adopt",
             post(sessions_api::adopt_handler),
         )

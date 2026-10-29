@@ -16,10 +16,12 @@ import {
   groupSessions,
   needsYouCount,
   plainPath,
+  readDialog,
   screenPollMs,
   sessionTitle,
   statusInfo,
   tailLines,
+  tappableOptions,
 } from './workbench'
 
 const session = (over: Partial<HarnessSession>): HarnessSession => ({
@@ -226,4 +228,24 @@ test('agents are grouped by the category the server gives, and an unlisted one i
   expect(harnessesIn(hosts, 'coding')).toEqual(['claude-code', 'mystery-agent'])
   expect(harnessesIn(hosts, 'general_purpose')).toEqual(['hermes', 'openclaw'])
   expect(harnessesIn({ harnesses: ['claude-code'] }, 'general_purpose')).toEqual([])
+})
+
+test('a numbered dialog is answered by option, leaving out the one that opens a text field', () => {
+  const pending = {
+    kind: 'path' as const,
+    question: 'Do you want to allow this?',
+    command: '/tmp',
+    truncated: false,
+    options: [
+      { id: 1, label: 'Yes', remember: false, typed: false, selected: false },
+      { id: 2, label: 'Yes, and remember this path', remember: true, typed: false, selected: true },
+      { id: 3, label: 'No, and tell Copilot what to do differently', remember: false, typed: true, selected: false },
+    ],
+  }
+  expect(tappableOptions(pending).map((o) => o.id)).toEqual([1, 2])
+  expect(readDialog({ pending, pending_seq: 7 })?.seq).toBe(7)
+  expect(readDialog({ pending, pending_seq: undefined })).toBeNull()
+  expect(readDialog({ pending: undefined, pending_seq: 7 })).toBeNull()
+  const onlyTyped = { ...pending, options: [pending.options[2]] }
+  expect(readDialog({ pending: onlyTyped, pending_seq: 7 })).toBeNull()
 })
