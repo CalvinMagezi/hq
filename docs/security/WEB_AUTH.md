@@ -7,7 +7,7 @@ HQ-SEC-001, HQ-SEC-004 and HQ-SEC-005.
 ## `/mcp` fails closed
 
 `/mcp` needs `AGENTHQ_API_KEY` (full access), `AGENTHQ_SPARK_API_KEY` (a
-read-only tool allowlist that includes the vault and session logs), `AGENTHQ_TASKS_API_KEY`
+read-only tool allowlist that includes the vault, session logs and session events), `AGENTHQ_TASKS_API_KEY`
 (task tools only, listed in `hq_mcp::gateway::TASKS_ALLOWLIST`: list, get, create, update and
 comment on tasks, work them under a lease with `task_claim`, `task_next`, `task_heartbeat` and
 `task_release`, file or move many with `task_create_many` and `task_update_many`, read links and

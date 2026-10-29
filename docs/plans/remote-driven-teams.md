@@ -406,6 +406,8 @@ gets at most a plain notice. Design in "Actionable alerts" below.
   untrusted-source list, in the session-token scope (its team) and the read-only Spark scope,
   and not in the handoff scope, for the same reason as `harness_session_logs`.
 - **3.3** was built with HQ-RDT-003.
+- The opt-in HTTP recipe for a cloud client is the read-only Spark key on `/mcp`, looping on
+  `harness_session_events` ("Following sessions by events" in `docs/AGENT_SESSIONS.md`).
 
 ### Actionable alerts: the Android app and web push
 

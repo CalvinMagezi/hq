@@ -186,6 +186,20 @@ now writes what happens to an event log, and `harness_session_events` reads it a
 - **Untrusted:** dialog text is the agent's own output, so reading events counts as reading
   untrusted content, the same as `harness_session_logs`.
 
+**From a cloud client, read-only (opt-in).** A client somewhere else (a cloud session, a CI
+job) can follow a team without any key that could change it. Set `AGENTHQ_SPARK_API_KEY` on
+the server (unset, `/mcp` refuses it), give the client that key and HQ's `/mcp` URL, and have
+it loop on one call:
+
+```json
+{"tool": "harness_session_events", "args": {"team": "<root session id>", "after": 0, "wait_secs": 40}}
+```
+
+sent through `hq_call` with `Authorization: Bearer <spark key>`. Each reply's `next` is the
+next call's `after`. The Spark scope reads sessions, logs and events and nothing else: it
+cannot answer, send, start or stop a session. Answering stays with the owner's phone, the web
+app, or a full key.
+
 ## Command policies
 
 A coding agent that asks before every command waits on whoever is there to answer, and one
