@@ -29,9 +29,11 @@ a model instead of starting on its default, and so does an id that could read as
 | Tool | Effect |
 |------|--------|
 | `harness_session_spawn` | Start an agent on a host. Returns a `session_id`. |
-| `harness_session_send` | Submit a prompt, or press `keys` (`down`, `enter`, `esc`, `ctrl+c`) to answer a dialog. |
+| `harness_session_send` | Submit a prompt, or press `keys` (`down`, `enter`, `esc`, `ctrl+c`) for a dialog HQ cannot read. |
+| `harness_session_pending` | The dialog a blocked session waits at, as data: its number (`seq`), kind, question, command or path, folder and options. |
+| `harness_session_answer` | Answer that dialog by option (`seq` and `option`), or `decline` it, optionally with a `message` sent as the next prompt. |
 | `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. |
-| `harness_session_logs` / `_status` / `_list` | Read output and live state. |
+| `harness_session_logs` / `_status` / `_list` | Read output and live state. `logs` with `since` returns only what is new. |
 | `harness_session_stop` / `_resume` | Close the workspace, or continue a stopped session. |
 | `host_list` | Which hosts exist and whether each answers right now. |
 | `host_agents` / `host_read` | Read-only view of every agent on a host, including ones you started by hand. |
@@ -58,6 +60,27 @@ app, and list every agent on a machine with `hq host status`.
   returns the screen and types nothing. Claude Code's workspace-trust prompt defaults to
   "No, exit", so pressing Enter would quit it. Read the screen, then send `keys`. Only
   Antigravity, whose default is verified to be "trust", is accepted automatically.
+- **Dialogs are data.** For Claude Code, Codex and Copilot, `harness_session_status`, `_list`
+  and `_wait` say when a blocked session waits at a dialog HQ can read (`pending_seq`, its
+  number, and `pending_kind`); `harness_session_pending` returns the dialog itself. The dialog's
+  text is the agent's output, so reading it counts as reading untrusted content, the same as
+  `harness_session_logs`. `harness_session_answer` names that
+  number, so it never answers a dialog that replaced the one that was read: it is refused, and
+  the caller reads again. HQ moves the agent's cursor and presses Enter only once the screen shows
+  it on the chosen option. `registered: false` (`not_registered`) means the dialog was still open
+  afterwards.
+- **"Don't ask again" is the owner's call.** An option marked `remember` lets the agent do the
+  same thing later without asking (Copilot's path dialog even highlights "remember this path").
+  Drive, a session's own token, a claude.ai connection, an `hq_ask` reply and a turn that read
+  untrusted content may pick only one-time answers or decline. Reading the dialog with
+  `harness_session_pending` counts as reading untrusted content, so a model that has read it
+  never widens an agent's permissions: the owner does that from the web Sessions panel, which
+  shows one button per option. An option that opens a text field is never picked: decline with a
+  `message` instead.
+- **Following output without rereading it.** `harness_session_logs` with `since: ""` starts a
+  cursor; each reply's `next` is the `since` for the next call, and the reply holds only the
+  lines that scrolled off the screen since then, plus the screen now. An agent that redraws a
+  full-screen view in place (Copilot) scrolls nothing off, so for it only the screen changes.
 - **A blocked agent alerts once.** The supervisor (every minute) raises an action-needed
   item when a session blocks, and again only if it blocks in a new state.
 - **A finished agent alerts once.** When the host reports `done` (the agent finished a turn and

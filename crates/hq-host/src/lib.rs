@@ -56,7 +56,8 @@ mod workspace;
 pub use client::{Client, ClientError};
 #[cfg(unix)]
 pub use detect::{
-    AgentState, Detection, Detector, ENGINE_VERSION, Input as DetectInput, OverrideReport,
+    AgentState, AnswerMethod, Detection, Detector, Dialog, DialogKind, DialogOption,
+    ENGINE_VERSION, Input as DetectInput, MAX_DIALOG_BYTES, OverrideReport,
 };
 #[cfg(unix)]
 pub use egress::{Decision, Egress, Rule, Verdict, decide as decide_egress, is_private};
@@ -80,8 +81,8 @@ pub use hooks::{
 };
 #[cfg(unix)]
 pub use host::{
-    AwaitingInfo, BurstLimit, Host, PANE_TOKEN_ENV, PaneInfo, PaneStatus, RUN_DIR_ENV, ReadSource,
-    RestoreReport, SpawnSpec, valid_name,
+    Answered, AwaitingInfo, BurstLimit, Host, PANE_TOKEN_ENV, PaneInfo, PaneStatus, RUN_DIR_ENV,
+    ReadSource, RestoreReport, SpawnSpec, valid_name,
 };
 #[cfg(unix)]
 pub use keys::encode_key;

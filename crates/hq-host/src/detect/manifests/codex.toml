@@ -1,12 +1,46 @@
 # Derived from herdrdev/herdr src/detect/manifests/codex.toml at commit 3d9d2b18dab139ba226ebc5a1c9a9f2c9c3ee4df,
 # licensed under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
-# Modified for Agent HQ: this header was added and the rule hooks_review_dialog
-# was appended at the end (not in the original).
+# Modified for Agent HQ: this header was added, the rule hooks_review_dialog
+# was appended at the end, and the [dialogs] tables and `dialog = ...` lines
+# were added (none of them in the original). What each original rule matches
+# is unchanged.
 # See NOTICE and docs/provenance/herdr.md.
 id = "codex"
-version = "2026.10.01.1"
-min_engine_version = 3
-updated_at = "2026-10-01T00:00:00Z"
+version = "2026.10.29.1"
+min_engine_version = 4
+updated_at = "2026-10-29T00:00:00Z"
+
+# Added by Agent HQ: how to read the dialogs the startup rules recognise. Codex
+# marks the highlighted option with "›" and ends with "Press enter to ...".
+[dialogs.trust]
+kind = "trust"
+top = '^> You are in |Folder access'
+footer = '(?i)press enter to continue'
+question = '(?i)\btrust\b.*\?'
+command_line = '^> You are in (.+)$'
+option = '^(?:›|\s)\s*(?P<num>\d+)\.\s+(?P<label>\S.*)$'
+selected = '^›'
+answer = "arrows"
+decline = ["esc"]
+
+[dialogs.update]
+kind = "other"
+top = '(?i)update available!'
+footer = '(?i)press enter to continue'
+option = '^(?:›|\s)\s*(?P<num>\d+)\.\s+(?P<label>\S.*)$'
+selected = '^›'
+answer = "arrows"
+decline = ["esc"]
+
+[dialogs.hooks]
+kind = "trust"
+top = '(?i)hooks need review'
+footer = '(?i)press enter to confirm or esc to go back'
+option = '^(?:›|\s)\s*(?P<num>\d+)\.\s+(?P<label>\S.*)$'
+selected = '^›'
+remember = '(?i)\btrust all\b'
+answer = "arrows"
+decline = ["esc"]
 
 [[rules]]
 id = "osc_title_blocked"
@@ -41,6 +75,7 @@ id = "trust_directory"
 state = "blocked"
 priority = 950
 region = "top_non_empty_lines(20)"
+dialog = "trust"
 visible_blocker = true
 all = [
   { any = [
@@ -64,6 +99,7 @@ id = "startup_update"
 state = "blocked"
 priority = 950
 region = "bottom_non_empty_lines(20)"
+dialog = "update"
 visible_blocker = true
 contains = ["Update available!", "Update now"]
 regex = ['Skip\s+until\s+next\s+version', 'Press enter to continue\s*\z']
@@ -130,5 +166,6 @@ id = "hooks_review_dialog"
 state = "blocked"
 priority = 940
 region = "bottom_non_empty_lines(20)"
+dialog = "hooks"
 visible_blocker = true
 contains = ["Hooks need review", "Press enter to confirm or esc to go back"]

@@ -161,7 +161,20 @@ pub(super) fn live_view(row: &HarnessSessionRow, live: &Liveness, cfg: &AgentHos
     };
     // Which kind of agent this is, so a reader never has to know the harness names.
     view["category"] = json!(spec::category_in(cfg, &row.harness).map(HarnessCategory::as_str));
+    if let Liveness::Alive(agent) = live {
+        with_pending(&mut view, agent);
+    }
     view
+}
+
+/// Says that a blocked agent waits at a dialog HQ can read, with its number and kind. The
+/// dialog's own text is the agent's output, so it comes only from `harness_session_pending`,
+/// which the governance layer counts as untrusted content the way it counts the logs.
+pub(super) fn with_pending(view: &mut Value, agent: &AgentInfo) {
+    if let (Some(dialog), Some(seq)) = (&agent.pending, agent.pending_seq) {
+        view["pending_seq"] = json!(seq);
+        view["pending_kind"] = json!(dialog.kind);
+    }
 }
 
 pub fn list(db: &Arc<Database>, status_filter: Option<String>) -> Result<Value> {
@@ -467,6 +480,15 @@ pub fn live_fields(
     if let Some(obj) = view.as_object_mut() {
         obj.remove("session");
     }
+    // The web panel shows the dialog's options as buttons; no model reads this.
+    if let Some(Liveness::Alive(agent)) = live
+        && let Some(dialog) = agent
+            .pending
+            .as_ref()
+            .filter(|_| agent.pending_seq.is_some())
+    {
+        view["pending"] = json!(dialog);
+    }
     view
 }
 
@@ -509,6 +531,56 @@ pub fn tail_log(db: &Arc<Database>, session_id: &str, lines: usize) -> Result<Va
             .ok()
             .and_then(|host| host.read_sourced(&row.agent_name, lines).ok())
     })
+}
+
+/// Output of a running session since `cursor` (empty starts one): the lines that scrolled off
+/// its screen since then, the screen now, and the cursor for next time. A session that ended,
+/// or a host that keeps no cursor, gets the plain tail instead, with a note.
+pub fn logs_since(
+    db: &Arc<Database>,
+    session_id: &str,
+    cursor: &str,
+    lines: usize,
+) -> Result<Value> {
+    let row = get_row(db, session_id)?;
+    let cursor = Some(cursor.trim()).filter(|c| !c.is_empty());
+    let fallback = |note: &str| -> Result<Value> {
+        let mut tail = tail_log(db, session_id, lines)?;
+        tail["note"] = json!(note);
+        Ok(tail)
+    };
+    if row.status != registry::STATUS_RUNNING {
+        return fallback(
+            "the session is not running, so there is no cursor: this is its last output",
+        );
+    }
+    let host = agent_host::host(Some(&row.host))?;
+    match host.read_since(&row.agent_name, cursor, lines) {
+        Ok(read) => {
+            let mut report = json!({
+                "session_id": session_id,
+                "source": "live",
+                "lines": read.lines,
+                "screen": read.screen,
+                "next": read.next,
+            });
+            if read.skipped > 0 {
+                report["skipped"] = json!(read.skipped);
+            }
+            if read.reset {
+                report["reset"] = json!(true);
+                report["note"] = json!(
+                    "the cursor could not be placed (the output it marks is gone), so these are the newest lines"
+                );
+            }
+            Ok(report)
+        }
+        Err(e) if matches!(e.code(), Some("unsupported" | "unknown_method")) => fallback(&format!(
+            "host '{}' keeps no cursor yet (it needs an update): this is the plain tail",
+            row.host
+        )),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// `read` is called only for a row the registry says is running, so a name
@@ -649,7 +721,7 @@ pub(super) fn send_text(db: &Arc<Database>, session_id: &str, text: &str) -> Res
     let outcome = host.submit(&row.agent_name, text);
     match outcome {
         Err(AgentHostError::Api { code, message }) if code == "agent_blocked" => bail!(
-            "session {session_id} is waiting at a dialog and the text was not sent ({message}). Read its output, then answer with keys."
+            "session {session_id} is waiting at a dialog and the text was not sent ({message}). Read it with harness_session_pending and answer with harness_session_answer."
         ),
         Err(e) => Err(e.into()),
         Ok(outcome) => {
@@ -699,7 +771,10 @@ pub fn wait(
     };
     match host.wait(&row.agent_name, until, timeout.min(MAX_WAIT)) {
         Ok(agent) => {
-            Ok(json!({ "session_id": session_id, "settled": true, "agent_status": agent.status }))
+            let mut report =
+                json!({ "session_id": session_id, "settled": true, "agent_status": agent.status });
+            with_pending(&mut report, &agent);
+            Ok(report)
         }
         Err(AgentHostError::Api { code, .. }) if code == "timeout" => Ok(
             json!({ "session_id": session_id, "settled": false, "note": "still working; call again or read the output" }),

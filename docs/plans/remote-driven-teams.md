@@ -1,6 +1,7 @@
 # Teams driven from a remote client: approvals by policy, events instead of polling
 
-Status: phase 0 built (0.1 to 0.8 below); the rest proposed. Phase 4 converges
+Status: phase 0 built (0.1 to 0.8 below); phase 1 built (see "What phase 1
+built" below); the rest proposed. Phase 4 converges
 with step 4 of [agent-teams.md](agent-teams.md) (`owns` and `worktree`), so that
 work lands once.
 
@@ -236,6 +237,36 @@ is truly incremental; the doc says so.
 its options as buttons, over the same API. On a phone this is the owner's answer
 surface.
 
+### What phase 1 built
+
+All of 1.1 to 1.6, with these differences from the design above:
+
+- **Shared dialog shapes.** Several rules in one file read the same kind of
+  dialog, so a file names shapes in `[dialogs.<name>]` and a rule says
+  `dialog = "<name>"`; `[rules.dialog]` inline still works. Each shape also has
+  `kind_when`, so one Copilot shape reads command, edit, path and trust dialogs.
+- **Answers check the cursor.** Every built-in shape answers with the arrow keys:
+  the host moves the cursor, waits until the screen shows it on the chosen
+  option, and only then presses Enter. That covers Copilot's highlighted
+  "remember this path" and its digit 3 (which only moves the cursor) without a
+  per-option key table. `digit` stays available to a rule file.
+- **Options that open a text field** (`typed`: Copilot's "No, and tell Copilot
+  what to do differently", the ask-user form's "Other") are never picked. Decline
+  with a `message` instead; it is sent as a prompt once the agent is back at its
+  prompt.
+- **One block, one alert.** A dialog read a moment after its block was announced
+  takes that event's number; only a different dialog in the same block gets a
+  new event.
+- **The logs cursor is opaque**, not a bare row number: a count plus a hash of
+  the last two lines, so it is found again after a full scrollback drops its
+  oldest rows, and `reset` says when it cannot be.
+- **The web panel's Approve button pressed Enter blind**, which on Copilot's
+  path dialog picked "remember this path". A dialog HQ can read now gets one
+  button per option instead, with the remember option marked.
+- **Not built:** keeping Claude's Notification message as a hint (its dialogs are
+  read from the screen), and option buttons in web push and the Android app
+  (HQ-RDT-003, which can now name options instead of keys).
+
 ## Phase 2: a command policy per session
 
 **2.1 Named policies in config**, owner-set, with generic built-in defaults:
@@ -462,7 +493,7 @@ phase 3's items and the task's `waiting_on`, not a new store.
 | Alerts, first PR | #298: the excerpt markers, a server HQ in the app, ETag on the notifications list | The phone shows agent prompts from a server HQ |
 | 4.1 to 4.3 | 1 to 2, shared with agent-teams step 4 | No shared working trees |
 | Phase 5.1 | 1 | A sleeping host is noticed |
-| Phase 1 | 2 to 3 | Structured answers; option buttons on the phone and in web push |
+| Phase 1 | built | Structured answers; option buttons in the web Sessions panel (phone and web push next, in HQ-RDT-003) |
 | Phase 2 | 2 to 3 | Prompts become policy; Claude Code gets a deny list |
 | Phase 3 | 2 | Events instead of screen reads; escalations pushed |
 | 4.4, 5.2, phase 6 | 2 to 3 | One team per remote client; decisions list |

@@ -4,6 +4,8 @@ import {
   type AgentStatus,
   type HarnessSession,
   type HostWorkspace,
+  type DialogOption,
+  type PendingDialog,
   type Purpose,
   type WorkbenchHost,
   type WorkbenchHosts,
@@ -179,6 +181,15 @@ export function classifyBlocked(screenText: string): BlockedKind {
   if (TRUST_PATTERN.test(tail)) return 'trust'
   return APPROVAL_PATTERN.test(tail) ? 'approval' : 'other'
 }
+
+/** A dialog the host read and numbered, so it can be answered by option instead of by keys. */
+export function readDialog(s: Pick<HarnessSession, 'pending' | 'pending_seq'>): { dialog: PendingDialog; seq: number } | null {
+  if (!s.pending || s.pending_seq == null) return null
+  return tappableOptions(s.pending).length > 0 ? { dialog: s.pending, seq: s.pending_seq } : null
+}
+
+/** The options a tap answers. One that opens a text field is left out: declining and then typing does the same. */
+export const tappableOptions = (dialog: PendingDialog): DialogOption[] => dialog.options.filter((o) => !o.typed)
 
 /** Holds Approve and Decline after an answer until the screen changes, so a slow refresh cannot send it twice. */
 export const answerHeld = (answeredTail: string | null, currentTail: string) => answeredTail !== null && answeredTail === currentTail

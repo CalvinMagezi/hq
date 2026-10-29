@@ -19,6 +19,9 @@ pub struct Event {
     pub state: Option<AgentState>,
     /// The rule that decided it (`hook:<event>` for an agent's own report).
     pub rule: Option<String>,
+    /// Set when this event announced a new dialog: the number an answer to it must name,
+    /// which is this event's own `seq`.
+    pub pending_seq: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +104,22 @@ impl EventLog {
         state: Option<AgentState>,
         rule: Option<String>,
     ) -> u64 {
+        self.push_event(name, kind, state, rule, false)
+    }
+
+    /// A state change that also shows a new dialog, numbered by this event.
+    pub fn push_dialog(&self, name: &str, state: AgentState, rule: Option<String>) -> u64 {
+        self.push_event(name, EventKind::State, Some(state), rule, true)
+    }
+
+    fn push_event(
+        &self,
+        name: &str,
+        kind: EventKind,
+        state: Option<AgentState>,
+        rule: Option<String>,
+        dialog: bool,
+    ) -> u64 {
         let mut inner = lock(&self.inner);
         inner.last += 1;
         let seq = inner.last;
@@ -110,6 +129,7 @@ impl EventLog {
             kind,
             state,
             rule,
+            pending_seq: dialog.then_some(seq),
         });
         while inner.events.len() > CAPACITY {
             inner.events.pop_front();

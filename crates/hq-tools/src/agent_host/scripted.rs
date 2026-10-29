@@ -6,8 +6,8 @@
 use super::backend::HostBackend;
 use super::transport::{RawOutput, run_with_deadline};
 use super::{
-    AgentHostError, AgentInfo, AgentStatus, Host, INVALID_KEYS_CODE, LaunchRequest, Launched,
-    PromptOutcome, validate_keys,
+    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, Host, INVALID_KEYS_CODE, LaunchRequest,
+    Launched, PendingRead, PromptOutcome, validate_keys,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -341,7 +341,9 @@ impl ScriptedHost {
             Ok(result) => Ok(result
                 .get("agent")
                 .and_then(agent_from_json)
-                .map_or(PromptOutcome::Submitted, PromptOutcome::Settled)),
+                .map_or(PromptOutcome::Submitted, |a| {
+                    PromptOutcome::Settled(Box::new(a))
+                })),
             Err(AgentHostError::Api { code, message }) if code == "agent_prompt_stalled" => {
                 Ok(PromptOutcome::Stalled(message))
             }
@@ -480,6 +482,34 @@ impl ScriptedHost {
             .ok()?;
         let pid = result.get("process_info")?.get("shell_pid")?.as_u64()?;
         u32::try_from(pid).ok()
+    }
+
+    pub fn pending(&self, target: &str) -> Result<Option<PendingRead>, AgentHostError> {
+        let v = self.json(&["agent", "pending", target], self.command_timeout)?;
+        Ok(super::parse_pending(&v))
+    }
+
+    pub fn answer(
+        &self,
+        target: &str,
+        seq: u64,
+        option: Option<u32>,
+    ) -> Result<AnswerOutcome, AgentHostError> {
+        let seq = seq.to_string();
+        let choice = option.map(|id| id.to_string());
+        let mut args = vec!["agent", "answer", target, "--seq", &seq];
+        match &choice {
+            Some(id) => args.extend(["--option", id.as_str()]),
+            None => args.push("--decline"),
+        }
+        let v = self.json(&args, self.command_timeout)?;
+        Ok(AnswerOutcome {
+            registered: v
+                .get("registered")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            agent: v.get("agent").and_then(agent_from_json),
+        })
     }
 }
 
@@ -632,6 +662,17 @@ impl HostBackend for ScriptedHost {
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         ScriptedHost::shell_pid(self, pane_id)
     }
+    fn pending(&self, target: &str) -> Result<Option<PendingRead>, AgentHostError> {
+        ScriptedHost::pending(self, target)
+    }
+    fn answer(
+        &self,
+        target: &str,
+        seq: u64,
+        option: Option<u32>,
+    ) -> Result<AnswerOutcome, AgentHostError> {
+        ScriptedHost::answer(self, target, seq, option)
+    }
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
         Arc::new(self.clone().with_launch_bound(bound))
     }
@@ -661,5 +702,10 @@ fn agent_from_json(v: &Value) -> Option<AgentInfo> {
         agent_session_id: None,
         exited: v.get("status").and_then(Value::as_str) == Some("exited"),
         exit_code: v.get("exit_code").and_then(Value::as_u64).map(|c| c as u32),
+        rule: text("rule"),
+        pending: v
+            .get("pending")
+            .and_then(|p| serde_json::from_value(p.clone()).ok()),
+        pending_seq: v.get("pending_seq").and_then(Value::as_u64),
     })
 }

@@ -79,6 +79,48 @@ export interface HarnessSession extends WatchedSession {
   /** False when the host is unreachable (the agent state is then unknown, not exited). */
   reachable?: boolean
   detail?: string
+  /** The dialog a blocked agent waits at, when the host can read it (shortened; `pending()` has it whole). */
+  pending?: PendingDialog
+  /** The number an answer to `pending` must name; a new dialog gets a new one. */
+  pending_seq?: number
+}
+
+/** What a dialog asks about. */
+export type DialogKind = 'command' | 'edit' | 'path' | 'question' | 'trust' | 'other'
+
+export interface DialogOption {
+  id: number
+  label: string
+  /** Picking it lets the agent do this again later without asking. */
+  remember: boolean
+  /** Picking it opens a text field instead of answering; decline with a message instead. */
+  typed: boolean
+  /** The agent's cursor is on it. */
+  selected: boolean
+}
+
+export interface PendingDialog {
+  kind: DialogKind
+  question: string | null
+  /** The command, file or path the dialog is about. */
+  command: string | null
+  options: DialogOption[]
+  truncated: boolean
+}
+
+export interface AnswerPayload {
+  seq: number
+  option?: number
+  decline?: boolean
+  /** With decline: sent to the agent as its next prompt once the dialog is gone. */
+  message?: string
+}
+
+export interface AnswerReport {
+  registered: boolean
+  /** The dialog was still open after the answer. */
+  not_registered?: boolean
+  note?: string
 }
 
 export interface SessionFilters {
@@ -256,6 +298,9 @@ export const globalSessionsApi = {
 
   send: (id: string, payload: SendPayload): Promise<{ sent?: string; keys?: string[]; note?: string }> =>
     hqJson(`${sessionPath(id)}/send`, 'POST', payload),
+
+  /** Answer the dialog numbered `seq` by option; refused (409) once the agent shows another one. */
+  answer: (id: string, payload: AnswerPayload): Promise<AnswerReport> => hqJson(`${sessionPath(id)}/answer`, 'POST', payload),
 
   adopt: (id: string, threadId?: string): Promise<AdoptResult> =>
     hqJson(`${sessionPath(id)}/adopt`, 'POST', threadId ? { thread_id: threadId } : {}),

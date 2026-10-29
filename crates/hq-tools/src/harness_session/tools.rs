@@ -515,14 +515,15 @@ impl HqTool for HarnessSessionLogsTool {
         "harness_session_logs"
     }
     fn description(&self) -> &str {
-        "Recent terminal output of a harness session: read live while it runs, from the last stored snapshot after it ends."
+        "Recent terminal output of a harness session: read live while it runs, from the last stored snapshot after it ends. To follow a session without reading the same lines again, pass `since` (\"\" on the first call, then the `next` each reply returns): the reply holds only the lines that scrolled off the screen since then, plus the current screen. An agent that redraws a full-screen view in place (Copilot) scrolls nothing off, so only its screen changes."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
                 "session_id": { "type": "string" },
-                "lines": { "type": "integer", "description": "How many trailing lines (default 40)", "default": 40 }
+                "lines": { "type": "integer", "description": "How many trailing lines (default 40); with `since`, the most new lines to return", "default": 40 },
+                "since": { "type": "string", "description": "A cursor from an earlier reply's `next`, or \"\" to start one" }
             },
             "required": ["session_id"]
         })
@@ -539,10 +540,17 @@ impl HqTool for HarnessSessionLogsTool {
         let id = arg_str(&args, "session_id");
         super::connector_may_drive(&db, &args, &id)?;
         let caller = super::caller_session(&args).map(str::to_string);
+        let since = args
+            .get("since")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         tokio::task::spawn_blocking(move || {
             // A launched agent may read the sessions of its own team.
             db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
-            super::tail_log(&db, &id, lines.clamp(1, 500))
+            match since {
+                Some(cursor) => super::logs_since(&db, &id, &cursor, lines.clamp(1, 500)),
+                None => super::tail_log(&db, &id, lines.clamp(1, 500)),
+            }
         })
         .await?
     }
@@ -559,7 +567,7 @@ impl HqTool for HarnessSessionSendTool {
         "harness_session_send"
     }
     fn description(&self) -> &str {
-        "Steer a running harness session. `text` is submitted as a prompt. If the session is blocked at a dialog the text is refused; read the output, then pass `keys` (logical names such as enter, esc, down, ctrl+c) to answer it."
+        "Steer a running harness session. `text` is submitted as a prompt. If the session is blocked at a dialog the text is refused: read the dialog with harness_session_pending and answer it with harness_session_answer, or pass `keys` (logical names such as enter, esc, down, ctrl+c) when HQ cannot read it."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -592,6 +600,103 @@ impl HqTool for HarnessSessionSendTool {
             } else {
                 super::send_keys(&db, &id, &keys, chat.as_ref())
             }
+        })
+        .await?
+    }
+}
+
+pub struct HarnessSessionPendingTool {
+    db: Arc<Database>,
+}
+
+#[async_trait]
+impl HqTool for HarnessSessionPendingTool {
+    fn name(&self) -> &str {
+        "harness_session_pending"
+    }
+    fn description(&self) -> &str {
+        "The dialog a blocked harness session waits at, as data: its number (`seq`), kind (command, edit, path, question, trust, other), question, the command or path it is about, the session's folder, every option, and the dialog's text. An option with `remember: true` would let the agent do more from now on without asking; `typed: true` opens a text field. Answer with harness_session_answer. `pending` is null when the session waits at no dialog HQ can read."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": { "type": "string" }
+            },
+            "required": ["session_id"]
+        })
+    }
+    fn category(&self) -> &str {
+        "harness"
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let db = self.db.clone();
+        let id = arg_str(&args, "session_id");
+        super::connector_may_drive(&db, &args, &id)?;
+        let caller = super::caller_session(&args).map(str::to_string);
+        tokio::task::spawn_blocking(move || {
+            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            super::answer::pending(&db, &id)
+        })
+        .await?
+    }
+}
+
+pub struct HarnessSessionAnswerTool {
+    db: Arc<Database>,
+    chat: Option<WatchingChat>,
+}
+
+#[async_trait]
+impl HqTool for HarnessSessionAnswerTool {
+    fn name(&self) -> &str {
+        "harness_session_answer"
+    }
+    fn description(&self) -> &str {
+        "Answer the dialog a harness session waits at by option, not by keys: pass the `seq` from harness_session_pending and an `option` id, or `decline: true` (with an optional `message` the agent gets as its next prompt once the dialog is gone). Refused if the session is at a different dialog by now: read it again. Options with remember: true are the owner's call; Drive, agent sessions and claude.ai connections are refused them. The reply says registered: false (not_registered) when the dialog is still open afterwards."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "session_id": { "type": "string" },
+                "seq": { "type": "integer", "description": "The dialog's number from harness_session_pending" },
+                "option": { "type": "integer", "description": "The id of the option to pick" },
+                "decline": { "type": "boolean", "description": "Dismiss the dialog without picking an option" },
+                "message": { "type": "string", "description": "With decline: what to tell the agent instead, sent once it is back at its prompt" }
+            },
+            "required": ["session_id", "seq"]
+        })
+    }
+    fn category(&self) -> &str {
+        "harness"
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        use super::answer::{Answerer, Choice};
+        let db = self.db.clone();
+        let id = arg_str(&args, "session_id");
+        super::spawned_may_target(&args, &id)?;
+        super::connector_may_drive(&db, &args, &id)?;
+        let seq = args.get("seq").and_then(Value::as_u64).ok_or_else(|| {
+            anyhow::anyhow!("pass `seq`, the dialog's number from harness_session_pending")
+        })?;
+        let option = args.get("option").and_then(Value::as_u64);
+        let decline = args.get("decline").and_then(Value::as_bool) == Some(true);
+        let message = Some(arg_str(&args, "message")).filter(|m| !m.trim().is_empty());
+        let choice = match (option, decline) {
+            (Some(o), false) => {
+                Choice::Option(u32::try_from(o).map_err(|_| anyhow::anyhow!("no option {o}"))?)
+            }
+            (None, true) => Choice::Decline(message),
+            _ => anyhow::bail!("pass either `option` or `decline: true`"),
+        };
+        let who = Answerer::of(&args, self.chat.as_ref());
+        let chat = self.chat.clone();
+        tokio::task::spawn_blocking(move || {
+            super::answer::answer(&db, &id, seq, choice, who, chat.as_ref())
         })
         .await?
     }
@@ -1179,6 +1284,11 @@ pub fn create_harness_session_tools(
             chat: chat.clone(),
         }),
         Box::new(HarnessSessionWaitTool { db: db.clone() }),
+        Box::new(HarnessSessionPendingTool { db: db.clone() }),
+        Box::new(HarnessSessionAnswerTool {
+            db: db.clone(),
+            chat: chat.clone(),
+        }),
         Box::new(HarnessSessionStopTool { db: db.clone() }),
         Box::new(HarnessSessionLinkTool {
             db: db.clone(),

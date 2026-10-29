@@ -321,7 +321,7 @@ async fn run_handoff(
     });
     if blocked {
         report["warning"] = json!(
-            "The agent stopped at a dialog before it reached its prompt, so the prompt was NOT typed and no work is running. The task is marked blocked. Read session.blocked.screen and answer with harness_session_send keys."
+            "The agent stopped at a dialog before it reached its prompt, so the prompt was NOT typed and no work is running. The task is marked blocked. Read it with harness_session_pending and answer with harness_session_answer."
         );
     }
     if let Some(obj) = session.as_object_mut() {
