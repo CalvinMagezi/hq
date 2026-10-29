@@ -142,6 +142,7 @@ fn broken_files_are_refused_with_a_reason() {
 fn builtin_rule_files_load() {
     let d = Detector::builtin();
     assert!(d.knows("claude") && d.knows("claude-code") && d.knows("codex"));
+    assert!(d.knows("copilot") && d.knows("github-copilot"));
 }
 
 #[test]
@@ -151,8 +152,9 @@ fn overrides_replace_built_ins_and_bad_files_are_reported() {
     std::fs::write(dir.path().join("broken.toml"), "id = ").unwrap();
     std::fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
     let mut d = Detector::builtin();
-    let problems = d.load_overrides(dir.path());
-    assert_eq!(problems.len(), 1, "{problems:?}");
+    let report = d.load_overrides(dir.path());
+    assert_eq!(report.problems.len(), 1, "{report:?}");
+    assert_eq!(report.loaded, vec!["claude".to_string()]);
     let got = d
         .detect(
             "claude",

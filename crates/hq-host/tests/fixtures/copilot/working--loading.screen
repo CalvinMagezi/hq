@@ -1,0 +1,15 @@
+
+ ! Failed to connect to MCP server "example": failed to initialize MCP client: MCP lifecycle negotiation did not
+   complete within 60000 ms. Execute '/mcp show example' to inspect or check the logs.
+
+ ! MCP server 'example' is taking longer than expected to connect.
+
+
+
+
+
+ ~/Documents/HQ/dialog-check                                          Run on: This computer ctrl+e change environment
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ○ Loading: 1 plugin, 1 hook, 31 skills, 2 MCP servers — still waiting on ide                         Claude Sonnet 5.5

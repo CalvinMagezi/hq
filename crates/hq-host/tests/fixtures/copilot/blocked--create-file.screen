@@ -1,0 +1,30 @@
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+ ❯ Run the shell command `echo hq-dialog-check` in this folder, then create a file named check.txt containing    09:39 ┃
+   the word ok, then reply DONE. Do nothing else.                                                                      ┃
+                                                                                                                       ┃
+ $ Shell Echo check string 1 line…                                                                                     ┃
+   echo hq-dialog-check                                                                                                ┃
+                                                                                                                       ┃
+ ○ Create check.txt                                                                                             1m 16s ┃
+                                                                                                                       ┃
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Create file                                                                                                          │
+│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ check.txt +1 -0                                                                                                      │
+│ /Users/you/Documents/HQ/dialog-check                                                                             │
+│                                                                                                                      │
+│ 1 +   ok                                                                                                             │
+│                                                                                                                      │
+│ Do you want to create /Users/you/Documents/HQ/dialog-check/check.txt?                                            │
+│                                                                                                                      │
+│ ❯ 1. Yes                                                                                                             │
+│   2. Yes, and don't ask again for file operations when in this directory (~/Documents/HQ/dialog-check)               │
+│   3. No, and tell Copilot what to do differently (Esc to stop)                                                       │
+│                                                                                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

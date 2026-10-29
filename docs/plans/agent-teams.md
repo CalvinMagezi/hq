@@ -200,7 +200,9 @@ supervisor's report.
    at `agent_delegate`, plugin hooks branch on `HQ_SESSION_ID`.
 2. `agent_delegate` arguments and `agent_host.teams` limits with `tree_root`.
 3. Tree scope, `team_roster`, the widened allowlist, the team folder.
-4. Brief and result contract, `owns` and `worktree`.
+4. Brief and result contract, `owns` and `worktree`. `worktree` lands together
+   with phase 4 of [remote-driven-teams.md](remote-driven-teams.md), which adds
+   it to spawn and handoff as well.
 5. Session tokens for Codex and Copilot.
 
 Each step ships with its tests and an end-to-end run on a real host: a root task,

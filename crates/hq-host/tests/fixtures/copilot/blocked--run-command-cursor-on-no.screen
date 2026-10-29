@@ -1,0 +1,31 @@
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+ ● Create check.txt +1                                                                                          1m 32s ┃
+                                                                                                                       ┃
+ ● DONE                                                                                                                ┃
+                                                                                                                       ┃
+ ❯ Run this exact shell command: mkdir -p sub && touch sub/a.txt && ls /tmp > /dev/null . Then reply DONE2. Do   09:41 ┃
+   nothing else.                                                                                                       ┃
+                                                                                                                       ┃
+ $ Shell Create sub/a.txt and list /tmp                                                                            15s ┃
+   mkdir -p sub && touch sub/a.txt && ls /tmp > /dev/null                                                              ┃
+                                                                                                                       ┃
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Create sub/a.txt and list /tmp                                                                                       │
+│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ │
+│ │ mkdir -p sub && touch sub/a.txt && ls /tmp > /dev/null                                                           │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                                                      │
+│ Do you want to run this command?                                                                                     │
+│                                                                                                                      │
+│   1. Yes                                                                                                             │
+│   2. Yes, and don't ask again for `mkdir` and `touch` in this directory (~/Documents/HQ/dialog-check)                │
+│ ❯ 3. No, and tell Copilot what to do differently (Esc to stop)                                                       │
+│                                                                                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -55,7 +55,9 @@ mod workspace;
 #[cfg(unix)]
 pub use client::{Client, ClientError};
 #[cfg(unix)]
-pub use detect::{AgentState, Detection, Detector, ENGINE_VERSION, Input as DetectInput};
+pub use detect::{
+    AgentState, Detection, Detector, ENGINE_VERSION, Input as DetectInput, OverrideReport,
+};
 #[cfg(unix)]
 pub use egress::{Decision, Egress, Rule, Verdict, decide as decide_egress, is_private};
 #[cfg(unix)]

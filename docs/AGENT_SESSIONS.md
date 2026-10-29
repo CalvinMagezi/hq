@@ -252,11 +252,22 @@ described under "Security model".
 
 A claude.ai connector, or the handoff key while `handoff_cwd_allow` lists anything, that asks for
 a `cwd` outside its folders does not get a dead end. HQ files an approval request for that folder
-on that host (your chat, the web inbox and a push notification) and tells the caller to call again
-with the same `cwd` once you answer. Approve and the folder, with everything under it, is allowed
-on that host until you revoke it; Dismiss and the caller is told you declined, and is not asked
-again until the request expires (24 hours). One caller may have at most 5 requests waiting. Home
-and root folders and anything `spawn_cwd_deny` matches are refused before any request is made.
+on that host (your chat, the web inbox and a push notification), and the spawn or handoff call
+waits for your answer:
+
+- Approve within the wait and the session starts in that same call. The folder, with everything
+  under it, is then allowed on that host until you revoke it.
+- Dismiss and the call fails at once saying you declined. The caller is not asked again until the
+  request expires (24 hours).
+- No answer within the wait and the call fails with an error that starts `BLOCKED: no session was
+  started`, telling the caller to say it is waiting on you and to call again with the same
+  arguments. Each call waits again, so a caller that keeps calling starts the session as soon as
+  you approve. Nothing about the error reads as a started session.
+
+The wait is 55 seconds less `launch_bound_secs`, at most 30 seconds, so the launch that follows an
+approval still finishes inside an MCP client's one-minute limit. One caller may have at most 5
+requests waiting. Home and root folders and anything `spawn_cwd_deny` matches are refused before
+any request is made.
 
 Approving is an owner action (the chat button, the web inbox or `hq queue approve`, all signed with
 the install key); no MCP key reaches it. The live grants are listed at `GET /api/session-folders`
