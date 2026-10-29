@@ -29,12 +29,13 @@ use hq_core::config::HqConfig;
 use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
-use hq_tools::agent_host::{AgentInfo, AgentStatus, Host, HostBackend};
+use hq_tools::agent_host::{AgentInfo, AgentStatus, GitHead, Host, HostBackend};
+use hq_tools::harness_session::checkout;
 use hq_tools::harness_session::mission::{self, Event};
 use hq_tools::harness_session::{
     HarnessCategory, Liveness, exited_pane, liveness, poll_hosts_with,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -96,6 +97,8 @@ type HostResolver = Arc<dyn Fn(&str) -> Result<Host> + Send + Sync>;
 struct HostPhase {
     polled: hq_tools::harness_session::HostPoll,
     screens: HashMap<String, String>,
+    /// The commit each finished writer's folder is at, so a new one is named in its alert.
+    heads: HashMap<String, GitHead>,
 }
 
 /// Every host call of a sweep, under one deadline. Blocking (ssh, subprocesses),
@@ -105,6 +108,7 @@ fn gather_hosts(
     rows: &[registry::HarnessSessionRow],
     resolve: &HostResolver,
     budget: Duration,
+    tracked: &HashSet<String>,
 ) -> HostPhase {
     let deadline = Instant::now() + budget;
     // A restarted built-in host holds agents until HQ supplies their env, and
@@ -127,6 +131,7 @@ fn gather_hosts(
     let polled = poll_hosts_with(rows, |name| (resolve.as_ref())(name).map(within_budget));
 
     let mut screens = HashMap::new();
+    let mut heads = HashMap::new();
     for row in rows {
         // An exited pane is read once more: its last screen is the run's output.
         let readable = matches!(liveness(&polled, row), Liveness::Alive(_))
@@ -145,8 +150,22 @@ fn gather_hosts(
                 tracing::warn!(session = %row.id, error = %e, "session-supervisor: screen read failed");
             }
         }
+        let finished =
+            matches!(liveness(&polled, row), Liveness::Alive(a) if a.status == AgentStatus::Done);
+        if finished && tracked.contains(&row.id) && Instant::now() < deadline {
+            let head = (resolve.as_ref())(&row.host)
+                .map(within_budget)
+                .and_then(|host| Ok(host.head(&row.agent_name)?));
+            if let Ok(Some(head)) = head {
+                heads.insert(row.id.clone(), head);
+            }
+        }
     }
-    HostPhase { polled, screens }
+    HostPhase {
+        polled,
+        screens,
+        heads,
+    }
 }
 
 /// Closes the pane of a session whose process has ended, so the host's list
@@ -275,6 +294,7 @@ fn sweep_alive(
     agent: &AgentInfo,
     screen: &str,
     dismissed: bool,
+    head: Option<&GitHead>,
 ) {
     let db_arc = Arc::new(db.clone());
     let (id, status) = (row.id.clone(), agent.status.as_str());
@@ -293,7 +313,7 @@ fn sweep_alive(
         // the driver's wake, and a state change after the keypress must not lose it.
         AgentStatus::Blocked if dismissed => {}
         AgentStatus::Blocked => alert_blocked(db, row, agent, screen),
-        AgentStatus::Done => alert_finished(db, vault_path, row, agent, screen),
+        AgentStatus::Done => alert_finished(db, vault_path, row, agent, screen, head),
         _ => {}
     }
 }
@@ -449,8 +469,14 @@ async fn supervise(
     let db_arc = Arc::new(db.clone());
     let running = db.with_conn(|c| registry::list(c, Some(registry::STATUS_RUNNING), 100))?;
     let (rows, resolver, host_budget) = (running.clone(), resolve.clone(), sweep.host_budget);
+    let tracked: HashSet<String> = running
+        .iter()
+        .filter(|r| checkout::tracked(&db_arc, &r.id))
+        .map(|r| r.id.clone())
+        .collect();
     let phase =
-        tokio::task::spawn_blocking(move || gather_hosts(&rows, &resolver, host_budget)).await?;
+        tokio::task::spawn_blocking(move || gather_hosts(&rows, &resolver, host_budget, &tracked))
+            .await?;
     hosts::watch_hosts(
         db,
         &phase.polled,
@@ -480,7 +506,8 @@ async fn supervise(
                     &resolve,
                 )
                 .await;
-                sweep_alive(db, vault_path, &row, &agent, screen, dismissed);
+                let head = phase.heads.get(&row.id);
+                sweep_alive(db, vault_path, &row, &agent, screen, dismissed, head);
                 keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
                 alive.push((row, *agent));
                 continue;
@@ -528,6 +555,18 @@ async fn supervise(
             Event::Exited
         };
         let link = record_on_task(db, &row, event);
+        // A worktree with nothing uncommitted goes; one with changes stays, and the message says where.
+        let worktree = match (resolve.as_ref())(&row.host) {
+            Ok(host) => {
+                let (db2, id) = (db_arc.clone(), row.id.clone());
+                tokio::task::spawn_blocking(move || checkout::release(&db2, &host, &id))
+                    .await
+                    .ok()
+                    .flatten()
+            }
+            Err(_) => None,
+        };
+        let worktree_line = worktree_line(worktree.as_ref());
         // Sessions started for one that ended on its own stop with it too.
         let stopped = hq_tools::harness_session::stop_children(&db_arc, &row.id);
         if !stopped.is_empty() {
@@ -595,7 +634,7 @@ async fn supervise(
 
         let subject = format!("Harness session '{label}' finished");
         let body = format!(
-            "{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}",
+            "{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}{worktree_line}",
             row.id,
             row.harness,
             if token.is_some() {

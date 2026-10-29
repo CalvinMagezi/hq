@@ -115,6 +115,38 @@ app, and list every agent on a machine with `hq host status`.
   still types its prompt.
 - Exit summaries use the last screen the supervisor captured while the agent was alive.
 
+## Agents that share a repository
+
+Two agents editing one working tree overwrite each other, and one running `git stash` or
+`git checkout` takes the other's changes with it. HQ keeps writers apart:
+
+- **A worktree of its own.** `harness_session_spawn`, `harness_session_handoff`, `hq sessions
+  spawn --branch <name>` and the web's New agent dialog ("Its own branch") take `worktree`:
+  - `{"branch": "<name>"}` for a writer. The host makes a git worktree of the folder's
+    repository at `<HQ folder>/worktrees/<repository>/<session>`, on that branch (made from the
+    folder's current commit if it does not exist), and the agent starts there. A branch
+    checked out in another worktree is refused, so a branch has one writer.
+  - `{"detached": "<commit or ref>"}` for a reviewer, which gets that commit checked out
+    detached.
+  - The worktree counts as approved because it comes from a folder that already is. The reply
+    has `worktree` (`path`, `repo`, `branch` or `detached`, `head`).
+  - `agent_delegate` takes `worktree: true` for a branch named for the worker's sub-task
+    (`hq/<task id>`), or the same object.
+- **Or paths it owns.** Without a worktree, a coding session (`purpose: code`) in a folder
+  another running coding session writes in is refused unless both name `owns` paths (relative
+  to the folder) that do not overlap. No `owns` means the whole folder. Not counted: a
+  reviewer, monitor or researcher, the new session's own parent (it delegated the work and
+  waits on it), and a session the host no longer has.
+- **A reviewer sees commits, not a moving tree.** When a writer finishes a turn, the
+  supervisor reads the commit its folder is at. A new one is named in the finished alert, in
+  the message to whoever delegated it and to the sessions observing it ("committed <sha>
+  \"subject\" on branch <b>"), and recorded as a `commit` event. A reviewer then checks out
+  that sha detached in its own worktree, so it reviews exactly what was committed.
+- **Cleanup.** At `harness_session_stop`, or when the agent exits, a worktree with nothing
+  uncommitted is removed; one with changes is kept and the reply or the exit message says
+  where. The branch keeps every commit either way. `harness_session_resume` makes the
+  worktree again on its branch, or finds it where it was kept.
+
 ## Sessions that work on a task
 
 `harness_session_spawn` takes an optional `task_id` (an id or a display id such as

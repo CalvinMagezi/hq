@@ -440,7 +440,9 @@ impl HqTool for AgentDelegateTool {
                 "description": { "type": "string", "description": "Everything the worker needs, since it sees nothing else: the objective, what done looks like, the files it owns, inputs as paths or links, and where to put its result" },
                 "harness": { "type": "string", "description": "Optional agent for the worker: your own kind by default, or one the owner listed in agent_host.teams.harnesses" },
                 "model": { "type": "string", "description": "Optional model for the worker, passed with its CLI's --model flag" },
-                "purpose": { "type": "string", "enum": ["code", "review", "research", "monitor", "general"], "description": "What the worker is for. Default: code for a coding agent. A reviewer or monitor never moves its task's status." }
+                "purpose": { "type": "string", "enum": ["code", "review", "research", "monitor", "general"], "description": "What the worker is for. Default: code for a coding agent. A reviewer or monitor never moves its task's status." },
+                "worktree": { "description": "Give the worker a git worktree of your folder's repository: true for a branch named for its sub-task (hq/<task id>), or {\"branch\": \"<name>\"} or {\"detached\": \"<commit>\"} (a reviewer). Without one it works in your folder, and a second coding worker there is refused unless their owns paths do not overlap." },
+                "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to your folder, the worker writes to. Workers in one folder must own paths that do not overlap." }
             },
             "required": ["title", "description"]
         })
@@ -564,6 +566,44 @@ pub struct Delegation {
     pub harness: String,
     pub model: Option<String>,
     pub purpose: Option<Purpose>,
+    /// A worktree of its own: `true` is a branch named for its sub-task.
+    pub worktree: DelegatedTree,
+    /// Paths it writes to in the delegator's folder.
+    pub owns: Vec<String>,
+}
+
+/// Where a delegated session writes.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DelegatedTree {
+    /// In the delegator's folder.
+    #[default]
+    Shared,
+    /// A worktree on a branch named for its sub-task (`hq/<task id>`).
+    ForTask,
+    /// A worktree on the branch or commit the delegator named.
+    Base(crate::agent_host::WorktreeBase),
+}
+
+impl DelegatedTree {
+    fn from_args(args: &Value) -> Result<Self> {
+        match args.get("worktree") {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => Ok(Self::Shared),
+            Some(Value::Bool(true)) => Ok(Self::ForTask),
+            Some(_) => Ok(crate::harness_session::checkout::parse_worktree(args)?
+                .map_or(Self::Shared, Self::Base)),
+        }
+    }
+
+    fn base(&self, task_display_id: &str) -> Option<crate::agent_host::WorktreeBase> {
+        match self {
+            Self::Shared => None,
+            Self::ForTask => Some(crate::agent_host::WorktreeBase::Branch(format!(
+                "hq/{}",
+                task_display_id.to_lowercase()
+            ))),
+            Self::Base(b) => Some(b.clone()),
+        }
+    }
 }
 
 impl Delegation {
@@ -577,6 +617,8 @@ impl Delegation {
             harness: arg_str(args, "harness").trim().to_string(),
             model: Some(arg_str(args, "model").trim().to_string()).filter(|m| !m.is_empty()),
             purpose: Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
+            worktree: DelegatedTree::from_args(args)?,
+            owns: crate::harness_session::checkout::parse_owns(args)?,
         };
         if request.title.trim().is_empty() || request.description.trim().is_empty() {
             bail!("a delegation needs a title and a description");
@@ -628,6 +670,8 @@ pub async fn run_delegation(
             purpose: request.purpose,
             observe: &[],
             model: request.model.as_deref(),
+            worktree: request.worktree.base(&sub.display_id),
+            owns: &request.owns,
         },
     )
     .await?;

@@ -243,6 +243,8 @@ export interface SpawnInput {
   label?: string
   /** What the session is for; omitted means the agent's default (code for a coding agent, general otherwise). */
   purpose?: Purpose
+  /** Work on this branch in a git worktree of its own instead of in the folder itself. */
+  branch?: string
 }
 
 /** Coding agents edit code; general-purpose agents (Hermes, OpenClaw) never take code work. */

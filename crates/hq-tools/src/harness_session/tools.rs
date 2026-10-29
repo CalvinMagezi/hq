@@ -212,6 +212,8 @@ impl HqTool for HarnessSessionSpawnTool {
                 "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any agent_host.harness_profiles). Coding agents: {}. General-purpose agents: {}.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::Coding).join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent. A general-purpose agent refuses code. monitor and review sessions never move their task's status." },
                 "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
+                "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
+                "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to cwd, this session writes to. A coding session in a folder another coding session already writes in is refused unless both own paths that do not overlap (no owns means the whole folder). Use a worktree instead when they would overlap." },
                 "observe": { "type": "array", "items": { "type": "string" }, "description": "Session ids a monitor or reviewer watches (at most 10; needs task_id). When one finishes a turn, blocks or exits, this session gets a message on its task thread, typed in when it is next idle." },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
                 "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
@@ -266,6 +268,8 @@ impl HqTool for HarnessSessionSpawnTool {
         let (goal, done) = (arg_str(&args, "goal"), arg_str(&args, "done_criteria"));
         let purpose = super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?;
         let observe = arg_str_list(&args, "observe");
+        let worktree = super::checkout::parse_worktree(&args)?;
+        let owns = super::checkout::parse_owns(&args)?;
         let model = arg_str(&args, "model");
         let model = Some(model.trim()).filter(|m| !m.is_empty());
         // Before a start folder is chosen or made, so a refused model leaves nothing behind.
@@ -312,6 +316,8 @@ impl HqTool for HarnessSessionSpawnTool {
                     purpose,
                     observe: &observe,
                     model,
+                    worktree: worktree.clone(),
+                    owns: &owns,
                 }
             };
         }
@@ -1119,6 +1125,8 @@ impl HqTool for HarnessSessionHandoffTool {
                 "done_criteria": { "type": "string", "description": "Alias of acceptance" },
                 "harness": { "type": "string", "description": format!("One of: {}. A general-purpose agent ({}) refuses code work; give it purpose research, review or general.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent." },
+                "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
+                "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to cwd, this session writes to. A coding session in a folder another coding session already writes in is refused unless both own paths that do not overlap (no owns means the whole folder). Use a worktree instead when they would overlap." },
                 "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
                 "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request and this call waits up to 30 seconds for their answer: it starts the session if they approve, and otherwise fails with BLOCKED and starts nothing. Tell the user you are waiting, then call again with the same arguments. Never start elsewhere and cd into it." },
                 "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
@@ -1202,6 +1210,8 @@ impl HqTool for HarnessSessionHandoffTool {
                 drive_opted_out: args.get("drive").and_then(Value::as_bool) == Some(false),
                 model: owned("model"),
                 purpose: super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
+                worktree: super::checkout::parse_worktree(&args)?,
+                owns: super::checkout::parse_owns(&args)?,
             },
         )
         .await?;

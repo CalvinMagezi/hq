@@ -68,6 +68,10 @@ pub async fn resume(
             row.host
         );
     }
+    // A session that had its own worktree comes back in it: made again on its branch when the
+    // stop removed it.
+    let (reopen_host, reopen_db, id) = (host.clone(), db.clone(), session_id.to_string());
+    blocking(move || super::checkout::reopen(&reopen_db, &reopen_host, &id)).await??;
     let resumable = match spec.resume {
         ResumeStrategy::Args(args) => {
             !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
@@ -802,6 +806,9 @@ pub fn stop(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     // Sessions started for this one stop with it.
     let stopped_children = stop_children(db, session_id);
     let mut report = json!({ "session_id": session_id, "status": "stopped" });
+    if let Some(worktree) = super::checkout::release(db, &host, session_id) {
+        report["worktree"] = worktree;
+    }
     if !stopped_children.is_empty() {
         report["stopped_children"] = json!(stopped_children);
     }

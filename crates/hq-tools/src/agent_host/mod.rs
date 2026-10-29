@@ -209,6 +209,52 @@ pub struct LogsSince {
     pub reset: bool,
 }
 
+/// What a worktree is checked out at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorktreeBase {
+    /// A writer's branch: checked out if it exists, else made from the folder's current commit.
+    Branch(String),
+    /// A commit (or a ref naming one) a reviewer checks out detached.
+    Detached(String),
+}
+
+/// A worktree the host made or found again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct WorktreeInfo {
+    pub path: String,
+    /// The repository's main folder.
+    pub repo: String,
+    pub branch: Option<String>,
+    pub head: String,
+    /// False when it already existed (a retry or a resume).
+    #[serde(default)]
+    pub created: bool,
+}
+
+/// The commit an agent's folder is at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct GitHead {
+    pub sha: String,
+    pub subject: String,
+    pub branch: Option<String>,
+}
+
+/// What removing a worktree did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+pub struct WorktreeRemoved {
+    pub removed: bool,
+    /// It has changes nobody committed, so it was kept.
+    pub dirty: bool,
+}
+
+/// A host reply that did not have the shape its method promises.
+pub(crate) fn bad_reply(method: &str, e: impl std::fmt::Display) -> AgentHostError {
+    AgentHostError::Api {
+        code: "bad_reply".into(),
+        message: format!("the host's {method} reply could not be read: {e}"),
+    }
+}
+
 /// A dialog read whole, with what an answer needs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingRead {

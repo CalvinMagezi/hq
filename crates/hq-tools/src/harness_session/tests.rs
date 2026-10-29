@@ -1456,6 +1456,8 @@ fn spawn_req<'a>(
         purpose,
         observe,
         model: None,
+        worktree: None,
+        owns: &[],
     }
 }
 
@@ -3678,4 +3680,286 @@ fn an_answer_the_dialog_did_not_take_says_so() {
     .unwrap();
     assert_eq!(report["not_registered"], true, "{report}");
     assert_eq!(report["answered"], "declined");
+}
+
+fn writer<'a>(owns: &'a [String]) -> SpawnRequest<'a> {
+    SpawnRequest {
+        owns,
+        ..spawn_req("claude-code", None, None, &[])
+    }
+}
+
+#[tokio::test]
+async fn a_second_writer_in_a_folder_is_refused_unless_their_paths_do_not_meet() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let start = |req: SpawnRequest<'static>| {
+        let (db, vault) = (db.clone(), vault.path().to_path_buf());
+        async move {
+            let (_dir, host) = startable_host();
+            spawn_on(&vault, &db, Arc::new(host), req).await
+        }
+    };
+    let (api, ui, api_handlers) = (
+        Box::leak(Box::new(vec!["src/api".to_string()])),
+        Box::leak(Box::new(vec!["web/".to_string()])),
+        Box::leak(Box::new(vec!["src/api/handlers".to_string()])),
+    );
+    let first = start(writer(api)).await.unwrap();
+    assert_eq!(first["owns"], serde_json::json!(["src/api"]));
+    start(writer(ui))
+        .await
+        .expect("paths that do not meet share the folder");
+
+    let err = start(writer(api_handlers)).await.unwrap_err().to_string();
+    assert!(
+        err.contains("already writes in /t") && err.contains("src/api"),
+        "{err}"
+    );
+    assert!(
+        err.contains("worktree"),
+        "the refusal names the way out: {err}"
+    );
+    let err = start(writer(&[])).await.unwrap_err().to_string();
+    assert!(
+        err.contains("already writes in /t"),
+        "no owns is the whole folder: {err}"
+    );
+
+    // A reviewer writes nothing, so it may sit in the folder.
+    start(spawn_req("claude-code", Some(Purpose::Review), None, &[]))
+        .await
+        .expect("a reviewer is not a writer");
+}
+
+const WORKTREE: &str = r#"{"id":"x","result":{"path":"/h/HQ/worktrees/t/hs-1","repo":"/t","branch":"feature","head":"abc123","created":true}}"#;
+
+#[tokio::test]
+async fn a_writer_with_a_worktree_starts_there_and_leaves_the_folder_free() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let (dir, host) = fake_host(&[
+        ("worktree add", WORKTREE.into(), None),
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-h", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let req = SpawnRequest {
+        worktree: Some(crate::agent_host::WorktreeBase::Branch("feature".into())),
+        ..spawn_req("claude-code", None, None, &[])
+    };
+    let report = spawn_on(vault.path(), &db, Arc::new(host), req)
+        .await
+        .unwrap();
+    assert_eq!(report["cwd"], "/h/HQ/worktrees/t/hs-1");
+    assert_eq!(report["worktree"]["branch"], "feature");
+    assert_eq!(report["worktree"]["repo"], "/t");
+    let calls = std::fs::read_to_string(dir.path().join("calls.log")).unwrap();
+    assert!(
+        calls.contains("worktree add --repo /t --session hs-claude-code-")
+            && calls.contains("--branch feature"),
+        "{calls}"
+    );
+    let id = report["session_id"].as_str().unwrap().to_string();
+    let checkout = db
+        .with_conn(|c| hq_db::session_checkouts::get(c, &id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkout.folder, "/t");
+    assert_eq!(checkout.worktree.as_deref(), Some("/h/HQ/worktrees/t/hs-1"));
+    assert_eq!(checkout.last_head.as_deref(), Some("abc123"));
+
+    // The folder itself has no writer, so a plain session may start there.
+    let (_dir, host) = startable_host();
+    spawn_on(
+        vault.path(),
+        &db,
+        Arc::new(host),
+        spawn_req("claude-code", None, None, &[]),
+    )
+    .await
+    .expect("the worktree writer does not hold the folder");
+}
+
+#[tokio::test]
+async fn a_launch_that_fails_takes_the_new_worktree_with_it() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let (dir, host) = fake_host(&[
+        ("worktree add", WORKTREE.into(), None),
+        (
+            "worktree remove",
+            r#"{"removed":true,"dirty":false}"#.into(),
+            None,
+        ),
+        ("workspace create", String::new(), Some("no room")),
+    ]);
+    let req = SpawnRequest {
+        worktree: Some(crate::agent_host::WorktreeBase::Branch("feature".into())),
+        ..spawn_req("claude-code", None, None, &[])
+    };
+    assert!(
+        spawn_on(vault.path(), &db, Arc::new(host), req)
+            .await
+            .is_err()
+    );
+    let calls = std::fs::read_to_string(dir.path().join("calls.log")).unwrap();
+    assert!(
+        calls.contains("worktree remove /h/HQ/worktrees/t/hs-1"),
+        "{calls}"
+    );
+}
+
+#[test]
+fn a_stopped_sessions_worktree_goes_unless_something_is_uncommitted() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let record = |id: &str| {
+        db.with_conn(|c| {
+            hq_db::session_checkouts::record(
+                c,
+                &hq_db::session_checkouts::NewCheckout {
+                    session_id: id,
+                    folder: "/t",
+                    worktree: Some("/h/HQ/worktrees/t/x"),
+                    repo: Some("/t"),
+                    branch: Some("feature"),
+                    detached: None,
+                    owns: &[],
+                    head: Some("abc"),
+                },
+            )
+        })
+        .unwrap();
+    };
+    record("hs-clean");
+    let (_d, clean) = fake_host(&[(
+        "worktree remove",
+        r#"{"removed":true,"dirty":false}"#.into(),
+        None,
+    )]);
+    let clean: crate::agent_host::Host = Arc::new(clean);
+    let said = checkout::release(&db, &clean, "hs-clean").unwrap();
+    assert_eq!(said["removed"], "/h/HQ/worktrees/t/x");
+    assert!(
+        checkout::release(&db, &clean, "hs-clean").is_none(),
+        "removed once"
+    );
+
+    record("hs-dirty");
+    let (_d, dirty) = fake_host(&[(
+        "worktree remove",
+        r#"{"removed":false,"dirty":true}"#.into(),
+        None,
+    )]);
+    let said = checkout::release(
+        &db,
+        &(Arc::new(dirty) as crate::agent_host::Host),
+        "hs-dirty",
+    )
+    .unwrap();
+    assert_eq!(said["kept"], "/h/HQ/worktrees/t/x");
+    assert!(checkout::release(&db, &clean, "nobody").is_none());
+}
+
+#[test]
+fn a_commit_is_news_once_and_the_starting_point_never() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-w",
+                harness: "claude-code",
+                label: "writer",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "local",
+                    agent_name: "hs-w",
+                    workspace_id: "w1",
+                    pane_id: "w1:p1",
+                },
+                purpose: None,
+            },
+        )?;
+        hq_db::session_checkouts::record(
+            c,
+            &hq_db::session_checkouts::NewCheckout {
+                session_id: "hs-w",
+                folder: "/t",
+                worktree: None,
+                repo: None,
+                branch: None,
+                detached: None,
+                owns: &[],
+                head: None,
+            },
+        )
+    })
+    .unwrap();
+    let head = |sha: &str| crate::agent_host::GitHead {
+        sha: sha.into(),
+        subject: "add the parser".into(),
+        branch: Some("feature".into()),
+    };
+    assert!(
+        !checkout::note_commit(&db, "hs-w", &head("aaa")),
+        "where it started"
+    );
+    assert!(checkout::note_commit(&db, "hs-w", &head("bbb")));
+    assert!(
+        !checkout::note_commit(&db, "hs-w", &head("bbb")),
+        "said once"
+    );
+    let events = db
+        .with_conn(|c| registry::list_events(c, "hs-w", 10))
+        .unwrap();
+    assert_eq!(events.iter().filter(|e| e.kind == "commit").count(), 1);
+    assert_eq!(
+        checkout::commit_line(&head("0123456789abcdef")),
+        "committed 0123456789ab \"add the parser\" on branch feature"
+    );
+}
+
+#[test]
+fn worktree_and_owns_arguments_are_checked() {
+    use crate::agent_host::WorktreeBase;
+    assert_eq!(checkout::parse_worktree(&json!({})).unwrap(), None);
+    assert_eq!(
+        checkout::parse_worktree(&json!({ "worktree": { "branch": "feat" } })).unwrap(),
+        Some(WorktreeBase::Branch("feat".into()))
+    );
+    assert_eq!(
+        checkout::parse_worktree(&json!({ "worktree": { "detached": "abc" } })).unwrap(),
+        Some(WorktreeBase::Detached("abc".into()))
+    );
+    for bad in [
+        json!({ "worktree": {} }),
+        json!({ "worktree": { "branch": "a", "detached": "b" } }),
+        json!({ "worktree": { "branch": " " } }),
+    ] {
+        assert!(checkout::parse_worktree(&bad).is_err(), "{bad}");
+    }
+    assert_eq!(
+        checkout::parse_owns(&json!({ "owns": ["./src/", "src", "docs/a.md"] })).unwrap(),
+        ["src", "docs/a.md"]
+    );
+    for bad in [
+        json!(["/etc"]),
+        json!(["../x"]),
+        json!(["."]),
+        json!(["a/../b"]),
+    ] {
+        assert!(
+            checkout::parse_owns(&json!({ "owns": bad })).is_err(),
+            "{bad}"
+        );
+    }
+    assert!(checkout::overlap(&[], &["a".into()]));
+    assert!(checkout::overlap(&["src".into()], &["src/api".into()]));
+    assert!(!checkout::overlap(
+        &["src/api".into()],
+        &["src/apiv2".into()]
+    ));
 }

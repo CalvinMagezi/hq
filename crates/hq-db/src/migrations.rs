@@ -382,6 +382,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "103_host_outages",
         include_str!("../sql/103_host_outages.sql"),
     ),
+    (
+        "104_session_checkouts",
+        include_str!("../sql/104_session_checkouts.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

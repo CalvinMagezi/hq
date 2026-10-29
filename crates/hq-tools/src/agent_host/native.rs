@@ -1,8 +1,9 @@
 use super::transport::Transport;
 use super::{
-    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, Host, HostBackend,
-    HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince, PendingRead,
-    PromptOutcome, shell_line, validate_keys,
+    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, GitHead, Host,
+    HostBackend, HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince,
+    PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved, bad_reply, shell_line,
+    validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -784,6 +785,32 @@ impl HostBackend for NativeBackend {
         argv.extend(self.hook_flags(name, kind));
         self.call("agent.set_resume", json!({ "name": name, "argv": argv }))
             .map(|_| ())
+    }
+
+    fn worktree_add(
+        &self,
+        repo: &str,
+        session: &str,
+        base: &WorktreeBase,
+    ) -> Result<WorktreeInfo, AgentHostError> {
+        let mut params = json!({ "repo": repo, "session": session });
+        match base {
+            WorktreeBase::Branch(b) => params["branch"] = json!(b),
+            WorktreeBase::Detached(r) => params["detached"] = json!(r),
+        }
+        let v = self.call("worktree.add", params)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree.add", e))
+    }
+
+    fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
+        let v = self.call("worktree.remove", json!({ "path": path }))?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree.remove", e))
+    }
+
+    fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
+        let v = self.call("agent.head", json!({ "name": target }))?;
+        serde_json::from_value(v.get("head").cloned().unwrap_or(Value::Null))
+            .map_err(|e| bad_reply("agent.head", e))
     }
 
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
