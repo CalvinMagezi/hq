@@ -43,6 +43,22 @@ against the run above on the next batch of the same project:
   scrapes, about a tenth of the tokens.
 - **A host that stops answering** is reported within five minutes.
 
+**How to measure (HQ-RDT-009).** Run the next batch of the same project under the new setup:
+a team formed with `team`, writers in worktrees, the default policies, decisions answered from
+the phone. Then read the numbers with `hq sessions stats --task <the batch's task>` (or
+`harness_session_stats`, or `hq sessions stats <root session id>` for one team). They come
+from the event log:
+
+- `waits`: how long dialogs waited (median, 90th percentile, longest, total minutes);
+- `dialogs.answered_by_owner` against `dialogs.answered_automatically` and `policy`
+  (allowed, denied, escalated): the owner's interventions;
+- `hosts`: outages and silent minutes;
+- `work`: finished turns, commits and exits.
+
+Compare them with the table in "The problem": about 4 h of unanswered approvals, 4.5 h of a
+silent host, and the 1 h 36 m clarifying question. Remote client cost is not in the log; count
+its `harness_session_events` calls against the 150 screen reads of the first run.
+
 ## What the code does today
 
 Facts this plan rests on, all on `main`:
@@ -362,8 +378,10 @@ owner's environment, through a harness profile's `env`.
   make them ask; it governs the dialogs they still show (paths outside the folder, and every
   dialog of agents that ask, such as Codex). The supervisor answers off the sweep, and raises
   the alert if the answer does not take.
-- **2.5** records every decision as a `policy_decision` event. Not built: the periodic summary
-  comment on the task, which waits for phase 3's reader.
+- **2.5** records every decision as a `policy_decision` event. The task gets one summary comment
+  when a session finishes a turn or exits ("Command policy 'builder' on session ...: 12
+  allowed, 2 declined (`git push` x2), 1 left to the owner."), counting from the last summary.
+  It quotes only the policy's rules, never a command the agent wrote.
 - **2.6** in "What actually stops each deny" in `docs/AGENT_SESSIONS.md`.
 
 ## Phase 3: events instead of polling, and decisions on the owner's phone
@@ -636,8 +654,12 @@ phase 3's items and the task's `waiting_on`, not a new store.
   it follows the moved task.
 - **6.2**: `task_decisions` and `GET /api/tasks/{id}/decisions` list the open dialog alerts of
   the task's sessions and teams (`dialog_alerts` joined to their inbox items), and the task page
-  answers them through HQ-RDT-003's route. Not built: the decisions in the task's own
-  `waiting_for`, which belongs to task verification's wait table and would mix two meanings.
+  answers them through HQ-RDT-003's route. A task a launch-time dialog blocks says it waits on
+  the owner (`waiting_on: owner`, the task's own field for a blocked task). A dialog mid-run
+  leaves the task in progress as before, so its decisions are listed rather than flipping its
+  status on every prompt.
+- Every answer is an `answered` event (who answered, what was picked, whether it took), so
+  `harness_session_stats` can tell the owner's interventions from a policy's or Drive's.
 
 ## Order of work
 

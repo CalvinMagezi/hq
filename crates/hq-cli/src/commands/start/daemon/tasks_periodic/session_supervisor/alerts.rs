@@ -36,6 +36,7 @@ pub(super) fn alert_finished(
     }
     let link = record_on_task(db, row, Event::Finished);
     record_event(db, &row.id, "finished", serde_json::json!({ "seq": seq }));
+    hq_tools::harness_session::policy::post_summary(&Arc::new(db.clone()), row);
     let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
     // A commit made in the turn is named, so a reviewer checks out exactly that.
     let db_arc = Arc::new(db.clone());

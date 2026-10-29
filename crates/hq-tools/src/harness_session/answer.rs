@@ -169,6 +169,25 @@ pub(super) fn answer_with(
     });
     screen_changed(session_id);
     let outcome = outcome?;
+    // Who answered, for the session's record and the team's numbers (`harness_session_stats`).
+    let by = match who {
+        Answerer::Owner => "owner",
+        Answerer::Automated(label) => label,
+    };
+    let picked = match &choice {
+        Choice::Option(id) => json!({ "option": id }),
+        Choice::Decline(_) => json!("decline"),
+    };
+    let detail = json!({
+        "seq": seq,
+        "kind": read.dialog.kind,
+        "by": by,
+        "choice": picked,
+        "registered": outcome.registered,
+    })
+    .to_string();
+    let id = session_id.to_string();
+    let _ = db.with_conn(move |c| registry::record_event(c, &id, "answered", by, Some(&detail)));
     let mut report = json!({
         "session_id": session_id,
         "seq": seq,

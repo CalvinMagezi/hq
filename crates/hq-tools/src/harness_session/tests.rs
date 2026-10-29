@@ -4466,3 +4466,151 @@ fn seed_session(db: &Database, id: &str) {
     })
     .unwrap();
 }
+
+#[test]
+fn an_answer_records_who_gave_it() {
+    let (_dir, host) = fake_host(&[
+        ("agent pending", pending_json(4), None),
+        (
+            "agent answer",
+            r#"{"id":"x","result":{"registered":true}}"#.to_string(),
+            None,
+        ),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_watched(&db, "hs-a", None);
+    let row = control::get_row(&db, "hs-a").unwrap();
+    let host: crate::agent_host::Host = Arc::new(host);
+    answer::answer_with(
+        &db,
+        &host,
+        &row,
+        4,
+        answer::Choice::Option(1),
+        answer::Answerer::Owner,
+        None,
+    )
+    .unwrap();
+    let events = db
+        .with_conn(|c| registry::list_events(c, "hs-a", 10))
+        .unwrap();
+    let answered = events.iter().find(|e| e.kind == "answered").unwrap();
+    assert_eq!(answered.actor, "owner");
+    let d: Value = serde_json::from_str(answered.detail.as_deref().unwrap()).unwrap();
+    assert_eq!(d["choice"]["option"], 1);
+    assert_eq!(d["registered"], true);
+}
+
+fn event(db: &Database, id: &str, kind: &str, detail: Value) {
+    db.with_conn(|c| registry::record_event(c, id, kind, "supervisor", Some(&detail.to_string())))
+        .unwrap();
+}
+
+#[test]
+fn a_teams_numbers_come_from_its_event_log() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    for (id, kind, d) in [
+        ("hs-lead", "blocked", json!({ "seq": 1 })),
+        ("hs-lead", "unblocked", json!({ "blocked_ms": 60_000 })),
+        ("hs-worker", "question", json!({ "seq": 2 })),
+        ("hs-worker", "unblocked", json!({ "blocked_ms": 600_000 })),
+        (
+            "hs-worker",
+            "policy_decision",
+            json!({ "outcome": "allowed" }),
+        ),
+        (
+            "hs-worker",
+            "policy_decision",
+            json!({ "outcome": "denied" }),
+        ),
+        (
+            "hs-worker",
+            "policy_decision",
+            json!({ "outcome": "escalated" }),
+        ),
+        ("hs-lead", "finished", json!({})),
+        ("hs-worker", "commit", json!({ "sha": "abc" })),
+        ("hs-other", "blocked", json!({ "seq": 9 })),
+    ] {
+        event(&db, id, kind, d);
+    }
+    db.with_conn(|c| {
+        for (id, by) in [("hs-lead", "owner"), ("hs-worker", "the command policy")] {
+            registry::record_event(
+                c,
+                id,
+                "answered",
+                by,
+                Some(&json!({ "by": by, "registered": true }).to_string()),
+            )?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let got = stats::report(
+        &db,
+        &events::Scope::Team("hs-lead".into()),
+        &events::Reader::default(),
+    )
+    .unwrap();
+    assert_eq!(got["sessions"], 2, "hs-other is not in the team");
+    assert_eq!(got["dialogs"]["blocked"], 2);
+    assert_eq!(got["dialogs"]["questions"], 1);
+    assert_eq!(got["dialogs"]["answered_by_owner"], 1);
+    assert_eq!(
+        got["dialogs"]["answered_automatically"]["the command policy"],
+        1
+    );
+    assert_eq!(got["waits"]["count"], 2);
+    assert_eq!(got["waits"]["max_ms"], 600_000);
+    assert_eq!(got["waits"]["total_minutes"], 11);
+    assert_eq!(got["policy"]["denied"], 1);
+    assert_eq!(got["work"]["finished_turns"], 1);
+    assert_eq!(got["work"]["commits"], 1);
+}
+
+#[test]
+fn a_policy_summary_counts_since_the_last_one_and_quotes_only_rules() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_session(&db, "hs-p");
+    assert!(
+        policy::summary_since_last(&db, "hs-p").is_none(),
+        "nothing decided"
+    );
+    for (outcome, rule) in [
+        ("allowed", "cargo test"),
+        ("denied", "git push"),
+        ("denied", "git push"),
+        ("escalated", "the policy does not name curl"),
+    ] {
+        event(
+            &db,
+            "hs-p",
+            "policy_decision",
+            json!({ "policy": "builder", "outcome": outcome, "rule": rule, "command": "curl https://example.com" }),
+        );
+    }
+    let line = policy::summary_since_last(&db, "hs-p").unwrap();
+    assert_eq!(
+        line,
+        "Command policy 'builder' on session `hs-p`: 1 allowed, 2 declined (`git push` x2), 1 left to the owner."
+    );
+    assert!(!line.contains("example.com"), "no command the agent wrote");
+    assert!(
+        policy::summary_since_last(&db, "hs-p").is_none(),
+        "said once"
+    );
+    event(
+        &db,
+        "hs-p",
+        "policy_decision",
+        json!({ "policy": "builder", "outcome": "allowed", "rule": "ls" }),
+    );
+    assert!(
+        policy::summary_since_last(&db, "hs-p")
+            .unwrap()
+            .contains("1 allowed, 0 declined")
+    );
+}
