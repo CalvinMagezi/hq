@@ -116,6 +116,46 @@ app, and list every agent on a machine with `hq host status`.
   still types its prompt.
 - Exit summaries use the last screen the supervisor captured while the agent was alive.
 
+## A team run from outside
+
+A remote client (a claude.ai connection, a web chat, the owner's own key) that starts a lead,
+a builder and a reviewer used to get three unrelated sessions. `team: <root session id>` on
+`harness_session_spawn` and `harness_session_handoff` starts the new session under that root
+instead, with everything a delegated worker gets:
+
+- the team's roster (`team_roster`);
+- messages between members (`agent_message_send`);
+- stop-with-root;
+- the limits in `agent_host.teams`: depth, children per session, running sessions per team
+  and starts per hour.
+
+Two rules apply to `team`:
+
+- The root must be running and must be the team's root; naming a worker is refused with the
+  root's id.
+- A claude.ai connection may name only a team it started. An agent inside a session adds
+  workers with `agent_delegate`, and the handoff key cannot reach a team.
+
+A reviewer joining a team with a `task_id` and no `observe` observes the team's running
+coding sessions, so their finished turns and commits reach it. Its command policy may not be
+wider than the root's.
+
+**Moving on to the next step.** File each plan step as a sub-task, and move a running session
+on with `harness_session_link` to the next one:
+
+- Its goal moves with it: the new task's title and description, with its acceptance criteria
+  as the definition of done. Drive reads that, not the launch brief.
+- The reply's `next_message` is the one line the session needs: "Continue with <task id>:
+  <title>. Its acceptance is on the task." `continue: true` sends it.
+- The task's description is never pasted into the session.
+
+**Decisions a task waits on.** `task_decisions`, and "Waiting for you" on the task's page in
+the web app, list every dialog the task's sessions and their teams wait on the owner for. Each
+comes with its question, command or path, and options, for example a command a policy left to
+you or a question an agent asked. Allow once and Decline there answer through the same route
+as the phone's notification buttons, so a dialog that moved on is refused and the answer is
+recorded with who gave it.
+
 ## Following sessions by events
 
 A remote client that drives a team used to read every agent's screen to learn whether
@@ -145,6 +185,20 @@ now writes what happens to an event log, and `harness_session_events` reads it a
   that is refused.
 - **Untrusted:** dialog text is the agent's own output, so reading events counts as reading
   untrusted content, the same as `harness_session_logs`.
+
+**From a cloud client, read-only (opt-in).** A client somewhere else (a cloud session, a CI
+job) can follow a team without any key that could change it. Set `AGENTHQ_SPARK_API_KEY` on
+the server (unset, `/mcp` refuses it), give the client that key and HQ's `/mcp` URL, and have
+it loop on one call:
+
+```json
+{"tool": "harness_session_events", "args": {"team": "<root session id>", "after": 0, "wait_secs": 40}}
+```
+
+sent through `hq_call` with `Authorization: Bearer <spark key>`. Each reply's `next` is the
+next call's `after`. The Spark scope reads sessions, logs and events and nothing else: it
+cannot answer, send, start or stop a session. Answering stays with the owner's phone, the web
+app, or a full key.
 
 ## Command policies
 

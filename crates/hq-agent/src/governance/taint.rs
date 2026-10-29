@@ -20,6 +20,7 @@ const UNTRUSTED_SOURCE_TOOLS: &[&str] = &[
     "harness_session_logs",
     "harness_session_pending",
     "harness_session_events",
+    "task_decisions",
     "host_read",
     "session_search",
     "vault_read",

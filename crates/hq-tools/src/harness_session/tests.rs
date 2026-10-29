@@ -4317,3 +4317,152 @@ fn an_events_read_names_one_scope() {
     );
     assert!(Scope::from_args(&json!({ "team": "hs-1", "task_id": "T-1" })).is_err());
 }
+
+#[test]
+fn a_remote_client_adds_sessions_to_a_team_it_may_reach() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    let (root, depth) = team::join(&db, &json!({}), "hs-lead").unwrap();
+    assert_eq!((root.as_str(), depth), ("hs-lead", 1));
+    let connector = json!({ CONNECTOR_ARG: "Claude" });
+    assert!(
+        team::join(&db, &connector, "hs-lead").is_ok(),
+        "a team it started"
+    );
+    db.with_conn(|c| registry::set_origin(c, "hs-other", registry::ORIGIN_USER))
+        .unwrap();
+    assert!(
+        team::join(&db, &connector, "hs-other").is_err(),
+        "not one it started"
+    );
+    let err = team::join(&db, &json!({}), "hs-worker")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("name the team's root, hs-lead"), "{err}");
+    let err = team::join(&db, &json!({ HANDOFF_SCOPE_ARG: true }), "hs-lead")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("handoff key"), "{err}");
+    let err = team::join(&db, &json!({ CALLER_SESSION_ARG: "hs-worker" }), "hs-lead")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("agent_delegate"), "{err}");
+    db.with_conn(|c| registry::set_status(c, "hs-lead", registry::STATUS_STOPPED))
+        .unwrap();
+    assert!(
+        team::join(&db, &json!({}), "hs-lead").is_err(),
+        "a stopped root"
+    );
+    assert_eq!(team::writers(&db, "hs-lead"), ["hs-worker"]);
+}
+
+#[test]
+fn moving_a_session_to_the_next_task_moves_its_goal_and_names_the_task_only() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let first = a_task(&db);
+    let next = db
+        .with_conn(|c| {
+            let new = hq_db::tasks::NewTask {
+                title: "step two: the parser",
+                description: "Long brief nobody should paste.\n\nAcceptance criteria:\nthe parser tests pass",
+                created_by: "test",
+                ..Default::default()
+            };
+            Ok(hq_db::tasks::create_task(c, "tk-next", "in-1", &new)?.id)
+        })
+        .unwrap();
+    seed_session(&db, "hs-move");
+    link(&db, "hs-move", &first, None).unwrap();
+    let moved = link_with(&db, "hs-move", &next, None, false, None).unwrap();
+    assert_eq!(moved["goal_moved"], true);
+    let message = moved["next_message"].as_str().unwrap();
+    assert!(
+        message.starts_with("Continue with ") && message.contains("step two: the parser"),
+        "{message}"
+    );
+    assert!(!message.contains("Long brief"), "never the description");
+    let row = get_row(&db, "hs-move").unwrap();
+    assert!(
+        row.goal
+            .as_deref()
+            .unwrap()
+            .starts_with("step two: the parser")
+    );
+    assert_eq!(row.done_criteria.as_deref(), Some("the parser tests pass"));
+    let same = link_with(&db, "hs-move", &next, None, false, None).unwrap();
+    assert!(
+        same.get("goal_moved").is_none(),
+        "linking to the same task moves nothing"
+    );
+}
+
+#[test]
+fn a_task_lists_the_dialogs_its_agents_wait_on_you_for() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let task = event_world(&db);
+    let item = hq_core::types::ValueItem::new(
+        "session-supervisor",
+        hq_core::types::ValueKind::ActionNeeded,
+        "Harness session 'hs-worker' is waiting for you",
+        "x",
+    );
+    hq_db::value_items::insert(&db, &item).unwrap();
+    let options = vec![
+        hq_db::dialog_alerts::DialogOption {
+            id: 1,
+            label: "Yes".into(),
+            remember: false,
+            typed: false,
+        },
+        hq_db::dialog_alerts::DialogOption {
+            id: 2,
+            label: "No".into(),
+            remember: false,
+            typed: false,
+        },
+    ];
+    hq_db::dialog_alerts::record(
+        &db,
+        &hq_db::dialog_alerts::NewDialogAlert {
+            item_id: &item.id,
+            session_id: "hs-worker",
+            pending_seq: 9,
+            kind: "command",
+            question: Some("Run this?"),
+            command: Some("curl https://example.com"),
+            options: &options,
+        },
+    )
+    .unwrap();
+    let got = decisions::for_task(&db, &task, &events::Reader::default()).unwrap();
+    let list = got["decisions"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "the worker is in the task's team");
+    assert_eq!(list[0]["seq"], 9);
+    assert_eq!(list[0]["approve"]["label"], "Yes");
+    hq_db::dialog_alerts::claim(&db, &item.id, "approve").unwrap();
+    let got = decisions::for_task(&db, &task, &events::Reader::default()).unwrap();
+    assert!(got["decisions"].as_array().unwrap().is_empty(), "answered");
+}
+
+fn seed_session(db: &Database, id: &str) {
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id,
+                harness: "claude-code",
+                label: id,
+                cwd: "/w",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "local",
+                    agent_name: id,
+                    workspace_id: "w1",
+                    pane_id: "w1:p1",
+                },
+                purpose: None,
+            },
+        )
+    })
+    .unwrap();
+}

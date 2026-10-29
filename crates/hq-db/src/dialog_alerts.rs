@@ -155,6 +155,54 @@ pub fn get(db: &Database, item_id: &str) -> Result<Option<DialogAlert>> {
     })
 }
 
+/// A dialog still waiting for the owner: its alert is in the inbox and nobody has answered it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OpenDecision {
+    pub item_id: String,
+    /// The alert's title ("Harness session '...' is waiting for you").
+    pub title: String,
+    pub asked_at: String,
+    pub alert: DialogAlert,
+}
+
+/// The dialogs of `sessions` still waiting for the owner, oldest first.
+pub fn open_for_sessions(db: &Database, sessions: &[String]) -> Result<Vec<OpenDecision>> {
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let marks = (0..sessions.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT d.item_id, v.title, v.created_at FROM dialog_alerts d \
+         JOIN value_items v ON v.id = d.item_id \
+         WHERE d.answered_at IS NULL AND v.state IN ('pending', 'routed', 'delivered') \
+         AND d.session_id IN ({marks}) ORDER BY v.created_at, d.item_id"
+    );
+    let found: Vec<(String, String, String)> = db.with_conn(|c| {
+        let mut stmt = c.prepare(&sql)?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(sessions.iter()), |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })?;
+    let mut out = Vec::new();
+    for (item_id, title, asked_at) in found {
+        if let Some(alert) = get(db, &item_id)? {
+            out.push(OpenDecision {
+                item_id,
+                title,
+                asked_at,
+                alert,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Claims the dialog for one answer. False when it was already answered, so a second tap or a
 /// replayed token answers nothing.
 pub fn claim(db: &Database, item_id: &str, answer: &str) -> Result<bool> {
@@ -238,6 +286,43 @@ mod tests {
             option(2, "No", false, false),
         ];
         assert_eq!(approve_option("question", &question), None);
+    }
+
+    #[test]
+    fn open_decisions_are_the_unanswered_alerts_still_in_the_inbox() {
+        let db = Database::open_memory().unwrap();
+        let options = copilot_path();
+        for (item, session) in [("item-a", "hs-1"), ("item-b", "hs-1"), ("item-c", "hs-2")] {
+            let v = hq_core::types::ValueItem {
+                id: item.into(),
+                ..hq_core::types::ValueItem::new(
+                    "session-supervisor",
+                    hq_core::types::ValueKind::ActionNeeded,
+                    "waiting",
+                    "body",
+                )
+            };
+            crate::value_items::insert(&db, &v).unwrap();
+            record(
+                &db,
+                &NewDialogAlert {
+                    item_id: item,
+                    session_id: session,
+                    pending_seq: 1,
+                    kind: "path",
+                    question: Some("Allow?"),
+                    command: Some("/tmp"),
+                    options: &options,
+                },
+            )
+            .unwrap();
+        }
+        claim(&db, "item-b", "approve").unwrap();
+        crate::value_items::dismiss_by_id(&db, "item-c").unwrap();
+        let open = open_for_sessions(&db, &["hs-1".into(), "hs-2".into()]).unwrap();
+        let ids: Vec<&str> = open.iter().map(|d| d.item_id.as_str()).collect();
+        assert_eq!(ids, ["item-a"], "answered and dismissed ones are not open");
+        assert!(open_for_sessions(&db, &[]).unwrap().is_empty());
     }
 
     #[test]

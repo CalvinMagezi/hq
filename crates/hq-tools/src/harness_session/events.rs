@@ -73,7 +73,7 @@ fn team_of(c: &rusqlite::Connection, session: &str) -> Result<Vec<String>> {
 
 /// The sessions `scope` names that `reader` may see. Naming a session it may not see is an
 /// error; a task or team that holds some is narrowed to the ones it may.
-fn sessions_in(db: &Arc<Database>, scope: &Scope, reader: &Reader) -> Result<Vec<String>> {
+pub fn sessions_in(db: &Arc<Database>, scope: &Scope, reader: &Reader) -> Result<Vec<String>> {
     let (scope, reader) = (scope.clone(), reader.clone());
     let named = matches!(scope, Scope::Sessions(_));
     let candidates: Vec<String> = db.with_conn(|c| {
