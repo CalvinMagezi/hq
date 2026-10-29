@@ -40,7 +40,7 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
     setBusy(true)
     setError(null)
     try {
-      await answerDecision(d.item_id, choice)
+      await answerDecision(d.notification_id, choice)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not answer that.')
     } finally {
