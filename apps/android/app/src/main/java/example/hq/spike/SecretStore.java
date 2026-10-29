@@ -35,6 +35,7 @@ final class SecretStore {
     private static final String PREFS = "secrets";
     private static final String INTERNAL_PREFS = "internal";
     private static final String WEB_TOKEN = "web_token";
+    private static final String SERVER_TOKEN = "server_token";
     private static final int TOKEN_BYTES = 18;
     private static final String TRANSFORM = "AES/GCM/NoPadding";
     private static final int KEY_BITS = 256;
@@ -113,6 +114,34 @@ final class SecretStore {
         } catch (GeneralSecurityException | IOException e) {
             throw new IllegalStateException("web token not replaced: " + e.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * The device token this phone holds for the owner's HQ on a server (ServerHq), sealed like the web
+     * token; null when none is kept or it can no longer be opened, which means signing in again.
+     */
+    static synchronized String serverToken(Context c) {
+        String stored = c.getSharedPreferences(INTERNAL_PREFS, Context.MODE_PRIVATE).getString(SERVER_TOKEN, null);
+        if (stored == null) return null;
+        try {
+            return open(SERVER_TOKEN, stored);
+        } catch (Exception e) {
+            Log.e(HubService.TAG, "server token cannot be opened: " + e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
+    static synchronized void keepServerToken(Context c, String token) {
+        SharedPreferences internal = c.getSharedPreferences(INTERNAL_PREFS, Context.MODE_PRIVATE);
+        try {
+            if (!internal.edit().putString(SERVER_TOKEN, seal(SERVER_TOKEN, token)).commit()) throw new IOException("preferences not written");
+        } catch (GeneralSecurityException | IOException e) {
+            throw new IllegalStateException("server token not kept: " + e.getClass().getSimpleName());
+        }
+    }
+
+    static synchronized void forgetServerToken(Context c) {
+        c.getSharedPreferences(INTERNAL_PREFS, Context.MODE_PRIVATE).edit().remove(SERVER_TOKEN).commit();
     }
 
     private static String newToken() {

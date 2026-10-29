@@ -25,7 +25,15 @@ data class KeepPage(val noticeTitle: String, val notice: String, val warn: Boole
 data class ChannelFacts(val id: String, val name: String, val importance: Int, val sound: Boolean)
 
 /** [buttonsSupported] is false where Android cannot ask for an unlock on a notification button (before Android 12), so the switch would do nothing. */
-data class NotifFacts(val allowed: Boolean = true, val channels: List<ChannelFacts> = emptyList(), val answers: Boolean = true, val buttonsSupported: Boolean = true)
+data class NotifFacts(val allowed: Boolean = true, val channels: List<ChannelFacts> = emptyList(), val answers: Boolean = true, val buttonsSupported: Boolean = true, val server: ServerFacts = ServerFacts())
+
+/** The owner's HQ on a server this phone is signed in to for its questions: its address, and whether it signed the phone out. */
+data class ServerFacts(val address: String? = null, val signedOut: Boolean = false) {
+    val connected: Boolean get() = address != null && !signedOut
+}
+
+/** [SettingsUi.busy] while the phone signs in to a server HQ. */
+internal const val SERVER_BUSY = "server-hq"
 
 /** What Capture and the widgets are set to, and what is saved on the phone but not yet sent. */
 data class CaptureFacts(val shareOpens: String = "note", val showTitles: Boolean = false, val waiting: List<example.hq.spike.capture.Queued> = emptyList())
