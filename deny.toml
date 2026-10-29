@@ -33,7 +33,7 @@ ignore = [
     # with .cargo/audit.toml, which `cargo audit` reads.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38.4 quadratic duplicate-attribute check, via typst/citationberg. Parser is not reachable from note content; see the comment above." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38.4 unbounded namespace-declaration allocation, via typst/citationberg. Parser is not reachable from note content; see the comment above." },
-    # A yanked crate, accepted on purpose and only until 2026-10-31.
+    # A yanked crate, accepted on purpose and only until 2026-11-30.
     # zip 8.6.0 is yanked, and so is every zip release except 9.0.3. The maintainers
     # yanked them for GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627 and GHSA-4684-h2q9-2vcp
     # (symlink and permission handling when extracting an archive to disk) and say more
@@ -45,23 +45,26 @@ ignore = [
     # Upgrade status on 2026-10-18: rust_xlsxwriter 0.100 requires zip 9, but docx-rs 0.4.22,
     # umya-spreadsheet 3.1.1 and transmutation 0.3.5 are their latest releases and all still
     # require zip 8, so zip 8.6.0 stays in Cargo.lock until all three move.
-    # Review on 2026-10-31, when the promised advisories should be out: re-read them against
-    # the code above, and drop this entry once those crates ship builds that use zip 9.
+    # Reviewed 2026-10-29: unchanged. docx-rs 0.4.22 and transmutation 0.3.5 are still the
+    # latest releases and still require zip ^8.6. umya-spreadsheet has a 4.0.0 beta on zip 9,
+    # but transmutation requires umya-spreadsheet ^3, whose latest (3.1.1) is on zip 8. The
+    # follow-up advisories are the RUSTSEC ids below; each was re-read against the callers.
+    # Next review 2026-11-30: drop this entry once those crates ship builds that use zip 9.
     # Tracked as HQ-VMS-036.
-    { crate = "zip@8.6.0", reason = "Yanked with all other zip releases except 9.0.3 after GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627 and GHSA-4684-h2q9-2vcp, which are all in archive extraction that nothing here calls. No upgrade exists yet because docx-rs, umya-spreadsheet and transmutation require zip 8. Expires 2026-10-31; see the comment above." },
+    { crate = "zip@8.6.0", reason = "Yanked with all other zip releases except 9.0.3 after GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627 and GHSA-4684-h2q9-2vcp, which are all in archive extraction that nothing here calls. No upgrade exists yet because docx-rs, umya-spreadsheet and transmutation require zip 8. Expires 2026-11-30; see the comment above." },
     # Advisories published after the yank (the follow-ups announced above). All three are in
     # ZipArchive::extract and ZipStreamReader::extract, which nothing here calls (the
     # callers are checked in the comment above). Same exit and same review date as the
     # yanked entry. Keep in step with .cargo/audit.toml, which `cargo audit` reads.
-    { id = "RUSTSEC-2026-0367", reason = "zip 8.6.0 keeps SUID/SGID bits when extracting an archive to disk. Nothing calls ZipArchive::extract or ZipStreamReader::extract; see the comment above. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0368", reason = "zip 8.6.0 ZipArchive::extract creates symlinks whose targets can leave the destination directory. Nothing calls the extraction code; see the comment above. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0369", reason = "zip 8.6.0 ZipArchive::extract and ZipStreamReader::extract apply Unix permissions through symlinks. Nothing calls the extraction code; see the comment above. Expires 2026-10-31." },
+    { id = "RUSTSEC-2026-0367", reason = "zip 8.6.0 keeps SUID/SGID bits when extracting an archive to disk. Nothing calls ZipArchive::extract or ZipStreamReader::extract; see the comment above. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0368", reason = "zip 8.6.0 ZipArchive::extract creates symlinks whose targets can leave the destination directory. Nothing calls the extraction code; see the comment above. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0369", reason = "zip 8.6.0 ZipArchive::extract and ZipStreamReader::extract apply Unix permissions through symlinks. Nothing calls the extraction code; see the comment above. Expires 2026-11-30." },
     # zstd 0.13.3 and zstd-safe 7.x, pinned by zip 8.6.0 (via docx-rs, rust_xlsxwriter,
     # umya-spreadsheet and transmutation). The fixes need zstd 0.14.3 and zstd-safe 8.2,
     # which zip 8 cannot take. Review with the zip ids above.
-    { id = "RUSTSEC-2026-0391", reason = "zstd context reuse across streams. zip 8.6.0 builds a new zstd::Decoder for every entry (compression.rs), so no context is reused. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0403", reason = "zstd-safe legacy-frame decompression. The `legacy` feature is not enabled anywhere in the tree, so legacy frames are rejected. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0398", reason = "zstd-safe Seekable::decompress. The `seekable` feature is not enabled and nothing uses the seekable format. Expires 2026-10-31." },
+    { id = "RUSTSEC-2026-0391", reason = "zstd context reuse across streams. zip 8.6.0 builds a new zstd::Decoder for every entry (compression.rs), so no context is reused. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0403", reason = "zstd-safe legacy-frame decompression. The `legacy` feature is not enabled anywhere in the tree, so legacy frames are rejected. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0398", reason = "zstd-safe Seekable::decompress. The `seekable` feature is not enabled and nothing uses the seekable format. Expires 2026-11-30." },
     # Ten more zstd-safe 7.3.0 advisories of 2026-10-16, published after the three above, all
     # fixed in zstd-safe 8.2 and all marked unsound (no known exploit). Reviewed 2026-10-29
     # against the only caller, zstd 0.13.3 as zip 8.6.0 uses it: default features off, so
@@ -69,16 +72,16 @@ ignore = [
     # `zdict_builder`), and zip calls nothing but a streaming zstd::Decoder (one new context
     # per entry, compression.rs) and a streaming zstd::stream::write::Encoder (write.rs).
     # Nothing else in the tree depends on zstd. Same exit and review date as the ids above.
-    { id = "RUSTSEC-2026-0395", reason = "zstd-safe CParameter::StableInBuffer. Needs the `experimental` feature, which is off; zip never sets it. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0396", reason = "zstd-safe Seekable reads a NULL or out-of-bounds seek table. The `seekable` feature is off, so the module is not even built. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0397", reason = "zstd-safe OutBuffer::around_pos. Neither zstd 0.13.3 nor zip calls it. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0399", reason = "zstd-safe CCtx::init_using_cdict and DCtx::init_using_ddict. Needs the `experimental` feature, which is off, and nothing uses dictionaries. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0400", reason = "zstd-safe one-shot DCtx and CCtx calls on a context with an open stream. zip only streams, with a new context per entry, and never makes a one-shot call. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0401", reason = "zstd-safe train_from_buffer. Needs the `zdict_builder` feature, which is off, and nothing trains dictionaries. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0402", reason = "zstd-safe CCtx::try_clone on a multithreaded context. Needs `experimental` and `zstdmt`, both off; zip never clones a context. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0404", reason = "zstd-safe DCtx::try_clone double free. Needs the `experimental` feature, which is off; zip never clones a context. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0405", reason = "zstd-safe SeekableCStream::compress_stream with an out-of-range InBuffer::pos. The `seekable` feature is off. Expires 2026-10-31." },
-    { id = "RUSTSEC-2026-0406", reason = "zstd-safe dictionary changes on a multithreaded context with an unfinished frame. Needs `zstdmt` (NbWorkers), which is off; zip never calls multithread. Expires 2026-10-31." },
+    { id = "RUSTSEC-2026-0395", reason = "zstd-safe CParameter::StableInBuffer. Needs the `experimental` feature, which is off; zip never sets it. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0396", reason = "zstd-safe Seekable reads a NULL or out-of-bounds seek table. The `seekable` feature is off, so the module is not even built. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0397", reason = "zstd-safe OutBuffer::around_pos. Neither zstd 0.13.3 nor zip calls it. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0399", reason = "zstd-safe CCtx::init_using_cdict and DCtx::init_using_ddict. Needs the `experimental` feature, which is off, and nothing uses dictionaries. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0400", reason = "zstd-safe one-shot DCtx and CCtx calls on a context with an open stream. zip only streams, with a new context per entry, and never makes a one-shot call. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0401", reason = "zstd-safe train_from_buffer. Needs the `zdict_builder` feature, which is off, and nothing trains dictionaries. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0402", reason = "zstd-safe CCtx::try_clone on a multithreaded context. Needs `experimental` and `zstdmt`, both off; zip never clones a context. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0404", reason = "zstd-safe DCtx::try_clone double free. Needs the `experimental` feature, which is off; zip never clones a context. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0405", reason = "zstd-safe SeekableCStream::compress_stream with an out-of-range InBuffer::pos. The `seekable` feature is off. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0406", reason = "zstd-safe dictionary changes on a multithreaded context with an unfinished frame. Needs `zstdmt` (NbWorkers), which is off; zip never calls multithread. Expires 2026-11-30." },
 ]
 
 [licenses]
