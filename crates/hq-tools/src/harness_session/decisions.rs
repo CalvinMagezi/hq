@@ -20,6 +20,8 @@ pub fn for_task(db: &Arc<Database>, task: &str, reader: &Reader) -> Result<Value
             let a = &d.alert;
             json!({
                 "item_id": d.item_id,
+                // The id the notification routes take (`POST /api/notifications/{id}/answer`).
+                "notification_id": format!("val_{}", d.item_id),
                 "asked_at": d.asked_at,
                 "session_id": a.session_id,
                 "seq": a.pending_seq,
