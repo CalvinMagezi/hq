@@ -503,6 +503,30 @@ the new session under that root. Roster, messages, stop-with-root and the tree
 limits then apply. It is kept apart from `from_session`, which means the caller's
 own identity. A reviewer in a team observes the team's writers by default.
 
+### What phases 4.1 to 4.3 built
+
+- **4.1** as designed, on `harness_session_spawn`, `harness_session_handoff`, `agent_delegate`
+  (`worktree: true` is a branch `hq/<task id>`), `hq sessions spawn --branch`, and the web's New
+  agent dialog. The host's `worktree.add` makes it under
+  `<HQ folder>/worktrees/<repository>/<session>` (the repository's main folder names it, so a
+  worktree made from another worktree sits with its siblings), refuses names that could be read
+  as options, and reports `branch_in_use` from git's own refusal. A launch that fails after
+  the worktree was made removes it again. `owns` lives in `session_checkouts` (migration 104),
+  next to the worktree and the last commit seen, so the session row is unchanged. The overlap
+  check skips the new session's own parent: refusing it would refuse every `agent_delegate`
+  of a coding worker into its delegator's folder, which is the default. Reviewers, monitors
+  and researchers are never counted as writers. A session the host's agent list no longer
+  has is skipped, as the supervisor reads it.
+- **4.2** with the commit read in the supervisor's host phase, only for finished agents HQ
+  tracks a checkout for, so it costs one `git log -1` per finished turn. The first commit seen
+  is where the session started; each later one is named once. The `commit` event goes to the
+  existing `harness_session_events` table, ready for phase 3's reader.
+- **4.3** at stop and at exit, through the host's `worktree.remove`, which removes only a clean
+  worktree under the HQ folder. `harness_session_resume` reopens it.
+- The host gate allows `worktree.add`, `worktree.remove` and `agent.head`, so all of this works
+  on a paired machine.
+- Not built here: the `reviewer` policy's push rule, which is phase 2.
+
 ## Phase 5: hosts that stay awake, and noticing when one does not
 
 **5.1 Unreachable alert.**
@@ -562,7 +586,7 @@ phase 3's items and the task's `waiting_on`, not a new store.
 |------|-----|----------|
 | Phase 0 | built | Copilot teams run with few prompts and visible blocks; folder requests block instead of going quiet |
 | Alerts, first PR | #298: the excerpt markers, a server HQ in the app, ETag on the notifications list | The phone shows agent prompts from a server HQ |
-| 4.1 to 4.3 | 1 to 2, shared with agent-teams step 4 | No shared working trees |
+| 4.1 to 4.3 | built | No shared working trees |
 | Phase 5 | built | A sleeping host is noticed; a laptop can stay awake while agents run |
 | Phase 1 | built | Structured answers; option buttons in the web Sessions panel |
 | HQ-RDT-003 | built | Answer buttons on the phone and in web push |

@@ -1,6 +1,6 @@
 use super::{
-    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, LaunchRequest, Launched, LogsSince,
-    PendingRead, PromptOutcome,
+    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, LaunchRequest, Launched,
+    LogsSince, PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -107,6 +107,36 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' cannot answer dialogs", self.name()),
+        })
+    }
+
+    /// Makes (or finds again) session `session`'s git worktree of the repository `repo` is in,
+    /// under the host's HQ folder. Only the built-in host can.
+    fn worktree_add(
+        &self,
+        _repo: &str,
+        _session: &str,
+        _base: &WorktreeBase,
+    ) -> Result<WorktreeInfo, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot make worktrees", self.name()),
+        })
+    }
+
+    /// Removes a worktree the host made, unless it has uncommitted changes.
+    fn worktree_remove(&self, _path: &str) -> Result<WorktreeRemoved, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot remove worktrees", self.name()),
+        })
+    }
+
+    /// The commit `target`'s folder is at; `None` outside a repository.
+    fn head(&self, _target: &str) -> Result<Option<GitHead>, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot read commits", self.name()),
         })
     }
 
@@ -330,6 +360,20 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         args: Vec<String>,
     ) -> Result<(), AgentHostError> {
         (**self).update_resume(name, kind, args)
+    }
+    fn worktree_add(
+        &self,
+        repo: &str,
+        session: &str,
+        base: &WorktreeBase,
+    ) -> Result<WorktreeInfo, AgentHostError> {
+        (**self).worktree_add(repo, session, base)
+    }
+    fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
+        (**self).worktree_remove(path)
+    }
+    fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
+        (**self).head(target)
     }
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
         (**self).awaiting()

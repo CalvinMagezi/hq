@@ -12,6 +12,7 @@
 pub mod answer;
 mod brief;
 pub mod category;
+pub mod checkout;
 mod coalesce;
 mod connector_notice;
 mod control;

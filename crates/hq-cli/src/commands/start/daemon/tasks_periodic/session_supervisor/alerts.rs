@@ -27,6 +27,7 @@ pub(super) fn alert_finished(
     row: &registry::HarnessSessionRow,
     agent: &AgentInfo,
     screen: &str,
+    head: Option<&GitHead>,
 ) {
     let (id, seq) = (row.id.clone(), agent.state_change_seq);
     match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
@@ -35,18 +36,33 @@ pub(super) fn alert_finished(
     }
     let link = record_on_task(db, row, Event::Finished);
     let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
+    // A commit made in the turn is named, so a reviewer checks out exactly that.
+    let db_arc = Arc::new(db.clone());
+    let commit = head
+        .filter(|h| checkout::note_commit(&db_arc, &row.id, h))
+        .map(checkout::commit_line);
+    let (finished, finished_turn) = match &commit {
+        Some(line) => (
+            format!("finished and {line}"),
+            format!("finished a turn and {line}"),
+        ),
+        None => ("finished".to_string(), "finished a turn".to_string()),
+    };
     // A delegated session tells whoever delegated it, whatever else happens here.
-    if let Err(e) = hq_tools::a2a::report_to_parent(db, row, "finished", &excerpt) {
+    if let Err(e) = hq_tools::a2a::report_to_parent(db, row, &finished, &excerpt) {
         tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
     }
-    report_to_observers(db, row, "finished a turn", &excerpt);
+    report_to_observers(db, row, &finished_turn, &excerpt);
     if hand_to_chat(db, row, WAKE_FINISHED) {
         return;
     }
     let label = session_label(row);
     let task_line = task_line(link.as_ref());
+    let commit_line = commit
+        .as_deref()
+        .map_or_else(String::new, |line| format!(" It {line}."));
     let body = format!(
-        "Session {} on {} finished its task and is waiting for the next instruction.\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
+        "Session {} on {} finished its task and is waiting for the next instruction.{commit_line}\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
         row.id, row.host,
     );
     post_relay_nudge(
@@ -259,5 +275,24 @@ pub(super) fn session_label(row: &registry::HarnessSessionRow) -> String {
         row.harness.clone()
     } else {
         format!("{} ({})", row.label, row.harness)
+    }
+}
+
+/// The line an exit message ends with when the session had a worktree.
+pub(super) fn worktree_line(released: Option<&serde_json::Value>) -> String {
+    let Some(v) = released else {
+        return String::new();
+    };
+    match (
+        v.get("removed").and_then(|p| p.as_str()),
+        v.get("kept").and_then(|p| p.as_str()),
+    ) {
+        (Some(path), _) => {
+            format!("\nIts worktree {path} was removed; its branch keeps every commit.")
+        }
+        (None, Some(path)) => format!(
+            "\nIts worktree {path} was kept: it has changes nobody committed. `harness_session_resume` continues there."
+        ),
+        _ => String::new(),
     }
 }

@@ -1220,3 +1220,71 @@ async fn a_sweep_records_a_silent_host_as_an_outage() {
     );
     assert_eq!(status_of(&db, "hs-away"), registry::STATUS_RUNNING);
 }
+
+/// A host whose finished agent's folder is at `sha`.
+fn host_at_commit(dir: &Path, name: &str, seq: u64, sha: &str) -> ScriptedHost {
+    let list = format!(
+        r#"{{"agent":"claude","agent_status":"done","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":{seq}}}"#
+    );
+    let head =
+        format!(r#"{{"head":{{"sha":"{sha}","subject":"add the parser","branch":"feature"}}}}"#);
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"result\":{{\"agents\":[{list}]}}}}' ;;\n  *\"agent read\"*) printf '%s' 'done' ;;\n  *\"agent head\"*) printf '%s' '{head}' ;;\n  *) exit 2 ;;\nesac\n"
+    );
+    let path = dir.join(format!("host-{seq}"));
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptedHost::new(path)
+}
+
+#[tokio::test]
+async fn a_finished_turn_names_the_commit_it_made_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-w");
+    db.with_conn(|c| {
+        hq_db::session_checkouts::record(
+            c,
+            &hq_db::session_checkouts::NewCheckout {
+                session_id: "hs-w",
+                folder: "/tmp",
+                worktree: None,
+                repo: None,
+                branch: None,
+                detached: None,
+                owns: &[],
+                head: Some("aaa111"),
+            },
+        )
+    })
+    .unwrap();
+
+    sweep(
+        tmp.path(),
+        &db,
+        &host_at_commit(tmp.path(), "hs-w", 3, "bbb222"),
+        None,
+    )
+    .await;
+    let body = only_body(tmp.path());
+    assert!(
+        body.contains("It committed bbb222 \"add the parser\" on branch feature."),
+        "{body}"
+    );
+    let events = db
+        .with_conn(|c| registry::list_events(c, "hs-w", 10))
+        .unwrap();
+    assert_eq!(events.iter().filter(|e| e.kind == "commit").count(), 1);
+
+    // The next finished turn with nothing new committed says nothing about a commit.
+    std::fs::remove_dir_all(mailbox_dir(tmp.path())).unwrap();
+    sweep(
+        tmp.path(),
+        &db,
+        &host_at_commit(tmp.path(), "hs-w", 4, "bbb222"),
+        None,
+    )
+    .await;
+    let body = only_body(tmp.path());
+    assert!(!body.contains("committed"), "{body}");
+}

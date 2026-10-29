@@ -36,6 +36,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   const [purpose, setPurpose] = useState<Purpose>('general')
   const [prompt, setPrompt] = useState('')
   const [label, setLabel] = useState('')
+  const [branch, setBranch] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<LaunchReport | null>(null)
@@ -72,6 +73,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
         ...(folder ? { folder } : {}),
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
         ...(label.trim() ? { label: label.trim() } : {}),
+        ...(!generalPurpose && branch.trim() ? { branch: branch.trim() } : {}),
       })
       if (launched.blocked || launched.note) setReport(launched)
       else onStarted(launched.session_id)
@@ -206,6 +208,25 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
                 </label>
                 <input id="agent-name" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={`${FIELD_CLASS} h-11 sm:h-9`} />
               </div>
+
+              {!generalPurpose && (
+                <div>
+                  <label htmlFor="agent-branch" className={LABEL_CLASS}>
+                    Its own branch (optional)
+                  </label>
+                  <input
+                    id="agent-branch"
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    maxLength={120}
+                    placeholder="feature/login-limits"
+                    className={`${FIELD_CLASS} h-11 sm:h-9`}
+                  />
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    It works in a copy of the folder on this branch, so two agents never edit the same files. Needed when another agent already works in this folder.
+                  </p>
+                </div>
+              )}
             </>
           )}
         </div>

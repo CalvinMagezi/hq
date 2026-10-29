@@ -79,9 +79,12 @@ version gets `protocol_mismatch`.
 | `host.dirs` | optional `path` (the HQ folder when absent) | `path`, `parent`, `dirs` (`name`, `path`), `truncated`; only folders inside the HQ folder, symlinks out of it refused |
 | `host.mkdir` | `name`, optional `parent` | `{"path"}`; one folder name (no slashes, colons, `~`, `$` or backticks), idempotent |
 | `host.stop` | none | `{}` |
+| `worktree.add` | `repo` (a folder in the repository), `session` (names the worktree's folder), and `branch` or `detached` (a commit or ref) | `path`, `repo` (the repository's main folder), `branch`, `head`, `created`; a git worktree at `<HQ folder>/worktrees/<repository>/<session>`. A branch that does not exist is made from the repository folder's current commit; one checked out in another worktree is refused with `branch_in_use`. Names that could be read as options are refused. Called again for the same session and branch, it returns the existing worktree. |
+| `worktree.remove` | `path` | `{removed, dirty}`; only a worktree under `<HQ folder>/worktrees/`, and only when `git status` is clean, otherwise it is kept (`dirty: true`). The branch keeps every commit. |
 | `agent.spawn` | `name`, `argv`, `cwd`, optional `agent` (kind, for state detection), `resume_argv` (see Restarts), `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
 | `agent.list` | none | `{"agents": [...]}` |
 | `agent.get` | `name` | agent info |
+| `agent.head` | `name` | `{"head": {sha, subject, branch} or null}`: the commit the agent's folder is at |
 | `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`, `styled`; default `recent_unwrapped`; `styled` is `recent` with color and style as ANSI escape sequences), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
 | `agent.send_text` | `name`, `text` | `{}` (raw bytes, as given) |
 | `agent.paste` | `name`, `text` | `{}` (bracketed paste when the program enabled it) |

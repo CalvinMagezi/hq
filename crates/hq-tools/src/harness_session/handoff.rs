@@ -51,6 +51,10 @@ pub struct HandoffRequest {
     pub purpose: Option<super::Purpose>,
     /// The model to start the harness on; blank is the harness's own default.
     pub model: String,
+    /// Start in a worktree of its own (see `SpawnRequest::worktree`).
+    pub worktree: Option<crate::agent_host::WorktreeBase>,
+    /// Paths it writes to in a shared folder (see `SpawnRequest::owns`).
+    pub owns: Vec<String>,
 }
 
 fn non_blank(s: &str) -> Option<&str> {
@@ -301,6 +305,8 @@ async fn run_handoff(
             purpose: req.purpose,
             observe: &[],
             model: non_blank(&req.model),
+            worktree: req.worktree.clone(),
+            owns: &req.owns,
         },
     )
     .await;

@@ -659,6 +659,12 @@ pub struct SpawnRequest<'a> {
     pub observe: &'a [String],
     /// The model to start the harness on; `None` is the harness's own default.
     pub model: Option<&'a str>,
+    /// Start in a git worktree of `cwd`'s repository of its own: a writer's branch or a
+    /// reviewer's commit. `None` starts in `cwd` itself.
+    pub worktree: Option<crate::agent_host::WorktreeBase>,
+    /// Paths (relative to `cwd`) the session writes to. A coding session in a folder another
+    /// is writing in is refused unless the two own paths that do not overlap.
+    pub owns: &'a [String],
 }
 
 /// What a caller is told when a session was given others to observe.
@@ -690,6 +696,8 @@ pub async fn spawn(
             purpose: None,
             observe: &[],
             model: None,
+            worktree: None,
+            owns: &[],
         },
     )
     .await
@@ -743,13 +751,39 @@ pub(crate) async fn spawn_on(
         ..req.goal
     };
     let session_id = new_session_id(&harness.name);
-    let cwd = req.cwd.to_string_lossy();
-    let report = launch_session(
+    let folder = req.cwd.to_string_lossy().to_string();
+    let parent = req.parent.map(|(id, _)| id);
+    // Where it writes, settled before anything is launched: its own worktree, or a check that
+    // no other writer works in the same paths of this folder.
+    let worktree = match &req.worktree {
+        Some(base) => {
+            let (h, f, id, b) = (
+                host.clone(),
+                folder.clone(),
+                session_id.clone(),
+                base.clone(),
+            );
+            let made = agent_host::blocking(move || h.worktree_add(&f, &id, &b)).await??;
+            Some((made, base.clone()))
+        }
+        None if purpose == Purpose::Code => {
+            let (d, h, f) = (db.clone(), host.clone(), folder.clone());
+            let (p, o) = (parent.map(str::to_string), req.owns.to_vec());
+            agent_host::blocking(move || checkout::check_writers(&d, &h, &f, p.as_deref(), &o))
+                .await??;
+            None
+        }
+        None => None,
+    };
+    let cwd = worktree
+        .as_ref()
+        .map_or(folder.clone(), |(w, _)| w.path.clone());
+    let launched = launch_session(
         vault_path,
         db,
         &harness,
         Launch {
-            host,
+            host: host.clone(),
             session_id: &session_id,
             cwd: &cwd,
             label: req.label,
@@ -766,7 +800,49 @@ pub(crate) async fn spawn_on(
             origin: None,
         },
     )
-    .await?;
+    .await;
+    let mut report = match launched {
+        Ok(report) => report,
+        Err(e) => {
+            // Nothing ran in a worktree made for a launch that failed, so it goes again.
+            if let Some((w, _)) = &worktree
+                && w.created
+            {
+                let (h, path) = (host.clone(), w.path.clone());
+                let _ = agent_host::blocking(move || h.worktree_remove(&path)).await;
+            }
+            return Err(e);
+        }
+    };
+    let worktree_ref = worktree.as_ref().map(|(w, b)| (w, b));
+    // Where a writer started, so its first commit is news and the starting point is not.
+    let head = match &worktree {
+        Some((w, _)) => Some(w.head.clone()),
+        None if purpose == Purpose::Code => {
+            let (h, id) = (host.clone(), session_id.clone());
+            agent_host::blocking(move || h.head(&id))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten()
+                .map(|g| g.sha)
+        }
+        None => None,
+    };
+    checkout::record(
+        db,
+        &session_id,
+        &folder,
+        worktree_ref,
+        req.owns,
+        head.as_deref(),
+    );
+    if let Some((w, base)) = worktree_ref {
+        report["worktree"] = checkout::describe(w, base);
+    }
+    if !req.owns.is_empty() {
+        report["owns"] = json!(req.owns);
+    }
     if req.watch.is_none() {
         return Ok(report);
     }
