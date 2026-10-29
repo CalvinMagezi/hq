@@ -839,6 +839,7 @@ private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
             }
         }
         Text("Each opens that channel in Android settings. Turning Needs you off means approvals only wait in the Inbox.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+        ServerHqSection(n.server, ui, actions)
         Label("Buttons on notifications")
         if (!n.buttonsSupported) {
             Text("Buttons on notifications need Android 12 or newer. On this phone approvals wait in the Inbox.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp))
@@ -858,6 +859,57 @@ private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
                     ),
                 )
             }
+        }
+    }
+}
+
+/** The owner's HQ on a server: this phone signs in to it with a one-time code, and its questions then arrive here too. */
+@Composable
+private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: SettingsActions) {
+    Label("Your HQ on a server")
+    if (server.connected) {
+        Group {
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Signed in", style = HqType.BodyBold, color = Mts.Ink)
+                    Text(server.address.orEmpty(), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                DialogButton("Disconnect", actions.onServerDisconnect)
+            }
+        }
+        Text(
+            "Questions from coding agents on that HQ arrive here, checked once a minute. Disconnect stops that on this phone; to end the sign-in itself, sign this phone out in Settings, Devices on that HQ.",
+            style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp),
+        )
+        return
+    }
+    if (server.signedOut) Box(Modifier.padding(top = 4.dp)) { NoticeCard("Signed out", "Your HQ at ${server.address} signed this phone out. Sign in again with a new code.", true) }
+    val busy = ui.busy == SERVER_BUSY
+    var address by remember { androidx.compose.runtime.mutableStateOf(server.address.orEmpty()) }
+    var code by remember { androidx.compose.runtime.mutableStateOf("") }
+    Column(Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("If your HQ runs on a server, sign this phone in to it so its questions arrive here with the same buttons. Get a one-time code from Settings, Devices on that HQ.", style = HqType.BodySm, color = Mts.InkMuted)
+        ServerField("Address", address, "https://hq.example.com", busy, androidx.compose.ui.text.input.KeyboardType.Uri) { address = it }
+        ServerField("One-time code", code, "XXXXX-XXXXX", busy, androidx.compose.ui.text.input.KeyboardType.Ascii) { code = it }
+        ui.serverError?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText) }
+        GreenButton(if (busy) "Signing in\u2026" else "Sign in", enabled = !busy && address.isNotBlank() && code.isNotBlank(), busy = busy) { actions.onServerConnect(address, code) }
+    }
+}
+
+/** One labelled line of text for the server sign-in, with a hint while it is empty. */
+@Composable
+private fun ServerField(label: String, value: String, hint: String, busy: Boolean, keyboard: androidx.compose.ui.text.input.KeyboardType, onChange: (String) -> Unit) {
+    val field = RoundedCornerShape(12.dp)
+    Column(Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(field).background(Mts.Surface000).border(2.dp, Mts.Line, field).padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text(label, style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+        Box {
+            if (value.isEmpty()) Text(hint, style = HqType.Body, color = Mts.InkMuted)
+            androidx.compose.foundation.text.BasicTextField(
+                value, onChange, Modifier.fillMaxWidth(), enabled = !busy, singleLine = true,
+                textStyle = HqType.Body.copy(color = Mts.Ink),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(Mts.Ink),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = keyboard, autoCorrectEnabled = false),
+            )
         }
     }
 }

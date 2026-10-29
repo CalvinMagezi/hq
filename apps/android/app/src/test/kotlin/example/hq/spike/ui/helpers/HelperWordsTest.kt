@@ -358,7 +358,7 @@ class HelperWordsTest {
     }
 
     @Test fun aNoticeQuotesOnlyTheEndOfTheScreenAndStillMatchesALongerRead() {
-        val notice = "Session s-1 on mac is blocked on a prompt or approval:\n<hq-output>\n${editScreen.takeLast(4).joinToString("\n")}\n</hq-output>\nRead it with x"
+        val notice = "Session s-1 on mac is blocked on a prompt or approval:\n----- session output -----\n${editScreen.takeLast(4).joinToString("\n")}\n----- end session output -----\nRead it with x"
         val quoted = HelperWords.excerptLines(notice)
         assertEquals(4, quoted.size)
         val shown = HelperWords.blocked(quoted)!!

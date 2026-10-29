@@ -14,6 +14,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.AlertPoster
 import example.hq.spike.HubService
+import example.hq.spike.ServerHq
 import example.hq.spike.capture.CapturePrefs
 import example.hq.spike.capture.CaptureWidget
 import example.hq.spike.capture.NeedsYouWidget
@@ -86,6 +87,8 @@ data class SettingsUi(
     val pair: PairState? = null,
     val askDisconnect: String? = null,
     val askReplace: String? = null,
+    /** Why signing in to a server HQ did not work, shown under its fields. */
+    val serverError: String? = null,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 
@@ -109,6 +112,8 @@ class SettingsActions(
     val onFix: (PhoneFix) -> Unit = {},
     val onChannel: (String) -> Unit = {},
     val onAnswers: (Boolean) -> Unit = {},
+    val onServerConnect: (String, String) -> Unit = { _, _ -> },
+    val onServerDisconnect: () -> Unit = {},
     val onShareOpens: (String) -> Unit = {},
     val onSetup: (String) -> Unit = {},
     val onCheckToken: (String) -> Unit = {},
@@ -185,6 +190,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onShowTitles = { on -> CapturePrefs.setShowTitles(ctx(), on); Widgets.renderAll(ctx()); _state.update { it.copy(capture = it.capture.copy(showTitles = on)) } },
         onAddWidget = ::addWidget, onSendNow = ::sendNow, onDiscard = { id -> Outbox.of(ctx()).remove(id); _state.update { it.copy(capture = captureFacts(), phone = phoneRows()) } },
         onAnswers = { on -> AlertPoster.setAnswersAllowed(ctx(), on); _state.update { it.copy(notif = it.notif.copy(answers = on)) } },
+        onServerConnect = ::connectServer,
+        onServerDisconnect = ::disconnectServer,
         onRefresh = ::refreshNow,
     )
 
@@ -491,7 +498,32 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val nm = ctx().getSystemService(NotificationManager::class.java)
         val channels = listOf(AlertPoster.NEEDS, AlertPoster.UPDATES, HUB_CHANNEL).mapNotNull { nm.getNotificationChannel(it) }
             .map { ChannelFacts(it.id, it.name.toString(), it.importance, it.sound != null) }
-        return NotifFacts(nm.areNotificationsEnabled(), channels, AlertPoster.answersAllowed(ctx()), buttonsSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+        return NotifFacts(
+            nm.areNotificationsEnabled(), channels, AlertPoster.answersAllowed(ctx()), buttonsSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+            server = ServerFacts(ServerHq.address(ctx()), ServerHq.signedOut(ctx())),
+        )
+    }
+
+    /** Signs this phone in to the owner's server HQ with a one-time code; what went wrong is shown under the fields. */
+    private fun connectServer(address: String, code: String) {
+        if (_state.value.busy != null) return
+        _state.update { it.copy(busy = SERVER_BUSY, serverError = null) }
+        viewModelScope.launch {
+            val problem = withContext(Dispatchers.IO) {
+                try {
+                    ServerHq.connect(ctx(), address, code)
+                } catch (e: IllegalStateException) {
+                    "Signed in, but this phone could not keep the sign-in. Try again."
+                }
+            }
+            _state.update { it.copy(busy = null, serverError = problem, notif = notifFacts(), line = if (problem == null) "Signed in. Questions from that HQ now arrive here." else it.line) }
+        }
+    }
+
+    /** Stops asking the server HQ. The sign-in itself ends only when the phone is signed out there, which the line says. */
+    private fun disconnectServer() {
+        ServerHq.disconnect(ctx())
+        _state.update { it.copy(serverError = null, notif = notifFacts(), line = "Disconnected. To end the sign-in on that HQ too, sign this phone out in its Settings, Devices.") }
     }
 
     /** Opens the Android page that changes a setting the owner was told about; a page this phone does not have is tried past, never a crash. */
