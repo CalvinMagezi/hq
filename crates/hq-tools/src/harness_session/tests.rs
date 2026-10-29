@@ -4438,6 +4438,11 @@ fn a_task_lists_the_dialogs_its_agents_wait_on_you_for() {
     let list = got["decisions"].as_array().unwrap();
     assert_eq!(list.len(), 1, "the worker is in the task's team");
     assert_eq!(list[0]["seq"], 9);
+    assert_eq!(
+        list[0]["notification_id"],
+        format!("val_{}", item.id),
+        "what the answer route takes"
+    );
     assert_eq!(list[0]["approve"]["label"], "Yes");
     hq_db::dialog_alerts::claim(&db, &item.id, "approve").unwrap();
     let got = decisions::for_task(&db, &task, &events::Reader::default()).unwrap();
