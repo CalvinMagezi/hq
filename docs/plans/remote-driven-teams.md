@@ -351,20 +351,24 @@ What exists:
 What stops it working for a team on a remote HQ:
 
 1. **The app only talks to the HQ on the phone** (`127.0.0.1:5678`). An HQ on a
-   server cannot reach it. Fix: the app's alert loop also polls the owner's
-   remote HQ over HTTPS with a device credential from the existing device-code
-   exchange (`/api/auth/exchange`); later it long-polls phase 3's event endpoint
-   instead of polling every 20 seconds.
+   server cannot reach it. Fixed in #298: the phone signs in to the server HQ
+   with a one-time code (`/api/auth/exchange`) and asks it once a minute with an
+   ETag, so an unchanged list is a bodiless 304 on mobile data; answers go back
+   to the HQ that asked. Later it long-polls phase 3's event endpoint instead.
 2. **The app never finds the screen excerpt.** The server wraps it in
-   `----- session output -----` lines (since #199). The app looks for
-   `<hq-output>` (written in #224 against its own fixtures), so `canAllow` is
-   false and real prompts get only an Open button. Fix in the first PR; once
-   phase 1 lands, the item carries the pending dialog as data and nothing parses
-   a screen.
-3. **Allow presses Enter and Not now presses Esc.** Enter takes the highlighted
-   option, and Copilot highlights "remember this path" on its path dialog. The
-   buttons must answer a named option through phase 1's answer route with its
-   `seq`, so a changed dialog is refused instead of answered.
+   `----- session output -----` lines (since #199). The app looked for
+   `<hq-output>` (written in #224 against its own fixtures), so `canAllow` was
+   false and real prompts got only an Open button. Fixed in #298; once phase 1
+   lands, the item carries the pending dialog as data and nothing parses a
+   screen.
+3. **Allow presses Enter and Not now presses Esc.** This is safe today but
+   narrow. Before Enter goes out, the app re-reads the live screen and refuses a
+   changed dialog, a missing cursor, or a highlighted choice that is not a plain
+   yes once, so Copilot's pre-selected "remember this path" is never taken (and
+   since #298 such a card offers Open helper instead of Allow). What it cannot do
+   is pick a yes once that is not highlighted, or decline with a message. Phase
+   1's answer route, which names an option and carries the dialog's `seq`, gives
+   the buttons both.
 4. **Web push has no buttons and no credential.** The payload gains the item id,
    the kind and up to two options. The service worker shows them as `actions`
    (Chrome on macOS shows two). A click posts to
@@ -455,7 +459,7 @@ phase 3's items and the task's `waiting_on`, not a new store.
 | Step | PRs | Unblocks |
 |------|-----|----------|
 | Phase 0 | built | Copilot teams run with few prompts and visible blocks; folder requests block instead of going quiet |
-| Alerts, first PR | 1: the excerpt markers, remote HQ polling in the app | The phone shows agent prompts from a server HQ |
+| Alerts, first PR | #298: the excerpt markers, a server HQ in the app, ETag on the notifications list | The phone shows agent prompts from a server HQ |
 | 4.1 to 4.3 | 1 to 2, shared with agent-teams step 4 | No shared working trees |
 | Phase 5.1 | 1 | A sleeping host is noticed |
 | Phase 1 | 2 to 3 | Structured answers; option buttons on the phone and in web push |
