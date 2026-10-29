@@ -51,23 +51,21 @@ async fn choose_start_dir(
     let vault_guard = |p: &std::path::Path| {
         super::check_cwd_outside_vault(p, host_name, &agent_host.default_host, &cfg.vault_path)
     };
-    let wanted = requested
+    let checked = requested
         .map(|r| super::require_cwd_in(Some(r), agent_host, bound))
-        .transpose()
-        .map_err(|e| match e.downcast_ref::<super::OutsideAllowedFolders>() {
+        .transpose();
+    let wanted = match checked {
+        Ok(wanted) => wanted,
+        Err(e) => {
+            let Some(outside) = e.downcast_ref::<super::OutsideAllowedFolders>() else {
+                return Err(e);
+            };
             // A folder that could never be granted is refused, not asked for.
-            Some(outside) if vault_guard(&outside.cwd).is_err() => {
-                vault_guard(&outside.cwd).err().unwrap_or(e)
-            }
-            Some(outside) => super::folder_request::ask_owner(
-                asker.vault_path,
-                asker.db,
-                host.name(),
-                &asker.requester,
-                &outside.cwd,
-            ),
-            None => e,
-        })?;
+            vault_guard(&outside.cwd)?;
+            let folder = outside.cwd.clone();
+            Some(await_folder_approval(host, &folder, &cfg.agent_host, bound, asker).await?)
+        }
+    };
     // A folder that is not allowed is refused whether or not it exists, never quietly swapped.
     if let Some(path) = &wanted {
         vault_guard(path)?;
@@ -88,6 +86,62 @@ async fn choose_start_dir(
     super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, bound)?;
     vault_guard(&fallback.path)?;
     Ok(fallback)
+}
+
+/// Asks the owner for a folder the caller may not use yet, and waits a while for the answer, so
+/// a quick approval starts the session in this same call. Until they approve, the call fails with
+/// a block that says nothing started; a decline fails at once.
+async fn await_folder_approval(
+    host: &crate::agent_host::Host,
+    folder: &std::path::Path,
+    agent_host: &hq_core::config::AgentHostConfig,
+    bound: super::CwdBound,
+    asker: &FolderAsker<'_>,
+) -> Result<std::path::PathBuf> {
+    use super::folder_request::{self as requests, Answer, AwaitingApproval};
+    let host_name = host.name();
+    let asked = requests::ask_owner(
+        asker.vault_path,
+        asker.db,
+        host_name,
+        &asker.requester,
+        folder,
+    );
+    if asked.downcast_ref::<AwaitingApproval>().is_none() {
+        // Declined, too many waiting, or a folder that cannot be shown to the owner.
+        return Err(asked);
+    }
+    let budget = requests::answer_wait(agent_host);
+    let started = std::time::Instant::now();
+    match requests::wait_for_answer(asker.db, host_name, &asker.requester, folder, budget).await {
+        Answer::Approved => {
+            let shown = folder.to_string_lossy().into_owned();
+            let mut folders = agent_host.clone();
+            if bound == super::CwdBound::Connector {
+                folders =
+                    super::connector_folders(agent_host, host_hq_folder(host).await.as_deref());
+            }
+            folders.handoff_cwd_allow.extend(requests::granted_folders(
+                asker.db,
+                host_name,
+                &asker.requester,
+                Some(&shown),
+            )?);
+            super::require_cwd_in(Some(&shown), &folders, bound)
+        }
+        Answer::Declined => Err(requests::ask_owner(
+            asker.vault_path,
+            asker.db,
+            host_name,
+            &asker.requester,
+            folder,
+        )),
+        Answer::Waiting => Err(requests::still_waiting(
+            folder,
+            host_name,
+            started.elapsed(),
+        )),
+    }
 }
 
 /// What a refused folder needs to ask the owner for it.
@@ -161,7 +215,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 "observe": { "type": "array", "items": { "type": "string" }, "description": "Session ids a monitor or reviewer watches (at most 10; needs task_id). When one finishes a turn, blocks or exits, this session gets a message on its task thread, typed in when it is next idle." },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
                 "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
-                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request instead of starting: wait for them, then call again with the same cwd. Never start elsewhere and cd into it." },
+                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request and this call waits up to 30 seconds for their answer: it starts the session if they approve, and otherwise fails with BLOCKED and starts nothing. Tell the user you are waiting, then call again with the same arguments. Never start elsewhere and cd into it." },
                 "label": { "type": "string", "description": "Short human label, e.g. 'auth-refactor'", "default": "" },
                 "task_id": { "type": "string", "description": "HQ task (id or display id such as FR-053) this session works on. Must exist and not be complete. Its title and description become the goal when `goal` is omitted." },
                 "goal": { "type": "string", "description": "What the session should accomplish. HQ drives only a session with a specific goal and definition of done; without them it observes." },
@@ -961,7 +1015,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 "harness": { "type": "string", "description": format!("One of: {}. A general-purpose agent ({}) refuses code work; give it purpose research, review or general.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent." },
                 "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
-                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request instead of starting: wait for them, then call again with the same cwd. Never start elsewhere and cd into it." },
+                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny. A claude.ai connector (and the handoff key while agent_host.handoff_cwd_allow lists anything) may use only the host's HQ folder, that list and folders the owner approved. Asking for any other folder sends the owner an approval request and this call waits up to 30 seconds for their answer: it starts the session if they approve, and otherwise fails with BLOCKED and starts nothing. Tell the user you are waiting, then call again with the same arguments. Never start elsewhere and cd into it." },
                 "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
                 "external_id": { "type": "string", "description": "Idempotency key for the task, unique per space. Not combinable with task_id." },
                 "task_id": { "type": "string", "description": "Work on this existing HQ task (id or display id) instead of filing one. Must not be complete." },
