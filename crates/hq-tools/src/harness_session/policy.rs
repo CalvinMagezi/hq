@@ -220,3 +220,74 @@ pub fn refuse_drive(
         policy.name
     ))
 }
+
+/// One line for the session's task saying what its command policy decided since the last such
+/// line: how many commands it allowed, declined (by rule) and left to the owner. Written when a
+/// session finishes a turn or exits, so the task gets a summary rather than a comment per
+/// decision. The rules are the owner's own text; no command the agent wrote is quoted.
+/// Records a `policy_summary` event so the next summary starts after this one. `None` when the
+/// policy decided nothing since.
+pub fn summary_since_last(db: &Arc<Database>, session_id: &str) -> Option<String> {
+    let ids = vec![session_id.to_string()];
+    let events = db
+        .with_conn(move |c| hq_db::session_events::newest(c, &ids, 1000))
+        .ok()?;
+    let start = events
+        .iter()
+        .rposition(|e| e.kind == "policy_summary")
+        .map_or(0, |i| i + 1);
+    let decisions: Vec<Value> = events[start..]
+        .iter()
+        .filter(|e| e.kind == "policy_decision")
+        .filter_map(|e| serde_json::from_str(e.detail.as_deref()?).ok())
+        .collect();
+    let name = decisions.first()?["policy"].as_str()?.to_string();
+    let count = |outcome: &str| decisions.iter().filter(|d| d["outcome"] == outcome).count();
+    let (allowed, denied, escalated) = (count("allowed"), count("denied"), count("escalated"));
+    let mut rules: Vec<(String, usize)> = Vec::new();
+    for d in decisions.iter().filter(|d| d["outcome"] == "denied") {
+        let rule = d["rule"].as_str().unwrap_or("?").to_string();
+        match rules.iter_mut().find(|(r, _)| *r == rule) {
+            Some((_, n)) => *n += 1,
+            None => rules.push((rule, 1)),
+        }
+    }
+    let declined = match rules.is_empty() {
+        true => String::new(),
+        false => format!(
+            " ({})",
+            rules
+                .iter()
+                .map(|(r, n)| format!("`{r}` x{n}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    let line = format!(
+        "Command policy '{name}' on session `{session_id}`: {allowed} allowed, {denied} declined{declined}, {escalated} left to the owner."
+    );
+    let detail =
+        json!({ "allowed": allowed, "denied": denied, "escalated": escalated }).to_string();
+    let id = session_id.to_string();
+    let _ = db.with_conn(move |c| {
+        registry::record_event(c, &id, "policy_summary", "supervisor", Some(&detail))
+    });
+    Some(line)
+}
+
+/// Posts `summary_since_last` on the session's task, if it works on one and there is anything
+/// to say. Logged, never raised.
+pub fn post_summary(db: &Arc<Database>, row: &HarnessSessionRow) {
+    let Some(task) = row.mission_id.clone() else {
+        return;
+    };
+    let Some(line) = summary_since_last(db, &row.id) else {
+        return;
+    };
+    let posted = db.with_conn(move |c| {
+        hq_db::tasks::add_comment(c, &task, super::mission::COMMENT_AUTHOR, &line, None)
+    });
+    if let Err(e) = posted {
+        tracing::warn!(session = %row.id, error = %e, "the command policy summary was not posted");
+    }
+}

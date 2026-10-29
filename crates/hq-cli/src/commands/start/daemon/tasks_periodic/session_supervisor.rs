@@ -580,6 +580,7 @@ async fn supervise(
             "exited",
             serde_json::json!({ "exit_code": exited.as_ref().and_then(|a| a.exit_code) }),
         );
+        hq_tools::harness_session::policy::post_summary(&db_arc, &row);
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
         // A stack specialist's run is over when its process ends. Its exit code

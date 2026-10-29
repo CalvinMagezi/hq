@@ -87,10 +87,10 @@ enum Commands {
     /// Manage long-lived agent sessions: coding agents (claude-code, cursor, opencode, antigravity, pi...)
     /// and general-purpose agents (hermes, openclaw), which never take code work
     Sessions {
-        /// Subcommand: list (default), spawn <harness>, status <id>, logs <id>, send <id>, stop <id>, resume <id>
+        /// Subcommand: list (default), spawn <harness>, status <id>, logs <id>, send <id>, stop <id>, resume <id>, stats [<root id>] [--task <id>]
         #[arg(default_value = "list")]
         sub: String,
-        /// Harness name (spawn) or session id (status/logs/send/stop/resume)
+        /// Harness name (spawn), session id (status/logs/send/stop/resume) or team root (stats)
         arg: Option<String>,
         /// Prompt text (spawn/send/resume)
         #[arg(long)]

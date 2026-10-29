@@ -29,6 +29,7 @@ pub mod policy;
 mod preflight;
 pub mod spec;
 pub mod stack;
+pub mod stats;
 pub mod team;
 pub mod tools;
 
