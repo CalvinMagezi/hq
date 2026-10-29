@@ -117,6 +117,17 @@ enum Commands {
         /// Model to start the agent on, passed with its CLI's --model flag (spawn)
         #[arg(long)]
         model: Option<String>,
+        /// Work on this branch in a git worktree of its own, so it never shares a working
+        /// tree with another agent (spawn)
+        #[arg(long)]
+        branch: Option<String>,
+        /// A path, relative to --cwd, the session writes to; repeat for more (spawn)
+        #[arg(long)]
+        owns: Vec<String>,
+        /// Command policy to run under: builder, reviewer, one from agent_host.command_policies,
+        /// or none (spawn; default: builder for code, reviewer for review)
+        #[arg(long)]
+        policy: Option<String>,
         /// Log lines to tail (logs)
         #[arg(long, default_value_t = 40)]
         lines: usize,
@@ -1041,6 +1052,9 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             observe,
             task,
             model,
+            branch,
+            owns,
+            policy,
             lines,
         } => {
             commands::sessions::run(
@@ -1056,6 +1070,9 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
                     observe,
                     task,
                     model,
+                    branch,
+                    owns,
+                    policy,
                 },
                 lines,
             )

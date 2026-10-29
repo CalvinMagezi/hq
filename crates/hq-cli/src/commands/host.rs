@@ -73,6 +73,7 @@ pub async fn run(args: HostArgs) -> Result<()> {
         "lockdown" => lockdown(&dir, arg.as_deref()),
         "unlock" => unlock(&dir),
         "report" => report(dir_arg),
+        "policy-check" => policy_check(arg.as_deref()),
         "gate" => gate(&dir),
         "relay" => relay(port, unix),
         "sandbox-init" => sandbox_init(port, unix, &rest),
@@ -89,7 +90,7 @@ pub async fn run(args: HostArgs) -> Result<()> {
         "authorize" => super::host_install::authorize(key.as_deref(), from.as_deref()),
         "gate-key" => gate_key_command(arg.as_deref()),
         other => bail!(
-            "unknown subcommand '{other}': use serve, status, stop, lockdown, unlock, install, sign, authorize, gate-key, report or gate"
+            "unknown subcommand '{other}': use serve, status, stop, lockdown, unlock, install, sign, authorize, gate-key, report, policy-check or gate"
         ),
     }
 }
@@ -154,6 +155,7 @@ async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> 
         eprintln!("hq host could not restore {name}: {why}");
     }
     let stop = server.stop_handle();
+    let awake = keep_awake(host.clone());
     println!("hq host serving {}", socket_path(&dir).display());
     let serving = tokio::task::spawn_blocking(move || server.serve());
 
@@ -167,7 +169,62 @@ async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> 
     if let Some(gate) = gate {
         gate.shutdown();
     }
+    if let Some(awake) = awake {
+        awake.stop();
+    }
     Ok(result?)
+}
+
+/// How often the host checks whether any agent is still running, for `keep_awake`.
+const AWAKE_CHECK: Duration = Duration::from_secs(15);
+
+/// The thread that keeps the machine awake while agents run, when `agent_host.keep_awake`
+/// asks for it and this platform has a way.
+struct AwakeThread {
+    stop: std::sync::mpsc::Sender<()>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl AwakeThread {
+    fn stop(self) {
+        drop(self.stop);
+        let _ = self.thread.join();
+    }
+}
+
+fn keep_awake(host: Arc<Host>) -> Option<AwakeThread> {
+    use hq_core::config::KeepAwake as Setting;
+    let setting = hq_core::config::HqConfig::load()
+        .map(|c| c.agent_host.keep_awake)
+        .unwrap_or_default();
+    if setting == Setting::Off {
+        return None;
+    }
+    let Some(argv) = hq_host::assertion_command(std::process::id()) else {
+        eprintln!(
+            "hq host: agent_host.keep_awake is set, but this platform has no way to stay awake"
+        );
+        return None;
+    };
+    println!("hq host keeps this machine awake while agents run");
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    let thread = std::thread::spawn(move || {
+        let mut awake = hq_host::KeepAwake::new(argv);
+        loop {
+            let busy = host
+                .list()
+                .iter()
+                .any(|p| matches!(p.status, hq_host::PaneStatus::Running));
+            awake.update(busy);
+            if !matches!(
+                stopped.recv_timeout(AWAKE_CHECK),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ) {
+                break;
+            }
+        }
+    });
+    Some(AwakeThread { stop, thread })
 }
 
 /// What `agent_host` asks of the TCP gate, checked before the host starts anything. A gate that
@@ -463,6 +520,63 @@ fn report(dir: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// A shell command as long as this is refused by the policy hook rather than read half.
+const MAX_POLICY_INPUT: u64 = 256 * 1024;
+
+/// `hq host policy-check <file>`: the Claude Code `PreToolUse` hook on the shell tool of an
+/// agent that runs under a command policy (the host writes `<file>` at launch). It reads the
+/// tool call on stdin and prints a deny decision when the policy denies the command, nothing
+/// otherwise. It fails closed: a policy it cannot read, or a call it cannot read whole, is
+/// refused, so a broken file never turns the denies off.
+fn policy_check(file: Option<&str>) -> Result<()> {
+    use std::io::Read;
+    let mut input = String::new();
+    let read = std::io::stdin()
+        .take(MAX_POLICY_INPUT + 1)
+        .read_to_string(&mut input);
+    let input = match read {
+        Ok(_) if input.len() as u64 <= MAX_POLICY_INPUT => Some(input.as_str()),
+        _ => None,
+    };
+    let policy = file
+        .and_then(|f| std::fs::read(f).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    if let Some(verdict) = policy_verdict(policy.as_ref(), input) {
+        println!("{verdict}");
+    }
+    Ok(())
+}
+
+/// The hook's answer for one tool call: a deny, or `None` to let it run.
+fn policy_verdict(
+    policy: Option<&hq_core::command_policy::Policy>,
+    input: Option<&str>,
+) -> Option<serde_json::Value> {
+    use hq_core::command_policy::Decision;
+    let call: Option<serde_json::Value> = input.and_then(|i| serde_json::from_str(i).ok());
+    let reason = match (policy, &call) {
+        (_, Some(c)) if c["tool_name"] != "Bash" => return None,
+        (None, _) => "HQ could not read the command policy this session runs under, so it runs no shell command. Tell the owner.".to_string(),
+        (Some(_), None) => "HQ could not read this command whole, so its command policy refuses it. Run it in smaller steps.".to_string(),
+        (Some(policy), Some(c)) => {
+            let command = c["tool_input"]["command"].as_str().unwrap_or_default();
+            match policy.decide(command) {
+                Decision::Deny { rule } => {
+                    hq_tools::harness_session::policy::denial_message(policy, &rule)
+                }
+                _ => return None,
+            }
+        }
+    };
+    Some(json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }))
+}
+
 /// `hq host gate`: the command a remote machine's `authorized_keys` pins an ssh
 /// key to. It reads one request from stdin, refuses anything outside the
 /// allowlist, and prints the host's reply as one JSON line.
@@ -506,6 +620,45 @@ fn sandbox_init(port: Option<u16>, unix: Option<PathBuf>, rest: &[String]) -> Re
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_policy_hook_denies_what_the_policy_denies_and_fails_closed() {
+        let builder = hq_core::command_policy::resolve("builder", &Default::default())
+            .unwrap()
+            .unwrap();
+        let call = |cmd: &str| {
+            json!({ "tool_name": "Bash", "tool_input": { "command": cmd } }).to_string()
+        };
+        let denied = policy_verdict(Some(&builder), Some(&call("git push origin main"))).unwrap();
+        let out = &denied["hookSpecificOutput"];
+        assert_eq!(out["permissionDecision"], "deny");
+        assert!(
+            out["permissionDecisionReason"]
+                .as_str()
+                .unwrap()
+                .contains("`git push`"),
+            "{denied}"
+        );
+        assert!(policy_verdict(Some(&builder), Some(&call("cargo test"))).is_none());
+        assert!(
+            policy_verdict(Some(&builder), Some(&call("curl https://example.com"))).is_none(),
+            "an escalation runs: Claude Code starts with its tools allowed"
+        );
+        let edit = json!({ "tool_name": "Edit", "tool_input": {} }).to_string();
+        assert!(
+            policy_verdict(None, Some(&edit)).is_none(),
+            "only the shell tool"
+        );
+        assert!(
+            policy_verdict(None, Some(&call("ls"))).is_some(),
+            "no policy file: closed"
+        );
+        assert!(
+            policy_verdict(Some(&builder), None).is_some(),
+            "an unread call: closed"
+        );
+        assert!(policy_verdict(Some(&builder), Some("not json")).is_some());
+    }
+
     use super::*;
 
     #[test]

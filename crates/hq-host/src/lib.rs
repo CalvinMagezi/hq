@@ -10,6 +10,8 @@ mod names;
 pub use names::check_folder_name;
 
 #[cfg(unix)]
+mod awake;
+#[cfg(unix)]
 mod client;
 #[cfg(unix)]
 mod detect;
@@ -51,7 +53,11 @@ mod state;
 mod token;
 #[cfg(unix)]
 mod workspace;
+#[cfg(unix)]
+mod worktree;
 
+#[cfg(unix)]
+pub use awake::{KeepAwake, assertion_command};
 #[cfg(unix)]
 pub use client::{Client, ClientError};
 #[cfg(unix)]
@@ -107,4 +113,9 @@ pub use token::{load_or_create as load_or_create_token, token_path};
 pub use workspace::{
     describe as describe_workspace, ensure_workspace, list_dirs, make_dir, resolve_inside,
     workspace_root,
+};
+#[cfg(unix)]
+pub use worktree::{
+    Base as WorktreeBase, Head, Removed as WorktreeRemoved, WORKTREES_DIR, Worktree, WorktreeError,
+    add as add_worktree, head as git_head, remove as remove_worktree,
 };

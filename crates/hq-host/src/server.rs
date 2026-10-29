@@ -511,6 +511,31 @@ impl Conn {
                     crate::workspace::make_dir(root, parent, name).map(|p| json!({ "path": p }))
                 })
             }
+            "worktree.add" => {
+                let p: WorktreeAddParams = parse(&params)?;
+                let base = match (p.branch, p.detached) {
+                    (Some(b), None) => crate::worktree::Base::Branch(b),
+                    (None, Some(r)) => crate::worktree::Base::Detached(r),
+                    _ => {
+                        return Err(body(
+                            "invalid_params",
+                            "worktree.add takes a branch or a detached commit, not both",
+                        ));
+                    }
+                };
+                let root = self.workspace_root()?;
+                let wt =
+                    crate::worktree::add(&root, std::path::Path::new(&p.repo), &p.session, &base)
+                        .map_err(|e| body(e.code(), e.message()))?;
+                Ok(json!(wt))
+            }
+            "worktree.remove" => {
+                let p: WorktreeRemoveParams = parse(&params)?;
+                let root = self.workspace_root()?;
+                let removed = crate::worktree::remove(&root, std::path::Path::new(&p.path))
+                    .map_err(|e| body(e.code(), e.message()))?;
+                Ok(json!(removed))
+            }
             // The reply goes out first; the connection loop stops the host after it.
             "host.stop" => {
                 self.stop_after_reply.set(true);
@@ -524,16 +549,20 @@ impl Conn {
 
     /// Runs `f` against the workspace folder, creating it first. A bad path or name is the
     /// caller's mistake (`invalid`); anything else is the machine's (`workspace_unavailable`).
-    fn workspace_call(
-        &self,
-        f: impl FnOnce(&std::path::Path) -> std::io::Result<Value>,
-    ) -> Result<Value, ErrorBody> {
-        let root = crate::workspace::ensure_workspace().map_err(|e| {
+    fn workspace_root(&self) -> Result<std::path::PathBuf, ErrorBody> {
+        crate::workspace::ensure_workspace().map_err(|e| {
             body(
                 "workspace_unavailable",
                 format!("cannot prepare the HQ folder: {e}"),
             )
-        })?;
+        })
+    }
+
+    fn workspace_call(
+        &self,
+        f: impl FnOnce(&std::path::Path) -> std::io::Result<Value>,
+    ) -> Result<Value, ErrorBody> {
+        let root = self.workspace_root()?;
         f(&root).map_err(|e| match e.kind() {
             std::io::ErrorKind::InvalidInput | std::io::ErrorKind::NotFound => {
                 body("invalid", e.to_string())
@@ -596,7 +625,18 @@ impl Conn {
             }
             "agent.hook_flags" => {
                 let p: HookFlagsParams = parse(params)?;
-                Ok(json!({ "flags": host.hook_flags(&p.name, &p.agent) }))
+                if let Some(policy) = &p.policy {
+                    // Only stored and handed back to `hq host policy-check`; never read here.
+                    let ok = policy.is_object()
+                        && serde_json::to_vec(policy).is_ok_and(|b| b.len() <= MAX_POLICY_BYTES);
+                    if !ok {
+                        return Err(body(
+                            "invalid_params",
+                            "agent.hook_flags policy must be a JSON object of at most 64 KiB",
+                        ));
+                    }
+                }
+                Ok(json!({ "flags": host.hook_flags_with(&p.name, &p.agent, p.policy.as_ref()) }))
             }
             "agent.set_resume" => {
                 let p: SetResumeParams = parse(params)?;
@@ -645,6 +685,12 @@ impl Conn {
                     "pending_seq": info.pending_seq,
                     "pending": info.pending.as_deref().map(|d| dialog_json(d, true)),
                 }))
+            }
+            // The commit the agent's folder is at, so HQ can tell a reviewer what to check out.
+            "agent.head" => {
+                let p: Named = parse(params)?;
+                let info = host.info(&p.name).map_err(host_err)?;
+                Ok(json!({ "head": crate::worktree::head(&info.cwd) }))
             }
             "agent.answer" => {
                 let p: AnswerParams = parse(params)?;
@@ -784,6 +830,23 @@ struct Named {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct WorktreeAddParams {
+    /// A folder in the repository; the worktree is of the repository it is in.
+    repo: String,
+    /// Names the worktree's folder.
+    session: String,
+    branch: Option<String>,
+    detached: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorktreeRemoveParams {
+    path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AnswerParams {
     name: String,
     /// The dialog's number, from `pending_seq`.
@@ -847,7 +910,13 @@ struct McpConfigParams {
 struct HookFlagsParams {
     name: String,
     agent: String,
+    /// The command policy the agent runs under, enforced by a Claude Code hook.
+    #[serde(default)]
+    policy: Option<Value>,
 }
+
+/// Largest command policy an agent's hook is given.
+const MAX_POLICY_BYTES: usize = 64 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

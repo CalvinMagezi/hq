@@ -12,19 +12,24 @@
 pub mod answer;
 mod brief;
 pub mod category;
+pub mod checkout;
 mod coalesce;
 mod connector_notice;
 mod control;
 mod cwd;
+pub mod decisions;
 pub mod dismiss;
+pub mod events;
 mod folder_request;
 pub mod handoff;
 mod launch;
 pub mod mission;
 mod origin;
+pub mod policy;
 mod preflight;
 pub mod spec;
 pub mod stack;
+pub mod team;
 pub mod tools;
 
 use crate::agent_host::{

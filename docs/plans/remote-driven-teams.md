@@ -340,6 +340,32 @@ stopped by the builder having no git credentials (hidden credential stores in
 the sandbox), and a deploy by the deploy key living only in the reviewer's or
 owner's environment, through a harness profile's `env`.
 
+### What phase 2 built
+
+- **2.1** as designed, under `agent_host.command_policies`, with `allow_remove` beside
+  `deny_remove` and `scripts`. The built-ins (`hq_core::command_policy::builtins`) are generic:
+  the plan's `bun` entries are the owner's to add. The engine is in `hq-core`, so the host's
+  hook and HQ judge with the same code.
+- **2.2** as designed, with two additions. A pattern's flags may appear anywhere after its
+  words, so a trailing `--force` is caught; and git's global options and common wrappers are
+  looked through. `sudo` always escalates.
+- **2.3** as designed. "No wider" is computed: every allow of the narrower policy is covered by
+  one of the wider's, every deny of the wider's is covered by one of the narrower's, and its
+  `otherwise` and `scripts` are no looser. The policy is stored in its own table
+  (`session_policies`, migration 105) rather than a column, holding the resolved rules, so a
+  config edit never changes a running session.
+- **2.4** at launch for Copilot (the policy's denies replace the fixed list) and Claude Code (a
+  `PreToolUse` hook running `hq host policy-check`, failing closed). The hook was chosen over
+  `permissions.deny` because hooks run under `--dangerously-skip-permissions`; that the deny
+  decision holds there is from Claude Code's documentation and still needs a run against the
+  real CLI. Both agents keep starting with their tools allowed, so `otherwise: escalate` cannot
+  make them ask; it governs the dialogs they still show (paths outside the folder, and every
+  dialog of agents that ask, such as Codex). The supervisor answers off the sweep, and raises
+  the alert if the answer does not take.
+- **2.5** records every decision as a `policy_decision` event. Not built: the periodic summary
+  comment on the task, which waits for phase 3's reader.
+- **2.6** in "What actually stops each deny" in `docs/AGENT_SESSIONS.md`.
+
 ## Phase 3: events instead of polling, and decisions on the owner's phone
 
 **3.1 One event log.** The supervisor writes these kinds to the existing
@@ -365,6 +391,23 @@ notice per dialog, never one per sweep. Telegram is a poor place for a decision
 (answering means opening the app), so decisions go to the two surfaces the owner
 already has open, each with buttons that answer without opening anything. Telegram
 gets at most a plain notice. Design in "Actionable alerts" below.
+
+### What phase 3 built
+
+- **3.1** as designed, in the existing `harness_session_events` table, with `question` for a
+  dialog of kind question and `policy` for the policy a session started under. `unblocked`
+  carries the milliseconds since the last `blocked` event, measured when a sweep first sees
+  the session no longer blocked. `host_unreachable` and `host_back` are written on each
+  session of the host, at the alert and at the return.
+- **3.2** as designed, except the long-poll checks the table every 750 ms instead of waiting
+  on a change notification: the supervisor writes from the daemon, which may be another
+  process than the one serving the call. A `limit` and `more` keep a reply small; the dialog's
+  text is capped at 300 characters (`harness_session_pending` has it whole). The tool is in the
+  untrusted-source list, in the session-token scope (its team) and the read-only Spark scope,
+  and not in the handoff scope, for the same reason as `harness_session_logs`.
+- **3.3** was built with HQ-RDT-003.
+- The opt-in HTTP recipe for a cloud client is the read-only Spark key on `/mcp`, looping on
+  `harness_session_events` ("Following sessions by events" in `docs/AGENT_SESSIONS.md`).
 
 ### Actionable alerts: the Android app and web push
 
@@ -503,6 +546,30 @@ the new session under that root. Roster, messages, stop-with-root and the tree
 limits then apply. It is kept apart from `from_session`, which means the caller's
 own identity. A reviewer in a team observes the team's writers by default.
 
+### What phases 4.1 to 4.3 built
+
+- **4.1** as designed, on `harness_session_spawn`, `harness_session_handoff`, `agent_delegate`
+  (`worktree: true` is a branch `hq/<task id>`), `hq sessions spawn --branch`, and the web's New
+  agent dialog. The host's `worktree.add` makes it under
+  `<HQ folder>/worktrees/<repository>/<session>` (the repository's main folder names it, so a
+  worktree made from another worktree sits with its siblings), refuses names that could be read
+  as options, and reports `branch_in_use` from git's own refusal. A launch that fails after
+  the worktree was made removes it again. `owns` lives in `session_checkouts` (migration 104),
+  next to the worktree and the last commit seen, so the session row is unchanged. The overlap
+  check skips the new session's own parent: refusing it would refuse every `agent_delegate`
+  of a coding worker into its delegator's folder, which is the default. Reviewers, monitors
+  and researchers are never counted as writers. A session the host's agent list no longer
+  has is skipped, as the supervisor reads it.
+- **4.2** with the commit read in the supervisor's host phase, only for finished agents HQ
+  tracks a checkout for, so it costs one `git log -1` per finished turn. The first commit seen
+  is where the session started; each later one is named once. The `commit` event goes to the
+  existing `harness_session_events` table, ready for phase 3's reader.
+- **4.3** at stop and at exit, through the host's `worktree.remove`, which removes only a clean
+  worktree under the HQ folder. `harness_session_resume` reopens it.
+- The host gate allows `worktree.add`, `worktree.remove` and `agent.head`, so all of this works
+  on a paired machine.
+- Not built here: the `reviewer` policy's push rule, which is phase 2.
+
 ## Phase 5: hosts that stay awake, and noticing when one does not
 
 **5.1 Unreachable alert.**
@@ -521,6 +588,25 @@ Linux. A closed lid on battery still sleeps, which the docs say.
 **5.3 Placement.** `docs/AGENT_SESSIONS.md` says to run long teams on an
 always-on host, and backend work on the server host where possible.
 
+### What phase 5 built
+
+- **5.1** as designed. The outage lives in `host_outages` (migration 103): the first failed
+  poll opens it, a claim makes the alert one per outage, and the first answer ends it. The
+  alert is an action-needed item from `session-supervisor` (dedup key
+  `host-unreachable-<host>-<since>`), so it reaches the Android app and web push with no new
+  path. When the host answers, the item is retired (state `expired`, not the owner's
+  dismissal) and an FYI says it is back with how long it was gone. A silence shorter than the
+  wait says nothing. A host whose sessions were all stopped while it was silent stops being
+  polled, so its outage ends quietly. `unreachable_alert_minutes: 0` keeps tracking but never
+  alerts. `hq doctor` lists open outages and suggests `keep_awake` when one exists.
+- **5.2** as designed, with two details. On Linux the inhibitor runs `tail --pid=<host pid>`
+  so it ends with the host. An inhibitor the OS refuses (it exits non-zero) is reported once
+  and not retried, so a server without the permission does not spawn one every check. The
+  host checks every 15 seconds.
+- **5.3** in "Behavior worth knowing" in `docs/AGENT_SESSIONS.md`.
+- Not built: the `host_unreachable` and `host_back` events, which come with phase 3's event
+  log.
+
 ## Phase 6: goals that move with the work, and a decisions list
 
 **6.1 One task per plan step.**
@@ -537,18 +623,35 @@ are listed on the team's task, each with its options. Answering one (web,
 relay) sends the mapped answer to the session and records who answered. It reuses
 phase 3's items and the task's `waiting_on`, not a new store.
 
+### What phases 4.4 and 6 built
+
+- **4.4** as designed, on spawn and handoff, holding the same lock as `agent_delegate` while
+  the limits are checked and the session starts. The limit checks are `agent_delegate`'s,
+  shared (`a2a::check_tree_limits`), without its rule that the lead works on a task, which
+  belongs to filing a sub-task. The root must be the team's root; a claude.ai connection may
+  name only a team it started, the handoff key and session tokens none.
+- **6.1**: `harness_session_link` moves a running session's goal when it was on another task,
+  taking the acceptance criteria under "Acceptance criteria:" as the definition of done. Its
+  reply carries the fixed line, and `continue: true` sends it. Drive's prompt reads the goal, so
+  it follows the moved task.
+- **6.2**: `task_decisions` and `GET /api/tasks/{id}/decisions` list the open dialog alerts of
+  the task's sessions and teams (`dialog_alerts` joined to their inbox items), and the task page
+  answers them through HQ-RDT-003's route. Not built: the decisions in the task's own
+  `waiting_for`, which belongs to task verification's wait table and would mix two meanings.
+
 ## Order of work
 
 | Step | PRs | Unblocks |
 |------|-----|----------|
 | Phase 0 | built | Copilot teams run with few prompts and visible blocks; folder requests block instead of going quiet |
 | Alerts, first PR | #298: the excerpt markers, a server HQ in the app, ETag on the notifications list | The phone shows agent prompts from a server HQ |
-| 4.1 to 4.3 | 1 to 2, shared with agent-teams step 4 | No shared working trees |
-| Phase 5.1 | 1 | A sleeping host is noticed |
-| Phase 1 | built | Structured answers; option buttons in the web Sessions panel (phone and web push next, in HQ-RDT-003) |
-| Phase 2 | 2 to 3 | Prompts become policy; Claude Code gets a deny list |
-| Phase 3 | 2 | Events instead of screen reads; escalations pushed |
-| 4.4, 5.2, phase 6 | 2 to 3 | One team per remote client; decisions list |
+| 4.1 to 4.3 | built | No shared working trees |
+| Phase 5 | built | A sleeping host is noticed; a laptop can stay awake while agents run |
+| Phase 1 | built | Structured answers; option buttons in the web Sessions panel |
+| HQ-RDT-003 | built | Answer buttons on the phone and in web push |
+| Phase 2 | built | Prompts become policy; Claude Code gets a deny list |
+| Phase 3 | built | Events instead of screen reads; escalations pushed |
+| 4.4, phase 6 | built | One team per remote client; decisions list |
 
 Each PR ships with tests and, for anything touching the host, a run on a real
 host with the CLI in question. After phase 0 and 4.1, the next batch of the

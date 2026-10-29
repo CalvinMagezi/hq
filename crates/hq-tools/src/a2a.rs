@@ -66,6 +66,22 @@ pub fn authorize_delegate(
     let Some(task_id) = parent.mission_id.clone() else {
         bail!("delegate from a session that works on a task: the new work is filed under it");
     };
+    let depth = check_tree_limits(db, &parent, limits)?;
+    Ok(DelegateSlot {
+        parent,
+        task_id,
+        depth,
+    })
+}
+
+/// Checks that `parent` may get another child under the team's limits (depth, children per
+/// session, running sessions per team, starts per hour), and returns the child's depth. Shared
+/// by a delegation and a remote client adding a session to its team.
+pub fn check_tree_limits(
+    db: &Database,
+    parent: &HarnessSessionRow,
+    limits: &TeamsConfig,
+) -> Result<i64> {
     let depth = parent.spawn_depth + 1;
     let max_depth = limits.depth_limit();
     if depth > max_depth {
@@ -104,11 +120,7 @@ pub fn authorize_delegate(
             "rate limit: this team may start at most {per_hour} sessions per {RATE_WINDOW_MINUTES} minutes (agent_host.teams.max_spawns_per_hour)"
         );
     }
-    Ok(DelegateSlot {
-        parent,
-        task_id,
-        depth,
-    })
+    Ok(depth)
 }
 
 fn tail_of(text: &str) -> String {
@@ -440,7 +452,10 @@ impl HqTool for AgentDelegateTool {
                 "description": { "type": "string", "description": "Everything the worker needs, since it sees nothing else: the objective, what done looks like, the files it owns, inputs as paths or links, and where to put its result" },
                 "harness": { "type": "string", "description": "Optional agent for the worker: your own kind by default, or one the owner listed in agent_host.teams.harnesses" },
                 "model": { "type": "string", "description": "Optional model for the worker, passed with its CLI's --model flag" },
-                "purpose": { "type": "string", "enum": ["code", "review", "research", "monitor", "general"], "description": "What the worker is for. Default: code for a coding agent. A reviewer or monitor never moves its task's status." }
+                "purpose": { "type": "string", "enum": ["code", "review", "research", "monitor", "general"], "description": "What the worker is for. Default: code for a coding agent. A reviewer or monitor never moves its task's status." },
+                "worktree": { "description": "Give the worker a git worktree of your folder's repository: true for a branch named for its sub-task (hq/<task id>), or {\"branch\": \"<name>\"} or {\"detached\": \"<commit>\"} (a reviewer). Without one it works in your folder, and a second coding worker there is refused unless their owns paths do not overlap." },
+                "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to your folder, the worker writes to. Workers in one folder must own paths that do not overlap." },
+                "policy": { "type": "string", "description": "The command policy the worker runs under: builder or reviewer, one the owner configured, or none. Default: builder for code, reviewer for review. It may not be wider than your own." }
             },
             "required": ["title", "description"]
         })
@@ -564,6 +579,46 @@ pub struct Delegation {
     pub harness: String,
     pub model: Option<String>,
     pub purpose: Option<Purpose>,
+    /// A worktree of its own: `true` is a branch named for its sub-task.
+    pub worktree: DelegatedTree,
+    /// Paths it writes to in the delegator's folder.
+    pub owns: Vec<String>,
+    /// The command policy it runs under: no wider than the delegator's.
+    pub policy: Option<String>,
+}
+
+/// Where a delegated session writes.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum DelegatedTree {
+    /// In the delegator's folder.
+    #[default]
+    Shared,
+    /// A worktree on a branch named for its sub-task (`hq/<task id>`).
+    ForTask,
+    /// A worktree on the branch or commit the delegator named.
+    Base(crate::agent_host::WorktreeBase),
+}
+
+impl DelegatedTree {
+    fn from_args(args: &Value) -> Result<Self> {
+        match args.get("worktree") {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => Ok(Self::Shared),
+            Some(Value::Bool(true)) => Ok(Self::ForTask),
+            Some(_) => Ok(crate::harness_session::checkout::parse_worktree(args)?
+                .map_or(Self::Shared, Self::Base)),
+        }
+    }
+
+    fn base(&self, task_display_id: &str) -> Option<crate::agent_host::WorktreeBase> {
+        match self {
+            Self::Shared => None,
+            Self::ForTask => Some(crate::agent_host::WorktreeBase::Branch(format!(
+                "hq/{}",
+                task_display_id.to_lowercase()
+            ))),
+            Self::Base(b) => Some(b.clone()),
+        }
+    }
 }
 
 impl Delegation {
@@ -577,6 +632,9 @@ impl Delegation {
             harness: arg_str(args, "harness").trim().to_string(),
             model: Some(arg_str(args, "model").trim().to_string()).filter(|m| !m.is_empty()),
             purpose: Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
+            worktree: DelegatedTree::from_args(args)?,
+            owns: crate::harness_session::checkout::parse_owns(args)?,
+            policy: crate::harness_session::policy::parse(args),
         };
         if request.title.trim().is_empty() || request.description.trim().is_empty() {
             bail!("a delegation needs a title and a description");
@@ -628,6 +686,9 @@ pub async fn run_delegation(
             purpose: request.purpose,
             observe: &[],
             model: request.model.as_deref(),
+            worktree: request.worktree.base(&sub.display_id),
+            owns: &request.owns,
+            policy: request.policy.as_deref(),
         },
     )
     .await?;
@@ -723,7 +784,9 @@ fn spawn_as_delegation(args: &Value) -> Result<(Delegation, Vec<&'static str>)> 
     Ok((request, ignored))
 }
 
-static DELEGATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Taken while a session is added to a team (a delegation, or a remote client's `team`), so
+/// two starts cannot both pass the limits before either child exists.
+pub(crate) static DELEGATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The one name an agent goes by, so an alias and its harness compare equal.
 fn canonical_harness(name: &str) -> &str {

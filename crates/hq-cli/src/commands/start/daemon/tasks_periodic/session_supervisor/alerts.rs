@@ -27,6 +27,7 @@ pub(super) fn alert_finished(
     row: &registry::HarnessSessionRow,
     agent: &AgentInfo,
     screen: &str,
+    head: Option<&GitHead>,
 ) {
     let (id, seq) = (row.id.clone(), agent.state_change_seq);
     match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
@@ -34,19 +35,35 @@ pub(super) fn alert_finished(
         _ => return,
     }
     let link = record_on_task(db, row, Event::Finished);
+    record_event(db, &row.id, "finished", serde_json::json!({ "seq": seq }));
     let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
+    // A commit made in the turn is named, so a reviewer checks out exactly that.
+    let db_arc = Arc::new(db.clone());
+    let commit = head
+        .filter(|h| checkout::note_commit(&db_arc, &row.id, h))
+        .map(checkout::commit_line);
+    let (finished, finished_turn) = match &commit {
+        Some(line) => (
+            format!("finished and {line}"),
+            format!("finished a turn and {line}"),
+        ),
+        None => ("finished".to_string(), "finished a turn".to_string()),
+    };
     // A delegated session tells whoever delegated it, whatever else happens here.
-    if let Err(e) = hq_tools::a2a::report_to_parent(db, row, "finished", &excerpt) {
+    if let Err(e) = hq_tools::a2a::report_to_parent(db, row, &finished, &excerpt) {
         tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
     }
-    report_to_observers(db, row, "finished a turn", &excerpt);
+    report_to_observers(db, row, &finished_turn, &excerpt);
     if hand_to_chat(db, row, WAKE_FINISHED) {
         return;
     }
     let label = session_label(row);
     let task_line = task_line(link.as_ref());
+    let commit_line = commit
+        .as_deref()
+        .map_or_else(String::new, |line| format!(" It {line}."));
     let body = format!(
-        "Session {} on {} finished its task and is waiting for the next instruction.\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
+        "Session {} on {} finished its task and is waiting for the next instruction.{commit_line}\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
         row.id, row.host,
     );
     post_relay_nudge(
@@ -113,12 +130,105 @@ pub(super) fn alert_blocked(
     row: &registry::HarnessSessionRow,
     agent: &AgentInfo,
     screen: &str,
+    resolve: &HostResolver,
 ) {
     let (id, seq) = (row.id.clone(), agent.state_change_seq);
     match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
         Ok(true) => {}
         _ => return,
     }
+    record_block(db, row, agent);
+    let note = match by_policy(db, row, agent, screen, resolve) {
+        PolicyStep::Answering => return,
+        PolicyStep::Escalated(note) => Some(note),
+        PolicyStep::NotJudged => None,
+    };
+    raise_blocked(db, row, agent, screen, note.as_deref());
+}
+
+/// What the session's command policy did with the dialog it blocked at.
+enum PolicyStep {
+    /// It allows or denies it, and is answering it in the background.
+    Answering,
+    /// It left it to the owner; the line says why.
+    Escalated(String),
+    /// No policy, no dialog HQ can read, or a kind a policy does not judge.
+    NotJudged,
+}
+
+/// A dialog the policy decides is answered off the sweep (an answer waits for the screen),
+/// and raised after all if the answer does not take.
+fn by_policy(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+    resolve: &HostResolver,
+) -> PolicyStep {
+    use hq_core::command_policy::Decision;
+    use hq_tools::harness_session::policy;
+    let db_arc = Arc::new(db.clone());
+    let (Some(dialog), Some(seq)) = (agent.pending.as_deref(), agent.pending_seq) else {
+        return PolicyStep::NotJudged;
+    };
+    let Some(rules) = policy::of(&db_arc, &row.id) else {
+        return PolicyStep::NotJudged;
+    };
+    let Some(decision) = policy::judge(&rules, dialog, &row.cwd) else {
+        return PolicyStep::NotJudged;
+    };
+    let host = match (resolve.as_ref())(&row.host) {
+        Ok(host) => host,
+        Err(_) => return PolicyStep::NotJudged,
+    };
+    if let Decision::Escalate { .. } = decision {
+        let acted = policy::act(&db_arc, &host, row, &rules, dialog, seq);
+        let reason = match acted {
+            Some(policy::Acted::Escalated { reason }) => reason,
+            _ => decision.why().to_string(),
+        };
+        record_escalation(db, &row.id, &rules.name, dialog, &reason);
+        return PolicyStep::Escalated(format!(
+            "Its '{}' command policy left this to you: {reason}.",
+            rules.name
+        ));
+    }
+    let (db2, row2, agent2, screen2, dialog2) = (
+        db_arc.clone(),
+        row.clone(),
+        agent.clone(),
+        screen.to_string(),
+        dialog.clone(),
+    );
+    tokio::task::spawn_blocking(move || {
+        match policy::act(&db2, &host, &row2, &rules, &dialog2, seq) {
+            Some(policy::Acted::Escalated { reason }) => {
+                record_escalation(&db2, &row2.id, &rules.name, &dialog2, &reason);
+                let note = format!(
+                    "Its '{}' command policy could not settle this: {reason}.",
+                    rules.name
+                );
+                raise_blocked(&db2, &row2, &agent2, &screen2, Some(&note));
+            }
+            Some(acted) => {
+                tracing::info!(session = %row2.id, ?acted, "session-supervisor: dialog answered by the command policy");
+            }
+            None => raise_blocked(&db2, &row2, &agent2, &screen2, None),
+        }
+    });
+    PolicyStep::Answering
+}
+
+/// The "waiting for you" alert for a blocked session, with `note` (what the command policy
+/// made of it) when there is one.
+fn raise_blocked(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+    note: Option<&str>,
+) {
+    let seq = agent.state_change_seq;
     let link = record_on_task(db, row, Event::Blocked);
     // A monitor hears about the block too; it can tell whoever can answer it.
     report_to_observers(
@@ -134,12 +244,13 @@ pub(super) fn alert_blocked(
     let label = session_label(row);
     let excerpt = last_lines(screen, BLOCKED_EXCERPT_LINES);
     let task_line = task_line(link.as_ref());
+    let note_line = note.map_or_else(String::new, |n| format!("\n{n}"));
     let item = ValueItem::new(
         "session-supervisor",
         ValueKind::ActionNeeded,
         format!("Harness session '{label}' is waiting for you"),
         format!(
-            "Session {} on {} is blocked on a prompt or approval:\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nRead it with `harness_session_pending` and answer with `harness_session_answer`, or with `harness_session_send` keys when HQ cannot read it.{task_line}",
+            "Session {} on {} is blocked on a prompt or approval:\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}{note_line}\nRead it with `harness_session_pending` and answer with `harness_session_answer`, or with `harness_session_send` keys when HQ cannot read it.{task_line}",
             row.id, row.host
         ),
     )
@@ -260,4 +371,96 @@ pub(super) fn session_label(row: &registry::HarnessSessionRow) -> String {
     } else {
         format!("{} ({})", row.label, row.harness)
     }
+}
+
+/// The line an exit message ends with when the session had a worktree.
+pub(super) fn worktree_line(released: Option<&serde_json::Value>) -> String {
+    let Some(v) = released else {
+        return String::new();
+    };
+    match (
+        v.get("removed").and_then(|p| p.as_str()),
+        v.get("kept").and_then(|p| p.as_str()),
+    ) {
+        (Some(path), _) => {
+            format!("\nIts worktree {path} was removed; its branch keeps every commit.")
+        }
+        (None, Some(path)) => format!(
+            "\nIts worktree {path} was kept: it has changes nobody committed. `harness_session_resume` continues there."
+        ),
+        _ => String::new(),
+    }
+}
+
+/// Longest question or command text an event carries; `harness_session_pending` has the rest.
+const EVENT_TEXT: usize = 300;
+
+fn capped(text: Option<&str>) -> Option<String> {
+    text.map(|t| {
+        if t.len() <= EVENT_TEXT {
+            t.to_string()
+        } else {
+            format!("{}…", &t[..t.floor_char_boundary(EVENT_TEXT)])
+        }
+    })
+}
+
+/// Appends one event to the session's log (`harness_session_events`), which
+/// `harness_session_events` reads as a stream. Logged, never raised.
+pub(super) fn record_event(db: &Database, session_id: &str, kind: &str, detail: serde_json::Value) {
+    let (id, kind_owned, detail) = (session_id.to_string(), kind.to_string(), detail.to_string());
+    if let Err(e) = db.with_conn(move |c| {
+        registry::record_event(c, &id, &kind_owned, "supervisor", Some(&detail))
+    }) {
+        tracing::warn!(session = %session_id, kind, error = %e, "session-supervisor: event not recorded");
+    }
+}
+
+/// A session blocked: `blocked`, or `question` when the agent asks the owner something, with
+/// the dialog when HQ can read it. Its text is the agent's output, capped.
+fn record_block(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
+    let dialog = agent.pending.as_deref();
+    let kind = match dialog {
+        Some(d) if d.kind == "question" => "question",
+        _ => "blocked",
+    };
+    let detail = match (dialog, agent.pending_seq) {
+        (Some(d), Some(seq)) => serde_json::json!({
+            "seq": seq,
+            "dialog": {
+                "kind": d.kind,
+                "question": capped(d.question.as_deref()),
+                "command": capped(d.command.as_deref()),
+                "options": d.options.iter().map(|o| serde_json::json!({
+                    "id": o.id,
+                    "label": capped(Some(&o.label)),
+                    "remember": o.remember,
+                })).collect::<Vec<_>>(),
+                "truncated": d.truncated,
+            },
+        }),
+        _ => serde_json::json!({ "dialog": null }),
+    };
+    record_event(db, &row.id, kind, detail);
+}
+
+/// The command policy left a dialog to the owner.
+fn record_escalation(
+    db: &Database,
+    session_id: &str,
+    policy: &str,
+    dialog: &hq_tools::agent_host::PendingDialog,
+    reason: &str,
+) {
+    record_event(
+        db,
+        session_id,
+        "escalation",
+        serde_json::json!({
+            "policy": policy,
+            "kind": dialog.kind,
+            "command": capped(dialog.command.as_deref()),
+            "reason": reason,
+        }),
+    );
 }

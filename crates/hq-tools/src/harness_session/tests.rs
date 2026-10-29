@@ -61,6 +61,7 @@ fn launch<'a>(host: ScriptedHost, id: &'a str, prompt: Option<&'a str>) -> Launc
         observe: &[],
         one_shot: None,
         origin: None,
+        policy: None,
     }
 }
 
@@ -1456,6 +1457,9 @@ fn spawn_req<'a>(
         purpose,
         observe,
         model: None,
+        worktree: None,
+        owns: &[],
+        policy: None,
     }
 }
 
@@ -3678,4 +3682,787 @@ fn an_answer_the_dialog_did_not_take_says_so() {
     .unwrap();
     assert_eq!(report["not_registered"], true, "{report}");
     assert_eq!(report["answered"], "declined");
+}
+
+fn writer<'a>(owns: &'a [String]) -> SpawnRequest<'a> {
+    SpawnRequest {
+        owns,
+        ..spawn_req("claude-code", None, None, &[])
+    }
+}
+
+#[tokio::test]
+async fn a_second_writer_in_a_folder_is_refused_unless_their_paths_do_not_meet() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let start = |req: SpawnRequest<'static>| {
+        let (db, vault) = (db.clone(), vault.path().to_path_buf());
+        async move {
+            let (_dir, host) = startable_host();
+            spawn_on(&vault, &db, Arc::new(host), req).await
+        }
+    };
+    let (api, ui, api_handlers) = (
+        Box::leak(Box::new(vec!["src/api".to_string()])),
+        Box::leak(Box::new(vec!["web/".to_string()])),
+        Box::leak(Box::new(vec!["src/api/handlers".to_string()])),
+    );
+    let first = start(writer(api)).await.unwrap();
+    assert_eq!(first["owns"], serde_json::json!(["src/api"]));
+    start(writer(ui))
+        .await
+        .expect("paths that do not meet share the folder");
+
+    let err = start(writer(api_handlers)).await.unwrap_err().to_string();
+    assert!(
+        err.contains("already writes in /t") && err.contains("src/api"),
+        "{err}"
+    );
+    assert!(
+        err.contains("worktree"),
+        "the refusal names the way out: {err}"
+    );
+    let err = start(writer(&[])).await.unwrap_err().to_string();
+    assert!(
+        err.contains("already writes in /t"),
+        "no owns is the whole folder: {err}"
+    );
+
+    // A reviewer writes nothing, so it may sit in the folder.
+    start(spawn_req("claude-code", Some(Purpose::Review), None, &[]))
+        .await
+        .expect("a reviewer is not a writer");
+}
+
+const WORKTREE: &str = r#"{"id":"x","result":{"path":"/h/HQ/worktrees/t/hs-1","repo":"/t","branch":"feature","head":"abc123","created":true}}"#;
+
+#[tokio::test]
+async fn a_writer_with_a_worktree_starts_there_and_leaves_the_folder_free() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let (dir, host) = fake_host(&[
+        ("worktree add", WORKTREE.into(), None),
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-h", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let req = SpawnRequest {
+        worktree: Some(crate::agent_host::WorktreeBase::Branch("feature".into())),
+        ..spawn_req("claude-code", None, None, &[])
+    };
+    let report = spawn_on(vault.path(), &db, Arc::new(host), req)
+        .await
+        .unwrap();
+    assert_eq!(report["cwd"], "/h/HQ/worktrees/t/hs-1");
+    assert_eq!(report["worktree"]["branch"], "feature");
+    assert_eq!(report["worktree"]["repo"], "/t");
+    let calls = std::fs::read_to_string(dir.path().join("calls.log")).unwrap();
+    assert!(
+        calls.contains("worktree add --repo /t --session hs-claude-code-")
+            && calls.contains("--branch feature"),
+        "{calls}"
+    );
+    let id = report["session_id"].as_str().unwrap().to_string();
+    let checkout = db
+        .with_conn(|c| hq_db::session_checkouts::get(c, &id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkout.folder, "/t");
+    assert_eq!(checkout.worktree.as_deref(), Some("/h/HQ/worktrees/t/hs-1"));
+    assert_eq!(checkout.last_head.as_deref(), Some("abc123"));
+
+    // The folder itself has no writer, so a plain session may start there.
+    let (_dir, host) = startable_host();
+    spawn_on(
+        vault.path(),
+        &db,
+        Arc::new(host),
+        spawn_req("claude-code", None, None, &[]),
+    )
+    .await
+    .expect("the worktree writer does not hold the folder");
+}
+
+#[tokio::test]
+async fn a_launch_that_fails_takes_the_new_worktree_with_it() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let (dir, host) = fake_host(&[
+        ("worktree add", WORKTREE.into(), None),
+        (
+            "worktree remove",
+            r#"{"removed":true,"dirty":false}"#.into(),
+            None,
+        ),
+        ("workspace create", String::new(), Some("no room")),
+    ]);
+    let req = SpawnRequest {
+        worktree: Some(crate::agent_host::WorktreeBase::Branch("feature".into())),
+        ..spawn_req("claude-code", None, None, &[])
+    };
+    assert!(
+        spawn_on(vault.path(), &db, Arc::new(host), req)
+            .await
+            .is_err()
+    );
+    let calls = std::fs::read_to_string(dir.path().join("calls.log")).unwrap();
+    assert!(
+        calls.contains("worktree remove /h/HQ/worktrees/t/hs-1"),
+        "{calls}"
+    );
+}
+
+#[test]
+fn a_stopped_sessions_worktree_goes_unless_something_is_uncommitted() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let record = |id: &str| {
+        db.with_conn(|c| {
+            hq_db::session_checkouts::record(
+                c,
+                &hq_db::session_checkouts::NewCheckout {
+                    session_id: id,
+                    folder: "/t",
+                    worktree: Some("/h/HQ/worktrees/t/x"),
+                    repo: Some("/t"),
+                    branch: Some("feature"),
+                    detached: None,
+                    owns: &[],
+                    head: Some("abc"),
+                },
+            )
+        })
+        .unwrap();
+    };
+    record("hs-clean");
+    let (_d, clean) = fake_host(&[(
+        "worktree remove",
+        r#"{"removed":true,"dirty":false}"#.into(),
+        None,
+    )]);
+    let clean: crate::agent_host::Host = Arc::new(clean);
+    let said = checkout::release(&db, &clean, "hs-clean").unwrap();
+    assert_eq!(said["removed"], "/h/HQ/worktrees/t/x");
+    assert!(
+        checkout::release(&db, &clean, "hs-clean").is_none(),
+        "removed once"
+    );
+
+    record("hs-dirty");
+    let (_d, dirty) = fake_host(&[(
+        "worktree remove",
+        r#"{"removed":false,"dirty":true}"#.into(),
+        None,
+    )]);
+    let said = checkout::release(
+        &db,
+        &(Arc::new(dirty) as crate::agent_host::Host),
+        "hs-dirty",
+    )
+    .unwrap();
+    assert_eq!(said["kept"], "/h/HQ/worktrees/t/x");
+    assert!(checkout::release(&db, &clean, "nobody").is_none());
+}
+
+#[test]
+fn a_commit_is_news_once_and_the_starting_point_never() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-w",
+                harness: "claude-code",
+                label: "writer",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "local",
+                    agent_name: "hs-w",
+                    workspace_id: "w1",
+                    pane_id: "w1:p1",
+                },
+                purpose: None,
+            },
+        )?;
+        hq_db::session_checkouts::record(
+            c,
+            &hq_db::session_checkouts::NewCheckout {
+                session_id: "hs-w",
+                folder: "/t",
+                worktree: None,
+                repo: None,
+                branch: None,
+                detached: None,
+                owns: &[],
+                head: None,
+            },
+        )
+    })
+    .unwrap();
+    let head = |sha: &str| crate::agent_host::GitHead {
+        sha: sha.into(),
+        subject: "add the parser".into(),
+        branch: Some("feature".into()),
+    };
+    assert!(
+        !checkout::note_commit(&db, "hs-w", &head("aaa")),
+        "where it started"
+    );
+    assert!(checkout::note_commit(&db, "hs-w", &head("bbb")));
+    assert!(
+        !checkout::note_commit(&db, "hs-w", &head("bbb")),
+        "said once"
+    );
+    let events = db
+        .with_conn(|c| registry::list_events(c, "hs-w", 10))
+        .unwrap();
+    assert_eq!(events.iter().filter(|e| e.kind == "commit").count(), 1);
+    assert_eq!(
+        checkout::commit_line(&head("0123456789abcdef")),
+        "committed 0123456789ab \"add the parser\" on branch feature"
+    );
+}
+
+#[test]
+fn worktree_and_owns_arguments_are_checked() {
+    use crate::agent_host::WorktreeBase;
+    assert_eq!(checkout::parse_worktree(&json!({})).unwrap(), None);
+    assert_eq!(
+        checkout::parse_worktree(&json!({ "worktree": { "branch": "feat" } })).unwrap(),
+        Some(WorktreeBase::Branch("feat".into()))
+    );
+    assert_eq!(
+        checkout::parse_worktree(&json!({ "worktree": { "detached": "abc" } })).unwrap(),
+        Some(WorktreeBase::Detached("abc".into()))
+    );
+    for bad in [
+        json!({ "worktree": {} }),
+        json!({ "worktree": { "branch": "a", "detached": "b" } }),
+        json!({ "worktree": { "branch": " " } }),
+    ] {
+        assert!(checkout::parse_worktree(&bad).is_err(), "{bad}");
+    }
+    assert_eq!(
+        checkout::parse_owns(&json!({ "owns": ["./src/", "src", "docs/a.md"] })).unwrap(),
+        ["src", "docs/a.md"]
+    );
+    for bad in [
+        json!(["/etc"]),
+        json!(["../x"]),
+        json!(["."]),
+        json!(["a/../b"]),
+    ] {
+        assert!(
+            checkout::parse_owns(&json!({ "owns": bad })).is_err(),
+            "{bad}"
+        );
+    }
+    assert!(checkout::overlap(&[], &["a".into()]));
+    assert!(checkout::overlap(&["src".into()], &["src/api".into()]));
+    assert!(!checkout::overlap(
+        &["src/api".into()],
+        &["src/apiv2".into()]
+    ));
+}
+
+#[tokio::test]
+async fn a_session_starts_under_its_purposes_policy_unless_it_names_another() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let start = |req: SpawnRequest<'static>| {
+        let (db, vault) = (db.clone(), vault.path().to_path_buf());
+        async move {
+            let (_dir, host) = startable_host();
+            spawn_on(&vault, &db, Arc::new(host), req).await
+        }
+    };
+    let coder = start(spawn_req("claude-code", None, None, &[]))
+        .await
+        .unwrap();
+    assert_eq!(coder["policy"], "builder");
+    let id = coder["session_id"].as_str().unwrap();
+    assert_eq!(policy::of(&db, id).unwrap().name, "builder");
+    assert!(
+        db.with_conn(|c| registry::list_events(c, id, 10))
+            .unwrap()
+            .iter()
+            .any(|e| e.kind == "policy")
+    );
+
+    let reviewer = start(spawn_req("claude-code", Some(Purpose::Review), None, &[]))
+        .await
+        .unwrap();
+    assert_eq!(reviewer["policy"], "reviewer");
+    let none = start(SpawnRequest {
+        policy: Some("none"),
+        ..spawn_req("codex", Some(Purpose::Review), None, &[])
+    })
+    .await
+    .unwrap();
+    assert!(none.get("policy").is_none());
+    let err = start(SpawnRequest {
+        policy: Some("yolo"),
+        ..spawn_req("codex", Some(Purpose::Review), None, &[])
+    })
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("no command policy 'yolo'"), "{err}");
+}
+
+#[test]
+fn a_started_session_may_not_widen_its_starters_policy() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    db.with_conn(|c| hq_db::session_policies::record(c, "hs-lead", &builder))
+        .unwrap();
+    assert_eq!(
+        policy::choose(&db, None, Purpose::Code, Some("hs-lead"))
+            .unwrap()
+            .unwrap()
+            .name,
+        "builder"
+    );
+    let err = policy::choose(&db, Some("reviewer"), Purpose::Code, Some("hs-lead"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("lets through more than 'builder'"), "{err}");
+    let err = policy::choose(&db, Some("none"), Purpose::Code, Some("hs-lead"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("needs one too"), "{err}");
+    // A starter without a policy constrains nothing.
+    assert!(policy::choose(&db, Some("reviewer"), Purpose::Code, Some("hs-other")).is_ok());
+}
+
+fn command_dialog(kind: &str, command: &str, truncated: bool) -> crate::agent_host::PendingDialog {
+    let option = |id, label: &str, remember| crate::agent_host::PendingOption {
+        id,
+        label: label.into(),
+        remember,
+        typed: false,
+        selected: id == 1,
+    };
+    crate::agent_host::PendingDialog {
+        kind: kind.into(),
+        question: Some("Run this?".into()),
+        command: Some(command.into()),
+        options: vec![
+            option(1, "Yes", false),
+            option(2, "Yes, always", true),
+            option(3, "No", false),
+        ],
+        truncated,
+        text: None,
+    }
+}
+
+#[test]
+fn a_policy_judges_commands_and_paths_and_leaves_the_rest_to_the_owner() {
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    let judge = |d| policy::judge(&builder, &d, "/w/app").map(|d| d.as_str());
+    assert_eq!(
+        judge(command_dialog("command", "git status", false)),
+        Some("allow")
+    );
+    assert_eq!(
+        judge(command_dialog("command", "git push", false)),
+        Some("deny")
+    );
+    assert_eq!(
+        judge(command_dialog("path", "/w/app/src", false)),
+        Some("allow")
+    );
+    assert_eq!(
+        judge(command_dialog("edit", "/etc/hosts", false)),
+        Some("escalate")
+    );
+    assert_eq!(
+        judge(command_dialog("command", "git status", true)),
+        Some("escalate"),
+        "a cut dialog may hide more"
+    );
+    assert_eq!(
+        judge(command_dialog("command", "git push", true)),
+        Some("deny")
+    );
+    assert_eq!(judge(command_dialog("question", "x", false)), None);
+    assert_eq!(judge(command_dialog("trust", "x", false)), None);
+    assert_eq!(
+        policy::yes_option(&command_dialog("command", "ls", false)),
+        Some(1),
+        "never the remember option"
+    );
+}
+
+#[test]
+fn copilots_denies_come_from_the_policy() {
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    let reviewer = hq_core::command_policy::resolve("reviewer", &Default::default())
+        .unwrap()
+        .unwrap();
+    let copilot: Vec<String> = spec::COPILOT_ARGS.iter().map(|a| a.to_string()).collect();
+    let b = with_policy_args(copilot.clone(), Some(&builder));
+    assert_eq!(b[0], "--allow-all-tools");
+    assert!(b.contains(&"--deny-tool=shell(git push)".to_string()));
+    assert!(b.contains(&"--deny-tool=shell(git restore)".to_string()));
+    let r = with_policy_args(copilot.clone(), Some(&reviewer));
+    assert!(
+        !r.contains(&"--deny-tool=shell(git push)".to_string()),
+        "a reviewer may push: {r:?}"
+    );
+    assert_eq!(with_policy_args(copilot.clone(), None), copilot);
+    let custom = vec!["--model".to_string(), "x".to_string()];
+    assert_eq!(with_policy_args(custom.clone(), Some(&builder)), custom);
+}
+
+#[test]
+fn a_drive_turn_does_not_answer_a_command_dialog_a_policy_decides() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let d = command_dialog("command", "curl https://example.com", false);
+    assert!(
+        policy::refuse_drive(&db, "hs-1", &d).is_none(),
+        "no policy: as before"
+    );
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    db.with_conn(|c| hq_db::session_policies::record(c, "hs-1", &builder))
+        .unwrap();
+    assert!(
+        policy::refuse_drive(&db, "hs-1", &d)
+            .unwrap()
+            .contains("waits for the owner")
+    );
+    assert!(policy::refuse_drive(&db, "hs-1", &command_dialog("question", "q", false)).is_none());
+}
+
+/// Sessions `lead` (started by a claude.ai connection, on task `task`) with a worker under it,
+/// and an unrelated `other`.
+fn event_world(db: &Database) -> String {
+    let task = a_task(db);
+    db.with_conn(|c| {
+        for id in ["hs-lead", "hs-worker", "hs-other"] {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id,
+                    harness: "claude-code",
+                    label: id,
+                    cwd: "/w",
+                    mission_id: None,
+                    placement: registry::Placement {
+                        host: "local",
+                        agent_name: id,
+                        workspace_id: "w1",
+                        pane_id: "w1:p1",
+                    },
+                    purpose: None,
+                },
+            )?;
+        }
+        registry::set_parent(c, "hs-worker", "hs-lead", 1)?;
+        registry::set_origin(c, "hs-lead", registry::ORIGIN_CONNECTOR)?;
+        registry::set_mission(c, "hs-lead", &task)?;
+        Ok(())
+    })
+    .unwrap();
+    task
+}
+
+fn kinds(v: &Value) -> Vec<String> {
+    v["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            format!(
+                "{}:{}",
+                e["session_id"].as_str().unwrap(),
+                e["kind"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_event_stream_reads_each_event_once_from_a_cursor() {
+    use events::{Reader, Scope, read};
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    let owner = Reader::default();
+    let start = read(&db, &Scope::All, &owner, None, 10, Duration::ZERO).unwrap();
+    let cursor = start["next"].as_i64().unwrap();
+    db.with_conn(|c| {
+        registry::record_event(
+            c,
+            "hs-worker",
+            "blocked",
+            "supervisor",
+            Some(r#"{"seq":3}"#),
+        )?;
+        registry::record_event(c, "hs-other", "finished", "supervisor", None)
+    })
+    .unwrap();
+    let team = Scope::Team("hs-lead".into());
+    let got = read(&db, &team, &owner, Some(cursor), 10, Duration::ZERO).unwrap();
+    assert_eq!(kinds(&got), ["hs-worker:blocked"]);
+    assert_eq!(
+        got["events"][0]["detail"]["seq"], 3,
+        "detail comes back as data"
+    );
+    let next = got["next"].as_i64().unwrap();
+    let again = read(&db, &team, &owner, Some(next), 10, Duration::ZERO).unwrap();
+    assert!(kinds(&again).is_empty());
+    assert_eq!(again["next"], next, "an empty read keeps the cursor");
+
+    let everything = read(&db, &Scope::All, &owner, Some(cursor), 1, Duration::ZERO).unwrap();
+    assert_eq!(everything["more"], true, "one at a time");
+    let started = std::time::Instant::now();
+    read(&db, &team, &owner, Some(next), 10, Duration::from_secs(1)).unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(900),
+        "it waited for an event"
+    );
+}
+
+#[test]
+fn a_task_reads_its_sessions_with_their_teams() {
+    use events::{Reader, Scope, read};
+    let db = Arc::new(Database::open_memory().unwrap());
+    let task = event_world(&db);
+    db.with_conn(|c| {
+        registry::record_event(c, "hs-lead", "finished", "supervisor", None)?;
+        registry::record_event(c, "hs-worker", "commit", "supervisor", None)?;
+        registry::record_event(c, "hs-other", "exited", "supervisor", None)
+    })
+    .unwrap();
+    let got = read(
+        &db,
+        &Scope::Task(task),
+        &Reader::default(),
+        Some(0),
+        10,
+        Duration::ZERO,
+    )
+    .unwrap();
+    assert_eq!(kinds(&got), ["hs-lead:finished", "hs-worker:commit"]);
+}
+
+#[test]
+fn a_reader_sees_only_what_it_may() {
+    use events::{Reader, Scope, read};
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    db.with_conn(|c| {
+        registry::record_event(c, "hs-worker", "blocked", "supervisor", None)?;
+        registry::record_event(c, "hs-other", "blocked", "supervisor", None)
+    })
+    .unwrap();
+    let worker = Reader {
+        caller: Some("hs-worker".into()),
+        connector: false,
+    };
+    let own = read(&db, &Scope::All, &worker, Some(0), 10, Duration::ZERO).unwrap();
+    assert_eq!(kinds(&own), ["hs-worker:blocked"], "its team only");
+    let err = read(
+        &db,
+        &Scope::Sessions(vec!["hs-other".into()]),
+        &worker,
+        Some(0),
+        10,
+        Duration::ZERO,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("its own team"), "{err}");
+
+    let connector = Reader {
+        caller: None,
+        connector: true,
+    };
+    let theirs = read(&db, &Scope::All, &connector, Some(0), 10, Duration::ZERO).unwrap();
+    assert_eq!(
+        kinds(&theirs),
+        ["hs-worker:blocked"],
+        "only teams it started"
+    );
+    assert!(
+        read(
+            &db,
+            &Scope::Sessions(vec!["hs-other".into()]),
+            &connector,
+            Some(0),
+            10,
+            Duration::ZERO
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn an_events_read_names_one_scope() {
+    use events::Scope;
+    assert_eq!(Scope::from_args(&json!({})).unwrap(), Scope::All);
+    assert_eq!(
+        Scope::from_args(&json!({ "team": "hs-1" })).unwrap(),
+        Scope::Team("hs-1".into())
+    );
+    assert!(Scope::from_args(&json!({ "team": "hs-1", "task_id": "T-1" })).is_err());
+}
+
+#[test]
+fn a_remote_client_adds_sessions_to_a_team_it_may_reach() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    let (root, depth) = team::join(&db, &json!({}), "hs-lead").unwrap();
+    assert_eq!((root.as_str(), depth), ("hs-lead", 1));
+    let connector = json!({ CONNECTOR_ARG: "Claude" });
+    assert!(
+        team::join(&db, &connector, "hs-lead").is_ok(),
+        "a team it started"
+    );
+    db.with_conn(|c| registry::set_origin(c, "hs-other", registry::ORIGIN_USER))
+        .unwrap();
+    assert!(
+        team::join(&db, &connector, "hs-other").is_err(),
+        "not one it started"
+    );
+    let err = team::join(&db, &json!({}), "hs-worker")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("name the team's root, hs-lead"), "{err}");
+    let err = team::join(&db, &json!({ HANDOFF_SCOPE_ARG: true }), "hs-lead")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("handoff key"), "{err}");
+    let err = team::join(&db, &json!({ CALLER_SESSION_ARG: "hs-worker" }), "hs-lead")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("agent_delegate"), "{err}");
+    db.with_conn(|c| registry::set_status(c, "hs-lead", registry::STATUS_STOPPED))
+        .unwrap();
+    assert!(
+        team::join(&db, &json!({}), "hs-lead").is_err(),
+        "a stopped root"
+    );
+    assert_eq!(team::writers(&db, "hs-lead"), ["hs-worker"]);
+}
+
+#[test]
+fn moving_a_session_to_the_next_task_moves_its_goal_and_names_the_task_only() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let first = a_task(&db);
+    let next = db
+        .with_conn(|c| {
+            let new = hq_db::tasks::NewTask {
+                title: "step two: the parser",
+                description: "Long brief nobody should paste.\n\nAcceptance criteria:\nthe parser tests pass",
+                created_by: "test",
+                ..Default::default()
+            };
+            Ok(hq_db::tasks::create_task(c, "tk-next", "in-1", &new)?.id)
+        })
+        .unwrap();
+    seed_session(&db, "hs-move");
+    link(&db, "hs-move", &first, None).unwrap();
+    let moved = link_with(&db, "hs-move", &next, None, false, None).unwrap();
+    assert_eq!(moved["goal_moved"], true);
+    let message = moved["next_message"].as_str().unwrap();
+    assert!(
+        message.starts_with("Continue with ") && message.contains("step two: the parser"),
+        "{message}"
+    );
+    assert!(!message.contains("Long brief"), "never the description");
+    let row = get_row(&db, "hs-move").unwrap();
+    assert!(
+        row.goal
+            .as_deref()
+            .unwrap()
+            .starts_with("step two: the parser")
+    );
+    assert_eq!(row.done_criteria.as_deref(), Some("the parser tests pass"));
+    let same = link_with(&db, "hs-move", &next, None, false, None).unwrap();
+    assert!(
+        same.get("goal_moved").is_none(),
+        "linking to the same task moves nothing"
+    );
+}
+
+#[test]
+fn a_task_lists_the_dialogs_its_agents_wait_on_you_for() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let task = event_world(&db);
+    let item = hq_core::types::ValueItem::new(
+        "session-supervisor",
+        hq_core::types::ValueKind::ActionNeeded,
+        "Harness session 'hs-worker' is waiting for you",
+        "x",
+    );
+    hq_db::value_items::insert(&db, &item).unwrap();
+    let options = vec![
+        hq_db::dialog_alerts::DialogOption {
+            id: 1,
+            label: "Yes".into(),
+            remember: false,
+            typed: false,
+        },
+        hq_db::dialog_alerts::DialogOption {
+            id: 2,
+            label: "No".into(),
+            remember: false,
+            typed: false,
+        },
+    ];
+    hq_db::dialog_alerts::record(
+        &db,
+        &hq_db::dialog_alerts::NewDialogAlert {
+            item_id: &item.id,
+            session_id: "hs-worker",
+            pending_seq: 9,
+            kind: "command",
+            question: Some("Run this?"),
+            command: Some("curl https://example.com"),
+            options: &options,
+        },
+    )
+    .unwrap();
+    let got = decisions::for_task(&db, &task, &events::Reader::default()).unwrap();
+    let list = got["decisions"].as_array().unwrap();
+    assert_eq!(list.len(), 1, "the worker is in the task's team");
+    assert_eq!(list[0]["seq"], 9);
+    assert_eq!(list[0]["approve"]["label"], "Yes");
+    hq_db::dialog_alerts::claim(&db, &item.id, "approve").unwrap();
+    let got = decisions::for_task(&db, &task, &events::Reader::default()).unwrap();
+    assert!(got["decisions"].as_array().unwrap().is_empty(), "answered");
+}
+
+fn seed_session(db: &Database, id: &str) {
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id,
+                harness: "claude-code",
+                label: id,
+                cwd: "/w",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "local",
+                    agent_name: id,
+                    workspace_id: "w1",
+                    pane_id: "w1:p1",
+                },
+                purpose: None,
+            },
+        )
+    })
+    .unwrap();
 }

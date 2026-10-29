@@ -79,9 +79,12 @@ version gets `protocol_mismatch`.
 | `host.dirs` | optional `path` (the HQ folder when absent) | `path`, `parent`, `dirs` (`name`, `path`), `truncated`; only folders inside the HQ folder, symlinks out of it refused |
 | `host.mkdir` | `name`, optional `parent` | `{"path"}`; one folder name (no slashes, colons, `~`, `$` or backticks), idempotent |
 | `host.stop` | none | `{}` |
+| `worktree.add` | `repo` (a folder in the repository), `session` (names the worktree's folder), and `branch` or `detached` (a commit or ref) | `path`, `repo` (the repository's main folder), `branch`, `head`, `created`; a git worktree at `<HQ folder>/worktrees/<repository>/<session>`. A branch that does not exist is made from the repository folder's current commit; one checked out in another worktree is refused with `branch_in_use`. Names that could be read as options are refused. Called again for the same session and branch, it returns the existing worktree. |
+| `worktree.remove` | `path` | `{removed, dirty}`; only a worktree under `<HQ folder>/worktrees/`, and only when `git status` is clean, otherwise it is kept (`dirty: true`). The branch keeps every commit. |
 | `agent.spawn` | `name`, `argv`, `cwd`, optional `agent` (kind, for state detection), `resume_argv` (see Restarts), `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
 | `agent.list` | none | `{"agents": [...]}` |
 | `agent.get` | `name` | agent info |
+| `agent.head` | `name` | `{"head": {sha, subject, branch} or null}`: the commit the agent's folder is at |
 | `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`, `styled`; default `recent_unwrapped`; `styled` is `recent` with color and style as ANSI escape sequences), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
 | `agent.send_text` | `name`, `text` | `{}` (raw bytes, as given) |
 | `agent.paste` | `name`, `text` | `{}` (bracketed paste when the program enabled it) |
@@ -599,6 +602,15 @@ the host's own `spawn_failed` error naming the command. The hook settings file i
 written on the remote machine by the host (`agent.hook_flags`), so hooks,
 conversation ids and resume work the same as locally.
 
+`agent.hook_flags` also takes `policy`, the command policy a Claude Code agent runs under
+(a JSON object of at most 64 KiB, which the host stores and never reads). The host writes it
+next to the hook settings (`hooks/<name>.policy.json`, 0600) and adds a `PreToolUse` hook on
+the shell tool that runs `hq host policy-check <that file>`. The hook reads the tool call on
+stdin and prints a deny decision when the policy denies the command, so a deny holds under
+`--dangerously-skip-permissions` too. It fails closed: a policy file it cannot read, or a call
+too long to read whole (256 KiB), is refused. A later `agent.hook_flags` without `policy` (a
+restart) keeps the stored one, and the file goes with the agent's other files.
+
 ### Over a private tunnel instead of ssh
 
 A host can also be reached over TCP on a private tunnel address (for example a
@@ -682,7 +694,15 @@ The wire protocol is written out in `crates/hq-gate/src/lib.rs`.
   `agent_host.ssh_multiplex` keeps the ssh connection open between calls. State
   changes arrive as events instead of one poll a minute.
 - A laptop that is asleep or off the tailnet is skipped, not marked dead; its
-  sessions are picked up again when it answers.
+  sessions are picked up again when it answers. After
+  `agent_host.unreachable_alert_minutes` (5 by default) of silence HQ raises one alert, and
+  says when it is back.
+- `agent_host.keep_awake: while_sessions` in the laptop's own config makes `hq host serve`
+  hold a sleep assertion while at least one agent's process runs, and let go when the last
+  one ends: `caffeinate -i -w <host pid>` on macOS, `systemd-inhibit --what=sleep:idle` on
+  Linux. The assertion watches the host's pid, so a host that dies does not keep the machine
+  awake. Off by default. Closing the lid on battery still sleeps a Mac, and a Linux machine
+  that refuses the inhibitor (no permission for it) is told once on the host's stderr.
 - No terminal UI: `hq host status` on the machine and `harness_session_list` in HQ
   show every session. A session silent and not working for
   `agent_host.idle_reap_hours` (24 by default) is stopped by the host itself and can

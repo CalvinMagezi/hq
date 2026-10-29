@@ -91,8 +91,17 @@ pub(crate) struct NotificationActionResponse {
 
 /// Each item with the dialog it is about, when it is a blocked session's alert (`dialog_alerts`).
 const VALUE_ITEM_COLUMNS: &str = "SELECT v.id, v.source_task, v.kind, v.title, v.body, v.artifact_path, v.score, v.state, v.created_at, v.link, \
-     d.session_id, d.pending_seq, d.kind, d.question, d.command, d.options, d.approve_option, d.answered_at IS NOT NULL \
+     d.session_id, d.pending_seq, d.kind, d.question, d.command, d.options, d.approve_option, d.answered_at IS NOT NULL, \
+     v.dedup_key \
      FROM value_items v LEFT JOIN dialog_alerts d ON d.item_id = v.id";
+
+/// Action-needed items that ask the owner to look, not to decide: approving one would mean
+/// nothing, so they offer only Dismiss. Matched on the dedup key's prefix.
+const NOTICE_KEYS: &[&str] = &["host-unreachable-"];
+
+fn is_notice(dedup_key: Option<&str>) -> bool {
+    dedup_key.is_some_and(|k| NOTICE_KEYS.iter().any(|p| k.starts_with(p)))
+}
 
 fn state_where(state_filter: Option<&str>) -> &'static str {
     match state_filter {
@@ -152,8 +161,10 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
     } else {
         "value"
     };
+    let notice = is_notice(row.get::<_, Option<String>>(18)?.as_deref());
     let actions: &[&str] = match (state == NotificationState::Pending, needs_answer) {
         (false, _) => &[],
+        (true, true) if notice => &["dismiss"],
         (true, true) => &["approve", "reject"],
         (true, false) => &["dismiss", "acknowledge"],
     };
@@ -433,6 +444,22 @@ mod tests {
         let res = aggregate_notifications(&db, Some("pending"), Some("all"), 50).unwrap();
         assert_eq!(res.notifications.len(), 1);
         assert_eq!(res.pending_approvals_count, 1);
+    }
+
+    #[test]
+    fn a_host_that_is_not_answering_offers_nothing_to_approve() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let item = hq_core::types::ValueItem::new(
+            "session-supervisor",
+            hq_core::types::ValueKind::ActionNeeded,
+            "Host 'laptop' is not answering",
+            "Host laptop has not answered for 5 minutes.",
+        )
+        .with_dedup_key("host-unreachable-laptop-1000");
+        hq_db::value_items::emit(&db, &item).unwrap();
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        assert_eq!(items[0].kind, NotificationKind::ActionNeeded);
+        assert_eq!(items[0].actions, ["dismiss"]);
     }
 
     #[test]

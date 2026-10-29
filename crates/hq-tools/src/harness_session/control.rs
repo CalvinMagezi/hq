@@ -68,6 +68,12 @@ pub async fn resume(
             row.host
         );
     }
+    // A session that had its own worktree comes back in it: made again on its branch when the
+    // stop removed it.
+    let (reopen_host, reopen_db, id) = (host.clone(), db.clone(), session_id.to_string());
+    blocking(move || super::checkout::reopen(&reopen_db, &reopen_host, &id)).await??;
+    // The policy it started under, so a resumed agent is held to the same rules.
+    let policy = super::policy::of(db, session_id);
     let resumable = match spec.resume {
         ResumeStrategy::Args(args) => {
             !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
@@ -95,6 +101,7 @@ pub async fn resume(
             observe: &[],
             one_shot: None,
             origin: None,
+            policy: policy.as_ref(),
         },
     )
     .await?;
@@ -190,10 +197,48 @@ pub fn link(
     task: &str,
     watch: Option<NewWatch<'_>>,
 ) -> Result<Value> {
-    let link = db.with_conn(|c| {
+    link_with(db, session_id, task, watch, false, None)
+}
+
+/// The one message a session gets when its work moves to another task. It names the task and
+/// never carries its description: the agent reads the task (phase 6 of
+/// docs/plans/remote-driven-teams.md), and a pasted brief is what once contradicted later
+/// instructions.
+pub fn continue_message(display_id: &str, title: &str) -> String {
+    format!("Continue with {display_id}: {title}. Its acceptance is on the task.")
+}
+
+/// `link`, and when the session was on another task, its goal moves to the new one (the
+/// task's title and description, and its acceptance criteria as the definition of done when
+/// it has them). With `tell`, a running session that can take an instruction is sent
+/// `continue_message`.
+pub fn link_with(
+    db: &Arc<Database>,
+    session_id: &str,
+    task: &str,
+    watch: Option<NewWatch<'_>>,
+    tell: bool,
+    chat: Option<&WatchingChat>,
+) -> Result<Value> {
+    let (link, moved, title) = db.with_conn(|c| {
+        let before = registry::get(c, session_id)?.and_then(|r| r.mission_id);
         let link = mission::link(c, session_id, task)?;
         let row = registry::get(c, session_id)?;
-        if let Some(row) = row.filter(|r| r.goal.is_none())
+        let moved = before.is_some() && before.as_deref() != Some(link.task_id.as_str());
+        let new_task = hq_db::tasks::get_task(c, &link.task_id)?;
+        if moved {
+            let goal = task_goal(c, &link.task_id);
+            let done = new_task
+                .as_ref()
+                .and_then(|t| super::handoff::acceptance_of(&t.description));
+            registry::set_goal(
+                c,
+                session_id,
+                goal.as_deref(),
+                done.as_deref(),
+                registry::ACTOR_HQ,
+            )?;
+        } else if let Some(row) = row.filter(|r| r.goal.is_none())
             && let Some(goal) = row.mission_id.as_deref().and_then(|m| task_goal(c, m))
         {
             registry::set_goal(c, session_id, Some(&goal), None, registry::ACTOR_HQ)?;
@@ -201,9 +246,25 @@ pub fn link(
         if let Some(w) = watch {
             start_watch(c, session_id, w)?;
         }
-        Ok(link)
+        Ok((link, moved, new_task.map(|t| t.title).unwrap_or_default()))
     })?;
-    let report = json!({ "session_id": session_id, "task": link });
+    let mut report = json!({ "session_id": session_id, "task": link });
+    if moved {
+        let message = continue_message(&link.display_id, &title);
+        report["goal_moved"] = json!(true);
+        report["next_message"] = json!(message);
+        if tell {
+            match send(db, session_id, &message, chat) {
+                Ok(_) => report["told"] = json!(true),
+                Err(e) => {
+                    report["told"] = json!(false);
+                    report["note"] = json!(format!(
+                        "the session was not told ({e}); send next_message with harness_session_send when it can take it"
+                    ));
+                }
+            }
+        }
+    }
     Ok(if watch.is_some() {
         with_watch_state(db, session_id, report)
     } else {
@@ -802,6 +863,9 @@ pub fn stop(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     // Sessions started for this one stop with it.
     let stopped_children = stop_children(db, session_id);
     let mut report = json!({ "session_id": session_id, "status": "stopped" });
+    if let Some(worktree) = super::checkout::release(db, &host, session_id) {
+        report["worktree"] = worktree;
+    }
     if !stopped_children.is_empty() {
         report["stopped_children"] = json!(stopped_children);
     }

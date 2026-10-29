@@ -20,7 +20,13 @@ use crate::util::generate_id;
 const CREATED_BY: &str = "mcp-handoff";
 const DEFAULT_SPACE: &str = "personal";
 const DEFAULT_INITIATIVE: &str = "Inbox";
-const ACCEPTANCE_HEADING: &str = "Acceptance criteria:";
+pub(super) const ACCEPTANCE_HEADING: &str = "Acceptance criteria:";
+
+/// The acceptance criteria a task's description carries under `ACCEPTANCE_HEADING`, if any.
+pub(super) fn acceptance_of(description: &str) -> Option<String> {
+    let (_, after) = description.split_once(ACCEPTANCE_HEADING)?;
+    non_blank(after).map(str::to_string)
+}
 
 /// Two handoffs for the same work must not both find "no session yet" and each
 /// start one, so the check and the launch run under one lock per process.
@@ -51,6 +57,15 @@ pub struct HandoffRequest {
     pub purpose: Option<super::Purpose>,
     /// The model to start the harness on; blank is the harness's own default.
     pub model: String,
+    /// Start in a worktree of its own (see `SpawnRequest::worktree`).
+    pub worktree: Option<crate::agent_host::WorktreeBase>,
+    /// Paths it writes to in a shared folder (see `SpawnRequest::owns`).
+    pub owns: Vec<String>,
+    /// The command policy to run under; blank is its purpose's.
+    pub policy: String,
+    /// The team root the new session joins, and its depth there, already checked
+    /// (`team::join`).
+    pub team: Option<(String, i64)>,
 }
 
 fn non_blank(s: &str) -> Option<&str> {
@@ -293,7 +308,10 @@ async fn run_handoff(
                 drive: req.drive_new && !req.drive_opted_out,
                 opted_out: req.drive_opted_out,
             }),
-            parent: None,
+            parent: req
+                .team
+                .as_ref()
+                .map(|(root, depth)| (root.as_str(), *depth)),
             goal: GoalText {
                 goal: None,
                 done_criteria: non_blank(&req.acceptance),
@@ -301,6 +319,9 @@ async fn run_handoff(
             purpose: req.purpose,
             observe: &[],
             model: non_blank(&req.model),
+            worktree: req.worktree.clone(),
+            owns: &req.owns,
+            policy: non_blank(&req.policy),
         },
     )
     .await;

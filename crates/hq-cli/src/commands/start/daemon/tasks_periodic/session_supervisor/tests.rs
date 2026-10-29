@@ -155,7 +155,7 @@ const TEST_HOST_BUDGET: Duration = Duration::from_secs(60);
 async fn sweep(vault: &Path, db: &Database, host: &ScriptedHost, s: Option<&Summarizer>) {
     let host = host.clone();
     let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(host.clone()) as Host));
-    supervise(vault, db, s, resolve, TEST_HOST_BUDGET)
+    supervise(vault, db, s, resolve, Sweep::within(TEST_HOST_BUDGET))
         .await
         .unwrap();
 }
@@ -265,9 +265,15 @@ async fn an_unreachable_host_leaves_its_sessions_running() {
     store_snapshot(&db, "hs-away", "last known screen");
 
     let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
-    supervise(tmp.path(), &db, None, resolve, HOST_SWEEP_BUDGET)
-        .await
-        .unwrap();
+    supervise(
+        tmp.path(),
+        &db,
+        None,
+        resolve,
+        Sweep::within(HOST_SWEEP_BUDGET),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(status_of(&db, "hs-away"), registry::STATUS_RUNNING);
     assert!(
@@ -288,9 +294,15 @@ async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
     let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(hung.clone()) as Host));
 
     let started = Instant::now();
-    supervise(tmp.path(), &db, None, resolve, Duration::from_millis(500))
-        .await
-        .unwrap();
+    supervise(
+        tmp.path(),
+        &db,
+        None,
+        resolve,
+        Sweep::within(Duration::from_millis(500)),
+    )
+    .await
+    .unwrap();
 
     assert!(
         started.elapsed() < Duration::from_secs(8),
@@ -478,9 +490,15 @@ async fn an_unreachable_host_leaves_the_task_untouched() {
     let task = seed_with_task(&db, "hs-laptop");
 
     let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
-    supervise(tmp.path(), &db, None, resolve, HOST_SWEEP_BUDGET)
-        .await
-        .unwrap();
+    supervise(
+        tmp.path(),
+        &db,
+        None,
+        resolve,
+        Sweep::within(HOST_SWEEP_BUDGET),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         task_state(&db, &task),
@@ -1053,4 +1071,409 @@ async fn a_stack_run_on_a_host_that_reports_no_exit_code_is_judged_by_its_screen
         hq_db::tasks::STATUS_BLOCKED,
         "no code and no output means the run crashed"
     );
+}
+
+fn host_items(db: &Database) -> Vec<(String, String, String)> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT kind, title, state FROM value_items WHERE dedup_key LIKE 'host-%' ORDER BY created_at, rowid",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })
+    .unwrap()
+}
+
+fn poll(host: &str, answer: std::result::Result<(), &str>) -> hq_tools::harness_session::HostPoll {
+    let mut polled = hq_tools::harness_session::HostPoll::new();
+    polled.insert(
+        host.into(),
+        answer.map(|_| Vec::new()).map_err(String::from),
+    );
+    polled
+}
+
+#[test]
+fn a_silent_host_alerts_once_after_the_wait_and_says_when_it_is_back() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    seed(&db, "hs-b");
+    let rows = vec![row_of(&db, "hs-a"), row_of(&db, "hs-b")];
+    let after = Some(Duration::from_secs(300));
+    let silent = poll(
+        "local",
+        Err("ssh: connect to host laptop: Operation timed out\nmore"),
+    );
+
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_000);
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_240);
+    assert!(
+        host_items(&db).is_empty(),
+        "four minutes is not yet an outage worth a word"
+    );
+
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_300);
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_360);
+    let items = host_items(&db);
+    assert_eq!(items.len(), 1, "one alert per outage: {items:?}");
+    assert_eq!(items[0].0, "action_needed");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT body FROM value_items WHERE dedup_key LIKE 'host-unreachable-%'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert!(
+        body.contains("5 minutes") && body.contains("2 sessions"),
+        "{body}"
+    );
+    assert!(body.contains("hs-a") && body.contains("hs-b"), "{body}");
+    assert!(
+        body.contains("Operation timed out") && !body.contains("more"),
+        "{body}"
+    );
+
+    hosts::watch_hosts(&db, &poll("local", Ok(())), &rows, after, 10_900);
+    let items = host_items(&db);
+    assert_eq!(items.len(), 2, "{items:?}");
+    assert_eq!(
+        items[0].2, "expired",
+        "the alert leaves the inbox: {items:?}"
+    );
+    assert_eq!(items[1].0, "fyi");
+    assert!(items[1].1.contains("answering again"), "{items:?}");
+
+    hosts::watch_hosts(&db, &poll("local", Ok(())), &rows, after, 11_000);
+    assert_eq!(host_items(&db).len(), 2, "back is said once");
+}
+
+#[test]
+fn a_short_silence_or_an_alert_turned_off_says_nothing() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    let rows = vec![row_of(&db, "hs-a")];
+    let silent = poll("local", Err("timed out"));
+    let after = Some(Duration::from_secs(300));
+
+    hosts::watch_hosts(&db, &silent, &rows, after, 1_000);
+    hosts::watch_hosts(&db, &poll("local", Ok(())), &rows, after, 1_120);
+    assert!(host_items(&db).is_empty(), "a blip is not news");
+    assert!(hq_db::host_outages::list(&db).unwrap().is_empty());
+
+    hosts::watch_hosts(&db, &silent, &rows, None, 2_000);
+    hosts::watch_hosts(&db, &silent, &rows, None, 9_000);
+    assert!(host_items(&db).is_empty(), "the alert is off");
+    assert_eq!(
+        hq_db::host_outages::list(&db).unwrap().len(),
+        1,
+        "still tracked"
+    );
+}
+
+#[test]
+fn an_outage_whose_sessions_all_stopped_ends_quietly() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    let rows = vec![row_of(&db, "hs-a")];
+    let after = Some(Duration::from_secs(60));
+    let silent = poll("local", Err("timed out"));
+    hosts::watch_hosts(&db, &silent, &rows, after, 1_000);
+    hosts::watch_hosts(&db, &silent, &rows, after, 1_100);
+    assert_eq!(host_items(&db).len(), 1);
+
+    hosts::watch_hosts(&db, &Default::default(), &[], after, 1_200);
+    let items = host_items(&db);
+    assert_eq!(
+        items.len(),
+        1,
+        "no back notice for a host nobody polls: {items:?}"
+    );
+    assert_eq!(items[0].2, "expired");
+    assert!(hq_db::host_outages::list(&db).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_sweep_records_a_silent_host_as_an_outage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-away");
+    let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
+    let sweep = Sweep {
+        host_budget: HOST_SWEEP_BUDGET,
+        unreachable_after: Some(Duration::ZERO),
+    };
+    supervise(tmp.path(), &db, None, resolve, sweep)
+        .await
+        .unwrap();
+
+    let open = hq_db::host_outages::list(&db).unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].host, "local");
+    assert!(
+        open[0].alert_item_id.is_some(),
+        "a zero wait alerts at once"
+    );
+    assert_eq!(status_of(&db, "hs-away"), registry::STATUS_RUNNING);
+}
+
+/// A host whose finished agent's folder is at `sha`.
+fn host_at_commit(dir: &Path, name: &str, seq: u64, sha: &str) -> ScriptedHost {
+    let list = format!(
+        r#"{{"agent":"claude","agent_status":"done","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":{seq}}}"#
+    );
+    let head =
+        format!(r#"{{"head":{{"sha":"{sha}","subject":"add the parser","branch":"feature"}}}}"#);
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"result\":{{\"agents\":[{list}]}}}}' ;;\n  *\"agent read\"*) printf '%s' 'done' ;;\n  *\"agent head\"*) printf '%s' '{head}' ;;\n  *) exit 2 ;;\nesac\n"
+    );
+    let path = dir.join(format!("host-{seq}"));
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptedHost::new(path)
+}
+
+#[tokio::test]
+async fn a_finished_turn_names_the_commit_it_made_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-w");
+    db.with_conn(|c| {
+        hq_db::session_checkouts::record(
+            c,
+            &hq_db::session_checkouts::NewCheckout {
+                session_id: "hs-w",
+                folder: "/tmp",
+                worktree: None,
+                repo: None,
+                branch: None,
+                detached: None,
+                owns: &[],
+                head: Some("aaa111"),
+            },
+        )
+    })
+    .unwrap();
+
+    sweep(
+        tmp.path(),
+        &db,
+        &host_at_commit(tmp.path(), "hs-w", 3, "bbb222"),
+        None,
+    )
+    .await;
+    let body = only_body(tmp.path());
+    assert!(
+        body.contains("It committed bbb222 \"add the parser\" on branch feature."),
+        "{body}"
+    );
+    let events = db
+        .with_conn(|c| registry::list_events(c, "hs-w", 10))
+        .unwrap();
+    assert_eq!(events.iter().filter(|e| e.kind == "commit").count(), 1);
+
+    // The next finished turn with nothing new committed says nothing about a commit.
+    std::fs::remove_dir_all(mailbox_dir(tmp.path())).unwrap();
+    sweep(
+        tmp.path(),
+        &db,
+        &host_at_commit(tmp.path(), "hs-w", 4, "bbb222"),
+        None,
+    )
+    .await;
+    let body = only_body(tmp.path());
+    assert!(!body.contains("committed"), "{body}");
+}
+
+/// A host whose agent waits at a command dialog for `command`; it logs every call, and an
+/// answer makes the dialog go.
+fn host_at_command(dir: &Path, name: &str, seq: u64, command: &str) -> ScriptedHost {
+    let pending = format!(
+        r#"{{"kind":"command","question":"Do you want to run this command?","command":"{command}","options":[{{"id":1,"label":"Yes"}},{{"id":2,"label":"Yes, and do not ask again for {command}","remember":true}},{{"id":3,"label":"No, and tell me what to do differently","typed":true}}]}}"#
+    );
+    let agent = format!(
+        r#"{{"agent":"codex","agent_status":"blocked","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":{seq},"pending_seq":{seq},"pending":{pending}}}"#
+    );
+    let script = format!(
+        "#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/calls.log\"\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"result\":{{\"agents\":[{agent}]}}}}' ;;\n  *\"agent read\"*) printf '%s' 'Do you want to run this command?' ;;\n  *\"agent pending\"*) printf '%s' '{{\"result\":{{\"pending_seq\":{seq},\"rule\":\"codex-command\",\"pending\":{pending}}}}}' ;;\n  *\"agent answer\"*) printf '%s' '{{\"result\":{{\"registered\":true}}}}' ;;\n  *) exit 2 ;;\nesac\n"
+    );
+    let path = dir.join(format!("host-{seq}"));
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptedHost::new(path)
+}
+
+fn with_builder(db: &Database, id: &str) {
+    let builder = hq_core::command_policy::resolve("builder", &Default::default())
+        .unwrap()
+        .unwrap();
+    db.with_conn(|c| hq_db::session_policies::record(c, id, &builder))
+        .unwrap();
+}
+
+/// Waits for the background answer to record its decision.
+async fn policy_outcome(db: &Database, id: &str) -> serde_json::Value {
+    for _ in 0..100 {
+        let events = db.with_conn(|c| registry::list_events(c, id, 10)).unwrap();
+        if let Some(e) = events.iter().find(|e| e.kind == "policy_decision") {
+            return serde_json::from_str(e.detail.as_deref().unwrap()).unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the policy never decided");
+}
+
+fn answers(dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(dir.join("calls.log"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| l.contains("agent answer"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_command_the_policy_allows_is_answered_once_and_raises_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-ok");
+    with_builder(&db, "hs-ok");
+    let host = host_at_command(tmp.path(), "hs-ok", 5, "cargo test");
+
+    sweep(tmp.path(), &db, &host, None).await;
+    let outcome = policy_outcome(&db, "hs-ok").await;
+    assert_eq!(outcome["decision"], "allow");
+    assert_eq!(outcome["outcome"], "allowed");
+    let answered = answers(tmp.path());
+    assert_eq!(answered.len(), 1, "{answered:?}");
+    assert!(
+        answered[0].contains("--option 1"),
+        "the one-time yes, never remember: {answered:?}"
+    );
+    assert_eq!(alert_count(&db), 0, "nothing for the owner");
+}
+
+#[tokio::test]
+async fn a_command_the_policy_denies_is_declined_without_asking_anyone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-push");
+    with_builder(&db, "hs-push");
+    let host = host_at_command(tmp.path(), "hs-push", 6, "git push origin main");
+
+    sweep(tmp.path(), &db, &host, None).await;
+    let outcome = policy_outcome(&db, "hs-push").await;
+    assert_eq!(outcome["decision"], "deny");
+    assert_eq!(outcome["rule"], "git push");
+    assert!(answers(tmp.path())[0].contains("--decline"));
+    assert_eq!(alert_count(&db), 0);
+}
+
+#[tokio::test]
+async fn a_command_the_policy_does_not_name_reaches_the_owner_with_the_reason() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-curl");
+    with_builder(&db, "hs-curl");
+    let host = host_at_command(tmp.path(), "hs-curl", 7, "curl https://example.com");
+
+    sweep(tmp.path(), &db, &host, None).await;
+    assert!(answers(tmp.path()).is_empty(), "nothing is pressed");
+    assert_eq!(alert_count(&db), 1);
+    let body: String = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT body FROM value_items WHERE dedup_key = 'session-blocked-hs-curl-7'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert!(
+        body.contains("'builder' command policy left this to you")
+            && body.contains("does not name curl"),
+        "{body}"
+    );
+    let outcome = policy_outcome(&db, "hs-curl").await;
+    assert_eq!(outcome["outcome"], "escalated");
+}
+
+#[tokio::test]
+async fn without_a_policy_every_dialog_still_goes_to_the_owner() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-old");
+    let host = host_at_command(tmp.path(), "hs-old", 8, "cargo test");
+    sweep(tmp.path(), &db, &host, None).await;
+    assert!(answers(tmp.path()).is_empty());
+    assert_eq!(alert_count(&db), 1);
+}
+
+fn event_kinds(db: &Database, id: &str) -> Vec<(String, Option<String>)> {
+    db.with_conn(|c| registry::list_events(c, id, 20))
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.actor == "supervisor")
+        .map(|e| (e.kind, e.detail))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_session_s_life_is_written_as_events_for_the_stream() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-life");
+
+    sweep(
+        tmp.path(),
+        &db,
+        &host_with_dialog(tmp.path(), "hs-life", 4),
+        None,
+    )
+    .await;
+    let dir2 = tempfile::tempdir().unwrap();
+    let working = fake_host(dir2.path(), &[("hs-life", "working", 5)], "compiling");
+    sweep(tmp.path(), &db, &working, None).await;
+    let dir3 = tempfile::tempdir().unwrap();
+    let done = fake_host(dir3.path(), &[("hs-life", "done", 6)], "All done.");
+    sweep(tmp.path(), &db, &done, None).await;
+    let dir4 = tempfile::tempdir().unwrap();
+    sweep(tmp.path(), &db, &gone_host(dir4.path()), None).await;
+
+    let events = event_kinds(&db, "hs-life");
+    let kinds: Vec<&str> = events.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(kinds, ["blocked", "unblocked", "finished", "exited"]);
+    let blocked: serde_json::Value = serde_json::from_str(events[0].1.as_deref().unwrap()).unwrap();
+    assert_eq!(blocked["seq"], 4);
+    assert_eq!(blocked["dialog"]["kind"], "path");
+    assert_eq!(blocked["dialog"]["options"][1]["remember"], true);
+    let unblocked: serde_json::Value =
+        serde_json::from_str(events[1].1.as_deref().unwrap()).unwrap();
+    assert!(unblocked["blocked_ms"].as_i64().is_some(), "{unblocked}");
+    assert_eq!(unblocked["status"], "working");
+}
+
+#[test]
+fn a_silent_host_is_an_event_on_each_of_its_sessions() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    seed(&db, "hs-b");
+    let rows = vec![row_of(&db, "hs-a"), row_of(&db, "hs-b")];
+    let silent = poll("local", Err("timed out"));
+    hosts::watch_hosts(&db, &silent, &rows, Some(Duration::ZERO), 100);
+    hosts::watch_hosts(
+        &db,
+        &poll("local", Ok(())),
+        &rows,
+        Some(Duration::ZERO),
+        400,
+    );
+    for id in ["hs-a", "hs-b"] {
+        let kinds: Vec<String> = event_kinds(&db, id).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(kinds, ["host_unreachable", "host_back"], "{id}");
+    }
 }

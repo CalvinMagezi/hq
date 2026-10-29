@@ -378,6 +378,18 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "102_dialog_alerts",
         include_str!("../sql/102_dialog_alerts.sql"),
     ),
+    (
+        "103_host_outages",
+        include_str!("../sql/103_host_outages.sql"),
+    ),
+    (
+        "104_session_checkouts",
+        include_str!("../sql/104_session_checkouts.sql"),
+    ),
+    (
+        "105_session_policies",
+        include_str!("../sql/105_session_policies.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

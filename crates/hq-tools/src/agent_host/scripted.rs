@@ -6,8 +6,9 @@
 use super::backend::HostBackend;
 use super::transport::{RawOutput, run_with_deadline};
 use super::{
-    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, Host, INVALID_KEYS_CODE, LaunchRequest,
-    Launched, PendingRead, PromptOutcome, validate_keys,
+    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, Host, INVALID_KEYS_CODE,
+    LaunchRequest, Launched, PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo,
+    WorktreeRemoved, bad_reply, validate_keys,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -513,6 +514,43 @@ impl ScriptedHost {
     }
 }
 
+impl ScriptedHost {
+    pub fn worktree_add(
+        &self,
+        repo: &str,
+        session: &str,
+        base: &WorktreeBase,
+    ) -> Result<WorktreeInfo, AgentHostError> {
+        let (flag, value) = match base {
+            WorktreeBase::Branch(b) => ("--branch", b.as_str()),
+            WorktreeBase::Detached(r) => ("--detached", r.as_str()),
+        };
+        let args = [
+            "worktree",
+            "add",
+            "--repo",
+            repo,
+            "--session",
+            session,
+            flag,
+            value,
+        ];
+        let v = self.json(&args, self.command_timeout)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree add", e))
+    }
+
+    pub fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
+        let v = self.json(&["worktree", "remove", path], self.command_timeout)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree remove", e))
+    }
+
+    pub fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
+        let v = self.json(&["agent", "head", target], self.command_timeout)?;
+        serde_json::from_value(v.get("head").cloned().unwrap_or(Value::Null))
+            .map_err(|e| bad_reply("agent head", e))
+    }
+}
+
 /// Text starting with `-` would be read as an option by the host's parser, so it
 /// gets a leading space.
 fn option_safe(text: &str) -> String {
@@ -672,6 +710,20 @@ impl HostBackend for ScriptedHost {
         option: Option<u32>,
     ) -> Result<AnswerOutcome, AgentHostError> {
         ScriptedHost::answer(self, target, seq, option)
+    }
+    fn worktree_add(
+        &self,
+        repo: &str,
+        session: &str,
+        base: &WorktreeBase,
+    ) -> Result<WorktreeInfo, AgentHostError> {
+        ScriptedHost::worktree_add(self, repo, session, base)
+    }
+    fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
+        ScriptedHost::worktree_remove(self, path)
+    }
+    fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
+        ScriptedHost::head(self, target)
     }
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
         Arc::new(self.clone().with_launch_bound(bound))

@@ -1,8 +1,9 @@
 use super::transport::Transport;
 use super::{
-    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, Host, HostBackend,
-    HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince, PendingRead,
-    PromptOutcome, shell_line, validate_keys,
+    AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, GitHead, Host,
+    HostBackend, HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince,
+    PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved, bad_reply, shell_line,
+    validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -300,7 +301,7 @@ impl NativeBackend {
         {
             tracing::warn!(agent = %req.name, error = %e, "could not write the MCP config");
         }
-        let flags = self.hook_flags(&req.name, &req.kind);
+        let flags = self.hook_flags_with(&req.name, &req.kind, req.policy.as_ref());
         req.args.extend(flags.clone());
         if let Some(resume) = req.resume_args.as_mut() {
             resume.extend(flags);
@@ -310,10 +311,20 @@ impl NativeBackend {
 
     /// Empty for other kinds, or when the host cannot write the file.
     fn hook_flags(&self, name: &str, kind: &str) -> Vec<String> {
+        self.hook_flags_with(name, kind, None)
+    }
+
+    /// `hook_flags`, handing the host the command policy to enforce when there is one. Without
+    /// it the host keeps the policy it was given at launch, so a restart stays under it.
+    fn hook_flags_with(&self, name: &str, kind: &str, policy: Option<&Value>) -> Vec<String> {
         if kind != CLAUDE_KIND {
             return Vec::new();
         }
-        let reply = self.call("agent.hook_flags", json!({ "name": name, "agent": kind }));
+        let mut params = json!({ "name": name, "agent": kind });
+        if let Some(policy) = policy {
+            params["policy"] = policy.clone();
+        }
+        let reply = self.call("agent.hook_flags", params);
         let flags = reply.ok().and_then(|v| v.get("flags").cloned());
         flags
             .and_then(|f| serde_json::from_value(f).ok())
@@ -786,6 +797,32 @@ impl HostBackend for NativeBackend {
             .map(|_| ())
     }
 
+    fn worktree_add(
+        &self,
+        repo: &str,
+        session: &str,
+        base: &WorktreeBase,
+    ) -> Result<WorktreeInfo, AgentHostError> {
+        let mut params = json!({ "repo": repo, "session": session });
+        match base {
+            WorktreeBase::Branch(b) => params["branch"] = json!(b),
+            WorktreeBase::Detached(r) => params["detached"] = json!(r),
+        }
+        let v = self.call("worktree.add", params)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree.add", e))
+    }
+
+    fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
+        let v = self.call("worktree.remove", json!({ "path": path }))?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree.remove", e))
+    }
+
+    fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
+        let v = self.call("agent.head", json!({ "name": target }))?;
+        serde_json::from_value(v.get("head").cloned().unwrap_or(Value::Null))
+            .map_err(|e| bad_reply("agent.head", e))
+    }
+
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
         let v = self.call("agent.awaiting", json!({}))?;
         let list = v.get("agents").and_then(Value::as_array);
@@ -865,6 +902,7 @@ mod tests {
             resume_args: None,
             mcp: None,
             start_timeout: Duration::from_secs(1),
+            policy: None,
         }
     }
 

@@ -33,6 +33,7 @@ a model instead of starting on its default, and so does an id that could read as
 | `harness_session_pending` | The dialog a blocked session waits at, as data: its number (`seq`), kind, question, command or path, folder and options. |
 | `harness_session_answer` | Answer that dialog by option (`seq` and `option`), or `decline` it, optionally with a `message` sent as the next prompt. |
 | `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. |
+| `harness_session_events` | What happened to sessions, a task or a team, as compact events after a cursor, waiting up to 45 s for the next one. See "Following sessions by events". |
 | `harness_session_logs` / `_status` / `_list` | Read output and live state. `logs` with `since` returns only what is new. |
 | `harness_session_stop` / `_resume` | Close the workspace, or continue a stopped session. |
 | `host_list` | Which hosts exist and whether each answers right now. |
@@ -89,6 +90,18 @@ app, and list every agent on a machine with `hq host status`.
 - **An unreachable host is not an exit.** If the laptop sleeps or leaves the tailnet, its
   sessions stay `running` and are left alone. They resume being watched when it answers.
   `harness_session_stop` fails for such a session rather than pretending to stop it.
+- **A host that stops answering is reported.** Once a host with running sessions has been
+  silent for `agent_host.unreachable_alert_minutes` (default 5, 0 turns it off), the supervisor
+  raises one action-needed item naming the host and its sessions, which reaches the phone and
+  web push like any other. When the host answers again the item leaves the inbox and a notice
+  says it is back, with how long it was gone. A short silence says nothing. The outage is kept
+  in the database (`host_outages`), so a daemon restart neither repeats the alert nor forgets
+  it, and `hq doctor` lists hosts that are silent right now.
+- **Where to run a long team.** A machine that sleeps stops every agent on it. Run long
+  unattended teams on a host that is always on (a desktop or a server), and backend work on the
+  server's own host where its toolchain allows. On a laptop, `agent_host.keep_awake:
+  while_sessions` in that machine's config keeps it awake while an agent runs (see
+  [AGENT_HOST.md](AGENT_HOST.md)); a laptop with its lid closed on battery still sleeps.
 - **Prompts are confirmed, not just sent.** `agent prompt` writes the text and Enter
   together, but a TUI that is not listening yet can swallow the Enter and leave the text in
   its input box. `harness_session_send` and the initial prompt wait for the agent to start
@@ -102,6 +115,193 @@ app, and list every agent on a machine with `hq host status`.
   started with `copilot --interactive=<prompt>` instead of having the prompt typed. A resume
   still types its prompt.
 - Exit summaries use the last screen the supervisor captured while the agent was alive.
+
+## A team run from outside
+
+A remote client (a claude.ai connection, a web chat, the owner's own key) that starts a lead,
+a builder and a reviewer used to get three unrelated sessions. `team: <root session id>` on
+`harness_session_spawn` and `harness_session_handoff` starts the new session under that root
+instead, with everything a delegated worker gets:
+
+- the team's roster (`team_roster`);
+- messages between members (`agent_message_send`);
+- stop-with-root;
+- the limits in `agent_host.teams`: depth, children per session, running sessions per team
+  and starts per hour.
+
+Two rules apply to `team`:
+
+- The root must be running and must be the team's root; naming a worker is refused with the
+  root's id.
+- A claude.ai connection may name only a team it started. An agent inside a session adds
+  workers with `agent_delegate`, and the handoff key cannot reach a team.
+
+A reviewer joining a team with a `task_id` and no `observe` observes the team's running
+coding sessions, so their finished turns and commits reach it. Its command policy may not be
+wider than the root's.
+
+**Moving on to the next step.** File each plan step as a sub-task, and move a running session
+on with `harness_session_link` to the next one:
+
+- Its goal moves with it: the new task's title and description, with its acceptance criteria
+  as the definition of done. Drive reads that, not the launch brief.
+- The reply's `next_message` is the one line the session needs: "Continue with <task id>:
+  <title>. Its acceptance is on the task." `continue: true` sends it.
+- The task's description is never pasted into the session.
+
+**Decisions a task waits on.** `task_decisions`, and "Waiting for you" on the task's page in
+the web app, list every dialog the task's sessions and their teams wait on the owner for. Each
+comes with its question, command or path, and options, for example a command a policy left to
+you or a question an agent asked. Allow once and Decline there answer through the same route
+as the phone's notification buttons, so a dialog that moved on is refused and the answer is
+recorded with who gave it.
+
+## Following sessions by events
+
+A remote client that drives a team used to read every agent's screen to learn whether
+anything changed: about 1.5k tokens a read, a hundred and fifty reads a run. The supervisor
+now writes what happens to an event log, and `harness_session_events` reads it as one stream.
+
+- **Kinds:**
+  - `blocked`: with the dialog when HQ can read it (its number, kind, question, command and
+    options, the text capped at 300 characters).
+  - `question`: the agent asks the owner something.
+  - `unblocked`: with how long it waited.
+  - `finished` and `exited`.
+  - `commit`: sha, subject and branch (see "Agents that share a repository").
+  - `policy_decision` and `escalation`: what a command policy decided, and what it left to
+    the owner and why.
+  - `host_unreachable` and `host_back`: on each session of a host that stopped answering.
+  - `policy`, `goal` and `drive`: written when a session starts or changes.
+- **Scope:** `session_ids`, a `task_id` (the sessions working on it and their teams), or a
+  `team` (a root session id). None reads every session the caller may see.
+- **Cursor:** each reply has `next`. Pass it as `after` and the reply holds only what came
+  since, oldest first, at most `limit` (50 by default) with `more` when there is more. Without
+  `after` the reply holds the newest events and a cursor.
+- **Waiting:** `wait_secs` (at most 45, under an MCP client's 60 second limit) holds the call
+  until the first new event, so a client loops on one call instead of polling screens.
+- **Who sees what:** the owner sees every session, a claude.ai connection the teams it
+  started, and an agent with its own session token its own team. Naming a session outside
+  that is refused.
+- **Untrusted:** dialog text is the agent's own output, so reading events counts as reading
+  untrusted content, the same as `harness_session_logs`.
+
+**From a cloud client, read-only (opt-in).** A client somewhere else (a cloud session, a CI
+job) can follow a team without any key that could change it. Set `AGENTHQ_SPARK_API_KEY` on
+the server (unset, `/mcp` refuses it), give the client that key and HQ's `/mcp` URL, and have
+it loop on one call:
+
+```json
+{"tool": "harness_session_events", "args": {"team": "<root session id>", "after": 0, "wait_secs": 40}}
+```
+
+sent through `hq_call` with `Authorization: Bearer <spark key>`. Each reply's `next` is the
+next call's `after`. The Spark scope reads sessions, logs and events and nothing else: it
+cannot answer, send, start or stop a session. Answering stays with the owner's phone, the web
+app, or a full key.
+
+## Command policies
+
+A coding agent that asks before every command waits on whoever is there to answer, and one
+that asks nothing can push, wipe a tree or print its environment. A **command policy** sits
+between: commands it allows go ahead, commands it denies are refused, and only the rest reach
+the owner. Policy is code. A model never approves a command.
+
+```yaml
+agent_host:
+  command_policies:
+    builder:                    # replaces the built-in builder
+      allow: ["git status", "git add", "git commit", "cargo test", "pnpm codegen"]
+      deny: ["git push", "git stash", "git reset --hard", "rm -r", "env", "pnpm deploy"]
+      otherwise: escalate       # escalate | allow | deny
+      scripts: escalate         # escalate | allow
+    careful:
+      extends: builder
+      allow_remove: ["cargo test"]
+      deny: ["cargo publish"]
+```
+
+- **Which one.** `harness_session_spawn`, `harness_session_handoff`, `agent_delegate` and
+  `hq sessions spawn --policy` take `policy`. Without one, a coding session gets `builder` and a
+  review gets `reviewer`; monitors, researchers and general-purpose agents get none, and
+  `policy: none` asks for none (every dialog goes to the owner, as before). The built-ins are
+  generic: `builder` allows reading the tree, local git and common build and test commands,
+  and denies `git push`, `git stash`, `git reset --hard`, `git clean`, `git checkout --`,
+  `git restore`, `rm -r`, `env` and `printenv`; `reviewer` extends it and may also
+  `git checkout --detach` and `git push`, never with `--force`, `-f`, `--force-with-lease`,
+  `--mirror` or `--delete`. An entry of the same name in your config replaces a built-in.
+  A session started by another session may run only under a policy no wider than its
+  starter's. The policy is resolved and stored with the session at launch (a `policy` event),
+  so editing the config later changes new sessions, not running ones; a resume keeps it.
+- **Matching.** A command line is split at `&&`, `||`, `;`, `|` and `&`, and is allowed only
+  when every command in it is; a deny anywhere wins. A pattern names a command's leading words
+  (`git push`) and flags that may appear anywhere after them (`git push --force` also catches
+  `git push origin main --force`; `rm -r` also catches `rm -rf`). Git's own options before the
+  subcommand (`git -C dir push`) do not hide it, and wrappers (`env X=1`, `nohup`, `timeout`,
+  `sudo`) are looked through; `sudo` always goes to the owner. Command substitution, `eval`, a
+  heredoc and inline interpreter code (`sh -c`, `python3 -c`, `node -e`) go to the owner unless
+  the policy sets `scripts: allow`. Edits and paths inside the session's folder or worktree are
+  allowed; anything outside goes to the owner.
+- **At launch.** Copilot starts with every tool allowed (`--allow-all-tools`) and the policy's
+  denies as `--deny-tool=shell(...)`. Its rules name a command and subcommand but no flags, so a
+  deny with a flag becomes the whole command (`git reset --hard` denies `git reset`), unless the
+  policy allows that command (the reviewer's `git push`), when it is left to the dialogs. Claude
+  Code keeps its permission bypass and gets a `PreToolUse` hook on its shell tool that refuses
+  what the policy denies (see [AGENT_HOST.md](AGENT_HOST.md)). For both, `otherwise` and
+  escalations apply only to the dialogs they still show: they do not ask before other commands.
+- **In the supervisor.** When a session with a policy blocks at a command, edit or path dialog
+  HQ can read, the policy decides. Allowed: HQ picks the one-time yes (never a "remember"
+  option). Denied: HQ declines and tells the agent which rule. Anything else becomes the usual
+  "waiting for you" alert, with a line saying why the policy left it to you. An answer that
+  does not take raises the alert after all. Questions and trust dialogs always go to the owner.
+  Each decision is a `policy_decision` event (command, decision, rule, outcome).
+- **Drive** does not answer a command dialog of a session with a policy: the policy decided
+  it, and what it left open is the owner's. A remote client may still answer an escalation.
+
+### What actually stops each deny
+
+A deny guards against a slip. What stops the action for certain is the agent not having what
+it needs to do it:
+
+| Deny | What stops it for certain |
+|------|---------------------------|
+| `git push` | The builder holds no git credential: the sandbox hides the credential stores (`agent_host.sandbox.hide_credentials`, on by default) and HQ passes no token. Give push rights only to a reviewer's profile, through a harness profile's `env`. |
+| A deploy, a migration on a shared database | The deploy key lives only in the owner's or the reviewer's environment (a harness profile's `env`), never the builder's. |
+| `git stash`, `git reset --hard`, `git clean`, `git checkout --`, `git restore` | A worktree per writer (see below): another agent's changes are not in the tree these act on. |
+| `rm -r` | A worktree, and commits: what was committed comes back from git. |
+| `env`, `printenv` | The sandbox's allowlisted environment: HQ's own tokens and other agents' environments are not in it. |
+
+## Agents that share a repository
+
+Two agents editing one working tree overwrite each other, and one running `git stash` or
+`git checkout` takes the other's changes with it. HQ keeps writers apart:
+
+- **A worktree of its own.** `harness_session_spawn`, `harness_session_handoff`, `hq sessions
+  spawn --branch <name>` and the web's New agent dialog ("Its own branch") take `worktree`:
+  - `{"branch": "<name>"}` for a writer. The host makes a git worktree of the folder's
+    repository at `<HQ folder>/worktrees/<repository>/<session>`, on that branch (made from the
+    folder's current commit if it does not exist), and the agent starts there. A branch
+    checked out in another worktree is refused, so a branch has one writer.
+  - `{"detached": "<commit or ref>"}` for a reviewer, which gets that commit checked out
+    detached.
+  - The worktree counts as approved because it comes from a folder that already is. The reply
+    has `worktree` (`path`, `repo`, `branch` or `detached`, `head`).
+  - `agent_delegate` takes `worktree: true` for a branch named for the worker's sub-task
+    (`hq/<task id>`), or the same object.
+- **Or paths it owns.** Without a worktree, a coding session (`purpose: code`) in a folder
+  another running coding session writes in is refused unless both name `owns` paths (relative
+  to the folder) that do not overlap. No `owns` means the whole folder. Not counted: a
+  reviewer, monitor or researcher, the new session's own parent (it delegated the work and
+  waits on it), and a session the host no longer has.
+- **A reviewer sees commits, not a moving tree.** When a writer finishes a turn, the
+  supervisor reads the commit its folder is at. A new one is named in the finished alert, in
+  the message to whoever delegated it and to the sessions observing it ("committed <sha>
+  \"subject\" on branch <b>"), and recorded as a `commit` event. A reviewer then checks out
+  that sha detached in its own worktree, so it reviews exactly what was committed.
+- **Cleanup.** At `harness_session_stop`, or when the agent exits, a worktree with nothing
+  uncommitted is removed; one with changes is kept and the reply or the exit message says
+  where. The branch keeps every commit either way. `harness_session_resume` makes the
+  worktree again on its branch, or finds it where it was kept.
 
 ## Sessions that work on a task
 

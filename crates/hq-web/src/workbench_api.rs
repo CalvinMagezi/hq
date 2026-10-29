@@ -172,6 +172,9 @@ pub(crate) struct SpawnBody {
     label: Option<String>,
     /// `code`, `monitor`, `research`, `review` or `general`; blank is the agent's default.
     purpose: Option<String>,
+    /// A branch to work on in a git worktree of its own, so it never shares a working tree
+    /// with another agent in the folder. Blank works in the folder itself.
+    branch: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -314,6 +317,7 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
     let purpose = harness::Purpose::parse_opt(body.purpose.as_deref())
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let host_name = trimmed(body.host);
+    let worktree = trimmed(body.branch).map(agent_host::WorktreeBase::Branch);
     let (folder, new_folder) = (trimmed(body.folder), trimmed(body.new_folder));
 
     let own = own_folder_name(&label, &harness_name);
@@ -349,6 +353,9 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
             purpose,
             observe: &[],
             model: None,
+            worktree,
+            owns: &[],
+            policy: None,
         },
     )
     .await
@@ -588,6 +595,7 @@ mod tests {
             prompt,
             label,
             purpose: None,
+            branch: None,
         };
         for bad in [
             body("  ", None, None),

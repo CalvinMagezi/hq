@@ -29,12 +29,13 @@ use hq_core::config::HqConfig;
 use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
-use hq_tools::agent_host::{AgentInfo, AgentStatus, Host, HostBackend};
+use hq_tools::agent_host::{AgentInfo, AgentStatus, GitHead, Host, HostBackend};
+use hq_tools::harness_session::checkout;
 use hq_tools::harness_session::mission::{self, Event};
 use hq_tools::harness_session::{
     HarnessCategory, Liveness, exited_pane, liveness, poll_hosts_with,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -96,6 +97,8 @@ type HostResolver = Arc<dyn Fn(&str) -> Result<Host> + Send + Sync>;
 struct HostPhase {
     polled: hq_tools::harness_session::HostPoll,
     screens: HashMap<String, String>,
+    /// The commit each finished writer's folder is at, so a new one is named in its alert.
+    heads: HashMap<String, GitHead>,
 }
 
 /// Every host call of a sweep, under one deadline. Blocking (ssh, subprocesses),
@@ -105,6 +108,7 @@ fn gather_hosts(
     rows: &[registry::HarnessSessionRow],
     resolve: &HostResolver,
     budget: Duration,
+    tracked: &HashSet<String>,
 ) -> HostPhase {
     let deadline = Instant::now() + budget;
     // A restarted built-in host holds agents until HQ supplies their env, and
@@ -127,6 +131,7 @@ fn gather_hosts(
     let polled = poll_hosts_with(rows, |name| (resolve.as_ref())(name).map(within_budget));
 
     let mut screens = HashMap::new();
+    let mut heads = HashMap::new();
     for row in rows {
         // An exited pane is read once more: its last screen is the run's output.
         let readable = matches!(liveness(&polled, row), Liveness::Alive(_))
@@ -145,8 +150,22 @@ fn gather_hosts(
                 tracing::warn!(session = %row.id, error = %e, "session-supervisor: screen read failed");
             }
         }
+        let finished =
+            matches!(liveness(&polled, row), Liveness::Alive(a) if a.status == AgentStatus::Done);
+        if finished && tracked.contains(&row.id) && Instant::now() < deadline {
+            let head = (resolve.as_ref())(&row.host)
+                .map(within_budget)
+                .and_then(|host| Ok(host.head(&row.agent_name)?));
+            if let Ok(Some(head)) = head {
+                heads.insert(row.id.clone(), head);
+            }
+        }
     }
-    HostPhase { polled, screens }
+    HostPhase {
+        polled,
+        screens,
+        heads,
+    }
 }
 
 /// Closes the pane of a session whose process has ended, so the host's list
@@ -233,9 +252,30 @@ pub async fn run_session_supervisor(
         db,
         summarizer.as_ref(),
         resolve,
-        HOST_SWEEP_BUDGET,
+        Sweep {
+            host_budget: HOST_SWEEP_BUDGET,
+            unreachable_after: config.agent_host.unreachable_alert_after(),
+        },
     )
     .await
+}
+
+/// How one sweep treats its hosts.
+struct Sweep {
+    /// Time the hosts get in total.
+    host_budget: Duration,
+    /// How long a host with sessions may stay silent before the alert; `None` never alerts.
+    unreachable_after: Option<Duration>,
+}
+
+impl Sweep {
+    #[cfg(test)]
+    fn within(host_budget: Duration) -> Self {
+        Sweep {
+            host_budget,
+            unreachable_after: None,
+        }
+    }
 }
 
 fn summarizer_for(config: &HqConfig) -> Option<Summarizer> {
@@ -245,17 +285,48 @@ fn summarizer_for(config: &HqConfig) -> Option<Summarizer> {
         .then(|| llm_summarizer(config.relay.session_exit_summary_timeout_secs))
 }
 
+/// What the sweep read of one live session.
+struct Seen<'a> {
+    agent: &'a AgentInfo,
+    screen: &'a str,
+    /// The supervisor just dismissed a known prompt on it.
+    dismissed: bool,
+    /// The commit its folder is at, for a finished writer.
+    head: Option<&'a GitHead>,
+}
+
 /// Store a live session's screen, keep its resume token current, and alert
 /// once when it blocks on a dialog.
 fn sweep_alive(
     db: &Database,
     vault_path: &Path,
     row: &registry::HarnessSessionRow,
-    agent: &AgentInfo,
-    screen: &str,
-    dismissed: bool,
+    seen: Seen<'_>,
+    resolve: &HostResolver,
 ) {
+    let Seen {
+        agent,
+        screen,
+        dismissed,
+        head,
+    } = seen;
     let db_arc = Arc::new(db.clone());
+    // The previous sweep saw it blocked and this one does not: how long it waited.
+    if row.last_agent_status.as_deref() == Some(AgentStatus::Blocked.as_str())
+        && agent.status != AgentStatus::Blocked
+    {
+        let id = row.id.clone();
+        let waited = db
+            .with_conn(move |c| hq_db::session_events::blocked_for_ms(c, &id))
+            .ok()
+            .flatten();
+        record_event(
+            db,
+            &row.id,
+            "unblocked",
+            serde_json::json!({ "blocked_ms": waited, "status": agent.status.as_str() }),
+        );
+    }
     let (id, status) = (row.id.clone(), agent.status.as_str());
     if let Err(e) = db.with_conn(move |c| registry::set_seen(c, &id, status)) {
         tracing::warn!(session = %row.id, error = %e, "session-supervisor: status store failed");
@@ -271,8 +342,8 @@ fn sweep_alive(
         // Only the survey's own block is silenced. A finished turn always alerts: it carries
         // the driver's wake, and a state change after the keypress must not lose it.
         AgentStatus::Blocked if dismissed => {}
-        AgentStatus::Blocked => alert_blocked(db, row, agent, screen),
-        AgentStatus::Done => alert_finished(db, vault_path, row, agent, screen),
+        AgentStatus::Blocked => alert_blocked(db, row, agent, screen, resolve),
+        AgentStatus::Done => alert_finished(db, vault_path, row, agent, screen, head),
         _ => {}
     }
 }
@@ -423,13 +494,26 @@ async fn supervise(
     db: &Database,
     summarizer: Option<&Summarizer>,
     resolve: HostResolver,
-    host_budget: Duration,
+    sweep: Sweep,
 ) -> Result<()> {
     let db_arc = Arc::new(db.clone());
     let running = db.with_conn(|c| registry::list(c, Some(registry::STATUS_RUNNING), 100))?;
-    let (rows, resolver) = (running.clone(), resolve.clone());
+    let (rows, resolver, host_budget) = (running.clone(), resolve.clone(), sweep.host_budget);
+    let tracked: HashSet<String> = running
+        .iter()
+        .filter(|r| checkout::tracked(&db_arc, &r.id))
+        .map(|r| r.id.clone())
+        .collect();
     let phase =
-        tokio::task::spawn_blocking(move || gather_hosts(&rows, &resolver, host_budget)).await?;
+        tokio::task::spawn_blocking(move || gather_hosts(&rows, &resolver, host_budget, &tracked))
+            .await?;
+    hosts::watch_hosts(
+        db,
+        &phase.polled,
+        &running,
+        sweep.unreachable_after,
+        chrono::Utc::now().timestamp(),
+    );
     // Started after the host phase so a slow host cannot spend the summaries' time.
     let summary_deadline = Instant::now() + SUMMARY_SWEEP_BUDGET;
 
@@ -452,7 +536,14 @@ async fn supervise(
                     &resolve,
                 )
                 .await;
-                sweep_alive(db, vault_path, &row, &agent, screen, dismissed);
+                let head = phase.heads.get(&row.id);
+                let seen = Seen {
+                    agent: &agent,
+                    screen,
+                    dismissed,
+                    head,
+                };
+                sweep_alive(db, vault_path, &row, seen, &resolve);
                 keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
                 alive.push((row, *agent));
                 continue;
@@ -483,6 +574,12 @@ async fn supervise(
         }
         let token = row.resume_token.clone();
         tracing::info!(session = %row.id, harness = %row.harness, "session-supervisor: marked exited");
+        record_event(
+            db,
+            &row.id,
+            "exited",
+            serde_json::json!({ "exit_code": exited.as_ref().and_then(|a| a.exit_code) }),
+        );
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
         // A stack specialist's run is over when its process ends. Its exit code
@@ -500,6 +597,18 @@ async fn supervise(
             Event::Exited
         };
         let link = record_on_task(db, &row, event);
+        // A worktree with nothing uncommitted goes; one with changes stays, and the message says where.
+        let worktree = match (resolve.as_ref())(&row.host) {
+            Ok(host) => {
+                let (db2, id) = (db_arc.clone(), row.id.clone());
+                tokio::task::spawn_blocking(move || checkout::release(&db2, &host, &id))
+                    .await
+                    .ok()
+                    .flatten()
+            }
+            Err(_) => None,
+        };
+        let worktree_line = worktree_line(worktree.as_ref());
         // Sessions started for one that ended on its own stop with it too.
         let stopped = hq_tools::harness_session::stop_children(&db_arc, &row.id);
         if !stopped.is_empty() {
@@ -567,7 +676,7 @@ async fn supervise(
 
         let subject = format!("Harness session '{label}' finished");
         let body = format!(
-            "{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}",
+            "{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}{worktree_line}",
             row.id,
             row.harness,
             if token.is_some() {
@@ -593,6 +702,7 @@ async fn supervise(
 }
 
 mod alerts;
+mod hosts;
 #[cfg(test)]
 #[cfg(unix)]
 mod tests;

@@ -11,6 +11,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_bash_sandbox(config);
     report_machine_profile(config);
     report_search_index(config);
+    report_agent_hosts(config);
     report_web_search(config).await;
     report_import_tools();
     report_code_signature();
@@ -339,6 +340,63 @@ fn report_machine_profile(config: &HqConfig) {
              Start the daemon, or it is written within 30s of `hq start`."
         ),
     }
+}
+
+/// Hosts with sessions that are not answering right now, and whether this machine stays awake
+/// for its own agents. Silent when there is nothing to say and keep-awake is at its default.
+fn report_agent_hosts(config: &HqConfig) {
+    let outages = hq_db::Database::open_existing(&config.db_path())
+        .ok()
+        .and_then(|db| hq_db::host_outages::list(&db).ok())
+        .unwrap_or_default();
+    let lines = agent_host_lines(
+        &outages,
+        config.agent_host.keep_awake,
+        chrono::Utc::now().timestamp(),
+    );
+    if lines.is_empty() {
+        return;
+    }
+    println!("\nAgent hosts");
+    for Line(label, text) in lines {
+        println!("  {label}  {text}");
+    }
+}
+
+fn agent_host_lines(
+    outages: &[hq_db::host_outages::Outage],
+    keep_awake: hq_core::config::KeepAwake,
+    now: i64,
+) -> Vec<Line> {
+    use hq_core::config::KeepAwake;
+    let mut lines: Vec<Line> = outages
+        .iter()
+        .map(|o| {
+            Line(
+                "warn",
+                format!(
+                    "{} has not answered for {} minutes ({})",
+                    o.host,
+                    o.minutes(now),
+                    o.detail
+                ),
+            )
+        })
+        .collect();
+    match keep_awake {
+        KeepAwake::WhileSessions => lines.push(Line(
+            "ok",
+            "this machine's host keeps it awake while agents run (agent_host.keep_awake)".into(),
+        )),
+        KeepAwake::Off if !outages.is_empty() => lines.push(Line(
+            "--",
+            "a host that sleeps stops its agents: set agent_host.keep_awake: while_sessions in \
+             that machine's config"
+                .into(),
+        )),
+        KeepAwake::Off => {}
+    }
+    lines
 }
 
 /// The daemon refreshes its report every tick, a few seconds apart; this much silence means it is
@@ -867,6 +925,24 @@ mod tests {
 
     fn labels(lines: &[Line]) -> Vec<&'static str> {
         lines.iter().map(|l| l.0).collect()
+    }
+
+    #[test]
+    fn a_silent_host_is_named_and_keep_awake_suggested() {
+        use hq_core::config::KeepAwake;
+        let outage = hq_db::host_outages::Outage {
+            host: "laptop".into(),
+            since: 1_000,
+            detail: "connect timed out".into(),
+            alert_item_id: None,
+        };
+        assert!(agent_host_lines(&[], KeepAwake::Off, 2_000).is_empty());
+        let lines = agent_host_lines(std::slice::from_ref(&outage), KeepAwake::Off, 1_600);
+        assert_eq!(labels(&lines), ["warn", "--"]);
+        assert!(lines[0].1.contains("laptop") && lines[0].1.contains("10 minutes"));
+        assert!(lines[1].1.contains("keep_awake"));
+        let lines = agent_host_lines(&[], KeepAwake::WhileSessions, 2_000);
+        assert_eq!(labels(&lines), ["ok"]);
     }
 
     #[cfg(unix)]

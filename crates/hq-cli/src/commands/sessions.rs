@@ -29,6 +29,12 @@ pub struct SpawnOpts {
     pub task: Option<String>,
     /// Model to start the agent on; `None` is its own default.
     pub model: Option<String>,
+    /// A branch to work on in a git worktree of its own.
+    pub branch: Option<String>,
+    /// Paths it writes to in a folder it shares.
+    pub owns: Vec<String>,
+    /// The command policy to run under; `None` is its purpose's.
+    pub policy: Option<String>,
 }
 
 pub async fn run(
@@ -47,6 +53,9 @@ pub async fn run(
         observe,
         task,
         model,
+        branch,
+        owns,
+        policy,
     } = opts;
     let db = open_db(config)?;
     let vault = &config.vault_path;
@@ -85,7 +94,7 @@ pub async fn run(
         "spawn" => {
             let harness = arg1.ok_or_else(|| {
                 anyhow::anyhow!(
-                    "usage: hq sessions spawn <harness> [--prompt ...] [--cwd ...] [--label ...] [--purpose ...] [--task ...] [--observe <id>]..."
+                    "usage: hq sessions spawn <harness> [--prompt ...] [--cwd ...] [--label ...] [--purpose ...] [--task ...] [--observe <id>]... [--branch <name>] [--owns <path>]..."
                 )
             })?;
             let purpose = hq_tools::harness_session::Purpose::parse_opt(purpose.as_deref())?;
@@ -135,6 +144,12 @@ pub async fn run(
                     purpose,
                     observe: &observe,
                     model: model.as_deref(),
+                    worktree: branch
+                        .map(|b| b.trim().to_string())
+                        .filter(|b| !b.is_empty())
+                        .map(hq_tools::agent_host::WorktreeBase::Branch),
+                    owns: &owns,
+                    policy: policy.as_deref(),
                 },
             )
             .await?;
