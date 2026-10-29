@@ -23,7 +23,7 @@ use hq_db::tasks::{self as t, Task};
 use rusqlite::Connection;
 use serde::Serialize;
 
-const COMMENT_AUTHOR: &str = "harness-session";
+pub(crate) const COMMENT_AUTHOR: &str = "harness-session";
 /// Longest screen text quoted in a crashed run's `blocked_reason`, well under
 /// `t::MAX_BLOCK_TEXT_CHARS` so the reason around it always fits.
 const MAX_QUOTED_SCREEN_CHARS: usize = 300;
@@ -135,7 +135,10 @@ fn record_in(
                 true => Some(blocked_reason(conn, session, event)?),
                 false => None,
             };
-            advance(conn, &task, from, to, reason, &ctx)?
+            // A dialog at launch is a decision only the owner can make: the task says so.
+            let waiting = (to == t::STATUS_BLOCKED && matches!(event, Event::BlockedAtLaunch))
+                .then(|| WAITING_ON_OWNER.to_string());
+            advance(conn, &task, from, to, reason, waiting, &ctx)?
         }
         _ => None,
     };
@@ -284,12 +287,16 @@ fn close_lease(conn: &Connection, session: &HarnessSessionRow, event: Event) -> 
 
 /// Move `task` to `to` if it is in one of `from`. Claim-safe on its status, so
 /// a concurrent edit by a person wins rather than being overwritten.
+/// What a task blocked on a dialog waits on.
+pub const WAITING_ON_OWNER: &str = "owner";
+
 fn advance(
     conn: &Connection,
     task: &Task,
     from: &[&str],
     to: &str,
     blocked_reason: Option<String>,
+    waiting_on: Option<String>,
     ctx: &t::WriteCtx,
 ) -> Result<Option<Task>> {
     if !from.contains(&task.status.as_str()) {
@@ -298,6 +305,7 @@ fn advance(
     let patch = t::TaskPatch {
         status: Some(to.to_string()),
         blocked_reason: blocked_reason.map(Some),
+        waiting_on: waiting_on.map(Some),
         ..Default::default()
     };
     t::update_task_as(conn, &task.id, &patch, Some(&task.status), ctx).map(Some)
@@ -936,6 +944,10 @@ mod tests {
         let link = apply(&db, &a, Event::BlockedAtLaunch).unwrap();
         assert!(link.moved);
         assert_eq!(status(&db, &task), t::STATUS_BLOCKED);
+        let blocked = db
+            .with_conn(|c| Ok(t::get_task(c, &task)?.unwrap()))
+            .unwrap();
+        assert_eq!(blocked.waiting_on.as_deref(), Some(WAITING_ON_OWNER));
         let last = comments(&db, &task).pop().unwrap();
         assert!(
             last.contains("startup dialog") && last.contains("nothing is working"),

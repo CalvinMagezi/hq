@@ -186,6 +186,11 @@ now writes what happens to an event log, and `harness_session_events` reads it a
 - **Untrusted:** dialog text is the agent's own output, so reading events counts as reading
   untrusted content, the same as `harness_session_logs`.
 
+**The numbers.** `harness_session_stats` (or `hq sessions stats [<root session id>] [--task
+<id>]`) reads the same log into counts and times: dialogs and who answered them, how long
+they waited (median, 90th percentile, longest, total), the command policy's allows, denies and
+escalations, host outages, and finished turns, commits and exits. It quotes no dialog text.
+
 **From a cloud client, read-only (opt-in).** A client somewhere else (a cloud session, a CI
 job) can follow a team without any key that could change it. Set `AGENTHQ_SPARK_API_KEY` on
 the server (unset, `/mcp` refuses it), give the client that key and HQ's `/mcp` URL, and have
@@ -254,7 +259,9 @@ agent_host:
   option). Denied: HQ declines and tells the agent which rule. Anything else becomes the usual
   "waiting for you" alert, with a line saying why the policy left it to you. An answer that
   does not take raises the alert after all. Questions and trust dialogs always go to the owner.
-  Each decision is a `policy_decision` event (command, decision, rule, outcome).
+  Each decision is a `policy_decision` event (command, decision, rule, outcome), and the task gets
+  one summary line when the session finishes a turn or exits: how many commands the policy
+  allowed, declined (by rule) and left to you since the last one.
 - **Drive** does not answer a command dialog of a session with a policy: the policy decided
   it, and what it left open is the owner's. A remote client may still answer an escalation.
 

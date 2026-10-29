@@ -1477,3 +1477,37 @@ fn a_silent_host_is_an_event_on_each_of_its_sessions() {
         assert_eq!(kinds, ["host_unreachable", "host_back"], "{id}");
     }
 }
+
+#[tokio::test]
+async fn a_finished_turn_posts_what_the_policy_decided_on_the_task() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    let task = seed_with_task(&db, "hs-pol");
+    for outcome in ["allowed", "allowed", "denied"] {
+        let detail =
+            serde_json::json!({ "policy": "builder", "outcome": outcome, "rule": "git push" });
+        db.with_conn(|c| {
+            registry::record_event(
+                c,
+                "hs-pol",
+                "policy_decision",
+                "supervisor",
+                Some(&detail.to_string()),
+            )
+        })
+        .unwrap();
+    }
+    let done = fake_host(tmp.path(), &[("hs-pol", "done", 3)], "Done.");
+    sweep(tmp.path(), &db, &done, None).await;
+    let comments = db
+        .with_conn(|c| hq_db::tasks::list_comments(c, &task))
+        .unwrap();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains("Command policy 'builder'")
+                && c.body.contains("2 allowed, 1 declined")),
+        "{:?}",
+        comments.iter().map(|c| &c.body).collect::<Vec<_>>()
+    );
+}

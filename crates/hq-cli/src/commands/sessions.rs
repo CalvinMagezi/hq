@@ -155,6 +155,22 @@ pub async fn run(
             .await?;
             print_json(&result);
         }
+        "stats" => {
+            use hq_tools::harness_session::events::{Reader, Scope};
+            let task = task.as_deref().map(str::trim).filter(|t| !t.is_empty());
+            let scope = match (arg1, task) {
+                (Some(root), None) => Scope::Team(root),
+                (None, Some(task)) => Scope::Task(task.to_string()),
+                (None, None) => Scope::All,
+                (Some(_), Some(_)) => {
+                    anyhow::bail!(
+                        "usage: hq sessions stats [<root session id>] [--task <id>], one of the two"
+                    )
+                }
+            };
+            let result = hq_tools::harness_session::stats::report(&db, &scope, &Reader::default())?;
+            print_json(&result);
+        }
         "status" => {
             let id =
                 arg1.ok_or_else(|| anyhow::anyhow!("usage: hq sessions status <session-id>"))?;
