@@ -645,7 +645,7 @@ impl HqTool for HarnessSessionWaitTool {
             "type": "object",
             "properties": {
                 "session_id": { "type": "string" },
-                "timeout_secs": { "type": "integer", "description": "Seconds to wait, 3 to 300 (default 120)", "default": 120 },
+                "timeout_secs": { "type": "integer", "description": "Seconds to wait, 3 to 45 (default 40). To wait longer, call again.", "default": 40 },
                 "until": { "type": "array", "items": { "type": "string", "enum": ["idle", "working", "blocked", "done"] }, "description": "States that end the wait (default: idle, done, blocked)" }
             },
             "required": ["session_id"]
@@ -661,7 +661,7 @@ impl HqTool for HarnessSessionWaitTool {
         let secs = args
             .get("timeout_secs")
             .and_then(Value::as_u64)
-            .unwrap_or(120);
+            .unwrap_or(super::DEFAULT_WAIT.as_secs());
         let until: Vec<crate::agent_host::AgentStatus> = args
             .get("until")
             .and_then(Value::as_array)
@@ -674,7 +674,7 @@ impl HqTool for HarnessSessionWaitTool {
             .unwrap_or_default();
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
-        let timeout = std::time::Duration::from_secs(secs.clamp(3, 300));
+        let timeout = std::time::Duration::from_secs(secs.clamp(3, super::MAX_WAIT.as_secs()));
         let caller = super::caller_session(&args).map(str::to_string);
         tokio::task::spawn_blocking(move || {
             db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;

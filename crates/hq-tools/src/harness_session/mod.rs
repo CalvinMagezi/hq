@@ -56,8 +56,13 @@ const TRUST_SETTLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Screen lines shown to the caller when a launch stops at a dialog.
 const BLOCKED_SCREEN_LINES: usize = 40;
 
-/// Longest a single `harness_session_wait` may block.
-pub const MAX_WAIT: Duration = Duration::from_secs(300);
+/// Longest a single `harness_session_wait` may block. An MCP client's call gives
+/// up near 60 seconds, and a wait it abandoned tells it nothing, so a longer
+/// wait is a loop of short ones.
+pub const MAX_WAIT: Duration = Duration::from_secs(45);
+/// What `harness_session_wait` waits when the caller names no timeout.
+pub const DEFAULT_WAIT: Duration = Duration::from_secs(40);
+const _: () = assert!(MAX_WAIT.as_secs() < 60 && DEFAULT_WAIT.as_secs() <= MAX_WAIT.as_secs());
 
 /// What one host said about its agents during a sweep: the agents, or why it
 /// could not be asked.

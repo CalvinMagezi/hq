@@ -396,6 +396,12 @@ async fn launch_with(
         let host = l.host.clone();
         let (name, prompt) = (l.session_id.to_string(), prompt.to_string());
         note = prompt_note(blocking(move || host.submit(&name, &prompt)).await??);
+    } else if !settled.ready && settled.screen.is_none() {
+        note = Some(if prompt.is_some() && prompt_at_start.is_empty() {
+            STILL_STARTING_UNTYPED.into()
+        } else {
+            STILL_STARTING.into()
+        });
     }
     let task = match (task, settled.screen.is_some()) {
         (Some(_), true) => record_on_task(db, l.session_id, mission::Event::BlockedAtLaunch),
@@ -539,6 +545,15 @@ pub(super) fn settle_startup(
             screen: None,
         });
     }
+    // Still loading when the launch bound ran out (a slow MCP server, say): there
+    // is no dialog to answer, so this is not reported as one.
+    if status == Some(AgentStatus::Working) {
+        return Ok(Settled {
+            ready: false,
+            status,
+            screen: None,
+        });
+    }
     let screen = host.read(name, BLOCKED_SCREEN_LINES)?;
     let accepts_trust = trust_pattern.is_some_and(|p| screen.contains(p));
     if !accepts_trust {
@@ -574,6 +589,9 @@ pub(crate) fn prompt_note(outcome: PromptOutcome) -> Option<String> {
         PromptOutcome::Submitted | PromptOutcome::Settled(_) => None,
     }
 }
+
+pub(super) const STILL_STARTING: &str = "The agent was still starting when the launch bound ran out. A prompt given at launch runs once it is ready; wait for it with harness_session_wait.";
+pub(super) const STILL_STARTING_UNTYPED: &str = "The agent was still starting when the launch bound ran out, so the prompt was not typed. Wait for it with harness_session_wait, then send the prompt.";
 
 pub(super) const RESUBMITTED_NOTE: &str = "The host saw no activity after the prompt, so Enter was pressed once more. Read the output to confirm the agent started.";
 
