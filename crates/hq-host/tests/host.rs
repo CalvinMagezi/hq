@@ -467,6 +467,30 @@ fn a_blocked_dialog_is_seen_as_blocked() {
 }
 
 #[test]
+fn text_is_refused_at_a_dialog_and_keys_are_not() {
+    let host = Host::new();
+    let dialog = "printf '\\n  Hooks need review\\n\\n  1. Review hooks\\n\\n  Press enter to confirm or esc to go back\\n'; sleep 30";
+    host.spawn(agent("asking", "codex", dialog)).unwrap();
+    host.wait_state(
+        "asking",
+        &[AgentState::Blocked],
+        Duration::from_millis(200),
+        WAIT,
+    )
+    .unwrap();
+    let err = host.prompt("asking", "carry on").unwrap_err();
+    assert_eq!(err.code(), "agent_blocked");
+    host.send_keys("asking", &["esc".to_string()]).unwrap();
+    host.kill("asking").unwrap();
+
+    // An agent with no rules has no state to read, so its text goes through as before.
+    host.spawn(agent("plain-text", "no-such-agent", "sleep 30"))
+        .unwrap();
+    host.prompt("plain-text", "hello").unwrap();
+    host.kill("plain-text").unwrap();
+}
+
+#[test]
 fn an_agent_kind_without_rules_has_no_state() {
     let host = Host::new();
     host.spawn(agent("plain", "no-such-agent", "sleep 30"))

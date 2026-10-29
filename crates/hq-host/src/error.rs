@@ -34,6 +34,10 @@ pub enum HostError {
     LockedDown(String),
     #[error("'{name}' needs these variables to resume: {missing}")]
     MissingEnv { name: String, missing: String },
+    #[error(
+        "'{0}' is waiting at a dialog, so the text was not typed: answer the dialog with keys first"
+    )]
+    Blocked(String),
 }
 
 impl HostError {
@@ -55,6 +59,7 @@ impl HostError {
             HostError::TooManyAgents(_) => "too_many_agents",
             HostError::MissingEnv { .. } => "missing_env",
             HostError::LockedDown(_) => "locked_down",
+            HostError::Blocked(_) => "agent_blocked",
         }
     }
 }
