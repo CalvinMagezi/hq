@@ -9,6 +9,7 @@
 //! hand are visible through `host_agents`/`host_read` and steerable only
 //! through `host_send`.
 
+mod brief;
 pub mod category;
 mod coalesce;
 mod connector_notice;
