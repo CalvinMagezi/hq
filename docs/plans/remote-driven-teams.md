@@ -1,7 +1,8 @@
 # Teams driven from a remote client: approvals by policy, events instead of polling
 
-Status: proposed. Nothing here is built yet. Phase 4 converges with step 4 of
-[agent-teams.md](agent-teams.md) (`owns` and `worktree`), so that work lands once.
+Status: phase 0 built (0.1 to 0.8 below); the rest proposed. Phase 4 converges
+with step 4 of [agent-teams.md](agent-teams.md) (`owns` and `worktree`), so that
+work lands once.
 
 ## The problem
 
@@ -123,12 +124,13 @@ through the existing `load_overrides`, and `hq doctor` lists files that failed t
 parse. When a CLI changes its screens, the fix is a file, not a release.
 
 **0.3 Copilot launches with its own permission flags.** `github-copilot` gets
-`--allow-all-tools` plus a `--deny-tool` for each entry of the default deny list
-(phase 2's `builder` list, expressed as `shell(...)` rules). This gives Copilot
-what `claude-code` already has, with a deny list it lacks today. A harness profile
-can still replace the arguments. Verify on the current Copilot CLI how
-`shell(...)` matches a compound command before calling the deny list anything
-more than a guard.
+`--allow-all-tools` plus `--deny-tool` rules for `git push`, `git stash`,
+`git reset`, `git clean`, `rm`, `env` and `printenv` (`COPILOT_ARGS` in
+`harness_session/spec.rs`). This gives Copilot what `claude-code` already has,
+with a deny list it lacks today. A harness profile with its own `args` replaces
+them, so a profile meant to keep the denials must list them too. Copilot rules
+match a command or subcommand, not a flag (see below), so `rm` is denied outright
+rather than only `rm -r`.
 
 **0.4 `harness_session_wait` stays under the connector limit.** Default 40 s,
 maximum 45 s for gateway callers; in-process callers keep 300 s.
@@ -145,10 +147,49 @@ maximum 45 s for gateway callers; in-process callers keep 300 s.
 when detection reads `blocked`, which makes the existing branch in `send_text`
 live. Keys stay allowed.
 
+**0.7 A folder request blocks the spawn.** A connector asking for a folder the
+owner has not approved used to get an error back at once, worded "this is not a
+failure", and nothing retried when the owner approved, so the caller carried on as
+if a session had started. Now spawn and handoff file the request and wait for the
+answer within the call: an approval starts the session in that call, a decline
+fails at once, and no answer fails with `BLOCKED: no session was started` and
+tells the caller to say so and call again with the same arguments. The wait is
+55 seconds less the launch bound, at most 30, so the launch after an approval
+still fits inside an MCP client's minute.
+
+**0.8 A loading agent is not "waiting at a dialog".** A launch whose agent was
+still loading when the launch bound ran out (Copilot waits up to a minute on a
+slow MCP server) was reported as blocked at a dialog and recorded as
+`BlockedAtLaunch` on its task. It is now reported as still starting, with a note
+on whether its prompt was typed.
+
 Phase 0 meets the bug's acceptance lines: Copilot reads `blocked`, `working` and
 `idle`; `wait` settles on `blocked`; in-scope commands no longer prompt; Drive
 does not resend the brief. "Drive never picks don't ask again" becomes structural
 in phase 1.
+
+### What a live Copilot session showed (CLI 1.0.105)
+
+Captured from throwaway sessions in scratch folders while building 0.1:
+
+- A dialog is a box at the bottom that replaces the prompt box and footer, with
+  `↑/↓ to navigate · enter to select · esc to cancel`. The ask-user form is a
+  separate shape between two rules: `enter accept · ctrl+d decline · esc cancel`.
+- Some commands (`echo`) run with no dialog even in manual approval.
+- **The path dialog pre-selects "Yes, and remember this path for this
+  session".** Enter on whatever is highlighted widens the session's
+  permissions. Answers must name an option (phase 1), never press Enter blind.
+- The digit `1` answers "Yes" at once. The digit `3` only moves the cursor, and
+  Enter on option 3 did not register, as seen in the original run. Esc is the
+  reliable decline, and it aborts the whole turn ("Operation aborted by user").
+- `--deny-tool='shell(git push)'` and `--allow-all-tools` are in the CLI's own
+  help, with deny winning over allow. **A deny rule matches a command or a
+  command and subcommand, never a flag**: under `--allow-all-tools`,
+  `--deny-tool='shell(rm -r)'` let `rm -r dir` delete the folder, and
+  `--deny-tool='shell(rm)'` stopped it. 0.3 denies `rm` outright; `git rm` stays
+  allowed. Phase 2's matcher must not promise flag-level rules for Copilot.
+- An MCP server in the owner's Copilot config that cannot start inside the
+  sandbox costs every Copilot launch about a minute (`still waiting on ide`).
 
 ## Phase 1: the pending dialog as data
 
@@ -242,7 +283,9 @@ on its deploy and data commands) go in the owner's own config, not the defaults.
 **2.4 Where it is enforced.**
 
 - **At launch, in the harness's own terms.**
-  - Copilot: `--allow-tool` and `--deny-tool`.
+  - Copilot: `--allow-tool` and `--deny-tool`. Its rules cannot name a flag, so
+    a policy entry with one (`git reset --hard`) becomes the whole command at
+    launch, or stays with the supervisor when that would deny too much.
   - Claude Code: a `permissions.deny` list in the per-launch settings file HQ
     already writes (`hq-host/src/hooks.rs`). Confirm that deny rules hold under
     `--dangerously-skip-permissions`; if they do not, the same file carries a
@@ -285,10 +328,54 @@ returns compact events (about 100 tokens each, the pending dialog included) and
 `next`. The remote client reads events instead of screens, and only escalations
 need its attention.
 
-**3.3 Escalations reach the owner.** Each escalation and `question` becomes one
-ActionNeeded value item, which reaches the relay (Telegram) and web push with the
-command and options. The owner answers from the Sessions panel (1.6) or by
-replying in the relay. One notice per dialog, never one per sweep.
+**3.3 Escalations reach the owner where they can answer in one tap.** Each
+escalation, agent question and folder request becomes one ActionNeeded item, one
+notice per dialog, never one per sweep. Telegram is a poor place for a decision
+(answering means opening the app), so decisions go to the two surfaces the owner
+already has open, each with buttons that answer without opening anything. Telegram
+gets at most a plain notice. Design in "Actionable alerts" below.
+
+### Actionable alerts: the Android app and web push
+
+What exists:
+
+- The Android app runs a foreground service (`HubService`) that polls
+  `/api/notifications?state=pending` every 20 seconds and posts notifications
+  with **Allow** and **Not now** buttons for coding-agent prompts. Allow needs
+  the phone unlocked. Before answering, it re-reads the live screen and refuses
+  if the dialog changed (`AnswerReceiver`, `HelperWords.checkAnswer`).
+- Web push already reaches the laptop for ActionNeeded items
+  (`crates/hq-web/src/web_push/`), but the service worker shows no buttons and
+  only opens a page.
+
+What stops it working for a team on a remote HQ:
+
+1. **The app only talks to the HQ on the phone** (`127.0.0.1:5678`). An HQ on a
+   server cannot reach it. Fix: the app's alert loop also polls the owner's
+   remote HQ over HTTPS with a device credential from the existing device-code
+   exchange (`/api/auth/exchange`); later it long-polls phase 3's event endpoint
+   instead of polling every 20 seconds.
+2. **The app never finds the screen excerpt.** The server wraps it in
+   `----- session output -----` lines (since #199). The app looks for
+   `<hq-output>` (written in #224 against its own fixtures), so `canAllow` is
+   false and real prompts get only an Open button. Fix in the first PR; once
+   phase 1 lands, the item carries the pending dialog as data and nothing parses
+   a screen.
+3. **Allow presses Enter and Not now presses Esc.** Enter takes the highlighted
+   option, and Copilot highlights "remember this path" on its path dialog. The
+   buttons must answer a named option through phase 1's answer route with its
+   `seq`, so a changed dialog is refused instead of answered.
+4. **Web push has no buttons and no credential.** The payload gains the item id,
+   the kind and up to two options. The service worker shows them as `actions`
+   (Chrome on macOS shows two). A click posts to
+   `/api/notifications/{id}/answer` with a token the server put in the encrypted
+   push payload: an HMAC with the install's approval key over item id,
+   `pending_seq`, option and expiry (15 minutes). The route accepts that token for
+   that item and option only, once. The service worker never holds the web
+   token.
+
+Folder requests (0.7) use the same buttons, so approving a folder from the phone
+starts the waiting spawn.
 
 **3.4 Optional: a push for cloud clients.** A documented recipe, off by default:
 from the remote environment, a background command long-polls an HTTP endpoint
@@ -367,10 +454,11 @@ phase 3's items and the task's `waiting_on`, not a new store.
 
 | Step | PRs | Unblocks |
 |------|-----|----------|
-| Phase 0 | 3: rules and overrides; Copilot flags and the wait limit; the brief guard and no text into dialogs | Copilot teams run with few prompts and visible blocks |
+| Phase 0 | built | Copilot teams run with few prompts and visible blocks; folder requests block instead of going quiet |
+| Alerts, first PR | 1: the excerpt markers, remote HQ polling in the app | The phone shows agent prompts from a server HQ |
 | 4.1 to 4.3 | 1 to 2, shared with agent-teams step 4 | No shared working trees |
 | Phase 5.1 | 1 | A sleeping host is noticed |
-| Phase 1 | 2 to 3 | Structured answers; owner answers from the phone |
+| Phase 1 | 2 to 3 | Structured answers; option buttons on the phone and in web push |
 | Phase 2 | 2 to 3 | Prompts become policy; Claude Code gets a deny list |
 | Phase 3 | 2 | Events instead of screen reads; escalations pushed |
 | 4.4, 5.2, phase 6 | 2 to 3 | One team per remote client; decisions list |
@@ -380,18 +468,18 @@ host with the CLI in question. After phase 0 and 4.1, the next batch of the
 original project runs under the new setup, and its waiting time, interventions
 and remote client calls are compared with the run above.
 
-## Decisions for the owner
+## Decisions (the owner took the recommendations)
 
 1. Copilot defaults to `--allow-all-tools` plus the deny list, matching what
-   Claude Code already gets, rather than needing a profile to opt in.
-   Recommended: yes.
-2. The built-in policies' `otherwise`: `escalate` (safer, more pings) or `allow`
-   inside the sandbox. Recommended: `escalate`, revisited once phase 3 shows how
-   often it fires.
-3. Worktree location: under the host's workspace root (recommended), or next to
-   the repository.
-4. `keep_awake` default on macOS hosts. Recommended: off, with `hq doctor`
-   suggesting it when a host has gone unreachable with live sessions.
+   Claude Code already gets, rather than needing a profile to opt in. Built in
+   0.3.
+2. The built-in policies' `otherwise` is `escalate`, revisited once phase 3 shows
+   how often it fires.
+3. Worktrees live under the host's workspace root.
+4. `keep_awake` is off by default on macOS hosts, with `hq doctor` suggesting it
+   when a host has gone unreachable with live sessions.
+5. Decisions reach the owner through the Android app and web push with answer
+   buttons, not Telegram.
 
 ## Not doing
 
