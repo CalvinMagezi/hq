@@ -301,7 +301,7 @@ impl NativeBackend {
         {
             tracing::warn!(agent = %req.name, error = %e, "could not write the MCP config");
         }
-        let flags = self.hook_flags(&req.name, &req.kind);
+        let flags = self.hook_flags_with(&req.name, &req.kind, req.policy.as_ref());
         req.args.extend(flags.clone());
         if let Some(resume) = req.resume_args.as_mut() {
             resume.extend(flags);
@@ -311,10 +311,20 @@ impl NativeBackend {
 
     /// Empty for other kinds, or when the host cannot write the file.
     fn hook_flags(&self, name: &str, kind: &str) -> Vec<String> {
+        self.hook_flags_with(name, kind, None)
+    }
+
+    /// `hook_flags`, handing the host the command policy to enforce when there is one. Without
+    /// it the host keeps the policy it was given at launch, so a restart stays under it.
+    fn hook_flags_with(&self, name: &str, kind: &str, policy: Option<&Value>) -> Vec<String> {
         if kind != CLAUDE_KIND {
             return Vec::new();
         }
-        let reply = self.call("agent.hook_flags", json!({ "name": name, "agent": kind }));
+        let mut params = json!({ "name": name, "agent": kind });
+        if let Some(policy) = policy {
+            params["policy"] = policy.clone();
+        }
+        let reply = self.call("agent.hook_flags", params);
         let flags = reply.ok().and_then(|v| v.get("flags").cloned());
         flags
             .and_then(|f| serde_json::from_value(f).ok())
@@ -892,6 +902,7 @@ mod tests {
             resume_args: None,
             mcp: None,
             start_timeout: Duration::from_secs(1),
+            policy: None,
         }
     }
 

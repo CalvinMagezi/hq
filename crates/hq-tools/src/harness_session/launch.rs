@@ -120,6 +120,32 @@ pub(super) struct Launch<'a> {
     /// column's default (`user`); callers that learn the origin late set it
     /// with `tag_origin`.
     pub(super) origin: Option<&'a str>,
+    /// The command policy it starts under.
+    pub(super) policy: Option<&'a hq_core::command_policy::Policy>,
+}
+
+/// Copilot's default start allows every tool and denies a fixed list; under a policy the
+/// denies are the policy's. A profile with its own arguments is left as it is.
+pub(super) fn with_policy_args(
+    mut args: Vec<String>,
+    policy: Option<&hq_core::command_policy::Policy>,
+) -> Vec<String> {
+    let Some(policy) = policy else { return args };
+    if !args.iter().any(|a| a == "--allow-all-tools") {
+        return args;
+    }
+    args.retain(|a| !a.starts_with("--deny-tool=shell("));
+    let at = args
+        .iter()
+        .position(|a| a == "--allow-all-tools")
+        .map_or(args.len(), |i| i + 1);
+    let denies: Vec<String> = policy
+        .launch_denies()
+        .into_iter()
+        .map(|c| format!("--deny-tool=shell({c})"))
+        .collect();
+    args.splice(at..at, denies);
+    args
 }
 
 pub(super) fn workspace_label(harness: &str, label: &str) -> String {
@@ -183,6 +209,7 @@ pub(super) struct OwnedLaunch {
     observe: Vec<String>,
     one_shot: Option<String>,
     origin: Option<String>,
+    policy: Option<hq_core::command_policy::Policy>,
 }
 
 impl OwnedLaunch {
@@ -206,6 +233,7 @@ impl OwnedLaunch {
             observe: l.observe.to_vec(),
             one_shot: own(l.one_shot),
             origin: own(l.origin),
+            policy: l.policy.cloned(),
         }
     }
 
@@ -239,6 +267,7 @@ impl OwnedLaunch {
             observe: &self.observe,
             one_shot: self.one_shot.as_deref(),
             origin: self.origin.as_deref(),
+            policy: self.policy.as_ref(),
         }
     }
 }
@@ -351,7 +380,10 @@ async fn launch_with(
                 )
             })?,
             None => {
-                let mut args = build_args(harness, l.session_id, l.resume_token, l.resuming);
+                let mut args = with_policy_args(
+                    build_args(harness, l.session_id, l.resume_token, l.resuming),
+                    l.policy,
+                );
                 args.extend(prompt_at_start.iter().cloned());
                 args
             }
@@ -359,10 +391,11 @@ async fn launch_with(
         command: profile.and_then(|p| p.command.clone()),
         resume_args: match l.one_shot {
             Some(_) => None,
-            None => restart_args(harness, l.session_id),
+            None => restart_args(harness, l.session_id).map(|a| with_policy_args(a, l.policy)),
         },
         mcp,
         start_timeout: l.host.launch_bound(),
+        policy: l.policy.and_then(|p| serde_json::to_value(p).ok()),
     };
     let began = std::time::Instant::now();
     let host = l.host.clone();
@@ -665,6 +698,9 @@ pub struct SpawnRequest<'a> {
     /// Paths (relative to `cwd`) the session writes to. A coding session in a folder another
     /// is writing in is refused unless the two own paths that do not overlap.
     pub owns: &'a [String],
+    /// The command policy to run under; `None` is its purpose's (`builder` for code,
+    /// `reviewer` for review), and `none` asks for no policy.
+    pub policy: Option<&'a str>,
 }
 
 /// What a caller is told when a session was given others to observe.
@@ -698,6 +734,7 @@ pub async fn spawn(
             model: None,
             worktree: None,
             owns: &[],
+            policy: None,
         },
     )
     .await
@@ -753,6 +790,8 @@ pub(crate) async fn spawn_on(
     let session_id = new_session_id(&harness.name);
     let folder = req.cwd.to_string_lossy().to_string();
     let parent = req.parent.map(|(id, _)| id);
+    // Settled before anything is made, so a refused policy costs nothing.
+    let policy = policy::choose(db, req.policy, purpose, parent)?;
     // Where it writes, settled before anything is launched: its own worktree, or a check that
     // no other writer works in the same paths of this folder.
     let worktree = match &req.worktree {
@@ -798,6 +837,7 @@ pub(crate) async fn spawn_on(
             observe: req.observe,
             one_shot: None,
             origin: None,
+            policy: policy.as_ref(),
         },
     )
     .await;
@@ -842,6 +882,10 @@ pub(crate) async fn spawn_on(
     }
     if !req.owns.is_empty() {
         report["owns"] = json!(req.owns);
+    }
+    if let Some(policy) = &policy {
+        policy::record(db, &session_id, policy);
+        report["policy"] = json!(policy.name);
     }
     if req.watch.is_none() {
         return Ok(report);

@@ -604,6 +604,18 @@ impl Host {
     /// host does not know its socket directory, or when the file cannot be
     /// written (the screen still decides the state then).
     pub fn hook_flags(&self, name: &str, agent: &str) -> Vec<String> {
+        self.hook_flags_with(name, agent, None)
+    }
+
+    /// `hook_flags`, also storing the command `policy` the agent runs under. The hook file
+    /// then runs `hq host policy-check` before every shell command, which refuses what the
+    /// policy denies. Without `policy`, one stored at launch keeps applying (a restart).
+    pub fn hook_flags_with(
+        &self,
+        name: &str,
+        agent: &str,
+        policy: Option<&serde_json::Value>,
+    ) -> Vec<String> {
         let dir = lock(&self.run_dir).clone();
         let (true, Some(dir)) = (agent == "claude" && valid_name(name), dir) else {
             return Vec::new();
@@ -620,7 +632,19 @@ impl Host {
         let exe = std::env::current_exe()
             .map_or_else(|_| "hq".to_string(), |p| p.to_string_lossy().into_owned());
         let command = format!("{} host report", shell_quote(&exe));
-        match crate::hooks::write_claude_settings(&dir, name, &command) {
+        if let Some(policy) = policy
+            && let Err(e) = crate::hooks::write_policy(&dir, name, policy)
+        {
+            eprintln!("hq host: no command policy file for '{name}': {e}");
+        }
+        let check = crate::hooks::policy_path(&dir, name).map(|path| {
+            format!(
+                "{} host policy-check {}",
+                shell_quote(&exe),
+                shell_quote(&path.to_string_lossy())
+            )
+        });
+        match crate::hooks::write_claude_settings_with(&dir, name, &command, check.as_deref()) {
             Ok(path) => {
                 flags.extend([
                     "--settings".to_string(),

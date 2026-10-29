@@ -55,6 +55,8 @@ pub struct HandoffRequest {
     pub worktree: Option<crate::agent_host::WorktreeBase>,
     /// Paths it writes to in a shared folder (see `SpawnRequest::owns`).
     pub owns: Vec<String>,
+    /// The command policy to run under; blank is its purpose's.
+    pub policy: String,
 }
 
 fn non_blank(s: &str) -> Option<&str> {
@@ -307,6 +309,7 @@ async fn run_handoff(
             model: non_blank(&req.model),
             worktree: req.worktree.clone(),
             owns: &req.owns,
+            policy: non_blank(&req.policy),
         },
     )
     .await;

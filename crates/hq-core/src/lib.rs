@@ -2,6 +2,7 @@
 
 pub mod approval_key;
 pub mod build_info;
+pub mod command_policy;
 pub mod config;
 pub mod critic;
 pub mod daemon_restart;

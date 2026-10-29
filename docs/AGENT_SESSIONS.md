@@ -115,6 +115,77 @@ app, and list every agent on a machine with `hq host status`.
   still types its prompt.
 - Exit summaries use the last screen the supervisor captured while the agent was alive.
 
+## Command policies
+
+A coding agent that asks before every command waits on whoever is there to answer, and one
+that asks nothing can push, wipe a tree or print its environment. A **command policy** sits
+between: commands it allows go ahead, commands it denies are refused, and only the rest reach
+the owner. Policy is code. A model never approves a command.
+
+```yaml
+agent_host:
+  command_policies:
+    builder:                    # replaces the built-in builder
+      allow: ["git status", "git add", "git commit", "cargo test", "pnpm codegen"]
+      deny: ["git push", "git stash", "git reset --hard", "rm -r", "env", "pnpm deploy"]
+      otherwise: escalate       # escalate | allow | deny
+      scripts: escalate         # escalate | allow
+    careful:
+      extends: builder
+      allow_remove: ["cargo test"]
+      deny: ["cargo publish"]
+```
+
+- **Which one.** `harness_session_spawn`, `harness_session_handoff`, `agent_delegate` and
+  `hq sessions spawn --policy` take `policy`. Without one, a coding session gets `builder` and a
+  review gets `reviewer`; monitors, researchers and general-purpose agents get none, and
+  `policy: none` asks for none (every dialog goes to the owner, as before). The built-ins are
+  generic: `builder` allows reading the tree, local git and common build and test commands,
+  and denies `git push`, `git stash`, `git reset --hard`, `git clean`, `git checkout --`,
+  `git restore`, `rm -r`, `env` and `printenv`; `reviewer` extends it and may also
+  `git checkout --detach` and `git push`, never with `--force`, `-f`, `--force-with-lease`,
+  `--mirror` or `--delete`. An entry of the same name in your config replaces a built-in.
+  A session started by another session may run only under a policy no wider than its
+  starter's. The policy is resolved and stored with the session at launch (a `policy` event),
+  so editing the config later changes new sessions, not running ones; a resume keeps it.
+- **Matching.** A command line is split at `&&`, `||`, `;`, `|` and `&`, and is allowed only
+  when every command in it is; a deny anywhere wins. A pattern names a command's leading words
+  (`git push`) and flags that may appear anywhere after them (`git push --force` also catches
+  `git push origin main --force`; `rm -r` also catches `rm -rf`). Git's own options before the
+  subcommand (`git -C dir push`) do not hide it, and wrappers (`env X=1`, `nohup`, `timeout`,
+  `sudo`) are looked through; `sudo` always goes to the owner. Command substitution, `eval`, a
+  heredoc and inline interpreter code (`sh -c`, `python3 -c`, `node -e`) go to the owner unless
+  the policy sets `scripts: allow`. Edits and paths inside the session's folder or worktree are
+  allowed; anything outside goes to the owner.
+- **At launch.** Copilot starts with every tool allowed (`--allow-all-tools`) and the policy's
+  denies as `--deny-tool=shell(...)`. Its rules name a command and subcommand but no flags, so a
+  deny with a flag becomes the whole command (`git reset --hard` denies `git reset`), unless the
+  policy allows that command (the reviewer's `git push`), when it is left to the dialogs. Claude
+  Code keeps its permission bypass and gets a `PreToolUse` hook on its shell tool that refuses
+  what the policy denies (see [AGENT_HOST.md](AGENT_HOST.md)). For both, `otherwise` and
+  escalations apply only to the dialogs they still show: they do not ask before other commands.
+- **In the supervisor.** When a session with a policy blocks at a command, edit or path dialog
+  HQ can read, the policy decides. Allowed: HQ picks the one-time yes (never a "remember"
+  option). Denied: HQ declines and tells the agent which rule. Anything else becomes the usual
+  "waiting for you" alert, with a line saying why the policy left it to you. An answer that
+  does not take raises the alert after all. Questions and trust dialogs always go to the owner.
+  Each decision is a `policy_decision` event (command, decision, rule, outcome).
+- **Drive** does not answer a command dialog of a session with a policy: the policy decided
+  it, and what it left open is the owner's. A remote client may still answer an escalation.
+
+### What actually stops each deny
+
+A deny guards against a slip. What stops the action for certain is the agent not having what
+it needs to do it:
+
+| Deny | What stops it for certain |
+|------|---------------------------|
+| `git push` | The builder holds no git credential: the sandbox hides the credential stores (`agent_host.sandbox.hide_credentials`, on by default) and HQ passes no token. Give push rights only to a reviewer's profile, through a harness profile's `env`. |
+| A deploy, a migration on a shared database | The deploy key lives only in the owner's or the reviewer's environment (a harness profile's `env`), never the builder's. |
+| `git stash`, `git reset --hard`, `git clean`, `git checkout --`, `git restore` | A worktree per writer (see below): another agent's changes are not in the tree these act on. |
+| `rm -r` | A worktree, and commits: what was committed comes back from git. |
+| `env`, `printenv` | The sandbox's allowlisted environment: HQ's own tokens and other agents' environments are not in it. |
+
 ## Agents that share a repository
 
 Two agents editing one working tree overwrite each other, and one running `git stash` or

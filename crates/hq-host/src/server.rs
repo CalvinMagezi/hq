@@ -625,7 +625,18 @@ impl Conn {
             }
             "agent.hook_flags" => {
                 let p: HookFlagsParams = parse(params)?;
-                Ok(json!({ "flags": host.hook_flags(&p.name, &p.agent) }))
+                if let Some(policy) = &p.policy {
+                    // Only stored and handed back to `hq host policy-check`; never read here.
+                    let ok = policy.is_object()
+                        && serde_json::to_vec(policy).is_ok_and(|b| b.len() <= MAX_POLICY_BYTES);
+                    if !ok {
+                        return Err(body(
+                            "invalid_params",
+                            "agent.hook_flags policy must be a JSON object of at most 64 KiB",
+                        ));
+                    }
+                }
+                Ok(json!({ "flags": host.hook_flags_with(&p.name, &p.agent, p.policy.as_ref()) }))
             }
             "agent.set_resume" => {
                 let p: SetResumeParams = parse(params)?;
@@ -899,7 +910,13 @@ struct McpConfigParams {
 struct HookFlagsParams {
     name: String,
     agent: String,
+    /// The command policy the agent runs under, enforced by a Claude Code hook.
+    #[serde(default)]
+    policy: Option<Value>,
 }
+
+/// Largest command policy an agent's hook is given.
+const MAX_POLICY_BYTES: usize = 64 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

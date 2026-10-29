@@ -72,6 +72,8 @@ pub async fn resume(
     // stop removed it.
     let (reopen_host, reopen_db, id) = (host.clone(), db.clone(), session_id.to_string());
     blocking(move || super::checkout::reopen(&reopen_db, &reopen_host, &id)).await??;
+    // The policy it started under, so a resumed agent is held to the same rules.
+    let policy = super::policy::of(db, session_id);
     let resumable = match spec.resume {
         ResumeStrategy::Args(args) => {
             !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
@@ -99,6 +101,7 @@ pub async fn resume(
             observe: &[],
             one_shot: None,
             origin: None,
+            policy: policy.as_ref(),
         },
     )
     .await?;

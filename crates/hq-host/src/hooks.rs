@@ -18,13 +18,48 @@ const CLAUDE_EVENTS: [&str; 4] = ["SessionStart", "UserPromptSubmit", "Stop", "N
 /// gets the event as JSON on stdin and must print nothing: output of a
 /// SessionStart hook is handed to the model as context.
 pub fn claude_settings(report_command: &str) -> Value {
+    claude_settings_with(report_command, None)
+}
+
+/// `claude_settings`, plus a `PreToolUse` hook on the shell tool that runs `policy_command`
+/// before every command. Hooks run whatever the permission mode, so a deny holds under
+/// `--dangerously-skip-permissions` too. Its output is the decision, so it is not silenced.
+pub fn claude_settings_with(report_command: &str, policy_command: Option<&str>) -> Value {
     let silent = format!("{report_command} >/dev/null 2>&1 || true");
     let entry = json!([{ "hooks": [{ "type": "command", "command": silent }] }]);
-    let hooks: serde_json::Map<String, Value> = CLAUDE_EVENTS
+    let mut hooks: serde_json::Map<String, Value> = CLAUDE_EVENTS
         .iter()
         .map(|event| (event.to_string(), entry.clone()))
         .collect();
+    if let Some(check) = policy_command {
+        hooks.insert(
+            "PreToolUse".into(),
+            json!([{ "matcher": "Bash", "hooks": [{ "type": "command", "command": check }] }]),
+        );
+    }
     json!({ "hooks": hooks })
+}
+
+/// Where the command policy of `name` is kept, next to its hook settings.
+fn policy_file(dir: &Path, name: &str) -> PathBuf {
+    dir.join(HOOKS_DIR).join(format!("{name}{POLICY_SUFFIX}"))
+}
+
+const POLICY_SUFFIX: &str = ".policy.json";
+
+/// Writes the command policy of `name` (0600, in the 0700 hooks directory).
+pub fn write_policy(dir: &Path, name: &str, policy: &Value) -> std::io::Result<()> {
+    check_name(name)?;
+    let hooks = dir.join(HOOKS_DIR);
+    token::ensure_dir(&hooks)?;
+    write_private(&policy_file(dir, name), policy)
+}
+
+/// The command policy file of `name`, if one was written.
+pub fn policy_path(dir: &Path, name: &str) -> Option<PathBuf> {
+    check_name(name).ok()?;
+    let path = policy_file(dir, name);
+    path.is_file().then_some(path)
 }
 
 /// Writes `<dir>/hooks/<name>.json` (0600, in a 0700 directory) and returns
@@ -34,11 +69,21 @@ pub fn write_claude_settings(
     name: &str,
     report_command: &str,
 ) -> std::io::Result<PathBuf> {
+    write_claude_settings_with(dir, name, report_command, None)
+}
+
+/// `write_claude_settings` with the policy hook of `claude_settings_with`.
+pub fn write_claude_settings_with(
+    dir: &Path,
+    name: &str,
+    report_command: &str,
+    policy_command: Option<&str>,
+) -> std::io::Result<PathBuf> {
     check_name(name)?;
     let hooks = dir.join(HOOKS_DIR);
     token::ensure_dir(&hooks)?;
     let path = hooks.join(format!("{name}.json"));
-    write_private(&path, &claude_settings(report_command))?;
+    write_private(&path, &claude_settings_with(report_command, policy_command))?;
     Ok(path)
 }
 
@@ -99,6 +144,7 @@ pub fn remove_agent_files(dir: &Path, name: &str) {
     for folder in [HOOKS_DIR, MCP_DIR] {
         let _ = fs::remove_file(dir.join(folder).join(format!("{name}.json")));
     }
+    let _ = fs::remove_file(policy_file(dir, name));
 }
 
 /// Deletes every hook and MCP config file whose agent is not in `keep`.
@@ -114,7 +160,8 @@ pub fn sweep_agent_files(dir: &Path, keep: &[String]) {
                 .and_then(|s| s.to_str())
                 .unwrap_or_default();
             let ours = path.extension().is_some_and(|e| e == "json" || e == "tmp");
-            if ours && !keep.iter().any(|k| k == stem.trim_end_matches(".json")) {
+            let agent = stem.trim_end_matches(".json").trim_end_matches(".policy");
+            if ours && !keep.iter().any(|k| k == agent) {
                 let _ = fs::remove_file(&path);
             }
         }
@@ -151,6 +198,39 @@ pub fn report_params(hook_input: &str) -> Option<Value> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_policy_adds_a_shell_hook_that_is_not_silenced() {
+        let plain = claude_settings("/bin/hq host report");
+        assert!(plain["hooks"].get("PreToolUse").is_none());
+        let s = claude_settings_with("/bin/hq host report", Some("/bin/hq host policy-check /p"));
+        let pre = &s["hooks"]["PreToolUse"][0];
+        assert_eq!(pre["matcher"], "Bash");
+        assert_eq!(pre["hooks"][0]["command"], "/bin/hq host policy-check /p");
+    }
+
+    #[test]
+    fn a_policy_file_lives_and_goes_with_its_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(policy_path(dir.path(), "a1").is_none());
+        write_policy(dir.path(), "a1", &json!({ "name": "builder" })).unwrap();
+        write_policy(dir.path(), "a2", &json!({ "name": "builder" })).unwrap();
+        let path = policy_path(dir.path(), "a1").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, FILE_MODE);
+        sweep_agent_files(dir.path(), &["a1".to_string()]);
+        assert!(
+            policy_path(dir.path(), "a1").is_some(),
+            "a live agent keeps its policy"
+        );
+        assert!(
+            policy_path(dir.path(), "a2").is_none(),
+            "a gone agent's is swept"
+        );
+        remove_agent_files(dir.path(), "a1");
+        assert!(policy_path(dir.path(), "a1").is_none());
+        assert!(write_policy(dir.path(), "../x", &json!({})).is_err());
+    }
 
     #[test]
     fn every_event_runs_the_command_silently() {

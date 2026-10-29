@@ -136,6 +136,7 @@ fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
             resume_args: Some(vec!["-c".into()]),
             mcp: None,
             start_timeout: WAIT,
+            policy: None,
         })
         .unwrap();
     let mut client = Client::connect(&dir).unwrap();

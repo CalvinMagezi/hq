@@ -172,6 +172,13 @@ pub struct AgentHostConfig {
     /// lid closed on battery still sleeps.
     #[serde(default)]
     pub keep_awake: KeepAwake,
+
+    /// Named command policies (`allow`, `deny`, `otherwise`, `scripts`, `extends`,
+    /// `allow_remove`, `deny_remove`). An entry named `builder` or `reviewer` replaces the
+    /// built-in one. A coding session gets `builder` and a reviewer `reviewer` unless the
+    /// caller names another, or `none`. See `crate::command_policy`.
+    #[serde(default)]
+    pub command_policies: BTreeMap<String, crate::command_policy::PolicyConfig>,
 }
 
 /// `agent_host.keep_awake`.
@@ -573,6 +580,7 @@ impl Default for AgentHostConfig {
             teams: TeamsConfig::default(),
             unreachable_alert_minutes: default_unreachable_alert_minutes(),
             keep_awake: KeepAwake::Off,
+            command_policies: BTreeMap::new(),
         }
     }
 }

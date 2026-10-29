@@ -285,17 +285,31 @@ fn summarizer_for(config: &HqConfig) -> Option<Summarizer> {
         .then(|| llm_summarizer(config.relay.session_exit_summary_timeout_secs))
 }
 
+/// What the sweep read of one live session.
+struct Seen<'a> {
+    agent: &'a AgentInfo,
+    screen: &'a str,
+    /// The supervisor just dismissed a known prompt on it.
+    dismissed: bool,
+    /// The commit its folder is at, for a finished writer.
+    head: Option<&'a GitHead>,
+}
+
 /// Store a live session's screen, keep its resume token current, and alert
 /// once when it blocks on a dialog.
 fn sweep_alive(
     db: &Database,
     vault_path: &Path,
     row: &registry::HarnessSessionRow,
-    agent: &AgentInfo,
-    screen: &str,
-    dismissed: bool,
-    head: Option<&GitHead>,
+    seen: Seen<'_>,
+    resolve: &HostResolver,
 ) {
+    let Seen {
+        agent,
+        screen,
+        dismissed,
+        head,
+    } = seen;
     let db_arc = Arc::new(db.clone());
     let (id, status) = (row.id.clone(), agent.status.as_str());
     if let Err(e) = db.with_conn(move |c| registry::set_seen(c, &id, status)) {
@@ -312,7 +326,7 @@ fn sweep_alive(
         // Only the survey's own block is silenced. A finished turn always alerts: it carries
         // the driver's wake, and a state change after the keypress must not lose it.
         AgentStatus::Blocked if dismissed => {}
-        AgentStatus::Blocked => alert_blocked(db, row, agent, screen),
+        AgentStatus::Blocked => alert_blocked(db, row, agent, screen, resolve),
         AgentStatus::Done => alert_finished(db, vault_path, row, agent, screen, head),
         _ => {}
     }
@@ -507,7 +521,13 @@ async fn supervise(
                 )
                 .await;
                 let head = phase.heads.get(&row.id);
-                sweep_alive(db, vault_path, &row, &agent, screen, dismissed, head);
+                let seen = Seen {
+                    agent: &agent,
+                    screen,
+                    dismissed,
+                    head,
+                };
+                sweep_alive(db, vault_path, &row, seen, &resolve);
                 keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
                 alive.push((row, *agent));
                 continue;

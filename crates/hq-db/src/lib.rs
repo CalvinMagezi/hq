@@ -18,6 +18,7 @@ pub mod push_subscriptions;
 pub mod search;
 pub mod self_update_runs;
 pub mod session_checkouts;
+pub mod session_policies;
 pub mod session_tokens;
 pub mod skill_evidence;
 pub mod skill_invocations;

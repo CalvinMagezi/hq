@@ -154,6 +154,11 @@ pub(super) fn answer_with(
     if let Some(why) = refusal(&read.dialog, &choice, who) {
         bail!(why);
     }
+    if chat.is_some_and(|c| c.driver_turn)
+        && let Some(why) = super::policy::refuse_drive(db, session_id, &read.dialog)
+    {
+        bail!(why);
+    }
     let option = match &choice {
         Choice::Option(id) => Some(*id),
         Choice::Decline(_) => None,
