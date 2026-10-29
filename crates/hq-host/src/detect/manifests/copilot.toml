@@ -1,0 +1,82 @@
+# Agent HQ's own rules for GitHub Copilot CLI, written from screens of
+# Copilot CLI 1.0.105 captured on 2026-10-29 (tests/fixtures/copilot).
+#
+# Copilot draws a dialog as a box at the bottom of the screen, in place of its
+# prompt box and status footer, so every rule here reads only the last few
+# lines: a dialog quoted higher up in the conversation never counts. Idle is
+# claimed only when the idle footer is on screen; anything the rules do not
+# recognise reads unknown, never idle.
+id = "copilot"
+version = "2026.10.29.1"
+min_engine_version = 3
+updated_at = "2026-10-29T00:00:00Z"
+aliases = ["github-copilot"]
+
+[[rules]]
+id = "approval_dialog"
+state = "blocked"
+priority = 990
+region = "bottom_non_empty_lines(12)"
+visible_blocker = true
+# Run a command, create or edit a file, allow a path: a "Do you want to ..."
+# question, numbered options and the navigation footer.
+contains = ["enter to select", "esc to cancel"]
+line_regex = [
+  '(?i)^\s*│?\s*do you want to\b',
+  '^\s*│?\s*(?:❯\s*)?\d+\.\s+\S',
+]
+
+[[rules]]
+id = "ask_user_form"
+state = "blocked"
+priority = 990
+region = "bottom_non_empty_lines(4)"
+visible_blocker = true
+# "Copilot needs information." The agent asked a question and waits for it.
+contains = ["enter accept", "esc cancel"]
+
+[[rules]]
+id = "menu_dialog"
+state = "blocked"
+priority = 970
+region = "bottom_non_empty_lines(12)"
+visible_blocker = true
+# Any other numbered menu waiting at the bottom, such as a folder trust question.
+contains = ["enter to select", "esc to cancel"]
+line_regex = ['^\s*│?\s*❯\s*\d+\.\s+\S']
+
+[[rules]]
+id = "working_footer"
+state = "working"
+priority = 960
+region = "bottom_non_empty_lines(2)"
+visible_working = true
+# "○ Working · 177 B esc esc interrupt"; the spinner glyph changes.
+line_regex = ['(?i)^\s*\S\s+Working\b.*\besc\s+esc\s+interrupt\b']
+
+[[rules]]
+id = "loading_footer"
+state = "working"
+priority = 955
+region = "bottom_non_empty_lines(2)"
+visible_working = true
+# Startup: "◉ Loading: 1 plugin, 1 hook, ... still waiting on ide". A prompt
+# given at launch runs once this clears.
+line_regex = ['^\s*\S\s+Loading:']
+
+[[rules]]
+id = "idle_footer"
+state = "idle"
+priority = 900
+region = "bottom_non_empty_lines(2)"
+visible_idle = true
+# "← open sidebar · Interactive · Manual Approval · / commands · ? help"; the
+# approval mode in the middle varies (Allow All, Manual Approval).
+contains = ["open sidebar"]
+
+[[rules]]
+id = "unrecognised"
+state = "unknown"
+priority = 0
+# No gate: matches every screen, so a screen none of the rules above know reads
+# unknown instead of the engine's default idle.

@@ -557,6 +557,37 @@ async fn a_blocked_launch_reports_the_screen_and_types_nothing() {
 }
 
 #[tokio::test]
+async fn an_agent_still_loading_is_not_reported_as_blocked() {
+    let (dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", String::new(), Some(NOT_READY)),
+        ("agent get", agent_json("hs-t2", "working"), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let spec = harness("claude-code");
+
+    let report = launch_session(vault.path(), &db, &spec, launch(host, "hs-t2", Some("go")))
+        .await
+        .unwrap();
+
+    assert_eq!(report["agent_status"], "working");
+    assert!(report.get("blocked").is_none(), "{report}");
+    assert!(
+        report["note"]
+            .as_str()
+            .unwrap()
+            .contains("prompt was not typed"),
+        "{report}"
+    );
+    let log = calls(&dir);
+    assert!(
+        !log.contains("agent prompt"),
+        "must not type into a loading agent: {log}"
+    );
+}
+
+#[tokio::test]
 async fn a_vouched_trust_dialog_is_accepted_then_the_prompt_is_typed() {
     let (dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),

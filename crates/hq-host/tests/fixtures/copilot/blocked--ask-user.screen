@@ -1,0 +1,27 @@
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+ ✗ Shell Create sub/a.txt and list /tmp Operation aborted by user                                                1m 3s ┃
+   mkdir -p sub && touch sub/a.txt && ls /tmp > /dev/null                                                              ┃
+   Approval check                                                                                                      ┃
+     └ - Confirmation cancelled for shell command (mkdir, touch)                                                       ┃
+                                                                                                                       ┃
+ ❯ Use your ask-user tool to ask me one multiple-choice question: which colour should check.txt mention, red or  09:42 ┃
+   blue. Wait for my answer, then reply with it.                                                                       ┃
+                                                                                                                       ┃
+ ○ Asking user Waiting for response                                                                                 45s┃
+                                                                                                                       ┃
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Copilot needs information.
+ Which colour should check.txt mention?
+
+ Colour:
+ ❯ red
+   blue
+   Other (type your answer)
+
+ ↑/↓ select · enter accept · ctrl+d decline · esc cancel
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -70,6 +70,30 @@ impl HarnessSessionSpec {
     }
 }
 
+/// Copilot starts with every tool allowed, as `claude-code` starts with its
+/// permission bypass: in manual approval every command waits on a dialog nobody
+/// is there to answer. The denials name commands that undo or leak work outside
+/// the agent's own change: pushing, stashing, resetting or cleaning a tree another
+/// agent may share, deleting files (`git rm` stays allowed, and git can bring back
+/// what it removes), printing the environment. A deny wins over
+/// `--allow-all-tools`, and Copilot checks each command of a compound line.
+///
+/// A rule names a command or a command and its subcommand, never a flag: checked
+/// on Copilot CLI 1.0.105, `shell(rm -r)` let `rm -r dir` through and `shell(rm)`
+/// stopped it. These guard against a slip; what stops a push or a deploy for
+/// certain is the agent not holding the credential. A profile with its own `args`
+/// replaces all of this.
+pub const COPILOT_ARGS: &[&str] = &[
+    "--allow-all-tools",
+    "--deny-tool=shell(git push)",
+    "--deny-tool=shell(git stash)",
+    "--deny-tool=shell(git reset)",
+    "--deny-tool=shell(git clean)",
+    "--deny-tool=shell(rm)",
+    "--deny-tool=shell(env)",
+    "--deny-tool=shell(printenv)",
+];
+
 /// The known interactive-session harnesses.
 ///
 /// Resume flags verified against each CLI where known; harnesses marked
@@ -188,7 +212,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         harness: "github-copilot",
         category: HarnessCategory::Coding,
         kind: "copilot",
-        args: &[],
+        args: COPILOT_ARGS,
         resume: ResumeStrategy::None,
         token_pattern: None,
         one_shot: None,
@@ -508,6 +532,19 @@ mod tests {
         assert_eq!(spec_for("agy").unwrap().binary(), "agy");
         assert_eq!(spec_for("cursor").unwrap().binary(), "cursor-agent");
         assert_eq!(spec_for("github-copilot").unwrap().binary(), "copilot");
+        let copilot = spec_for("github-copilot").unwrap().args;
+        assert_eq!(copilot[0], "--allow-all-tools");
+        assert!(copilot.contains(&"--deny-tool=shell(git push)"));
+        // Every deny is one argv word: a value split at its space would be read
+        // as a second tool name, or as the prompt. And none names a flag, which
+        // Copilot ignores (a rule that looks like protection and is not).
+        for deny in &copilot[1..] {
+            let inner = deny
+                .strip_prefix("--deny-tool=shell(")
+                .and_then(|d| d.strip_suffix(')'))
+                .unwrap_or_else(|| panic!("{deny}"));
+            assert!(!inner.split(' ').any(|w| w.starts_with('-')), "{deny}");
+        }
     }
 
     #[test]

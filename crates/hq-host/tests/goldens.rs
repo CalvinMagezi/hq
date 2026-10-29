@@ -4,8 +4,10 @@
 //!
 //! Where an agent could say what it was doing, the label comes from the agent:
 //! Claude Code's own `SessionStart`, `UserPromptSubmit`, `Stop` and
-//! `Notification` hooks. Codex has no such hook, so its labels come from what
-//! was on screen (a dialog waiting for a choice, "esc to interrupt" mid-turn).
+//! `Notification` hooks. Codex and Copilot have no such hook, so their labels
+//! come from what was on screen (a dialog waiting for a choice, "esc to
+//! interrupt" mid-turn). The Copilot screens come from a throwaway session in a
+//! scratch folder, with the folder's path replaced.
 #![cfg(unix)]
 
 use hq_host::{AgentState, DetectInput, Detector};
@@ -57,4 +59,51 @@ fn claude_screens_from_real_sessions_are_detected_correctly() {
 #[test]
 fn codex_screens_from_real_sessions_are_detected_correctly() {
     assert!(check_agent("codex") >= 8);
+}
+
+#[test]
+fn copilot_screens_from_real_sessions_are_detected_correctly() {
+    assert!(check_agent("copilot") >= 10);
+}
+
+/// A screen the rules do not recognise is unknown for Copilot, never idle: idle
+/// is what lets text be typed into the pane.
+#[test]
+fn an_unrecognised_copilot_screen_is_unknown() {
+    let got = Detector::builtin()
+        .detect(
+            "github-copilot",
+            DetectInput {
+                screen: " [Current]  Sessions   Issues   Pull requests   Gists\n\n some other view",
+                osc_title: "",
+            },
+        )
+        .unwrap();
+    assert_eq!(got.state, AgentState::Unknown);
+}
+
+/// A dialog quoted higher up in the conversation, with the idle footer below
+/// it, is not a dialog that is open now.
+#[test]
+fn a_copilot_dialog_far_above_the_footer_does_not_block() {
+    let mut screen = String::from(
+        "│ Do you want to run this command?\n│ ❯ 1. Yes\n│   3. No\n│ ↑/↓ to navigate · enter to select · esc to cancel\n",
+    );
+    for _ in 0..14 {
+        screen.push_str(" ● some later output\n");
+    }
+    screen.push_str(&"─".repeat(40));
+    screen.push_str("\n❯\n");
+    screen.push_str(&"─".repeat(40));
+    screen.push_str("\n ← open sidebar · Interactive · Manual Approval · / commands");
+    let got = Detector::builtin()
+        .detect(
+            "copilot",
+            DetectInput {
+                screen: &screen,
+                osc_title: "",
+            },
+        )
+        .unwrap();
+    assert_eq!(got.state, AgentState::Idle, "rule {:?}", got.rule);
 }

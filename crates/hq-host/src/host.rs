@@ -974,8 +974,14 @@ impl Host {
         self.live_pane(name)?.write(&bytes)
     }
 
-    /// Pastes `text` and presses Enter.
+    /// Pastes `text` and presses Enter, unless the agent is waiting at a dialog: there the
+    /// Enter would pick whichever option is highlighted, which can be one that widens what the
+    /// agent may do ("don't ask again"). A dialog is answered with keys, on purpose.
     pub fn prompt(&self, name: &str, text: &str) -> Result<(), HostError> {
+        let pane = self.live_pane(name)?;
+        if info_of(name, &pane, &self.detector).state == Some(AgentState::Blocked) {
+            return Err(HostError::Blocked(name.to_string()));
+        }
         self.paste(name, text)?;
         std::thread::sleep(PROMPT_ENTER_DELAY);
         self.send_keys(name, &["enter".to_string()])

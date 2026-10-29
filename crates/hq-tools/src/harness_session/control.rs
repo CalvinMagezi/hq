@@ -633,6 +633,9 @@ pub fn send(
     text: &str,
     chat: Option<&WatchingChat>,
 ) -> Result<Value> {
+    if chat.is_some_and(|c| c.driver_turn) {
+        super::brief::refuse_repeated_brief(db, session_id, text)?;
+    }
     let result = metered(db, session_id, chat, SendKind::Text, || {
         send_text(db, session_id, text)
     });

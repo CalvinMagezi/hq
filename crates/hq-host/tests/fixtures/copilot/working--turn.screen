@@ -1,0 +1,20 @@
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+                                                                                                                       ┃
+ ● Create check.txt +1                                                                                          1m 32s ┃
+                                                                                                                       ┃
+ ● DONE                                                                                                                ┃
+                                                                                                                       ┃
+ ❯ Run this exact shell command and show me its full output: copilot --help | grep -i -E 'deny-tool'          09:44    ┃
+                                                                                                                       ┃
+ $ Shell Show copilot help for permission flags 64 lines…                                                        1m 2s ┃
+   copilot --help | grep -i -E 'deny-tool'                                                                             ┃
+                                                                                                                       ┃
+ ~/Documents/HQ/dialog-check                                                                      Session: 10.2 AIC used
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ○ Working · 177 B esc esc interrupt                                                                  Claude Sonnet 5.5
