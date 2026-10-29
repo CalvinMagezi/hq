@@ -10,6 +10,8 @@ mod names;
 pub use names::check_folder_name;
 
 #[cfg(unix)]
+mod awake;
+#[cfg(unix)]
 mod client;
 #[cfg(unix)]
 mod detect;
@@ -52,6 +54,8 @@ mod token;
 #[cfg(unix)]
 mod workspace;
 
+#[cfg(unix)]
+pub use awake::{KeepAwake, assertion_command};
 #[cfg(unix)]
 pub use client::{Client, ClientError};
 #[cfg(unix)]

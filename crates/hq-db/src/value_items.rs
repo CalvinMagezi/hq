@@ -412,6 +412,19 @@ pub fn approve_by_id(db: &Database, id_or_token: &str) -> Result<bool> {
     })
 }
 
+/// Retires one active item whose condition went away by itself (a host that answers again), so
+/// it leaves the inbox without counting as the owner's dismissal. True if a row matched.
+pub fn retire(db: &Database, id: &str) -> Result<bool> {
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE value_items SET state='expired' \
+             WHERE id = ?1 AND state IN ('pending','routed','delivered')",
+            params![id],
+        )?;
+        Ok(n > 0)
+    })
+}
+
 /// Expire pending/routed items past their TTL. Delivered items are kept for the ledger.
 pub fn gc_expired(db: &Database) -> Result<usize> {
     db.with_conn(|c| {

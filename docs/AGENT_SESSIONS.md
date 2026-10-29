@@ -89,6 +89,18 @@ app, and list every agent on a machine with `hq host status`.
 - **An unreachable host is not an exit.** If the laptop sleeps or leaves the tailnet, its
   sessions stay `running` and are left alone. They resume being watched when it answers.
   `harness_session_stop` fails for such a session rather than pretending to stop it.
+- **A host that stops answering is reported.** Once a host with running sessions has been
+  silent for `agent_host.unreachable_alert_minutes` (default 5, 0 turns it off), the supervisor
+  raises one action-needed item naming the host and its sessions, which reaches the phone and
+  web push like any other. When the host answers again the item leaves the inbox and a notice
+  says it is back, with how long it was gone. A short silence says nothing. The outage is kept
+  in the database (`host_outages`), so a daemon restart neither repeats the alert nor forgets
+  it, and `hq doctor` lists hosts that are silent right now.
+- **Where to run a long team.** A machine that sleeps stops every agent on it. Run long
+  unattended teams on a host that is always on (a desktop or a server), and backend work on the
+  server's own host where its toolchain allows. On a laptop, `agent_host.keep_awake:
+  while_sessions` in that machine's config keeps it awake while an agent runs (see
+  [AGENT_HOST.md](AGENT_HOST.md)); a laptop with its lid closed on battery still sleeps.
 - **Prompts are confirmed, not just sent.** `agent prompt` writes the text and Enter
   together, but a TUI that is not listening yet can swallow the Enter and leave the text in
   its input box. `harness_session_send` and the initial prompt wait for the agent to start

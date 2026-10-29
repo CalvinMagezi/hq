@@ -155,7 +155,7 @@ const TEST_HOST_BUDGET: Duration = Duration::from_secs(60);
 async fn sweep(vault: &Path, db: &Database, host: &ScriptedHost, s: Option<&Summarizer>) {
     let host = host.clone();
     let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(host.clone()) as Host));
-    supervise(vault, db, s, resolve, TEST_HOST_BUDGET)
+    supervise(vault, db, s, resolve, Sweep::within(TEST_HOST_BUDGET))
         .await
         .unwrap();
 }
@@ -265,9 +265,15 @@ async fn an_unreachable_host_leaves_its_sessions_running() {
     store_snapshot(&db, "hs-away", "last known screen");
 
     let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
-    supervise(tmp.path(), &db, None, resolve, HOST_SWEEP_BUDGET)
-        .await
-        .unwrap();
+    supervise(
+        tmp.path(),
+        &db,
+        None,
+        resolve,
+        Sweep::within(HOST_SWEEP_BUDGET),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(status_of(&db, "hs-away"), registry::STATUS_RUNNING);
     assert!(
@@ -288,9 +294,15 @@ async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
     let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(hung.clone()) as Host));
 
     let started = Instant::now();
-    supervise(tmp.path(), &db, None, resolve, Duration::from_millis(500))
-        .await
-        .unwrap();
+    supervise(
+        tmp.path(),
+        &db,
+        None,
+        resolve,
+        Sweep::within(Duration::from_millis(500)),
+    )
+    .await
+    .unwrap();
 
     assert!(
         started.elapsed() < Duration::from_secs(8),
@@ -478,9 +490,15 @@ async fn an_unreachable_host_leaves_the_task_untouched() {
     let task = seed_with_task(&db, "hs-laptop");
 
     let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
-    supervise(tmp.path(), &db, None, resolve, HOST_SWEEP_BUDGET)
-        .await
-        .unwrap();
+    supervise(
+        tmp.path(),
+        &db,
+        None,
+        resolve,
+        Sweep::within(HOST_SWEEP_BUDGET),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         task_state(&db, &task),
@@ -1053,4 +1071,152 @@ async fn a_stack_run_on_a_host_that_reports_no_exit_code_is_judged_by_its_screen
         hq_db::tasks::STATUS_BLOCKED,
         "no code and no output means the run crashed"
     );
+}
+
+fn host_items(db: &Database) -> Vec<(String, String, String)> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT kind, title, state FROM value_items WHERE dedup_key LIKE 'host-%' ORDER BY created_at, rowid",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })
+    .unwrap()
+}
+
+fn poll(host: &str, answer: std::result::Result<(), &str>) -> hq_tools::harness_session::HostPoll {
+    let mut polled = hq_tools::harness_session::HostPoll::new();
+    polled.insert(
+        host.into(),
+        answer.map(|_| Vec::new()).map_err(String::from),
+    );
+    polled
+}
+
+#[test]
+fn a_silent_host_alerts_once_after_the_wait_and_says_when_it_is_back() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    seed(&db, "hs-b");
+    let rows = vec![row_of(&db, "hs-a"), row_of(&db, "hs-b")];
+    let after = Some(Duration::from_secs(300));
+    let silent = poll(
+        "local",
+        Err("ssh: connect to host laptop: Operation timed out\nmore"),
+    );
+
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_000);
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_240);
+    assert!(
+        host_items(&db).is_empty(),
+        "four minutes is not yet an outage worth a word"
+    );
+
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_300);
+    hosts::watch_hosts(&db, &silent, &rows, after, 10_360);
+    let items = host_items(&db);
+    assert_eq!(items.len(), 1, "one alert per outage: {items:?}");
+    assert_eq!(items[0].0, "action_needed");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT body FROM value_items WHERE dedup_key LIKE 'host-unreachable-%'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert!(
+        body.contains("5 minutes") && body.contains("2 sessions"),
+        "{body}"
+    );
+    assert!(body.contains("hs-a") && body.contains("hs-b"), "{body}");
+    assert!(
+        body.contains("Operation timed out") && !body.contains("more"),
+        "{body}"
+    );
+
+    hosts::watch_hosts(&db, &poll("local", Ok(())), &rows, after, 10_900);
+    let items = host_items(&db);
+    assert_eq!(items.len(), 2, "{items:?}");
+    assert_eq!(
+        items[0].2, "expired",
+        "the alert leaves the inbox: {items:?}"
+    );
+    assert_eq!(items[1].0, "fyi");
+    assert!(items[1].1.contains("answering again"), "{items:?}");
+
+    hosts::watch_hosts(&db, &poll("local", Ok(())), &rows, after, 11_000);
+    assert_eq!(host_items(&db).len(), 2, "back is said once");
+}
+
+#[test]
+fn a_short_silence_or_an_alert_turned_off_says_nothing() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    let rows = vec![row_of(&db, "hs-a")];
+    let silent = poll("local", Err("timed out"));
+    let after = Some(Duration::from_secs(300));
+
+    hosts::watch_hosts(&db, &silent, &rows, after, 1_000);
+    hosts::watch_hosts(&db, &poll("local", Ok(())), &rows, after, 1_120);
+    assert!(host_items(&db).is_empty(), "a blip is not news");
+    assert!(hq_db::host_outages::list(&db).unwrap().is_empty());
+
+    hosts::watch_hosts(&db, &silent, &rows, None, 2_000);
+    hosts::watch_hosts(&db, &silent, &rows, None, 9_000);
+    assert!(host_items(&db).is_empty(), "the alert is off");
+    assert_eq!(
+        hq_db::host_outages::list(&db).unwrap().len(),
+        1,
+        "still tracked"
+    );
+}
+
+#[test]
+fn an_outage_whose_sessions_all_stopped_ends_quietly() {
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-a");
+    let rows = vec![row_of(&db, "hs-a")];
+    let after = Some(Duration::from_secs(60));
+    let silent = poll("local", Err("timed out"));
+    hosts::watch_hosts(&db, &silent, &rows, after, 1_000);
+    hosts::watch_hosts(&db, &silent, &rows, after, 1_100);
+    assert_eq!(host_items(&db).len(), 1);
+
+    hosts::watch_hosts(&db, &Default::default(), &[], after, 1_200);
+    let items = host_items(&db);
+    assert_eq!(
+        items.len(),
+        1,
+        "no back notice for a host nobody polls: {items:?}"
+    );
+    assert_eq!(items[0].2, "expired");
+    assert!(hq_db::host_outages::list(&db).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_sweep_records_a_silent_host_as_an_outage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-away");
+    let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
+    let sweep = Sweep {
+        host_budget: HOST_SWEEP_BUDGET,
+        unreachable_after: Some(Duration::ZERO),
+    };
+    supervise(tmp.path(), &db, None, resolve, sweep)
+        .await
+        .unwrap();
+
+    let open = hq_db::host_outages::list(&db).unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].host, "local");
+    assert!(
+        open[0].alert_item_id.is_some(),
+        "a zero wait alerts at once"
+    );
+    assert_eq!(status_of(&db, "hs-away"), registry::STATUS_RUNNING);
 }

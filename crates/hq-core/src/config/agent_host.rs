@@ -160,6 +160,29 @@ pub struct AgentHostConfig {
     /// to new sessions (`agent_delegate`).
     #[serde(default)]
     pub teams: TeamsConfig,
+
+    /// Minutes a host with running sessions may go without answering before HQ raises one
+    /// "not answering" alert (a laptop that slept, a machine off the network). A notice
+    /// follows when it answers again. 0 turns the alert off. Clamped to 1..=1440.
+    #[serde(default = "default_unreachable_alert_minutes")]
+    pub unreachable_alert_minutes: u64,
+
+    /// Whether `hq host serve` keeps this machine from sleeping while an agent runs on it
+    /// (`caffeinate` on macOS, `systemd-inhibit` on Linux). Off by default. A laptop with its
+    /// lid closed on battery still sleeps.
+    #[serde(default)]
+    pub keep_awake: KeepAwake,
+}
+
+/// `agent_host.keep_awake`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeepAwake {
+    /// The machine sleeps as it normally would.
+    #[default]
+    Off,
+    /// Held awake while at least one agent's process is running.
+    WhileSessions,
 }
 
 /// Limits on a team: every session reachable through delegation from one root
@@ -412,6 +435,10 @@ fn default_idle_reap_hours() -> u64 {
     24
 }
 
+fn default_unreachable_alert_minutes() -> u64 {
+    5
+}
+
 fn default_host() -> String {
     NATIVE_HOST.to_string()
 }
@@ -508,6 +535,13 @@ impl AgentHostConfig {
     pub fn ask_spawned_session_cap(&self) -> i64 {
         i64::from(self.max_ask_spawned_sessions.min(20))
     }
+
+    /// How long a host may stay silent before the alert, or `None` when the alert is off.
+    pub fn unreachable_alert_after(&self) -> Option<std::time::Duration> {
+        (self.unreachable_alert_minutes > 0).then(|| {
+            std::time::Duration::from_secs(self.unreachable_alert_minutes.clamp(1, 1440) * 60)
+        })
+    }
 }
 
 impl Default for AgentHostConfig {
@@ -537,6 +571,8 @@ impl Default for AgentHostConfig {
             sandbox: SandboxConfig::default(),
             idle_reap_hours: default_idle_reap_hours(),
             teams: TeamsConfig::default(),
+            unreachable_alert_minutes: default_unreachable_alert_minutes(),
+            keep_awake: KeepAwake::Off,
         }
     }
 }
