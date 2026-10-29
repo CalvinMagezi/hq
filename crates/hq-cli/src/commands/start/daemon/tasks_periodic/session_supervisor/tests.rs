@@ -337,6 +337,52 @@ async fn a_blocked_agent_alerts_once_until_its_state_changes() {
     assert_eq!(alert_count(&db), 2, "a new block is a new alert");
 }
 
+/// A host whose one agent is blocked at a dialog it read, numbered `seq`.
+fn host_with_dialog(dir: &Path, name: &str, seq: u64) -> ScriptedHost {
+    let pending = r#"{"kind":"path","question":"Do you want to allow this?","command":"/tmp","options":[{"id":1,"label":"Yes"},{"id":2,"label":"Yes, and remember this path","remember":true},{"id":3,"label":"No (Esc)"}]}"#;
+    let agent = format!(
+        r#"{{"agent":"copilot","agent_status":"blocked","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":{seq},"pending_seq":{seq},"pending":{pending}}}"#
+    );
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"id\":\"x\",\"result\":{{\"agents\":[{agent}]}}}}' ;;\n  *\"agent read\"*) printf '%s' 'Do you want to allow this?' ;;\n  *) exit 2 ;;\nesac\n"
+    );
+    let path = dir.join("scripted-host");
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptedHost::new(path)
+}
+
+#[tokio::test]
+async fn a_block_at_a_dialog_hq_can_read_ties_the_alert_to_that_dialog() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-path");
+    let host = host_with_dialog(tmp.path(), "hs-path", 12);
+
+    sweep(tmp.path(), &db, &host, None).await;
+    sweep(tmp.path(), &db, &host, None).await;
+    assert_eq!(alert_count(&db), 1);
+    let item_id: String = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT id FROM value_items WHERE dedup_key = 'session-blocked-hs-path-12'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    let dialog = hq_db::dialog_alerts::get(&db, &item_id).unwrap().unwrap();
+    assert_eq!(dialog.session_id, "hs-path");
+    assert_eq!(dialog.pending_seq, 12);
+    assert_eq!(dialog.kind, "path");
+    assert_eq!(dialog.options.len(), 3);
+    assert_eq!(
+        dialog.approve_option,
+        Some(1),
+        "the button answers once, never remember"
+    );
+}
+
 #[tokio::test]
 async fn a_finished_agent_alerts_once_and_stays_running() {
     let tmp = tempfile::tempdir().unwrap();

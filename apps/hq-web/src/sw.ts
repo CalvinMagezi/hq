@@ -139,28 +139,83 @@ function appUrl(raw: unknown, fallback: string): string {
   return new URL(fallback, self.location.origin).href
 }
 
-// Web Push from the server (docs/WEB_PUSH.md): the payload is {title, body, url, tag}.
+/** What a push carries (docs/WEB_PUSH.md). A blocked agent's push also has the inbox item, its
+ * buttons and a one-use token per button, which answers that one question in place of the web token. */
+interface PushData {
+  title?: string
+  body?: string
+  url?: string
+  tag?: string
+  item?: string
+  actions?: { action: string; title: string }[]
+  tokens?: Record<string, string>
+}
+
+const ICON = '/icons/hq-icon-192.png'
+const BADGE = '/icons/hq-mark-96.png'
+/** The token-checked route a push button answers through; it takes no web token. */
+const PUSH_ANSWER_PATH = '/api/notifications/push-answer'
+
 self.addEventListener('push', (event) => {
-  let data: { title?: string; body?: string; url?: string; tag?: string } = {}
+  let data: PushData = {}
   try {
     data = event.data?.json() ?? {}
   } catch {
     data = { body: event.data?.text() }
   }
+  const actions = (data.actions ?? []).filter((a) => data.item && data.tokens?.[a.action])
   event.waitUntil(
     self.registration.showNotification(data.title || 'HQ', {
       body: data.body ?? '',
-      icon: '/icons/hq-icon-192.png',
-      badge: '/icons/hq-mark-96.png',
+      icon: ICON,
+      badge: BADGE,
       tag: data.tag,
-      data: { url: appUrl(data.url, '/notifications') },
+      requireInteraction: actions.length > 0,
+      data: { url: appUrl(data.url, '/notifications'), item: data.item, tokens: data.tokens },
+      ...({ actions } as object),
     }),
   )
 })
 
+/** Sends a push button's answer and says how it went in the notification's place. */
+async function answerFromPush(notification: Notification, choice: string): Promise<void> {
+  const { item, tokens, url } = notification.data ?? {}
+  const says = (title: string, body: string) =>
+    self.registration.showNotification(title, { body, icon: ICON, badge: BADGE, tag: notification.tag, data: { url } })
+  let res: Response
+  try {
+    res = await fetch(PUSH_ANSWER_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: item, choice, token: tokens?.[choice] }),
+    })
+  } catch {
+    await says('Not sent', 'HQ could not be reached. Open HQ to answer.')
+    return
+  }
+  if (res.ok) {
+    const report = (await res.json().catch(() => ({}))) as { registered?: boolean }
+    await says(
+      choice === 'approve' ? 'Allowed once' : 'Declined',
+      report.registered === false ? 'The agent did not take it yet. Open HQ to check.' : 'The agent has your answer.',
+    )
+  } else if (res.status === 409) {
+    await says('Already answered', 'That question was answered elsewhere, or the agent moved on.')
+  } else if (res.status === 403) {
+    await says('This button expired', 'Open HQ to answer.')
+  } else {
+    await says('Not sent', 'Open HQ to answer.')
+  }
+}
+
 // A notification (a reply alert or a push) opens its page: in an HQ window already open, or a new one.
+// A push button answers the question it came with instead.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
+  if (event.action === 'approve' || event.action === 'decline') {
+    event.waitUntil(answerFromPush(event.notification, event.action))
+    return
+  }
   const target = appUrl(event.notification.data?.url, '/chat')
   event.waitUntil(
     (async () => {

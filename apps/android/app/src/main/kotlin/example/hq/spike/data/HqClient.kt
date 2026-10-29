@@ -281,6 +281,23 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val sourceTask: String?,
         val valKind: String?,
         val actions: List<String>,
+        /** For a helper's question the server read: the dialog it is about. Null from an older server. */
+        val dialog: AlertDialog? = null,
+    )
+
+    /**
+     * The dialog a helper's alert is about. [approveLabel] names the one answer a button may give (a plain yes, once),
+     * null when none may; the server answers it through `/api/notifications/{id}/answer`, so a button never picks the
+     * wrong dialog or a "don't ask again" option.
+     */
+    data class AlertDialog(
+        val sessionId: String,
+        val seq: Long,
+        val kind: String,
+        val question: String?,
+        val command: String?,
+        val approveLabel: String?,
+        val answered: Boolean,
     )
 
     data class InboxList(val items: List<InboxItem>, val unread: Int, val pending: Int)
@@ -296,7 +313,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                     InboxItem(
                         n.getString("id"), n.optString("kind", ""), n.optString("title", ""), n.optString("description", ""), n.optString("state", ""),
                         n.optString("created_at", ""), meta?.optStringOrNull("link"), extra?.optStringOrNull("source_task"), extra?.optStringOrNull("val_kind"),
-                        n.optJSONArray("actions").strings(),
+                        n.optJSONArray("actions").strings(), alertDialog(meta),
                     )
                 },
                 o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),
@@ -306,6 +323,14 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** Records the owner's answer: approve, reject or dismiss. The thing that asked acts on it. */
     suspend fun answerNotification(id: String, action: String) {
         send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/action").post(JSONObject().put("action", action).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
+    /**
+     * Answers the dialog behind a helper's notice: [choice] is approve (the yes-once answer the server named) or decline. The
+     * server sends it to that dialog only; 409 means it was answered elsewhere or the helper moved on.
+     */
+    suspend fun answerDialog(id: String, choice: String) {
+        send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/answer").post(JSONObject().put("choice", choice).toString().toRequestBody("application/json".toMediaType())).build()) { }
     }
 
     /** Types keys such as enter or esc into a helper's terminal. 409 means it is no longer at a prompt. */
@@ -564,6 +589,16 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         const val MESSAGE_PAGE = 100
         private val EMPTY_JSON = "{}".toRequestBody("application/json".toMediaType())
     }
+}
+
+/** The dialog in a notification's metadata, or null for any other notice. */
+internal fun alertDialog(meta: JSONObject?): HqClient.AlertDialog? {
+    val d = meta?.optJSONObject("dialog") ?: return null
+    val session = d.optString("session_id", "").ifBlank { return null }
+    if (!d.has("seq")) return null
+    fun text(key: String) = if (d.isNull(key)) null else d.optString(key, "").ifBlank { null }
+    val approve = d.optJSONObject("approve")?.let { a -> if (a.isNull("label")) null else a.optString("label", "").ifBlank { null } }
+    return HqClient.AlertDialog(session, d.optLong("seq"), d.optString("kind", "other"), text("question"), text("command"), approve, d.optBoolean("answered", false))
 }
 
 internal fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }

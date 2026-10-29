@@ -44,6 +44,10 @@ pub(crate) struct NotificationMetadata {
     /// A page of the web app the item opens, from `notify_owner`'s `link`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) link: Option<String>,
+    /// For a blocked session's alert: the dialog it is about and the buttons it may have,
+    /// answered through `/api/notifications/{id}/answer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dialog: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,16 +89,44 @@ pub(crate) struct NotificationActionResponse {
     pub(crate) message: String,
 }
 
-const VALUE_ITEM_COLUMNS: &str = "SELECT id, source_task, kind, title, body, artifact_path, score, state, created_at, link FROM value_items";
+/// Each item with the dialog it is about, when it is a blocked session's alert (`dialog_alerts`).
+const VALUE_ITEM_COLUMNS: &str = "SELECT v.id, v.source_task, v.kind, v.title, v.body, v.artifact_path, v.score, v.state, v.created_at, v.link, \
+     d.session_id, d.pending_seq, d.kind, d.question, d.command, d.options, d.approve_option, d.answered_at IS NOT NULL \
+     FROM value_items v LEFT JOIN dialog_alerts d ON d.item_id = v.id";
 
 fn state_where(state_filter: Option<&str>) -> &'static str {
     match state_filter {
-        Some("pending") => " WHERE state IN ('pending', 'delivered')",
-        Some("approved") => " WHERE state = 'engaged'",
-        Some("dismissed") => " WHERE state = 'dismissed'",
-        Some("resolved") | Some("history") => " WHERE state IN ('engaged', 'dismissed', 'expired')",
+        Some("pending") => " WHERE v.state IN ('pending', 'delivered')",
+        Some("approved") => " WHERE v.state = 'engaged'",
+        Some("dismissed") => " WHERE v.state = 'dismissed'",
+        Some("resolved") | Some("history") => {
+            " WHERE v.state IN ('engaged', 'dismissed', 'expired')"
+        }
         _ => "",
     }
+}
+
+/// The dialog columns of a joined row, when the item has one.
+fn dialog_from_row(
+    row: &rusqlite::Row,
+    item_id: &str,
+) -> rusqlite::Result<Option<serde_json::Value>> {
+    let Some(session_id) = row.get::<_, Option<String>>(10)? else {
+        return Ok(None);
+    };
+    let options: String = row.get(15)?;
+    let alert = hq_db::dialog_alerts::DialogAlert {
+        item_id: item_id.to_string(),
+        session_id,
+        pending_seq: row.get::<_, i64>(11)? as u64,
+        kind: row.get(12)?,
+        question: row.get(13)?,
+        command: row.get(14)?,
+        options: serde_json::from_str(&options).unwrap_or_default(),
+        approve_option: row.get::<_, Option<i64>>(16)?.map(|a| a as u32),
+        answered: row.get(17)?,
+    };
+    Ok(Some(crate::dialog_answer::dialog_view(&alert)))
 }
 
 fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationItem> {
@@ -129,6 +161,7 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         ("source_task".to_string(), source_task),
         ("val_kind".to_string(), kind_str),
     ]);
+    let dialog = dialog_from_row(row, &id)?;
     Ok(NotificationItem {
         id: format!("val_{id}"),
         kind,
@@ -146,6 +179,7 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
             link: row
                 .get::<_, Option<String>>(9)?
                 .filter(|l| crate::web_push::is_app_path(l)),
+            dialog,
         },
         actions: actions.iter().map(|a| a.to_string()).collect(),
     })
@@ -194,7 +228,7 @@ pub(crate) fn aggregate_notifications(
 }
 
 /// Maps a client action to the value item's `(engagement, state)`.
-fn action_outcome(action: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn action_outcome(action: &str) -> Option<(&'static str, &'static str)> {
     match action {
         "approve" | "engage" => Some(("approved", "engaged")),
         "dismiss" | "reject" => Some(("dismissed", "dismissed")),
@@ -203,7 +237,7 @@ fn action_outcome(action: &str) -> Option<(&'static str, &'static str)> {
 }
 
 /// Returns false when no value item has that id.
-fn record_action(
+pub(crate) fn record_action(
     db: &hq_db::Database,
     val_id: &str,
     engagement: &str,
@@ -347,7 +381,7 @@ mod tests {
             assert_eq!(state_where(Some(filter)), "", "{filter}");
         }
         assert_eq!(state_where(None), "");
-        assert!(state_where(Some("pending")).starts_with(" WHERE state IN"));
+        assert!(state_where(Some("pending")).starts_with(" WHERE v.state IN"));
     }
 
     use super::*;
@@ -399,6 +433,70 @@ mod tests {
         let res = aggregate_notifications(&db, Some("pending"), Some("all"), 50).unwrap();
         assert_eq!(res.notifications.len(), 1);
         assert_eq!(res.pending_approvals_count, 1);
+    }
+
+    #[test]
+    fn a_blocked_sessions_alert_lists_its_dialog_and_its_one_button() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let item = hq_core::types::ValueItem::new(
+            "session-supervisor",
+            hq_core::types::ValueKind::ActionNeeded,
+            "Harness session 'copilot' is waiting for you",
+            "Session hs-1 on laptop is blocked on a prompt or approval",
+        );
+        hq_db::value_items::insert(&db, &item).unwrap();
+        let plain = hq_core::types::ValueItem::new(
+            "notify_owner",
+            hq_core::types::ValueKind::Fyi,
+            "Deploy finished",
+            "v1.2 is live",
+        );
+        hq_db::value_items::insert(&db, &plain).unwrap();
+        let options = vec![
+            hq_db::dialog_alerts::DialogOption {
+                id: 1,
+                label: "Yes".into(),
+                remember: false,
+                typed: false,
+            },
+            hq_db::dialog_alerts::DialogOption {
+                id: 2,
+                label: "Yes, and remember this path".into(),
+                remember: true,
+                typed: false,
+            },
+        ];
+        hq_db::dialog_alerts::record(
+            &db,
+            &hq_db::dialog_alerts::NewDialogAlert {
+                item_id: &item.id,
+                session_id: "hs-1",
+                pending_seq: 7,
+                kind: "path",
+                question: Some("Do you want to allow this?"),
+                command: Some("/tmp"),
+                options: &options,
+            },
+        )
+        .unwrap();
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        let alert = items
+            .iter()
+            .find(|n| n.id == format!("val_{}", item.id))
+            .unwrap();
+        let dialog = alert
+            .metadata
+            .dialog
+            .as_ref()
+            .expect("the alert carries its dialog");
+        assert_eq!(dialog["seq"], 7);
+        assert_eq!(dialog["approve"]["label"], "Yes");
+        assert_eq!(dialog["options"][1]["remember"], true);
+        let news = items
+            .iter()
+            .find(|n| n.id == format!("val_{}", plain.id))
+            .unwrap();
+        assert!(news.metadata.dialog.is_none());
     }
 
     #[tokio::test]

@@ -144,8 +144,50 @@ pub(super) fn alert_blocked(
         ),
     )
     .with_dedup_key(format!("session-blocked-{}-{seq}", row.id));
+    let fresh = item.dedup_key.as_deref().is_some_and(|key| {
+        matches!(
+            hq_db::value_items::find_active_by_dedup(db, item.kind, key),
+            Ok(None)
+        )
+    });
     let _ = hq_db::value_items::emit(db, &item);
+    if fresh {
+        record_dialog(db, &item.id, &row.id, agent);
+    }
     tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent blocked, alert sent");
+}
+
+/// Ties the alert to the dialog the host read, when it read one, so a notification button
+/// answers that dialog and no other.
+fn record_dialog(db: &Database, item_id: &str, session_id: &str, agent: &AgentInfo) {
+    let (Some(dialog), Some(seq)) = (agent.pending.as_deref(), agent.pending_seq) else {
+        return;
+    };
+    let options: Vec<hq_db::dialog_alerts::DialogOption> = dialog
+        .options
+        .iter()
+        .map(|o| hq_db::dialog_alerts::DialogOption {
+            id: o.id,
+            label: o.label.clone(),
+            remember: o.remember,
+            typed: o.typed,
+        })
+        .collect();
+    let recorded = hq_db::dialog_alerts::record(
+        db,
+        &hq_db::dialog_alerts::NewDialogAlert {
+            item_id,
+            session_id,
+            pending_seq: seq,
+            kind: &dialog.kind,
+            question: dialog.question.as_deref(),
+            command: dialog.command.as_deref(),
+            options: &options,
+        },
+    );
+    if let Err(e) = recorded {
+        tracing::warn!(session = %session_id, error = %e, "session-supervisor: could not record the dialog behind an alert");
+    }
 }
 
 /// Record `event` on the session's HQ task. Logged, never raised: one broken

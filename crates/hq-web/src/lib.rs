@@ -9,6 +9,7 @@ mod chat_apps;
 mod chat_uploads;
 mod copilot_usage_api;
 mod device_auth;
+mod dialog_answer;
 mod error;
 pub mod gmail_ingest;
 mod mcp_http;
@@ -364,6 +365,14 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/notifications/{id}/action",
             axum::routing::post(notifications_api::notification_action_handler),
+        )
+        .route(
+            "/api/notifications/{id}/answer",
+            post(dialog_answer::answer_handler),
+        )
+        .route(
+            dialog_answer::PUSH_ANSWER_PATH,
+            post(dialog_answer::push_answer_handler),
         )
         .route(
             "/api/notifications/mark-all-read",

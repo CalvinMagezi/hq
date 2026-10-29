@@ -1,5 +1,6 @@
 package example.hq.spike.ui.inbox
 
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.InboxItem
 import example.hq.spike.ui.chat.blocks.Plain
 import example.hq.spike.ui.helpers.AskKind
@@ -36,6 +37,8 @@ data class InboxCard(
     val excerpt: List<String> = emptyList(),
     /** For an approval: everything it says. The card shows [body], cut short; the details page shows this, and answers from there. */
     val fullBody: String = "",
+    /** For a helper's question the server read: the dialog the answer goes to. Answered through the server, never by keys typed here. */
+    val dialog: HqClient.AlertDialog? = null,
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
@@ -69,6 +72,8 @@ object InboxWords {
     private fun helperCard(item: InboxItem, label: String, what: String, sessionId: String?, host: String?): InboxCard {
         val who = label.trim().split(' ', '(').firstOrNull { it.isNotBlank() }?.replaceFirstChar { it.uppercase() } ?: "A helper"
         val line = lastLine(item.description)
+        val dialog = item.dialog?.takeIf { !it.answered }
+        if (what == "is waiting for you" && dialog != null) return dialogCard(item, who, dialog, host)
         return when (what) {
             "is waiting for you" -> {
                 val excerpt = HelperWords.excerptLines(item.description)
@@ -95,6 +100,20 @@ object InboxWords {
                 whereOf(item, host), item.createdAt, CardIcon.Pause, sessionId, false, "Take a look", item.link, askedBy(item, host), item.state,
             )
         }
+    }
+
+    /**
+     * A helper's question the server read: the card says what it asks and the command or path it is about, and offers Allow
+     * once only when the server named a plain yes-once answer. The answer goes to the server, which sends it to that dialog
+     * and no other, so nothing here reads the screen.
+     */
+    private fun dialogCard(item: InboxItem, who: String, d: HqClient.AlertDialog, host: String?): InboxCard {
+        val body = listOfNotNull(d.question, d.command).joinToString("\n").ifBlank { "It stopped to ask before going on." }
+        val canAllow = d.approveLabel != null
+        return InboxCard(
+            item.id, CardKind.HelperAsks, "$who needs your OK", body, whereOf(item, host), item.createdAt, CardIcon.Sparkle, d.sessionId, canAllow,
+            if (canAllow) "Allow once" else "Open helper", item.link, askedBy(item, host), item.state, dialog = d,
+        )
     }
 
     /** What the helper is asking, from the screen excerpt the supervisor includes. */

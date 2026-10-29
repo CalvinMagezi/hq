@@ -32,6 +32,7 @@ class AnswerReceiver : BroadcastReceiver() {
         val answer = intent.getStringExtra(ANSWER) ?: return
         val session = intent.getStringExtra(SESSION)
         val kind = intent.getStringExtra(KIND)
+        val dialog = intent.getBooleanExtra(DIALOG, false)
         val title = intent.getStringExtra(TITLE).orEmpty()
         val excerpt = intent.getStringExtra(EXCERPT).orEmpty().lines()
         // Cards posted before the owner turned answers off still carry their buttons.
@@ -57,6 +58,19 @@ class AnswerReceiver : BroadcastReceiver() {
                 val target = Hq.of(context, id)
                 if (target == null) {
                     nm.notify(nid, say(context, AnswerWords.Say("Not sent", "This phone is no longer signed in to your server HQ."), null))
+                    return@Thread
+                }
+                if (dialog) {
+                    // The server answers the dialog it read and refuses one that moved on, so nothing is read or typed here. A retry
+                    // after a timeout is safe: the first answer claimed the dialog, so a second one is refused, never sent twice.
+                    val choice = if (answer == "approve") "approve" else "decline"
+                    val status = postStatus("/api/notifications/$itemId/answer", JSONObject().put("choice", choice), target, deadline)
+                    val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+                    when (status) {
+                        in 200..299 -> nm.notify(nid, say(context, AnswerWords.answered(true, answer == "approve", AnswerWords.asker(title), at), null))
+                        409 -> nm.notify(nid, say(context, AnswerWords.movedOn, null))
+                        else -> throw java.io.IOException("status $status")
+                    }
                     return@Thread
                 }
                 // An answer given elsewhere stands: the server would take a second one over it. A check that cannot be made lets this one go.
@@ -145,6 +159,25 @@ class AnswerReceiver : BroadcastReceiver() {
         }
     }
 
+    /** A POST whose status is the answer: 409 means the dialog was answered elsewhere or moved on, not a failure. */
+    private fun postStatus(path: String, body: JSONObject, target: Hq, deadline: Long): Int {
+        val h = URL(target.base + path).openConnection() as HttpURLConnection
+        try {
+            h.requestMethod = "POST"
+            h.connectTimeout = minOf(CONNECT_MS, left(deadline))
+            h.readTimeout = left(deadline)
+            h.instanceFollowRedirects = false
+            h.doOutput = true
+            h.setRequestProperty("Authorization", "Bearer " + target.token)
+            h.setRequestProperty("X-HQ-Client", "android")
+            h.setRequestProperty("Content-Type", "application/json")
+            h.outputStream.use { it.write(body.toString().toByteArray()) }
+            return h.responseCode
+        } finally {
+            h.disconnect()
+        }
+    }
+
     /** Milliseconds left of the deadline an answer has, from the tap (a connect can add up to two seconds more); none left means the answer failed. */
     private fun left(deadline: Long): Int = (deadline - SystemClock.elapsedRealtime()).toInt().also { if (it <= 0) throw java.io.IOException("no time left") }
 
@@ -173,6 +206,7 @@ class AnswerReceiver : BroadcastReceiver() {
         private const val KIND = "kind"
         private const val TITLE = "title"
         private const val EXCERPT = "excerpt"
+        private const val DIALOG = "dialog"
         private const val CHECK_LINES = 81
         private const val HISTORY_LIMIT = 100
         private const val DEADLINE_MS = 10_000L
@@ -184,7 +218,7 @@ class AnswerReceiver : BroadcastReceiver() {
 
         fun intent(c: Context, card: InboxCard, answer: String): PendingIntent {
             val i = Intent(c, AnswerReceiver::class.java).putExtra(ID, card.id).putExtra(ANSWER, answer).putExtra(SESSION, card.sessionId)
-                .putExtra(KIND, card.kind.name).putExtra(TITLE, card.title).putExtra(EXCERPT, card.excerpt.joinToString("\n"))
+                .putExtra(KIND, card.kind.name).putExtra(TITLE, card.title).putExtra(EXCERPT, card.excerpt.joinToString("\n")).putExtra(DIALOG, card.dialog != null)
             return PendingIntent.getBroadcast(c, (card.id + answer).hashCode(), i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         }
     }
