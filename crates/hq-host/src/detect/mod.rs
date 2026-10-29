@@ -205,6 +205,14 @@ fn gate_matches(gate: &Gate, text: &str, lower: &str) -> bool {
         && !gate.none.iter().any(|g| gate_matches(g, text, lower))
 }
 
+/// What `Detector::load_overrides` found: the ids it loaded, and the files it
+/// skipped with the reason.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct OverrideReport {
+    pub loaded: Vec<String>,
+    pub problems: Vec<String>,
+}
+
 /// The rule files, by agent.
 pub struct Detector {
     by_id: HashMap<String, Compiled>,
@@ -214,6 +222,7 @@ pub struct Detector {
 const BUILTIN: &[&str] = &[
     include_str!("manifests/claude.toml"),
     include_str!("manifests/codex.toml"),
+    include_str!("manifests/copilot.toml"),
 ];
 
 impl Detector {
@@ -242,25 +251,30 @@ impl Detector {
     }
 
     /// Adds every `*.toml` in `dir`, replacing built-ins of the same id. Files
-    /// that do not parse are skipped and reported, never fatal.
-    pub fn load_overrides(&mut self, dir: &Path) -> Vec<String> {
-        let mut problems = Vec::new();
+    /// that do not parse are skipped and reported, never fatal. A missing
+    /// directory is an empty report.
+    pub fn load_overrides(&mut self, dir: &Path) -> OverrideReport {
+        let mut report = OverrideReport::default();
         let Ok(entries) = std::fs::read_dir(dir) else {
-            return problems;
+            return report;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_none_or(|e| e != "toml") {
-                continue;
-            }
+        let mut paths: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .collect();
+        // Two files with one id: the later name wins, the same way on every machine.
+        paths.sort();
+        for path in paths {
             let result = std::fs::read_to_string(&path)
                 .map_err(|e| e.to_string())
                 .and_then(|text| self.add(&text));
-            if let Err(e) = result {
-                problems.push(format!("{}: {e}", path.display()));
+            match result {
+                Ok(id) => report.loaded.push(id),
+                Err(e) => report.problems.push(format!("{}: {e}", path.display())),
             }
         }
-        problems
+        report
     }
 
     fn find(&self, agent: &str) -> Option<&Compiled> {

@@ -14,6 +14,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_web_search(config).await;
     report_import_tools();
     report_code_signature();
+    report_state_rules();
     report_spend_ledger(config);
     super::health::print_summary(issues, "hq doctor");
     Ok(())
@@ -193,6 +194,51 @@ fn report_code_signature() {
 /// There is no coding-agent host, and so no host install module, off Unix.
 #[cfg(not(unix))]
 fn report_code_signature() {}
+
+/// The owner's agent state rule files, read the way `hq host serve` reads them, so
+/// one that does not parse is found before a session sits unseen at a dialog.
+#[cfg(unix)]
+fn report_state_rules() {
+    let dir = hq_core::config::detect_overrides_dir();
+    let report = hq_host::Detector::builtin().load_overrides(&dir);
+    println!("\nAgent state rules");
+    for Line(label, text) in state_rule_lines(&dir, &report) {
+        println!("  {label}  {text}");
+    }
+}
+
+#[cfg(not(unix))]
+fn report_state_rules() {}
+
+#[cfg(unix)]
+fn state_rule_lines(dir: &std::path::Path, report: &hq_host::OverrideReport) -> Vec<Line> {
+    let mut lines = Vec::new();
+    if report.loaded.is_empty() && report.problems.is_empty() {
+        lines.push(Line(
+            "ok",
+            format!(
+                "built-in rules only (files in {} add or replace them)",
+                dir.display()
+            ),
+        ));
+    } else if !report.loaded.is_empty() {
+        lines.push(Line(
+            "ok",
+            format!(
+                "built-in rules, replaced or added from {}: {}",
+                dir.display(),
+                report.loaded.join(", ")
+            ),
+        ));
+    }
+    for problem in &report.problems {
+        lines.push(Line(
+            "warn",
+            format!("skipped (the host ignores it): {problem}"),
+        ));
+    }
+    lines
+}
 
 fn on_path(tool: &str) -> bool {
     std::env::var_os("PATH")
@@ -821,6 +867,25 @@ mod tests {
 
     fn labels(lines: &[Line]) -> Vec<&'static str> {
         lines.iter().map(|l| l.0).collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_rule_overrides_are_named_and_a_broken_file_warns() {
+        let dir = Path::new("/home/someone/.hq/detect");
+        let none = hq_host::OverrideReport::default();
+        let lines = state_rule_lines(dir, &none);
+        assert_eq!(labels(&lines), vec!["ok"]);
+        assert!(lines[0].1.contains("built-in rules only"));
+
+        let mixed = hq_host::OverrideReport {
+            loaded: vec!["copilot".into()],
+            problems: vec!["/home/someone/.hq/detect/x.toml: expected a value".into()],
+        };
+        let lines = state_rule_lines(dir, &mixed);
+        assert_eq!(labels(&lines), vec!["ok", "warn"]);
+        assert!(lines[0].1.contains("copilot"));
+        assert!(lines[1].1.contains("x.toml"));
     }
 
     #[test]

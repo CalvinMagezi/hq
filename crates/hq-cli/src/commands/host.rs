@@ -1,7 +1,7 @@
 //! `hq host`: run or inspect the built-in agent host.
 
 use anyhow::{Context, Result, bail};
-use hq_host::{BurstLimit, Client, Host, Server, socket_path};
+use hq_host::{BurstLimit, Client, Detector, Host, Server, socket_path};
 use serde_json::json;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
@@ -94,6 +94,25 @@ pub async fn run(args: HostArgs) -> Result<()> {
     }
 }
 
+/// The built-in state rules plus the owner's overrides in `~/.hq/detect`. A file
+/// that does not parse is skipped and named, so a typo never stops the host.
+fn state_rules() -> Detector {
+    let dir = hq_core::config::detect_overrides_dir();
+    let mut detector = Detector::builtin();
+    let report = detector.load_overrides(&dir);
+    if !report.loaded.is_empty() {
+        println!(
+            "hq host state rules from {}: {}",
+            dir.display(),
+            report.loaded.join(", ")
+        );
+    }
+    for problem in &report.problems {
+        eprintln!("hq host skipped a state rule file: {problem}");
+    }
+    detector
+}
+
 struct Caps {
     max_agents: usize,
     max_starts: usize,
@@ -104,7 +123,7 @@ async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> 
         bail!("--max-agents and --max-starts must be at least 1");
     }
     let host = Arc::new(
-        Host::new()
+        Host::with_detector(state_rules())
             .with_state_dir(&dir)
             .with_require_sandbox(!allow_unsandboxed)
             .with_max_agents(caps.max_agents)

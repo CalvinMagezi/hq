@@ -13,6 +13,13 @@ pub const NATIVE_HOST: &str = "native";
 /// `HQ_HOST_DIR` when set (the same variable panes get, so hooks and HQ agree),
 /// else `~/.hq/run/host`. A unix socket path is limited to about 100 bytes, so a
 /// long override can fail to bind.
+/// Where the owner keeps agent state rule files that replace or add to the
+/// built-in ones (`<id>.toml`, the same format). The host reads them at start, so
+/// a CLI that changes its screens is fixed with a file instead of a release.
+pub fn detect_overrides_dir() -> std::path::PathBuf {
+    super::HqConfig::hq_dir().join("detect")
+}
+
 pub fn native_host_dir() -> std::path::PathBuf {
     match std::env::var_os("HQ_HOST_DIR") {
         Some(dir) if !dir.is_empty() => dir.into(),
