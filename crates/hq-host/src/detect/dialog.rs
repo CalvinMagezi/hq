@@ -293,11 +293,20 @@ pub fn extract(spec: &DialogSpec, lines: &[String]) -> Option<Dialog> {
         return None;
     }
     let reach = footer.saturating_sub(MAX_DIALOG_LINES);
-    let (top, mut truncated) = match lines[reach..footer]
-        .iter()
-        .rposition(|l| spec.top.is_match(l))
+    // A rule straight above a numbered option splits one list (Claude Code's question form
+    // draws one before "Chat about this"), so it is not where the dialog starts.
+    let splits_list = |i: usize| {
+        lines.get(i + 1).is_some_and(|next| {
+            spec.option
+                .captures(unbox(next))
+                .is_some_and(|c| c.name("num").is_some())
+        })
+    };
+    let (top, mut truncated) = match (reach..footer)
+        .rev()
+        .find(|&i| spec.top.is_match(&lines[i]) && !splits_list(i))
     {
-        Some(i) => (reach + i, false),
+        Some(i) => (i, false),
         None => (reach, true),
     };
     let body: Vec<&str> = lines[top..footer].iter().map(|l| unbox(l)).collect();
