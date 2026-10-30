@@ -46,6 +46,8 @@ P12_PASS="hq-p12-import"  # unused at install time, kept for reference
 LAUNCH_LABEL="com.agent-hq.hq-all"
 LAUNCH_DOMAIN="gui/$INVOKING_UID"
 LAUNCH_PLIST="$USER_HOME/Library/LaunchAgents/$LAUNCH_LABEL.plist"
+LAUNCHD_BOOTOUT_WAIT_SECS=15
+LAUNCHD_BOOTSTRAP_TRIES=5
 
 # Helper: run a command as the invoking user (needed when this script is sudo'd).
 run_as_user() {
@@ -336,8 +338,25 @@ verify_daemon_binary() {
 if $LAUNCHD_REGISTERED; then
     echo "Reloading launchd job $LAUNCH_LABEL..."
     run_as_user launchctl bootout "$LAUNCH_DOMAIN/$LAUNCH_LABEL" 2>/dev/null || true
-    sleep 1
-    run_as_user launchctl bootstrap "$LAUNCH_DOMAIN" "$LAUNCH_PLIST" 2>/dev/null || true
+    # bootout returns before the job is gone, and a bootstrap while it is still
+    # registered fails with "Input/output error", leaving the daemon stopped.
+    for _ in $(seq 1 "$LAUNCHD_BOOTOUT_WAIT_SECS"); do
+        run_as_user launchctl print "$LAUNCH_DOMAIN/$LAUNCH_LABEL" >/dev/null 2>&1 || break
+        sleep 1
+    done
+    bootstrapped=false
+    for _ in $(seq 1 "$LAUNCHD_BOOTSTRAP_TRIES"); do
+        if bootstrap_err="$(run_as_user launchctl bootstrap "$LAUNCH_DOMAIN" "$LAUNCH_PLIST" 2>&1)"; then
+            bootstrapped=true
+            break
+        fi
+        sleep 1
+    done
+    if ! $bootstrapped; then
+        echo "⚠️  launchctl bootstrap failed: $bootstrap_err"
+        echo "   Start it by hand: launchctl bootstrap $LAUNCH_DOMAIN $LAUNCH_PLIST"
+        exit 1
+    fi
     run_as_user launchctl enable "$LAUNCH_DOMAIN/$LAUNCH_LABEL" 2>/dev/null || true
     run_as_user launchctl kickstart -k "$LAUNCH_DOMAIN/$LAUNCH_LABEL" >/dev/null 2>&1 || true
 
