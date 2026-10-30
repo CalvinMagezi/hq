@@ -228,6 +228,21 @@ fn launch_is_not_ready_before_the_agent_has_drawn_its_screen() {
 }
 
 #[test]
+fn an_agent_that_settles_after_a_startup_spinner_is_ready() {
+    // Codex shows a working spinner while it loads, then sits at its prompt: idle with a
+    // finished turn (done), which is ready for the first prompt, not a dialog.
+    let host = Running::start();
+    let b = host.backend();
+    let mut req = cat("hs-codex", "codex");
+    req.command = Some(
+        "f() { printf '\\033]0;\u{280b} loading\\007'; echo loading; sleep 2; printf '\\033]0;codex\\007'; echo ready; cat; }; f"
+            .into(),
+    );
+    let launched = b.launch(&req).unwrap();
+    assert!(launched.ready, "{:?}", launched.agent);
+}
+
+#[test]
 fn a_kind_without_rules_is_also_not_ready_before_its_screen_is_drawn() {
     let host = Running::start();
     let b = host.backend();
