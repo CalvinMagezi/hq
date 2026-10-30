@@ -23,12 +23,15 @@ kind_when = [
 ]
 top = '^─{20,}\s*$'
 footer = '(?i)esc to cancel'
-question = '(?i)^\s*(?:do you want to\b|quick safety check\b)'
+# The last alternative is the question line of an AskUserQuestion form, which is not indented.
+question = '(?i)^\s*(?:do you want to\b|quick safety check\b)|^[^\s☐❯].*\?\s*$'
 command_block = ['(?i)^\s*bash command\s*$', '(?i)^\s*do you want to proceed\?']
 command_line = '(?i)^\s*do you want to (?:create|make this edit to|edit|overwrite|delete) (.+?)\?\s*$'
-option = '^ (?:❯ |  )\s*(?:(?P<num>\d+)\.\s+)?(?P<label>\S.*)$'
-selected = '^ ❯'
+# Permission dialogs indent their options one column more than the question form does.
+option = '^ ?(?:❯ |  )\s*(?:(?P<num>\d+)\.\s+)?(?P<label>\S.*)$'
+selected = '^ ?❯'
 remember = '(?i)don.t ask again|\balways\b|switch to accept edits|\bauto-accept\b'
+typed = '(?i)^type something|^chat about this'
 answer = "arrows"
 decline = ["esc"]
 

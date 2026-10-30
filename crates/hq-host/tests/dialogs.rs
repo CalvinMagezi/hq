@@ -164,6 +164,26 @@ fn claude_trust_dialog() {
 }
 
 #[test]
+fn claude_ask_user_question() {
+    // AskUserQuestion draws a second rule above "Chat about this": the dialog's top is the first.
+    let d = read("claude", "blocked--ask-user-question");
+    assert_eq!(d.kind, DialogKind::Other);
+    assert_eq!(
+        d.question.as_deref(),
+        Some("Which colour should the test use?")
+    );
+    assert_eq!(
+        options(&d),
+        [
+            (1, "Red", true, false, false),
+            (2, "Blue", false, false, false),
+            (3, "Type something.", false, false, true),
+            (4, "Chat about this", false, false, true),
+        ]
+    );
+}
+
+#[test]
 fn codex_trust_directory() {
     let d = read("codex", "blocked--trust-directory");
     assert_eq!(d.kind, DialogKind::Trust);
