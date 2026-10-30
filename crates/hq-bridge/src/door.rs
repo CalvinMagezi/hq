@@ -184,7 +184,7 @@ impl ProtocolHandler for EdgeService {
 /// answer closes the stream at once.
 async fn forward(send: SendStream, recv: RecvStream, target: &DoorTarget) {
     if let Some(conn) = connect(target).await {
-        conn.pipe(send, recv).await;
+        conn.pipe(send, recv, IDLE).await;
     }
 }
 
@@ -196,11 +196,11 @@ pub(crate) enum Local {
 }
 
 impl Local {
-    pub(crate) async fn pipe(self, send: SendStream, recv: RecvStream) {
+    pub(crate) async fn pipe(self, send: SendStream, recv: RecvStream, idle: Duration) {
         match self {
-            Self::Tcp(tcp) => pipe(send, recv, tcp).await,
+            Self::Tcp(tcp) => pipe(send, recv, tcp, idle).await,
             #[cfg(unix)]
-            Self::Unix(unix) => pipe(send, recv, unix).await,
+            Self::Unix(unix) => pipe(send, recv, unix, idle).await,
         }
     }
 }
@@ -225,26 +225,26 @@ pub(crate) async fn connect(target: &DoorTarget) -> Option<Local> {
     }
 }
 
-pub(crate) async fn pipe<S>(send: SendStream, recv: RecvStream, door: S)
+pub(crate) async fn pipe<S>(send: SendStream, recv: RecvStream, door: S, idle: Duration)
 where
     S: AsyncRead + AsyncWrite + Send + Unpin,
 {
     let (door_read, door_write) = tokio::io::split(door);
-    let up = copy_until_idle(recv, door_write);
-    let down = copy_until_idle(door_read, send);
+    let up = copy_until_idle(recv, door_write, idle);
+    let down = copy_until_idle(door_read, send, idle);
     tokio::join!(up, down);
 }
 
-/// Copies `from` to `to` until `from` ends, either side fails, or no byte arrives for [`IDLE`].
+/// Copies `from` to `to` until `from` ends, either side fails, or no byte arrives for `idle`.
 /// The writer is shut down at the end, so the other side sees the end of the data.
-async fn copy_until_idle<R, W>(mut from: R, mut to: W)
+async fn copy_until_idle<R, W>(mut from: R, mut to: W, idle: Duration)
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
     let mut buf = vec![0u8; CHUNK];
     loop {
-        match tokio::time::timeout(IDLE, from.read(&mut buf)).await {
+        match tokio::time::timeout(idle, from.read(&mut buf)).await {
             Ok(Ok(n)) if n > 0 => {
                 if to.write_all(&buf[..n]).await.is_err() {
                     break;

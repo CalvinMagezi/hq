@@ -37,6 +37,14 @@ const STATUS_UNKNOWN: u8 = 1;
 const STATUS_DOWN: u8 = 2;
 /// How long a stream may take to name its service.
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
+/// A direction of a service stream with no bytes for this long is ended. Long, because a browser
+/// holding an event stream sends nothing upstream for as long as it listens.
+// ponytail: per-direction idle; idle-on-both-directions if long-lived silent uploads ever matter.
+const SERVICE_IDLE: Duration = Duration::from_secs(60 * 60);
+/// How long dialing a peer may take before a forwarded connection gives up.
+const DIAL_TIMEOUT: Duration = Duration::from_secs(20);
+/// Local connections one forward handles at once; more wait in the listener's backlog.
+const MAX_FORWARDED: usize = 256;
 
 /// Lowercase letters, digits and `-`, 1 to [`MAX_NAME`] bytes.
 pub fn valid_name(name: &str) -> bool {
@@ -158,7 +166,7 @@ async fn serve_stream(mut send: SendStream, mut recv: RecvStream, services: &Ser
         return;
     };
     if send.write_all(&[STATUS_OK]).await.is_ok() {
-        local.pipe(send, recv).await;
+        local.pipe(send, recv, SERVICE_IDLE).await;
     }
 }
 
@@ -206,7 +214,11 @@ pub async fn open_service(conn: &Connection, service: &str) -> Result<(SendStrea
 /// breaks.
 pub async fn run_forward(dialer: Dialer, peer: String, service: String, listener: TcpListener) {
     let conn: Arc<tokio::sync::Mutex<Option<Connection>>> = Arc::default();
+    let permits = Arc::new(Semaphore::new(MAX_FORWARDED));
     loop {
+        let Ok(permit) = permits.clone().acquire_owned().await else {
+            return;
+        };
         let (tcp, from) = match listener.accept().await {
             Ok(accepted) => accepted,
             Err(e) => {
@@ -224,14 +236,17 @@ pub async fn run_forward(dialer: Dialer, peer: String, service: String, listener
         tokio::spawn(async move {
             let _ = tcp.set_nodelay(true);
             match stream_to(&dialer, &peer, &service, &conn).await {
-                Ok((send, recv)) => pipe(send, recv, tcp).await,
+                Ok((send, recv)) => pipe(send, recv, tcp, SERVICE_IDLE).await,
                 Err(e) => tracing::warn!(%service, "bridge forward: {e:#}"),
             }
+            drop(permit);
         });
     }
 }
 
-/// A stream to the peer's service on the kept connection, dialing again once if it broke.
+/// A stream to the peer's service on the kept connection, dialing again when that connection is
+/// gone. The list is read every time: a revoke made in another process (the CLI) cannot reach
+/// this process's connections, so the kept one is closed here once the peer is off the list.
 async fn stream_to(
     dialer: &Dialer,
     peer: &str,
@@ -239,18 +254,38 @@ async fn stream_to(
     kept: &tokio::sync::Mutex<Option<Connection>>,
 ) -> Result<(SendStream, RecvStream)> {
     let mut slot = kept.lock().await;
-    if let Some(conn) = slot.as_ref().filter(|c| c.close_reason().is_none()) {
-        let conn = conn.clone();
-        drop(slot);
-        if let Ok(stream) = open_service(&conn, service).await {
-            return Ok(stream);
+    if !dialer.is_paired(peer).await {
+        if let Some(conn) = slot.take() {
+            conn.close(REJECT_REVOKED.into(), b"revoked");
         }
-        slot = kept.lock().await;
+        bail!("{peer} is not a paired peer");
     }
-    let conn = dialer.connect_service(peer).await?;
-    *slot = Some(conn.clone());
+    let alive = slot
+        .as_ref()
+        .filter(|c| c.close_reason().is_none())
+        .cloned();
+    let conn = match alive {
+        Some(conn) => conn,
+        None => {
+            let conn = tokio::time::timeout(DIAL_TIMEOUT, dialer.connect_service(peer))
+                .await
+                .context("the peer did not answer in time")??;
+            *slot = Some(conn.clone());
+            conn
+        }
+    };
     drop(slot);
-    open_service(&conn, service).await
+    match open_service(&conn, service).await {
+        // The connection broke under us: one fresh dial. A refusal by the service is final.
+        Err(_) if conn.close_reason().is_some() => {
+            let fresh = tokio::time::timeout(DIAL_TIMEOUT, dialer.connect_service(peer))
+                .await
+                .context("the peer did not answer in time")??;
+            *kept.lock().await = Some(fresh.clone());
+            open_service(&fresh, service).await
+        }
+        result => result,
+    }
 }
 
 #[cfg(test)]

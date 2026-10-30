@@ -204,3 +204,14 @@ async fn a_service_whose_port_is_down_says_so() {
     let err = with_timeout(open_service(&conn, "web")).await.unwrap_err();
     assert!(err.to_string().contains("not answering"), "{err}");
 }
+
+/// A revoke made by another process (`hq bridge revoke`) changes only the list. The forward must
+/// still stop: it reads the list before every new local connection and drops its kept connection.
+#[tokio::test]
+async fn a_forward_stops_when_its_peer_is_revoked_from_another_process() {
+    let (phone, mac) = pair().await;
+    let port = forward(&mac, &phone.id(), "web").await;
+    assert!(with_timeout(round_trip(port, b"before")).await.is_some());
+    peers::revoke(&mac.db, &phone.id()).unwrap();
+    assert_eq!(with_timeout(round_trip(port, b"after")).await, None);
+}

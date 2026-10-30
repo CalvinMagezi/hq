@@ -7,20 +7,34 @@
 
 use crate::WsState;
 use crate::mcp_http::McpKeys;
-use crate::tls::not_found;
+use crate::tls::{STRIPPED_HEADERS, not_found};
 use axum::{Router, body::Body, extract::Request, middleware::Next};
 use std::{net::SocketAddr, sync::Arc};
+
+/// Marks every request as forwarded, so the `/mcp` development switch can never apply here even
+/// if it is turned on after the door opened.
+const FORWARDED_VALUE: &str = "by=hq-paired-devices";
 
 /// Wraps `router` for the paired-devices door: the connector's OAuth and discovery paths are not
 /// found, and `/mcp` needs one of `keys` before any handler runs.
 pub(crate) fn guard(router: Router, keys: McpKeys) -> Router {
     router.layer(axum::middleware::from_fn(
-        move |req: Request<Body>, next: Next| {
+        move |mut req: Request<Body>, next: Next| {
             let keys = keys.clone();
             async move {
                 if !allowed(req.uri().path(), req.headers(), &keys) {
                     return not_found();
                 }
+                // A paired device chooses its own headers: none that claim a proxy's or a
+                // tunnel's word is believed.
+                let headers = req.headers_mut();
+                for name in STRIPPED_HEADERS {
+                    headers.remove(name);
+                }
+                headers.insert(
+                    axum::http::header::FORWARDED,
+                    axum::http::HeaderValue::from_static(FORWARDED_VALUE),
+                );
                 next.run(req).await
             }
         },
@@ -36,11 +50,13 @@ fn allowed(path: &str, headers: &axum::http::HeaderMap, keys: &McpKeys) -> bool 
 }
 
 /// Why the door stays shut, if it must.
-fn refusal(state: &WsState, auth_on: bool, dev_switch: bool) -> Option<&'static str> {
+/// The configured web token is required, not only a device token: revoking the last device token
+/// turns sign-in off, which would open `/api` and `/ws` to every paired device.
+fn refusal(state: &WsState, dev_switch: bool) -> Option<&'static str> {
     if state.profile().is_lite() {
         return Some("not available under profile: lite");
     }
-    if !auth_on {
+    if state.configured_web_token().is_none() {
         return Some("set web_auth_token first: paired devices arrive as loopback");
     }
     dev_switch.then_some("HQ_MCP_DEV_NO_AUTH is on, which would open /mcp to every paired device")
@@ -57,8 +73,7 @@ pub(crate) fn spawn(state: &Arc<WsState>, router: Router) {
     let state = state.clone();
     tokio::spawn(async move {
         let dev_switch = std::env::var(crate::auth::MCP_DEV_NO_AUTH_ENV).is_ok_and(|v| v == "1");
-        let auth_on = state.web_auth_enabled_async().await;
-        if let Some(why) = refusal(&state, auth_on, dev_switch) {
+        if let Some(why) = refusal(&state, dev_switch) {
             return refuse(why);
         }
         serve(listen, guard(router, McpKeys::from_env())).await;
@@ -163,10 +178,14 @@ mod tests {
     #[tokio::test]
     async fn stays_shut_without_sign_in_or_with_the_dev_switch() {
         let w = world();
-        assert!(refusal(&w.state, false, false).is_some());
-        assert!(refusal(&w.state, true, true).is_some());
-        assert!(refusal(&w.state, true, false).is_none());
+        assert!(refusal(&w.state, true).is_some());
+        assert!(refusal(&w.state, false).is_none());
         let lite = crate::tls::tests::support::world_with(hq_core::config::Profile::Lite);
-        assert!(refusal(&lite.state, true, false).is_some());
+        assert!(refusal(&lite.state, false).is_some());
+        // A device token alone does not count: the configured token must be set.
+        let vault = tempfile::TempDir::new().unwrap();
+        let no_token = WsState::new(vault.path().to_path_buf(), None);
+        hq_db::web_auth::mint(&no_token.db, "phone", 0, None).unwrap();
+        assert!(refusal(&no_token, false).is_some());
     }
 }

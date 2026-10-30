@@ -18,10 +18,10 @@ mod store;
 pub(crate) mod tests;
 
 pub use acceptor::{ConnectorAcceptor, MAX_CONNECTIONS, Served, Timeouts};
-pub(crate) use gate::not_found;
 pub use gate::{
     CONNECTOR_PATHS, is_connector_path, is_connector_territory, refuse_connector_paths,
 };
+pub(crate) use gate::{STRIPPED_HEADERS, not_found};
 pub(crate) use listener::spawn_door;
 
 use crate::WsState;

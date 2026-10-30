@@ -300,6 +300,14 @@ pub struct Dialer {
 }
 
 impl Dialer {
+    /// Whether `peer` is on the list now. Any failure is "no".
+    pub(crate) async fn is_paired(&self, peer: &str) -> bool {
+        match peer.parse::<EndpointId>() {
+            Ok(id) => still_paired(&self.db, id).await,
+            Err(_) => false,
+        }
+    }
+
     /// Connects to a paired peer's services (`services::open_service` opens one on it).
     pub async fn connect_service(&self, peer: &str) -> Result<Connection> {
         self.dial(peer, SVC_ALPN).await
