@@ -553,7 +553,7 @@ impl HostBackend for NativeBackend {
                 &SETTLED,
                 req.start_timeout.saturating_sub(began.elapsed()),
             ) {
-                Ok(Some(info)) => info.status == AgentStatus::Idle,
+                Ok(Some(info)) => matches!(info.status, AgentStatus::Idle | AgentStatus::Done),
                 Ok(None) => false,
                 Err(e) => {
                     let _ = self.close_workspace(&req.name);
