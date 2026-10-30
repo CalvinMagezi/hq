@@ -41,7 +41,7 @@ pub fn claude_settings_with(report_command: &str, policy_command: Option<&str>) 
 }
 
 /// Where the command policy of `name` is kept, next to its hook settings.
-fn policy_file(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn policy_file(dir: &Path, name: &str) -> PathBuf {
     dir.join(HOOKS_DIR).join(format!("{name}{POLICY_SUFFIX}"))
 }
 

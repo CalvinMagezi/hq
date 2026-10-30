@@ -464,6 +464,29 @@ fn bubblewrap_hides_a_directory_with_an_empty_tmpfs_and_binds_back_only_the_allo
 }
 
 #[test]
+fn bubblewrap_binds_an_allowed_file_back_read_only() {
+    let tmp = tempfile::tempdir().unwrap();
+    let policy = tmp.path().join("a.policy.json");
+    std::fs::write(&policy, "{}").unwrap();
+    let mut s = sandbox(Path::new("/proj"));
+    s.hidden_dirs = vec![HiddenDir {
+        dir: tmp.path().into(),
+        allow: vec![policy.clone()],
+    }];
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let policy = policy.to_string_lossy().into_owned();
+    assert!(
+        args.windows(3)
+            .any(|w| w == ["--ro-bind", policy.as_str(), policy.as_str()]),
+        "{args:?}"
+    );
+}
+
+#[test]
 fn canonical_resolves_dedups_and_puts_parents_first() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().canonicalize().unwrap();
