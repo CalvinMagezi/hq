@@ -28,6 +28,9 @@ pub enum ResumeStrategy {
     None,
 }
 
+/// Codex config override that skips its update prompt in sessions HQ starts.
+const CODEX_NO_UPDATE_CHECK: &str = "check_for_update_on_startup=false";
+
 #[derive(Debug, Clone)]
 pub struct HarnessSessionSpec {
     pub harness: &'static str,
@@ -161,8 +164,16 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         category: HarnessCategory::Coding,
         kind: "codex",
         // The background daemon check reads other processes, which the sandbox forbids.
-        args: &["--no-daemon"],
-        resume: ResumeStrategy::Args(&["--no-daemon", "resume", "--last"]),
+        // The startup update check can draw "Update available!" after the agent first
+        // reads as idle, so the brief would land in it and pick "Update now".
+        args: &["--no-daemon", "-c", CODEX_NO_UPDATE_CHECK],
+        resume: ResumeStrategy::Args(&[
+            "--no-daemon",
+            "-c",
+            CODEX_NO_UPDATE_CHECK,
+            "resume",
+            "--last",
+        ]),
         token_pattern: None,
         one_shot: None,
         trust_pattern: None,
@@ -475,6 +486,20 @@ mod tests {
                     s.harness
                 );
             }
+        }
+    }
+
+    #[test]
+    fn codex_starts_and_resumes_without_its_update_prompt() {
+        let spec = spec_for("codex").unwrap();
+        let ResumeStrategy::Args(resume) = spec.resume else {
+            panic!("codex resumes by arguments");
+        };
+        for args in [spec.args, resume] {
+            assert!(
+                args.windows(2).any(|w| w == ["-c", CODEX_NO_UPDATE_CHECK]),
+                "{args:?}"
+            );
         }
     }
 
