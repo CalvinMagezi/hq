@@ -479,6 +479,8 @@ fn wall(spec: &SandboxSpec, t: &Target, bridge: Option<&Bridge>) -> Result<Wall,
     let own_files = [
         run_dir.join("hooks").join(format!("{}.json", t.name)),
         run_dir.join("mcp").join(format!("{}.json", t.name)),
+        // The command policy hook runs inside this sandbox and must read its policy.
+        crate::hooks::policy_file(&run_dir, t.name),
     ];
     let socket = server::agent_socket_path(&run_dir);
     let mut allow = canonical(own_files);
@@ -1149,6 +1151,8 @@ mod tests {
             (run_dir.join("mcp/a.json"), "OWN"),
             (run_dir.join("mcp/b.json"), SECRET),
             (run_dir.join("hooks/a.json"), "{}"),
+            (run_dir.join("hooks/a.policy.json"), "OWN"),
+            (run_dir.join("hooks/b.policy.json"), SECRET),
             (project.join(".git/config"), "[core]"),
             (project.join(".mcp.json"), "{}"),
         ] {
@@ -1463,6 +1467,8 @@ mod tests {
              sees() {{ grep -q {SECRET} \"$1\"; }}; \
              t hq_token 'sees {home}/.hq/operator.token'; t host_token 'sees {run}/operator.token'; \
              t sibling_mcp 'sees {run}/mcp/b.json'; t own_mcp 'grep -q OWN {run}/mcp/a.json'; \
+             t own_policy 'grep -q OWN {run}/hooks/a.policy.json'; t sibling_policy 'sees {run}/hooks/b.policy.json'; \
+             t write_policy 'echo x > {run}/hooks/a.policy.json'; \
              t ssh_key 'sees {home}/.ssh/id_test'; t gh_token 'sees {home}/.config/gh/hosts.yml'; \
              t npmrc 'sees {home}/.npmrc'; t other_account 'sees {home}/.claude-work/credentials.json'; \
              t other_agent 'sees {home}/.codex/auth.json'; t other_agent_too 'sees {home}/.gemini/oauth.json'; \
@@ -1494,6 +1500,9 @@ mod tests {
             ("host_token", false),
             ("sibling_mcp", false),
             ("own_mcp", true),
+            ("own_policy", true),
+            ("sibling_policy", false),
+            ("write_policy", false),
             ("ssh_key", false),
             ("gh_token", false),
             ("npmrc", false),

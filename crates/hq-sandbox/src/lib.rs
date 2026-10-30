@@ -357,7 +357,14 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
             (&hidden.dir).into(),
         ]);
         for file in &hidden.allow {
-            args.extend(["--bind".into(), file.into(), file.into()]);
+            // A socket needs a writable bind to connect; a file the agent reads (its
+            // hook settings, its command policy) must not be one it can rewrite.
+            let bind = if file.is_file() {
+                "--ro-bind"
+            } else {
+                "--bind"
+            };
+            args.extend([bind.into(), file.into(), file.into()]);
         }
     }
     for file in &s.masked_files {
