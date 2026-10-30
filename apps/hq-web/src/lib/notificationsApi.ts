@@ -9,6 +9,21 @@ interface NotificationMetadata {
   extra?: Record<string, string>
   /** A page of the web app the item opens, such as /tasks. */
   link?: string
+  /** The dialog an agent waits at, when the item is about one. */
+  dialog?: NotificationDialog
+}
+
+/** A blocked agent's dialog as the server read it (`metadata.dialog`). */
+export interface NotificationDialog {
+  session_id: string
+  seq: number
+  kind: string
+  question: string | null
+  command: string | null
+  options: { id: number; label: string; remember?: boolean; typed?: boolean }[]
+  /** The one-time yes a button may pick; null when only the agent's own page can answer. */
+  approve: { id: number; label: string | null } | null
+  answered: boolean
 }
 
 export interface NotificationItem {

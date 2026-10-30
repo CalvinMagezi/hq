@@ -255,7 +255,8 @@ fn raise_blocked(
             row.id, row.host
         ),
     )
-    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id));
+    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id))
+    .with_link(session_page(&row.id));
     let fresh = item.dedup_key.as_deref().is_some_and(|key| {
         matches!(
             hq_db::value_items::find_active_by_dedup(db, item.kind, key),
@@ -346,8 +347,14 @@ pub(super) fn badge_web_inbox(db: &Database, row: &registry::HarnessSessionRow, 
             row.id, row.host
         ),
     )
-    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id));
+    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id))
+    .with_link(session_page(&row.id));
     let _ = hq_db::value_items::emit(db, &item);
+}
+
+/// The web app's page for one session, where every option of its dialog is a button.
+fn session_page(session_id: &str) -> String {
+    format!("/sessions?id={session_id}")
 }
 
 /// Must stay in `hq_daemon::value_bus::WEB_ONLY_SOURCES`, so it never reaches the relay.

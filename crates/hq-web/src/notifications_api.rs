@@ -173,6 +173,15 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         ("val_kind".to_string(), kind_str),
     ]);
     let dialog = dialog_from_row(row, &id)?;
+    // A question from an agent is answered through its dialog, never by approving the notice.
+    let awaits_dialog = dialog
+        .as_ref()
+        .is_some_and(|d| d["answered"] == serde_json::Value::Bool(false));
+    let actions: &[&str] = if awaits_dialog && !actions.is_empty() {
+        &["dismiss"]
+    } else {
+        actions
+    };
     Ok(NotificationItem {
         id: format!("val_{id}"),
         kind,
@@ -246,6 +255,28 @@ pub(crate) fn action_outcome(action: &str) -> Option<(&'static str, &'static str
         _ => None,
     }
 }
+
+/// Approving or rejecting the notice of an agent's open dialog would only clear the notice and
+/// leave the agent waiting, so it is refused; the dialog's own answer route answers it.
+/// Dismissing the notice stays allowed.
+fn refuse_unanswered_dialog(
+    db: &hq_db::Database,
+    val_id: &str,
+    action: &str,
+) -> Result<(), ApiError> {
+    if !matches!(action, "approve" | "engage" | "reject") {
+        return Ok(());
+    }
+    let open = hq_db::dialog_alerts::get(db, val_id)
+        .map_err(ApiError::internal)?
+        .is_some_and(|a| !a.answered);
+    if open {
+        return Err(ApiError::Conflict(DIALOG_NOT_ANSWERED.into()));
+    }
+    Ok(())
+}
+
+const DIALOG_NOT_ANSWERED: &str = "This is an agent waiting at a question. Answer it with its own buttons or on the agent's page; approving the notice would not answer the agent.";
 
 /// Returns false when no value item has that id.
 pub(crate) fn record_action(
@@ -331,6 +362,9 @@ pub(crate) async fn notification_action_handler(
         return ApiError::bad_request(format!("unknown action '{}' for value item", body.action))
             .into_response();
     };
+    if let Err(e) = refuse_unanswered_dialog(&state.db, val_id, &body.action) {
+        return e.into_response();
+    }
     match record_action(&state.db, val_id, engagement, db_state) {
         Err(e) => {
             warn!(id = %id, action = %body.action, error = %e, "notification action failed");
@@ -598,5 +632,58 @@ mod tests {
         assert_eq!(act("val_abc12345", "explode").await.status(), 400);
         let approved = aggregate_notifications(&state.db, Some("approved"), None, 10).unwrap();
         assert_eq!(approved.notifications[0].state, NotificationState::Approved);
+    }
+
+    #[tokio::test]
+    async fn an_open_dialog_is_not_approved_through_its_notice() {
+        // Approving the notice of a question once left the agent waiting with the alert gone.
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let item = hq_core::types::ValueItem::new(
+            "session-supervisor",
+            hq_core::types::ValueKind::ActionNeeded,
+            "Harness session 'claude' is waiting for you",
+            "Session hs-1 on laptop is blocked on a prompt or approval",
+        );
+        hq_db::value_items::insert(&state.db, &item).unwrap();
+        let options = ["Red", "Blue"].map(|label| hq_db::dialog_alerts::DialogOption {
+            id: if label == "Red" { 1 } else { 2 },
+            label: label.into(),
+            remember: false,
+            typed: false,
+        });
+        hq_db::dialog_alerts::record(
+            &state.db,
+            &hq_db::dialog_alerts::NewDialogAlert {
+                item_id: &item.id,
+                session_id: "hs-1",
+                pending_seq: 7,
+                kind: "other",
+                question: Some("Which colour should the test use?"),
+                command: None,
+                options: &options,
+            },
+        )
+        .unwrap();
+        let id = format!("val_{}", item.id);
+        let listed = scan_value_items(&state.db, Some("pending")).unwrap();
+        let notice = listed.iter().find(|n| n.id == id).unwrap();
+        assert_eq!(notice.actions, ["dismiss"], "only its dialog answers it");
+
+        let act = |action: &str| {
+            let body = NotificationActionRequest {
+                action: action.into(),
+            };
+            notification_action_handler(State(state.clone()), AxumPath(id.clone()), Json(body))
+        };
+        for action in ["approve", "engage", "reject"] {
+            assert_eq!(act(action).await.status(), 409, "{action}");
+        }
+        assert_eq!(
+            scan_value_items(&state.db, Some("pending")).unwrap().len(),
+            1,
+            "a refused action leaves the notice in place"
+        );
+        assert_eq!(act("dismiss").await.status(), 200);
     }
 }

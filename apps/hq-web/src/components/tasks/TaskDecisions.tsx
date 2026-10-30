@@ -55,7 +55,7 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
           {d.session_id}
         </Link>{' '}
         {ASKS[d.kind] ?? 'needs an answer'}
-        {d.question && d.kind === 'question' ? `: ${d.question}` : ''}
+        {d.question ? `: ${d.question}` : ''}
       </p>
       {d.command && (
         <pre className="max-h-28 overflow-auto rounded bg-black/40 px-2 py-1 text-[11px] text-neutral-200 whitespace-pre-wrap break-words">
