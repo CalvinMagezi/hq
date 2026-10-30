@@ -8,6 +8,7 @@ use crate::door::{EDGE_ALPN, EdgeDoor, EdgeService, LABEL_BYTES};
 use crate::host::{self, OpenTicket, PairingSpec, Registrar, Tuning};
 use crate::join::{self, JoinOptions, JoinResult, target_from};
 use crate::key::load_or_create_key;
+use crate::services::{SVC_ALPN, ServiceProtocol, Services};
 use crate::ticket::{Purpose, Ticket};
 use crate::wire::{Card, MAX_DIAL_ITEMS};
 use anyhow::{Context, Result, anyhow, bail};
@@ -158,7 +159,7 @@ impl Drop for LiveGuard {
 }
 
 /// Whether `id` is on the list. Any failure is "no": the gate fails closed.
-async fn still_paired(db: &Database, id: EndpointId) -> bool {
+pub(crate) async fn still_paired(db: &Database, id: EndpointId) -> bool {
     let db = db.clone();
     tokio::task::spawn_blocking(move || peers::is_paired(&db, &id.to_string()).unwrap_or(false))
         .await
@@ -191,7 +192,7 @@ impl EndpointHooks for ServiceGate {
         }
         // Two protocols, two lists: a paired peer may not open the edge protocol and the edge may
         // not open the service protocol, so neither can borrow the other's door.
-        let allowed = if conn.alpn() == SERVICE_ALPN {
+        let allowed = if conn.alpn() == SERVICE_ALPN || conn.alpn() == SVC_ALPN {
             still_paired(&self.db, conn.remote_id()).await
         } else if conn.alpn() == EDGE_ALPN {
             still_edge(&self.db, conn.remote_id()).await
@@ -289,6 +290,39 @@ impl Registrar for PeerRegistrar {
     }
 }
 
+/// Dials paired peers by key, as [`Bridge::connect`] does, from a task that does not own the
+/// bridge. Connections it opens are registered, so a revoke closes them too.
+#[derive(Clone)]
+pub struct Dialer {
+    endpoint: Endpoint,
+    db: Database,
+    live: Arc<Live>,
+}
+
+impl Dialer {
+    /// Connects to a paired peer's services (`services::open_service` opens one on it).
+    pub async fn connect_service(&self, peer: &str) -> Result<Connection> {
+        self.dial(peer, SVC_ALPN).await
+    }
+
+    async fn dial(&self, peer: &str, alpn: &[u8]) -> Result<Connection> {
+        let id: EndpointId = peer
+            .parse()
+            .map_err(|_| anyhow!("{peer} is not a machine id"))?;
+        let db = self.db.clone();
+        let key = id.to_string();
+        let record = tokio::task::spawn_blocking(move || peers::get(&db, &key))
+            .await??
+            .filter(|p| p.is_active())
+            .ok_or_else(|| anyhow!("{peer} is not a paired peer"))?;
+        let target = target_from(id, &record.relays, &record.addrs)?;
+        let conn = self.endpoint.connect(target, alpn).await?;
+        // A revoke closes this one too, not only the connections the peer opened to us.
+        self.live.register(id, conn.weak_handle());
+        Ok(conn)
+    }
+}
+
 /// What forgetting the edge did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ForgotEdge {
@@ -316,6 +350,8 @@ pub struct Bridge {
     pub reached_edge: Arc<AtomicU64>,
     /// Edge streams dropped because the device's stream cap was full.
     pub edge_over_cap: Arc<AtomicU64>,
+    /// Service streams dropped because the stream cap was full.
+    pub service_over_cap: Arc<AtomicU64>,
     _router: Option<Router>,
 }
 
@@ -343,8 +379,24 @@ impl Bridge {
         handler: Option<StreamHandler>,
         edge_door: Option<EdgeDoor>,
     ) -> Result<Self> {
+        Self::start_with_services(cfg, db, handler, edge_door, None).await
+    }
+
+    /// Like [`Bridge::start_with_edge_door`], and with `services` it also offers those named
+    /// services to paired peers on the service protocol (`services.rs`). Without, the service
+    /// protocol is not accepted at all.
+    pub async fn start_with_services(
+        cfg: BridgeConfig,
+        db: Database,
+        handler: Option<StreamHandler>,
+        edge_door: Option<EdgeDoor>,
+        services: Option<Services>,
+    ) -> Result<Self> {
         if let Some(door) = &edge_door {
             door.validate()?;
+        }
+        if let Some(services) = &services {
+            services.validate()?;
         }
         let key = load_or_create_key(&cfg.key)?;
         let mut builder = Endpoint::builder(presets::Minimal)
@@ -365,7 +417,9 @@ impl Bridge {
         let reached_service = Arc::new(AtomicU64::new(0));
         let reached_edge = Arc::new(AtomicU64::new(0));
         let edge_over_cap = Arc::new(AtomicU64::new(0));
-        let router = (handler.is_some() || edge_door.is_some()).then(|| {
+        let service_over_cap = Arc::new(AtomicU64::new(0));
+        let serves = handler.is_some() || edge_door.is_some() || services.is_some();
+        let router = serves.then(|| {
             let mut builder = Router::builder(endpoint.clone());
             if let Some(handler) = handler {
                 builder = builder.accept(
@@ -375,6 +429,18 @@ impl Bridge {
                         live: live.clone(),
                         handler,
                         reached: reached_service.clone(),
+                    },
+                );
+            }
+            if let Some(services) = services {
+                builder = builder.accept(
+                    SVC_ALPN,
+                    ServiceProtocol {
+                        db: db.clone(),
+                        live: live.clone(),
+                        permits: Arc::new(tokio::sync::Semaphore::new(services.max_streams)),
+                        services: Arc::new(services),
+                        over_cap: service_over_cap.clone(),
                     },
                 );
             }
@@ -406,6 +472,7 @@ impl Bridge {
             edge_live,
             reached_edge,
             edge_over_cap,
+            service_over_cap,
             _router: router,
         })
     }
@@ -542,20 +609,26 @@ impl Bridge {
 
     /// Connects to a paired peer by key alone: no code, no ticket.
     pub async fn connect(&self, peer: &str) -> Result<Connection> {
-        let id: EndpointId = peer
-            .parse()
-            .map_err(|_| anyhow!("{peer} is not a machine id"))?;
-        let db = self.db.clone();
-        let key = id.to_string();
-        let record = tokio::task::spawn_blocking(move || peers::get(&db, &key))
-            .await??
-            .filter(|p| p.is_active())
-            .ok_or_else(|| anyhow!("{peer} is not a paired peer"))?;
-        let target = target_from(id, &record.relays, &record.addrs)?;
-        let conn = self.endpoint.connect(target, SERVICE_ALPN).await?;
-        // A revoke closes this one too, not only the connections the peer opened to us.
-        self.live.register(id, conn.weak_handle());
-        Ok(conn)
+        self.dial(peer, SERVICE_ALPN).await
+    }
+
+    /// Connects to a paired peer's services (`services::open_service` opens one on it).
+    pub async fn connect_service(&self, peer: &str) -> Result<Connection> {
+        self.dial(peer, SVC_ALPN).await
+    }
+
+    async fn dial(&self, peer: &str, alpn: &[u8]) -> Result<Connection> {
+        self.dialer().dial(peer, alpn).await
+    }
+
+    /// A handle that dials paired peers' services and outlives no part of this bridge it needs:
+    /// a forward task holds one instead of the bridge.
+    pub fn dialer(&self) -> Dialer {
+        Dialer {
+            endpoint: self.endpoint.clone(),
+            db: self.db.clone(),
+            live: self.live.clone(),
+        }
     }
 
     /// Takes a peer off the list and closes every connection it has open, at once.

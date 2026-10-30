@@ -9,6 +9,7 @@ mod chat_apps;
 mod chat_uploads;
 mod copilot_usage_api;
 mod device_auth;
+mod devices_door;
 mod dialog_answer;
 mod error;
 pub mod gmail_ingest;
@@ -659,6 +660,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
     // The connector's TLS door serves this same router (a second one would start the watchers
     // above twice). It is a no-op unless `mcp_connector.tls` is on.
     tls::spawn_door(&state, app.clone());
+    devices_door::spawn(&state, app.clone());
     app
 }
 

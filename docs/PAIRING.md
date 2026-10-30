@@ -176,6 +176,47 @@ cannot open the edge protocol; the edge cannot open the service protocol. Forget
 its open connections (at once through `Bridge::forget_edge`; from another process at its next
 stream). `--relay auto` uses the registered edge's relay, so the edge can find this device.
 
+## Services and forwards
+
+Once two machines are paired, each can offer the other named services and reach the other's through
+local ports. This is how a laptop and a phone use HQ together with no VPN: the laptop opens the
+phone's web app and `/mcp` on a local port, and the phone reaches the laptop's coding-agent host the
+same way. Configure it in `~/.hq/config.yaml`; `hq bridge serve` (and the phone app's `hq bridge run`)
+reads it at start.
+
+```yaml
+# On the phone: offer the web app to paired devices, and reach the laptop's host gate.
+bridge:
+  web_listen: 127.0.0.1:5690        # the paired-devices door of the web server (below)
+  services:
+    web: 127.0.0.1:5690
+  forwards:
+    - peer: <laptop id from `hq bridge peers`>
+      service: gate
+      listen: 127.0.0.1:47490       # the phone's host entry for the laptop points here
+
+# On the laptop: offer the host gate, and reach the phone's web app.
+bridge:
+  services:
+    gate: 127.0.0.1:7747            # agent_host.gate_listen
+  forwards:
+    - peer: <phone id>
+      service: web
+      listen: 127.0.0.1:47480       # open http://127.0.0.1:47480 here
+```
+
+A service name is lowercase letters, digits and `-`. A service leads to a loopback port with a fixed
+number or an absolute socket path, chosen by the machine that offers it: the other side only names
+it and never chooses an address. A service may not lead to the web server's own port; give paired
+devices the web app through `bridge.web_listen`, a second listener the web server opens only when
+the web token is set, which serves the web app, `/api`, `/ws` and `/mcp` with an API key, and never
+the claude.ai connector's OAuth paths. A forward listens on loopback only. The services use their
+own protocol name (`hq/svc/1`), offered only by a machine that has services, and admitted only from
+paired peers; revoking a peer closes its open streams.
+
+The web app keeps its sign-in per address, so open it at the forward's address and sign in there.
+List that origin in the phone's `web_allowed_origins` if the browser shows it as refused.
+
 ## What listens, and when
 
 | Listener | When |
@@ -184,6 +225,9 @@ stream). `--relay auto` uses the registered edge's relay, so the edge can find t
 | Throwaway endpoint (one UDP socket per ticket) | From `open_ticket` until the ticket is used, expired or burned. `hq bridge pair` runs it until then |
 | The edge protocol on the long-term endpoint | Whenever a serving bridge has an edge door (the default); the gate admits only the registered edge. `--edge-door off` removes it |
 | Connection to the connector door | One per stream the edge opens, made by the bridge, to the door's socket (or opted-in loopback port) only |
+| The service protocol on the long-term endpoint | Whenever a serving bridge has `bridge.services`; the gate admits only paired peers |
+| One TCP port per forward, on loopback | While `hq bridge serve` or `hq bridge run` runs with `bridge.forwards` |
+| The web server's paired-devices door, on loopback | While the web server runs with `bridge.web_listen` and the web token set |
 
 `hq bridge run` is both: the long-term endpoint for as long as it runs, and one throwaway endpoint while
 a ticket is open. The Android app starts it only after the owner turned paired devices on.

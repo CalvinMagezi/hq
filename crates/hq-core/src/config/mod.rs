@@ -2,6 +2,7 @@ mod agent;
 mod agent_host;
 mod backends;
 mod backup;
+mod bridge;
 mod budgets;
 mod collaboration;
 pub mod company;
@@ -33,6 +34,9 @@ pub use agent_host::{
 };
 pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
 pub use backup::BackupConfig;
+pub use bridge::{
+    BridgeForward, BridgeServicesConfig, CheckedForward, MAX_SERVICE_NAME, valid_service_name,
+};
 pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
 pub use collaboration::*;
 pub use company::{CompanyConfig, CompanyIdentity, ConnectorBinding, ListenerDef, company_by_id};
@@ -285,6 +289,11 @@ pub struct HqConfig {
     #[serde(default)]
     pub mcp_connector: McpConnectorConfig,
 
+    /// Services this machine offers its paired devices over the bridge, and local ports that
+    /// reach theirs. Empty by default.
+    #[serde(default)]
+    pub bridge: BridgeServicesConfig,
+
     /// Web Push notifications to the PWA. Off by default.
     #[serde(default)]
     pub web_push: WebPushConfig,
@@ -495,6 +504,7 @@ impl Default for HqConfig {
             usage_ledger: UsageLedgerConfig::default(),
             mcp_connector: McpConnectorConfig::default(),
             web_push: WebPushConfig::default(),
+            bridge: BridgeServicesConfig::default(),
             budgets: BudgetsConfig::default(),
             tasks: TasksConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),

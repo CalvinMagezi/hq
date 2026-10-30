@@ -43,7 +43,7 @@ Nothing in `hq-bridge` starts on its own, and the `hq` binary does not call it a
 
 | Listener | Exists | Accepts | From |
 |---|---|---|---|
-| Long-term endpoint, one UDP socket | From `Bridge::start` with a handler until `shutdown`. Without a handler it only dials out and accepts no protocol | `hq/bridge/1` | Peers on the paired list; others are closed at the handshake (403) |
+| Long-term endpoint, one UDP socket | From `Bridge::start` with a handler until `shutdown`. Without a handler it only dials out and accepts no protocol | `hq/bridge/1`, and `hq/svc/1` when services are configured (section 14) | Peers on the paired list; others are closed at the handshake (403) |
 | Throwaway endpoint, one UDP socket per open ticket | From `Bridge::open_ticket` (or `OpenTicket::open`) until the ticket ends | `hq/pair/<v>` or `hq/register/<v>`, one purpose per ticket | Anyone who has the ticket, until it is used, expires, is burned, or the source is shut out |
 
 On Android the phone app runs `hq bridge run` as a child process of the hub service (section 12). It
@@ -359,4 +359,31 @@ name and sizes, never content), and a stolen edge key lets its holder open strea
 door, where TLS, the path filter and OAuth still stand in the way. The piped stream is plain bytes
 to a loopback port: any bug in the door is reachable by the edge, which is why the door is the
 connector's own gate (`docs/security/CONNECTOR_TLS.md`) and nothing else.
+
+## 14. Services and forwards between paired machines
+
+Paired machines reach each other's services over a third protocol name, `hq/svc/1`
+(`crates/hq-bridge/src/services.rs`). The first bytes of a stream name a service; the machine that
+offers it maps the name to a loopback target from its own configuration and pipes the stream there.
+A forward is the client side: a loopback port whose connections each become one stream.
+
+| # | Who | Tries | What happens | Test |
+|---|---|---|---|---|
+| S1 | A stranger, or the edge | Opens `hq/svc/1` | Closed at the handshake: the gate admits paired peers only, as for `hq/bridge/1` | `a_machine_that_is_not_paired_gets_nothing` |
+| S2 | A paired peer | Names a service this machine does not offer, or a malformed name | One status byte says "unknown" and the stream ends; nothing is dialed. A name is 1 to 32 bytes of `a-z0-9-` | `an_unknown_service_is_refused_by_name`, `names_are_short_lowercase_ascii` |
+| S3 | A paired peer | Aims a stream at another address | The protocol carries a name, never an address. Targets are a loopback address with a fixed port or an absolute socket path, checked at start | `services_lead_to_loopback_ports_or_socket_paths_only` |
+| S4 | A paired peer | Uses the web app as loopback, to skip sign-in | The web server's own port may not be a service (`hq bridge serve` refuses it). The paired-devices door (`bridge.web_listen`) opens only with the web token on and `HQ_MCP_DEV_NO_AUTH` off, so `/api` and `/ws` still need the token | `a_service_may_not_lead_to_the_main_web_port`, `stays_shut_without_sign_in_or_with_the_dev_switch` |
+| S5 | A paired peer | Uses the connector through the bridge, or a connector grant on `/mcp` | The paired-devices door answers 404 for `/oauth/*`, `/.well-known/*` and `/mcp/*`, and passes `/mcp` only with a configured API key: a connector grant, a session token or the web token is refused before any handler runs. The two doors share no path and no credential | `serves_the_owners_api_and_keyed_mcp_and_nothing_of_the_connectors` |
+| S6 | A revoked peer | Keeps an open stream | `Bridge::revoke` closes its connections at once; a revoke from another process is seen within a second (each connection rechecks the list) and on every new stream | `revoking_closes_open_streams_and_refuses_new_ones` |
+| S7 | A paired peer | Opens many streams | At most 64 piped at once over all peers; extra streams are dropped and counted; a piped stream ends after 150 s of silence in one direction | shared with the edge door (E6) |
+| S8 | Another local user | Connects to a forward's port | A forward listens on loopback, so any local process can use it, with whatever credentials the far service asks for (the web token, an API key, the host gate's signed challenge). Use forwards on single-user machines | residual risk |
+
+Departure from the two-doors plan: `docs/plans/zero-setup-pairing.md` keeps `/mcp` off the
+own-devices door entirely. The laptop needs the phone's `/mcp` for `task_peer` and `remote_mcp`, so
+this door serves it to API keys only, which is the credential that path already used before the
+bridge. Connector grants still work only on the connector's own door.
+
+Residual risks: a paired device is trusted with whatever the services it can name lead to, so offer
+only what the owner's other devices need. The relay (when one is used) sees that two machines talk
+and how much, never content.
 
