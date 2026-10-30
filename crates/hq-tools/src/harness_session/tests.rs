@@ -558,6 +558,47 @@ async fn a_blocked_launch_reports_the_screen_and_types_nothing() {
 }
 
 #[tokio::test]
+async fn a_dialog_that_appears_after_ready_is_a_blocked_launch_not_an_error() {
+    // Codex reads as idle, then shows its folder trust question before the prompt lands.
+    let refused = r#"{"error":{"code":"agent_blocked","message":"waiting at a dialog"},"id":"x"}"#;
+    let (_dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-t4", "idle"), None),
+        ("agent prompt", String::new(), Some(refused)),
+        (
+            "agent read",
+            "Trust this folder?\n› 1. Trust and continue".into(),
+            None,
+        ),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+
+    let report = launch_session(
+        vault.path(),
+        &db,
+        &harness("claude-code"),
+        launch(host, "hs-t4", Some("go")),
+    )
+    .await
+    .expect("the session exists, so the spawn reports it");
+
+    assert_eq!(report["agent_status"], "blocked", "{report}");
+    assert!(
+        report["blocked"]["screen"]
+            .as_str()
+            .unwrap()
+            .contains("Trust this folder?"),
+        "{report}"
+    );
+    assert_eq!(
+        get_row(&db, "hs-t4").unwrap().status,
+        registry::STATUS_RUNNING
+    );
+}
+
+#[tokio::test]
 async fn an_agent_still_loading_is_not_reported_as_blocked() {
     let (dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),

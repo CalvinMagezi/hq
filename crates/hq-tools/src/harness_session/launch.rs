@@ -421,14 +421,17 @@ async fn launch_with(
     let name = l.session_id.to_string();
     let trust = harness.spec.trust_pattern;
     let launched_for_settle = launched.clone();
-    let settled =
+    let mut settled =
         blocking(move || settle_startup(&host, &name, trust, &launched_for_settle)).await??;
 
     let mut note = None;
     if let (Some(prompt), true, true) = (prompt, settled.ready, prompt_at_start.is_empty()) {
         let host = l.host.clone();
         let (name, prompt) = (l.session_id.to_string(), prompt.to_string());
-        note = prompt_note(blocking(move || host.submit(&name, &prompt)).await??);
+        match blocking(move || submit_at_start(&host, &name, &prompt)).await?? {
+            Typed(outcome) => note = prompt_note(outcome),
+            BlockedFirst(blocked) => settled = blocked,
+        }
     } else if !settled.ready && settled.screen.is_none() {
         note = Some(if prompt.is_some() && prompt_at_start.is_empty() {
             STILL_STARTING_UNTYPED.into()
@@ -611,6 +614,36 @@ pub(super) fn settle_startup(
         screen,
     })
 }
+
+pub(super) enum FirstPrompt {
+    Typed(PromptOutcome),
+    BlockedFirst(Settled),
+}
+use FirstPrompt::{BlockedFirst, Typed};
+
+/// Types the first prompt into an agent that looked ready. An agent can show a dialog
+/// (a folder trust question, say) after it first reads as idle; that is a launch that
+/// stopped at a dialog, reported with its screen, not a failed spawn.
+pub(super) fn submit_at_start(
+    host: &dyn HostBackend,
+    name: &str,
+    prompt: &str,
+) -> Result<FirstPrompt, AgentHostError> {
+    match host.submit(name, prompt) {
+        Ok(outcome) => Ok(Typed(outcome)),
+        Err(AgentHostError::Api { code, .. }) if code == AGENT_BLOCKED_CODE => {
+            Ok(BlockedFirst(Settled {
+                ready: false,
+                status: Some(AgentStatus::Blocked),
+                screen: Some(host.read(name, BLOCKED_SCREEN_LINES)?),
+            }))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// The host's error code for text refused because the agent waits at a dialog.
+const AGENT_BLOCKED_CODE: &str = "agent_blocked";
 
 pub(crate) fn prompt_note(outcome: PromptOutcome) -> Option<String> {
     match outcome {
