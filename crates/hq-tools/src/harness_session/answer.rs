@@ -210,6 +210,10 @@ pub(super) fn answer_with(
         );
         return Ok(report);
     }
+    // Its notice is gone from every device, whichever way it was answered.
+    if let Err(e) = hq_db::dialog_alerts::settle(db, session_id, seq, option.is_some()) {
+        tracing::warn!(session = %session_id, error = %e, "answer: could not close the dialog's alerts");
+    }
     if let Some(task) = record_on_task(db, session_id, mission::Event::Steered) {
         report["task"] = task;
     }
