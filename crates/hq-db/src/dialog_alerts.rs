@@ -165,7 +165,8 @@ pub struct OpenDecision {
     pub alert: DialogAlert,
 }
 
-/// The dialogs of `sessions` still waiting for the owner, oldest first.
+/// The dialogs of `sessions` still waiting for the owner, oldest first. A stopped or exited
+/// session waits for nothing, so its dialogs are left out.
 pub fn open_for_sessions(db: &Database, sessions: &[String]) -> Result<Vec<OpenDecision>> {
     if sessions.is_empty() {
         return Ok(Vec::new());
@@ -177,6 +178,7 @@ pub fn open_for_sessions(db: &Database, sessions: &[String]) -> Result<Vec<OpenD
     let sql = format!(
         "SELECT d.item_id, v.title, v.created_at FROM dialog_alerts d \
          JOIN value_items v ON v.id = d.item_id \
+         JOIN harness_sessions s ON s.id = d.session_id AND s.status = 'running' \
          WHERE d.answered_at IS NULL AND v.state IN ('pending', 'routed', 'delivered') \
          AND d.session_id IN ({marks}) ORDER BY v.created_at, d.item_id"
     );
@@ -292,7 +294,23 @@ mod tests {
     fn open_decisions_are_the_unanswered_alerts_still_in_the_inbox() {
         let db = Database::open_memory().unwrap();
         let options = copilot_path();
-        for (item, session) in [("item-a", "hs-1"), ("item-b", "hs-1"), ("item-c", "hs-2")] {
+        db.with_conn(|c| {
+            for (id, status) in [("hs-1", "running"), ("hs-2", "running"), ("hs-3", "stopped")] {
+                c.execute(
+                    "INSERT INTO harness_sessions (id, harness, label, host, agent_name, cwd, logfile, status) \
+                     VALUES (?1, 'claude-code', '', 'local', ?1, '/t', '', ?2)",
+                    params![id, status],
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        for (item, session) in [
+            ("item-a", "hs-1"),
+            ("item-b", "hs-1"),
+            ("item-c", "hs-2"),
+            ("item-d", "hs-3"),
+        ] {
             let v = hq_core::types::ValueItem {
                 id: item.into(),
                 ..hq_core::types::ValueItem::new(
@@ -319,9 +337,14 @@ mod tests {
         }
         claim(&db, "item-b", "approve").unwrap();
         crate::value_items::dismiss_by_id(&db, "item-c").unwrap();
-        let open = open_for_sessions(&db, &["hs-1".into(), "hs-2".into()]).unwrap();
+        let sessions = ["hs-1".into(), "hs-2".into(), "hs-3".into()];
+        let open = open_for_sessions(&db, &sessions).unwrap();
         let ids: Vec<&str> = open.iter().map(|d| d.item_id.as_str()).collect();
-        assert_eq!(ids, ["item-a"], "answered and dismissed ones are not open");
+        assert_eq!(
+            ids,
+            ["item-a"],
+            "answered, dismissed and stopped sessions' ones are not open"
+        );
         assert!(open_for_sessions(&db, &[]).unwrap().is_empty());
     }
 

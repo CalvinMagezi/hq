@@ -1,11 +1,13 @@
 import { useRouter } from '@tanstack/react-router'
 import { X, CheckCircle2, XCircle, FileCode, Check, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import type { NotificationItem } from '~/lib/notificationsApi'
+import { DialogAnswer, openDialog } from './DialogAnswer'
 
 interface Props {
   notification: NotificationItem | null
   onClose: () => void
   onAction: (id: string, action: string) => Promise<void>
+  onAnswered: (id: string, choice: 'approve' | 'decline') => void
   loadingAction: string | null
 }
 
@@ -13,10 +15,12 @@ export function NotificationDetailDrawer({
   notification,
   onClose,
   onAction,
+  onAnswered,
   loadingAction,
 }: Props) {
   const router = useRouter()
   if (!notification) return null
+  const dialog = openDialog(notification)
 
   const isPending = notification.state === 'pending'
   const isValue = notification.kind === 'value_item'
@@ -155,7 +159,9 @@ export function NotificationDetailDrawer({
               background: 'rgba(0,0,0,0.4)',
             }}
           >
-            {notification.kind === 'action_needed' ? (
+            {dialog ? (
+              <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
+            ) : notification.kind === 'action_needed' ? (
               <>
                 <button
                   type="button"

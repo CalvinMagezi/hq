@@ -84,6 +84,14 @@ function NotificationsPage() {
     }
   }
 
+  // The dialog answer route resolves the notice too; this mirrors that until the next load.
+  const handleAnswered = (id: string, choice: 'approve' | 'decline') => {
+    updateNotificationState(id, choice === 'approve' ? 'approved' : 'dismissed')
+    if (selectedNotification && selectedNotification.id === id) {
+      setSelectedNotification(null)
+    }
+  }
+
   const handleMarkAllRead = async () => {
     try {
       await markAllNotificationsRead()
@@ -271,6 +279,7 @@ function NotificationsPage() {
               notification={notif}
               onSelect={setSelectedNotification}
               onAction={handleAction}
+              onAnswered={handleAnswered}
               loadingAction={loadingAction}
             />
           ))
@@ -294,6 +303,7 @@ function NotificationsPage() {
         notification={selectedNotification}
         onClose={() => setSelectedNotification(null)}
         onAction={handleAction}
+              onAnswered={handleAnswered}
         loadingAction={loadingAction}
       />
     </div>

@@ -13,11 +13,13 @@ import {
 } from 'lucide-react'
 import type { NotificationItem, NotificationKind, NotificationState } from '~/lib/notificationsApi'
 import { relTime } from '~/lib/time'
+import { DialogAnswer, openDialog } from './DialogAnswer'
 
 interface Props {
   notification: NotificationItem
   onSelect: (notification: NotificationItem) => void
   onAction: (id: string, action: string) => Promise<void>
+  onAnswered: (id: string, choice: 'approve' | 'decline') => void
   loadingAction: string | null
 }
 
@@ -25,9 +27,11 @@ export function NotificationCard({
   notification,
   onSelect,
   onAction,
+  onAnswered,
   loadingAction,
 }: Props) {
   const isPending = notification.state === 'pending'
+  const dialog = openDialog(notification)
 
   const getKindIcon = (kind: NotificationKind) => {
     switch (kind) {
@@ -119,7 +123,9 @@ export function NotificationCard({
           <span>View Details & Diff</span>
         </button>
 
-        {isPending ? (
+        {dialog ? (
+          <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
+        ) : isPending ? (
           <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
             {notification.kind === 'action_needed' ? (
               <>
