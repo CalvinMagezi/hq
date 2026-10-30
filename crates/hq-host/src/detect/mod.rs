@@ -323,6 +323,7 @@ impl Detector {
     pub fn detect(&self, agent: &str, input: Input<'_>) -> Option<Detection> {
         let compiled = self.find(agent)?;
         let mut best: Option<&Rule> = None;
+        let mut best_readable: Option<&Rule> = None;
         for rule in &compiled.rules {
             let text = region::region(input, &rule.region);
             if !gate_matches(&rule.gate, text, &text.to_lowercase()) {
@@ -331,6 +332,15 @@ impl Detector {
             if best.is_none_or(|b| rule.priority > b.priority) {
                 best = Some(rule);
             }
+            let readable = rule.state == AgentState::Blocked && rule.dialog.is_some();
+            if readable && best_readable.is_none_or(|b| rule.priority > b.priority) {
+                best_readable = Some(rule);
+            }
+        }
+        // A blocked agent is reported through a rule that can read its dialog when one matched,
+        // so a stronger signal that only says "blocked" (a window title) never hides the dialog.
+        if best.is_some_and(|b| b.state == AgentState::Blocked && b.dialog.is_none()) {
+            best = best_readable.or(best);
         }
         Some(match best {
             Some(rule) => Detection {

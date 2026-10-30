@@ -198,6 +198,29 @@ fn codex_trust_directory() {
 }
 
 #[test]
+fn codex_command_approval() {
+    // Its window title says "Action Required", a blocked rule with no dialog; the dialog still reads.
+    let d = read("codex", "blocked--command-approval");
+    assert_eq!(d.kind, DialogKind::Command);
+    assert_eq!(d.command.as_deref(), Some("curl -sI https://example.com"));
+    assert_eq!(
+        d.question.as_deref(),
+        Some("Would you like to run the following command?")
+    );
+    let opts = options(&d);
+    assert_eq!(opts.len(), 3, "{opts:?}");
+    assert_eq!(opts[0], (1, "Yes, proceed (y)", true, false, false));
+    assert!(
+        opts[1].3,
+        "remembering a prefix widens permissions: {opts:?}"
+    );
+    assert!(
+        opts[2].4,
+        "telling Codex what to do opens a text field: {opts:?}"
+    );
+}
+
+#[test]
 fn codex_update_and_hooks_dialogs() {
     let update = read("codex", "blocked--update-dialog");
     assert_eq!(update.options.len(), 3);

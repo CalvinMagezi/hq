@@ -42,6 +42,22 @@ remember = '(?i)\btrust all\b'
 answer = "arrows"
 decline = ["esc"]
 
+# Added by Agent HQ. Codex 0.161 asks before a command the sandbox refused:
+# "Would you like to run the following command?", the command after "$ ", and
+# numbered options (yes once, yes and remember a prefix, no with a message).
+[dialogs.command]
+kind = "command"
+top = '(?i)would you like to run the following command\?'
+footer = '(?i)press enter to confirm or esc to cancel'
+question = '(?i)would you like to run the following command\?'
+command_line = '^\s*\$ (.+?)\s*$'
+option = '^(?:›|\s)\s*(?P<num>\d+)\.\s+(?P<label>\S.*)$'
+selected = '^›'
+remember = "(?i)don't ask again"
+typed = '(?i)tell codex what to do differently'
+answer = "arrows"
+decline = ["esc"]
+
 [[rules]]
 id = "osc_title_blocked"
 state = "blocked"
@@ -103,6 +119,15 @@ dialog = "update"
 visible_blocker = true
 contains = ["Update available!", "Update now"]
 regex = ['Skip\s+until\s+next\s+version', 'Press enter to continue\s*\z']
+
+[[rules]]
+id = "command_approval"
+state = "blocked"
+priority = 920
+region = "bottom_non_empty_lines(20)"
+dialog = "command"
+visible_blocker = true
+contains = ["Would you like to run the following command?", "Press enter to confirm or esc to cancel"]
 
 [[rules]]
 id = "live_strong_blocker"
