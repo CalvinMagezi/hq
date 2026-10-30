@@ -77,7 +77,6 @@ pub async fn run_telegram_relay(
     token: &str,
     vault: Arc<VaultClient>,
     db: Arc<Database>,
-    notifications_token: Option<String>,
     thread_events: Option<tokio::sync::broadcast::Sender<String>>,
 ) -> Result<()> {
     info!("telegram: starting bot...");
@@ -103,12 +102,7 @@ pub async fn run_telegram_relay(
     let threads: Threads = Arc::new(TokioMutex::new(restored));
 
     let _ = std::fs::create_dir_all(vault_path.join("_mailboxes/relay"));
-    // The outreach bot delivers notifications when configured.
-    let notif_token = notifications_token.unwrap_or_else(|| token.to_string());
-    tokio::spawn(run_mailbox_poller(
-        Arc::new(vault_path.clone()),
-        Arc::new(notif_token),
-    ));
+    tokio::spawn(run_mailbox_poller(Arc::new(vault_path.clone())));
 
     write_relay_status(
         &vault_path,

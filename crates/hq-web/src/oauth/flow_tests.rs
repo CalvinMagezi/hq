@@ -614,12 +614,19 @@ async fn tools_see_the_connection_and_a_busy_connection_is_slowed() {
 async fn connecting_tells_the_owner_at_once() {
     let (app, state, _vault) = app_and_db();
     full_access(&app).await;
-    let inbox = hq_core::mailbox::peek_messages(&state.vault_path, "relay").unwrap();
+    let inbox =
+        hq_db::value_items::list_by_state(&state.db, hq_core::types::ValueState::Pending).unwrap();
     assert!(
         inbox
             .iter()
-            .any(|m| m.content.contains("Claude on the web")),
+            .any(|i| i.body.contains("Claude on the web") || i.title.contains("Claude on the web")),
         "{inbox:?}"
+    );
+    assert!(
+        hq_core::mailbox::peek_messages(&state.vault_path, "relay")
+            .unwrap()
+            .is_empty(),
+        "chat relays carry chat only"
     );
 }
 

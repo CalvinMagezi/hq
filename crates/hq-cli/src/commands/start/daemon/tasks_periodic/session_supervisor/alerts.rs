@@ -357,7 +357,6 @@ fn session_page(session_id: &str) -> String {
     format!("/sessions?id={session_id}")
 }
 
-/// Must stay in `hq_daemon::value_bus::WEB_ONLY_SOURCES`, so it never reaches the relay.
 pub(super) const WEB_INBOX_SOURCE: &str = "session_chat";
 
 /// The line that tells the operator where the linked task now stands.

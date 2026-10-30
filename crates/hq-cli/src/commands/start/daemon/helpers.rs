@@ -49,11 +49,3 @@ pub fn mark_run_today(vault_path: &Path, task_name: &str) {
         }
     }
 }
-
-/// Owner Telegram chat for proactive notifications (never guest last-active).
-pub fn telegram_notification_chat_id(vault_path: &Path) -> Option<i64> {
-    let relay = hq_core::config::HqConfig::load()
-        .map(|c| c.relay)
-        .unwrap_or_default();
-    hq_core::telegram_access::notification_chat_id(vault_path, &relay)
-}

@@ -71,13 +71,7 @@ fn approval_unspent(db: &Database, key: &str) -> Result<bool> {
 
 /// The error a refused folder returns: a request filed (or already waiting, or declined) and what
 /// the caller should do next. Never `Ok`: the session does not start on this call.
-pub(super) fn ask_owner(
-    vault_path: &Path,
-    db: &Database,
-    host: &str,
-    requester: &str,
-    path: &Path,
-) -> anyhow::Error {
+pub(super) fn ask_owner(db: &Database, host: &str, requester: &str, path: &Path) -> anyhow::Error {
     let path = &normalized(path);
     let raw = path.to_string_lossy();
     if raw.chars().count() > MAX_PATH_CHARS || hq_db::tasks::has_hidden_chars(&raw) {
@@ -99,7 +93,7 @@ pub(super) fn ask_owner(
              again or start the session somewhere else to reach it; ask the owner what they want instead."
         ),
         RequestState::Wait => pending(&shown, host),
-        RequestState::Ask => match file_request(vault_path, db, &key, host, requester, path) {
+        RequestState::Ask => match file_request(db, &key, host, requester, path) {
             Ok(()) => pending(&shown, host),
             Err(e) => e,
         },
@@ -107,7 +101,6 @@ pub(super) fn ask_owner(
 }
 
 fn file_request(
-    vault_path: &Path,
     db: &Database,
     key: &str,
     host: &str,
@@ -138,12 +131,6 @@ fn file_request(
     .with_dedup_key(key.to_string());
     item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(REQUEST_TTL_HOURS));
     value_items::insert(db, &item).map_err(|_| lookup_failed())?;
-    if !matches!(value_items::deliver(vault_path, db, &item, true), Ok(true)) {
-        tracing::warn!(
-            host,
-            "folder request did not reach the relay; it is still in the web inbox"
-        );
-    }
     Ok(())
 }
 
@@ -285,13 +272,13 @@ mod tests {
 
     #[test]
     fn a_refused_folder_asks_once_and_the_owners_approval_becomes_a_lasting_grant() {
-        let (dir, db) = setup();
+        let (_dir, db) = setup();
         let path = Path::new("/srv/work/app");
         let key = request_key("claude", "laptop", path);
-        let first = ask_owner(dir.path(), &db, "laptop", "claude", path).to_string();
+        let first = ask_owner(&db, "laptop", "claude", path).to_string();
         assert!(first.contains("asked the owner"), "{first}");
         assert!(first.contains("same cwd"), "{first}");
-        let again = ask_owner(dir.path(), &db, "laptop", "claude", path).to_string();
+        let again = ask_owner(&db, "laptop", "claude", path).to_string();
         assert!(again.contains("asked the owner"), "{again}");
         let filed = requests(&db, &key);
         assert_eq!(filed.len(), 1, "a waiting request is not filed twice");
@@ -330,10 +317,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_waiting_call_sees_an_approval_that_lands_while_it_waits() {
-        let (dir, db) = setup();
+        let (_dir, db) = setup();
         let db = Arc::new(db);
         let path = Path::new("/srv/work/quick");
-        let asked = ask_owner(dir.path(), &db, "laptop", "claude", path);
+        let asked = ask_owner(&db, "laptop", "claude", path);
         assert!(
             asked.downcast_ref::<AwaitingApproval>().is_some(),
             "{asked}"
@@ -351,9 +338,9 @@ mod tests {
 
     #[tokio::test]
     async fn no_answer_is_a_block_that_says_nothing_started_and_a_decline_ends_the_wait() {
-        let (dir, db) = setup();
+        let (_dir, db) = setup();
         let path = Path::new("/srv/work/slow");
-        ask_owner(dir.path(), &db, "laptop", "claude", path);
+        ask_owner(&db, "laptop", "claude", path);
         let budget = Duration::from_millis(200);
         let answer = wait_for_answer(&db, "laptop", "claude", path, budget).await;
         assert_eq!(answer, Answer::Waiting);
@@ -394,12 +381,12 @@ mod tests {
 
     #[test]
     fn a_declined_folder_is_not_asked_again_and_a_flood_is_capped() {
-        let (dir, db) = setup();
+        let (_dir, db) = setup();
         let path = Path::new("/srv/secret");
-        ask_owner(dir.path(), &db, "laptop", "claude", path);
+        ask_owner(&db, "laptop", "claude", path);
         let id = requests(&db, &request_key("claude", "laptop", path)).remove(0);
         assert!(value_items::dismiss_by_id(&db, &id).unwrap());
-        let declined = ask_owner(dir.path(), &db, "laptop", "claude", path).to_string();
+        let declined = ask_owner(&db, "laptop", "claude", path).to_string();
         assert!(declined.contains("declined"), "{declined}");
         assert_eq!(
             requests(&db, &request_key("claude", "laptop", path)).len(),
@@ -407,29 +394,11 @@ mod tests {
         );
 
         for n in 0..MAX_WAITING_PER_CALLER {
-            ask_owner(
-                dir.path(),
-                &db,
-                "laptop",
-                "claude",
-                Path::new(&format!("/srv/p{n}")),
-            );
+            ask_owner(&db, "laptop", "claude", Path::new(&format!("/srv/p{n}")));
         }
-        let capped = ask_owner(
-            dir.path(),
-            &db,
-            "laptop",
-            "claude",
-            Path::new("/srv/one-more"),
-        );
+        let capped = ask_owner(&db, "laptop", "claude", Path::new("/srv/one-more"));
         assert!(capped.to_string().contains("already waiting"), "{capped}");
-        let other = ask_owner(
-            dir.path(),
-            &db,
-            "laptop",
-            "other",
-            Path::new("/srv/one-more"),
-        );
+        let other = ask_owner(&db, "laptop", "other", Path::new("/srv/one-more"));
         assert!(
             other.to_string().contains("asked the owner"),
             "the cap is per caller"
@@ -493,17 +462,11 @@ mod spelling_tests {
         assert!(!key("/srv/app").starts_with(&requester_prefix("claude:x")));
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(&dir.path().join("t.db")).unwrap();
-        let spoof = ask_owner(
-            dir.path(),
-            &db,
-            "laptop",
-            "claude",
-            Path::new("/srv/a\u{202e}b"),
-        );
+        let spoof = ask_owner(&db, "laptop", "claude", Path::new("/srv/a\u{202e}b"));
         assert!(spoof.to_string().contains("invisible"), "{spoof}");
         let long = format!("/srv/{}", "a".repeat(MAX_PATH_CHARS));
         assert!(
-            ask_owner(dir.path(), &db, "laptop", "claude", Path::new(&long))
+            ask_owner(&db, "laptop", "claude", Path::new(&long))
                 .to_string()
                 .contains("too long")
         );

@@ -111,7 +111,14 @@ fn default_watch_root(vault_path: &Path) -> Option<PathBuf> {
     (!is_home && parent.parent().is_some()).then(|| parent.to_path_buf())
 }
 
-pub async fn run_disk_watchdog(vault_path: &Path, config: &HqConfig) -> Result<()> {
+/// Inbox source of the breach report.
+const DISK_WATCHDOG_SOURCE: &str = "disk-watchdog";
+
+pub async fn run_disk_watchdog(
+    vault_path: &Path,
+    db: &hq_db::Database,
+    config: &HqConfig,
+) -> Result<()> {
     let cfg = &config.disk_watchdog;
     if !cfg.enabled {
         return Ok(());
@@ -181,28 +188,18 @@ pub async fn run_disk_watchdog(vault_path: &Path, config: &HqConfig) -> Result<(
         "disk-watchdog: threshold(s) breached"
     );
 
-    let Some(token) = config
-        .relay
-        .notifications_token
-        .as_deref()
-        .or(config.relay.telegram_token.as_deref())
-    else {
-        return Ok(());
-    };
-    let Some(chat) = super::super::helpers::telegram_notification_chat_id(vault_path) else {
-        return Ok(());
-    };
-    let text = format!(
-        "Disk watchdog: threshold(s) breached\n\n{}",
-        report.join("\n")
-    );
-    #[cfg(feature = "telegram")]
-    if let Err(e) = hq_relay::telegram::send_message(token, chat, &text).await {
-        tracing::warn!(error = %e, "disk-watchdog: telegram delivery failed");
-    }
-    #[cfg(not(feature = "telegram"))]
-    {
-        let _ = (token, chat, text);
+    let item = hq_core::types::ValueItem::new(
+        DISK_WATCHDOG_SOURCE,
+        hq_core::types::ValueKind::ActionNeeded,
+        "Disk watchdog: threshold(s) breached",
+        report.join("\n"),
+    )
+    .with_dedup_key(format!(
+        "disk-watchdog-{}",
+        chrono::Utc::now().format("%Y-%m-%d")
+    ));
+    if let Err(e) = hq_db::value_items::emit(db, &item) {
+        tracing::warn!(error = %e, "disk-watchdog: inbox item failed");
     }
     Ok(())
 }
@@ -239,6 +236,7 @@ mod tests {
         let mut config = HqConfig::default();
         config.disk_watchdog.enabled = false;
         let vault = std::env::temp_dir();
-        assert!(run_disk_watchdog(&vault, &config).await.is_ok());
+        let db = hq_db::Database::open_memory().unwrap();
+        assert!(run_disk_watchdog(&vault, &db, &config).await.is_ok());
     }
 }

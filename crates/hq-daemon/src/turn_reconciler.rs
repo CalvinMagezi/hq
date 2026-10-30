@@ -4,8 +4,8 @@
 //! `background_turns` registry. If the daemon is killed mid-flight, those rows
 //! are left in `running` forever. On boot this module sweeps the registry:
 //! every stranded row is marked `interrupted`, and rows fresh enough to act on
-//! (younger than `config.relay.background_turn_max_days`) get an FYI posted to
-//! the `relay` mailbox so Telegram/Discord users hear about it and can
+//! (younger than `config.relay.background_turn_max_days`) get an FYI in the
+//! owner's inbox (chat relays carry chat only) and in the chat's thread history, so they can
 //! reply `resume <id>` (Task 9) to rerun the turn. Stale rows are marked
 //! interrupted silently and only logged.
 //!
@@ -18,7 +18,6 @@
 //! per-row failures never abort the sweep.
 
 use anyhow::Result;
-use hq_core::types::MailboxMessageType;
 use hq_db::Database;
 use hq_db::background_turns;
 use std::path::Path;
@@ -29,7 +28,7 @@ use tracing::{info, warn};
 pub struct ReconcileStats {
     /// Rows found in `running` (all were marked interrupted).
     pub stranded: usize,
-    /// FYI notices posted to the relay mailbox (fresh rows only).
+    /// FYI notices posted to the owner's inbox (fresh rows only).
     pub notified: usize,
     /// Rows too old to notify (`> max_age_days`), logged only.
     pub stale: usize,
@@ -75,7 +74,10 @@ pub fn reconcile_expired_turns(db: &Database, max_age_days: u64) -> Result<usize
 /// `vault_path` locates the mailbox directory; `db` is the open vault database;
 /// `max_age_days` is the staleness ceiling (`config.relay.background_turn_max_days`).
 /// Every running row is marked interrupted; rows within the age ceiling also get
-/// an FYI posted to the `relay` mailbox. Per-row errors are logged and skipped.
+/// an FYI in the owner's inbox. Per-row errors are logged and skipped.
+/// Inbox source of the notice for a turn a restart interrupted.
+const INTERRUPTED_TURN_SOURCE: &str = "background-turn";
+
 pub fn reconcile_stranded_turns(
     vault_path: &Path,
     db: &Database,
@@ -144,21 +146,20 @@ pub fn reconcile_stranded_turns(
             blocked_suffix(row.blocked_on.as_deref(), row.blocked_detail.as_deref()),
             row.id
         );
-        let msg = hq_core::mailbox::new_message(
-            "background-turn",
-            "relay",
-            MailboxMessageType::Direct,
-            Some("Background turn interrupted"),
-            &text,
-            None,
-        );
-        match hq_core::mailbox::send_message(vault_path, &msg) {
-            Ok(()) => {
+        let item = hq_core::types::ValueItem::new(
+            INTERRUPTED_TURN_SOURCE,
+            hq_core::types::ValueKind::Fyi,
+            "Background turn interrupted",
+            text.clone(),
+        )
+        .with_dedup_key(format!("turn-interrupted-{}", row.id));
+        match hq_db::value_items::emit(db, &item) {
+            Ok(_) => {
                 stats.notified += 1;
-                info!(turn = %row.id, platform = %row.platform, "turn-reconciler: interrupted turn, FYI posted");
+                info!(turn = %row.id, platform = %row.platform, "turn-reconciler: interrupted turn, inbox notice posted");
             }
             Err(e) => {
-                warn!(turn = %row.id, error = %e, "turn-reconciler: FYI post failed");
+                warn!(turn = %row.id, error = %e, "turn-reconciler: inbox notice failed");
             }
         }
         record_interrupt_thread_entry(vault_path, &row, &text);
@@ -170,9 +171,8 @@ pub fn reconcile_stranded_turns(
 /// Record the interrupt FYI into the same per-interface `_threads/*.jsonl`
 /// file a completed turn would land in, so a later chat turn's history
 /// actually contains "this task died" instead of only the `background_turns`
-/// DB row knowing. The mailbox delivery above reaches the chat surface but
-/// bypasses thread history entirely, unlike `native_hq::record_thread_turn`
-/// on the normal completion path.
+/// DB row knowing, as `native_hq::record_thread_turn` does on the normal
+/// completion path.
 fn record_interrupt_thread_entry(
     vault_path: &Path,
     row: &background_turns::BackgroundTurnRow,
@@ -287,6 +287,14 @@ mod tests {
         assert!(mailbox_files(tmp.path()).is_empty());
     }
 
+    /// The body of the one inbox notice the reconciler wrote.
+    fn inbox_body(db: &Database) -> String {
+        let items =
+            hq_db::value_items::list_by_state(db, hq_core::types::ValueState::Pending).unwrap();
+        assert_eq!(items.len(), 1);
+        items[0].body.clone()
+    }
+
     #[test]
     fn fresh_running_turn_is_interrupted_and_notified() {
         let tmp = tempfile::tempdir().unwrap();
@@ -308,9 +316,11 @@ mod tests {
         assert_eq!(row.status, background_turns::STATUS_INTERRUPTED);
         assert!(row.completed_at.is_some());
 
-        let files = mailbox_files(tmp.path());
-        assert_eq!(files.len(), 1);
-        let body = std::fs::read_to_string(mailbox_dir(tmp.path()).join(&files[0])).unwrap();
+        assert!(
+            mailbox_files(tmp.path()).is_empty(),
+            "chat relays carry chat only"
+        );
+        let body = inbox_body(&db);
         assert!(body.contains("bt-fresh"));
         assert!(body.contains("telegram"));
         assert!(body.contains("resume bt-fresh"));
@@ -461,9 +471,7 @@ mod tests {
 
         reconcile_stranded_turns(tmp.path(), &db, 5).unwrap();
 
-        let files = mailbox_files(tmp.path());
-        assert_eq!(files.len(), 1);
-        let body = std::fs::read_to_string(mailbox_dir(tmp.path()).join(&files[0])).unwrap();
+        let body = inbox_body(&db);
         assert!(body.contains("waiting on Alex"));
         assert!(body.contains("which OpenRouter key to use"));
     }

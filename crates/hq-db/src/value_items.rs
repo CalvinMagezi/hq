@@ -331,51 +331,6 @@ pub fn consume_approval(db: &Database, dedup_key: &str) -> Result<bool> {
     })
 }
 
-/// Sender id the relay recognises: its items get Approve and Dismiss buttons.
-pub const VALUE_BUS_SENDER: &str = "value-bus";
-
-/// Sends one item into the relay mailbox now and marks it delivered. A decision gets the
-/// Approve and Dismiss buttons; `interrupt` skips the relay's learned batching, which may
-/// otherwise hold or drop a notice. Returns whether the mailbox took it.
-pub fn deliver(
-    vault_path: &std::path::Path,
-    db: &Database,
-    item: &ValueItem,
-    interrupt: bool,
-) -> Result<bool> {
-    use hq_core::mailbox;
-    let mut out = mailbox::new_message(
-        VALUE_BUS_SENDER,
-        "relay",
-        hq_core::types::MailboxMessageType::Nudge,
-        Some(&item.title),
-        &render(item),
-        None,
-    );
-    if matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal) {
-        let token: String = item.id.chars().take(8).collect();
-        out.meta.insert("value_token".to_string(), token);
-    }
-    if interrupt {
-        out.meta
-            .insert(mailbox::META_INTERRUPT.to_string(), "true".to_string());
-    }
-    if mailbox::send_message(vault_path, &out).is_err() {
-        return Ok(false);
-    }
-    set_delivered(db, &item.id)?;
-    Ok(true)
-}
-
-/// The relay layer attaches the buttons itself, so the text carries no instructions.
-fn render(item: &ValueItem) -> String {
-    let mut s = format!("{}\n\n{}", item.title, item.body);
-    if let Some(p) = &item.artifact_path {
-        s.push_str(&format!("\n\n↪ {p}"));
-    }
-    s
-}
-
 /// State of the newest item with this dedup key in any state, e.g. whether an
 /// approval request was engaged or dismissed. `None` when never emitted.
 pub fn latest_state_by_dedup(db: &Database, dedup_key: &str) -> Result<Option<ValueState>> {
@@ -763,35 +718,6 @@ mod tests {
             .unwrap();
         assert!(dismiss_by_id(&db, &first.id).unwrap());
         assert_eq!(count_waiting_with_prefix(&db, "connector:g1:").unwrap(), 1);
-    }
-
-    #[test]
-    fn deliver_sends_now_with_buttons_for_decisions_and_marks_delivered() {
-        let db = open_db();
-        let vault = tempfile::TempDir::new().unwrap();
-        let ask = ValueItem::new("t", ValueKind::ActionNeeded, "Approve?", "body");
-        let note = ValueItem::new("t", ValueKind::Fyi, "Notice", "body");
-        for item in [&ask, &note] {
-            emit(&db, item).unwrap();
-            assert!(deliver(vault.path(), &db, item, true).unwrap());
-        }
-        assert_eq!(list_by_state(&db, ValueState::Delivered).unwrap().len(), 2);
-        let messages = hq_core::mailbox::peek_messages(vault.path(), "relay").unwrap();
-        assert_eq!(messages.len(), 2);
-        for m in &messages {
-            assert_eq!(m.from, VALUE_BUS_SENDER);
-            assert_eq!(
-                m.meta
-                    .get(hq_core::mailbox::META_INTERRUPT)
-                    .map(String::as_str),
-                Some("true")
-            );
-        }
-        let with_token = messages
-            .iter()
-            .filter(|m| m.meta.contains_key("value_token"))
-            .count();
-        assert_eq!(with_token, 1, "only the decision gets buttons");
     }
 
     #[test]

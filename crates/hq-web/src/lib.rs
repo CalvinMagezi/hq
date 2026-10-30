@@ -142,14 +142,12 @@ impl WsState {
         }
     }
 
-    /// Tells the owner, past the relay's batching, about an event they should see.
+    /// Puts an event the owner should see in their inbox (web, web push and the app).
     pub(crate) fn notify_owner(&self, source: &str, title: &str, body: &str) {
         use hq_core::types::{ValueItem, ValueKind};
         let item = ValueItem::new(source, ValueKind::Fyi, title, body);
-        let sent = hq_db::value_items::insert(&self.db, &item)
-            .and_then(|()| hq_db::value_items::deliver(&self.vault_path, &self.db, &item, true));
-        if !matches!(sent, Ok(true)) {
-            tracing::warn!("web: a notice did not reach the relay mailbox: {title}");
+        if let Err(e) = hq_db::value_items::insert(&self.db, &item) {
+            tracing::warn!("web: a notice was not recorded: {title}: {e:#}");
         }
     }
 

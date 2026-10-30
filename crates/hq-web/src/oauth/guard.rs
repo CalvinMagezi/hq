@@ -307,11 +307,7 @@ fn ask_owner(
     )
     .with_dedup_key(key.to_string());
     item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(APPROVAL_TTL_HOURS));
-    let sent = value_items::insert(&state.db, &item)
-        .and_then(|()| value_items::deliver(&state.vault_path, &state.db, &item, true));
-    if !matches!(sent, Ok(true)) {
-        tracing::warn!(tool = %call.tool, "connector: the approval request did not reach the relay; it is still in the web inbox");
-    }
+    value_items::insert(&state.db, &item).map_err(|_| lookup_failed())?;
     Ok(())
 }
 

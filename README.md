@@ -428,7 +428,7 @@ Send `!cancel` to interrupt the active session. The heartbeat message updates wi
 
 Relay turns are not killed at a hard wall. Each turn has a configurable ack window (`relay.turn_ack_timeout_secs`, default 270). When a turn outlives the window, the chat gets an immediate ack and the in-flight session detaches into the persisted `background_turns` registry, delivering the result asynchronously when it finishes. Sub-agent spawns are non-blocking; child completion wakes the parked parent with the reports.
 
-On daemon boot, and again every 6 hours, a reconciler sweeps `background_turns`: rows still `running` (listener died or daemon restarted mid-turn) are marked `interrupted`, fresh rows get a notification with a `resume <id>` affordance, and rows older than `relay.background_turn_max_days` (default 5) are retired silently.
+On daemon boot, and again every 6 hours, a reconciler sweeps `background_turns`: rows still `running` (listener died or daemon restarted mid-turn) are marked `interrupted`, fresh rows get an inbox notice and a line in the chat's history with a `resume <id>` affordance, and rows older than `relay.background_turn_max_days` (default 5) are retired silently.
 
 Detached turns stay visible in chat. Every `relay.background_progress_secs` (default 300) the relay posts a heartbeat (`Task <id> still running (elapsed Xm).`), and the agent can volunteer mid-turn notes with the `report_progress` tool (`Task <id>: <note>`).
 

@@ -1,8 +1,8 @@
 //! `notify_owner`: lets HQ, and any agent reaching HQ over MCP, put a notification in the
 //! owner's inbox. The web server pushes it to every browser that turned Web Push on
-//! (`docs/WEB_PUSH.md`); with `channels: web_and_chat` the value bus also sends it to the chat
-//! relay. The tool only writes the inbox row, so it works from any process sharing the vault
-//! database, and holds no push keys itself.
+//! (`docs/WEB_PUSH.md`) and the phone app shows it. Chat relays (Telegram, Discord) carry chat
+//! only, never notifications. The tool only writes the inbox row, so it works from any process
+//! sharing the vault database, and holds no push keys itself.
 
 use std::sync::Arc;
 
@@ -15,10 +15,8 @@ use serde_json::{Value, json};
 
 use crate::registry::{HqTool, ToolPolicy};
 
-/// Inbox source for notifications that stay in the web app (and its pushes).
+/// Inbox source of the notifications this tool sends.
 pub const NOTIFY_SOURCE: &str = "agent_notify";
-/// Inbox source for notifications the value bus also sends to the chat relay.
-pub const NOTIFY_RELAY_SOURCE: &str = "agent_notify_relay";
 
 const MAX_TITLE_CHARS: usize = 120;
 const MAX_BODY_CHARS: usize = 2000;
@@ -59,7 +57,6 @@ struct Notice {
     body: String,
     link: Option<String>,
     dedup_key: Option<String>,
-    relay: bool,
 }
 
 fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
@@ -88,17 +85,11 @@ fn parse(args: &Value) -> Result<Notice> {
     {
         bail!("dedup_key is longer than {MAX_DEDUP_CHARS} characters");
     }
-    let relay = match str_arg(args, "channels").unwrap_or("web") {
-        "web" => false,
-        "web_and_chat" => true,
-        other => bail!("channels must be \"web\" or \"web_and_chat\", not {other:?}"),
-    };
     Ok(Notice {
         title: title.to_string(),
         body: body.to_string(),
         link,
         dedup_key,
-        relay,
     })
 }
 
@@ -128,8 +119,8 @@ impl HqTool for NotifyOwnerTool {
         "Send the owner a notification: it lands in the HQ web inbox and is pushed to every \
          phone or browser that turned on push notifications, even with HQ closed. Use it when \
          something finished, failed or needs the owner, not for progress chatter. Optional \
-         link opens a page of the web app (a path like /tasks). channels: \"web\" (default) \
-         or \"web_and_chat\" to also send it to the chat relay. Rate-limited per hour."
+         link opens a page of the web app (a path like /tasks). It never goes to a chat \
+         (Telegram or Discord). Rate-limited per hour."
     }
 
     fn category(&self) -> &str {
@@ -176,11 +167,6 @@ impl HqTool for NotifyOwnerTool {
                 "dedup_key": {
                     "type": "string",
                     "description": "Names the event. A second notification with a key that is still in the inbox, or that the owner dismissed, is dropped."
-                },
-                "channels": {
-                    "type": "string",
-                    "enum": ["web", "web_and_chat"],
-                    "description": "web (default): inbox and push. web_and_chat: also the chat relay (Telegram or Discord)."
                 }
             },
             "required": ["title"]
@@ -207,7 +193,7 @@ impl HqTool for NotifyOwnerTool {
             let since = Utc::now() - Duration::hours(1);
             let recent = hq_db::value_items::count_from_sources_since(
                 &db,
-                &[NOTIFY_SOURCE, NOTIFY_RELAY_SOURCE],
+                &[NOTIFY_SOURCE],
                 &since,
             )?;
             if recent >= max {
@@ -215,12 +201,7 @@ impl HqTool for NotifyOwnerTool {
                     "notify_owner limit reached: {recent} notifications in the last hour (web_push.max_agent_per_hour is {max}). Wait, or fold this into one summary later."
                 );
             }
-            let source = if notice.relay {
-                NOTIFY_RELAY_SOURCE
-            } else {
-                NOTIFY_SOURCE
-            };
-            let mut item = ValueItem::new(source, ValueKind::Fyi, notice.title, notice.body);
+            let mut item = ValueItem::new(NOTIFY_SOURCE, ValueKind::Fyi, notice.title, notice.body);
             if let Some(link) = notice.link {
                 item = item.with_link(link);
             }
@@ -232,7 +213,6 @@ impl HqTool for NotifyOwnerTool {
                 "sent": true,
                 "id": item.id,
                 "push": if push_enabled { "queued for every subscribed device" } else { "off on this server (web_push.enabled); the notification is in the web inbox" },
-                "relay": notice.relay,
             }))
         })
         .await?
@@ -265,20 +245,6 @@ mod tests {
         assert_eq!(items[0].source_task, NOTIFY_SOURCE);
         assert_eq!(items[0].title, "Deploy finished");
         assert_eq!(items[0].link.as_deref(), Some("/tasks"));
-    }
-
-    #[tokio::test]
-    async fn web_and_chat_uses_the_relayed_source() {
-        let (tool, db) = tool(5);
-        tool.execute(json!({"title": "t", "channels": "web_and_chat"}))
-            .await
-            .unwrap();
-        assert_eq!(inbox(&db)[0].source_task, NOTIFY_RELAY_SOURCE);
-        assert!(
-            tool.execute(json!({"title": "t", "channels": "sms"}))
-                .await
-                .is_err()
-        );
     }
 
     #[tokio::test]
