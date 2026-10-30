@@ -218,6 +218,39 @@ pub fn claim(db: &Database, item_id: &str, answer: &str) -> Result<bool> {
     })
 }
 
+/// Closes the alerts for dialog `seq` of `session_id` once it was answered any way other than
+/// their own button (the agent's page, a tool, Drive), and takes their inbox items off every
+/// list, so no device keeps asking a question that is gone. Returns how many it closed.
+pub fn settle(db: &Database, session_id: &str, seq: u64, picked: bool) -> Result<usize> {
+    let (answer, state, engagement) = if picked {
+        ("answered", "engaged", "approved")
+    } else {
+        ("decline", "dismissed", "dismissed")
+    };
+    db.with_conn(|c| {
+        let ids: Vec<String> = c
+            .prepare(
+                "SELECT item_id FROM dialog_alerts \
+                 WHERE session_id = ?1 AND pending_seq = ?2 AND answered_at IS NULL",
+            )?
+            .query_map(params![session_id, seq as i64], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        for id in &ids {
+            c.execute(
+                "UPDATE dialog_alerts SET answered_at = datetime('now'), answer = ?2 \
+                 WHERE item_id = ?1 AND answered_at IS NULL",
+                params![id, answer],
+            )?;
+            c.execute(
+                "UPDATE value_items SET state = ?2, engagement = ?3, engaged_at = datetime('now') \
+                 WHERE id = ?1 AND state IN ('pending', 'routed', 'delivered')",
+                params![id, state, engagement],
+            )?;
+        }
+        Ok(ids.len())
+    })
+}
+
 /// Gives a claim back when the answer could not be delivered (the host did not answer), so it
 /// can be tried again. Not used when the dialog moved on: that dialog is gone for good.
 pub fn release(db: &Database, item_id: &str) -> Result<()> {
@@ -346,6 +379,52 @@ mod tests {
             "answered, dismissed and stopped sessions' ones are not open"
         );
         assert!(open_for_sessions(&db, &[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn answering_elsewhere_closes_the_alert_and_its_notice() {
+        let db = Database::open_memory().unwrap();
+        let options = copilot_path();
+        for (item, seq) in [("item-now", 7), ("item-next", 8)] {
+            let v = hq_core::types::ValueItem {
+                id: item.into(),
+                ..hq_core::types::ValueItem::new(
+                    "session-supervisor",
+                    hq_core::types::ValueKind::ActionNeeded,
+                    "waiting",
+                    "body",
+                )
+            };
+            crate::value_items::insert(&db, &v).unwrap();
+            record(
+                &db,
+                &NewDialogAlert {
+                    item_id: item,
+                    session_id: "hs-1",
+                    pending_seq: seq,
+                    kind: "command",
+                    question: Some("Run it?"),
+                    command: Some("curl -sI https://example.com"),
+                    options: &options,
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(settle(&db, "hs-1", 7, true).unwrap(), 1);
+        assert!(get(&db, "item-now").unwrap().unwrap().answered);
+        assert!(
+            !get(&db, "item-next").unwrap().unwrap().answered,
+            "only that dialog"
+        );
+        let pending =
+            crate::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
+        let ids: Vec<&str> = pending.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["item-next"], "its notice left every list");
+        assert_eq!(
+            settle(&db, "hs-1", 7, true).unwrap(),
+            0,
+            "a second settle is a no-op"
+        );
     }
 
     #[test]

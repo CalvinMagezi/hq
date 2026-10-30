@@ -3670,6 +3670,64 @@ fn an_answer_names_the_dialog_it_read_and_the_host_presses_the_keys() {
 }
 
 #[test]
+fn an_answer_from_the_agent_page_closes_the_dialog_notice() {
+    // Answered by option (the agent's page), its "waiting for you" notice must not linger.
+    let (_dir, host) = fake_host(&[
+        ("agent pending", pending_json(7), None),
+        (
+            "agent answer",
+            r#"{"id":"x","result":{"registered":true}}"#.to_string(),
+            None,
+        ),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_watched(&db, "hs-a", None);
+    let item = hq_core::types::ValueItem::new(
+        "session-supervisor",
+        hq_core::types::ValueKind::ActionNeeded,
+        "Harness session 'hs-a' is waiting for you",
+        "x",
+    );
+    hq_db::value_items::insert(&db, &item).unwrap();
+    hq_db::dialog_alerts::record(
+        &db,
+        &hq_db::dialog_alerts::NewDialogAlert {
+            item_id: &item.id,
+            session_id: "hs-a",
+            pending_seq: 7,
+            kind: "path",
+            question: Some("Do you want to allow this?"),
+            command: None,
+            options: &[],
+        },
+    )
+    .unwrap();
+    let row = control::get_row(&db, "hs-a").unwrap();
+    let host: crate::agent_host::Host = Arc::new(host);
+    answer::answer_with(
+        &db,
+        &host,
+        &row,
+        7,
+        answer::Choice::Option(1),
+        answer::Answerer::Owner,
+        None,
+    )
+    .unwrap();
+    assert!(
+        hq_db::dialog_alerts::get(&db, &item.id)
+            .unwrap()
+            .unwrap()
+            .answered
+    );
+    assert!(
+        hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn a_stale_number_or_a_remember_option_from_an_automated_caller_presses_nothing() {
     let replies = [
         ("agent pending", pending_json(8), None),
