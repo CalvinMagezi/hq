@@ -60,6 +60,9 @@ export const Route = createRootRoute({
 })
 
 /** True inside the Android app's own screen (`?host=android`). The server render and the first client render say false, so hydration matches. */
+/** How often an open app asks whether a new build was installed on the server. */
+const SW_UPDATE_CHECK_MS = 30 * 60 * 1000
+
 function useEmbedded(): boolean {
   return useSyncExternalStore(
     () => () => undefined,
@@ -175,9 +178,20 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
 
+    // An installed app stays open for days and the browser looks for a new worker only on a
+    // navigation, so it is asked again on a timer and whenever the app comes back into view.
+    let registration: ServiceWorkerRegistration | undefined
+    const checkForUpdate = () => void registration?.update().catch(() => undefined)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkForUpdate()
+    }
+    const updateTimer = window.setInterval(checkForUpdate, SW_UPDATE_CHECK_MS)
+    document.addEventListener('visibilitychange', onVisible)
+
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
+        registration = reg
         if (reg.waiting) setSwUpdateAvailable(true)
         reg.addEventListener('updatefound', () => {
           const nextWorker = reg.installing
@@ -203,6 +217,10 @@ function VaultShell({ embedded }: { embedded: boolean }) {
         .map((u) => u.pathname)
       reg.active?.postMessage({ type: 'CACHE_ASSETS', urls })
     }, ROUTE_CHUNKS_SETTLE_MS))
+    return () => {
+      window.clearInterval(updateTimer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   useEffect(() => {

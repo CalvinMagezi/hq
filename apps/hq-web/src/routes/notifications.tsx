@@ -78,7 +78,8 @@ function NotificationsPage() {
         }
       }
     } catch (e) {
-      console.error(`Failed to execute action ${action}:`, e)
+      // A refused action (an agent's question approved as a notice, say) must not look like it worked.
+      useHQStore.getState().setSystemNotice(e instanceof Error ? e.message : `Could not ${action} that.`)
     } finally {
       setLoadingAction(null)
     }
