@@ -43,8 +43,8 @@ Turn on Message Content Intent as in step 2 above.
 relay:
   discord_token: "..."
   # Discord user IDs allowed to send the bot regular chat messages, act on
-  # approval buttons (email-triage Send/Skip,
-  # value-bus Approve/Dismiss), and click component interactions generally.
+  # family request buttons (Approve/Deny), and click component interactions
+  # generally. Discord carries chat only: notifications go to the web inbox.
   discord_allowed_user_ids:
     - 123456789012345678
 ```

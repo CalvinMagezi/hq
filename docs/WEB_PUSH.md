@@ -69,7 +69,7 @@ From HQ's own chat, a `/watch`, or any MCP client (`hq_call` with `notify_owner`
   refuses any other origin too, so a notification can never send you off-site.
 - `dedup_key` drops a repeat while an item with the same key is still in the inbox, or
   after you dismissed it. Put the date or version in it for events that recur.
-- `channels: web_and_chat` also sends it to the chat relay (Telegram or Discord).
+- It never goes to a chat. Telegram and Discord carry chat only, never notifications.
 
 The tool writes the inbox row and nothing else. Every HQ process shares the vault
 database, so `hq mcp` (stdio), the `/mcp` endpoint and the daemon can all call it; the web
@@ -78,7 +78,7 @@ server picks the row up within a few seconds and pushes it.
 ## How it works
 
 - `crates/hq-tools/src/notify.rs`: the `notify_owner` tool. It writes a `value_items`
-  row with source `agent_notify` (or `agent_notify_relay`) and the optional `link`.
+  row with source `agent_notify` and the optional `link`.
 - `crates/hq-web/src/web_push/`: the server end.
   - `vapid.rs` holds the P-256 key and signs a short-lived ES256 token per push
     (RFC 8292).

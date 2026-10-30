@@ -100,13 +100,7 @@ async fn await_folder_approval(
 ) -> Result<std::path::PathBuf> {
     use super::folder_request::{self as requests, Answer, AwaitingApproval};
     let host_name = host.name();
-    let asked = requests::ask_owner(
-        asker.vault_path,
-        asker.db,
-        host_name,
-        &asker.requester,
-        folder,
-    );
+    let asked = requests::ask_owner(asker.db, host_name, &asker.requester, folder);
     if asked.downcast_ref::<AwaitingApproval>().is_none() {
         // Declined, too many waiting, or a folder that cannot be shown to the owner.
         return Err(asked);
@@ -130,7 +124,6 @@ async fn await_folder_approval(
             super::require_cwd_in(Some(&shown), &folders, bound)
         }
         Answer::Declined => Err(requests::ask_owner(
-            asker.vault_path,
             asker.db,
             host_name,
             &asker.requester,
@@ -147,20 +140,15 @@ async fn await_folder_approval(
 /// What a refused folder needs to ask the owner for it.
 struct FolderAsker<'a> {
     db: &'a hq_db::Database,
-    vault_path: &'a std::path::Path,
     requester: String,
 }
 
 impl<'a> FolderAsker<'a> {
-    fn of(db: &'a hq_db::Database, vault_path: &'a std::path::Path, args: &Value) -> Self {
+    fn of(db: &'a hq_db::Database, args: &Value) -> Self {
         let requester = super::connector_label(args)
             .map(str::to_string)
             .unwrap_or_else(|| super::folder_request::HANDOFF_REQUESTER.to_string());
-        Self {
-            db,
-            vault_path,
-            requester,
-        }
+        Self { db, requester }
     }
 }
 
@@ -308,7 +296,7 @@ impl HqTool for HarnessSessionSpawnTool {
             .map(str::trim)
             .filter(|c| !c.is_empty());
         let bound = super::CwdBound::of(&args);
-        let asker = FolderAsker::of(&self.db, &self.vault_path, &args);
+        let asker = FolderAsker::of(&self.db, &args);
         let start = choose_start_dir(
             &host_handle,
             requested,
@@ -386,7 +374,7 @@ impl HqTool for HarnessSessionSpawnTool {
         super::tag_origin(&self.db, &report, origin);
         let brief = super::connector_brief(&args, &["prompt", "goal", "done_criteria"]);
         let cwd = report["cwd"].as_str().unwrap_or("unknown").to_string();
-        super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &brief, &cwd);
+        super::notify_connector_start(&self.db, &args, &report, &brief, &cwd);
         Ok(report)
     }
 }
@@ -422,7 +410,7 @@ impl HarnessSessionSpawnTool {
             &delegator.host,
             super::CwdBound::of(args),
             (&arg_str(args, "label"), &delegator.harness),
-            &FolderAsker::of(&self.db, &self.vault_path, args),
+            &FolderAsker::of(&self.db, args),
         )
         .await?;
         if start.path != std::path::Path::new(&delegator.cwd) {
@@ -436,14 +424,7 @@ impl HarnessSessionSpawnTool {
                 .await?;
         super::tag_origin(&self.db, &report, origin);
         let brief = super::connector_brief(args, &["prompt", "goal", "done_criteria"]);
-        super::notify_connector_start(
-            &self.vault_path,
-            &self.db,
-            args,
-            &report,
-            &brief,
-            &delegator.cwd,
-        );
+        super::notify_connector_start(&self.db, args, &report, &brief, &delegator.cwd);
         Ok(report)
     }
 }
@@ -1202,7 +1183,7 @@ impl HqTool for HarnessSessionHandoffTool {
         // Before a start folder is chosen or made, so a refused model leaves nothing behind.
         super::spec::resolve(&harness)?.with_model(Some(model.trim()).filter(|m| !m.is_empty()))?;
         let bound = super::CwdBound::of(&args);
-        let asker = FolderAsker::of(&self.db, &self.vault_path, &args);
+        let asker = FolderAsker::of(&self.db, &args);
         let start = choose_start_dir(
             &host,
             requested,
@@ -1288,7 +1269,7 @@ impl HqTool for HarnessSessionHandoffTool {
             }
         }
         let cwd = start.path.to_string_lossy().into_owned();
-        super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &brief, &cwd);
+        super::notify_connector_start(&self.db, &args, &report, &brief, &cwd);
         Ok(report)
     }
 }

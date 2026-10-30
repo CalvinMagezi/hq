@@ -803,3 +803,63 @@ pub(crate) fn progress_sink(
 
 #[cfg(test)]
 mod tests;
+
+/// Mailbox senders that are part of a chat, not notifications: a family member's request in a
+/// Discord chat waits for the owner's answer in that chat.
+const CHAT_FLOW_SENDERS: &[&str] = &["family-confirm"];
+
+/// Empties the relay mailbox. Notices are dropped, since chat relays carry chat only; the chat
+/// flows among them are returned to the caller.
+pub fn take_chat_flows(vault_path: &Path) -> Vec<hq_core::types::MailboxMessage> {
+    let messages = match hq_core::mailbox::receive_messages(vault_path, "relay") {
+        Ok(messages) => messages,
+        Err(e) => {
+            tracing::debug!(error = %e, "relay: could not read the relay mailbox");
+            return Vec::new();
+        }
+    };
+    let (flows, notices): (Vec<_>, Vec<_>) = messages
+        .into_iter()
+        .partition(|m| CHAT_FLOW_SENDERS.contains(&m.from.as_str()));
+    if !notices.is_empty() {
+        tracing::debug!(
+            dropped = notices.len(),
+            "relay: dropped notices; chat relays carry chat only"
+        );
+    }
+    flows
+}
+
+#[cfg(test)]
+mod chat_only_tests {
+    use super::*;
+
+    #[test]
+    fn the_relay_mailbox_is_emptied_and_only_chat_flows_come_back() {
+        let vault = tempfile::tempdir().unwrap();
+        for from in [
+            "value-bus",
+            "session-supervisor",
+            "family-confirm",
+            "agent-host",
+        ] {
+            let msg = hq_core::mailbox::new_message(
+                from,
+                "relay",
+                hq_core::types::MailboxMessageType::Nudge,
+                Some("subject"),
+                "body",
+                None,
+            );
+            hq_core::mailbox::send_message(vault.path(), &msg).unwrap();
+        }
+        let flows = take_chat_flows(vault.path());
+        let senders: Vec<&str> = flows.iter().map(|m| m.from.as_str()).collect();
+        assert_eq!(senders, ["family-confirm"]);
+        assert!(
+            hq_core::mailbox::peek_messages(vault.path(), "relay")
+                .unwrap()
+                .is_empty()
+        );
+    }
+}

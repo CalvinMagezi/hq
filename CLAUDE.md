@@ -92,7 +92,12 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   blocked launches are reported, never auto-answered. Setup, security model and
   pairing a machine: `docs/AGENT_HOST.md`, `docs/JOIN_A_MACHINE.md`.
 - **No job queue**: the filesystem job queue (`_jobs/`) is retired. All work
-  dispatches through sub-agents or relay notifications.
+  dispatches through sub-agents.
+- **Chat relays are chat only.** Telegram and Discord carry conversations, never
+  notifications. Alerts, approvals and notices go to the owner's inbox (`value_items`:
+  web app, web push, the phone app). The relay pollers empty `_mailboxes/relay` without
+  sending (`hq_relay::relay_common::take_chat_flows`); the one chat flow left is a family
+  member's request, answered in Discord. Do not add a path that posts to a relay.
 - **Long relay turns**: turns that outlive the ack window
   (`relay.turn_ack_timeout_secs`, default 270s) detach into the persisted
   `background_turns` registry and deliver results asynchronously. A startup and
@@ -110,7 +115,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - **Identity is never model-writable.** Tools learn the caller only from reserved `_hq_*` arguments the runtime sets (`_hq_connector`, `_hq_caller_session`, `_hq_native_*`). A native session strips every `_hq_*` key the model sent before it sets its own, and the MCP gateway strips `_hq_native_*` from callers. Provenance is recorded only where a write path knows the caller; otherwise it is `unknown`. Review state changes only through `note_review`.
 - **Disk watchdog**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/disk_watchdog.rs` is a 6-hour daemon task
   that checks overall disk usage, the bun install cache, and `node_modules` and
-  `target` bloat under configurable roots, notifying via the configured relay on
+  `target` bloat under configurable roots, putting a report in the owner's inbox on
   breach. Config: `disk_watchdog:` in `~/.hq/config.yaml`.
 
 ## Entry Points

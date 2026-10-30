@@ -601,10 +601,6 @@ async fn a_watched_session_wakes_its_chat_instead_of_the_relay() {
         1,
         "one web-inbox badge for the block"
     );
-    assert!(
-        hq_daemon::value_bus::WEB_ONLY_SOURCES.contains(&WEB_INBOX_SOURCE),
-        "the badge must never reach Telegram"
-    );
 
     sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
     let row = row_of(&db, "hs-web");

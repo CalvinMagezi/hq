@@ -610,7 +610,7 @@ async fn dispatch_task(
                 Ok(())
             }
         }
-        "disk-watchdog" => tasks_periodic::run_disk_watchdog(vault_path, config).await,
+        "disk-watchdog" => tasks_periodic::run_disk_watchdog(vault_path, db, config).await,
         "backup" => tasks_periodic::run_backup(config).await,
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
         "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,

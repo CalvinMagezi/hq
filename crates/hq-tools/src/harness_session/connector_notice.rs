@@ -4,7 +4,6 @@
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
 use serde_json::Value;
-use std::path::Path;
 
 /// Where the notice's prompt is cut. Telegram caps a message near 4 KB, and the cut says so.
 const MAX_PROMPT_CHARS: usize = 2500;
@@ -60,23 +59,14 @@ pub fn connector_start_notice(
     ))
 }
 
-/// Sends the notice straight to the owner's chat, past the relay's batching. Best effort: the
-/// session is already running, and a failure is logged.
-pub fn notify_connector_start(
-    vault_path: &Path,
-    db: &Database,
-    args: &Value,
-    report: &Value,
-    brief: &str,
-    cwd: &str,
-) {
+/// Puts the notice in the owner's inbox (web, web push and the app; chat relays carry no
+/// notifications). Best effort: the session is already running, and a failure is logged.
+pub fn notify_connector_start(db: &Database, args: &Value, report: &Value, brief: &str, cwd: &str) {
     let Some(item) = connector_start_notice(args, report, brief, cwd) else {
         return;
     };
-    let sent = hq_db::value_items::insert(db, &item)
-        .and_then(|()| hq_db::value_items::deliver(vault_path, db, &item, true));
-    if !matches!(sent, Ok(true)) {
-        tracing::warn!("connector: the session start notice did not reach the relay mailbox");
+    if let Err(e) = hq_db::value_items::insert(db, &item) {
+        tracing::warn!("connector: the session start notice was not recorded: {e:#}");
     }
 }
 
@@ -131,19 +121,16 @@ mod tests {
     }
 
     #[test]
-    fn the_notice_reaches_the_relay_mailbox_as_an_interrupt() {
-        let vault = tempfile::TempDir::new().unwrap();
+    fn the_notice_goes_to_the_inbox_only() {
         let db = Database::open_memory().unwrap();
         let args = json!({ super::super::CONNECTOR_ARG: "Claude" });
-        notify_connector_start(vault.path(), &db, &args, &report(), "go", "/srv");
-        let inbox = hq_core::mailbox::peek_messages(vault.path(), "relay").unwrap();
-        assert_eq!(inbox.len(), 1);
+        notify_connector_start(&db, &args, &report(), "go", "/srv");
+        let pending =
+            hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
         assert_eq!(
-            inbox[0]
-                .meta
-                .get(hq_core::mailbox::META_INTERRUPT)
-                .map(String::as_str),
-            Some("true")
+            pending.len(),
+            1,
+            "web inbox, web push and the app pick it up"
         );
     }
 }

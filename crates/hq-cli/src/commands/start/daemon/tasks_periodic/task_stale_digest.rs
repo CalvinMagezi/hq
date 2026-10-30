@@ -5,7 +5,7 @@ use hq_db::Database;
 use hq_db::tasks::{StaleTask, stale_tasks};
 use tracing::info;
 
-/// Source name of the digest item. Listed in `WEB_ONLY_SOURCES`: task housekeeping stays in the web app.
+/// Source name of the digest item, shown in the web inbox.
 pub const STALE_DIGEST_SOURCE: &str = "task_stale_digest";
 /// Tasks named in one digest; the count still covers all of them.
 const MAX_LISTED: usize = 10;

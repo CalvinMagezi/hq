@@ -8,8 +8,6 @@ use std::path::Path;
 
 use super::caller_context::{CallerContext, InstanceMeta};
 
-pub use hq_core::telegram_access::notification_chat_id as get_notification_chat_id;
-
 /// Resolved role for an incoming Telegram chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TelegramRole {
@@ -262,7 +260,10 @@ mod tests {
             telegram_allowed_chat_ids: vec![999],
             ..Default::default()
         };
-        assert_eq!(get_notification_chat_id(vault, &relay), Some(111));
+        assert_eq!(
+            hq_core::telegram_access::notification_chat_id(vault, &relay),
+            Some(111)
+        );
     }
 
     #[test]

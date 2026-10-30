@@ -80,7 +80,7 @@ An owner is established in one of two ways:
 Pairing is only accepted while no owner exists. Allowlisted chats and
 `telegram_users` guests behave as before.
 
-Inline button taps (value-bus Approve and Dismiss) are honored only from the owner.
+Inline button taps on older messages (value-bus Approve and Dismiss) are honored only from the owner.
 
 ## Vault files
 
@@ -94,7 +94,7 @@ Inline button taps (value-bus Approve and Dismiss) are honored only from the own
 
 ## Behavior
 
-- **Proactive alerts** (value-bus items, mailbox) go to the **owner** only.
+- **Chat only.** Telegram carries conversations and nothing else: no alerts, approvals, digests or restart notices. Those go to the owner's inbox (web app, web push and the phone app). The relay mailbox (`_mailboxes/relay`) is emptied without sending.
 - **Guests** run under the `telegram_guest` tool profile (`crates/hq-agent/src/tool_policy.rs`): no shell, file or vault writes, sub-agents, skill edits or remote MCP servers.
 - **`/login`** replies with the owner's web login link (`<first web_allowed_origins entry>/vault#token=<token>`), carrying a new device token that Settings, Devices lists as "Telegram /login" and can sign out on its own, with link previews off and a reminder to delete the message. Owner only, and only in a private chat: a group gets "Send /login to me in a private chat." and a guest gets the owner-only refusal. Without an origin or a web token it explains that and points at `sudo hq-join --print-link`. `/help` lists every command.
 

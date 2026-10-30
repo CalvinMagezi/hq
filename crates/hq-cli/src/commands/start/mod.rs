@@ -198,10 +198,9 @@ fn spawn_telegram(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Database
         return;
     };
     let (vault, db) = (vault.clone(), db.clone());
-    let notifications_token = config.relay.notifications_token.clone();
     tokio::spawn(async move {
         info!("telegram: starting relay");
-        let result = relay::run_telegram_relay(&token, vault, db, notifications_token, None).await;
+        let result = relay::run_telegram_relay(&token, vault, db, None).await;
         if let Err(e) = result {
             tracing::error!("telegram relay error: {e}");
         }
@@ -349,14 +348,7 @@ async fn start_telegram(
         config.relay.telegram_token.as_ref().context(
             "Telegram token not configured. Set relay.telegram_token in ~/.hq/config.yaml",
         )?;
-    relay::run_telegram_relay(
-        token,
-        vault,
-        db,
-        config.relay.notifications_token.clone(),
-        None,
-    )
-    .await
+    relay::run_telegram_relay(token, vault, db, None).await
 }
 
 #[cfg(not(feature = "telegram"))]

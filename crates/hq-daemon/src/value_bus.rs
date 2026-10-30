@@ -1,42 +1,13 @@
-//! Value Bus delivery: rank pending items, budget them, send each into the relay
-//! mailbox (actionable ones with an approve/dismiss token), and record
-//! engagement on tap.
+//! Value Bus delivery: new inbox items are marked delivered, which is all the web inbox, web
+//! push and the phone app need. Chat relays (Telegram, Discord) carry chat only, never these
+//! notifications. Taps on Approve or Dismiss in messages sent before that still record
+//! engagement.
 
 use anyhow::Result;
 use std::path::Path;
 
-use hq_core::types::{ValueItem, ValueKind, ValueState};
+use hq_core::types::ValueState;
 use hq_db::Database;
-
-/// Max items delivered per cycle. Keeps Telegram from being flooded; the rest
-/// stay Pending for the next cycle.
-const VALUE_BUS_BUDGET: usize = 3;
-
-/// Source tasks whose ActionNeeded items demand same-day attention.
-const SAME_DAY_ACTION_SOURCES: &[&str] = &["email-triage"];
-/// Source tasks whose items belong in the web inbox only, never the relay.
-/// `skill_review` is `hq_agent::skill_review::VALUE_SOURCE`: skill changes are FYI.
-/// `session_chat` is a harness session a web chat watches that needs an answer.
-/// `agent_notify` is `hq_tools::notify::NOTIFY_SOURCE`: `notify_owner` with `channels: web`.
-pub const WEB_ONLY_SOURCES: &[&str] = &[
-    "task_ready_for_review",
-    "task_needs_owner",
-    "task_autonomy",
-    "task_briefing",
-    "task_queue_alert",
-    "task_veto_window",
-    "task_audit_digest",
-    "task_stale_digest",
-    "skill_review",
-    "session_chat",
-    "agent_notify",
-];
-
-/// Decide whether an item interrupts now or goes through normal relay batching.
-pub fn is_urgent(item: &ValueItem) -> bool {
-    item.kind == ValueKind::ActionNeeded
-        && SAME_DAY_ACTION_SOURCES.contains(&item.source_task.as_str())
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ValueAction {
@@ -44,21 +15,11 @@ pub enum ValueAction {
     Dismiss,
 }
 
-/// Rank + budget + deliver pending value items to the relay mailbox.
-pub async fn run_value_bus_delivery(vault_path: &Path, db: &Database) -> Result<()> {
+/// Marks every pending item delivered. Nothing is sent to a chat relay.
+pub async fn run_value_bus_delivery(_vault_path: &Path, db: &Database) -> Result<()> {
     let _ = hq_db::value_items::gc_expired(db)?;
-    let pending = hq_db::value_items::list_by_state(db, ValueState::Pending)?;
-    let (web_only, relayed): (Vec<_>, Vec<_>) = pending
-        .into_iter()
-        .partition(|i| WEB_ONLY_SOURCES.contains(&i.source_task.as_str()));
-    // Delivered to the web inbox by being listed there; never sent to the relay.
-    for item in &web_only {
+    for item in hq_db::value_items::list_by_state(db, ValueState::Pending)? {
         hq_db::value_items::set_delivered(db, &item.id)?;
-    }
-    for item in relayed.into_iter().take(VALUE_BUS_BUDGET) {
-        // No digest collects non-urgent items any more, so every item is sent;
-        // only urgent ones bypass the notification gate's batching.
-        hq_db::value_items::deliver(vault_path, db, &item, is_urgent(&item))?;
     }
     Ok(())
 }
@@ -91,7 +52,7 @@ pub fn record_engagement(vault_path: &Path, token: &str, action: ValueAction) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_core::types::ValueKind;
+    use hq_core::types::{ValueItem, ValueKind};
 
     /// Open the canonical vault db so that handles obtained via path (emit_at,
     /// record_engagement) and via this handle point at the SAME file.
@@ -115,89 +76,39 @@ mod tests {
         assert_eq!(parse_value_command("approve ab"), None); // token too short
     }
 
-    #[test]
-    fn urgency_by_kind_and_source() {
-        use hq_core::types::ValueKind;
-        let a = ValueItem::new("email-triage", ValueKind::ActionNeeded, "t", "b");
-        assert!(is_urgent(&a));
-        let i = ValueItem::new("memory-consolidation", ValueKind::Insight, "t", "b");
-        assert!(!is_urgent(&i));
-    }
-
     #[tokio::test]
-    async fn task_items_stay_web_only_and_notices_get_no_token() {
+    async fn no_item_reaches_a_chat_relay() {
         let dir = tempfile::tempdir().unwrap();
         let vault = dir.path();
         let db = open_vault_db(vault);
-        let task = ValueItem::new(
-            "task_ready_for_review",
-            ValueKind::ActionNeeded,
-            "FR-1: x",
-            "b",
-        );
-        let notice = ValueItem::new("memory-consolidation", ValueKind::Fyi, "Notice", "b");
-        hq_db::value_items::emit(&db, &task).unwrap();
-        hq_db::value_items::emit(&db, &notice).unwrap();
+        for (source, kind) in [
+            ("task_ready_for_review", ValueKind::ActionNeeded),
+            ("email-triage", ValueKind::ActionNeeded),
+            ("memory-consolidation", ValueKind::Fyi),
+            ("connector", ValueKind::ActionNeeded),
+        ] {
+            hq_db::value_items::emit(&db, &ValueItem::new(source, kind, "t", "b")).unwrap();
+        }
 
         run_value_bus_delivery(vault, &db).await.unwrap();
 
-        let relay_dir = vault.join("_mailboxes").join("relay");
-        let msgs: Vec<String> = std::fs::read_dir(&relay_dir)
-            .unwrap()
-            .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
-            .collect();
-        assert_eq!(msgs.len(), 1, "only the notice reaches the relay");
-        assert!(msgs[0].contains("Notice") && !msgs[0].contains("value_token"));
-        let pending = hq_db::value_items::list_by_state(&db, ValueState::Pending).unwrap();
         assert!(
-            pending.is_empty(),
-            "the task item is marked delivered for the web inbox"
+            hq_core::mailbox::peek_messages(vault, "relay")
+                .unwrap()
+                .is_empty(),
+            "chat relays carry chat only"
         );
-    }
-
-    #[tokio::test]
-    async fn loop_closes_emit_deliver_engage() {
-        let dir = tempfile::tempdir().unwrap();
-        let vault = dir.path();
-        let db = open_vault_db(vault);
-
-        // Emit two action items with the SAME dedup key (one must collapse) plus one insight.
-        let a = ValueItem::new("email-triage", ValueKind::ActionNeeded, "Reply A", "body")
-            .with_dedup_key("thread-1");
-        let dup = ValueItem::new(
-            "email-triage",
-            ValueKind::ActionNeeded,
-            "Reply A dup",
-            "body",
-        )
-        .with_dedup_key("thread-1");
-        let insight = ValueItem::new(
-            "memory-consolidation",
-            ValueKind::Insight,
-            "Insight",
-            "body",
+        assert!(
+            hq_db::value_items::list_by_state(&db, ValueState::Pending)
+                .unwrap()
+                .is_empty()
         );
-        hq_db::value_items::emit(&db, &a).unwrap();
-        hq_db::value_items::emit(&db, &dup).unwrap(); // collapses
-        hq_db::value_items::emit(&db, &insight).unwrap();
-
-        run_value_bus_delivery(vault, &db).await.unwrap();
-
-        // Both surviving items are delivered; the duplicate collapsed on emit.
-        let relay_dir = vault.join("_mailboxes").join("relay");
-        let count = std::fs::read_dir(&relay_dir).unwrap().count();
-        assert_eq!(count, 2, "urgent and non-urgent items both delivered");
-
-        // The action item (highest score) is delivered; engage it by token.
-        let token: String = a.id.chars().take(8).collect();
-        assert!(record_engagement(vault, &token, ValueAction::Approve).unwrap());
-
-        let stats = hq_db::value_items::task_engagement_stats(&db).unwrap();
-        let et = stats
-            .iter()
-            .find(|s| s.source_task == "email-triage")
-            .unwrap();
-        assert_eq!(et.delivered, 1);
-        assert_eq!(et.engaged, 1);
+        assert_eq!(
+            hq_db::value_items::list_by_state(&db, ValueState::Delivered)
+                .unwrap()
+                .len(),
+            4,
+            "every item is delivered to the inbox"
+        );
     }
 }

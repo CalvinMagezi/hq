@@ -41,7 +41,6 @@ const DEFAULT_LINK: &str = "/notifications";
 /// device signing in, which the owner must hear about even with no chat app connected.
 const ALWAYS_PUSHED_SOURCES: &[&str] = &[
     hq_tools::notify::NOTIFY_SOURCE,
-    hq_tools::notify::NOTIFY_RELAY_SOURCE,
     crate::device_auth::DEVICE_SIGN_IN_SOURCE,
 ];
 

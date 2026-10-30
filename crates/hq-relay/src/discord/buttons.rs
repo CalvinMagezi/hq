@@ -1,4 +1,4 @@
-//! Status embed and the email and value-bus action buttons.
+//! Status embed, the family request buttons, and parsers for buttons on older messages.
 
 use super::*;
 
@@ -18,16 +18,6 @@ const VALUE_DISMISS_PREFIX: &str = "value_dismiss_";
 const FAMILY_APPROVE_PREFIX: &str = "family_approve_";
 const FAMILY_DENY_PREFIX: &str = "family_deny_";
 
-/// Build a Discord button custom_id for an email-triage send action.
-pub(crate) fn make_email_send_button_id(token: &str) -> String {
-    format!("{EMAIL_SEND_PREFIX}{token}")
-}
-
-/// Build a Discord button custom_id for an email-triage skip action.
-pub(crate) fn make_email_skip_button_id(token: &str) -> String {
-    format!("{EMAIL_SKIP_PREFIX}{token}")
-}
-
 /// Parse an email-triage button custom_id back to (action, token).
 pub(crate) fn parse_email_button_id(custom_id: &str) -> Option<(&str, &str)> {
     if let Some(id) = custom_id.strip_prefix(EMAIL_SEND_PREFIX) {
@@ -39,36 +29,6 @@ pub(crate) fn parse_email_button_id(custom_id: &str) -> Option<(&str, &str)> {
     }
 }
 
-/// Build a Discord message for an email-triage reply-needed notification with
-/// Send/Skip buttons.
-pub(crate) fn build_email_action_message(
-    text: &str,
-    token: &str,
-) -> serenity::builder::CreateMessage {
-    use serenity::builder::{CreateActionRow, CreateButton};
-    use serenity::model::application::ButtonStyle;
-
-    let send_btn = CreateButton::new(make_email_send_button_id(token))
-        .label("Send")
-        .style(ButtonStyle::Success);
-    let skip_btn = CreateButton::new(make_email_skip_button_id(token))
-        .label("Skip")
-        .style(ButtonStyle::Secondary);
-    let row = CreateActionRow::Buttons(vec![send_btn, skip_btn]);
-
-    CreateMessage::new().content(text).components(vec![row])
-}
-
-/// Build a Discord button custom_id for a value-bus approve action.
-pub(crate) fn make_value_approve_button_id(token: &str) -> String {
-    format!("{VALUE_APPROVE_PREFIX}{token}")
-}
-
-/// Build a Discord button custom_id for a value-bus dismiss action.
-pub(crate) fn make_value_dismiss_button_id(token: &str) -> String {
-    format!("{VALUE_DISMISS_PREFIX}{token}")
-}
-
 /// Parse a value-bus button custom_id back to (action, token).
 pub(crate) fn parse_value_button_id(custom_id: &str) -> Option<(&str, &str)> {
     if let Some(id) = custom_id.strip_prefix(VALUE_APPROVE_PREFIX) {
@@ -78,26 +38,6 @@ pub(crate) fn parse_value_button_id(custom_id: &str) -> Option<(&str, &str)> {
     } else {
         None
     }
-}
-
-/// Build a Discord message for a value-bus item with Approve/Dismiss buttons,
-/// with inline buttons.
-pub(crate) fn build_value_action_message(
-    text: &str,
-    token: &str,
-) -> serenity::builder::CreateMessage {
-    use serenity::builder::{CreateActionRow, CreateButton};
-    use serenity::model::application::ButtonStyle;
-
-    let approve_btn = CreateButton::new(make_value_approve_button_id(token))
-        .label("Approve")
-        .style(ButtonStyle::Success);
-    let dismiss_btn = CreateButton::new(make_value_dismiss_button_id(token))
-        .label("Dismiss")
-        .style(ButtonStyle::Secondary);
-    let row = CreateActionRow::Buttons(vec![approve_btn, dismiss_btn]);
-
-    CreateMessage::new().content(text).components(vec![row])
 }
 
 /// Build a Discord button custom_id for a family-action approve action.
@@ -157,8 +97,6 @@ mod tests {
 
     #[test]
     fn email_button_id_round_trips() {
-        assert_eq!(make_email_send_button_id("a1b2c3"), "email_send_a1b2c3");
-        assert_eq!(make_email_skip_button_id("a1b2c3"), "email_skip_a1b2c3");
         assert_eq!(
             parse_email_button_id("email_send_a1b2c3"),
             Some(("send", "a1b2c3"))
@@ -173,14 +111,6 @@ mod tests {
 
     #[test]
     fn value_button_id_round_trips() {
-        assert_eq!(
-            make_value_approve_button_id("a1b2c3d4"),
-            "value_approve_a1b2c3d4"
-        );
-        assert_eq!(
-            make_value_dismiss_button_id("a1b2c3d4"),
-            "value_dismiss_a1b2c3d4"
-        );
         assert_eq!(
             parse_value_button_id("value_approve_a1b2c3d4"),
             Some(("approve", "a1b2c3d4"))
