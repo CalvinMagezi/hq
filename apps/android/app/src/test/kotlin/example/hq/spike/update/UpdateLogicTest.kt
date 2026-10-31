@@ -64,8 +64,8 @@ class UpdateLogicTest {
         assertTrue(UpdateLogic.due(5000, 1000))
     }
 
-    @Test fun channelUrlsAreTheTwoPointerReleases() {
-        assertEquals("${UpdateLogic.APK_URL_PREFIX}channel-stable/android-channel.json", UpdateLogic.manifestUrl(UpdateChannel.Stable))
+    @Test fun stableFollowsLatestAndMainItsOwnRelease() {
+        assertEquals("https://github.com/CalvinMagezi/hq/releases/latest/download/android-channel.json", UpdateLogic.manifestUrl(UpdateChannel.Stable))
         assertEquals("${UpdateLogic.APK_URL_PREFIX}channel-main/android-channel.json", UpdateLogic.manifestUrl(UpdateChannel.Main))
         assertEquals(UpdateChannel.Stable, UpdateChannel.of(null))
         assertEquals(UpdateChannel.Stable, UpdateChannel.of("nightly"))

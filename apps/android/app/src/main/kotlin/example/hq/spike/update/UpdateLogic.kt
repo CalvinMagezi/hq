@@ -36,7 +36,8 @@ sealed interface UpdateState {
 /** The rules for the in-app updater that need no Android: reading the manifest, comparing builds, and when to ask. */
 object UpdateLogic {
     /** The only place an APK may come from; a manifest that points anywhere else is refused even though its signature is good. */
-    const val APK_URL_PREFIX = "https://github.com/CalvinMagezi/hq/releases/download/"
+    private const val RELEASES_URL = "https://github.com/CalvinMagezi/hq/releases/"
+    const val APK_URL_PREFIX = RELEASES_URL + "download/"
     const val CHANNEL_FILE = "android-channel.json"
     const val CHECK_EVERY_MS = 24L * 60 * 60 * 1000
 
@@ -47,7 +48,11 @@ object UpdateLogic {
     private const val SHA256_HEX_CHARS = 64
     private const val VERSION_MAX_CHARS = 64
 
-    fun manifestUrl(channel: UpdateChannel): String = APK_URL_PREFIX + channel.tag + "/" + CHANNEL_FILE
+    /** Stable is "the latest release", which the Promote workflow keeps pointing at `channel-stable`; main is its own prerelease. */
+    fun manifestUrl(channel: UpdateChannel): String = when (channel) {
+        UpdateChannel.Stable -> RELEASES_URL + "latest/download/" + CHANNEL_FILE
+        UpdateChannel.Main -> APK_URL_PREFIX + channel.tag + "/" + CHANNEL_FILE
+    }
 
     /** The manifest, or null when anything in it is missing or unsafe. Call it only on bytes whose signature has been checked. */
     fun parse(text: String): ChannelManifest? = try {
