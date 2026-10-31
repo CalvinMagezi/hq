@@ -1,9 +1,11 @@
 # The desktop app (macOS)
 
 The first desktop in the Native Bridge sprint ([plan](plans/native-bridge-sprint.md), workstream
-W5). A small Tauri 2 app that starts and stops the local HQ host, shows the QR code that pairs a
-phone or another computer, takes the six digits the other device shows, lists and revokes paired
-devices, and has a Connect Claude screen. The web app (`apps/hq-web`) is its main window.
+W5). A small Tauri 2 app that is the laptop's one app for HQ: it starts and stops the local
+host, shows the QR code that pairs a phone or another computer, takes the six digits the other
+device shows, and lists and revokes paired devices. While it is on, its bridge also offers this
+laptop's coding-agent host to the phone and reaches the phone's web app. The web app
+(`apps/hq-web`) is its main window, and when a phone is the hub it shows the phone's copy.
 
 Threat model, listeners and the web view's limits: [security/DESKTOP.md](security/DESKTOP.md).
 Pairing itself: [PAIRING.md](PAIRING.md).
@@ -12,9 +14,9 @@ Pairing itself: [PAIRING.md](PAIRING.md).
 
 | Screen | What you can do |
 |---|---|
-| Host | Start and stop the `hq` host (`hq start all`) and see its state. Open HQ, which shows the web app in a second window. An optional setting starts the host when the app opens. |
-| Devices | Switch the app on for paired devices, show a pairing code (QR and the `hqpair://` link), type the six digits the other device shows, list paired devices, revoke one. |
-| Connect Claude | Show whether the claude.ai connector is on, the address to add in claude.ai, and open or close the window that lets one new connection through. |
+| Host | Start and stop the host and see its state. What it starts depends on the config (see "The phone as the hub"). Open HQ, which shows the web app in a second window. An optional setting starts the host when the app opens. |
+| Devices | Switch the app on for paired devices, show a pairing code (QR and the `hqpair://` link), type the six digits the other device shows, list paired devices, revoke one. While the app is on it also lists what it shares with paired devices and the forwards it opened, with "running elsewhere" for a forward whose port another process already holds. |
+| Claude | A short note that Claude Code and Claude Desktop on this laptop reach HQ through the app. It has no buttons yet. The Connect Claude screen is gone: the public claude.ai connector is retired (see the [sprint plan](plans/native-bridge-sprint.md)). |
 
 Nothing starts by itself. Opening the app starts no host, opens no network port and writes
 nothing but its own folder (`~/.hq/desktop`). The host starts when you press Start (or when you turned on "Start the
@@ -22,6 +24,40 @@ host when this app opens"); the pairing endpoint opens when you press Switch on;
 web address opens when you press Open HQ. The app never registers a login item, and it stops the
 host it started when it quits (Cmd-Q, closing the window or a plain kill). A host it did not start (one you run in a terminal, or a service)
 is shown as "Running elsewhere" and cannot be stopped from the app.
+
+## The phone as the hub
+
+When HQ lives on a paired phone, the laptop's config (`~/.hq/config.yaml`) says so with the
+services and forwards from [PAIRING.md](PAIRING.md#services-and-forwards):
+
+```yaml
+bridge:
+  services:
+    gate: 127.0.0.1:7747            # this laptop's host gate, offered to the phone
+  forwards:
+    - peer: <phone id>
+      service: web                  # the phone's web app
+      listen: 127.0.0.1:47480
+```
+
+The app reads that config and changes three things:
+
+- **The bridge serves and forwards.** Switching on starts the bridge with the configured services
+  and opens the configured forwards, using the same code as `hq bridge serve`
+  (`hq_bridge::services_from_config` and `start_forwards`). A forward whose port is already taken
+  (for example by a `hq bridge serve` on this machine) does not stop the bridge; the Devices
+  screen shows it as "running elsewhere". A service that leads to HQ's own web port is refused.
+  Switching off closes the forwards the app opened.
+- **The HQ window shows the phone.** With a forward to the `web` service, **Open HQ** proxies to
+  that forward's loopback address instead of this machine's own web server. The proxy still adds no
+  credential and the app puts no token in the window's address: sign in once in the window, which
+  keeps the sign-in per address.
+- **The Host button starts only the coding agents.** A config that offers a `gate` service and has
+  a `web` forward counts as serving a hub, so the button runs `hq host serve` instead of
+  `hq start all` (HQ itself is on the phone). The app tells the host is up by connecting to its
+  control socket (`host.sock` in the host directory, `HQ_HOST_DIR` or `~/.hq/run/host`) rather
+  than asking `/health`, which `hq host serve` does not have. Without a hub the button runs
+  `hq start all` as before.
 
 ## Pairing a device
 
@@ -59,23 +95,6 @@ refused.
 
 Port, relay, name and `hq_path` changes apply the next time the app opens. The host's own output goes to
 `~/.hq/desktop/host.log` (owner-only). The app reads the same `~/.hq/config.yaml` as `hq`.
-
-## Connect Claude
-
-Until `hq edge` and the device-side TLS (workstreams W1 and W2) are merged, this machine has no
-address Claude's servers can reach, and the screen says so instead of inventing one. If you
-already run a public address, set `mcp_connector.public_url` (see
-[CLAUDE_CONNECTOR.md](CLAUDE_CONNECTOR.md)) and the screen shows the connector address to paste
-into claude.ai, and **Allow a new connection** opens the ten-minute window.
-
-The consent page (`/connect`) and its API are served on the app's own address, so no tailnet name
-is needed to open them in a browser on this Mac. One piece is still open and belongs to
-workstream W6: HQ tells Claude to send your browser to `mcp_connector.authorize_url`. That may now
-be the app's own loopback address (`http://127.0.0.1:<port>`, the only plain-http origin HQ
-accepts), but whether claude.ai follows such an `authorization_endpoint` is still a test to run
-against a real account (`docs/plans/native-bridge/w6-claude-run.md`). The screen says when the
-advertised origin is not the app's own. To approve on the app's address, get a sign-in link from
-the screen and open it in the browser first.
 
 ## Building it
 

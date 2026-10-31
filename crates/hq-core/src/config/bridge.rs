@@ -6,6 +6,11 @@ use super::mcp_connector::{DoorListen, DoorTarget};
 /// Longest service name a stream may ask for.
 pub const MAX_SERVICE_NAME: usize = 32;
 
+/// The service a hub offers for its web app, and the one a laptop offers for its coding-agent
+/// host (`docs/PAIRING.md`, "Services and forwards").
+pub const HUB_WEB_SERVICE: &str = "web";
+pub const HUB_GATE_SERVICE: &str = "gate";
+
 /// What this machine offers its paired devices over the bridge, and which of theirs it reaches
 /// through local ports. Empty by default: nothing is offered and nothing is forwarded.
 /// Docs: `docs/PAIRING.md` ("Services and forwards").
@@ -96,6 +101,23 @@ impl BridgeServicesConfig {
         Ok(out)
     }
 
+    /// Where this machine reaches a paired hub's web app: the loopback address of the first
+    /// forward to the `web` service. `None` when there is no such forward or the forwards are
+    /// not valid.
+    pub fn hub_web_listen(&self) -> Option<SocketAddr> {
+        self.forwards()
+            .ok()?
+            .into_iter()
+            .find(|f| f.service == HUB_WEB_SERVICE)
+            .map(|f| f.listen)
+    }
+
+    /// Whether this machine serves a hub: it offers its host gate and reaches the hub's web app,
+    /// so HQ itself runs elsewhere (on the phone) and only coding agents run here.
+    pub fn serves_hub(&self) -> bool {
+        self.services.contains_key(HUB_GATE_SERVICE) && self.hub_web_listen().is_some()
+    }
+
     /// The forwards, checked: valid service names, loopback listen ports, no port used twice.
     pub fn forwards(&self) -> Result<Vec<CheckedForward>, String> {
         let mut out: Vec<CheckedForward> = Vec::new();
@@ -174,6 +196,27 @@ mod tests {
         ] {
             assert!(parse(bad).forwards().is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_laptop_serves_a_hub_when_it_offers_the_gate_and_reaches_the_web_app() {
+        let hub = parse(
+            "services:\n  gate: 127.0.0.1:7747\nforwards:\n  - peer: abc\n    service: web\n    listen: 127.0.0.1:47480\n",
+        );
+        assert!(hub.serves_hub());
+        assert_eq!(
+            hub.hub_web_listen(),
+            Some("127.0.0.1:47480".parse().unwrap())
+        );
+        let no_forward = parse("services:\n  gate: 127.0.0.1:7747\n");
+        assert!(!no_forward.serves_hub());
+        let no_gate = parse("forwards:\n  - {peer: a, service: web, listen: \"127.0.0.1:1\"}\n");
+        assert!(!no_gate.serves_hub());
+        assert_eq!(
+            no_gate.hub_web_listen(),
+            Some("127.0.0.1:1".parse().unwrap())
+        );
+        assert!(!BridgeServicesConfig::default().serves_hub());
     }
 
     #[test]

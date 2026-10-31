@@ -21,10 +21,6 @@
     "allow-pairing-submit",
     "allow-pairing-decline",
     "allow-pairing-revoke",
-    "allow-connect-status",
-    "allow-connect-arm",
-    "allow-connect-disarm",
-    "allow-connect-sign-in-link",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

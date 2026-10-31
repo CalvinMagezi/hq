@@ -9,9 +9,10 @@
 use crate::qr::{self, QrMatrix};
 use anyhow::{Context, Result, anyhow};
 use hq_bridge::{
-    Bridge, BridgeConfig, EndpointId, PairRequest, RelayMode, StreamHandler, Tuning,
-    code::printable, echo_handler,
+    Bridge, BridgeConfig, EndpointId, Forwards, PairRequest, RelayMode, StreamHandler, Tuning,
+    code::printable, echo_handler, services_from_config, start_forwards,
 };
+use hq_core::config::BridgeServicesConfig;
 use hq_db::{Database, bridge as peers};
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -38,6 +39,15 @@ pub struct PairingConfig {
     pub tuning: Tuning,
 }
 
+/// What this machine offers its paired devices and which of their services it reaches through
+/// local ports: `bridge:` in the HQ config.
+#[derive(Debug, Clone, Default)]
+pub struct HubServices {
+    pub config: BridgeServicesConfig,
+    /// HQ's own web port, which no service may lead to.
+    pub ws_port: u16,
+}
+
 type OpenDb = Box<dyn Fn() -> Result<Database> + Send + Sync>;
 
 pub struct PairingController {
@@ -45,10 +55,16 @@ pub struct PairingController {
     open_db: OpenDb,
     db: Mutex<Option<Database>>,
     handler: StreamHandler,
+    hub: HubServices,
     bridge: tokio::sync::Mutex<Option<Bridge>>,
+    /// The forwards the bridge opened, kept to close their ports when it stops.
+    forwards: Mutex<Option<Forwards>>,
     /// This machine's card while it is switched on. The screen reads it instead of the bridge, so
     /// a slow start or revoke (both can wait on a relay) never freezes the refresh.
     host: Mutex<Option<HostCard>>,
+    /// The forwards' state, set and cleared with `host`.
+    forward_views: Mutex<Vec<ForwardView>>,
+    offered: Mutex<Vec<String>>,
     session: Arc<Mutex<Session>>,
     changed: watch::Sender<u64>,
 }
@@ -107,6 +123,17 @@ pub struct HostCard {
     pub addrs: Vec<String>,
 }
 
+/// One local port that reaches a service on a paired device.
+#[derive(Debug, Clone, Serialize)]
+pub struct ForwardView {
+    pub service: String,
+    pub peer_short: String,
+    pub listen: String,
+    /// The port was already taken, typically by a `hq bridge serve` on this machine, so this app
+    /// did not open it and does not own it.
+    pub running_elsewhere: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PeerView {
     pub id: String,
@@ -121,6 +148,9 @@ pub struct PairingSnapshot {
     /// Whether this machine is switched on for paired devices.
     pub running: bool,
     pub host: Option<HostCard>,
+    /// The services this machine offers its paired devices, by name.
+    pub services: Vec<String>,
+    pub forwards: Vec<ForwardView>,
     pub ticket: Option<TicketView>,
     pub pending: Vec<PendingView>,
     pub peers: Vec<PeerView>,
@@ -166,11 +196,22 @@ impl PairingController {
             open_db: Box::new(open_db),
             db: Mutex::new(None),
             handler: handler.unwrap_or_else(echo_handler),
+            hub: HubServices::default(),
             bridge: tokio::sync::Mutex::new(None),
+            forwards: Mutex::new(None),
             host: Mutex::new(None),
+            forward_views: Mutex::new(Vec::new()),
+            offered: Mutex::new(Vec::new()),
             session: Arc::default(),
             changed: watch::channel(0).0,
         }
+    }
+
+    /// Offers `hub.config`'s services to paired devices and opens its forwards while the bridge is
+    /// on. Without this, the bridge offers nothing and forwards nothing.
+    pub fn with_services(mut self, hub: HubServices) -> Self {
+        self.hub = hub;
+        self
     }
 
     /// Ticks whenever the screen should read the snapshot again.
@@ -204,7 +245,12 @@ impl PairingController {
             if let Some(dir) = self.cfg.key.parent() {
                 crate::settings::create_private_dir(dir)?;
             }
-            let bridge = Bridge::start(
+            let services = services_from_config(&self.hub.config, self.hub.ws_port)?;
+            let offered: Vec<String> = services
+                .as_ref()
+                .map(|s| s.targets.keys().cloned().collect())
+                .unwrap_or_default();
+            let bridge = Bridge::start_with_services(
                 BridgeConfig {
                     key: self.cfg.key.clone(),
                     bind: self.cfg.bind.clone(),
@@ -215,8 +261,21 @@ impl PairingController {
                 },
                 self.db()?,
                 Some(self.handler.clone()),
+                None,
+                services,
             )
             .await?;
+            let forwards = match start_forwards(&bridge, &self.hub.config).await {
+                Ok(forwards) => forwards,
+                Err(e) => {
+                    bridge.shutdown().await;
+                    return Err(e);
+                }
+            };
+            *self.forward_views.lock().unwrap() =
+                forwards.status.iter().map(forward_view).collect();
+            *self.forwards.lock().unwrap() = Some(forwards);
+            *self.offered.lock().unwrap() = offered;
             let card = bridge.card();
             *self.host.lock().unwrap() = Some(HostCard {
                 short_id: short(&card.id),
@@ -234,6 +293,11 @@ impl PairingController {
         self.cancel_ticket();
         let bridge = self.bridge.lock().await.take();
         *self.host.lock().unwrap() = None;
+        self.forward_views.lock().unwrap().clear();
+        self.offered.lock().unwrap().clear();
+        if let Some(forwards) = self.forwards.lock().unwrap().take() {
+            forwards.abort();
+        }
         if let Some(bridge) = bridge {
             bridge.shutdown().await;
         }
@@ -387,6 +451,8 @@ impl PairingController {
         PairingSnapshot {
             running: host.is_some(),
             host,
+            services: self.offered.lock().unwrap().clone(),
+            forwards: self.forward_views.lock().unwrap().clone(),
             ticket: session.ticket.as_ref().map(|t| t.view.clone()),
             pending: session.pending.iter().map(pending_view).collect(),
             peers,
@@ -407,6 +473,15 @@ impl PairingController {
                 last_seen_at: p.last_seen_at,
             })
             .collect())
+    }
+}
+
+fn forward_view(f: &hq_bridge::ForwardStatus) -> ForwardView {
+    ForwardView {
+        service: f.service.clone(),
+        peer_short: short(&f.peer),
+        listen: f.listen.to_string(),
+        running_elsewhere: f.running_elsewhere,
     }
 }
 

@@ -18,10 +18,6 @@ const COMMANDS: &[&str] = &[
     "pairing_submit",
     "pairing_decline",
     "pairing_revoke",
-    "connect_status",
-    "connect_arm",
-    "connect_disarm",
-    "connect_sign_in_link",
 ];
 
 fn main() {

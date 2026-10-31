@@ -1,10 +1,12 @@
-//! Starting, stopping and watching the local `hq` host (`hq start all`).
+//! Starting, stopping and watching the local `hq` host: `hq start all`, or `hq host serve` (coding
+//! agents only) on a laptop whose HQ lives on a paired phone.
 //!
 //! The app owns exactly one thing here: the child process it started. It never runs `hq stop`
 //! (which kills by name and by port, and would take down a daemon or a session it did not
-//! start). A host that answers on the web port but is not this app's child is reported as
+//! start). A host that answers its probe but is not this app's child is reported as
 //! running elsewhere and cannot be stopped from here.
 
+use hq_core::config::{HOST_SOCKET_FILE, HqConfig};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -19,14 +21,22 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 const PROBE_READ_MAX: usize = 64;
 const HQ_BINARY: &str = "hq";
 
+/// How the app tells that a host is up, which depends on what it runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Probe {
+    /// `GET /health` on this web port (`hq start all`).
+    Health(u16),
+    /// A connection to the control socket (`hq host serve`, which has no web server).
+    Socket(PathBuf),
+}
+
 #[derive(Debug, Clone)]
 pub struct HostSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     /// Where the host's output goes. Created owner-only.
     pub log: PathBuf,
-    /// The web port the host answers `/health` on (`ws_port` in the HQ config).
-    pub health_port: u16,
+    pub probe: Probe,
     /// How long a stop waits after the polite signal before it kills what is left.
     pub stop_grace: Duration,
 }
@@ -37,8 +47,29 @@ impl HostSpec {
             program,
             args: vec!["start".into(), "all".into()],
             log,
-            health_port,
+            probe: Probe::Health(health_port),
             stop_grace: DEFAULT_STOP_GRACE,
+        }
+    }
+
+    /// `hq host serve`: the coding-agent host alone, for a laptop whose HQ is on a paired phone.
+    pub fn for_agents_only(program: PathBuf, log: PathBuf, socket: PathBuf) -> Self {
+        Self {
+            program,
+            args: vec!["host".into(), "serve".into()],
+            log,
+            probe: Probe::Socket(socket),
+            stop_grace: DEFAULT_STOP_GRACE,
+        }
+    }
+
+    /// The host this machine needs: agents only when it serves a hub, else all of HQ.
+    pub fn for_config(program: PathBuf, log: PathBuf, config: &HqConfig) -> Self {
+        if config.bridge.serves_hub() {
+            let socket = hq_core::config::native_host_dir().join(HOST_SOCKET_FILE);
+            Self::for_agents_only(program, log, socket)
+        } else {
+            Self::for_hq(program, log, config.ws_port)
         }
     }
 }
@@ -54,7 +85,7 @@ pub enum HostStatus {
     Running {
         pid: u32,
     },
-    /// Something answers on the web port that this app did not start.
+    /// Something answers where the host would that this app did not start.
     External,
     /// This app started it and it ended by itself.
     Exited {
@@ -113,7 +144,7 @@ impl HostController {
 
     pub async fn status(&self) -> HostStatus {
         let own = self.reap_and_pid();
-        let answering = probe_health(self.spec.health_port).await;
+        let answering = host_answers(&self.spec.probe).await;
         let last_exit = self.inner.lock().unwrap().last_exit;
         match own {
             Some(pid) if answering => HostStatus::Running { pid },
@@ -134,7 +165,7 @@ impl HostController {
         if self.reap_and_pid().is_some() {
             return Ok(self.status().await);
         }
-        if probe_health(self.spec.health_port).await {
+        if host_answers(&self.spec.probe).await {
             return Err(HostError::AlreadyRunning);
         }
         let child = spawn(&self.spec)?;
@@ -167,7 +198,7 @@ impl HostController {
             .reap_and_pid()
             .or_else(|| self.inner.lock().unwrap().group)
         else {
-            return if probe_health(self.spec.health_port).await {
+            return if host_answers(&self.spec.probe).await {
                 Err(HostError::NotOurs)
             } else {
                 // Nothing of ours is running; stopping also clears a note that it ended by itself.
@@ -287,6 +318,29 @@ fn group_alive(pid: u32) -> bool {
 
 #[cfg(not(unix))]
 fn group_alive(_pid: u32) -> bool {
+    false
+}
+
+/// Whether a host answers the way `probe` says.
+async fn host_answers(probe: &Probe) -> bool {
+    match probe {
+        Probe::Health(port) => probe_health(*port).await,
+        Probe::Socket(path) => probe_socket(path).await,
+    }
+}
+
+/// Whether something accepts a connection on the host's control socket. The connection is closed
+/// at once without a word, so nothing is asked of the host.
+#[cfg(unix)]
+async fn probe_socket(path: &Path) -> bool {
+    matches!(
+        tokio::time::timeout(PROBE_TIMEOUT, tokio::net::UnixStream::connect(path)).await,
+        Ok(Ok(_))
+    )
+}
+
+#[cfg(not(unix))]
+async fn probe_socket(_path: &Path) -> bool {
     false
 }
 
@@ -420,9 +474,103 @@ mod tests {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), script.into()],
             log: dir.join("logs").join("host.log"),
-            health_port,
+            probe: Probe::Health(health_port),
             stop_grace: Duration::from_millis(600),
         }
+    }
+
+    fn spec_for(config: &HqConfig) -> HostSpec {
+        HostSpec::for_config("hq".into(), "host.log".into(), config)
+    }
+
+    fn bridge(gate: bool, web_forward: bool) -> hq_core::config::BridgeServicesConfig {
+        hq_core::config::BridgeServicesConfig {
+            services: gate
+                .then(|| ("gate".to_string(), "127.0.0.1:7747".to_string()))
+                .into_iter()
+                .collect(),
+            forwards: web_forward
+                .then(|| hq_core::config::BridgeForward {
+                    peer: "abc".into(),
+                    service: "web".into(),
+                    listen: "127.0.0.1:47480".into(),
+                })
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn hub_config() -> HqConfig {
+        HqConfig {
+            bridge: bridge(true, true),
+            ..HqConfig::default()
+        }
+    }
+
+    #[test]
+    fn a_laptop_that_serves_a_hub_runs_only_the_agent_host() {
+        let hub = spec_for(&hub_config());
+        assert_eq!(hub.args, ["host", "serve"]);
+        let Probe::Socket(socket) = hub.probe else {
+            panic!("an agent-only host has no /health");
+        };
+        assert_eq!(
+            socket,
+            hq_core::config::native_host_dir().join(HOST_SOCKET_FILE)
+        );
+    }
+
+    #[test]
+    fn a_machine_without_a_hub_runs_all_of_hq() {
+        let mut config = HqConfig {
+            ws_port: 6001,
+            ..HqConfig::default()
+        };
+        let plain = spec_for(&config);
+        assert_eq!(plain.args, ["start", "all"]);
+        assert_eq!(plain.probe, Probe::Health(6001));
+        // Offering the gate without reaching a phone's web app is not a hub.
+        config.bridge = bridge(true, false);
+        assert_eq!(spec_for(&config).args, ["start", "all"]);
+    }
+
+    #[test]
+    fn the_socket_name_matches_the_host_s_own() {
+        let dir = Path::new("/run/hq/host");
+        assert_eq!(
+            dir.join(HOST_SOCKET_FILE),
+            hq_host::socket_path(dir),
+            "hq-core and hq-host disagree on the control socket's name"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_agent_host_is_up_while_its_socket_accepts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.sock");
+        let probe = Probe::Socket(path.clone());
+        assert!(!host_answers(&probe).await);
+        // A leftover file with nothing behind it is not a host. A closed listener is not used for
+        // this: another test's fork can hold its descriptor open for a moment.
+        std::fs::write(&path, b"").unwrap();
+        assert!(!host_answers(&probe).await);
+        std::fs::remove_file(&path).unwrap();
+        let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        assert!(host_answers(&probe).await);
+    }
+
+    #[tokio::test]
+    async fn a_socket_host_this_app_did_not_start_is_reported_and_never_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.sock");
+        let _listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let mut spec = spec(dir.path(), "sleep 60", 0);
+        spec.probe = Probe::Socket(path);
+        let host = HostController::new(spec);
+        assert_eq!(host.status().await, HostStatus::External);
+        assert!(matches!(host.start().await, Err(HostError::AlreadyRunning)));
+        assert!(matches!(host.stop().await, Err(HostError::NotOurs)));
     }
 
     fn alive(pid: i32) -> bool {

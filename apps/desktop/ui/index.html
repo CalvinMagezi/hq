@@ -12,14 +12,14 @@
     <nav aria-label="Sections">
       <button type="button" data-tab="host" aria-selected="true">Host</button>
       <button type="button" data-tab="devices" aria-selected="false">Devices</button>
-      <button type="button" data-tab="claude" aria-selected="false">Connect Claude</button>
+      <button type="button" data-tab="claude" aria-selected="false">Claude</button>
     </nav>
   </header>
 
   <main>
     <section id="tab-host">
       <h2>Host</h2>
-      <p>The HQ host runs your agents, tasks and notes on this Mac. This app starts it only when you press Start, and stops what it started when you quit. It never starts anything when you log in.</p>
+      <p>The Start button runs HQ on this Mac. When this Mac works with the HQ on your phone, it starts only the coding agents here, since HQ itself is on the phone. This app starts it only when you press Start, and stops what it started when you quit. It never starts anything when you log in.</p>
       <p class="row"><span id="host-state" class="badge">Checking</span><span id="host-detail" class="muted"></span></p>
       <p class="row">
         <button type="button" id="host-start">Start host</button>
@@ -52,6 +52,11 @@
 
         <div id="pending"></div>
 
+        <div id="forwards-block" hidden>
+          <h3>Shared with paired devices</h3>
+          <ul id="forwards" class="list"></ul>
+        </div>
+
         <h3>Paired devices</h3>
         <ul id="peers" class="list"></ul>
         <p id="peers-empty" class="muted">No devices paired yet.</p>
@@ -60,23 +65,8 @@
     </section>
 
     <section id="tab-claude" hidden>
-      <h2>Connect Claude</h2>
-      <p id="claude-state" class="row"></p>
-      <div id="claude-url-block" hidden>
-        <p>Add this address in claude.ai under Settings, Connectors.</p>
-        <p class="row"><code id="claude-url" class="link"></code><button type="button" id="copy-url">Copy</button></p>
-      </div>
-      <ul id="claude-notes" class="notes"></ul>
-      <p class="row">
-        <button type="button" id="arm">Allow a new connection</button>
-        <button type="button" id="disarm">Close the window</button>
-      </p>
-      <p id="armed" class="muted"></p>
-      <h3>Consent on this Mac</h3>
-      <p>The consent page is served on <code id="local-consent"></code>. To approve there, sign that browser in first.</p>
-      <p class="row"><button type="button" id="signin">Get a sign-in link</button></p>
-      <p id="signin-out" class="row" hidden><code id="signin-link" class="link"></code><button type="button" id="open-signin">Open in browser</button></p>
-      <p id="claude-error" class="error" role="alert"></p>
+      <h2>Claude</h2>
+      <p>Claude Code and Claude Desktop on this laptop reach HQ through the app.</p>
     </section>
   </main>
 

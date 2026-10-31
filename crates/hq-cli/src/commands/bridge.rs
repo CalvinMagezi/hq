@@ -5,13 +5,12 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use hq_bridge::{
-    Bridge, BridgeConfig, EdgeDoor, EndpointId, JoinResult, RelayMode, Services, Ticket, Tuning,
-    code::printable, echo, echo_handler, qr, run_forward,
+    Bridge, BridgeConfig, EdgeDoor, EndpointId, JoinResult, RelayMode, Ticket, Tuning,
+    code::printable, echo, echo_handler, qr,
 };
 use hq_core::config::{DoorListen, DoorTarget, HqConfig};
 use hq_db::{Database, bridge as peers};
 use std::{
-    collections::BTreeMap,
     net::SocketAddr,
     path::PathBuf,
     time::{Duration, Instant},
@@ -216,44 +215,22 @@ fn edge_door_with(net: &NetArgs, config: Option<&HqConfig>) -> Result<Option<Edg
     Ok(Some(EdgeDoor::new(target)))
 }
 
-/// The services in `bridge.services`, checked, or `None` when there are none. A service may not
-/// lead to the main web port: paired devices get the web app through `bridge.web_listen`, the door
-/// that keeps the connector's paths and credentials out.
-fn bridge_services(config: Option<&HqConfig>) -> Result<Option<Services>> {
-    let Some(config) = config else {
-        return Ok(None);
-    };
-    let targets = config.bridge.services().map_err(|e| anyhow!(e))?;
-    if targets.is_empty() {
-        return Ok(None);
-    }
-    let mut out = BTreeMap::new();
-    for (name, target) in targets {
-        let target = match target {
-            DoorTarget::Unix(path) => hq_bridge::DoorTarget::Unix(path),
-            DoorTarget::Tcp(addr) if addr.port() == config.ws_port => bail!(
-                "bridge.services.{name} leads to the web server's own port ({}); point it at bridge.web_listen",
-                config.ws_port
-            ),
-            DoorTarget::Tcp(addr) => hq_bridge::DoorTarget::Tcp(addr),
-        };
-        out.insert(name, target);
-    }
-    Ok(Some(Services::new(out)))
-}
-
-/// Opens every forward in `bridge.forwards` on this bridge. A port that cannot be bound fails the
-/// whole start, so a half-working setup is never mistaken for a working one.
+/// Opens every forward in `bridge.forwards` on this bridge and keeps them for as long as the
+/// process runs. A port that cannot be bound fails the whole start, so a half-working setup is
+/// never mistaken for a working one.
 async fn start_forwards(bridge: &Bridge, config: Option<&HqConfig>) -> Result<()> {
     let Some(config) = config else {
         return Ok(());
     };
-    for f in config.bridge.forwards().map_err(|e| anyhow!(e))? {
-        let listener = tokio::net::TcpListener::bind(f.listen)
-            .await
-            .with_context(|| format!("bridge.forwards: could not listen on {}", f.listen))?;
+    let forwards = hq_bridge::start_forwards(bridge, &config.bridge).await?;
+    for f in &forwards.status {
+        if f.running_elsewhere {
+            bail!(
+                "bridge.forwards: could not listen on {}: already in use",
+                f.listen
+            );
+        }
         eprintln!("Forwarding {} to {} on {}.", f.listen, f.service, f.peer);
-        tokio::spawn(run_forward(bridge.dialer(), f.peer, f.service, listener));
     }
     Ok(())
 }
@@ -267,7 +244,10 @@ async fn start(net: &NetArgs, db: Database, serve: bool) -> Result<Bridge> {
     let relay = relay_mode(&resolve_relay(&net.relay, &db)?)?;
     let door = if serve { edge_door(net)? } else { None };
     let services = if serve {
-        bridge_services(HqConfig::load().ok().as_ref())?
+        match HqConfig::load().ok() {
+            Some(c) => hq_bridge::services_from_config(&c.bridge, c.ws_port)?,
+            None => None,
+        }
     } else {
         None
     };
@@ -595,21 +575,6 @@ mod tests {
             .unwrap()
             .public();
         assert_eq!(hq_bridge::device_label(&id), hq_edge::device_label(&id));
-    }
-
-    #[test]
-    fn a_service_may_not_lead_to_the_main_web_port() {
-        let mut config = HqConfig::default();
-        assert!(bridge_services(Some(&config)).unwrap().is_none());
-        config.ws_port = 5678;
-        config.bridge.services =
-            BTreeMap::from([("web".to_string(), "127.0.0.1:5678".to_string())]);
-        assert!(bridge_services(Some(&config)).is_err());
-        config.bridge.services =
-            BTreeMap::from([("web".to_string(), "127.0.0.1:5690".to_string())]);
-        assert!(bridge_services(Some(&config)).unwrap().is_some());
-        config.bridge.services = BTreeMap::from([("web".to_string(), "0.0.0.0:5690".to_string())]);
-        assert!(bridge_services(Some(&config)).is_err());
     }
 
     #[test]

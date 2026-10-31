@@ -6,6 +6,7 @@ license.workspace = true
 description = "Native Bridge pairing: a one-time ticket, six typed digits, then reconnect by key over iroh"
 
 [dependencies]
+hq-core = { workspace = true }
 hq-db = { workspace = true }
 # Pinned exactly: the spike's lock file (the phone measurements in docs/plans/native-bridge/spike-f)
 # resolved 1.4.1, and iroh's API still moves between minor versions.
