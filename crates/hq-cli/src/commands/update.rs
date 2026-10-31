@@ -1,6 +1,6 @@
 //! `hq update`: thin wrapper over the `hq-update` crate.
 
-use clap::Args;
+use clap::{Args, Subcommand};
 #[cfg(unix)]
 use hq_update::cli::{BuildIdentity, CliArgs, Mode};
 
@@ -53,6 +53,54 @@ pub struct UpdateArgs {
     /// Update config file (default /etc/hq/update.conf)
     #[arg(long, value_name = "PATH")]
     conf: Option<std::path::PathBuf>,
+    #[command(subcommand)]
+    sub: Option<UpdateSub>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum UpdateSub {
+    /// Internal: exit 0 only when <SIG> is a valid signature by the release key over <FILE>. The
+    /// Android app checks its update manifest with it.
+    #[command(name = "verify-file", hide = true)]
+    VerifyFile {
+        file: std::path::PathBuf,
+        sig: std::path::PathBuf,
+    },
+}
+
+/// Largest file `verify-file` reads; a release manifest is a few hundred bytes.
+#[cfg(unix)]
+const VERIFY_FILE_MAX_BYTES: u64 = 1 << 20;
+
+/// Checks `sig_path` (a `.minisig`) over `file` against `key_text`, the trusted release key.
+#[cfg(unix)]
+fn verify_file(
+    key_text: Option<&str>,
+    file: &std::path::Path,
+    sig_path: &std::path::Path,
+) -> Result<(), String> {
+    use std::io::Read;
+    let key_text = key_text
+        .map(str::trim)
+        .filter(|k| !k.is_empty())
+        .ok_or("this build has no release key (build with HQ_UPDATE_PUBKEY)")?;
+    let key = hq_update::verify::parse_public_key(key_text).map_err(|e| e.to_string())?;
+    let read = |path: &std::path::Path| -> Result<Vec<u8>, String> {
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .and_then(|f| f.take(VERIFY_FILE_MAX_BYTES + 1).read_to_end(&mut bytes))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        if bytes.len() as u64 > VERIFY_FILE_MAX_BYTES {
+            return Err(format!("{} is too large to verify", path.display()));
+        }
+        Ok(bytes)
+    };
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    hq_update::verify::verify(&key, &name, &read(file)?, &read(sig_path)?)
+        .map_err(|e| e.to_string())
 }
 
 pub fn register_build_info() {
@@ -65,6 +113,10 @@ pub fn register_build_info() {
 
 #[cfg(not(unix))]
 pub async fn run(args: UpdateArgs) -> i32 {
+    if args.sub.is_some() {
+        eprintln!("`hq update verify-file` is not available on Windows");
+        return 1;
+    }
     windows::run(args.apply, args.json).await
 }
 
@@ -250,6 +302,15 @@ mod windows {
 
 #[cfg(unix)]
 pub async fn run(args: UpdateArgs) -> i32 {
+    if let Some(UpdateSub::VerifyFile { file, sig }) = &args.sub {
+        return match verify_file(EMBEDDED_PUBKEY, file, sig) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        };
+    }
     let mode = if args.apply {
         Mode::Apply
     } else if args.rollback {
@@ -293,5 +354,46 @@ pub fn run_db(args: &[String]) -> i32 {
             eprintln!("{e}");
             1
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod verify_file_tests {
+    use super::verify_file;
+
+    // A throwaway key made with `minisign -G -W`; its secret half was discarded.
+    const KEY: &str = "untrusted comment: minisign public key 42D1EE7A44CF7901\nRWQBec9Eeu7RQiMUD1cx2V5qHDo1rOjJxWe9Ekj5EOiaaRvN4eIL/uQJ\n";
+    const DATA: &str = "hq android update fixture\n";
+    const SIG: &str = "untrusted comment: signature from minisign secret key\nRUQBec9Eeu7RQjfpN0jJPgTNhf4IS8Z9rHnJhNF2sWnM0MD4Bi1cGvWuCSRHev2+BKJOqUoiHLVGuAWAZpTTzNP4Y2B9uCI6WQw=\ntrusted comment: hq release data.txt\nakFmS253BHLI4rdW4X7h/8HJxcGIwVSzilMAq+uRqns2Hpb04zv2QRzGYdBdgv7I3lzCS78//gtkYslPLXzpCA==\n";
+
+    fn run(key: Option<&str>, data: &str, sig: &str) -> Result<(), String> {
+        let dir = tempfile::tempdir().unwrap();
+        let (file, sig_file) = (
+            dir.path().join("data.txt"),
+            dir.path().join("data.txt.minisig"),
+        );
+        std::fs::write(&file, data).unwrap();
+        std::fs::write(&sig_file, sig).unwrap();
+        verify_file(key, &file, &sig_file)
+    }
+
+    #[test]
+    fn update_verify_file_accepts_a_real_minisign_signature() {
+        assert_eq!(run(Some(KEY), DATA, SIG), Ok(()));
+    }
+
+    #[test]
+    fn update_verify_file_refuses_a_changed_file_a_garbled_signature_and_a_missing_key() {
+        assert!(run(Some(KEY), "tampered\n", SIG).is_err());
+        assert!(run(Some(KEY), DATA, "not a signature").is_err());
+        assert!(run(None, DATA, SIG).is_err());
+        assert!(run(Some("  "), DATA, SIG).is_err());
+    }
+
+    #[test]
+    fn update_verify_file_refuses_a_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("none");
+        assert!(verify_file(Some(KEY), &missing, &missing).is_err());
     }
 }

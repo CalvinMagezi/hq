@@ -19,7 +19,7 @@ cd apps/android
 Build `hq` with `--features tunnel,bridge` (the CI recipe in `.github/workflows/android.yml`): the pairing
 screens need `hq bridge run`. Scanning a pairing code uses CameraX and ZXing (both Apache-2.0, no Google
 Play services). `-Phq.appId=<id>` builds a copy that installs beside the real app for a phone test with its
-own data; it is not for a release, and the default id is what updates the installed app.
+own data; it is not for a release, and the default id (`online.agenthq.app`) is what updates the installed app.
 
 The `hq` binary must be built from 2026-10-08 or later: the standby start passes `hq web --supervised`, which keeps the web token out of `hq.log`, and an older binary exits on the unknown flag.
 
@@ -28,26 +28,67 @@ missing or wrong, so it cannot produce an APK without hq or signed with the wron
 `~/.gradle/gradle.properties` if you build often; never in the repository.
 The APK is `app/build/outputs/apk/debug/app-debug.apk`. It is a debug build on purpose: the debuggable
 flag lets `adb shell run-as` place certificates, the Caddyfile and a restored vault in the app's
-private directory. The cost is that anyone with `adb` access to an unlocked phone can run as the app, so
-keep USB debugging off when you are not using it; a non-debuggable build comes with release work. Release signing, the final package id and an update channel are separate work
-(PERSONAL-INBOX-064).
+private directory (those `run-as` commands below work on this build only). The cost is that anyone
+with `adb` access to an unlocked phone can run as the app, so keep USB debugging off when you are not using it.
+A debug build only updates a phone that runs a debug build signed with the same `-Phq.keystore`
+(keep that file and back it up); without it Gradle uses its own debug key, which suits CI and a throwaway emulator.
 
-**Do not change the id or the key.** The package id stays `example.hq.spike` and the APK must be signed
-with the key the installed app was signed with (`-Phq.keystore`, alias `debug`): only an update with the
-same id and the same signature keeps the vault, the Keystore key and the signed-in sessions, and
-uninstalling deletes all three. **Keep the key file and back it up off this machine**: if it is lost, the
-phone can only be moved to a new key by uninstalling, which deletes its data. Keep `versionCode` the same
-or higher. Install with `adb install -r`
-only. Without `-Phq.keystore` Gradle signs with its own debug key, which is fine for CI and for a
-throwaway emulator but cannot update a phone that already runs the app.
+## Release builds and the update channel
+
+The app id is `online.agenthq.app` and is fixed. The code keeps the Kotlin package `example.hq.spike`
+(the `namespace`), which is not the app id; nothing reads the package name at run time, the shortcuts
+and the file provider follow `applicationId`. A phone that ran the old `example.hq.spike` build keeps
+that app beside this one; they do not share data.
+
+A **release** build (`:app:assembleRelease`) is what people install. It is not debuggable, is signed
+only with the release key, and needs `-Phq.bin`, `-Phq.caddy` and `-Phq.web` like a phone build.
+Gradle refuses to package it unless all three environment variables are set, and
+never signs it with a debug key:
+
+```bash
+HQ_RELEASE_KEYSTORE=<path to the .jks> HQ_RELEASE_KEYSTORE_PASSWORD=<password> HQ_RELEASE_KEY_ALIAS=<alias> \
+  ./gradlew :app:assembleRelease -Phq.bin=... -Phq.caddy=... -Phq.web=... \
+  -Phq.versionCode=<a number higher than the last release> -Phq.versionName=<version>
+```
+
+**Do not build a release locally.** CI does it: `.github/workflows/release.yml` builds `hq` for Android
+(`android.yml`), builds the web app and this APK in the `release` environment from the secrets
+`ANDROID_RELEASE_KEYSTORE_B64`, `ANDROID_RELEASE_KEYSTORE_PASSWORD` and `ANDROID_RELEASE_KEY_ALIAS`,
+and fails unless `scripts/release/android-check.sh` finds the release certificate and the app id.
+`versionCode` is the workflow run number and `versionName` the release version. A second job signs
+`android-channel.json` (`{ version, versionCode, url, sha256, minSdk }`) with the release's minisign key and
+attaches it, the APK (`agent-hq-android.apk`) and its `.sha256` to the release. The Promote workflow
+copies that manifest to `channel-stable`, which is the repository's latest release.
+
+The release certificate's SHA-256, which `apksigner verify --print-certs` must show on every release:
+
+```text
+FC:6B:48:A7:9F:DC:3D:EA:90:45:86:4B:7A:09:A0:F9:CC:99:2C:B2:40:66:A3:D6:43:91:FF:41:2A:07:29:5A
+```
+
+**The key is permanent.** Only an update signed by the same key as the installed app is accepted, and
+uninstalling deletes the vault, the Keystore key and the signed-in sessions. Keep a copy of the keystore
+off GitHub and off the build machine; if it is lost, every phone has to uninstall to move to a new key.
+
+### Updating inside the app
+
+Settings, Backup and about, has "Check for updates", and the hub service checks once a day while it
+runs. A check only records what it found; the owner taps "Install update", then Android asks to confirm.
+The app fetches `releases/latest/download/android-channel.json` and its `.minisig` (stable), or the
+`channel-main` release's copy when "Follow every build of main" is on. It trusts the manifest only
+when `libhq.so update verify-file` accepts the signature against the release key compiled into `hq`
+(no signature code in Kotlin), and trusts the APK only when its SHA-256 equals the one in that signed
+manifest and the manifest's URL is a release asset of this repository. A build is newer only by `versionCode`.
+Android itself then refuses an APK signed with any other key. The first install needs "Install unknown apps"
+turned on for the browser or file manager; the app asks once for its own updates.
 
 ## The native shell (in progress)
 
 `ShellActivity` is the Kotlin and Jetpack Compose app described by the mobile design (page 3): the same
 two bars on every main screen, five places (Notes, Tasks, a raised Chat button, Helpers, Inbox), Back
 from any place to Chat and then out. It is the launcher screen. The WebView app (`MainActivity`) stays as a
-fallback that only adb can open: `adb shell am start -n example.hq.spike/.MainActivity`. Open the shell on
-one place with `adb shell am start -n example.hq.spike/.ShellActivity --es place chat --ei badge 3` (no `-S`:
+fallback that only adb can open: `adb shell am start -n online.agenthq.app/.MainActivity`. Open the shell on
+one place with `adb shell am start -n online.agenthq.app/.ShellActivity --es place chat --ei badge 3` (no `-S`:
 that force-stops the app and hq with it).
 
 Sizes, colours and type come from the design's own stylesheet, one value for one value (dp are the
@@ -59,7 +100,7 @@ higher or lower than the board.
 
 ## Name, icon and notifications
 
-The launcher label is `AgentHQ` (the package id stays `example.hq.spike`, so an update keeps the data).
+The launcher label is `AgentHQ` (the package id is `online.agenthq.app`, so an update keeps the data).
 The icon reuses the web app's own artwork: the adaptive icon's foreground is `hq-icon-maskable-512.png`
 on the manifest's background colour, with a monochrome layer for themed icons, and the notification
 glyph is a white silhouette of the same mark at the five densities, so the launcher icon and the
@@ -103,9 +144,9 @@ ends its shell when the input ends, so anything chained after the `cat` does not
 # secrets.in: NAME=value per line; '#' comments; NAME= (empty) removes a stored name
 #   HQ_RELAY__TELEGRAM_TOKEN=...
 #   COPILOT_GITHUB_TOKEN=...
-adb exec-in "run-as example.hq.spike sh -c 'cat > files/secrets.tmp'" < secrets.in
-adb shell "run-as example.hq.spike sh -c 'chmod 600 files/secrets.tmp && mv files/secrets.tmp files/secrets.in'"
-adb shell "run-as example.hq.spike sh -c 'kill \$(pidof libhq.so)'"   # the supervisor restarts hq and imports
+adb exec-in "run-as online.agenthq.app sh -c 'cat > files/secrets.tmp'" < secrets.in
+adb shell "run-as online.agenthq.app sh -c 'chmod 600 files/secrets.tmp && mv files/secrets.tmp files/secrets.in'"
+adb shell "run-as online.agenthq.app sh -c 'kill \$(pidof libhq.so)'"   # the supervisor restarts hq and imports
 ```
 
 Only credentials are accepted: a name must end in `_API_KEY` or `_TOKEN`, and `HQ_WEB_AUTH_TOKEN` is

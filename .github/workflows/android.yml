@@ -3,7 +3,8 @@ name: Android
 # Builds hq for 64-bit Android (aarch64-linux-android) with the NDK and keeps the binary as a
 # workflow artifact. It also fails when a LOAD segment is not aligned to 16 KB pages, which Google
 # Play requires of native code in apps that target Android 15 or newer. The artifact is not
-# signed and not attached to a release: the phone app that packages it is separate work.
+# signed and not attached to a release by this workflow: release.yml calls it (workflow_call) and
+# packages the binary into the signed APK.
 # Runs on main, on pull requests that could break the Android build (dependencies, manifests, this
 # file), weekly, and by hand.
 on:
@@ -28,6 +29,12 @@ on:
   schedule:
     - cron: "17 5 * * 1"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: "Release version `hq --version` reports; empty for the Cargo.toml version"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -65,7 +72,11 @@ jobs:
       - name: Build hq
         env:
           HQ_GIT_SHA: ${{ github.sha }}
+          HQ_BUILD_VERSION: ${{ inputs.version }}
         run: |
+          # The release key is compiled in so `hq update verify-file` (the app's updater) can check signed channel manifests.
+          HQ_UPDATE_PUBKEY=$(sed -n 2p release/minisign.pub)
+          export HQ_UPDATE_PUBKEY
           tc="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export ANDROID_NDK_HOME="$NDK" ANDROID_NDK_ROOT="$NDK"
           export CC_aarch64_linux_android="$tc/aarch64-linux-android${ANDROID_API}-clang"
