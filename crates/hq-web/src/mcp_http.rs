@@ -144,6 +144,9 @@ async fn handle_mcp(
     dev_open: bool,
 ) -> Result<Json<Value>, Json<Value>> {
     let id = body.get("id").cloned().unwrap_or(Value::Null);
+    let secret = crate::auth::presented_secret(headers);
+    // A paired device's own key (minted at pairing) has the owner's full scope, whether or not
+    // any key is configured in the environment.
     let identity = crate::auth::resolve_identity(
         headers,
         keys.full.as_deref(),
@@ -151,8 +154,8 @@ async fn handle_mcp(
         keys.handoff.as_deref(),
         keys.tasks.as_deref(),
         dev_open,
-    );
-    let secret = crate::auth::presented_secret(headers);
+    )
+    .or_else(|| device_key_for_secret(state, secret).then_some(crate::auth::ApiIdentity::Full));
     // A launched agent's own token, when none of the configured keys matched.
     let session = match identity {
         Some(_) => None,
@@ -225,6 +228,12 @@ async fn handle_mcp(
         // `initialize` only on this error.
         _ => rpc_err(id, -32601, "Method not found"),
     })
+}
+
+/// Whether a presented secret is a live per-device key a paired machine got at setup
+/// (`hq/setup/1`). Revoking the device revokes it. Any failure is "no".
+pub(crate) fn device_key_for_secret(state: &WsState, secret: &str) -> bool {
+    !secret.is_empty() && hq_db::bridge_setup::device_key_live(&state.db, secret).unwrap_or(false)
 }
 
 /// The running session a presented secret belongs to, if it is a session token.
@@ -843,4 +852,56 @@ mod tests {
             assert_eq!(res["error"]["code"], -32001, "{secret}: {res}");
         }
     }
+
+    /// A paired device's key, on a server with no key in its environment (a phone).
+    #[tokio::test]
+    async fn a_paired_devices_key_has_full_scope_and_dies_with_the_pairing() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(Fake("config_manage", "config")));
+        let vault = tempfile::TempDir::new().unwrap();
+        let state = Arc::new(
+            WsState::new(vault.path().to_path_buf(), None).with_registry(Arc::new(registry)),
+        );
+        let key = paired_device_key(&state.db, "aa11");
+        let keys = Arc::new(McpKeys::default());
+        let app = axum::Router::new().route(
+            "/mcp",
+            axum::routing::post({
+                let state = state.clone();
+                move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
+                    let (state, keys) = (state.clone(), keys.clone());
+                    async move { respond(&state, &headers, body, &keys, false).await }
+                }
+            }),
+        );
+        let res = rpc(&app, Some(&key), call("config_manage")).await;
+        assert!(!call_failed(&res), "full scope runs config_manage: {res}");
+        let forged = hq_db::bridge_setup::new_device_key();
+        assert_eq!(
+            rpc(&app, Some(&forged), list()).await["error"]["code"],
+            -32001
+        );
+        hq_db::bridge::revoke(&state.db, "aa11").unwrap();
+        assert_eq!(rpc(&app, Some(&key), list()).await["error"]["code"], -32001);
+    }
+}
+
+/// A paired peer with a device key, as a hub's setup leaves it. Returns the key.
+#[cfg(test)]
+pub(crate) fn paired_device_key(db: &hq_db::Database, peer: &str) -> String {
+    use hq_db::bridge_setup as rows;
+    hq_db::bridge::add_peer(db, peer, "laptop", &[], &[]).unwrap();
+    let key = rows::new_device_key();
+    let setup = rows::Setup {
+        peer_id: peer.into(),
+        peer_role: rows::ROLE_MACHINE.into(),
+        peer_name: "laptop".into(),
+        local_port: 47_401,
+        peer_offers: true,
+        peer_port: Some(47_402),
+        mcp_key: None,
+        offered: false,
+    };
+    assert!(rows::record(db, &setup, Some(&key)).unwrap());
+    key
 }
