@@ -1,15 +1,21 @@
 //! The app's host against a joiner that does what `hq bridge join` does, through the Rust side:
 //! real iroh endpoints on loopback with no relay, the real migrated schema, the real gate.
 
-use hq_bridge::{Bridge, BridgeConfig, JoinResult, RelayMode, Ticket, Tuning, echo};
+use hq_bridge::{Bridge, BridgeConfig, JoinResult, RelayMode, Ticket, Tuning, echo, open_service};
+use hq_core::config::{BridgeForward, BridgeServicesConfig};
 use hq_db::Database;
 use hq_desktop::pairing::{
-    MAX_DIGIT_TRIES, PairingConfig, PairingController, PairingSnapshot, PendingView, Submitted,
+    HubServices, MAX_DIGIT_TRIES, PairingConfig, PairingController, PairingSnapshot, PendingView,
+    Submitted,
 };
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    sync::oneshot,
+};
 
 const GIVE_UP: Duration = Duration::from_secs(20);
 const GONE: Duration = Duration::from_secs(5);
@@ -27,6 +33,10 @@ struct App {
 }
 
 fn app_with(tuning: Tuning) -> App {
+    app_with_services(tuning, None)
+}
+
+fn app_with_services(tuning: Tuning, hub: Option<HubServices>) -> App {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     let host = PairingController::new(
@@ -41,6 +51,10 @@ fn app_with(tuning: Tuning) -> App {
         move || Ok(db.clone()),
         None,
     );
+    let host = match hub {
+        Some(hub) => host.with_services(hub),
+        None => host,
+    };
     App {
         host: Arc::new(host),
         _dir: dir,
@@ -353,4 +367,100 @@ async fn a_new_code_replaces_the_old_one_and_stopping_closes_everything() {
     app.host.stop().await;
     let snap = app.host.snapshot().await;
     assert!(!snap.running && snap.ticket.is_none());
+}
+
+/// A TCP echo server on loopback, standing in for the host gate.
+async fn echo_server(listener: TcpListener) {
+    while let Ok((mut tcp, _)) = listener.accept().await {
+        tokio::spawn(async move {
+            let mut buf = [0u8; 256];
+            while let Ok(n) = tcp.read(&mut buf).await {
+                if n == 0 || tcp.write_all(&buf[..n]).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+}
+
+#[tokio::test]
+async fn the_app_offers_its_gate_and_opens_forwards_and_reports_a_port_taken_elsewhere() {
+    let gate = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let gate_addr = gate.local_addr().unwrap();
+    tokio::spawn(echo_server(gate));
+    // A `hq bridge serve` on this machine already holds the second forward's port.
+    let taken = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let taken_addr = taken.local_addr().unwrap();
+    let free_addr = {
+        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        probe.local_addr().unwrap()
+    };
+    let forward = |service: &str, listen: std::net::SocketAddr| BridgeForward {
+        peer: "0123456789abcdef".into(),
+        service: service.into(),
+        listen: listen.to_string(),
+    };
+    let app = app_with_services(
+        Tuning {
+            ttl: Duration::from_secs(120),
+            ..Tuning::default()
+        },
+        Some(HubServices {
+            config: BridgeServicesConfig {
+                services: [("gate".to_string(), gate_addr.to_string())].into(),
+                forwards: vec![forward("web", free_addr), forward("other", taken_addr)],
+                ..Default::default()
+            },
+            ws_port: 1,
+        }),
+    );
+
+    let joiner = Arc::new(Joiner::new().await);
+    let ticket = app.host.begin().await.unwrap();
+    let (digits, outcome) = joiner.join(&ticket.link, tuning());
+    let request = first_request(&app.host).await;
+    let shown = within("the joiner's digits", digits).await.unwrap();
+    assert_eq!(
+        app.host.submit_digits(request.id, &shown),
+        Submitted::Accepted
+    );
+    within("the join to finish", outcome)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let snapshot = app.host.snapshot().await;
+    assert_eq!(snapshot.services, ["gate"]);
+    let web = &snapshot.forwards[0];
+    assert!(web.service == "web" && !web.running_elsewhere);
+    assert!(snapshot.forwards[1].running_elsewhere);
+    assert!(
+        TcpListener::bind(free_addr).await.is_err(),
+        "the forward does not listen"
+    );
+
+    // The phone reaches the laptop's gate by name, and the bytes come back from the gate.
+    let host_id = snapshot.host.unwrap().id;
+    let conn = within(
+        "the service connection",
+        joiner.bridge.dialer().connect_service(&host_id),
+    )
+    .await
+    .unwrap();
+    let (mut send, mut recv) = within("the gate service", open_service(&conn, "gate"))
+        .await
+        .unwrap();
+    send.write_all(b"ping").await.unwrap();
+    let mut back = [0u8; 4];
+    within("the echo", recv.read_exact(&mut back))
+        .await
+        .unwrap();
+    assert_eq!(&back, b"ping");
+
+    app.host.stop().await;
+    assert!(app.host.snapshot().await.forwards.is_empty());
+    assert!(
+        TcpListener::bind(free_addr).await.is_ok(),
+        "stopping left the forward's port bound"
+    );
 }

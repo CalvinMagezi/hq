@@ -10,11 +10,11 @@ around it.
 
 | Asset | Why it matters |
 |---|---|
-| A1. HQ's web token and API | The web app can do anything the owner can. The app holds the token to sign its own window in |
+| A1. HQ's web token and API | The web app can do anything the owner can. The app holds this machine's token to sign its own window in to a local HQ. A hub's token is never held by the app: the person signs in to the hub in the window |
 | A2. The paired list and the bridge key | Whoever is on the list can open streams to this machine's bridge service |
 | A3. The person's attention at the digits | Six digits typed by hand are the only thing between a stranger who has seen the QR code and the paired list |
 | A4. Processes the owner runs | The app starts and stops one host. It must never stop anything else |
-| A5. The consent approval | Approving a claude.ai connection hands a conversation access to HQ's tools |
+| A5. The laptop's host gate | A paired device that reaches the `gate` service can start coding agents on this machine. Only paired devices get that far, and the service leads to one fixed loopback address chosen here |
 
 ## 2. Listeners
 
@@ -23,10 +23,12 @@ ends when the app quits (or earlier, as noted).
 
 | Listener | Starts when | Binds | Accepts |
 |---|---|---|---|
-| The app's local web address (TCP, `proxy_port`, default 47474) | **Open HQ**, **Get a sign-in link**, or **Open in browser** | `127.0.0.1` only; any other address is refused at start | HTTP and the chat socket from this machine, only with this address as `Host`; forwards to HQ's web server on loopback |
+| The app's local web address (TCP, `proxy_port`, default 47474) | **Open HQ** | `127.0.0.1` only; any other address is refused at start | HTTP and the chat socket from this machine, only with this address as `Host`; forwards to one loopback upstream: HQ's web server on this machine, or the forward to a paired hub's web app when the config has one |
 | Pairing endpoint (UDP, `bridge_port`, default 47475) | **Switch on** (also **Show pairing code**) until **Switch off** or quit | Every interface | `hq/bridge/1` from devices on the paired list; everyone else is closed at the handshake |
 | One temporary pairing endpoint (UDP, random port) | **Show pairing code**, until the code is used, expires (10 min), is cancelled or replaced | Every interface | `hq/pair/<v>` from anyone holding the code, with the limits in PAIRING.md |
-| The host (`hq start all`, a child process) | **Start host**, or the launch setting | Whatever HQ's `web_bind` says | HQ's own listeners; documented elsewhere. The app talks to it over loopback only and refuses to run against a `web_bind` that is one non-loopback address |
+| Forwards (TCP, each `bridge.forwards` entry, for example `127.0.0.1:47480` to a phone's `web`) | **Switch on**, until **Switch off** or quit | Loopback only, checked when the config is read. A port another process already holds is not bound and is shown as "running elsewhere" | Connections from this machine; each becomes one stream to the named service of one paired device. Nothing else is reachable through it |
+| Services (over the pairing endpoint, `hq/svc/1`, each `bridge.services` entry such as `gate`) | **Switch on**, until **Switch off** or quit | No new socket: they ride the pairing endpoint above | A paired device names a service and the app connects to the loopback port or socket the config gives that name. The device never names an address, and a service may not lead to HQ's own web port |
+| The host (`hq start all` or, when this machine serves a hub, `hq host serve`; a child process) | **Start host**, or the launch setting | `hq start all`: whatever HQ's `web_bind` says. `hq host serve`: a private unix socket in the host directory, and the gate if `agent_host.gate_listen` is set | The host's own listeners; documented elsewhere. The app talks to `hq start all` over loopback only and refuses to run against a `web_bind` that is one non-loopback address. For `hq host serve` it only opens and closes a connection on the control socket to see that it is up |
 
 The pairing endpoints use UDP on all interfaces because a phone has to find the Mac on the local
 network. macOS asks the person for Local Network access the first time
@@ -59,8 +61,10 @@ guarded by the configuration test; it was not exercised with a real web view in 
 
 ## 4. The proxy
 
-A reverse proxy to one upstream, HQ's web server on loopback (`proxy.rs`). It is the origin the HQ
-window uses, and the address the consent page is served on.
+A reverse proxy to one upstream on loopback (`proxy.rs`): HQ's web server on this machine, or the
+forward to a paired hub's web app. It is the origin the HQ window uses. The Connect Claude screen
+and its commands are gone, so nothing in the app opens the consent page or mints a sign-in link
+any more; the proxy's routes and checks are unchanged.
 
 | Rule | Why |
 |---|---|
@@ -88,37 +92,27 @@ window uses, and the address the consent page is served on.
   the group a TERM and, once the 12-second grace is over, a KILL to whatever is left of the group,
   including members that ignored the TERM after the leader exited. Start and stop run one at a
   time, so two clicks cannot make two hosts. The app never runs `hq stop` (it kills by
-  name and by port) and never signals a pid it did not spawn. If something already answers
-  `/health` and is not the child, start and stop both refuse.
+  name and by port) and never signals a pid it did not spawn. If something already answers the
+  host's probe (`/health` for `hq start all`, the control socket for `hq host serve`) and is not
+  the child, start and stop both refuse.
 - **Quitting closes everything, and is held until it has.** Closing the last window, SIGTERM and
   ctrl-c close the host, the proxy and the pairing endpoints side by side, each with its own bound, so an open event stream or a slow relay cannot keep the host from being
   stopped. A second quit while that runs is held, not let through. On macOS Cmd-Q and logout end the event
   loop without asking first (the app delegate only implements `applicationWillTerminate:`), so the
   same close also runs on the final exit event, with the windows already gone. After the final
   stop nothing can start a host.
-- **The token reaches the HQ window in the URL fragment** (`/#token=…`), built in process: it never
+- **For a local HQ, the token reaches the HQ window in the URL fragment** (`/#token=…`); a paired
+  hub gets no token from the app. It is built in process: it never
   passes through argv, the environment, a log, or the proxy (a fragment is not sent). HQ's web app
-  moves it into the window's local storage and removes it from the address bar. The sign-in link
-  for another browser carries a one-time code, which does pass through `open`'s argv for an
-  instant; it is single use and lasts ten minutes.
+  moves it into the window's local storage and removes it from the address bar.
 - **The control window never receives the web token, the bridge key or the expected pairing
-  digits**; they stay in Rust. It does show the pairing link and a one-time sign-in code, which are
-  meant to be shown and are single use.
+  digits**; they stay in Rust. It does show the pairing link, which is meant to be shown and is
+  single use.
 - **Settings are owner-only, unknown keys are refused, and a corrupt file is an error**, not a
   silent reset.
 
 ## 6. Open items
 
-- **Consent on the app's own address is only half tested.** The proxy serves `/connect`, the
-  consent API and `/oauth/authorize`. `mcp_connector.authorize_url` now accepts plain http on
-  `127.0.0.1`, `[::1]` and `localhost` (nothing else), HQ matches the request's `Host` against it
-  before it answers `/oauth/authorize`, and the request cookie drops `Secure` on such an origin
-  because WebKit refuses a `Secure` cookie over http. What is not verified is whether claude.ai
-  sends a browser to such an `authorization_endpoint`; that is the W6 run
-  (`docs/plans/native-bridge/w6-claude-run.md`). The Connect Claude screen says when the
-  advertised origin is not the app's own.
-- **No address for Claude yet.** The connector address is whatever `mcp_connector.public_url`
-  says; the device name from `hq edge` and the TLS door come with W1 and W2.
 - **The web token is at rest in the HQ window's storage** (WebKit's data store for the app's
   identifier), like a signed-in browser. An XSS in HQ's web app would reach it; HQ's CSP is the
   defense.
@@ -127,7 +121,6 @@ window uses, and the address the consent page is served on.
   useless without the request id, but it is shared with whatever else listens on this machine.
 - **A host the app started survives a crash of the app** (its own process group). A clean quit
   stops it. A later launch shows it as "Running elsewhere", which cannot be stopped from the app.
-- **The sign-in code appears in `ps` for an instant** when opened in the browser.
 - **Downloads in the HQ window** (exports) are not handled; WebKit's default applies.
 - **The pairing endpoint is on every interface** while switched on. Only paired keys get past the
   handshake, and the service behind it is an echo until the host gate is built on it, but a
@@ -173,6 +166,9 @@ window uses, and the address the consent page is served on.
 | 25 | A host that crashed | Leaves group members behind and a status poll has already reaped the leader | The group is remembered until it is empty, and a stop still reaches it | `stop_reaches_group_members_after_a_status_poll_reaped_the_leader` |
 | 26 | A launch-time start, or a click, during quit | Starts a host that nothing will stop | The final stop closes the door under the same gate | `nothing_starts_after_the_final_stop` |
 | 27 | A slow relay or revoke | Freezes the screen's refresh | The refresh reads a cached card, not the bridge lock | `the_screen_refresh_does_not_wait_for_the_bridge_lock` |
+| 28 | A paired device | Asks for a service by a name that leads to HQ's own web port, or names an address | The config is refused at start; the device only names a service | `a_service_may_not_lead_to_the_main_web_port`, `the_app_offers_its_gate_and_opens_forwards_and_reports_a_port_taken_elsewhere` |
+| 29 | Another process on this machine | Holds a forward's port | The bridge still starts and the forward is shown as running elsewhere; stopping frees only the ports the app opened | `the_app_offers_its_gate_and_opens_forwards_and_reports_a_port_taken_elsewhere` |
+| 30 | A socket host this app did not start | Is stopped from the app | Start and stop refuse | `a_socket_host_this_app_did_not_start_is_reported_and_never_stopped` |
 
 ## 8. Guard checks
 

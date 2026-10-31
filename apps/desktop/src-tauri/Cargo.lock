@@ -1874,6 +1874,7 @@ version = "0.9.1"
 dependencies = [
  "anyhow",
  "data-encoding",
+ "hq-core",
  "hq-db",
  "iroh",
  "qrcodegen",

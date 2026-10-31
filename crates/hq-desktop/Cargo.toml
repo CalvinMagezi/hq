@@ -3,7 +3,7 @@ name = "hq-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Logic behind the desktop app: host lifecycle, device pairing, Connect Claude and the loopback proxy. No GUI dependencies; the Tauri shell in apps/desktop is a thin layer over it"
+description = "Logic behind the desktop app: host lifecycle, device pairing and the loopback proxy. No GUI dependencies; the Tauri shell in apps/desktop is a thin layer over it"
 
 [dependencies]
 hq-core = { workspace = true }
@@ -26,6 +26,7 @@ subtle = "2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+hq-host = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

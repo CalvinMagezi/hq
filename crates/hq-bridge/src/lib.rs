@@ -10,6 +10,7 @@ pub mod bridge;
 pub mod code;
 pub mod dns;
 pub mod door;
+pub mod from_config;
 pub mod host;
 pub mod join;
 pub mod key;
@@ -24,6 +25,7 @@ pub use bridge::{
     device_label, echo, echo_handler, path_kind,
 };
 pub use door::{DEFAULT_MAX_STREAMS, DoorTarget, EDGE_ALPN, EdgeDoor, LABEL_BYTES};
+pub use from_config::{ForwardStatus, Forwards, services_from_config, start_forwards};
 pub use host::{Joiner, OpenTicket, PairRequest, PairingSpec, Registrar, Tuning};
 pub use iroh::{EndpointId, RelayMode, endpoint::Connection};
 pub use join::{JoinOptions, JoinResult, Joined};
