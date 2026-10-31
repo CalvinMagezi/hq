@@ -13,6 +13,7 @@
 #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
 mod backend;
+pub mod bridge_hosts;
 #[cfg(unix)]
 mod native;
 #[cfg(unix)]
@@ -365,7 +366,17 @@ pub fn host(name: Option<&str>) -> anyhow::Result<Host> {
     let cfg = HqConfig::load()
         .context("loading config for hosts")?
         .agent_host;
-    build(&cfg, name.unwrap_or(&cfg.default_host))
+    let name = name.unwrap_or(&cfg.default_host).to_string();
+    build_with(&cfg, &bridge_hosts::load(), &name)
+}
+
+/// A host by name, among the configured ones and those bridge setup made; configured ones win.
+fn build_with(
+    cfg: &AgentHostConfig,
+    setup: &[bridge_hosts::SetupHost],
+    name: &str,
+) -> anyhow::Result<Host> {
+    build(&bridge_hosts::for_host(cfg, setup, name), name)
 }
 
 #[cfg(not(unix))]
@@ -504,9 +515,8 @@ pub fn local() -> anyhow::Result<Host> {
 /// Names of the hosts HQ may talk to: this machine's built-in host and every
 /// configured remote.
 pub fn native_host_names() -> Vec<String> {
-    let remotes = HqConfig::load()
-        .map(|c| c.agent_host.hosts)
-        .unwrap_or_default();
+    let cfg = HqConfig::load().map(|c| c.agent_host).unwrap_or_default();
+    let remotes = bridge_hosts::merged(cfg, &bridge_hosts::load()).hosts;
     std::iter::once(NATIVE_HOST.to_string())
         .chain(remotes.into_keys())
         .collect()
@@ -517,9 +527,10 @@ pub fn all_hosts() -> anyhow::Result<Vec<Host>> {
     let cfg = HqConfig::load()
         .context("loading config for hosts")?
         .agent_host;
+    let setup = bridge_hosts::load();
     let mut names = vec![NATIVE_HOST.to_string()];
-    names.extend(cfg.hosts.keys().cloned());
-    names.iter().map(|n| build(&cfg, n)).collect()
+    names.extend(bridge_hosts::merged(cfg.clone(), &setup).hosts.into_keys());
+    names.iter().map(|n| build_with(&cfg, &setup, n)).collect()
 }
 
 /// `command` is typed as written, so it may carry its own arguments or a `~`.
