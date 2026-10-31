@@ -131,10 +131,10 @@ jobs:
           - platform: linux-aarch64
             runner: ubuntu-22.04-arm
           - platform: darwin-aarch64
-            runner: macos-14
+            runner: macos-15
           # Intel Macs, cross-compiled on the Apple Silicon runner and checked under Rosetta.
           - platform: darwin-x86_64
-            runner: macos-14
+            runner: macos-15
             target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
