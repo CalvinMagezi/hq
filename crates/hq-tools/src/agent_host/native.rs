@@ -12,6 +12,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const HOST_NAME: &str = "native";
+
+/// Extra time `worktree.add` gets: a new worktree copies what `.worktreeinclude` names, and
+/// where the disk cannot clone, a large `node_modules` is a plain copy that can take minutes.
+const WORKTREE_COPY_MARGIN: Duration = Duration::from_secs(300);
 /// How long a prompt may go without the agent reacting before Enter is retried.
 const SUBMIT_CONFIRM: Duration = Duration::from_secs(10);
 /// How long `submit` waits for the typed text to echo before it starts counting output.
@@ -813,7 +817,11 @@ impl HostBackend for NativeBackend {
             }
             WorktreeBase::Detached(r) => params["detached"] = json!(r),
         }
-        let v = self.call("worktree.add", params)?;
+        let v = self.call_within(
+            "worktree.add",
+            params,
+            self.command_timeout + WORKTREE_COPY_MARGIN,
+        )?;
         serde_json::from_value(v).map_err(|e| bad_reply("worktree.add", e))
     }
 

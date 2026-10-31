@@ -96,6 +96,19 @@ fn wanted(main: &Path, include: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// Makes `dst`'s parent folder and checks it resolves inside `target`, so a tracked symlink in
+/// the path cannot send a copy outside the worktree.
+fn parent_inside(dst: &Path, target: &Path) -> Result<(), String> {
+    let parent = dst.parent().ok_or("no parent folder")?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let real = parent.canonicalize().map_err(|e| e.to_string())?;
+    let root = target.canonicalize().map_err(|e| e.to_string())?;
+    if real.starts_with(&root) {
+        return Ok(());
+    }
+    Err("its folder is a link out of the worktree".into())
+}
+
 /// Copies `src` to `dst` (which does not exist yet), as a clone where the file system can.
 fn copy_path(src: &Path, dst: &Path) -> Result<(), String> {
     let run = |flags: &[&str]| {
@@ -173,9 +186,7 @@ pub fn copy_included(main: &Path, target: &Path) -> Copied {
                 .push(format!("{rel}: already in the worktree"));
             continue;
         }
-        if let Some(parent) = dst.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
+        if let Err(e) = parent_inside(&dst, target) {
             done.not_copied.push(format!("{rel}: {e}"));
             continue;
         }
@@ -274,6 +285,21 @@ mod tests {
         assert!(done.copied.is_empty());
         assert_eq!(done.not_copied.len(), 1, "{done:?}");
         assert_eq!(fs::read_to_string(target.join(".env")).unwrap(), "MINE=1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_links_out_of_the_worktree_is_not_copied_into() {
+        let (tmp, main) = repo(Some("web/node_modules/\n"));
+        let target = tmp.path().join("wt");
+        git(&main, &["worktree", "add", "-q", target.to_str().unwrap()]);
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::remove_dir_all(target.join("web")).ok();
+        std::os::unix::fs::symlink(&outside, target.join("web")).unwrap();
+        let done = copy_included(&main, &target);
+        assert!(done.copied.is_empty(), "{done:?}");
+        assert!(!outside.join("node_modules").exists());
     }
 
     #[test]
