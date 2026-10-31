@@ -1,5 +1,7 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.ui.firstrun.FirstRunWords
+import example.hq.spike.ui.firstrun.StoredKeysPage
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -122,6 +124,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.CaptureWidgets -> "Capture and widgets"
     SettingsPage.SetupApp -> "Set up"
     SettingsPage.PairApp -> "Pair"
+    SettingsPage.StoredKeys -> FirstRunWords.KEYS_TITLE
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -157,6 +160,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.CaptureWidgets -> CaptureWidgets(ui, actions)
                 SettingsPage.SetupApp -> SetupApp(ui, actions)
                 SettingsPage.PairApp -> PairApp(ui, actions)
+                SettingsPage.StoredKeys -> StoredKeysPage()
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
                 SettingsPage.Computers -> ReadOnlyList(ui, "No computer is listed.") { Facts(SettingsWords.computerRows(ui.snap.settings)) }

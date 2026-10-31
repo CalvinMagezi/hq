@@ -133,12 +133,41 @@ can revoke it after months without opening it.
 
 ## Credentials and the mode flag
 
-Credentials are kept as ciphertext. Put the ones the instance needs in a plain file and push it into
-the app's private folder; the app encrypts each value under a key in the Android Keystore the next
-time it starts `hq`, then overwrites the file with zeros and deletes it. The web token is sealed the
-same way (a token left in plain preferences by an earlier build is moved on first use). Write to a
-temporary name and rename, so a restart cannot read half a file. Use two `adb` calls: `adb exec-in`
-ends its shell when the input ends, so anything chained after the `cat` does not run:
+A phone with nothing set up opens a first-run flow in the app (`ui/firstrun/`): an AI service key, optional
+Telegram and Discord bot tokens, then Start. Restoring a `.hqbak` backup is the other way in. Nothing
+needs `adb`. Each credential is encrypted under a key in the Android Keystore as soon as it is saved
+(`SecretStore.put`) and is never written to a plain file, a log line or an Intent extra. A name must end in
+`_API_KEY` or `_TOKEN` and follow the same rule as a `secrets.in` line (`HubConfig.entryProblem`), and
+`HQ_WEB_AUTH_TOKEN` is reserved. Settings, "Keys on this phone", lists the stored names (never the values) and
+adds, replaces or removes one; `hq` restarts to read the change.
+
+The flow saves only which step the person is on (`firstrun` preferences), never a credential, so it resumes
+after a kill. It is skipped when a model key is already stored or the app had already started `hq` before the
+flow existed, so an upgrade and an `adb`-provisioned build are not asked again. A stored
+`HQ_RELAY__TELEGRAM_TOKEN` or `HQ_RELAY__DISCORD_TOKEN` also sets that relay's `*_ENABLED` for the `hq` child
+(`HubConfig.relaySwitches`), because a relay stays off until switched on.
+
+"Other OpenAI-compatible" saves a `custom` backend (endpoint, optional model, `credential_env:
+CUSTOM_API_KEY`) in `files/hqhome/config.yaml` after a comment marker, and refuses to touch a file that
+already has its own top-level `backends:`.
+
+Restore (`ui/firstrun/Restore.kt`) copies the backup and the passphrase or key file into the cache, holds
+`hq` stopped (`HubService.holdHq`), runs `libhq.so restore <file> --into files/hqhome/.vault-restoring
+--passphrase-file|--key-file <file>` with a cleared environment, and swaps the folder in for `.vault` only on
+success. The passphrase is never an argument; its file is mode 0600 and is zeroed and deleted afterwards.
+
+The run mode: `hq` starts as standby (the web app only, no relays and no scheduler) and the Start step writes
+`active` into `files/mode` and restarts it to run `hq start all`; the notification then says so. Do that
+only on one machine at a time: a second daemon on a copy of the same data would poll the same bots
+and fire the same schedules.
+
+### For development builds
+
+`adb` still works, for a phone you drive from a computer. Put the credentials in a plain file and push it
+into the app's private folder; the app seals each value the next time it starts `hq`, then overwrites the
+file with zeros and deletes it. Write to a temporary name and rename, so a restart cannot read half a file.
+Use two `adb` calls: `adb exec-in` ends its shell when the input ends, so anything chained after the
+`cat` does not run:
 
 ```bash
 # secrets.in: NAME=value per line; '#' comments; NAME= (empty) removes a stored name
@@ -149,20 +178,14 @@ adb shell "run-as online.agenthq.app sh -c 'chmod 600 files/secrets.tmp && mv fi
 adb shell "run-as online.agenthq.app sh -c 'kill \$(pidof libhq.so)'"   # the supervisor restarts hq and imports
 ```
 
-Only credentials are accepted: a name must end in `_API_KEY` or `_TOKEN`, and `HQ_WEB_AUTH_TOKEN` is
-reserved. Switches that `hq` reads from the environment (`HQ_MCP_DEV_NO_AUTH`, `HQ_BIN_PATH`, ...)
-and non-secret settings such as chat ids belong in `files/hqhome/config.yaml`. The vault, config
-path, web token, bind address and port are applied after the credentials, so a credential cannot
-change them. A link, a directory or a file over 64 KiB at `secrets.in` is refused and removed
-without being read. A push that stops half way leaves `files/secrets.tmp` holding plaintext; delete it
-and push again. Stored names that the rule no longer allows (from an older build) are dropped when
-`hq` starts. `adb logcat -s HQHUB` shows the names imported, never a value.
-
-`hq` starts as standby: the web app only, no relays and no scheduler. Write `active` into
-`files/mode` and restart `hq` to run `hq start all` instead; the notification then says so, and `adb
-logcat -s HQHUB` shows `hq mode`. Do that
-only on one machine at a time: a second daemon on a copy of the same data would poll the same bots
-and fire the same schedules.
+Switches that `hq` reads from the environment (`HQ_MCP_DEV_NO_AUTH`, `HQ_BIN_PATH`, ...) and non-secret
+settings such as chat ids belong in `files/hqhome/config.yaml`. The vault, config path, web token, bind
+address and port are applied after the credentials, so a credential cannot change them. A link, a directory
+or a file over 64 KiB at `secrets.in` is refused and removed without being read. A push that stops half way
+leaves `files/secrets.tmp` holding plaintext; delete it and push again. Stored names that the rule no
+longer allows (from an older build) are dropped when `hq` starts. `adb logcat -s HQHUB` shows the names
+imported and `hq mode`, never a value. To run active from `adb`, write `active` into `files/mode` and
+restart `hq`.
 
 `./gradlew :app:testDebugUnitTest` runs the parsing and file checks (`HubConfigCheck`, wrapped in a JUnit
 test). `:app:lintDebug` runs Android Lint's `NewApi` check against `minSdk` 26, so a call to an Android

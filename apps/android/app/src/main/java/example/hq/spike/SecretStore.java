@@ -77,6 +77,40 @@ final class SecretStore {
     }
 
     /**
+     * Seals one credential, under the same rules as a line of secrets.in. The value goes from memory to the
+     * encrypted preferences and nowhere else. Throws IllegalArgumentException (the reason, never the value)
+     * for a name or value the rules refuse, and IllegalStateException when it could not be stored.
+     */
+    static synchronized void put(Context c, String name, String value) {
+        String problem = value.isEmpty() ? "value is empty" : HubConfig.entryProblem(name, value);
+        if (problem != null) throw new IllegalArgumentException(problem);
+        SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!prefs.contains(name) && prefs.getAll().size() >= HubConfig.MAX_SECRETS) throw new IllegalArgumentException("too many names");
+        try {
+            if (!prefs.edit().putString(name, seal(name, value)).commit()) throw new IOException("preferences not written");
+        } catch (GeneralSecurityException | IOException e) {
+            throw new IllegalStateException("key not stored: " + e.getClass().getSimpleName());
+        }
+    }
+
+    /** Forgets one stored credential; a name that is not stored is not an error. */
+    static synchronized void remove(Context c, String name) {
+        if (!c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(name).commit()) {
+            throw new IllegalStateException("key not removed");
+        }
+    }
+
+    /** The stored names a credential may have, sorted; never a value. */
+    static synchronized List<String> names(Context c) {
+        List<String> out = new ArrayList<>();
+        for (String name : c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll().keySet()) {
+            if (HubConfig.isCredentialName(name)) out.add(name);
+        }
+        java.util.Collections.sort(out);
+        return out;
+    }
+
+    /**
      * The token that gates the web app and API. It is kept sealed like the credentials; one left in
      * plain preferences by an earlier build is moved here on first use. A new token is made only when
      * the stored one is unreadable for good (the key was replaced or the value is damaged); any other

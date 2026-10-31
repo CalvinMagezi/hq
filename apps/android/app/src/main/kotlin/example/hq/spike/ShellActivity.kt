@@ -87,6 +87,13 @@ import example.hq.spike.ui.startup.DidNotStartScreen
 import example.hq.spike.ui.startup.StartingScreen
 import example.hq.spike.ui.startup.StartupWords
 import example.hq.spike.ui.startup.Startup
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import example.hq.spike.ui.firstrun.FirstRunHost
+import example.hq.spike.ui.firstrun.FirstRunLogic
+import example.hq.spike.ui.firstrun.FirstRunStore
+import example.hq.spike.ui.firstrun.FirstRunViewModel
+import example.hq.spike.ui.firstrun.Step
 import example.hq.spike.ui.startup.FirstLaunch
 import example.hq.spike.ui.usage.ChipTarget
 import example.hq.spike.ui.usage.UsageViewModel
@@ -110,6 +117,15 @@ class ShellActivity : ComponentActivity() {
     private val settings: SettingsViewModel by viewModels()
     private val usage: UsageViewModel by viewModels()
     private val search: SearchViewModel by viewModels()
+
+    /** Which first-run screen opens, decided in onCreate before hq starts (its first answer would mark the app as used). */
+    private var firstRunStep: Step? = null
+    private val firstRun: FirstRunViewModel by viewModels {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T = FirstRunViewModel(application, firstRunStep) as T
+        }
+    }
 
     /** A place asked for by a tapped notification while the app is already open; the shell takes it and clears it. */
     private var requested by mutableStateOf<Place?>(null)
@@ -213,6 +229,17 @@ class ShellActivity : ComponentActivity() {
         }
     } catch (e: java.io.IOException) { emptyList() }
 
+    /** The first-run screen to open, or null when this install is already set up. Saves Welcome at once, so a kill resumes it. */
+    private fun decideFirstRun(): Step? {
+        val store = FirstRunStore(this)
+        val saved = store.step()
+        val heard = FirstLaunch.isDone(this)
+        val needsKeyLookup = !store.done() && saved == null && !heard
+        val step = FirstRunLogic.decide(store.done(), saved, needsKeyLookup && KeyVault.hasModelKey(this), heard)
+        if (step != null && saved == null) store.save(step)
+        return step
+    }
+
     private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -224,6 +251,7 @@ class ShellActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // A rotation keeps the web page open; it loads again from its start.
         web = WebPage.fromSlug(savedInstanceState?.getString(STATE_WEB))
+        if (intent.getStringExtra("fixture") == null) firstRunStep = decideFirstRun()
         HqServices.ensureHubRunning(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -274,9 +302,11 @@ class ShellActivity : ComponentActivity() {
             }
             val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; "x-failed" -> Startup.DidNotStart; else -> null }
             val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
+            val firstRunUi by firstRun.ui.collectAsStateWithLifecycle()
             val startup = startupFixture ?: if (fixture == null) StartupWords.decide(status, firstDone) else Startup.None
             HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }) {
-                if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
+                if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
+                else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
                 else if (startup == Startup.DidNotStart) DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
                 else HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
