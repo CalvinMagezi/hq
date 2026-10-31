@@ -84,8 +84,8 @@ fn answer(is_notification: bool, reply: Json<Value>) -> axum::response::Response
 }
 
 /// The configured keys, one per scope.
-#[derive(Default)]
-struct McpKeys {
+#[derive(Default, Clone)]
+pub(crate) struct McpKeys {
     full: Option<String>,
     spark: Option<String>,
     handoff: Option<String>,
@@ -93,7 +93,7 @@ struct McpKeys {
 }
 
 impl McpKeys {
-    fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         Self {
             full: std::env::var("AGENTHQ_API_KEY").ok(),
             spark: std::env::var("AGENTHQ_SPARK_API_KEY").ok(),
@@ -104,6 +104,28 @@ impl McpKeys {
                 .ok()
                 .filter(|k| !k.trim().is_empty()),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_full(key: &str) -> Self {
+        Self {
+            full: Some(key.to_string()),
+            ..Self::default()
+        }
+    }
+
+    /// Whether the request carries one of these keys. Session tokens, connector grants and the
+    /// development switch count for nothing here.
+    pub(crate) fn presented(&self, headers: &axum::http::HeaderMap) -> bool {
+        crate::auth::resolve_identity(
+            headers,
+            self.full.as_deref(),
+            self.spark.as_deref(),
+            self.handoff.as_deref(),
+            self.tasks.as_deref(),
+            false,
+        )
+        .is_some()
     }
 
     fn none_configured(&self) -> bool {
@@ -206,7 +228,7 @@ async fn handle_mcp(
 }
 
 /// The running session a presented secret belongs to, if it is a session token.
-fn session_for_secret(state: &WsState, secret: &str) -> Option<String> {
+pub(crate) fn session_for_secret(state: &WsState, secret: &str) -> Option<String> {
     if secret.is_empty() {
         return None;
     }

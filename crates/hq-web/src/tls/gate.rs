@@ -63,7 +63,7 @@ pub(crate) fn not_found() -> Response {
 /// Headers a proxy in front of HQ would add, and those HQ reads as "this caller is local" or as
 /// an identity handed over by a tunnel. A client of this door chooses what it sends, so none of
 /// them is believed.
-const STRIPPED_HEADERS: [&str; 10] = [
+pub(crate) const STRIPPED_HEADERS: [&str; 10] = [
     "forwarded",
     "x-forwarded-for",
     "x-forwarded-host",

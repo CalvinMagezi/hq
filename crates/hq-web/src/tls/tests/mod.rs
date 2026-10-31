@@ -3,5 +3,5 @@ mod chain;
 mod door;
 mod doors;
 mod pebble;
-mod support;
+pub(crate) mod support;
 mod test_ca;

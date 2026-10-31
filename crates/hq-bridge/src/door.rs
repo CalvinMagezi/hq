@@ -29,7 +29,7 @@ use tokio::{
 };
 
 /// How often an open connection checks that its peer is still the registered edge.
-const RECHECK: Duration = Duration::from_secs(1);
+pub(crate) const RECHECK: Duration = Duration::from_secs(1);
 
 use crate::bridge::{Live, LiveGuard, REJECT_REVOKED, still_edge};
 
@@ -82,15 +82,7 @@ impl EdgeDoor {
     /// The edge may be pointed at the connector's door and nowhere else: an absolute socket path,
     /// or a loopback address with a fixed port, and a stream cap the semaphore can hold.
     pub fn validate(&self) -> Result<()> {
-        match &self.target {
-            DoorTarget::Unix(path) if !path.is_absolute() || path.file_name().is_none() => {
-                bail!("the edge door must be an absolute socket path")
-            }
-            DoorTarget::Tcp(addr) if !addr.ip().is_loopback() || addr.port() == 0 => {
-                bail!("the edge door must be a loopback address with a fixed port")
-            }
-            _ => {}
-        }
+        check_target(&self.target, "the edge door")?;
         if self.recheck.is_zero() {
             bail!("the edge door's recheck interval must not be zero");
         }
@@ -101,6 +93,20 @@ impl EdgeDoor {
             );
         }
         Ok(())
+    }
+}
+
+/// A pipe may lead to an absolute socket path or a loopback address with a fixed port, nothing
+/// else on this machine and nothing off it.
+pub(crate) fn check_target(target: &DoorTarget, what: &str) -> Result<()> {
+    match target {
+        DoorTarget::Unix(path) if !path.is_absolute() || path.file_name().is_none() => {
+            bail!("{what} must be an absolute socket path")
+        }
+        DoorTarget::Tcp(addr) if !addr.ip().is_loopback() || addr.port() == 0 => {
+            bail!("{what} must be a loopback address with a fixed port")
+        }
+        _ => Ok(()),
     }
 }
 
@@ -177,45 +183,68 @@ impl ProtocolHandler for EdgeService {
 /// Connects to the door and copies both ways until both directions end. A door that does not
 /// answer closes the stream at once.
 async fn forward(send: SendStream, recv: RecvStream, target: &DoorTarget) {
+    if let Some(conn) = connect(target).await {
+        conn.pipe(send, recv, IDLE).await;
+    }
+}
+
+/// A connection to a loopback target, either kind.
+pub(crate) enum Local {
+    Tcp(TcpStream),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixStream),
+}
+
+impl Local {
+    pub(crate) async fn pipe(self, send: SendStream, recv: RecvStream, idle: Duration) {
+        match self {
+            Self::Tcp(tcp) => pipe(send, recv, tcp, idle).await,
+            #[cfg(unix)]
+            Self::Unix(unix) => pipe(send, recv, unix, idle).await,
+        }
+    }
+}
+
+/// Connects to `target` on this machine, or `None` if it does not answer in time.
+pub(crate) async fn connect(target: &DoorTarget) -> Option<Local> {
     match target {
         DoorTarget::Tcp(addr) => {
             let connected = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(addr)).await;
-            let Ok(Ok(tcp)) = connected else { return };
+            let tcp = connected.ok()?.ok()?;
             let _ = tcp.set_nodelay(true);
-            pipe(send, recv, tcp).await;
+            Some(Local::Tcp(tcp))
         }
         #[cfg(unix)]
         DoorTarget::Unix(path) => {
             let connected =
                 tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::UnixStream::connect(path)).await;
-            let Ok(Ok(unix)) = connected else { return };
-            pipe(send, recv, unix).await;
+            Some(Local::Unix(connected.ok()?.ok()?))
         }
         #[cfg(not(unix))]
-        DoorTarget::Unix(_) => {}
+        DoorTarget::Unix(_) => None,
     }
 }
 
-async fn pipe<S>(send: SendStream, recv: RecvStream, door: S)
+pub(crate) async fn pipe<S>(send: SendStream, recv: RecvStream, door: S, idle: Duration)
 where
     S: AsyncRead + AsyncWrite + Send + Unpin,
 {
     let (door_read, door_write) = tokio::io::split(door);
-    let up = copy_until_idle(recv, door_write);
-    let down = copy_until_idle(door_read, send);
+    let up = copy_until_idle(recv, door_write, idle);
+    let down = copy_until_idle(door_read, send, idle);
     tokio::join!(up, down);
 }
 
-/// Copies `from` to `to` until `from` ends, either side fails, or no byte arrives for [`IDLE`].
+/// Copies `from` to `to` until `from` ends, either side fails, or no byte arrives for `idle`.
 /// The writer is shut down at the end, so the other side sees the end of the data.
-async fn copy_until_idle<R, W>(mut from: R, mut to: W)
+async fn copy_until_idle<R, W>(mut from: R, mut to: W, idle: Duration)
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
     let mut buf = vec![0u8; CHUNK];
     loop {
-        match tokio::time::timeout(IDLE, from.read(&mut buf)).await {
+        match tokio::time::timeout(idle, from.read(&mut buf)).await {
             Ok(Ok(n)) if n > 0 => {
                 if to.write_all(&buf[..n]).await.is_err() {
                     break;
