@@ -1,6 +1,6 @@
 # Pairing configures everything
 
-Status: design, for the owner's review (MOBILE-FIRST-002). Builds on `hq bridge` services and
+Status: approved by the owner on 2026-10-31 (MOBILE-FIRST-002). Builds on `hq bridge` services and
 forwards (PR #321) and on what test zero had to do by hand on 2026-10-31.
 
 ## The problem
@@ -107,10 +107,7 @@ Revoking a peer, from either side, the app, the CLI or the desktop app, removes 
 - Choosing the relay (MOBILE-FIRST-006).
 - The desktop app's buttons for this. It calls the same library afterwards.
 
-## Open questions for the owner
+## Decisions (owner, 2026-10-31)
 
-1. **Should a laptop that runs its own full HQ** (not only agents) **pair as a hub?** Two hubs would
-   then sync nothing and only see each other. Proposed: yes, peers with no setup.
-2. **Per-device MCP keys:** full scope by default, or the tasks scope unless the owner widens it?
-   Proposed: full, since the laptop is the owner's own machine and agents get their own narrow
-   session tokens anyway.
+1. A laptop that runs its own full HQ pairs as a hub. Two hubs are peers with no setup.
+2. Per-device MCP keys have the owner's full scope. Agents still get their own narrow session tokens.
