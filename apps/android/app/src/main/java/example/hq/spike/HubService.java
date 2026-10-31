@@ -52,6 +52,9 @@ public class HubService extends Service {
     /** The run mode the hq child was started with, so a switch that raced a start can be seen and repeated. */
     private static volatile boolean childActive;
     private static volatile Process caddyProc;
+    /** While true the supervisor does not start hq: a restore is replacing the vault it would hold open. */
+    private static volatile boolean held;
+    private static final long HELD_POLL_MS = 1_000;
 
     /** The notification glyph, looked up by name because the build makes no R class. */
     static int statIcon(Context c) {
@@ -132,6 +135,33 @@ public class HubService extends Service {
         restartHq();
     }
 
+    /**
+     * Stops hq and keeps it stopped until [releaseHq], so the vault can be replaced. Blocks until the child has
+     * ended (at most about 25 s); call it off the main thread. Returns false if it could not be stopped.
+     */
+    public static boolean holdHq() {
+        held = true;
+        restartHq();
+        Process p = hqProc;
+        if (p == null) return true;
+        try {
+            if (!p.waitFor(FORCE_STOP_AFTER_MS + 5_000, TimeUnit.MILLISECONDS)) {
+                held = false;
+                return false;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            held = false;
+            return false;
+        }
+        return true;
+    }
+
+    /** Lets the supervisor start hq again, with whatever mode and credentials are stored by then. */
+    public static void releaseHq() {
+        held = false;
+    }
+
     /** True when the running hq child was started in Active mode. */
     public static boolean childActive() {
         return childActive;
@@ -196,7 +226,7 @@ public class HubService extends Service {
                 if (pb == null) {
                     if (!saidUnconfigured) Log.i(TAG, name + " not configured, waiting for its files");
                     saidUnconfigured = true;
-                    if (!pause(gen, BACKOFF_MAX_MS)) return;
+                    if (!pause(gen, held && isHq ? HELD_POLL_MS : BACKOFF_MAX_MS)) return;
                     continue;
                 }
                 long t0 = System.currentTimeMillis();
@@ -246,6 +276,7 @@ public class HubService extends Service {
      * they cannot change the vault, config, bind address or port.
      */
     private ProcessBuilder hqProcess() {
+        if (held) return null;
         SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
         WebAssets.sync(this);
         boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
@@ -269,7 +300,9 @@ public class HubService extends Service {
         fixed.put("HQ_WEB_AUTH_TOKEN", token(this));
         fixed.put("HQ_WEB_BIND", "127.0.0.1");
         fixed.put("HQ_WS_PORT", String.valueOf(PORT));
-        pb.environment().putAll(HubConfig.childEnv(SecretStore.load(this), fixed));
+        Map<String, String> secrets = SecretStore.load(this);
+        fixed.putAll(HubConfig.relaySwitches(secrets));
+        pb.environment().putAll(HubConfig.childEnv(secrets, fixed));
         pb.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(trimmed(new File(getFilesDir(), "hq.log"))));
         return pb;
     }
