@@ -209,7 +209,7 @@ A service name is lowercase letters, digits and `-`. A service leads to a loopba
 number or an absolute socket path, chosen by the machine that offers it: the other side only names
 it and never chooses an address. A service may not lead to the web server's own port; give paired
 devices the web app through `bridge.web_listen`, a second listener the web server opens only when
-the web token is set, which serves the web app, `/api`, `/ws` and `/mcp` with an API key, and never
+the web token is set, which serves the web app, `/api`, `/ws` and `/mcp` with an API key or a launched agent's session token, and never
 the claude.ai connector's OAuth paths. A forward listens on loopback only. The services use their
 own protocol name (`hq/svc/1`), offered only by a machine that has services, and admitted only from
 paired peers; revoking a peer closes its open streams.

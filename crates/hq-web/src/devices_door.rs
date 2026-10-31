@@ -2,8 +2,8 @@
 //! `web` service points at, so the owner's paired devices reach the web app, `/api`, `/ws` and
 //! `/mcp` by key over iroh. Everything arriving here looks like loopback, so it opens only when
 //! the web token is on and the `/mcp` development switch is off. The connector's OAuth paths never
-//! answer here, and `/mcp` takes a configured API key only: no connector grant and no session
-//! token, so the two doors share no credential (`docs/security/PAIRING.md`, section 14).
+//! answer here, and `/mcp` takes a configured API key or a launched agent's session token, never a
+//! connector grant, so the two doors share no credential (`docs/security/PAIRING.md`, section 14).
 
 use crate::WsState;
 use crate::mcp_http::McpKeys;
@@ -16,13 +16,14 @@ use std::{net::SocketAddr, sync::Arc};
 const FORWARDED_VALUE: &str = "by=hq-paired-devices";
 
 /// Wraps `router` for the paired-devices door: the connector's OAuth and discovery paths are not
-/// found, and `/mcp` needs one of `keys` before any handler runs.
-pub(crate) fn guard(router: Router, keys: McpKeys) -> Router {
+/// found, and `/mcp` needs one of `keys` or a session token before any handler runs.
+pub(crate) fn guard(router: Router, keys: McpKeys, state: Arc<WsState>) -> Router {
     router.layer(axum::middleware::from_fn(
         move |mut req: Request<Body>, next: Next| {
             let keys = keys.clone();
+            let state = state.clone();
             async move {
-                if !allowed(req.uri().path(), req.headers(), &keys) {
+                if !allowed(req.uri().path(), req.headers(), &keys, &state) {
                     return not_found();
                 }
                 // A paired device chooses its own headers: none that claim a proxy's or a
@@ -41,12 +42,20 @@ pub(crate) fn guard(router: Router, keys: McpKeys) -> Router {
     ))
 }
 
-fn allowed(path: &str, headers: &axum::http::HeaderMap, keys: &McpKeys) -> bool {
+fn allowed(path: &str, headers: &axum::http::HeaderMap, keys: &McpKeys, state: &WsState) -> bool {
     let under = |prefix: &str| path == prefix || path.starts_with(&format!("{prefix}/"));
     if under("/oauth") || under("/.well-known") {
         return false;
     }
-    !under("/mcp") || (path == "/mcp" && keys.presented(headers))
+    if !under("/mcp") {
+        return true;
+    }
+    // Agents launched on a paired machine call back with their own session token
+    // (`agent_host.agent_mcp_url`); a connector grant is never one.
+    path == "/mcp"
+        && (keys.presented(headers)
+            || crate::mcp_http::session_for_secret(state, crate::auth::presented_secret(headers))
+                .is_some())
 }
 
 /// Why the door stays shut, if it must.
@@ -76,7 +85,8 @@ pub(crate) fn spawn(state: &Arc<WsState>, router: Router) {
         if let Some(why) = refusal(&state, dev_switch) {
             return refuse(why);
         }
-        serve(listen, guard(router, McpKeys::from_env())).await;
+        let app = guard(router, McpKeys::from_env(), state.clone());
+        serve(listen, app).await;
     });
 }
 
@@ -105,10 +115,10 @@ mod tests {
     const KEY: &str = "owner-mcp-key";
     const TOOLS_LIST: &str = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
 
-    async fn door(router: Router) -> SocketAddr {
+    async fn door(router: Router, state: Arc<WsState>) -> SocketAddr {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = guard(router, McpKeys::with_full(KEY));
+        let app = guard(router, McpKeys::with_full(KEY), state);
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
@@ -127,11 +137,11 @@ mod tests {
     }
 
     /// Mutation: `allowed` returns true for everything. The OAuth loop then sees 200s and the
-    /// grant and session token reach `/mcp`.
+    /// connector's grant reaches `/mcp`.
     #[tokio::test]
     async fn serves_the_owners_api_and_keyed_mcp_and_nothing_of_the_connectors() {
         let w = world();
-        let addr = door(w.router.clone()).await;
+        let addr = door(w.router.clone(), w.state.clone()).await;
         let bearer = format!("Bearer {WEB_TOKEN}");
         assert_eq!(
             call(addr, "GET", "/api/tree", &[("authorization", &bearer)]).await,
@@ -148,14 +158,29 @@ mod tests {
             .db
             .with_conn(|c| hq_db::session_tokens::mint(c, "sess-1"))
             .unwrap();
-        for secret in [grant.access_token.as_str(), session.as_str(), WEB_TOKEN] {
+        // A launched agent's session token reaches the handler, which serves it.
+        let agent = format!("Bearer {session}");
+        assert_eq!(
+            call(addr, "POST", "/mcp", &[("authorization", &agent)]).await,
+            200
+        );
+        for secret in [grant.access_token.as_str(), WEB_TOKEN, "not-a-token"] {
             let bearer = format!("Bearer {secret}");
             assert_eq!(
                 call(addr, "POST", "/mcp", &[("authorization", &bearer)]).await,
                 404,
-                "a credential that is not an API key reached /mcp"
+                "a credential that is neither an API key nor a session token reached /mcp"
             );
         }
+        w.state
+            .db
+            .with_conn(|c| hq_db::session_tokens::revoke(c, "sess-1"))
+            .unwrap();
+        assert_eq!(
+            call(addr, "POST", "/mcp", &[("authorization", &agent)]).await,
+            404,
+            "a revoked session token reached /mcp"
+        );
         for path in [
             "/oauth/authorize",
             "/oauth/token",

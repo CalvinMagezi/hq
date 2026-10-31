@@ -228,7 +228,7 @@ async fn handle_mcp(
 }
 
 /// The running session a presented secret belongs to, if it is a session token.
-fn session_for_secret(state: &WsState, secret: &str) -> Option<String> {
+pub(crate) fn session_for_secret(state: &WsState, secret: &str) -> Option<String> {
     if secret.is_empty() {
         return None;
     }
