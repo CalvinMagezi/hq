@@ -35,7 +35,7 @@ env:
 jobs:
   macos-app:
     name: macOS app (clippy, build, unsigned)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     defaults:
       run:
