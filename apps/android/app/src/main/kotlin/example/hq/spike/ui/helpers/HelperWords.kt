@@ -1,5 +1,6 @@
 package example.hq.spike.ui.helpers
 
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.HelperRow
 import java.time.Duration
 import java.time.LocalDateTime
@@ -245,6 +246,9 @@ object HelperWords {
             else -> AnswerCheck.Ok
         }
     }
+
+    /** The dialog alert of helper [id], if HQ raised one: its answer goes through the server, not through the screen. */
+    fun decisionFor(rows: List<HelperRow>, id: String): HqClient.HelperDecision? = rows.firstOrNull { it.id == id }?.decision
 
     /** What to tell the owner when a check refuses the key, in the words used on every screen that answers a helper. */
     fun checkWords(check: AnswerCheck): String = when (check) {
