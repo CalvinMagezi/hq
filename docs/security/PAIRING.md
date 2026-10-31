@@ -39,7 +39,7 @@ alone. The same exchange, under another protocol name, registers a device with a
 ## 3. Listeners
 
 Nothing in `hq-bridge` starts on its own, and the `hq` binary does not call it at start-up.
-`hq bridge` exists only when built with the `bridge` feature (off by default, Unix only).
+`hq bridge` is in every Linux and macOS build (the default `bridge` feature); Windows builds leave it out.
 
 | Listener | Exists | Accepts | From |
 |---|---|---|---|
