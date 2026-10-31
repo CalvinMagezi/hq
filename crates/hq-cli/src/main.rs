@@ -540,6 +540,10 @@ enum Commands {
         /// Limit the server to a scope's tools: full (default) or tasks
         #[arg(long, value_enum, default_value = "full")]
         scope: commands::cursor_mcp_config::ServeScope,
+        /// Relay to the `remote_mcp` entry with this name instead of serving this machine's
+        /// vault (for a client that starts only stdio servers, such as Claude Desktop)
+        #[arg(long, conflicts_with = "scope")]
+        remote: Option<String>,
     },
 
     // ─── Background Daemon ───────────────────────────────────────────
@@ -1245,7 +1249,10 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             };
             commands::mcp::run(config, &sub, scope).await
         }
-        Commands::McpServe { scope } => commands::mcp_serve::run(config, scope).await,
+        Commands::McpServe {
+            remote: Some(name), ..
+        } => commands::mcp_relay::run(config, &name).await,
+        Commands::McpServe { scope, .. } => commands::mcp_serve::run(config, scope).await,
         Commands::Link { path } => {
             commands::mcp::run_deprecated(config, "link", "install", project_scope(path)).await
         }

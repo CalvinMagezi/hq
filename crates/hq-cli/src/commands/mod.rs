@@ -57,6 +57,7 @@ pub mod lite;
 pub mod logs;
 pub mod mailbox;
 pub mod mcp;
+pub mod mcp_relay;
 pub mod mcp_serve;
 pub mod memory;
 pub mod models;
