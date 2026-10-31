@@ -3847,7 +3847,10 @@ async fn a_writer_with_a_worktree_starts_there_and_leaves_the_folder_free() {
         ("agent prompt", OK.into(), None),
     ]);
     let req = SpawnRequest {
-        worktree: Some(crate::agent_host::WorktreeBase::Branch("feature".into())),
+        worktree: Some(crate::agent_host::WorktreeBase::Branch {
+            name: "feature".into(),
+            from: None,
+        }),
         ..spawn_req("claude-code", None, None, &[])
     };
     let report = spawn_on(vault.path(), &db, Arc::new(host), req)
@@ -3897,7 +3900,10 @@ async fn a_launch_that_fails_takes_the_new_worktree_with_it() {
         ("workspace create", String::new(), Some("no room")),
     ]);
     let req = SpawnRequest {
-        worktree: Some(crate::agent_host::WorktreeBase::Branch("feature".into())),
+        worktree: Some(crate::agent_host::WorktreeBase::Branch {
+            name: "feature".into(),
+            from: None,
+        }),
         ..spawn_req("claude-code", None, None, &[])
     };
     assert!(
@@ -4029,7 +4035,25 @@ fn worktree_and_owns_arguments_are_checked() {
     assert_eq!(checkout::parse_worktree(&json!({})).unwrap(), None);
     assert_eq!(
         checkout::parse_worktree(&json!({ "worktree": { "branch": "feat" } })).unwrap(),
-        Some(WorktreeBase::Branch("feat".into()))
+        Some(WorktreeBase::Branch {
+            name: "feat".into(),
+            from: None
+        })
+    );
+    assert_eq!(
+        checkout::parse_worktree(&json!({ "worktree": { "branch": "feat", "from": " lead " } }))
+            .unwrap(),
+        Some(WorktreeBase::Branch {
+            name: "feat".into(),
+            from: Some("lead".into())
+        })
+    );
+    assert_eq!(
+        checkout::parse_worktree(&json!({ "worktree": { "branch": "feat", "from": "" } })).unwrap(),
+        Some(WorktreeBase::Branch {
+            name: "feat".into(),
+            from: None
+        })
     );
     assert_eq!(
         checkout::parse_worktree(&json!({ "worktree": { "detached": "abc" } })).unwrap(),
@@ -4039,6 +4063,7 @@ fn worktree_and_owns_arguments_are_checked() {
         json!({ "worktree": {} }),
         json!({ "worktree": { "branch": "a", "detached": "b" } }),
         json!({ "worktree": { "branch": " " } }),
+        json!({ "worktree": { "detached": "abc", "from": "main" } }),
     ] {
         assert!(checkout::parse_worktree(&bad).is_err(), "{bad}");
     }
@@ -4717,4 +4742,98 @@ fn a_policy_summary_counts_since_the_last_one_and_quotes_only_rules() {
             .unwrap()
             .contains("1 allowed, 0 declined")
     );
+}
+
+#[tokio::test]
+async fn the_worktree_add_carries_from_only_when_it_is_set() {
+    use crate::agent_host::WorktreeBase;
+    let (dir, host) = fake_host(&[("worktree add", WORKTREE.into(), None)]);
+    let plain = WorktreeBase::Branch {
+        name: "feature".into(),
+        from: None,
+    };
+    host.worktree_add("/t", "hs-1", &plain).unwrap();
+    let from = WorktreeBase::Branch {
+        name: "feature".into(),
+        from: Some("lead".into()),
+    };
+    host.worktree_add("/t", "hs-2", &from).unwrap();
+    let calls = std::fs::read_to_string(dir.path().join("calls.log")).unwrap();
+    let lines: Vec<&str> = calls
+        .lines()
+        .filter(|l| l.contains("worktree add"))
+        .collect();
+    assert!(!lines[0].contains("--from"), "{calls}");
+    assert!(lines[1].contains("--branch feature --from lead"), "{calls}");
+}
+
+#[test]
+fn describe_lists_what_was_copied_into_a_new_worktree() {
+    let info = crate::agent_host::WorktreeInfo {
+        path: "/w".into(),
+        repo: "/t".into(),
+        branch: Some("feature".into()),
+        head: "abc".into(),
+        created: true,
+        copied: vec![".env".into()],
+        not_copied: vec![],
+    };
+    let base = crate::agent_host::WorktreeBase::Branch {
+        name: "feature".into(),
+        from: Some("lead".into()),
+    };
+    let said = checkout::describe(&info, &base);
+    assert_eq!(said["copied"], json!([".env"]));
+    assert_eq!(said["from"], "lead");
+    assert!(said.get("not_copied").is_none());
+}
+
+#[test]
+fn status_reports_the_worktrees_state_and_survives_a_host_error() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        hq_db::session_checkouts::record(
+            c,
+            &hq_db::session_checkouts::NewCheckout {
+                session_id: "hs-w",
+                folder: "/t",
+                worktree: Some("/h/HQ/worktrees/t/x"),
+                repo: Some("/t"),
+                branch: Some("feature"),
+                detached: None,
+                owns: &[],
+                head: Some("abc"),
+            },
+        )
+    })
+    .unwrap();
+    let reply = r#"{"branch":"feature","head":"def","changed":2,"ahead":1,"behind":0}"#;
+    let (dir, host) = fake_host(&[("worktree status", reply.into(), None)]);
+    let host: crate::agent_host::Host = Arc::new(host);
+    let mut view = json!({});
+    control::add_worktree_status_on(&db, "hs-w", || Ok(host), &mut view);
+    assert_eq!(view["worktree_status"]["changed"], 2);
+    assert_eq!(view["worktree_status"]["ahead"], 1);
+    assert_eq!(view["worktree_status"]["head"], "def");
+    let calls = std::fs::read_to_string(dir.path().join("calls.log")).unwrap();
+    assert!(
+        calls.contains("worktree status /h/HQ/worktrees/t/x"),
+        "{calls}"
+    );
+
+    let mut failed = json!({});
+    control::add_worktree_status_on(&db, "hs-w", || anyhow::bail!("down"), &mut failed);
+    assert!(failed.get("worktree_status").is_none());
+    assert_eq!(failed["worktree_status_error"], "down");
+}
+
+#[test]
+fn a_session_id_always_gets_the_same_port_in_range() {
+    let (a, b) = ("hs-claude-code-1", "hs-claude-code-2");
+    assert_eq!(launch::session_port(a), launch::session_port(a));
+    for id in [a, b] {
+        let p = launch::session_port(id);
+        assert!((20000..30000).contains(&p), "{p}");
+    }
+    assert_ne!(launch::session_port(a), launch::session_port(b));
 }

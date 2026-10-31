@@ -289,10 +289,41 @@ Two agents editing one working tree overwrite each other, and one running `git s
     repository at `<HQ folder>/worktrees/<repository>/<session>`, on that branch (made from the
     folder's current commit if it does not exist), and the agent starts there. A branch
     checked out in another worktree is refused, so a branch has one writer.
+  - `{"branch": "<name>", "from": "<ref>"}` makes a new branch at that ref instead of the
+    folder's current commit (`hq sessions spawn --branch <name> --from <ref>`). `from` is
+    ignored when the branch exists, and it is refused with `detached`, which is already at its
+    commit. Use it to start a worker at its lead's branch.
   - `{"detached": "<commit or ref>"}` for a reviewer, which gets that commit checked out
     detached.
   - The worktree counts as approved because it comes from a folder that already is. The reply
-    has `worktree` (`path`, `repo`, `branch` or `detached`, `head`).
+    has `worktree` (`path`, `repo`, `branch` or `detached`, `head`, and `from`, `copied` and
+    `not_copied` when they apply).
+  - **Files git ignores.** A new worktree has none of the repository's untracked, ignored files
+    (`.env`, `node_modules`). A `.worktreeinclude` file at the repository root names the ones to
+    bring along, in gitignore syntax:
+
+    ```
+    .env
+    .env.local
+    node_modules/
+    target/
+    ```
+
+    Only paths the file names and git ignores are copied, up to 500 paths, from the folder the
+    session was started in. They are copy-on-write clones on APFS, btrfs and XFS, and plain
+    copies elsewhere. The worktree's own `.worktreeinclude` (the one at the commit it starts
+    from) is read first, then the folder's, which may be untracked. A path the worktree already
+    has is left alone. Copying happens when the worktree is created, not on a retry or a resume
+    that finds it again. What was copied is in `worktree.copied`; paths that could not
+    be are in `worktree.not_copied`, and a failure never fails the launch.
+  - **A port per session.** Every session's environment has `HQ_PORT`, a number from 20000 to
+    29999 worked out from the session id, so two agents' dev servers do not collide. A restart
+    gets the same one.
+  - **Where it stands.** `harness_session_status` reports `worktree_status` (`changed` files,
+    `ahead` and `behind` the commit the session started at, `branch`, `head`) for a session with a
+    worktree still in place. If the host cannot say, the reply has `worktree_status_error`
+    instead. `harness_session_list` does the same for running sessions when passed
+    `worktree_status: true`, with one host call per session; without it the list makes none.
   - `agent_delegate` takes `worktree: true` for a branch named for the worker's sub-task
     (`hq/<task id>`), or the same object.
 - **Or paths it owns.** Without a worktree, a coding session (`purpose: code`) in a folder

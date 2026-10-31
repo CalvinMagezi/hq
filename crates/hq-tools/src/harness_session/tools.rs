@@ -200,7 +200,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any agent_host.harness_profiles). Coding agents: {}. General-purpose agents: {}.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::Coding).join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent. A general-purpose agent refuses code. monitor and review sessions never move their task's status." },
                 "model": { "type": "string", "description": "Model to start the agent on, passed with its CLI's --model flag (for example sonnet or gpt-5.5 for claude-code, cursor or codex). Omit for the agent's own default. Refused, before anything starts, for an agent with no model flag HQ knows. The result's `model` reports what was passed." },
-                "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
+                "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "from": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. {\"branch\": \"<name>\", \"from\": \"<ref>\"} starts a new branch at that ref instead (ignored when the branch exists). A new worktree gets the gitignored files the repository's .worktreeinclude names (such as .env, node_modules), copied as copy-on-write clones, listed in the reply's worktree.copied. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
                 "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to cwd, this session writes to. A coding session in a folder another coding session already writes in is refused unless both own paths that do not overlap (no owns means the whole folder). Use a worktree instead when they would overlap." },
                 "policy": { "type": "string", "description": "The command policy it runs under: builder or reviewer, one the owner configured under agent_host.command_policies, or none (every dialog goes to the owner). Default: builder for a coding session, reviewer for a review. A policy answers the dialogs it decides; see docs/AGENT_SESSIONS.md." },
                 "team": { "type": "string", "description": "A root session id: the new session joins that session's team as a worker under it, with the team's roster, messages between members, stop-with-root and limits. For the owner, a web chat and a claude.ai connection (on a team it started); an agent inside a session uses agent_delegate. A reviewer joining a team observes its running coding sessions unless observe names others." },
@@ -446,7 +446,8 @@ impl HqTool for HarnessSessionListTool {
             "type": "object",
             "properties": {
                 "status": { "type": "string", "description": "Optional filter: running, exited, stopped, orphaned" },
-                "task_id": { "type": "string", "description": "Only the sessions of this HQ task (id or display id); ignores status" }
+                "task_id": { "type": "string", "description": "Only the sessions of this HQ task (id or display id); ignores status" },
+                "worktree_status": { "type": "boolean", "description": "Default false. When true, each running session with a worktree also reports worktree_status (changed files, ahead and behind its start), one host call each." }
             }
         })
     }
@@ -462,10 +463,14 @@ impl HqTool for HarnessSessionListTool {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         let task = arg_str(&args, "task_id");
+        let with_worktrees = args
+            .get("worktree_status")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
             if task.is_empty() {
-                super::list(&db, status)
+                super::list_with(&db, status, with_worktrees)
             } else {
                 super::list_for_task(&db, &task)
             }
@@ -484,7 +489,7 @@ impl HqTool for HarnessSessionStatusTool {
         "harness_session_status"
     }
     fn description(&self) -> &str {
-        "Status of one harness session: registry row plus the live host agent status and whether its host is reachable."
+        "Status of one harness session: registry row plus the live host agent status and whether its host is reachable. A session with a live worktree also reports worktree_status (changed files, ahead and behind its start)."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -1137,7 +1142,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 "done_criteria": { "type": "string", "description": "Alias of acceptance" },
                 "harness": { "type": "string", "description": format!("One of: {}. A general-purpose agent ({}) refuses code work; give it purpose research, review or general.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
                 "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent." },
-                "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
+                "worktree": { "type": "object", "properties": { "branch": { "type": "string" }, "from": { "type": "string" }, "detached": { "type": "string" } }, "description": "Start in a git worktree of its own, under the host's HQ folder, so it never shares a working tree with another agent: {\"branch\": \"<name>\"} for a writer (made from the folder's current commit if it does not exist; refused while another worktree has it checked out), {\"detached\": \"<commit or ref>\"} for a reviewer. {\"branch\": \"<name>\", \"from\": \"<ref>\"} starts a new branch at that ref instead (ignored when the branch exists). A new worktree gets the gitignored files the repository's .worktreeinclude names (such as .env, node_modules), copied as copy-on-write clones, listed in the reply's worktree.copied. Removed at stop or exit when nothing is uncommitted; the branch keeps every commit." },
                 "owns": { "type": "array", "items": { "type": "string" }, "description": "Paths, relative to cwd, this session writes to. A coding session in a folder another coding session already writes in is refused unless both own paths that do not overlap (no owns means the whole folder). Use a worktree instead when they would overlap." },
                 "policy": { "type": "string", "description": "The command policy it runs under: builder or reviewer, one the owner configured under agent_host.command_policies, or none (every dialog goes to the owner). Default: builder for a coding session, reviewer for a review. A policy answers the dialogs it decides; see docs/AGENT_SESSIONS.md." },
                 "team": { "type": "string", "description": "A root session id: the new session joins that session's team as a worker under it, with the team's roster, messages between members, stop-with-root and limits. For the owner, a web chat and a claude.ai connection (on a team it started); an agent inside a session uses agent_delegate. A reviewer joining a team observes its running coding sessions unless observe names others." },

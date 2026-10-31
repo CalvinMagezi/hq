@@ -121,6 +121,9 @@ enum Commands {
         /// tree with another agent (spawn)
         #[arg(long)]
         branch: Option<String>,
+        /// Start a new --branch at this ref instead of the folder's current commit (spawn)
+        #[arg(long)]
+        from: Option<String>,
         /// A path, relative to --cwd, the session writes to; repeat for more (spawn)
         #[arg(long)]
         owns: Vec<String>,
@@ -1053,6 +1056,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             task,
             model,
             branch,
+            from,
             owns,
             policy,
             lines,
@@ -1071,6 +1075,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
                     task,
                     model,
                     branch,
+                    from,
                     owns,
                     policy,
                 },

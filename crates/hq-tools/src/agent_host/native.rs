@@ -2,8 +2,8 @@ use super::transport::Transport;
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, GitHead, Host,
     HostBackend, HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince,
-    PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved, bad_reply, shell_line,
-    validate_keys,
+    PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved, WorktreeStatus,
+    bad_reply, shell_line, validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -805,7 +805,12 @@ impl HostBackend for NativeBackend {
     ) -> Result<WorktreeInfo, AgentHostError> {
         let mut params = json!({ "repo": repo, "session": session });
         match base {
-            WorktreeBase::Branch(b) => params["branch"] = json!(b),
+            WorktreeBase::Branch { name, from } => {
+                params["branch"] = json!(name);
+                if let Some(from) = from {
+                    params["from"] = json!(from);
+                }
+            }
             WorktreeBase::Detached(r) => params["detached"] = json!(r),
         }
         let v = self.call("worktree.add", params)?;
@@ -815,6 +820,19 @@ impl HostBackend for NativeBackend {
     fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
         let v = self.call("worktree.remove", json!({ "path": path }))?;
         serde_json::from_value(v).map_err(|e| bad_reply("worktree.remove", e))
+    }
+
+    fn worktree_status(
+        &self,
+        path: &str,
+        against: Option<&str>,
+    ) -> Result<WorktreeStatus, AgentHostError> {
+        let mut params = json!({ "path": path });
+        if let Some(against) = against {
+            params["against"] = json!(against);
+        }
+        let v = self.call("worktree.status", params)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree.status", e))
     }
 
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
