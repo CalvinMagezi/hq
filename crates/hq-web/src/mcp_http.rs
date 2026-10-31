@@ -368,6 +368,26 @@ fn negotiated_version(request: &Value) -> &'static str {
         .unwrap_or(&PROTOCOL_VERSIONS[0])
 }
 
+/// A paired peer with a device key, as a hub's setup leaves it. Returns the key.
+#[cfg(test)]
+pub(crate) fn paired_device_key(db: &hq_db::Database, peer: &str) -> String {
+    use hq_db::bridge_setup as rows;
+    hq_db::bridge::add_peer(db, peer, "laptop", &[], &[]).unwrap();
+    let key = rows::new_device_key();
+    let setup = rows::Setup {
+        peer_id: peer.into(),
+        peer_role: rows::ROLE_MACHINE.into(),
+        peer_name: "laptop".into(),
+        local_port: 47_401,
+        peer_offers: true,
+        peer_port: Some(47_402),
+        mcp_key: None,
+        offered: false,
+    };
+    assert!(rows::record(db, &setup, Some(&key)).unwrap());
+    key
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -884,24 +904,4 @@ mod tests {
         hq_db::bridge::revoke(&state.db, "aa11").unwrap();
         assert_eq!(rpc(&app, Some(&key), list()).await["error"]["code"], -32001);
     }
-}
-
-/// A paired peer with a device key, as a hub's setup leaves it. Returns the key.
-#[cfg(test)]
-pub(crate) fn paired_device_key(db: &hq_db::Database, peer: &str) -> String {
-    use hq_db::bridge_setup as rows;
-    hq_db::bridge::add_peer(db, peer, "laptop", &[], &[]).unwrap();
-    let key = rows::new_device_key();
-    let setup = rows::Setup {
-        peer_id: peer.into(),
-        peer_role: rows::ROLE_MACHINE.into(),
-        peer_name: "laptop".into(),
-        local_port: 47_401,
-        peer_offers: true,
-        peer_port: Some(47_402),
-        mcp_key: None,
-        offered: false,
-    };
-    assert!(rows::record(db, &setup, Some(&key)).unwrap());
-    key
 }
