@@ -87,6 +87,25 @@ and `docs/security/NETWORK.md`, section 9.
 It turns on the `bridge` feature too (`--features tunnel,bridge`), which adds `hq bridge`, the QR
 pairing of `docs/PAIRING.md`. The app drives it through `hq bridge run`, described next.
 
+## Installing the APK without the Play Store
+
+Each release build of main also publishes a signed Android app: `agent-hq-android.apk` (app id
+`online.agenthq.app`) on the release page, with its `.sha256`. Download it on the phone from the
+GitHub Releases page and open it. Android asks once to allow "Install unknown apps" for the browser or
+file manager you used. Check the signing certificate with `apksigner verify --print-certs`; its SHA-256
+must be the one in `apps/android/README.md` and `docs/security/RELEASE_CHECKLIST.md`.
+
+After that the app updates itself: Settings, Backup and about, "Check for updates" (and once a day while
+the hub service runs) reads the signed `android-channel.json` of the stable channel, or of every main build
+if you turn on "Follow every build of main". The signature is checked by the `hq` inside the app against the
+release key, the APK against the hash in that signed file, and Android against the app's own signing key.
+You still confirm each install. How it is built and signed: `apps/android/README.md`.
+
+Google plans to require developers to be verified for apps installed outside the Play Store from 2026
+on certified devices, country by country. It is not enforced in Uganda before 2027. The project owner
+registers the app id and signing key before then, so these installs keep working; that is not done yet
+and nothing in the app depends on it today.
+
 ## The bridge on the phone
 
 The phone can pair with another machine of its owner by QR code and then be reached by key, with no
