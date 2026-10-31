@@ -23,6 +23,8 @@ pub struct Checkout {
     pub owns: Vec<String>,
     /// The last commit seen at a finished turn.
     pub last_head: Option<String>,
+    /// The commit it started at; a resume keeps the first one.
+    pub start_head: Option<String>,
     /// When its worktree was removed, if it was.
     pub removed_at: Option<String>,
 }
@@ -39,7 +41,7 @@ pub struct NewCheckout<'a> {
 }
 
 const COLS: &str =
-    "session_id, folder, worktree, repo, branch, detached, owns, last_head, removed_at";
+    "session_id, folder, worktree, repo, branch, detached, owns, last_head, removed_at, start_head";
 
 fn row(r: &rusqlite::Row) -> rusqlite::Result<Checkout> {
     let owns: String = r.get(6)?;
@@ -53,17 +55,19 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Checkout> {
         owns: serde_json::from_str(&owns).unwrap_or_default(),
         last_head: r.get(7)?,
         removed_at: r.get(8)?,
+        start_head: r.get(9)?,
     })
 }
 
 pub fn record(c: &Connection, n: &NewCheckout<'_>) -> Result<()> {
     c.execute(
         "INSERT INTO session_checkouts \
-         (session_id, folder, worktree, repo, branch, detached, owns, last_head) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+         (session_id, folder, worktree, repo, branch, detached, owns, last_head, start_head) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8) \
          ON CONFLICT(session_id) DO UPDATE SET folder = excluded.folder, \
          worktree = excluded.worktree, repo = excluded.repo, branch = excluded.branch, \
-         detached = excluded.detached, owns = excluded.owns, removed_at = NULL",
+         detached = excluded.detached, owns = excluded.owns, removed_at = NULL, \
+         start_head = COALESCE(start_head, excluded.start_head)",
         params![
             n.session_id,
             n.folder,
@@ -251,6 +255,26 @@ mod tests {
             assert!(got.removed_at.is_some());
             assert_eq!(got.branch.as_deref(), Some("feature"));
             assert_eq!(got.last_head.as_deref(), Some("bbb"));
+            assert_eq!(
+                got.start_head.as_deref(),
+                Some("aaa"),
+                "the start stays put"
+            );
+            // A resume records again at a later commit; the start is still the first one.
+            record(
+                c,
+                &NewCheckout {
+                    session_id: "hs-w",
+                    folder: "/w/app",
+                    worktree: Some("/h/HQ/worktrees/app/hs-w"),
+                    repo: Some("/w/app"),
+                    branch: Some("feature"),
+                    detached: None,
+                    owns: &[],
+                    head: Some("bbb"),
+                },
+            )?;
+            assert_eq!(get(c, "hs-w")?.unwrap().start_head.as_deref(), Some("aaa"));
             Ok(())
         })
         .unwrap();
