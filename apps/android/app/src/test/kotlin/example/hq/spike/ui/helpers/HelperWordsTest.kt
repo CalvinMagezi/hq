@@ -325,6 +325,41 @@ class HelperWordsTest {
         assertEquals("Finished 1 d ago", cards[1].line)
     }
 
+    private fun decisionRows(decision: String) = example.hq.spike.data.helperRows(
+        """{"sessions":[{"id":"h1","harness":"copilot","status":"running","agent_status":"blocked"$decision}]}""",
+    )
+
+    @Test fun anOpenDialogAlertIsReadFromTheList() {
+        val d = decisionRows(""","decision":{"item_id":"abc","seq":4,"question":"Run npm test?","options":[{"id":1,"label":"Yes","remember":false,"typed":false},{"id":2,"label":"Yes, and remember","remember":true,"typed":false}]}""")[0].decision!!
+        assertEquals("abc", d.itemId)
+        assertEquals("val_abc", d.notificationId)
+        assertEquals(4L, d.seq)
+        assertEquals("Run npm test?", d.question)
+        assertEquals(listOf("Yes", "Yes, and remember"), d.options.map { it.label })
+        assertEquals(listOf(false, true), d.options.map { it.remember })
+    }
+
+    @Test fun aHelperWithNoDialogAlertHasNoDecision() {
+        assertNull(decisionRows("")[0].decision)
+        assertNull(decisionRows(""","decision":null""")[0].decision)
+    }
+
+    @Test fun aMalformedDecisionIsIgnoredAndDoesNotBreakTheList() {
+        assertNull(decisionRows(""","decision":"x"""")[0].decision)
+        assertNull(decisionRows(""","decision":{"seq":4}""")[0].decision)
+        assertNull(decisionRows(""","decision":{"item_id":"abc"}""")[0].decision)
+        assertNull(decisionRows(""","decision":{"item_id":"","seq":4}""")[0].decision)
+        val odd = decisionRows(""","decision":{"item_id":"abc","seq":4,"options":["x",{"id":1,"label":"Yes"}]}""")[0].decision!!
+        assertEquals(listOf("Yes"), odd.options.map { it.label })
+    }
+
+    @Test fun aHelperWithADecisionIsAnsweredThroughItsDialogAndOneWithoutFallsBackToTheScreen() {
+        val rows = decisionRows(""","decision":{"item_id":"abc","seq":4,"options":[]}""") + listOf(row())
+        assertEquals("val_abc", HelperWords.decisionFor(rows, "h1")?.notificationId)
+        assertNull(HelperWords.decisionFor(rows, "nope"))
+        assertNull(HelperWords.decisionFor(decisionRows(""), "h1"))
+    }
+
     // A long command wraps over several rows: the head of it must be shown, and must be part of what is compared.
     private fun wrapped(head: String) = listOf(
         "Bash command",
