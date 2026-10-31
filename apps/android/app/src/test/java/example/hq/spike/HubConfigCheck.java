@@ -14,6 +14,7 @@ public class HubConfigCheck {
     public static void main(String[] args) throws Exception {
         parsing();
         rejections();
+        entries();
         environment();
         alerts();
         files();
@@ -79,6 +80,40 @@ public class HubConfigCheck {
         StringBuilder many = new StringBuilder();
         for (int i = 0; i <= HubConfig.MAX_SECRETS; i++) many.append("N").append(i).append("_TOKEN=").append(MARK).append('\n');
         rejected(many.toString(), "too many names");
+    }
+
+    // The app stores a credential under the same rule a secrets.in line must meet: one function decides both.
+    private static void entries() {
+        for (String name : new String[] {"OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "CUSTOM_API_KEY", "HQ_RELAY__TELEGRAM_TOKEN", "HQ_RELAY__DISCORD_TOKEN"}) {
+            assert HubConfig.entryProblem(name, "v") == null : name;
+        }
+        assert "name reserved for the app".equals(HubConfig.entryProblem("HQ_WEB_AUTH_TOKEN", "v"));
+        for (String name : new String[] {"LD_PRELOAD", "PATH", "lower_api_key", "HQ_RELAY__TELEGRAM_ENABLED", "", "A_TOKEN\n"}) {
+            assert "name not allowed".equals(HubConfig.entryProblem(name, "v")) : name;
+        }
+        assert "control character in value".equals(HubConfig.entryProblem("A_TOKEN", "a\nb"));
+        assert "value too long".equals(HubConfig.entryProblem("A_TOKEN", "x".repeat(HubConfig.MAX_VALUE_CHARS + 1)));
+        assert HubConfig.entryProblem("A_TOKEN", "") == null : "empty is the removal marker, so the name rule alone passes it";
+        for (String text : new String[] {"HQ_WEB_AUTH_TOKEN=v", "A_TOKEN=a\u0001b", "LD_PRELOAD=v"}) {
+            String name = text.substring(0, text.indexOf('='));
+            String value = text.substring(text.indexOf('=') + 1);
+            boolean fileAllows;
+            try {
+                HubConfig.parseSecrets(text);
+                fileAllows = true;
+            } catch (IllegalArgumentException e) {
+                fileAllows = false;
+            }
+            assert fileAllows == (HubConfig.entryProblem(name, value) == null) : text.substring(0, 6);
+        }
+        Map<String, String> tokens = new LinkedHashMap<>();
+        assert HubConfig.relaySwitches(tokens).isEmpty();
+        tokens.put("OPENROUTER_API_KEY", "k");
+        assert HubConfig.relaySwitches(tokens).isEmpty() : "a model key turns no relay on";
+        tokens.put("HQ_RELAY__TELEGRAM_TOKEN", "t");
+        assert HubConfig.relaySwitches(tokens).equals(Map.of("HQ_RELAY__TELEGRAM_ENABLED", "true"));
+        tokens.put("HQ_RELAY__DISCORD_TOKEN", "d");
+        assert HubConfig.relaySwitches(tokens).size() == 2;
     }
 
     private static void alerts() {
