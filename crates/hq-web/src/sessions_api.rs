@@ -281,6 +281,16 @@ fn non_empty(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// The dialog a session waits on, as a phone answers it: by this alert, never by the screen.
+fn decision_json(d: &hq_db::dialog_alerts::OpenDecision) -> Value {
+    json!({
+        "item_id": d.item_id,
+        "seq": d.alert.pending_seq,
+        "options": d.alert.options,
+        "question": d.alert.question,
+    })
+}
+
 /// Every session in the registry, with live status and host reachability.
 pub(crate) async fn list_all_handler(
     State(state): State<Arc<WsState>>,
@@ -296,6 +306,9 @@ pub(crate) async fn list_all_handler(
     let result = tokio::task::spawn_blocking(move || {
         let listed = harness::list_live(&db, &filter)?;
         let cfg = harness::agent_host_config();
+        // One query for the whole list, so a phone polling every helper does not hit the db per row.
+        let ids: Vec<String> = listed.iter().map(|(row, _)| row.id.clone()).collect();
+        let open = hq_db::dialog_alerts::open_for_sessions(&db, &ids)?;
         db.with_conn(|c| {
             let archived = registry::archived_ids(c)?;
             listed
@@ -304,6 +317,9 @@ pub(crate) async fn list_all_handler(
                 .map(|(row, live)| {
                     let mut v = live_session_json(c, row, live.as_ref(), &cfg)?;
                     v["archived"] = json!(archived.contains(&row.id));
+                    if let Some(d) = open.iter().find(|d| d.alert.session_id == row.id) {
+                        v["decision"] = decision_json(d);
+                    }
                     Ok(v)
                 })
                 .collect::<anyhow::Result<Vec<_>>>()
@@ -956,6 +972,88 @@ mod tests {
         assert!(other_host["sessions"].as_array().unwrap().is_empty());
         let bad_task = list_all_handler(State(state.clone()), q(None, None, Some("FR-9999"))).await;
         assert_eq!(bad_task.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn global_list_carries_the_open_dialog_of_a_running_session_only() {
+        let state = test_state();
+        seed(&state, "hs-ask", None);
+        seed(&state, "hs-quiet", None);
+        let item = hq_core::types::ValueItem::new(
+            "session-supervisor",
+            hq_core::types::ValueKind::ActionNeeded,
+            "Harness session 'hs-ask' is waiting for you",
+            "x",
+        );
+        hq_db::value_items::insert(&state.db, &item).unwrap();
+        let options = vec![
+            hq_db::dialog_alerts::DialogOption {
+                id: 1,
+                label: "Yes".into(),
+                remember: false,
+                typed: false,
+            },
+            hq_db::dialog_alerts::DialogOption {
+                id: 2,
+                label: "Yes, and remember".into(),
+                remember: true,
+                typed: false,
+            },
+        ];
+        hq_db::dialog_alerts::record(
+            &state.db,
+            &hq_db::dialog_alerts::NewDialogAlert {
+                item_id: &item.id,
+                session_id: "hs-ask",
+                pending_seq: 4,
+                kind: "permission",
+                question: Some("Run npm test?"),
+                command: None,
+                options: &options,
+            },
+        )
+        .unwrap();
+        let list = |state: &Arc<WsState>| {
+            list_all_handler(
+                State(state.clone()),
+                Query(ListQuery {
+                    task_id: None,
+                    status: None,
+                    host: None,
+                    include_archived: None,
+                }),
+            )
+        };
+
+        let sessions = body(list(&state).await).await["sessions"].clone();
+        let find = |id: &str| {
+            sessions
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["id"] == id)
+                .unwrap()
+                .clone()
+        };
+        let decision = &find("hs-ask")["decision"];
+        assert_eq!(decision["item_id"], json!(item.id));
+        assert_eq!(decision["seq"], 4);
+        assert_eq!(decision["question"], "Run npm test?");
+        assert_eq!(decision["options"].as_array().unwrap().len(), 2);
+        assert!(find("hs-quiet").get("decision").is_none());
+
+        state
+            .db
+            .with_conn(|c| registry::set_status(c, "hs-ask", registry::STATUS_STOPPED))
+            .unwrap();
+        let sessions = body(list(&state).await).await["sessions"].clone();
+        assert!(
+            sessions
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|s| s.get("decision").is_none())
+        );
     }
 
     #[tokio::test]
