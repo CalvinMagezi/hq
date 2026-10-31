@@ -1,5 +1,6 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.ui.firstrun.FirstRunWords
 import android.app.ActivityManager
 import android.app.Application
 import android.app.NotificationManager
@@ -290,6 +291,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(it, Instant.now()).checked.any { r -> !r.ok } }),
             HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else "Needs you ${if (on(AlertPoster.NEEDS)) "on" else "off"} · Updates ${if (on(AlertPoster.UPDATES)) "on" else "off"}", warn = !allowed),
             HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
+            HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
         )
     }
 

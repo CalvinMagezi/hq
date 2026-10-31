@@ -1,5 +1,6 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.ui.firstrun.FirstRunWords
 import java.time.Instant
 import org.json.JSONObject
 
@@ -45,6 +46,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", "Good · 1 thing to check"),
         HomeRow(SettingsPage.Notifications, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", "Sharing opens a new note"),
+        HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
     )
     val channels = listOf(ChannelFacts("needs", "Needs you", 4, true), ChannelFacts("updates", "Updates", 3, false), ChannelFacts("hub", "HQ is running", 2, false))
     val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
