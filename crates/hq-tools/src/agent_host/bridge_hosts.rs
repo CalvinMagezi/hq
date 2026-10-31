@@ -6,7 +6,6 @@
 
 use hq_core::config::{AgentHostConfig, HqConfig, RemoteHostConfig};
 use hq_db::{Database, bridge_setup as rows};
-use std::sync::OnceLock;
 
 /// One machine that setup made a host of.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,22 +41,19 @@ pub fn from_rows(setups: &[rows::Setup]) -> Vec<SetupHost> {
         .collect()
 }
 
-/// This vault's database, opened once per process: host lookups happen on every call and
-/// opening runs the migrations. `None` when it cannot be opened, which means "no setup hosts".
-fn database() -> Option<&'static Database> {
-    static DB: OnceLock<Option<Database>> = OnceLock::new();
-    DB.get_or_init(|| {
-        let path = HqConfig::load().ok()?.db_path();
-        path.exists().then(|| Database::open(&path).ok()).flatten()
-    })
-    .as_ref()
-}
-
-/// The setup hosts of this machine's database. A failed read is no hosts, never an error: a
+/// The setup hosts of this machine's database, read through a read-only connection that never
+/// runs migrations: listing hosts must not write the owner's database (or create it). A failed
+/// read, a missing file or a database without the setup table is no hosts, never an error: a
 /// configured host must keep working whatever the database says.
 pub fn load() -> Vec<SetupHost> {
-    database()
-        .and_then(|db| rows::list(db).ok())
+    let Ok(config) = HqConfig::load() else {
+        return Vec::new();
+    };
+    let flags =
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    rusqlite::Connection::open_with_flags(config.db_path(), flags)
+        .ok()
+        .and_then(|conn| rows::list_in(&conn).ok())
         .map(|setups| from_rows(&setups))
         .unwrap_or_default()
 }

@@ -36,7 +36,8 @@ fn strings(json: &str) -> Vec<String> {
 
 /// Records a pairing. Pairing a key that was revoked brings it back with the new details. Empty
 /// relay or address lists keep what is already known: a pairing that learned nothing new must not
-/// forget how to dial the peer.
+/// forget how to dial the peer. A new pairing starts setup over (`bridge_setup`): whatever was set
+/// up before, and its device key, go in the same transaction.
 pub fn add_peer(
     db: &Database,
     id: &str,
@@ -45,7 +46,8 @@ pub fn add_peer(
     addrs: &[String],
 ) -> Result<()> {
     db.with_conn(|c| {
-        c.execute(
+        let tx = c.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO bridge_peers (id, label, relays, addrs, paired_at) \
              VALUES (?1, ?2, ?3, ?4, ?5) \
              ON CONFLICT(id) DO UPDATE SET label = excluded.label, \
@@ -60,6 +62,8 @@ pub fn add_peer(
                 now()
             ],
         )?;
+        crate::bridge_setup::forget(&tx, id)?;
+        tx.commit()?;
         Ok(())
     })
 }

@@ -514,7 +514,7 @@ fn report_setup(outcome: &hq_bridge::SetupOutcome) {
     }
     if outcome.key_missing() {
         println!(
-            "note: \"{name}\" kept the key it made for this machine earlier and this machine has no copy. Revoke and pair again to get a new one."
+            "note: \"{name}\" kept the key it made for this machine earlier and this machine has no copy. Pair again to get a new one."
         );
     }
 }
@@ -737,17 +737,20 @@ fn revoke(db: &Database, id: &str) -> Result<()> {
         .parse()
         .map_err(|_| anyhow!("{id} is not a machine id (see `hq bridge peers`)"))?;
     let id = id.to_string();
-    let changed = peers::revoke(db, &id)?;
-    // The revoke removed the setup row; the hub's gate line written for it goes too.
-    let authorized = setup_config(HqConfig::load().ok().as_ref(), Role::Machine).authorized_keys;
-    let removed = hq_bridge::setup::prune_gate_lines(db, &authorized)?;
-    if changed {
+    if peers::revoke(db, &id)? {
         println!("Revoked {id}. A machine serving it stops at its next request.");
     } else {
         println!("{id} is not an active peer.");
     }
-    if removed > 0 {
-        println!("Removed its key from {}.", authorized.display());
+    // The revoke removed the setup row; the hub's gate line written for it goes too.
+    let authorized = setup_config(HqConfig::load().ok().as_ref(), Role::Machine).authorized_keys;
+    match hq_bridge::setup::prune_gate_lines(db, &authorized) {
+        Ok(0) => {}
+        Ok(_) => println!("Removed its key from {}.", authorized.display()),
+        Err(e) => eprintln!(
+            "warning: its key is still in {}: {e:#}. A running `hq bridge serve` removes it.",
+            authorized.display()
+        ),
     }
     Ok(())
 }

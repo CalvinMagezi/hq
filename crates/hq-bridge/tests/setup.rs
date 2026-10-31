@@ -295,6 +295,30 @@ async fn running_setup_again_keeps_the_ports_and_mints_no_second_key() {
     assert_eq!(hub.row(&machine).unwrap(), hub_first);
 }
 
+/// The machine revoked the hub and paired again while the hub kept its row: the new pairing
+/// starts setup over, so the machine gets a fresh key and the old one stops working.
+#[tokio::test]
+async fn pairing_again_after_a_one_sided_revoke_gets_a_fresh_key() {
+    let (hub, machine, first) = paired_and_set_up().await;
+    let old = first.mcp_key.clone().unwrap();
+    machine.bridge.revoke(&hub.bridge.id()).await.unwrap();
+    assert!(
+        rows::device_key_live(&hub.db, &old).unwrap(),
+        "the hub was not told"
+    );
+    pair(&hub, &machine).await;
+    let again = with_timeout(machine.bridge.set_up(&hub.id()))
+        .await
+        .unwrap();
+    assert!(again.sent);
+    let new = again.setup.mcp_key.clone().expect("a fresh key");
+    assert_ne!(new, old);
+    assert!(rows::device_key_live(&hub.db, &new).unwrap());
+    assert!(!rows::device_key_live(&hub.db, &old).unwrap());
+    assert_eq!(rows::keys_minted(&hub.db, &machine.id()).unwrap(), 2);
+    assert!(machine.gate_lines().contains(&gate_label(&hub.id())));
+}
+
 #[tokio::test]
 async fn revoking_on_the_machine_undoes_its_side() {
     let (hub, machine, mine) = paired_and_set_up().await;

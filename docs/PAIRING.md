@@ -191,8 +191,9 @@ Right after the six digits match, the machine sends one setup message on its own
 | Hub | its paired-devices door (`bridge.web_listen`) offered as `web`; a forward on a loopback port to the machine's `gate`; a host named after the machine (`tcp` transport at that forward, with a gate key made for it under `~/.hq/gate/`); the machine's own forward as the `/mcp` address for agents launched there |
 
 Ports are picked on each side from 47400 to 47999 and kept. What was set up lives in the database
-(`bridge_setup`), never in `config.yaml`; the hub keeps only a hash of the machine's key. A second
-pairing or a restart reuses the ports and the key. Revoking the peer, from either side, undoes that
+(`bridge_setup`), never in `config.yaml`; the hub keeps only a hash of the machine's key. A restart,
+or running setup again, reuses the ports and the key; a new pairing starts setup over with a new
+key and revokes the old one. Revoking the peer, from either side, undoes that
 side's part: the forward closes, the gate line is removed, the key stops working and the host
 disappears.
 

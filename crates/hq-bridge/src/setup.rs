@@ -145,8 +145,8 @@ pub struct SetupOutcome {
 }
 
 impl SetupOutcome {
-    /// The hub kept the key it minted earlier and this machine has lost its copy: revoking and
-    /// pairing again gets a new one.
+    /// The hub kept the key it minted earlier and this machine has lost its copy: pairing again
+    /// gets a new one (a new pairing starts setup over on both sides).
     pub fn key_missing(&self) -> bool {
         self.setup.mcp_key.is_none()
     }

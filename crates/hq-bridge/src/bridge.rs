@@ -691,9 +691,15 @@ impl Bridge {
         let changed = tokio::task::spawn_blocking(move || peers::revoke(&db, &id)).await??;
         self.live.close_all(peer);
         if let Some(state) = &self.setup {
+            // The revoke stands either way; a gate file that cannot be written is said, and the
+            // forwards task tries again.
             if state.cfg.role == Role::Machine {
                 let (db, path) = (self.db.clone(), state.cfg.authorized_keys.clone());
-                tokio::task::spawn_blocking(move || prune_gate_lines(&db, &path)).await??;
+                let pruned =
+                    tokio::task::spawn_blocking(move || prune_gate_lines(&db, &path)).await;
+                if let Ok(Err(e)) = pruned {
+                    tracing::warn!("revoked, but the hub's gate line is still there: {e:#}");
+                }
             }
             state.wake();
         }

@@ -95,15 +95,18 @@ pub fn get(db: &Database, peer: &str) -> Result<Option<Setup>> {
 
 /// Every setup row of a peer that is still paired, oldest first.
 pub fn list(db: &Database) -> Result<Vec<Setup>> {
-    db.with_conn(|c| {
-        let mut stmt = c.prepare(&format!(
-            "SELECT {COLUMNS} FROM bridge_setup s WHERE EXISTS \
-             (SELECT 1 FROM bridge_peers p WHERE p.id = s.peer_id AND p.revoked_at IS NULL) \
-             ORDER BY created_at ASC, peer_id ASC"
-        ))?;
-        let rows = stmt.query_map([], row)?.collect::<rusqlite::Result<_>>()?;
-        Ok(rows)
-    })
+    db.with_conn(list_in)
+}
+
+/// [`list`] on a connection, for a reader that opens the file read-only and never migrates it.
+pub fn list_in(conn: &Connection) -> Result<Vec<Setup>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM bridge_setup s WHERE EXISTS \
+         (SELECT 1 FROM bridge_peers p WHERE p.id = s.peer_id AND p.revoked_at IS NULL) \
+         ORDER BY created_at ASC, peer_id ASC"
+    ))?;
+    let rows = stmt.query_map([], row)?.collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
 }
 
 /// Records a setup, and on a hub the hash of a key minted for it, in one transaction. Nothing is
@@ -192,7 +195,8 @@ pub fn device_key_live(db: &Database, secret: &str) -> Result<bool> {
     })
 }
 
-/// Revokes the peer's keys and deletes its setup row; `bridge::revoke` calls it in its transaction.
+/// Revokes the peer's keys and deletes its setup row. `bridge::revoke` calls it in its transaction,
+/// and so does `bridge::add_peer`: a new pairing starts setup over, with a new key.
 pub(crate) fn forget(conn: &Connection, peer: &str) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE bridge_device_keys SET revoked_at = ?2 WHERE peer_id = ?1 AND revoked_at IS NULL",
@@ -262,5 +266,19 @@ mod tests {
         // Pairing again brings the peer back, not its old key.
         peers::add_peer(&db, PEER, "laptop", &[], &[]).unwrap();
         assert!(!device_key_live(&db, &key).unwrap());
+    }
+
+    /// One side revoked and paired again while the other kept its row: the new pairing must not
+    /// leave the old key live, or the hub would answer the new setup with no key.
+    #[test]
+    fn pairing_an_active_peer_again_starts_its_setup_over() {
+        let db = Database::open_memory().unwrap();
+        peers::add_peer(&db, PEER, "laptop", &[], &[]).unwrap();
+        let key = new_device_key();
+        assert!(record(&db, &machine_row(), Some(&key)).unwrap());
+        peers::add_peer(&db, PEER, "laptop", &[], &[]).unwrap();
+        assert_eq!(get(&db, PEER).unwrap(), None);
+        assert!(!has_live_key(&db, PEER).unwrap());
+        assert!(peers::is_paired(&db, PEER).unwrap(), "still paired");
     }
 }
