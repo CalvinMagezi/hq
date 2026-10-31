@@ -106,6 +106,33 @@ on certified devices, country by country. It is not enforced in Uganda before 20
 registers the app id and signing key before then, so these installs keep working; that is not done yet
 and nothing in the app depends on it today.
 
+## First run on the phone
+
+A phone with nothing set up opens a short flow in the app before the shell, and no `adb` or computer is
+needed. It is shown once, while no AI service key is stored and no earlier launch has run, and it picks up
+where it stopped if Android closes the app half way.
+
+1. **Welcome.** Choose "Set up a new HQ" or "Restore from a backup".
+2. **Your AI model.** Pick OpenRouter, Anthropic or "Other OpenAI-compatible" (which asks for a base URL and
+   saves it in `files/hqhome/config.yaml` as a backend), then paste the key. The key is sealed in the Android
+   Keystore as it is saved and is never written to a file. "Check key" makes one request to the service and
+   says whether it was accepted; it is optional.
+3. **Chat apps (optional).** Paste a Telegram or Discord bot token, or skip. A stored bot token switches its
+   relay on for the `hq` child, so no config edit is needed. Linking an account to the bot is done after
+   the flow, in Settings, Messaging apps.
+4. **Start.** Writes `active` to `files/mode` and restarts `hq`, which then runs `hq start all`. Run it on
+   one machine only: a second copy on the same data would poll the same bots twice.
+
+**Restore.** Choose the `.hqbak` file and either type its passphrase or choose its key file. The app copies
+them into its cache, stops `hq`, runs `hq restore` into a new folder beside the vault, and swaps that folder
+in only after the whole backup verified, so a failed restore leaves the vault as it was. The passphrase and the
+key reach `hq restore` through a private file (mode 0600), never on a command line, and the copies are
+overwritten and deleted afterwards. Then continue to Start. Backups are made with `hq backup`
+(`docs/BACKUP.md`). Restoring on Android has not yet been run on a phone.
+
+**Keys later.** Settings, "Keys on this phone" lists the names of the sealed credentials (never the values),
+and adds, replaces or removes one. `hq` restarts to read the change.
+
 ## The bridge on the phone
 
 The phone can pair with another machine of its owner by QR code and then be reached by key, with no
