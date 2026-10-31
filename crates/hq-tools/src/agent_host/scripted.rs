@@ -8,7 +8,7 @@ use super::transport::{RawOutput, run_with_deadline};
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, Host, INVALID_KEYS_CODE,
     LaunchRequest, Launched, PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo,
-    WorktreeRemoved, bad_reply, validate_keys,
+    WorktreeRemoved, WorktreeStatus, bad_reply, validate_keys,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -521,20 +521,16 @@ impl ScriptedHost {
         session: &str,
         base: &WorktreeBase,
     ) -> Result<WorktreeInfo, AgentHostError> {
-        let (flag, value) = match base {
-            WorktreeBase::Branch(b) => ("--branch", b.as_str()),
-            WorktreeBase::Detached(r) => ("--detached", r.as_str()),
-        };
-        let args = [
-            "worktree",
-            "add",
-            "--repo",
-            repo,
-            "--session",
-            session,
-            flag,
-            value,
-        ];
+        let mut args = vec!["worktree", "add", "--repo", repo, "--session", session];
+        match base {
+            WorktreeBase::Branch { name, from } => {
+                args.extend(["--branch", name.as_str()]);
+                if let Some(from) = from {
+                    args.extend(["--from", from.as_str()]);
+                }
+            }
+            WorktreeBase::Detached(r) => args.extend(["--detached", r.as_str()]),
+        }
         let v = self.json(&args, self.command_timeout)?;
         serde_json::from_value(v).map_err(|e| bad_reply("worktree add", e))
     }
@@ -542,6 +538,19 @@ impl ScriptedHost {
     pub fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
         let v = self.json(&["worktree", "remove", path], self.command_timeout)?;
         serde_json::from_value(v).map_err(|e| bad_reply("worktree remove", e))
+    }
+
+    pub fn worktree_status(
+        &self,
+        path: &str,
+        against: Option<&str>,
+    ) -> Result<WorktreeStatus, AgentHostError> {
+        let mut args = vec!["worktree", "status", path];
+        if let Some(against) = against {
+            args.extend(["--against", against]);
+        }
+        let v = self.json(&args, self.command_timeout)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree status", e))
     }
 
     pub fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
@@ -721,6 +730,13 @@ impl HostBackend for ScriptedHost {
     }
     fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
         ScriptedHost::worktree_remove(self, path)
+    }
+    fn worktree_status(
+        &self,
+        path: &str,
+        against: Option<&str>,
+    ) -> Result<WorktreeStatus, AgentHostError> {
+        ScriptedHost::worktree_status(self, path, against)
     }
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         ScriptedHost::head(self, target)

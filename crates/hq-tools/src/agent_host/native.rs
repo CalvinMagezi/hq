@@ -2,8 +2,8 @@ use super::transport::Transport;
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, AwaitingAgent, GitHead, Host,
     HostBackend, HostEvent, HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, LogsSince,
-    PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved, bad_reply, shell_line,
-    validate_keys,
+    PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved, WorktreeStatus,
+    bad_reply, shell_line, validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -12,6 +12,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const HOST_NAME: &str = "native";
+
+/// Extra time `worktree.add` gets: a new worktree copies what `.worktreeinclude` names, and
+/// where the disk cannot clone, a large `node_modules` is a plain copy that can take minutes.
+const WORKTREE_COPY_MARGIN: Duration = Duration::from_secs(300);
 /// How long a prompt may go without the agent reacting before Enter is retried.
 const SUBMIT_CONFIRM: Duration = Duration::from_secs(10);
 /// How long `submit` waits for the typed text to echo before it starts counting output.
@@ -805,16 +809,38 @@ impl HostBackend for NativeBackend {
     ) -> Result<WorktreeInfo, AgentHostError> {
         let mut params = json!({ "repo": repo, "session": session });
         match base {
-            WorktreeBase::Branch(b) => params["branch"] = json!(b),
+            WorktreeBase::Branch { name, from } => {
+                params["branch"] = json!(name);
+                if let Some(from) = from {
+                    params["from"] = json!(from);
+                }
+            }
             WorktreeBase::Detached(r) => params["detached"] = json!(r),
         }
-        let v = self.call("worktree.add", params)?;
+        let v = self.call_within(
+            "worktree.add",
+            params,
+            self.command_timeout + WORKTREE_COPY_MARGIN,
+        )?;
         serde_json::from_value(v).map_err(|e| bad_reply("worktree.add", e))
     }
 
     fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
         let v = self.call("worktree.remove", json!({ "path": path }))?;
         serde_json::from_value(v).map_err(|e| bad_reply("worktree.remove", e))
+    }
+
+    fn worktree_status(
+        &self,
+        path: &str,
+        against: Option<&str>,
+    ) -> Result<WorktreeStatus, AgentHostError> {
+        let mut params = json!({ "path": path });
+        if let Some(against) = against {
+            params["against"] = json!(against);
+        }
+        let v = self.call("worktree.status", params)?;
+        serde_json::from_value(v).map_err(|e| bad_reply("worktree.status", e))
     }
 
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {

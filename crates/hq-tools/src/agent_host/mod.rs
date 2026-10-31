@@ -212,8 +212,9 @@ pub struct LogsSince {
 /// What a worktree is checked out at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorktreeBase {
-    /// A writer's branch: checked out if it exists, else made from the folder's current commit.
-    Branch(String),
+    /// A writer's branch: checked out if it exists, else made at `from` (default: the folder's
+    /// current commit).
+    Branch { name: String, from: Option<String> },
     /// A commit (or a ref naming one) a reviewer checks out detached.
     Detached(String),
 }
@@ -229,6 +230,22 @@ pub struct WorktreeInfo {
     /// False when it already existed (a retry or a resume).
     #[serde(default)]
     pub created: bool,
+    /// Gitignored paths copied in from the main folder (`.worktreeinclude`).
+    #[serde(default)]
+    pub copied: Vec<String>,
+    /// Paths `.worktreeinclude` named that could not be copied.
+    #[serde(default)]
+    pub not_copied: Vec<String>,
+}
+
+/// Where a worktree stands: uncommitted changes and distance from a ref.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct WorktreeStatus {
+    pub branch: Option<String>,
+    pub head: String,
+    pub changed: usize,
+    pub ahead: Option<u32>,
+    pub behind: Option<u32>,
 }
 
 /// The commit an agent's folder is at.

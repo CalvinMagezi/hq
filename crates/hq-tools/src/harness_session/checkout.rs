@@ -19,11 +19,20 @@ pub fn parse_worktree(args: &Value) -> Result<Option<WorktreeBase>> {
         return Ok(None);
     };
     let field = |k: &str| v.get(k).and_then(Value::as_str).map(str::trim);
+    let from = field("from").filter(|f| !f.is_empty());
     match (field("branch"), field("detached")) {
-        (Some(b), None) if !b.is_empty() => Ok(Some(WorktreeBase::Branch(b.to_string()))),
-        (None, Some(r)) if !r.is_empty() => Ok(Some(WorktreeBase::Detached(r.to_string()))),
+        (Some(b), None) if !b.is_empty() => Ok(Some(WorktreeBase::Branch {
+            name: b.to_string(),
+            from: from.map(str::to_string),
+        })),
+        (None, Some(r)) if !r.is_empty() => {
+            if from.is_some() {
+                bail!("from goes with branch; a detached checkout is already at its commit");
+            }
+            Ok(Some(WorktreeBase::Detached(r.to_string())))
+        }
         _ => bail!(
-            "worktree takes {{\"branch\": \"<name>\"}} for a writer or {{\"detached\": \"<commit or ref>\"}} for a reviewer"
+            "worktree takes {{\"branch\": \"<name>\", \"from\": \"<ref>\"}} for a writer (from is optional) or {{\"detached\": \"<commit or ref>\"}} for a reviewer"
         ),
     }
 }
@@ -116,8 +125,19 @@ pub(super) fn check_writers(
 pub(super) fn describe(w: &WorktreeInfo, base: &WorktreeBase) -> Value {
     let mut v = json!({ "path": w.path, "repo": w.repo, "head": w.head, "created": w.created });
     match base {
-        WorktreeBase::Branch(b) => v["branch"] = json!(b),
+        WorktreeBase::Branch { name, from } => {
+            v["branch"] = json!(name);
+            if let Some(from) = from {
+                v["from"] = json!(from);
+            }
+        }
         WorktreeBase::Detached(r) => v["detached"] = json!(r),
+    }
+    if !w.copied.is_empty() {
+        v["copied"] = json!(w.copied);
+    }
+    if !w.not_copied.is_empty() {
+        v["not_copied"] = json!(w.not_copied);
     }
     v
 }
@@ -132,7 +152,7 @@ pub(super) fn record(
     head: Option<&str>,
 ) {
     let (branch, detached) = match worktree.map(|(_, b)| b) {
-        Some(WorktreeBase::Branch(b)) => (Some(b.as_str()), None),
+        Some(WorktreeBase::Branch { name, .. }) => (Some(name.as_str()), None),
         Some(WorktreeBase::Detached(r)) => (None, Some(r.as_str())),
         None => (None, None),
     };
@@ -197,7 +217,10 @@ pub(super) fn reopen(db: &Arc<Database>, host: &Host, session_id: &str) -> Resul
         return Ok(None);
     };
     let base = match (&checkout.branch, &checkout.detached) {
-        (Some(b), _) => WorktreeBase::Branch(b.clone()),
+        (Some(b), _) => WorktreeBase::Branch {
+            name: b.clone(),
+            from: None,
+        },
         (None, Some(r)) => {
             WorktreeBase::Detached(checkout.last_head.clone().unwrap_or_else(|| r.clone()))
         }

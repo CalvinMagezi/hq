@@ -612,10 +612,10 @@ impl DelegatedTree {
     fn base(&self, task_display_id: &str) -> Option<crate::agent_host::WorktreeBase> {
         match self {
             Self::Shared => None,
-            Self::ForTask => Some(crate::agent_host::WorktreeBase::Branch(format!(
-                "hq/{}",
-                task_display_id.to_lowercase()
-            ))),
+            Self::ForTask => Some(crate::agent_host::WorktreeBase::Branch {
+                name: format!("hq/{}", task_display_id.to_lowercase()),
+                from: None,
+            }),
             Self::Base(b) => Some(b.clone()),
         }
     }
