@@ -55,6 +55,8 @@ mod token;
 mod workspace;
 #[cfg(unix)]
 mod worktree;
+#[cfg(unix)]
+mod worktree_copy;
 
 #[cfg(unix)]
 pub use awake::{KeepAwake, assertion_command};
@@ -116,6 +118,9 @@ pub use workspace::{
 };
 #[cfg(unix)]
 pub use worktree::{
-    Base as WorktreeBase, Head, Removed as WorktreeRemoved, WORKTREES_DIR, Worktree, WorktreeError,
-    add as add_worktree, head as git_head, remove as remove_worktree,
+    Base as WorktreeBase, Head, Removed as WorktreeRemoved, Status as WorktreeStatus,
+    WORKTREES_DIR, Worktree, WorktreeError, add as add_worktree, head as git_head,
+    remove as remove_worktree, status as worktree_status,
 };
+#[cfg(unix)]
+pub use worktree_copy::INCLUDE_FILE as WORKTREE_INCLUDE_FILE;

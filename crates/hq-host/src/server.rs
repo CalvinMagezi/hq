@@ -513,9 +513,15 @@ impl Conn {
             }
             "worktree.add" => {
                 let p: WorktreeAddParams = parse(&params)?;
-                let base = match (p.branch, p.detached) {
-                    (Some(b), None) => crate::worktree::Base::Branch(b),
-                    (None, Some(r)) => crate::worktree::Base::Detached(r),
+                let base = match (p.branch, p.detached, p.from) {
+                    (Some(name), None, from) => crate::worktree::Base::Branch { name, from },
+                    (None, Some(r), None) => crate::worktree::Base::Detached(r),
+                    (None, Some(_), Some(_)) => {
+                        return Err(body(
+                            "invalid_params",
+                            "from goes with a branch; a detached checkout is already at its commit",
+                        ));
+                    }
                     _ => {
                         return Err(body(
                             "invalid_params",
@@ -528,6 +534,17 @@ impl Conn {
                     crate::worktree::add(&root, std::path::Path::new(&p.repo), &p.session, &base)
                         .map_err(|e| body(e.code(), e.message()))?;
                 Ok(json!(wt))
+            }
+            "worktree.status" => {
+                let p: WorktreeStatusParams = parse(&params)?;
+                let root = self.workspace_root()?;
+                let status = crate::worktree::status(
+                    &root,
+                    std::path::Path::new(&p.path),
+                    p.against.as_deref(),
+                )
+                .map_err(|e| body(e.code(), e.message()))?;
+                Ok(json!(status))
             }
             "worktree.remove" => {
                 let p: WorktreeRemoveParams = parse(&params)?;
@@ -837,12 +854,22 @@ struct WorktreeAddParams {
     session: String,
     branch: Option<String>,
     detached: Option<String>,
+    /// Where a new branch starts; the folder's current commit when absent.
+    from: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorktreeRemoveParams {
     path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorktreeStatusParams {
+    path: String,
+    /// A commit or ref to count commits ahead of and behind.
+    against: Option<String>,
 }
 
 #[derive(Deserialize)]
