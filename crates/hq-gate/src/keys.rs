@@ -226,6 +226,49 @@ pub fn append_authorized(
     Ok(true)
 }
 
+/// Removes every line of the file whose key and label `drop` picks (`drop(key, label)`, the key as
+/// written and the label after `#`, trimmed), keeping all other lines byte for byte. Lines that do
+/// not parse are kept. The file gets the same checks as when it is read, and is replaced whole
+/// (written beside it with mode 0600, then renamed), so a reader never sees half of it. A missing
+/// file has nothing to remove. Returns how many lines went.
+pub fn remove_authorized(
+    path: &Path,
+    drop: impl Fn(&str, &str) -> bool,
+) -> Result<usize, GateError> {
+    let text = match std::fs::symlink_metadata(path) {
+        Ok(_) => read_trusted(path, GROUP_OTHER_WRITE, "writable")?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    };
+    let mut kept = String::with_capacity(text.len());
+    let mut removed = 0;
+    for line in text.split_inclusive('\n') {
+        let picked = parse_line(line.trim_end_matches(['\n', '\r'])).is_some_and(|k| {
+            let written = line.split_whitespace().next().unwrap_or_default();
+            drop(written, &k.label)
+        });
+        if picked {
+            removed += 1;
+        } else {
+            kept.push_str(line);
+        }
+    }
+    if removed == 0 {
+        return Ok(0);
+    }
+    let staged = path.with_extension("hq-new");
+    let _ = std::fs::remove_file(&staged);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(FILE_MODE)
+        .open(&staged)?;
+    file.write_all(kept.as_bytes())?;
+    file.sync_all()?;
+    std::fs::rename(&staged, path)?;
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +372,34 @@ mod tests {
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(load_authorized(&link).is_err());
         assert!(load_authorized(dir.path()).is_err());
+    }
+
+    #[test]
+    fn removing_drops_only_the_picked_lines_and_keeps_the_rest_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("keys");
+        assert_eq!(remove_authorized(&path, |_, _| true).unwrap(), 0, "no file");
+        let (a, b, c) = (key_text(1), key_text(2), key_text(3));
+        let text = format!(
+            "# owner's note\n{a} from=10.77.0.1 # mac\n{b} from=127.0.0.1 # bridge:aabbccdd\ngarbage line\n{c}  # bridge:aabbccdd-other"
+        );
+        std::fs::write(&path, &text).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let gone = remove_authorized(&path, |key, label| key == b && label == "bridge:aabbccdd");
+        assert_eq!(gone.unwrap(), 1);
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            after,
+            format!(
+                "# owner's note\n{a} from=10.77.0.1 # mac\ngarbage line\n{c}  # bridge:aabbccdd-other"
+            )
+        );
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(
+            remove_authorized(&path, |_, _| true).is_err(),
+            "a writable file is refused"
+        );
     }
 }
