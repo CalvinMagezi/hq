@@ -108,10 +108,10 @@ cd apps/desktop && bun run typecheck             # the control window's script
 The pairing test pairs a joiner built the way `hq bridge join` is (its own bridge, the link, the
 digits shown through a callback) with the app's host, connects by key, then revokes and checks
 the open connection closes. One more test drives the real `hq bridge join` program; it needs a
-build with the `bridge` feature, so it is opt-in:
+built `hq` binary, so it is opt-in:
 
 ```bash
-cargo build -p hq-cli --features bridge
+cargo build -p hq-cli
 HQ_BRIDGE_BIN=target/debug/hq cargo test -p hq-desktop --test cli_join -- --ignored
 ```
 
