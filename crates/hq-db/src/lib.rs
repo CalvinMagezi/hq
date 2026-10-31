@@ -3,6 +3,7 @@
 pub mod ask_requests;
 pub mod background_turns;
 pub mod bridge;
+pub mod bridge_setup;
 pub mod chat;
 pub mod copilot_usage_samples;
 pub mod dialog_alerts;

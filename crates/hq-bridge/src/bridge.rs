@@ -9,6 +9,10 @@ use crate::host::{self, OpenTicket, PairingSpec, Registrar, Tuning};
 use crate::join::{self, JoinOptions, JoinResult, target_from};
 use crate::key::load_or_create_key;
 use crate::services::{SVC_ALPN, ServiceProtocol, Services};
+use crate::setup::{
+    Role, SETUP_ALPN, SetupConfig, SetupOutcome, SetupProtocol, SetupState, machine_setup,
+    peers_without_setup, prune_gate_lines, spawn_forwards,
+};
 use crate::ticket::{Purpose, Ticket};
 use crate::wire::{Card, MAX_DIAL_ITEMS};
 use anyhow::{Context, Result, anyhow, bail};
@@ -40,6 +44,8 @@ const REJECT_UNPAIRED: u32 = 403;
 pub(crate) const REJECT_REVOKED: u32 = 403;
 const MAX_ECHO_BYTES: usize = 64 * 1024;
 const ONLINE_WAIT: Duration = Duration::from_secs(5);
+/// How often a hub that just paired looks for the machine's setup.
+const SETUP_POLL: Duration = Duration::from_millis(200);
 
 /// One request from a paired peer: a bidirectional stream, already checked against the list.
 pub struct PeerStream {
@@ -192,7 +198,8 @@ impl EndpointHooks for ServiceGate {
         }
         // Two protocols, two lists: a paired peer may not open the edge protocol and the edge may
         // not open the service protocol, so neither can borrow the other's door.
-        let allowed = if conn.alpn() == SERVICE_ALPN || conn.alpn() == SVC_ALPN {
+        let paired_only = [SERVICE_ALPN, SVC_ALPN, SETUP_ALPN];
+        let allowed = if paired_only.contains(&conn.alpn()) {
             still_paired(&self.db, conn.remote_id()).await
         } else if conn.alpn() == EDGE_ALPN {
             still_edge(&self.db, conn.remote_id()).await
@@ -300,6 +307,10 @@ pub struct Dialer {
 }
 
 impl Dialer {
+    pub(crate) fn db(&self) -> &Database {
+        &self.db
+    }
+
     /// Whether `peer` is on the list now. Any failure is "no".
     pub(crate) async fn is_paired(&self, peer: &str) -> bool {
         match peer.parse::<EndpointId>() {
@@ -313,7 +324,7 @@ impl Dialer {
         self.dial(peer, SVC_ALPN).await
     }
 
-    async fn dial(&self, peer: &str, alpn: &[u8]) -> Result<Connection> {
+    pub(crate) async fn dial(&self, peer: &str, alpn: &[u8]) -> Result<Connection> {
         let id: EndpointId = peer
             .parse()
             .map_err(|_| anyhow!("{peer} is not a machine id"))?;
@@ -360,6 +371,8 @@ pub struct Bridge {
     pub edge_over_cap: Arc<AtomicU64>,
     /// Service streams dropped because the stream cap was full.
     pub service_over_cap: Arc<AtomicU64>,
+    /// What pairing sets up with peers (`setup.rs`), when this bridge takes part.
+    setup: Option<Arc<SetupState>>,
     _router: Option<Router>,
 }
 
@@ -400,6 +413,20 @@ impl Bridge {
         edge_door: Option<EdgeDoor>,
         services: Option<Services>,
     ) -> Result<Self> {
+        Self::start_with_setup(cfg, db, handler, edge_door, services, None).await
+    }
+
+    /// Like [`Bridge::start_with_services`], and with `setup` this bridge takes part in setup
+    /// after pairing: a hub accepts `hq/setup/1` from paired peers, and a machine can run it
+    /// ([`Bridge::set_up`]). Without, the setup protocol is not accepted at all.
+    pub async fn start_with_setup(
+        cfg: BridgeConfig,
+        db: Database,
+        handler: Option<StreamHandler>,
+        edge_door: Option<EdgeDoor>,
+        services: Option<Services>,
+        setup: Option<SetupConfig>,
+    ) -> Result<Self> {
         if let Some(door) = &edge_door {
             door.validate()?;
         }
@@ -426,7 +453,10 @@ impl Bridge {
         let reached_edge = Arc::new(AtomicU64::new(0));
         let edge_over_cap = Arc::new(AtomicU64::new(0));
         let service_over_cap = Arc::new(AtomicU64::new(0));
-        let serves = handler.is_some() || edge_door.is_some() || services.is_some();
+        let setup = setup.map(|c| Arc::new(SetupState::new(c, cfg.name.clone())));
+        let hub = setup.as_ref().filter(|s| s.cfg.role == Role::Hub).cloned();
+        let serves =
+            handler.is_some() || edge_door.is_some() || services.is_some() || hub.is_some();
         let router = serves.then(|| {
             let mut builder = Router::builder(endpoint.clone());
             if let Some(handler) = handler {
@@ -449,6 +479,16 @@ impl Bridge {
                         permits: Arc::new(tokio::sync::Semaphore::new(services.max_streams)),
                         services: Arc::new(services),
                         over_cap: service_over_cap.clone(),
+                    },
+                );
+            }
+            if let Some(state) = hub {
+                builder = builder.accept(
+                    SETUP_ALPN,
+                    SetupProtocol {
+                        db: db.clone(),
+                        live: live.clone(),
+                        state,
                     },
                 );
             }
@@ -481,6 +521,7 @@ impl Bridge {
             reached_edge,
             edge_over_cap,
             service_over_cap,
+            setup,
             _router: router,
         })
     }
@@ -649,10 +690,86 @@ impl Bridge {
         let id = peer.to_string();
         let changed = tokio::task::spawn_blocking(move || peers::revoke(&db, &id)).await??;
         self.live.close_all(peer);
+        if let Some(state) = &self.setup {
+            // The revoke stands either way; a gate file that cannot be written is said, and the
+            // forwards task tries again.
+            if state.cfg.role == Role::Machine {
+                let (db, path) = (self.db.clone(), state.cfg.authorized_keys.clone());
+                let pruned =
+                    tokio::task::spawn_blocking(move || prune_gate_lines(&db, &path)).await;
+                if let Ok(Err(e)) = pruned {
+                    tracing::warn!("revoked, but the hub's gate line is still there: {e:#}");
+                }
+            }
+            state.wake();
+        }
         Ok(changed)
     }
 
+    fn setup_state(&self) -> Result<&Arc<SetupState>> {
+        self.setup
+            .as_ref()
+            .ok_or_else(|| anyhow!("this bridge was started without setup"))
+    }
+
+    /// Runs setup with the hub `peer` from this machine, or returns the setup already in place
+    /// without sending anything.
+    pub async fn set_up(&self, peer: &str) -> Result<SetupOutcome> {
+        let state = self.setup_state()?;
+        if state.cfg.role != Role::Machine {
+            bail!("a hub does not start setup; the machine does");
+        }
+        machine_setup(&self.dialer(), state, peer).await
+    }
+
+    /// Runs setup with every paired peer that has none yet, one after another, and returns what
+    /// each came to. A peer that is not a hub, or not serving, gives an error and is tried again
+    /// at the next start.
+    pub async fn set_up_all(&self) -> Result<Vec<(String, Result<SetupOutcome>)>> {
+        let db = self.db.clone();
+        let pending = tokio::task::spawn_blocking(move || peers_without_setup(&db)).await??;
+        let mut out = Vec::new();
+        for peer in pending {
+            let result = self.set_up(&peer).await;
+            out.push((peer, result));
+        }
+        Ok(out)
+    }
+
+    /// Opens a forward for every setup row and keeps them matching the rows until shutdown: a row
+    /// that appears (a setup in another process) gets one, a row that goes (a revoke from
+    /// anywhere) loses it. On a machine, gate lines of hubs with no row are removed too.
+    pub fn keep_setup(&self) -> Result<()> {
+        spawn_forwards(self.setup_state()?.clone(), self.dialer());
+        Ok(())
+    }
+
+    /// Waits until `peer` has a setup row here, for a hub that just paired: the machine starts
+    /// setup, so the hub only waits for it.
+    pub async fn wait_setup(
+        &self,
+        peer: &str,
+        wait: Duration,
+    ) -> Option<hq_db::bridge_setup::Setup> {
+        let end = tokio::time::Instant::now() + wait;
+        loop {
+            let (db, key) = (self.db.clone(), peer.to_string());
+            let row = tokio::task::spawn_blocking(move || hq_db::bridge_setup::get(&db, &key))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten();
+            if row.is_some() || tokio::time::Instant::now() >= end {
+                return row;
+            }
+            tokio::time::sleep(SETUP_POLL).await;
+        }
+    }
+
     pub async fn shutdown(self) {
+        if let Some(state) = &self.setup {
+            state.stop();
+        }
         if let Some(router) = &self._router {
             let _ = router.shutdown().await;
         }

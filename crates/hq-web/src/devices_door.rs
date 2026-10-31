@@ -2,8 +2,8 @@
 //! `web` service points at, so the owner's paired devices reach the web app, `/api`, `/ws` and
 //! `/mcp` by key over iroh. Everything arriving here looks like loopback, so it opens only when
 //! the web token is on and the `/mcp` development switch is off. The connector's OAuth paths never
-//! answer here, and `/mcp` takes a configured API key or a launched agent's session token, never a
-//! connector grant, so the two doors share no credential (`docs/security/PAIRING.md`, section 14).
+//! answer here, and `/mcp` takes a configured API key, a paired device's own key or a launched
+//! agent's session token, never a connector grant, so the two doors share no credential (`docs/security/PAIRING.md`, section 14).
 
 use crate::WsState;
 use crate::mcp_http::McpKeys;
@@ -51,11 +51,13 @@ fn allowed(path: &str, headers: &axum::http::HeaderMap, keys: &McpKeys, state: &
         return true;
     }
     // Agents launched on a paired machine call back with their own session token
-    // (`agent_host.agent_mcp_url`); a connector grant is never one.
+    // (`agent_host.agent_mcp_url`), and a paired machine with the key it got at setup; a
+    // connector grant is never either.
+    let secret = crate::auth::presented_secret(headers);
     path == "/mcp"
         && (keys.presented(headers)
-            || crate::mcp_http::session_for_secret(state, crate::auth::presented_secret(headers))
-                .is_some())
+            || crate::mcp_http::device_key_for_secret(state, secret)
+            || crate::mcp_http::session_for_secret(state, secret).is_some())
 }
 
 /// Why the door stays shut, if it must.
@@ -212,5 +214,31 @@ mod tests {
         let no_token = WsState::new(vault.path().to_path_buf(), None);
         hq_db::web_auth::mint(&no_token.db, "phone", 0, None).unwrap();
         assert!(refusal(&no_token, false).is_some());
+    }
+
+    /// Mutation: `allowed` drops the device key check. The live key then gets 404 here.
+    #[tokio::test]
+    async fn a_paired_devices_key_opens_mcp_until_the_device_is_revoked() {
+        let w = world();
+        let addr = door(w.router.clone(), w.state.clone()).await;
+        let key = crate::mcp_http::paired_device_key(&w.state.db, "aa11");
+        let bearer = format!("Bearer {key}");
+        assert_eq!(
+            call(addr, "POST", "/mcp", &[("x-api-key", &key)]).await,
+            200
+        );
+        assert_eq!(
+            call(addr, "POST", "/mcp", &[("authorization", &bearer)]).await,
+            200
+        );
+        assert_eq!(
+            call(addr, "GET", "/mcp/extra", &[("x-api-key", &key)]).await,
+            404
+        );
+        hq_db::bridge::revoke(&w.state.db, "aa11").unwrap();
+        assert_eq!(
+            call(addr, "POST", "/mcp", &[("x-api-key", &key)]).await,
+            404
+        );
     }
 }

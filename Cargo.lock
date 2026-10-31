@@ -3339,6 +3339,7 @@ dependencies = [
  "data-encoding",
  "hq-core",
  "hq-db",
+ "hq-gate",
  "iroh",
  "qrcodegen",
  "rand 0.8.8",

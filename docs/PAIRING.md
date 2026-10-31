@@ -177,13 +177,48 @@ cannot open the edge protocol; the edge cannot open the service protocol. Forget
 its open connections (at once through `Bridge::forget_edge`; from another process at its next
 stream). `--relay auto` uses the registered edge's relay, so the edge can find this device.
 
-## Services and forwards
+## What pairing sets up
+
+Pairing a hub with a machine wires both with no configuration. The **hub** holds HQ: the phone app
+(its helper `hq bridge run`), or a computer that runs `hq bridge` with `--as hub`. The **machine**
+runs coding agents for it: any other computer, which is the default for `pair`, `join` and `serve`.
+Right after the six digits match, the machine sends one setup message on its own protocol
+(`hq/setup/1`) and the hub answers. Each side then has:
+
+| Side | What it gets |
+|---|---|
+| Machine | its host gate offered to the hub as the service `gate`; the hub's gate key in `gate_authorized_keys`, from `127.0.0.1` only, labelled `bridge:<first 8 hex of the hub's id>`; a forward on a loopback port to the hub's `web`; a key minted for this machine alone that opens the hub's `/mcp`, used by `hq task` when no `task_peer` is configured |
+| Hub | its paired-devices door (`bridge.web_listen`) offered as `web`; a forward on a loopback port to the machine's `gate`; a host named after the machine (`tcp` transport at that forward, with a gate key made for it under `~/.hq/gate/`); the machine's own forward as the `/mcp` address for agents launched there |
+
+Ports are picked on each side from 47400 to 47999 and kept. What was set up lives in the database
+(`bridge_setup`), never in `config.yaml`; the hub keeps only a hash of the machine's key. A restart,
+or running setup again, reuses the ports and the key; a new pairing starts setup over with a new
+key and revokes the old one. Revoking the peer, from either side, undoes that
+side's part: the forward closes, the gate line is removed, the key stops working and the host
+disappears.
+
+```bash
+# On the laptop, with the phone app open on its pairing screen:
+hq bridge join            # paste or scan the phone's link, then type the digits on the phone
+hq bridge serve           # keeps the forward and the gate service up
+```
+
+Two things stay with the owner. The machine offers its gate only when `agent_host.gate_listen` is a
+loopback address that `agent_host.gate_allowed_sources` admits (`hq bridge serve` prints a one-line
+hint otherwise; setup never moves the gate). The hub offers `web` only when `bridge.web_listen` is
+set and the web token is on. A computer pairing as a hub keeps `hq bridge serve --as hub` running
+so the machine can reach it; a machine that could not reach the hub tries again at its next
+`hq bridge serve`. Two hubs, or two machines, pair as peers and set nothing up.
+
+Anything configured by hand wins: a service, forward, host or remote MCP entry with the same name
+or port as one setup would make keeps the configured one, so a setup written by hand keeps working.
+
+## Services and forwards by hand
 
 Once two machines are paired, each can offer the other named services and reach the other's through
-local ports. This is how a laptop and a phone use HQ together with no VPN: the laptop opens the
-phone's web app and `/mcp` on a local port, and the phone reaches the laptop's coding-agent host the
-same way. Configure it in `~/.hq/config.yaml`; `hq bridge serve` (and the phone app's `hq bridge run`)
-reads it at start.
+local ports. Pairing does this for a hub and a machine (above); the same pieces can also be set by
+hand, for other pairs or other services. Configure them in `~/.hq/config.yaml`; `hq bridge serve`
+(and the phone app's `hq bridge run`) reads it at start.
 
 ```yaml
 # On the phone: offer the web app to paired devices, and reach the laptop's host gate.
@@ -226,8 +261,9 @@ List that origin in the phone's `web_allowed_origins` if the browser shows it as
 | Throwaway endpoint (one UDP socket per ticket) | From `open_ticket` until the ticket is used, expired or burned. `hq bridge pair` runs it until then |
 | The edge protocol on the long-term endpoint | Whenever a serving bridge has an edge door (the default); the gate admits only the registered edge. `--edge-door off` removes it |
 | Connection to the connector door | One per stream the edge opens, made by the bridge, to the door's socket (or opted-in loopback port) only |
-| The service protocol on the long-term endpoint | Whenever a serving bridge has `bridge.services`; the gate admits only paired peers |
-| One TCP port per forward, on loopback | While `hq bridge serve` or `hq bridge run` runs with `bridge.forwards` |
+| The service protocol on the long-term endpoint | Whenever a serving bridge has `bridge.services`, or offers `gate` or `web` for setup; the gate admits only paired peers |
+| The setup protocol on the long-term endpoint | On a hub, whenever its bridge runs (`hq bridge run`, or `--as hub`); the gate admits only paired peers. A machine never accepts it |
+| One TCP port per forward, on loopback | While `hq bridge serve` or `hq bridge run` runs with `bridge.forwards`, and one per setup row |
 | The web server's paired-devices door, on loopback | While the web server runs with `bridge.web_listen` and the web token set |
 
 `hq bridge run` is both: the long-term endpoint for as long as it runs, and one throwaway endpoint while
@@ -241,6 +277,7 @@ Without a handler, `Bridge::start` binds a socket to dial out but accepts no pro
 ```bash
 cargo test -p hq-db bridge
 cargo test -p hq-bridge                       # unit tests and the loopback end-to-end tests
+cargo test -p hq-bridge --test setup          # setup after pairing, two machines on loopback
 cargo clippy -p hq-cli --all-targets -- -D warnings
 cargo test -p hq-cli --bin hq -- bridge_commands bridge_control
 ```

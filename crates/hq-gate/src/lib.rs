@@ -23,6 +23,6 @@ mod proto;
 mod server;
 
 pub use client::call;
-pub use keys::{AuthorizedKey, ClientKey, append_authorized, load_authorized};
+pub use keys::{AuthorizedKey, ClientKey, append_authorized, load_authorized, remove_authorized};
 pub use proto::{GateError, MAGIC, MAX_REPLY_BYTES, MAX_REQUEST_BYTES};
 pub use server::{Handler, Limits, Listener, ServerConfig, ShutdownHandle};

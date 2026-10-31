@@ -390,6 +390,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "105_session_policies",
         include_str!("../sql/105_session_policies.sql"),
     ),
+    (
+        "106_bridge_setup",
+        include_str!("../sql/106_bridge_setup.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
