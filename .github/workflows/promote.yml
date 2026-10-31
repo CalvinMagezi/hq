@@ -78,3 +78,18 @@ jobs:
             gh release create channel-stable --title "channel-stable" \
               --notes "Signed pointer to the promoted release. Not a downloadable build."
           gh release upload channel-stable promote-dl/channel-stable.json promote-dl/channel-stable.json.minisig --clobber
+
+      # The app's updater reads the stable channel from the latest release, so the Android manifest
+      # the tag was published with moves to channel-stable too, and channel-stable is the latest release.
+      - name: Promote the Android update manifest
+        run: |
+          rm -rf promote-android
+          mkdir promote-android
+          if ! gh release download "$TAG" --dir promote-android --pattern android-channel.json --pattern android-channel.json.minisig; then
+            echo "::notice::$TAG has no Android build; channel-stable keeps its previous Android manifest"
+            exit 0
+          fi
+          minisign -V -p release/minisign.pub -m promote-android/android-channel.json -x promote-android/android-channel.json.minisig -q
+          [ "$(jq -r .version promote-android/android-channel.json)" = "${TAG#v}" ] || { echo "android manifest version does not match the tag" >&2; exit 1; }
+          gh release upload channel-stable promote-android/android-channel.json promote-android/android-channel.json.minisig --clobber
+          gh release edit channel-stable --latest
