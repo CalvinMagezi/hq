@@ -20,25 +20,19 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
 
 const hosts = [
   {
+    name: 'An Android phone',
+    where: 'Early access, built by hand for now',
+    body: 'The home base. The daemon, chat, tasks, notes, inbox and both chat relays run on it, with a data saver for metered plans. Keep it on a charger. Coding agents run on your laptop or server, and the phone supervises them.',
+    href: '#phone-h',
+    tone: 'green',
+    preview: true,
+  },
+  {
     name: 'Your laptop or desktop',
     where: 'macOS (Apple Silicon and Intel) or Linux',
-    body: 'One command installs a signed binary and the web app. On a Mac, hq service install keeps the daemon running and starts it at login.',
+    body: 'Joins your phone with a QR code and runs your coding agents. One command installs a signed binary and the web app. On a Mac, hq service install keeps the daemon running and starts it at login.',
     cmd: 'curl -fsSL https://agent-hq.online/install.sh | bash',
     tone: 'blue',
-  },
-  {
-    name: 'A server',
-    where: 'Any Linux VPS, or a Hetzner server from a short form',
-    body: 'Always on, updates itself from signed releases every ten minutes and rolls back when a health check fails. Reach it privately over Tailscale.',
-    href: '/install/#server',
-    tone: 'green',
-  },
-  {
-    name: 'Docker',
-    where: 'One container, amd64 and arm64',
-    body: 'The image runs HQ with its web app and prints a sign-in link on first start. The vault lives in a volume.',
-    cmd: 'docker run -d -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq',
-    tone: 'indigo',
   },
   {
     name: 'Windows',
@@ -48,12 +42,18 @@ const hosts = [
     tone: 'blue',
   },
   {
-    name: 'An Android phone',
-    where: 'Developer preview',
-    body: 'A phone in a drawer can be the always-on host: the daemon, both chat relays and the web app run on it, with a data saver for metered plans. Coding agents still run on a laptop or server, and the phone supervises them.',
-    href: '#phone-h',
+    name: 'A server',
+    where: 'Any Linux VPS, or a Hetzner server from a short form',
+    body: 'Always on, updates itself from signed releases every ten minutes and rolls back when a health check fails. Pair it with your phone like a laptop, or run it on its own.',
+    href: '/install/#server',
     tone: 'green',
-    preview: true,
+  },
+  {
+    name: 'Docker',
+    where: 'One container, amd64 and arm64',
+    body: 'The image runs HQ with its web app and prints a sign-in link on first start. The vault lives in a volume.',
+    cmd: 'docker run -d -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq',
+    tone: 'indigo',
   },
 ];
 
@@ -68,15 +68,15 @@ const phoneShots = [
 ---
 
 <Layout
-  title="Agent HQ: a local-first AI agent hub"
-  description="Open-source AI agent hub on Discord, Telegram, web and terminal. A markdown vault on your machine, supervised coding agents, one Rust binary."
+  title="Agent HQ: a mobile-first AI agent harness"
+  description="Open-source AI agent harness that lives on your phone. Laptops and servers join with a QR code and talk directly, no VPN. Supervised coding agents, a markdown vault you can open, one Rust binary."
   path="/"
   jsonLd={{
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
     name: 'Agent HQ',
     alternateName: 'HQ',
-    description: 'Open-source, local-first AI agent hub that supervises coding agents and keeps a markdown vault on your own machine.',
+    description: 'Open-source, mobile-first AI agent harness. HQ lives on your phone, your laptop and servers join with a QR code, and it supervises coding agents and keeps a markdown vault you can open.',
     url: SITE_URL,
     applicationCategory: 'DeveloperApplication',
     operatingSystem: 'Linux, macOS, Windows, Android',
@@ -94,34 +94,36 @@ const phoneShots = [
       <div class="stack">
         <div class="tags">
           <span class="tag tag-green">Open source</span>
-          <span class="tag tag-blue">Local first</span>
+          <span class="tag tag-blue">Mobile first</span>
           <span class="tag glass-light">Version 0.9.x</span>
         </div>
         <h1 id="hero-h" class="display">
-          <span class="hl"><span>One agent.</span></span>
-          <span class="hl"><span>Every channel.</span></span>
-          <span class="hl"><span class="accent">Your machine.</span></span>
+          <span class="hl"><span>Your AI agents.</span></span>
+          <span class="hl"><span>Your phone.</span></span>
+          <span class="hl"><span class="accent">Every machine.</span></span>
         </h1>
         <div class="rule rule-in" aria-hidden="true"></div>
         <p class="lede fade-in hero-lede">
-          Agent HQ (HQ for short) puts one AI agent on Discord, Telegram, a web app and your terminal. It
-          keeps your data in a markdown vault on your own disk and supervises the coding agents you already
-          use. One Rust binary of about 58 MB. No cloud backend.
+          Agent HQ (HQ for short) lives on your phone. Your laptop and servers join it with a QR code and
+          talk to it directly, with no VPN to set up. Coding agents run on those machines, and your phone
+          starts them, watches them and answers their questions. Your data stays in a markdown vault you can
+          open. One Rust binary, no cloud backend.
         </p>
+        <p class="small fade-in">On your laptop or server:</p>
         <div class="install-pill glass fade-in">
           <span class="prompt" aria-hidden="true">$</span>
           <code id="hero-install">{installCmd}</code>
           <button type="button" class="btn btn-accent btn-sm" data-copy="hero-install" data-label="Copy" aria-label="Copy install command" hidden>Copy</button>
         </div>
         <div class="actions fade-in">
-          <a class="btn btn-primary btn-lg" href="/install/">Install guide</a>
+          <a class="btn btn-primary btn-lg" href="/install/#android-h">Early access</a>
           <a class="btn btn-lg" href="/architecture/">How it works</a>
           <a class="btn btn-lg" href={links.repo}>View on GitHub</a>
         </div>
       </div>
 
       <div class="graphic-panel glass-heavy shine">
-        <div class="graphic" role="img" aria-label="Four channels, Discord, Telegram, the web app and the terminal, flow into one agent, which writes to your vault.">
+        <div class="graphic" role="img" aria-label="Your phone runs HQ and holds the vault. A laptop, a server or VPS, Claude Code and chat on Telegram or Discord all connect to it.">
           <svg class="track" viewBox="0 0 560 440" aria-hidden="true" focusable="false">
             <path d="M150 60 C 230 60 220 210 300 210"></path>
             <path d="M150 160 C 230 160 220 210 300 210"></path>
@@ -134,12 +136,12 @@ const phoneShots = [
           <span class="flow-dot fd3"></span>
           <span class="flow-dot fd4"></span>
           <span class="flow-dot fd5"></span>
-          <span class="ch glass-light ch1"><span class="ping ping-blue"></span>Discord</span>
-          <span class="ch glass-light ch2"><span class="ping ping-green"></span>Telegram</span>
-          <span class="ch glass-light ch3"><span class="ping ping-blue"></span>Web app</span>
-          <span class="ch glass-light ch4"><span class="ping ping-green"></span>Terminal</span>
+          <span class="ch glass-light ch1"><span class="ping ping-blue"></span>Laptop</span>
+          <span class="ch glass-light ch2"><span class="ping ping-green"></span>Server / VPS</span>
+          <span class="ch glass-light ch3"><span class="ping ping-blue"></span>Claude Code</span>
+          <span class="ch glass-light ch4"><span class="ping ping-green"></span>Chat</span>
           <img class="core" src="/icons/hq-icon-192.png" alt="" width="96" height="96" decoding="async" />
-          <span class="g-label core-label">One agent</span>
+          <span class="g-label core-label">Phone (HQ)</span>
           {[1, 2, 3, 4, 5, 6].map((n) => <span class={`vbar vb${n}`}><span></span></span>)}
           <span class="g-label vault-label">Your vault</span>
           <span class="vault-path">.vault/*.md</span>
@@ -195,6 +197,129 @@ const phoneShots = [
     </div>
   </section>
 
+  <section class="sec" aria-labelledby="phone-h">
+    <span class="orb orb-i o-tl slow" aria-hidden="true"></span>
+    <span class="orb orb-g o-br" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Android app · early access</p>
+        <h2 id="phone-h" class="reveal">Your phone is home base</h2>
+        <p class="lede reveal">
+          The Android app runs HQ itself as a foreground service. Chat, tasks, notes and an inbox of things
+          that need your OK all live there, and so does the vault. Your laptop and servers join it, and the
+          coding agents running on them report back to your phone.
+        </p>
+      </div>
+      <ul class="phones list-plain" tabindex="0" aria-label="Screens from the Android app design preview">
+        {
+          phoneShots.map((p, i) => (
+            <li class={`phone-shot reveal reveal-${(i % 3) + 1}`}>
+              <img src={`/media/phone/${p.id}.jpg`} alt={p.alt} width="519" height="1124" loading="lazy" decoding="async" />
+              <span class="small">{p.label}</span>
+            </li>
+          ))
+        }
+      </ul>
+      <p class="small phone-note">Screens from the design preview. The app already opens its native screens by default, with the web app a tap away; these show where the design is heading.</p>
+      <div class="phone-facts">
+        <div class="gcard">
+          <h3>Works today</h3>
+          <ul class="facts list-plain">
+            <li>Full HQ on a phone with the <code>mobile</code> profile: daemon, chat, tasks, notes, inbox, web app, Telegram and Discord relays (chat only)</li>
+            <li>A data saver for people who pay for every megabyte, and keys held in the Android Keystore</li>
+            <li>Pairing a laptop or server with a QR code and six digits, and revoking a device closes its connections at once</li>
+            <li>Over the link, the phone reaches your laptop's coding agents and your laptop opens the phone's web app and HQ tools</li>
+            <li>Claude Code, Claude Desktop and Claude Code Remote Control reach HQ through your laptop while it is on</li>
+          </ul>
+        </div>
+        <div class="gcard">
+          <h3>Not there yet</h3>
+          <ul class="facts list-plain">
+            <li>No published app yet: you build the APK yourself and install it with adb</li>
+            <li>Relays are development relays today, so do not count on a production one</li>
+            <li>Not yet shown that a sleeping, unplugged phone always answers in time, so keep it on a charger</li>
+            <li>No agent shell on the phone: Android has no sandbox HQ can use, so that tool is refused</li>
+          </ul>
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn" href={links.androidApp}>Build the Android app</a>
+        <a class="btn" href={links.hqMobile}>How the mobile edition differs</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="join-h">
+    <span class="orb orb-b o-tl slow" aria-hidden="true"></span>
+    <span class="orb orb-g o-br" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Joining a machine</p>
+        <h2 id="join-h" class="reveal">Machines join by QR, not by VPN</h2>
+        <p class="lede reveal">
+          Pairing takes a minute. After that your machines reach each other directly over an encrypted
+          link. They dial each other by key and punch through home routers, with a relay only as a fallback.
+          You do not set up Tailscale, WireGuard or any VPN between your own machines.
+        </p>
+      </div>
+      <ol class="rail-steps">
+        <li class="rail" aria-hidden="true"><span></span></li>
+        <li class="gcard reveal">
+          <span class="step-dot dot-blue" aria-hidden="true"></span>
+          <h3>Install HQ on the laptop or server</h3>
+          <p class="body">One command on a laptop, desktop or VPS. Windows users run it inside WSL2.</p>
+        </li>
+        <li class="gcard reveal reveal-2">
+          <span class="step-dot dot-green" aria-hidden="true"></span>
+          <h3>Scan the QR code</h3>
+          <p class="body">Scan the code the phone shows, or the one the laptop shows, with the other device.</p>
+        </li>
+        <li class="gcard reveal reveal-3">
+          <span class="step-dot dot-sky" aria-hidden="true"></span>
+          <h3>Type six digits</h3>
+          <p class="body">The digits confirm it is really you. Then the machines are paired, and you can revoke one any time.</p>
+        </li>
+      </ol>
+      <p class="body reveal">
+        Once paired, the phone starts coding agents on the laptop and answers their questions, and agents
+        call back to HQ with their own narrow credential. Your laptop opens the phone's web app and tools.
+        See <a href="/install/#pair-h">how to pair</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="host-h">
+    <span class="orb orb-g o-tr slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-bl" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Where it runs</p>
+        <h2 id="host-h" class="reveal">Run it where it suits you</h2>
+        <p class="lede reveal">
+          HQ is one binary and a folder of markdown, so it goes wherever you have a machine.
+          The phone is home base. Laptops, desktops and servers join it, or each can run HQ on its own. The vault is the same everywhere.
+        </p>
+      </div>
+      <ul class="hosts list-plain">
+        {
+          hosts.map((h, i) => (
+            <li class={`gcard host reveal reveal-${(i % 3) + 1}${h.preview ? ' host-featured' : ''}`}>
+              <div class="host-top">
+                <span class={`dot dot-${h.tone === 'indigo' ? 'blue' : h.tone}`} aria-hidden="true"></span>
+                <h3>{h.name}</h3>
+                {h.preview && <span class="tag tag-green">Preview</span>}
+              </div>
+              <p class="small host-where">{h.where}</p>
+              <p class="body">{h.body}</p>
+              {h.cmd && <code class="host-cmd" tabindex="0" aria-label={`Command: ${h.cmd}`}>{h.cmd}</code>}
+              {h.href && <a class="host-link" href={h.href}>{h.preview ? 'See the phone app' : 'Server options'}</a>}
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
   <section class="sec" aria-labelledby="fit-h">
     <span class="orb orb-b o-tr slow" aria-hidden="true"></span>
     <span class="orb orb-g o-bl" aria-hidden="true"></span>
@@ -203,15 +328,15 @@ const phoneShots = [
         <p class="eyebrow reveal">How it fits together</p>
         <h2 id="fit-h" class="reveal">Four ways in, one agent, one vault</h2>
         <p class="lede reveal">
-          Every channel reaches the same agent loop, and the agent reads and writes the same vault. That is
-          the whole idea. The <a href="/architecture/">architecture page</a> goes through each part.
+          The app is the main way in. Telegram, Discord and the terminal are extra doors to the same agent
+          loop, and the agent reads and writes the same vault. That is the whole idea. The <a href="/architecture/">architecture page</a> goes through each part.
         </p>
         <ol class="rail-steps">
           <li class="rail" aria-hidden="true"><span></span></li>
           <li class="gcard reveal">
             <span class="step-dot dot-blue" aria-hidden="true"></span>
             <h3>Ask from anywhere</h3>
-            <p class="body">Discord, Telegram, the web app and your terminal share one conversation history and one memory. Start a thread on your phone and finish it at your desk.</p>
+            <p class="body">The app on your phone comes first. Discord, Telegram and your terminal are optional extras, and all of them share one conversation history and one memory. Start a thread on your phone and finish it at your desk.</p>
           </li>
           <li class="gcard reveal reveal-2">
             <span class="step-dot dot-green" aria-hidden="true"></span>
@@ -383,88 +508,6 @@ const phoneShots = [
       <div class="media-pair">
         <div class="gcard reveal"><Media id="session-watch" /></div>
         <div class="gcard reveal reveal-2"><Media id="terminal-install" /></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec" aria-labelledby="host-h">
-    <span class="orb orb-g o-tr slow" aria-hidden="true"></span>
-    <span class="orb orb-b o-bl" aria-hidden="true"></span>
-    <div class="container stack">
-      <div class="head">
-        <p class="eyebrow reveal">Where it runs</p>
-        <h2 id="host-h" class="reveal">Run it where it suits you</h2>
-        <p class="lede reveal">
-          HQ is one binary and a folder of markdown, so it goes wherever you have a machine that stays on.
-          Pick a host now and move later: the vault is the same everywhere.
-        </p>
-      </div>
-      <ul class="hosts list-plain">
-        {
-          hosts.map((h, i) => (
-            <li class={`gcard host reveal reveal-${(i % 3) + 1}${h.preview ? ' host-featured' : ''}`}>
-              <div class="host-top">
-                <span class={`dot dot-${h.tone === 'indigo' ? 'blue' : h.tone}`} aria-hidden="true"></span>
-                <h3>{h.name}</h3>
-                {h.preview && <span class="tag tag-green">Preview</span>}
-              </div>
-              <p class="small host-where">{h.where}</p>
-              <p class="body">{h.body}</p>
-              {h.cmd && <code class="host-cmd" tabindex="0" aria-label={`Command: ${h.cmd}`}>{h.cmd}</code>}
-              {h.href && <a class="host-link" href={h.href}>{h.preview ? 'See the phone app' : 'Server options'}</a>}
-            </li>
-          ))
-        }
-      </ul>
-    </div>
-  </section>
-
-  <section class="sec" aria-labelledby="phone-h">
-    <span class="orb orb-i o-tl slow" aria-hidden="true"></span>
-    <span class="orb orb-g o-br" aria-hidden="true"></span>
-    <div class="container stack">
-      <div class="head">
-        <p class="eyebrow reveal">Android app · developer preview</p>
-        <h2 id="phone-h" class="reveal">HQ on your phone, not just pointed at it</h2>
-        <p class="lede reveal">
-          The Android app runs HQ itself as a foreground service: chat, tasks, notes, an inbox of things that
-          need your OK, and the coding agents working on your other machines. Pair a laptop with a QR code,
-          and connect Claude from the phone.
-        </p>
-      </div>
-      <ul class="phones list-plain" tabindex="0" aria-label="Screens from the Android app design preview">
-        {
-          phoneShots.map((p, i) => (
-            <li class={`phone-shot reveal reveal-${(i % 3) + 1}`}>
-              <img src={`/media/phone/${p.id}.jpg`} alt={p.alt} width="519" height="1124" loading="lazy" decoding="async" />
-              <span class="small">{p.label}</span>
-            </li>
-          ))
-        }
-      </ul>
-      <p class="small phone-note">Screens from the design preview of the native app. The app in the repo today wraps the same web app, and these screens are where it is going.</p>
-      <div class="phone-facts">
-        <div class="gcard">
-          <h3>Works today</h3>
-          <ul class="facts list-plain">
-            <li>Full HQ on a phone with the <code>mobile</code> profile: daemon, Telegram and Discord relays, web app, sub-agents</li>
-            <li>A data saver for people who pay for every megabyte</li>
-            <li>Pairing other devices with a QR code, and recovery when the network changes</li>
-            <li>Keys held in the Android Keystore, and a Connect Claude screen</li>
-          </ul>
-        </div>
-        <div class="gcard">
-          <h3>Not there yet</h3>
-          <ul class="facts list-plain">
-            <li>No published app: you build the APK yourself and install it with adb</li>
-            <li>Not yet shown that a sleeping, unplugged phone always answers in time, so keep it on a charger</li>
-            <li>No agent shell on the phone: Android has no sandbox HQ can use, so that tool is refused</li>
-          </ul>
-        </div>
-      </div>
-      <div class="actions">
-        <a class="btn" href={links.androidApp}>Build the Android app</a>
-        <a class="btn" href={links.hqMobile}>How the mobile edition differs</a>
       </div>
     </div>
   </section>

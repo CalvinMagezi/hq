@@ -12,6 +12,7 @@ const buildCmd = 'cargo build --release -p hq-cli';
 const pathCmd = 'install -m 755 target/release/hq "$HOME/.local/bin/hq"';
 const firstRun = 'hq install   # scaffold the vault, seed the soul, write config\nhq env       # set LLM API keys interactively\nhq doctor    # verify the setup\nhq chat      # start an interactive session';
 const webBuild = '# the released UI, signed, no bun needed (any platform):\ncurl -fsSL https://agent-hq.online/install.sh | bash -s -- --web-only\n# or build it from this checkout instead:\nhq web --build\nhq start all   # API, WebSocket and the PWA on :5678';
+const pairCmd = 'hq bridge pair';
 const mcpCmd = 'hq mcp install --target claude-code\nhq mcp status';
 
 const provision = "ssh <ssh-host> 'bash -s' < deploy/setup-vps.sh";
@@ -49,7 +50,7 @@ const pickerOptions = [
 
 <Layout
   title="Install Agent HQ"
-  description="Install Agent HQ with a curl script, Homebrew, npx or Docker, on Windows, on a server with signed releases, or on an Android phone as a developer preview."
+  description="Install Agent HQ with a curl script, Homebrew, npx or Docker, on Windows, on a server with signed releases, or on an Android phone in early access, then pair your machines with it."
   path="/install/"
 >
   <section class="sec sec-hero" aria-labelledby="inst-h">
@@ -73,27 +74,109 @@ const pickerOptions = [
         </h1>
         <div class="rule rule-in" aria-hidden="true"></div>
         <p class="lede fade-in">
-          The quickest way in is one command that downloads a verified release, for Linux and for Macs on
-          Apple Silicon or Intel. Windows runs it in WSL2 or as HQ Lite. The server path installs signed releases
-          and updates itself, and it is Linux only. An Android phone can host HQ as a developer preview.
+          HQ is mobile first, so start with the phone: the Android app is in early access. Then put HQ on your
+          laptop or server with one command that downloads a verified release, for Linux and for Macs on Apple
+          Silicon or Intel, and pair it with a QR code. Windows runs it in WSL2 or as HQ Lite. The server path
+          installs signed releases and updates itself, and it is Linux only.
         </p>
       </div>
       <nav aria-label="On this page">
         <ul class="toc">
+          <li><a href="#android">Android phone (early access)</a></li>
+          <li><a href="#pair">Pair a laptop or server</a></li>
           {curl.available && <li><a href="#script">Install script</a></li>}
           {brew.available && <li><a href="#homebrew">Homebrew</a></li>}
           {npx.available && <li><a href="#npx">npx installer</a></li>}
           {docker.available && <li><a href="#docker">Docker</a></li>}
           <li><a href="#windows">Windows</a></li>
           <li><a href="#source">Build from source</a></li>
-          <li><a href="#android">Android phone (preview)</a></li>
           <li><a href="#server">Server with signed releases</a></li>
           <li><a href="#hetzner">One form on Hetzner</a></li>
-          <li><a href="#tailscale">Remote access over Tailscale</a></li>
+          <li><a href="#tailscale">Advanced: private networks</a></li>
           <li><a href="#maintain">Updating and uninstalling</a></li>
           <li><a href="#soon">Not available yet</a></li>
         </ul>
       </nav>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" id="android" aria-labelledby="android-h">
+    <span class="orb orb-g o-tr" aria-hidden="true"></span>
+    <span class="orb orb-b o-bl slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Android 8 or newer, arm64 · early access</p>
+        <h2 id="android-h" class="reveal">Start here: HQ on your Android phone</h2>
+        <p class="lede reveal">
+          HQ is mobile first: the phone is home base. The Android app runs <code>hq</code> as a foreground service with the
+          <code>mobile</code> profile: the daemon, chat, tasks, notes, inbox, the web app and both chat relays, with a data
+          saver for metered plans. It has no agent shell, because Android has no sandbox HQ can use, so coding agents run on
+          a laptop or server and the phone starts and supervises them.
+        </p>
+        <p class="body reveal">
+          <strong>Early access.</strong> There is no published app yet. You build the APK yourself and install it with
+          <code>adb</code>, and <a href={links.repo}>the repo</a> is the place to follow progress. Relays are development
+          relays today.
+        </p>
+      </div>
+      <ol class="steps steps-grid">
+        <li class="gcard reveal">
+          <p>Build <code>hq</code> for the phone with the features the app needs.</p>
+          <CodeBlock id="and-hq" label="hq for Android" code={androidHq} />
+        </li>
+        <li class="gcard reveal reveal-2">
+          <p>Build the APK. All four paths are required, and keep the signing key backed up: only an update signed with the same key keeps the phone's data.</p>
+          <CodeBlock id="and-apk" label="APK" code={androidApk} />
+        </li>
+        <li class="gcard reveal">
+          <p>Install it over USB debugging. Always update with <code>-r</code>; uninstalling deletes the vault.</p>
+          <CodeBlock id="and-install" label="Install" code={androidInstall} />
+        </li>
+        <li class="gcard reveal reveal-2">
+          <p>Push your model key the way the README shows (the app encrypts it under an Android Keystore key and wipes the plain copy), then switch from standby to the full daemon. Run the daemon on one machine at a time, or two of them answer the same bots.</p>
+          <CodeBlock id="and-active" label="Full HQ" code={androidActive} />
+        </li>
+      </ol>
+      <p class="body reveal">
+        Keep the phone on a charger and allow it to run in the background; the app's Keep running screen checks the
+        settings it can. The <a href={links.androidApp}>Android README</a> has the details, and
+        <a href={links.hqMobile}>the mobile edition</a> lists what differs from a laptop or server.
+      </p>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" id="pair" aria-labelledby="pair-h">
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">After the phone is running</p>
+        <h2 id="pair-h" class="reveal">Pair a laptop or server with your phone</h2>
+        <p class="lede reveal">
+          Install HQ on the laptop or server with one of the methods below, then pair it. After that the machines reach
+          each other directly over an encrypted link. You do not need Tailscale, WireGuard or a VPN between your own
+          machines.
+        </p>
+      </div>
+      <ol class="steps steps-grid">
+        <li class="gcard reveal">
+          <p>On the laptop or server, show a pairing QR code.</p>
+          <CodeBlock id="pair-cmd" label="Pair" code={pairCmd} />
+        </li>
+        <li class="gcard reveal reveal-2">
+          <p>Scan it with the phone app, then type the six digits the machine shows. Revoking a device later closes its connections at once.</p>
+        </li>
+      </ol>
+      <p class="body reveal">
+        On Windows, run this inside WSL2. Keep the phone on a charger so it answers when the laptop calls. The
+        <a href={links.pairing}>pairing guide</a> on GitHub covers the details.
+      </p>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" id="laptop" aria-labelledby="laptop-h">
+    <div class="container stack">
+      <div class="head">
+        <h2 id="laptop-h" class="reveal">Install HQ on a laptop or server</h2>
+      </div>
 
       <div class="picker" data-tabs>
         <div class="opts" role="group" aria-label="Choose an install method" data-tablist hidden>
@@ -278,46 +361,6 @@ const pickerOptions = [
     </div>
   </section>
 
-  <section class="sec sec-top0" id="android" aria-labelledby="android-h">
-    <span class="orb orb-g o-tr" aria-hidden="true"></span>
-    <span class="orb orb-b o-bl slow" aria-hidden="true"></span>
-    <div class="container stack">
-      <div class="head">
-        <p class="eyebrow reveal">Android 8 or newer, arm64 · developer preview</p>
-        <h2 id="android-h" class="reveal">Host HQ on an Android phone</h2>
-        <p class="lede reveal">
-          The Android app runs <code>hq</code> as a foreground service with the <code>mobile</code> profile: the daemon,
-          both chat relays and the web app, with a data saver for metered plans. It has no agent shell, because Android
-          has no sandbox HQ can use, so coding agents keep running on a laptop or server and the phone supervises them.
-          There is no published app yet: you build it, and installing it needs <code>adb</code>.
-        </p>
-      </div>
-      <ol class="steps steps-grid">
-        <li class="gcard reveal">
-          <p>Build <code>hq</code> for the phone with the features the app needs.</p>
-          <CodeBlock id="and-hq" label="hq for Android" code={androidHq} />
-        </li>
-        <li class="gcard reveal reveal-2">
-          <p>Build the APK. All four paths are required, and keep the signing key backed up: only an update signed with the same key keeps the phone's data.</p>
-          <CodeBlock id="and-apk" label="APK" code={androidApk} />
-        </li>
-        <li class="gcard reveal">
-          <p>Install it over USB debugging. Always update with <code>-r</code>; uninstalling deletes the vault.</p>
-          <CodeBlock id="and-install" label="Install" code={androidInstall} />
-        </li>
-        <li class="gcard reveal reveal-2">
-          <p>Push your model key the way the README shows (the app encrypts it under an Android Keystore key and wipes the plain copy), then switch from standby to the full daemon. Run the daemon on one machine at a time, or two of them answer the same bots.</p>
-          <CodeBlock id="and-active" label="Full HQ" code={androidActive} />
-        </li>
-      </ol>
-      <p class="body reveal">
-        Keep the phone on a charger and allow it to run in the background; the app's Keep running screen checks the
-        settings it can. The <a href={links.androidApp}>Android README</a> has the details, and
-        <a href={links.hqMobile}>the mobile edition</a> lists what differs from a laptop or server.
-      </p>
-    </div>
-  </section>
-
   <section class="sec sec-top0" id="server" aria-labelledby="server-h">
     <span class="orb orb-g o-c" aria-hidden="true"></span>
     <span class="orb orb-i o-br slow" aria-hidden="true"></span>
@@ -414,43 +457,6 @@ const pickerOptions = [
     </div>
   </section>
 
-  <section class="sec sec-top0" id="tailscale" aria-labelledby="ts-h">
-    <span class="orb orb-i o-c" aria-hidden="true"></span>
-    <div class="container stack">
-      <div class="head">
-        <p class="eyebrow reveal">Optional</p>
-        <h2 id="ts-h" class="reveal">{installChannels.tailscale.title}</h2>
-        <p class="lede reveal">
-          This puts the web UI on your tailnet over HTTPS, so your phone can reach it and the public internet cannot. HQ
-          stays on loopback, Caddy listens on <code>127.0.0.1:4749</code>, and
-          <a href={links.tailscaleServe}>tailscale serve</a> terminates TLS. HTTPS certificates must be enabled for your
-          tailnet. Run these on the server, from the repository checkout. <code>hq.example.ts.net</code> stands for your
-          server's own MagicDNS name.
-        </p>
-      </div>
-      <div class="panel glass-heavy shine zoom-in">
-        <div class="ts" role="img" aria-label="A request goes from your phone to tailscale serve on port 8443, to Caddy on 127.0.0.1:4749, to HQ on loopback.">
-          <span class="tsline" aria-hidden="true"></span>
-          <span class="tspk" aria-hidden="true"></span>
-          <span class="pill glass-heavy">Phone</span>
-          <span class="pill glass-heavy">tailscale serve :8443</span>
-          <span class="pill glass-heavy">Caddy 127.0.0.1:4749</span>
-          <span class="pill pill-green">HQ on loopback</span>
-        </div>
-      </div>
-      <ol class="steps steps-grid">
-        <li class="gcard reveal"><p>Join the tailnet.</p><CodeBlock id="ts-up" label="Tailscale up" code={tsUp} /></li>
-        <li class="gcard reveal reveal-2"><p>Add the loopback Caddy bridge.</p><CodeBlock id="ts-caddy" label="Caddy" code={tsCaddy} /></li>
-        <li class="gcard reveal"><p>Serve it on an alternate HTTPS port. Port 443 is usually taken by a public Caddyfile.</p><CodeBlock id="ts-serve" label="Serve" code={tsServe} /></li>
-        <li class="gcard reveal reveal-2"><p>List every origin you open the UI from in <code>/opt/hq/config.yaml</code>, and set a web token. Without the origin you get a 403 about an unrecognised Host header. Restart HQ afterwards.</p><CodeBlock id="ts-config" label="config.yaml" code={tsConfig} /></li>
-      </ol>
-      <div class="gcard reveal">
-        <p class="body">To turn it off again, run this. Never publish <code>/ws</code> or <code>/api</code> on a public address.</p>
-        <CodeBlock id="ts-off" label="Tailscale serve off" code={tsOff} />
-      </div>
-    </div>
-  </section>
-
   <section class="sec sec-top0" id="maintain" aria-labelledby="maintain-h">
     <span class="orb orb-g o-ml slow" aria-hidden="true"></span>
     <span class="orb orb-b o-br" aria-hidden="true"></span>
@@ -496,6 +502,43 @@ const pickerOptions = [
           <summary>Server</summary>
           <p class="body">It updates itself from signed releases every ten minutes. To remove it, back up <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq hq-update.timer</code> and delete the unit files, <code>/usr/local/bin/hq</code>, <code>/etc/hq</code> and <code>/opt/hq</code>.</p>
         </details>
+      </div>
+    </div>
+  </section>
+  <section class="sec sec-top0" id="tailscale" aria-labelledby="ts-h">
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Advanced: private networks</p>
+        <h2 id="ts-h" class="reveal">Advanced: private networks</h2>
+        <p class="lede reveal">
+          This is optional, and you no longer need it to connect your own machines: pairing with your phone does that.
+          Use it only if you want to reach the web UI over a tailnet you already run. It puts the web UI on your tailnet over HTTPS, so your phone can reach it and the public internet cannot. HQ
+          stays on loopback, Caddy listens on <code>127.0.0.1:4749</code>, and
+          <a href={links.tailscaleServe}>tailscale serve</a> terminates TLS. HTTPS certificates must be enabled for your
+          tailnet. Run these on the server, from the repository checkout. <code>hq.example.ts.net</code> stands for your
+          server's own MagicDNS name.
+        </p>
+      </div>
+      <div class="panel glass-heavy shine zoom-in">
+        <div class="ts" role="img" aria-label="A request goes from your phone to tailscale serve on port 8443, to Caddy on 127.0.0.1:4749, to HQ on loopback.">
+          <span class="tsline" aria-hidden="true"></span>
+          <span class="tspk" aria-hidden="true"></span>
+          <span class="pill glass-heavy">Phone</span>
+          <span class="pill glass-heavy">tailscale serve :8443</span>
+          <span class="pill glass-heavy">Caddy 127.0.0.1:4749</span>
+          <span class="pill pill-green">HQ on loopback</span>
+        </div>
+      </div>
+      <ol class="steps steps-grid">
+        <li class="gcard reveal"><p>Join the tailnet.</p><CodeBlock id="ts-up" label="Tailscale up" code={tsUp} /></li>
+        <li class="gcard reveal reveal-2"><p>Add the loopback Caddy bridge.</p><CodeBlock id="ts-caddy" label="Caddy" code={tsCaddy} /></li>
+        <li class="gcard reveal"><p>Serve it on an alternate HTTPS port. Port 443 is usually taken by a public Caddyfile.</p><CodeBlock id="ts-serve" label="Serve" code={tsServe} /></li>
+        <li class="gcard reveal reveal-2"><p>List every origin you open the UI from in <code>/opt/hq/config.yaml</code>, and set a web token. Without the origin you get a 403 about an unrecognised Host header. Restart HQ afterwards.</p><CodeBlock id="ts-config" label="config.yaml" code={tsConfig} /></li>
+      </ol>
+      <div class="gcard reveal">
+        <p class="body">To turn it off again, run this. Never publish <code>/ws</code> or <code>/api</code> on a public address.</p>
+        <CodeBlock id="ts-off" label="Tailscale serve off" code={tsOff} />
       </div>
     </div>
   </section>
