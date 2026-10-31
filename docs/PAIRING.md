@@ -11,12 +11,13 @@ The protocol, its attack notes and its residual risks are in
 `hq-bridge` crate. This page is for people who build on it and for anyone trying `hq bridge`.
 
 Nothing starts by itself. The `hq` binary does not call the crate at start-up, and the `hq bridge`
-command group exists only when built with the `bridge` feature.
+command group is in every Linux and macOS build (the default `bridge` feature); Windows builds
+leave it out, so a Windows machine pairs from WSL2.
 
 ## Try it between two terminals
 
 ```bash
-cargo build -p hq-cli --features bridge
+cargo build -p hq-cli
 ```
 
 On the machine that shows the QR code:
@@ -196,8 +197,8 @@ Without a handler, `Bridge::start` binds a socket to dial out but accepts no pro
 ```bash
 cargo test -p hq-db bridge
 cargo test -p hq-bridge                       # unit tests and the loopback end-to-end tests
-cargo clippy -p hq-cli --all-targets --features bridge -- -D warnings
-cargo test -p hq-cli --features bridge --bin hq -- bridge_commands bridge_control
+cargo clippy -p hq-cli --all-targets -- -D warnings
+cargo test -p hq-cli --bin hq -- bridge_commands bridge_control
 ```
 
 `bridge_control` drives two machines through the JSON-line control channel the phone app uses (pairing with
