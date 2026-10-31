@@ -17,6 +17,7 @@ pub mod key;
 pub mod limits;
 pub mod qr;
 pub mod services;
+pub mod setup;
 pub mod ticket;
 pub mod wire;
 
@@ -30,4 +31,5 @@ pub use host::{Joiner, OpenTicket, PairRequest, PairingSpec, Registrar, Tuning};
 pub use iroh::{EndpointId, RelayMode, endpoint::Connection};
 pub use join::{JoinOptions, JoinResult, Joined};
 pub use services::{SVC_ALPN, Services, open_service, run_forward};
+pub use setup::{Role, SETUP_ALPN, SetupConfig, SetupOutcome};
 pub use ticket::{LINK_SCHEME, Purpose, Ticket};
