@@ -289,14 +289,43 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
         }
         Ok(s)
     };
-    let peer = config.task_peer_server().map_err(anyhow::Error::msg)?;
+    let peer = match config.task_peer_server().map_err(anyhow::Error::msg)? {
+        Some(peer) => Some(peer.clone()),
+        None => bridge_task_peer(config),
+    };
     let (tool, args) = call_for(&cmd, &mut read_stdin)?;
-    let value = match peer {
+    let value = match &peer {
         Some(peer) => call_peer(peer, tool, args).await?,
         None => call_local(config, tool, args).await?,
     };
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
+}
+
+/// With no `task_peer` configured, a machine paired through the bridge with exactly one hub sends
+/// its tasks there, through its forward to the hub and with the key the hub minted for it.
+fn bridge_task_peer(config: &HqConfig) -> Option<hq_core::config::RemoteMcpServer> {
+    let path = config.db_path();
+    let db = path
+        .exists()
+        .then(|| hq_db::Database::open(&path).ok())
+        .flatten()?;
+    task_peer_from_setup(&hq_db::bridge_setup::list(&db).ok()?)
+}
+
+fn task_peer_from_setup(
+    setups: &[hq_db::bridge_setup::Setup],
+) -> Option<hq_core::config::RemoteMcpServer> {
+    let hubs: Vec<_> = setups.iter().filter(|s| s.is_hub()).collect();
+    let [hub] = hubs.as_slice() else {
+        return None;
+    };
+    Some(hq_core::config::RemoteMcpServer {
+        name: hub.peer_name.clone(),
+        url: format!("http://127.0.0.1:{}/mcp", hub.local_port),
+        api_key: Some(hub.mcp_key.clone()?),
+        live_user_turn_only: true,
+    })
 }
 
 /// A peer that accepts the connection and never answers would otherwise hang the terminal.
@@ -493,6 +522,32 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("not a task tool"));
+    }
+
+    #[test]
+    fn a_machine_paired_with_one_hub_through_the_bridge_sends_its_tasks_there() {
+        use hq_db::bridge_setup::{ROLE_HUB, ROLE_MACHINE, Setup};
+        let row = |id: &str, role: &str, key: Option<&str>| Setup {
+            peer_id: id.into(),
+            peer_role: role.into(),
+            peer_name: format!("{id}-name"),
+            local_port: 47_450,
+            peer_offers: true,
+            peer_port: None,
+            mcp_key: key.map(Into::into),
+            offered: true,
+        };
+        let phone = row("phone", ROLE_HUB, Some("hqd_k"));
+        let peer = task_peer_from_setup(std::slice::from_ref(&phone)).unwrap();
+        assert_eq!(peer.url, "http://127.0.0.1:47450/mcp");
+        assert_eq!(peer.api_key.as_deref(), Some("hqd_k"));
+        assert_eq!(peer.name, "phone-name");
+        let laptop = row("laptop", ROLE_MACHINE, None);
+        assert!(task_peer_from_setup(&[phone.clone(), laptop]).is_some());
+        let two = [phone.clone(), row("vps", ROLE_HUB, Some("hqd_j"))];
+        assert!(task_peer_from_setup(&two).is_none(), "two hubs: no guess");
+        assert!(task_peer_from_setup(&[row("phone", ROLE_HUB, None)]).is_none());
+        assert!(task_peer_from_setup(&[]).is_none());
     }
 
     #[test]
