@@ -80,7 +80,7 @@ const rows: Row[] = [
   },
   {
     topic: 'Where it runs',
-    hq: { text: 'A Mac or Linux machine, a VPS, Docker, or Windows (WSL2 or HQ Lite). An Android phone is the home base in early access: you build the APK yourself, and whether a sleeping, unplugged phone answers in time is not verified yet, so keep it on a charger. Laptops and servers join the phone with a QR code and talk to it over an encrypted peer-to-peer link, with no VPN. hq net (a self-hosted WireGuard network) and hq edge (a public forwarder you run yourself for a device behind NAT) are optional. There is no hosted service.', src: ['mobile docs', `${REPO_BLOB}/docs/HQ_MOBILE.md`] },
+    hq: { text: `A Mac or Linux machine, a VPS, Docker, or Windows (WSL2 or HQ Lite). An Android phone is the home base: install the signed app from ${links.androidApk}, and whether a sleeping, unplugged phone answers in time is not verified yet, so keep it on a charger. Laptops and servers join the phone with a QR code and talk to it over an encrypted peer-to-peer link, with no VPN. hq net (a self-hosted WireGuard network) and hq edge (a public forwarder you run yourself for a device behind NAT) are optional. There is no hosted service.`, src: ['mobile docs', `${REPO_BLOB}/docs/HQ_MOBILE.md`] },
     oc: { text: 'Self-hosted.', src: ['docs', OC_DOCS] },
     ha: { text: 'Local, or on serverless backends such as Modal and Daytona.', src: ['docs', HA_DOCS] },
   },
