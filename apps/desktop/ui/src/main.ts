@@ -277,8 +277,13 @@ function renderPeers(peers: Peer[]) {
         return
       }
       void guarded('devices-error', async () => {
-        await invoke('pairing_revoke', { id: peer.id })
+        const done = await invoke<{ revoked: boolean; claude_warning: string | null }>(
+          'pairing_revoke',
+          { id: peer.id },
+        )
         toast('Revoked. Its open connections were closed.')
+        // The revoke went through; Claude's leftover entry is shown where errors are.
+        if (done.claude_warning) $('devices-error').textContent = done.claude_warning
         await refreshDevices()
       })
     })

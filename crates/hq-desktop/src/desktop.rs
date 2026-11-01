@@ -50,6 +50,14 @@ impl DesktopInit {
     }
 }
 
+/// What a revoke did, for the window.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Revoked {
+    pub revoked: bool,
+    /// Set when HQ's entries could not all be taken out of Claude.
+    pub claude_warning: Option<String>,
+}
+
 pub struct Desktop {
     dir: PathBuf,
     settings: Mutex<Settings>,
@@ -170,16 +178,24 @@ impl Desktop {
 
     /// Revokes a device. A hub's entries in Claude go first: the revoke deletes the setup that
     /// names them, and a key that no longer works should not stay in Claude's config.
-    pub async fn revoke(&self, id: &str) -> Result<bool> {
-        if let Ok(bin) = claude::hq_program(&self.hq_program) {
-            let peer = id.to_string();
-            // Claude being absent or its file being odd must not stop the revoke.
-            let _ = claude::blocking(self.config.db_path(), bin, move |db, t| {
-                Ok(hq_bridge::claude::remove_for_peer(db, t, &peer))
-            })
-            .await;
-        }
-        self.pairing.revoke(id).await
+    pub async fn revoke(&self, id: &str) -> Result<Revoked> {
+        let peer = id.to_string();
+        let cleanup = match claude::hq_program(&self.hq_program) {
+            Ok(bin) => {
+                claude::blocking(self.config.db_path(), bin, move |db, t| {
+                    Ok(hq_bridge::claude::remove_for_peer(db, t, &peer))
+                })
+                .await
+            }
+            Err(e) => Err(e),
+        };
+        // Claude being absent or its file being odd must not stop the revoke, only be said.
+        let claude_warning = claude::revoke_warning(cleanup);
+        let revoked = self.pairing.revoke(id).await?;
+        Ok(Revoked {
+            revoked,
+            claude_warning,
+        })
     }
 
     pub fn settings(&self) -> Settings {

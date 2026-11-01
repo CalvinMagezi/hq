@@ -60,6 +60,25 @@ pub fn change(db: &Database, targets: &Targets, hub: &str, add: bool) -> Result<
     Ok(HubView::new(&hub.name, &report))
 }
 
+/// What a revoke tells the window about Claude, when the cleanup did not fully work. The revoke
+/// itself goes ahead either way.
+pub fn revoke_warning(cleanup: Result<Option<Report>>) -> Option<String> {
+    let report = match cleanup {
+        Ok(None) => return None,
+        Ok(Some(report)) => report,
+        Err(e) => return Some(format!("HQ could not be removed from Claude: {e:#}")),
+    };
+    let failed = [&report.code, &report.desktop]
+        .iter()
+        .any(|p| matches!(p, Part::Failed(_)));
+    failed.then(|| {
+        format!(
+            "HQ could not be fully removed from Claude. {}",
+            report.lines().join(". ")
+        )
+    })
+}
+
 /// Runs `work` on a blocking thread with this computer's `claude`, since the program is waited for.
 pub async fn blocking<T: Send + 'static>(
     db_path: PathBuf,
@@ -100,7 +119,7 @@ mod tests {
             true
         }
 
-        fn run(&self, args: &[String]) -> Result<Run> {
+        fn run(&self, args: &[String], _cwd: &Path) -> Result<Run> {
             self.calls.borrow_mut().push(args.to_vec());
             let mut out = Run {
                 ok: true,
@@ -109,7 +128,10 @@ mod tests {
             };
             match args[1].as_str() {
                 "get" if *self.added.borrow() => {
-                    out.stdout = format!("{}:\n  URL: http://127.0.0.1:47410/mcp\n", args[2])
+                    out.stdout = format!(
+                        "{}:\n  URL: http://127.0.0.1:47410/mcp\n  Headers:\n    x-api-key: {KEY}\n",
+                        args[2]
+                    )
                 }
                 "get" => out.ok = false,
                 "add" => *self.added.borrow_mut() = true,
@@ -162,6 +184,27 @@ mod tests {
 
         let shown = format!("{before:?}{added:?}{removed:?}");
         assert!(!shown.contains(KEY));
+    }
+
+    #[test]
+    fn a_revoke_warns_only_when_the_claude_cleanup_failed() {
+        assert_eq!(revoke_warning(Ok(None)), None);
+        let fine = Report {
+            code: Part::Removed("hq".into()),
+            desktop: Part::Absent,
+        };
+        assert_eq!(revoke_warning(Ok(Some(fine))), None);
+        let half = Report {
+            code: Part::Failed("`claude mcp` exited with an error: busy".into()),
+            desktop: Part::Removed("hq".into()),
+        };
+        let said = revoke_warning(Ok(Some(half))).unwrap();
+        assert!(
+            said.contains("busy") && said.contains("Claude Desktop: removed"),
+            "{said}"
+        );
+        let broken = revoke_warning(Err(anyhow::anyhow!("no database"))).unwrap();
+        assert!(broken.contains("no database"), "{broken}");
     }
 
     #[test]

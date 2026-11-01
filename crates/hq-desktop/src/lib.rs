@@ -15,4 +15,4 @@ pub mod qr;
 pub mod settings;
 pub mod window;
 
-pub use desktop::{Desktop, DesktopInit};
+pub use desktop::{Desktop, DesktopInit, Revoked};

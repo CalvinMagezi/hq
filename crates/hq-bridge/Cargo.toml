@@ -23,11 +23,10 @@ qrcodegen = "1.8"
 chrono = { workspace = true }
 dirs = { workspace = true }
 subtle = "2"
+tempfile = { workspace = true }
 url = { workspace = true }
 
 # The host gate's key files, for setup after pairing (`setup.rs`). Unix only, like the gate.
 [target.'cfg(unix)'.dependencies]
 hq-gate = { workspace = true }
 
-[dev-dependencies]
-tempfile = { workspace = true }

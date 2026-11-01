@@ -4,7 +4,7 @@
 
 use crate::Startup;
 use hq_desktop::{
-    Desktop,
+    Desktop, Revoked,
     claude::HubView,
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
@@ -133,7 +133,7 @@ fn pairing_decline(app: App<'_>, id: u64) -> bool {
 }
 
 #[tauri::command]
-async fn pairing_revoke(app: App<'_>, id: String) -> Reply<bool> {
+async fn pairing_revoke(app: App<'_>, id: String) -> Reply<Revoked> {
     app.revoke(&id).await.map_err(shown)
 }
 
