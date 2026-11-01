@@ -54,7 +54,7 @@ pub(super) fn alert_finished(
     if let Err(e) = hq_tools::a2a::report_to_parent(db, row, &finished, &excerpt) {
         tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
     }
-    report_to_observers(db, row, &finished_turn, &excerpt);
+    report_to_observers(db, row, "finished", &finished_turn, &excerpt);
     if hand_to_chat(db, row, WAKE_FINISHED) {
         return;
     }
@@ -82,10 +82,11 @@ pub(super) fn alert_finished(
 pub(super) fn report_to_observers(
     db: &Database,
     row: &registry::HarnessSessionRow,
+    kind: &str,
     event: &str,
     excerpt: &str,
 ) {
-    match hq_tools::a2a::report_to_observers(db, row, event, excerpt) {
+    match hq_tools::a2a::report_to_observers(db, row, kind, event, excerpt) {
         Ok(told) if !told.is_empty() => {
             tracing::info!(session = %row.id, observers = ?told, "session-supervisor: told the observers");
         }
@@ -235,6 +236,7 @@ fn raise_blocked(
     report_to_observers(
         db,
         row,
+        "blocked",
         "is blocked at a dialog",
         &tail_excerpt(screen, MAX_TAIL_BYTES),
     );

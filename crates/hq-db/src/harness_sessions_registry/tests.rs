@@ -75,16 +75,17 @@ fn observers_are_recorded_once_and_only_running_ones_are_listed() {
         add(c, "hs-coder", "claude-code")?;
         add(c, "hs-watch", "hermes")?;
         add(c, "hs-watch2", "hermes")?;
-        assert!(add_observed(c, "hs-watch", &["hs-watch".to_string()]).is_err());
-        assert!(add_observed(c, "hs-watch", &["hs-ghost".to_string()]).is_err());
+        assert!(add_observed(c, "hs-watch", &["hs-watch".to_string()], None).is_err());
+        assert!(add_observed(c, "hs-watch", &["hs-ghost".to_string()], None).is_err());
         add_observed(
             c,
             "hs-watch",
             &["hs-coder".to_string(), "hs-coder".to_string()],
+            None,
         )?;
-        add_observed(c, "hs-watch2", &["hs-coder".to_string()])?;
+        add_observed(c, "hs-watch2", &["hs-coder".to_string()], None)?;
         assert_eq!(observed_by(c, "hs-watch")?, vec!["hs-coder".to_string()]);
-        let watching: Vec<String> = running_observers(c, "hs-coder")?
+        let watching: Vec<String> = running_observers(c, "hs-coder", "finished")?
             .into_iter()
             .map(|r| r.id)
             .collect();
@@ -93,11 +94,68 @@ fn observers_are_recorded_once_and_only_running_ones_are_listed() {
             vec!["hs-watch".to_string(), "hs-watch2".to_string()]
         );
         set_status(c, "hs-watch2", "stopped")?;
-        let watching: Vec<String> = running_observers(c, "hs-coder")?
+        let watching: Vec<String> = running_observers(c, "hs-coder", "finished")?
             .into_iter()
             .map(|r| r.id)
             .collect();
         assert_eq!(watching, vec!["hs-watch".to_string()]);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn an_observer_hears_only_the_kinds_it_asked_for_and_can_stop() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        add(c, "hs-coder", "claude-code")?;
+        add(c, "hs-watch", "copilot")?;
+        let bad = add_observed(
+            c,
+            "hs-watch",
+            &["hs-coder".into()],
+            Some(&["commit".into()]),
+        );
+        assert!(bad.is_err(), "commit is not an observable kind");
+        add_observed(
+            c,
+            "hs-watch",
+            &["hs-coder".into()],
+            Some(&["blocked".into()]),
+        )?;
+        let hears =
+            |kind: &str| -> Result<usize> { Ok(running_observers(c, "hs-coder", kind)?.len()) };
+        assert_eq!((hears("blocked")?, hears("finished")?), (1, 0));
+        add_observed(c, "hs-watch", &["hs-coder".into()], None)?;
+        assert_eq!(hears("finished")?, 1, "observing again replaces the kinds");
+        assert_eq!(remove_observed(c, "hs-watch", &["hs-coder".into()])?, 1);
+        assert_eq!(hears("blocked")?, 0);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_delivered_relay_message_hands_its_depth_on_and_other_input_resets_it() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        add(c, "hs-a", "pi")?;
+        add(c, "hs-b", "pi")?;
+        crate::tasks::create_initiative(c, "in-1", "personal", None, "HQ", "hq", "HQ")?;
+        let task = crate::tasks::create_task(
+            c,
+            "tk-1",
+            "in-1",
+            &crate::tasks::NewTask {
+                title: "relay",
+                ..Default::default()
+            },
+        )?;
+        let m = crate::tasks::add_relay_message(c, &task.id, "hs-a", "hs-b", "hi", 2)?;
+        set_relay_depth(c, "hs-b", Some(m.id))?;
+        assert_eq!(relay_depth(c, "hs-b")?, 2);
+        set_relay_depth(c, "hs-b", None)?;
+        assert_eq!(relay_depth(c, "hs-b")?, 0);
         Ok(())
     })
     .unwrap();

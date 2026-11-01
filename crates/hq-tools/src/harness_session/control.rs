@@ -840,6 +840,11 @@ pub(super) fn send_text(db: &Arc<Database>, session_id: &str, text: &str) -> Res
         ),
         Err(e) => Err(e.into()),
         Ok(outcome) => {
+            // New input starts a new chain; a relay delivery sets its own depth after this.
+            let id = session_id.to_string();
+            if let Err(e) = db.with_conn(move |c| registry::set_relay_depth(c, &id, None)) {
+                tracing::warn!(session = %session_id, error = %e, "send: relay depth not reset");
+            }
             let mut report = json!({ "session_id": session_id, "sent": text });
             if let Some(note) = prompt_note(outcome) {
                 report["note"] = json!(note);

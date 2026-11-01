@@ -620,7 +620,7 @@ async fn supervise(
         if let Err(e) = hq_tools::a2a::report_to_parent(db, &row, "exited", &last_output) {
             tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
         }
-        alerts::report_to_observers(db, &row, "exited", &last_output);
+        alerts::report_to_observers(db, &row, "exited", "exited", &last_output);
         if hand_to_chat(db, &row, WAKE_EXITED) {
             continue;
         }

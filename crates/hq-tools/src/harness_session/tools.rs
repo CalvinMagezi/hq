@@ -1330,6 +1330,8 @@ pub fn create_harness_session_tools(
         }),
         Box::new(super::decisions::TaskDecisionsTool { db: db.clone() }),
         Box::new(super::stats::HarnessSessionStatsTool { db: db.clone() }),
+        Box::new(super::subscribe::HarnessSessionSubscribeTool { db: db.clone() }),
+        Box::new(super::subscribe::HarnessSessionUnsubscribeTool { db: db.clone() }),
         Box::new(HarnessSessionAnswerTool {
             db: db.clone(),
             chat: chat.clone(),

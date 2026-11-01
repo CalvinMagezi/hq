@@ -1029,9 +1029,29 @@ pub fn tree_members(conn: &Connection, root: &str) -> Result<Vec<HarnessSessionR
     Ok(rows)
 }
 
-/// Give `observer` the sessions `observed` to watch. Each must exist; a session
-/// never observes itself. Repeats are kept once.
-pub fn add_observed(conn: &Connection, observer: &str, observed: &[String]) -> Result<()> {
+/// Event kinds an observer can be told about.
+pub const OBSERVABLE_KINDS: &[&str] = &["finished", "blocked", "exited"];
+
+/// Give `observer` the sessions `observed` to watch, for `kinds` (None: every observable
+/// kind). Each must exist; a session never observes itself. Observing a session again
+/// replaces its kinds.
+pub fn add_observed(
+    conn: &Connection,
+    observer: &str,
+    observed: &[String],
+    kinds: Option<&[String]>,
+) -> Result<()> {
+    if let Some(bad) = kinds
+        .unwrap_or_default()
+        .iter()
+        .find(|k| !OBSERVABLE_KINDS.contains(&k.as_str()))
+    {
+        anyhow::bail!(
+            "'{bad}' is not an event kind to observe (one of {})",
+            OBSERVABLE_KINDS.join(", ")
+        );
+    }
+    let kinds = kinds.map(|k| k.join(","));
     for id in observed {
         if id == observer {
             anyhow::bail!("a session cannot observe itself");
@@ -1040,10 +1060,46 @@ pub fn add_observed(conn: &Connection, observer: &str, observed: &[String]) -> R
             anyhow::bail!("no harness session '{id}' to observe");
         }
         conn.execute(
-            "INSERT OR IGNORE INTO harness_session_observers (observer_id, observed_id) VALUES (?1, ?2)",
+            "INSERT INTO harness_session_observers (observer_id, observed_id, kinds) VALUES (?1, ?2, ?3) \
+             ON CONFLICT (observer_id, observed_id) DO UPDATE SET kinds = excluded.kinds",
+            params![observer, id, kinds],
+        )?;
+    }
+    Ok(())
+}
+
+/// Stop `observer` watching `observed`. Returns how many it was watching.
+pub fn remove_observed(conn: &Connection, observer: &str, observed: &[String]) -> Result<usize> {
+    let mut removed = 0;
+    for id in observed {
+        removed += conn.execute(
+            "DELETE FROM harness_session_observers WHERE observer_id = ?1 AND observed_id = ?2",
             params![observer, id],
         )?;
     }
+    Ok(removed)
+}
+
+/// How many relays deep `session`'s current turn is (0 when no relay started it).
+pub fn relay_depth(conn: &Connection, session: &str) -> Result<i64> {
+    Ok(conn
+        .query_row(
+            "SELECT relay_depth FROM harness_sessions WHERE id = ?1",
+            params![session],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(0))
+}
+
+/// The depth of `session`'s next turn: that of the message just typed into it, or 0 for
+/// input from anyone else (`message` None).
+pub fn set_relay_depth(conn: &Connection, session: &str, message: Option<i64>) -> Result<()> {
+    conn.execute(
+        "UPDATE harness_sessions SET relay_depth = \
+           COALESCE((SELECT relay_depth FROM task_comments WHERE id = ?2), 0) WHERE id = ?1",
+        params![session, message],
+    )?;
     Ok(())
 }
 
@@ -1058,16 +1114,21 @@ pub fn observed_by(conn: &Connection, observer: &str) -> Result<Vec<String>> {
     Ok(ids)
 }
 
-/// The running sessions watching `observed`.
-pub fn running_observers(conn: &Connection, observed: &str) -> Result<Vec<HarnessSessionRow>> {
+/// The running sessions watching `observed` for `kind`.
+pub fn running_observers(
+    conn: &Connection,
+    observed: &str,
+    kind: &str,
+) -> Result<Vec<HarnessSessionRow>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} FROM harness_sessions \
          WHERE status = 'running' AND id IN \
-           (SELECT observer_id FROM harness_session_observers WHERE observed_id = ?1) \
+           (SELECT observer_id FROM harness_session_observers WHERE observed_id = ?1 \
+              AND (kinds IS NULL OR instr(',' || kinds || ',', ',' || ?2 || ',') > 0)) \
          ORDER BY created_at"
     ))?;
     let rows = stmt
-        .query_map(params![observed], row_to_session)?
+        .query_map(params![observed, kind], row_to_session)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }

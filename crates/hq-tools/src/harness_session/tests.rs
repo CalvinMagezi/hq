@@ -1568,27 +1568,11 @@ async fn a_general_purpose_agent_defaults_to_general_and_a_coding_agent_to_code(
 }
 
 #[tokio::test]
-async fn only_a_monitor_or_reviewer_on_a_task_can_be_given_sessions_to_observe() {
+async fn a_session_given_sessions_to_observe_needs_a_task_and_a_limit() {
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
     let task = a_task(&db);
     let watched = vec!["hs-coder".to_string()];
-
-    let (dir, host) = startable_host();
-    let err = spawn_on(
-        vault.path(),
-        &db,
-        Arc::new(host),
-        spawn_req("hermes", Some(Purpose::Research), Some(&task), &watched),
-    )
-    .await
-    .unwrap_err()
-    .to_string();
-    assert!(
-        err.contains("only a session with purpose monitor or review"),
-        "{err}"
-    );
-    assert!(!calls(&dir).contains("workspace create"));
 
     let (dir, host) = startable_host();
     let err = spawn_on(
@@ -1679,7 +1663,7 @@ async fn a_monitor_records_what_it_observes_and_a_coding_agent_may_review_too() 
         .unwrap();
     assert_eq!(observed, watched);
     let observers: Vec<String> = db
-        .with_conn(|c| registry::running_observers(c, &coder_id))
+        .with_conn(|c| registry::running_observers(c, &coder_id, "finished"))
         .unwrap()
         .into_iter()
         .map(|r| r.id)
