@@ -40,6 +40,12 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"github_pat_[A-Za-z0-9_]{22,}",
         // HQ's own web device tokens (`hq_db::web_auth`). Kept last: the Bearer index above is fixed.
         r"hqw_[0-9a-f]{64}",
+        // Stripe secret keys, Google API keys, Slack tokens, and a private key header whose block
+        // was cut short (the full-block pattern above needs both ends).
+        r"\b[sr]k_live_[A-Za-z0-9]{16,}",
+        r"\bAIza[0-9A-Za-z_-]{35}",
+        r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
     ]
     .iter()
     .map(|p| Regex::new(p).expect("static secret pattern must compile"))
@@ -203,6 +209,25 @@ pub fn fmt_redacted<T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn other_common_key_shapes_are_credentials() {
+        let google = format!(
+            "AIza{}",
+            "A1b2C3d4E5".repeat(4).chars().take(35).collect::<String>()
+        );
+        for text in [
+            format!("sk_live_{}", "a1B2".repeat(6)),
+            google,
+            format!("xoxb-{}", "1234-abcd-".repeat(2)),
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk".to_string(),
+        ] {
+            assert!(looks_like_credential(&text), "{text}");
+        }
+        assert!(!looks_like_credential(
+            "let api_key = std::env::var(\"API_KEY\")?;"
+        ));
+    }
 
     #[test]
     fn a_fine_grained_github_token_is_a_credential() {

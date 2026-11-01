@@ -33,12 +33,23 @@ search and edit tools in `libhq.so`, so the worker costs no new binary. The mode
   listed repositories: Contents and Pull requests read and write, Actions read, no Workflows. On
   the phone, store it under Settings, Keys on this phone.
 - **Branches under `hq/` and pull requests only.** No other branch, no force, no merge, no
-  deleted ref. A branch that already exists must sit at the commit this tool last pushed there, a
-  SHA recorded beside the checkout, so a person's later push to that branch is never rewritten.
-  Branch protection on the default branch is a cheap server-side backstop.
-- **Only the checkout is read.** The tool walks the `github_clone` checkout. It refuses links,
-  special files and `.git` entries, so a link to a secret outside the checkout cannot be
-  published. Caps: 100 changed files and 5 MiB per file.
+  deleted ref, redirects not followed. A branch that already exists must sit at a commit this
+  tool made there, so a person's later push to that branch is never rewritten. A push identical
+  to the branch adds no commit. Branch protection on the default branch is a cheap server-side
+  backstop.
+- **Records the worker cannot touch.** The base commit and the commits pushed per branch live in
+  `<hq dir>/github/<owner>/<repo>/` (`base.json`, `pushed.json`), which `governance::secrets`
+  denies to every file tool. A worker can therefore neither point a push at another commit nor
+  claim someone else's branch as its own.
+- **Only the checkout is read.** The tool walks the `github_clone` checkout and reads each file
+  with `O_NOFOLLOW`, checking the open handle (one name, a plain file) and that its parent still
+  resolves inside the checkout. Links, hard links, special files and `.git` entries refuse the
+  push, so a link to a secret outside the checkout cannot be published. Caps: 100 changed files,
+  5 MiB per changed file, 25 MiB per push.
+- **No workflow files.** A changed path under `.github/` refuses the push. A pull request from an
+  `hq/` branch in the same repository runs CI with the repository's Actions secrets before anyone
+  reviews it, so a repository a worker pushes to should hold no Actions secrets, or gate them
+  behind an environment that needs approval.
 
 ## Why taint does not gate it
 
@@ -47,15 +58,24 @@ tainted (`governance/taint.rs` marks `github_clone` and `github_read`). A taint 
 the tool useless. The risk taint guards against here is exfiltration: an injected instruction
 that gets a secret published. That is handled at the boundary instead:
 
-- every changed file and the branch name, commit message, pull request title and body are
-  scanned with `hq_core::redact::looks_like_credential`, and a match refuses the whole push (the
-  refusal names the file, never the value);
+- every changed file, its path, and the branch name, commit message, pull request title and body
+  are scanned with `hq_core::redact::looks_like_credential` and compared with the write token
+  itself, and a match refuses the whole push (the refusal names the file, never the value). A
+  file that already held a credential shape when fetched (a test fixture, an `.env.example`) may
+  be edited, but never to include the live token;
 - a tainted session cannot read secret files in the first place (`governance/secrets.rs`);
 - everything lands in a pull request that a person reviews before it reaches the default branch.
 
-What the scan cannot catch is private but non-secret text, such as a vault note copied into the
-checkout. The worker preset (S3) must therefore limit the worker's `allowed_paths` to its
-checkout and scratch folder. S2's safety argument depends on that, and S3 has to deliver it.
+The scan is a heuristic over known shapes, not a boundary. It misses short or unusual secrets,
+encoded text (UTF-16, base64) and private but non-secret text such as a vault note copied into
+the checkout, and a pull request body can carry text out through a rendered image link. The real
+limit on what a worker can publish is what it can read: the worker preset (S3) must confine the
+worker's `allowed_paths` to its checkout and scratch folder. S2's safety argument depends on
+that, and S3 has to deliver it.
+
+A file swapped for a link between the walk and the read is caught by `O_NOFOLLOW` and the parent
+check; a folder swapped mid-read needs a second process racing the tool, which a worker without a
+shell does not have.
 
 ## Phone notes
 
