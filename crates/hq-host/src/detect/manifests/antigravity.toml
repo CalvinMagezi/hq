@@ -14,7 +14,7 @@
 # the "esc to cancel" footer, so it has to outrank the working rule. The
 # approval prompts of an agy started by hand have not been captured.
 id = "antigravity"
-version = "2026.11.01.2"
+version = "2026.11.01.3"
 min_engine_version = 4
 updated_at = "2026-11-01T00:00:00Z"
 aliases = ["agy"]
@@ -51,6 +51,16 @@ region = "bottom_non_empty_lines(1)"
 visible_working = true
 # "esc to cancel ... Gemini 3.8 Flash · high", under a braille spinner line.
 contains = ["esc to cancel"]
+
+[[rules]]
+id = "background_task_footer"
+state = "working"
+priority = 950
+region = "bottom_non_empty_lines(1)"
+visible_working = true
+# "? for shortcuts ... Gemini 3.8 Flash · high · 1 task(s) · /tasks": the prompt is free but a
+# command it started (a test run, a build) still runs, so the turn is not over.
+line_regex = ['\b\d+\s+task\(s\)']
 
 [[rules]]
 id = "idle_footer"
