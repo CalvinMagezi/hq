@@ -127,13 +127,10 @@ Linux file system on purpose: agents work much faster there and permissions beha
 Pair the Ubuntu shell with the phone, the same way as any machine in
 [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md). Run these steps inside Ubuntu.
 
-If `hq` is not in `~/.local/bin` yet, get it first. Pick the newest tag on the
-[releases page](https://github.com/CalvinMagezi/hq/releases), then:
+If `hq` is not installed in Ubuntu yet, install it first:
 
 ```
-V=0.9.1-main.81
-curl -fsSL -o hq.tgz "https://github.com/CalvinMagezi/hq/releases/download/v$V/hq-$V-linux-x86_64.tar.gz"
-tar xzf hq.tgz && mkdir -p ~/.local/bin && install -m 755 hq ~/.local/bin/hq
+curl -fsSL https://agent-hq.online/install.sh | bash
 ```
 
 1. Let the host's gate listen on loopback, where bridge traffic arrives, in `~/.hq/config.yaml`:
@@ -156,7 +153,7 @@ tar xzf hq.tgz && mkdir -p ~/.local/bin && install -m 755 hq ~/.local/bin/hq
 3. Keep the bridge up. Run `hq bridge serve` as a service (WSL2 has systemd from step 1) or in a
    terminal.
 
-The phone then lists this PC as a host, and its agents call back to the phone's HQ. Revoke it on the
+The phone then lists this PC as a host, and its agents call back to the phone's HQ. After pairing, `hq bridge join` offers to add HQ to Claude Code in this Ubuntu (`hq claude add` does the same later), so Claude Code here reaches the phone's HQ too. Revoke it on the
 phone, or with `hq bridge revoke <id>` in Ubuntu.
 
 WSL2's network sits behind Windows. The bridge dials out from this PC, so nothing needs opening.
