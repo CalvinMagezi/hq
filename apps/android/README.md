@@ -98,6 +98,33 @@ from the same SVG paths, `ui/shell/HqShell.kt` the bars. Clear Sans (Apache 2.0,
 navigation bar insets replace the design's fixed 28 dp and 16 dp, so the bars can sit a few dp
 higher or lower than the board.
 
+## Hey HQ: the phone's assistant
+
+AgentHQ can take Google's place as the phone's assistant: Settings, Apps, Choose default apps, Digital
+assistant app, AgentHQ. Holding Home (or the assist gesture) then opens a voice sheet over whatever is on
+screen. It asks for the unlock first, listens, shows what it heard, sends those words to HQ's chat and
+reads the reply aloud a sentence at a time. Tap the button to stop listening early, to interrupt the reply,
+or to ask a follow-up in the same chat. On a Galaxy A32 the side key opens only the power menu, so hold
+Home there.
+
+What stays on the phone: the audio and its recognition (sherpa-onnx streaming Zipformer), the spoken reply
+(sherpa-onnx with the LJ Speech Piper voice), and the screen. The microphone is open only while the sheet is
+showing; audio is read in 100 ms pieces, decoded and dropped, never written. The assistant turns off
+Android's assist data and screenshot, so the screen's text is never copied into the app. What leaves the
+phone: the words of the request, to whatever chat model HQ is configured with, exactly as a typed message.
+
+The speech models (about 128 MB) are downloaded once, after the owner taps Get under a notice, from the
+sherpa-onnx releases on GitHub. Each archive has a pinned SHA-256 in `voice/VoiceModels.kt`, and only the
+named files are unpacked into `no_backup/voice/`. The download sends nothing about the owner. Logcat gets
+the sheet's phase changes with a clock (`adb logcat -s HqVoice`), never the words.
+
+Test it beside the real app without touching it: `./gradlew :app:assembleDebug -Phq.appId=online.agenthq.voicetest`,
+install with `adb install -r -g`, then `adb shell cmd role add-role-holder android.app.role.ASSISTANT
+online.agenthq.voicetest 0` and `adb shell input keyevent 219`. That copy has no hq, so a request ends with
+"HQ is not answering", spoken. Note the assistant settings first (`settings get secure assistant`,
+`voice_interaction_service`, `voice_recognition_service`): uninstalling an assistant does not fall back to
+Google, so put the old holder back with the same `add-role-holder` command.
+
 ## Name, icon and notifications
 
 The launcher label is `AgentHQ` (the package id is `online.agenthq.app`, so an update keeps the data).
