@@ -37,6 +37,7 @@ option = '^\s*(?:❯\s*)?(?P<num>\d+)\.\s+(?P<label>\S.*)$'
 selected = '^\s*❯'
 remember = '(?i)don.t ask again|\bremember\b|\balways\b'
 typed = '(?i)tell copilot what to do differently'
+cwd = '(?i)\bcd\s+"?(?P<cwd>/[^"\s;&]+)'
 answer = "arrows"
 decline = ["esc"]
 

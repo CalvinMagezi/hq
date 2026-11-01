@@ -716,15 +716,44 @@ impl Policy {
 
     /// Judges a file edit or a path: inside the session's folder is allowed, anything else
     /// goes to the owner.
-    pub fn decide_path(&self, path: &str, folder: &str) -> Decision {
-        let inside = within(path.trim(), folder);
-        match inside {
-            true => Decision::Allow {
-                rule: "inside the session's folder".into(),
-            },
-            false => Decision::Escalate {
+    pub fn decide_path(&self, path: &str, folder: &str, base: Option<&str>) -> Decision {
+        let mut any_path = false;
+        for line in path.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if line.contains("->") {
+                let parts: Vec<&str> = line.split("->").map(str::trim).collect();
+                if parts.iter().any(|p| p.is_empty()) {
+                    return Decision::Escalate {
+                        reason: "it is outside the session's folder".into(),
+                    };
+                }
+                for p in parts {
+                    any_path = true;
+                    if !within(p, folder, base) {
+                        return Decision::Escalate {
+                            reason: "it is outside the session's folder".into(),
+                        };
+                    }
+                }
+            } else {
+                any_path = true;
+                if !within(line, folder, base) {
+                    return Decision::Escalate {
+                        reason: "it is outside the session's folder".into(),
+                    };
+                }
+            }
+        }
+        if !any_path {
+            return Decision::Escalate {
                 reason: "it is outside the session's folder".into(),
-            },
+            };
+        }
+        Decision::Allow {
+            rule: "inside the session's folder".into(),
         }
     }
 
@@ -764,20 +793,31 @@ impl Policy {
     }
 }
 
-/// Lexically normalised `path` (relative to `folder` when not absolute) is `folder` or below
-/// it. A `..` that leaves `folder` is outside.
-fn within(path: &str, folder: &str) -> bool {
+/// Lexically normalised `path` (relative to `base` when inside `folder`, else `folder`)
+/// is `folder` or below it. A `..` that leaves `folder` is outside.
+fn within(path: &str, folder: &str, base: Option<&str>) -> bool {
     if path.is_empty() || folder.is_empty() {
         return false;
     }
-    let base = normalise(Path::new(folder));
+    let Some(folder_base) = normalise(Path::new(folder)) else {
+        return false;
+    };
+    let resolve_root = match base {
+        Some(b) if within(b, folder, None) => {
+            if Path::new(b).is_absolute() {
+                PathBuf::from(b)
+            } else {
+                Path::new(folder).join(b)
+            }
+        }
+        _ => PathBuf::from(folder),
+    };
     let joined = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
-        Path::new(folder).join(path)
+        resolve_root.join(path)
     };
-    let Some(base) = base else { return false };
-    normalise(&joined).is_some_and(|p| p.starts_with(&base))
+    normalise(&joined).is_some_and(|p| p.starts_with(&folder_base))
 }
 
 fn normalise(p: &Path) -> Option<PathBuf> {
@@ -1007,23 +1047,61 @@ mod tests {
     fn paths_inside_the_folder_are_allowed_and_the_rest_escalate() {
         let b = policy(BUILDER);
         assert_eq!(
-            b.decide_path("/w/app/src/lib.rs", "/w/app").as_str(),
+            b.decide_path("/w/app/src/lib.rs", "/w/app", None).as_str(),
             "allow"
         );
-        assert_eq!(b.decide_path("src/lib.rs", "/w/app").as_str(), "allow");
         assert_eq!(
-            b.decide_path("/w/app/../other", "/w/app").as_str(),
+            b.decide_path("src/lib.rs", "/w/app", None).as_str(),
+            "allow"
+        );
+        assert_eq!(
+            b.decide_path("/w/app/../other", "/w/app", None).as_str(),
             "escalate"
         );
         assert_eq!(
-            b.decide_path("../../etc/passwd", "/w/app").as_str(),
+            b.decide_path("../../etc/passwd", "/w/app", None).as_str(),
             "escalate"
         );
         assert_eq!(
-            b.decide_path("/w/application", "/w/app").as_str(),
+            b.decide_path("/w/application", "/w/app", None).as_str(),
             "escalate"
         );
-        assert_eq!(b.decide_path("", "/w/app").as_str(), "escalate");
+        assert_eq!(b.decide_path("", "/w/app", None).as_str(), "escalate");
+    }
+
+    #[test]
+    fn paths_with_base_or_multiple_lines_judge_every_path() {
+        let b = policy(BUILDER);
+        assert_eq!(
+            b.decide_path("src/lib.rs\nsrc/main.rs", "/w/app", None)
+                .as_str(),
+            "allow"
+        );
+        assert_eq!(
+            b.decide_path("src/lib.rs\n/etc/passwd", "/w/app", None)
+                .as_str(),
+            "escalate"
+        );
+        assert_eq!(
+            b.decide_path("/w/app/link -> /etc/passwd", "/w/app", None)
+                .as_str(),
+            "escalate"
+        );
+        assert_eq!(
+            b.decide_path("../lib.rs", "/w/app", Some("/w/app/src"))
+                .as_str(),
+            "allow"
+        );
+        assert_eq!(
+            b.decide_path("src/lib.rs", "/w/app", Some("/outside/dir"))
+                .as_str(),
+            "allow"
+        );
+        assert_eq!(
+            b.decide_path("../../outside.rs", "/w/app", Some("/w/app/src"))
+                .as_str(),
+            "escalate"
+        );
     }
 
     #[test]

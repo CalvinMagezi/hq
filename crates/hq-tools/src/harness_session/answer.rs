@@ -267,6 +267,7 @@ mod tests {
             ],
             truncated: false,
             text: None,
+            cwd: None,
         }
     }
 

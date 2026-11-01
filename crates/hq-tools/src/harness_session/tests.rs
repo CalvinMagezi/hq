@@ -4181,6 +4181,7 @@ fn command_dialog(kind: &str, command: &str, truncated: bool) -> crate::agent_ho
         ],
         truncated,
         text: None,
+        cwd: None,
     }
 }
 

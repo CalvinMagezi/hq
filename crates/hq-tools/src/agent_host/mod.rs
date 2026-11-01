@@ -164,6 +164,9 @@ pub struct PendingDialog {
     /// Every line of the dialog; only in a full read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// Working directory detected from the command being approved, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]

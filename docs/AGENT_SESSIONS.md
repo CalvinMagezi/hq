@@ -249,7 +249,8 @@ agent_host:
   `sudo`) are looked through; `sudo` always goes to the owner. Command substitution, `eval`, a
   heredoc and inline interpreter code (`sh -c`, `python3 -c`, `node -e`) go to the owner unless
   the policy sets `scripts: allow`. Edits and paths inside the session's folder or worktree are
-  allowed; anything outside goes to the owner.
+  allowed; anything outside goes to the owner. Relative paths in path dialogs resolve against the directory
+  the shell command cd'd into when that directory is inside the session's folder, else against the session folder.
 - **At launch.** Copilot starts with every tool allowed (`--allow-all-tools`) and the policy's
   denies as `--deny-tool=shell(...)`. Its rules name a command and subcommand but no flags, so a
   deny with a flag becomes the whole command (`git reset --hard` denies `git reset`), unless the
