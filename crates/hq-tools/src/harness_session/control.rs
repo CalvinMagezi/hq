@@ -125,11 +125,47 @@ pub async fn resume(
 pub fn status(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     let row = get_row(db, session_id)?;
     let polled = poll_hosts(std::slice::from_ref(&row));
-    Ok(session_view(
-        &row,
-        &liveness(&polled, &row),
-        &spec::agent_host_config(),
-    ))
+    let mut view = session_view(&row, &liveness(&polled, &row), &spec::agent_host_config());
+    add_worktree_status(db, &row, &mut view);
+    Ok(view)
+}
+
+/// Adds `worktree_status` for a session with a live worktree, or `worktree_status_error` when
+/// the host cannot say. Never fails the caller.
+fn add_worktree_status(db: &Arc<Database>, row: &HarnessSessionRow, view: &mut Value) {
+    add_worktree_status_on(db, &row.id, || agent_host::host(Some(&row.host)), view);
+}
+
+pub(super) fn add_worktree_status_on(
+    db: &Arc<Database>,
+    session_id: &str,
+    host: impl FnOnce() -> Result<Host>,
+    view: &mut Value,
+) {
+    let id = session_id.to_string();
+    let Ok(Some(checkout)) = db.with_conn(move |c| hq_db::session_checkouts::get(c, &id)) else {
+        return;
+    };
+    let Some(worktree) = checkout.worktree.as_deref() else {
+        return;
+    };
+    if checkout.removed_at.is_some() {
+        return;
+    }
+    let read =
+        host().and_then(|h| Ok(h.worktree_status(worktree, checkout.start_head.as_deref())?));
+    match read {
+        Ok(s) => {
+            view["worktree_status"] = json!({
+                "changed": s.changed,
+                "ahead": s.ahead,
+                "behind": s.behind,
+                "branch": s.branch,
+                "head": s.head,
+            });
+        }
+        Err(e) => view["worktree_status_error"] = json!(e.to_string()),
+    }
 }
 
 /// The row, its live state, and what HQ is doing with it: the goal and
@@ -185,8 +221,26 @@ pub(super) fn with_pending(view: &mut Value, agent: &AgentInfo) {
 }
 
 pub fn list(db: &Arc<Database>, status_filter: Option<String>) -> Result<Value> {
+    list_with(db, status_filter, false)
+}
+
+/// `list`, and with `worktree_status` each running session that has a live worktree also reports
+/// it, one host call each.
+pub fn list_with(
+    db: &Arc<Database>,
+    status_filter: Option<String>,
+    worktree_status: bool,
+) -> Result<Value> {
     let rows = db.with_conn(move |c| registry::list(c, status_filter.as_deref(), 50))?;
-    Ok(json!({ "sessions": session_views(&rows) }))
+    let mut views = session_views(&rows);
+    if worktree_status {
+        for (row, view) in rows.iter().zip(views.iter_mut()) {
+            if row.status == registry::STATUS_RUNNING {
+                add_worktree_status(db, row, view);
+            }
+        }
+    }
+    Ok(json!({ "sessions": views }))
 }
 
 /// Attach an existing session (running or not) to an HQ task. From a web

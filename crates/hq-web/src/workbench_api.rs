@@ -317,7 +317,8 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
     let purpose = harness::Purpose::parse_opt(body.purpose.as_deref())
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let host_name = trimmed(body.host);
-    let worktree = trimmed(body.branch).map(agent_host::WorktreeBase::Branch);
+    let worktree =
+        trimmed(body.branch).map(|name| agent_host::WorktreeBase::Branch { name, from: None });
     let (folder, new_folder) = (trimmed(body.folder), trimmed(body.new_folder));
 
     let own = own_folder_name(&label, &harness_name);

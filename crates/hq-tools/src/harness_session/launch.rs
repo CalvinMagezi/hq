@@ -59,8 +59,32 @@ pub(super) fn launch_env(harness: &Harness, session_id: &str) -> Vec<(String, St
     let profile_env = harness.profile.iter().flat_map(|p| p.env.iter());
     profile_env
         .map(|(k, v)| (k.clone(), v.clone()))
-        .chain([(SESSION_ENV.to_string(), session_id.to_string())])
+        .chain([
+            (SESSION_ENV.to_string(), session_id.to_string()),
+            (PORT_ENV.to_string(), session_port(session_id).to_string()),
+        ])
         .collect()
+}
+
+/// Lowest port a session's `HQ_PORT` can be.
+const PORT_BASE: u16 = 20000;
+/// How many ports `HQ_PORT` is spread over.
+const PORT_SPAN: u64 = 10000;
+/// The variable that tells an agent which port its dev server may use.
+const PORT_ENV: &str = "HQ_PORT";
+/// The 64-bit FNV-1a parameters.
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0100_0000_01b3;
+
+/// A port that stays the same for a session id, so a restart rebuilds the same env. FNV-1a, since
+/// `DefaultHasher` may change between releases.
+pub(super) fn session_port(session_id: &str) -> u16 {
+    let mut hash = FNV_OFFSET_BASIS;
+    for b in session_id.bytes() {
+        hash ^= u64::from(b);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    PORT_BASE + (hash % PORT_SPAN) as u16
 }
 
 /// Starts the agents a restarted built-in host (local or remote) is holding for

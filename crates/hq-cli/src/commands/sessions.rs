@@ -31,6 +31,8 @@ pub struct SpawnOpts {
     pub model: Option<String>,
     /// A branch to work on in a git worktree of its own.
     pub branch: Option<String>,
+    /// The ref a new `branch` starts at; `None` is the folder's current commit.
+    pub from: Option<String>,
     /// Paths it writes to in a folder it shares.
     pub owns: Vec<String>,
     /// The command policy to run under; `None` is its purpose's.
@@ -54,6 +56,7 @@ pub async fn run(
         task,
         model,
         branch,
+        from,
         owns,
         policy,
     } = opts;
@@ -94,9 +97,15 @@ pub async fn run(
         "spawn" => {
             let harness = arg1.ok_or_else(|| {
                 anyhow::anyhow!(
-                    "usage: hq sessions spawn <harness> [--prompt ...] [--cwd ...] [--label ...] [--purpose ...] [--task ...] [--observe <id>]... [--branch <name>] [--owns <path>]..."
+                    "usage: hq sessions spawn <harness> [--prompt ...] [--cwd ...] [--label ...] [--purpose ...] [--task ...] [--observe <id>]... [--branch <name> [--from <ref>]] [--owns <path>]..."
                 )
             })?;
+            if from.as_deref().is_some_and(|f| !f.trim().is_empty())
+                && branch.as_deref().is_none_or(|b| b.trim().is_empty())
+            {
+                anyhow::bail!("--from goes with --branch");
+            }
+            let from = from.map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
             let purpose = hq_tools::harness_session::Purpose::parse_opt(purpose.as_deref())?;
             // No --cwd, or one the host does not have: a folder in that machine's HQ folder.
             let cwd = match cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
@@ -147,7 +156,10 @@ pub async fn run(
                     worktree: branch
                         .map(|b| b.trim().to_string())
                         .filter(|b| !b.is_empty())
-                        .map(hq_tools::agent_host::WorktreeBase::Branch),
+                        .map(|name| hq_tools::agent_host::WorktreeBase::Branch {
+                            name,
+                            from: from.clone(),
+                        }),
                     owns: &owns,
                     policy: policy.as_deref(),
                 },

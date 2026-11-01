@@ -28,6 +28,7 @@ harness_session_spawn {
 ```
 
 - `cwd` should be a git worktree. One writer per tree: two agents in the same checkout overwrite each other.
+- Do not cut worktrees by hand. Spawn each writer with `worktree: {"branch": "<name>", "from": "<lead branch>"}` and HQ makes the worktree, starting the branch at the lead's. Read `worktree.copied` in the spawn reply to see which ignored files (`.env`, `node_modules`) came along from the repository's `.worktreeinclude`, and `worktree.not_copied` for any that did not. A brief kept in an ignored folder that `.worktreeinclude` names (for example `.brief/`) reaches the worker the same way.
 - Put the whole brief in `prompt` at spawn. Do not spawn empty and send the brief afterward.
 - `done_criteria` is an observable fact, such as a named test passing. Without a goal and a definition of done, HQ only observes the session.
 - `model` is passed to the agent's own `--model` flag. Omit it for the agent's default.

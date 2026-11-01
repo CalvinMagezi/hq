@@ -1,6 +1,7 @@
 use super::{
     AgentHostError, AgentInfo, AgentStatus, AnswerOutcome, GitHead, LaunchRequest, Launched,
     LogsSince, PendingRead, PromptOutcome, WorktreeBase, WorktreeInfo, WorktreeRemoved,
+    WorktreeStatus,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -129,6 +130,18 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' cannot remove worktrees", self.name()),
+        })
+    }
+
+    /// Uncommitted changes in a worktree and its distance from `against` (default: its start).
+    fn worktree_status(
+        &self,
+        _path: &str,
+        _against: Option<&str>,
+    ) -> Result<WorktreeStatus, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot read worktrees", self.name()),
         })
     }
 
@@ -371,6 +384,13 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn worktree_remove(&self, path: &str) -> Result<WorktreeRemoved, AgentHostError> {
         (**self).worktree_remove(path)
+    }
+    fn worktree_status(
+        &self,
+        path: &str,
+        against: Option<&str>,
+    ) -> Result<WorktreeStatus, AgentHostError> {
+        (**self).worktree_status(path, against)
     }
     fn head(&self, target: &str) -> Result<Option<GitHead>, AgentHostError> {
         (**self).head(target)
