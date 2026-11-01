@@ -8,15 +8,19 @@ use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::registry::HqTool;
 
+mod tarball;
+
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
+const USER_AGENT: &str = "hq-github-read";
 const MAX_OUTPUT_CHARS: usize = 100_000;
 /// A diff read for verification may be longer than a tool reply; past this it is cut and says so.
 const MAX_DIFF_CHARS: usize = 2_000_000;
@@ -219,6 +223,15 @@ async fn run_capped(
     )
 }
 
+/// A GET carrying the read-only token when one is set. The write token is never sent from here.
+fn read_request(client: &reqwest::Client, url: &str, accept: &str) -> reqwest::RequestBuilder {
+    let req = client.get(url).header("Accept", accept);
+    match std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
+        Ok(token) => req.bearer_auth(token),
+        Err(_) => req,
+    }
+}
+
 /// No `gh` on this machine: public data can still be read over HTTPS.
 async fn http_get(path: &str) -> Result<String> {
     http_get_accepting(path, "application/vnd.github+json", MAX_OUTPUT_CHARS).await
@@ -227,15 +240,11 @@ async fn http_get(path: &str) -> Result<String> {
 async fn http_get_accepting(path: &str, accept: &str, max_chars: usize) -> Result<String> {
     let client = reqwest::Client::builder()
         .timeout(COMMAND_TIMEOUT)
-        .user_agent("hq-github-read")
+        .user_agent(USER_AGENT)
         .build()?;
-    let mut req = client
-        .get(format!("{API_HOST_URL}{path}"))
-        .header("Accept", accept);
-    if let Ok(token) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
-        req = req.bearer_auth(token);
-    }
-    let resp = req.send().await?;
+    let resp = read_request(&client, &format!("{API_HOST_URL}{path}"), accept)
+        .send()
+        .await?;
     let status = resp.status();
     let body = resp.text().await?;
     if !status.is_success() {
@@ -366,6 +375,88 @@ pub(crate) async fn pr_diff_text(repo: &str, number: u64) -> Result<(String, boo
 
 pub struct GithubCloneTool;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloneMethod {
+    Gh,
+    Git,
+    /// Neither tool is installed (a phone): the commit's tarball over HTTPS.
+    Tarball,
+}
+
+fn clone_method(have_gh: bool, have_git: bool) -> CloneMethod {
+    match (have_gh, have_git) {
+        (true, _) => CloneMethod::Gh,
+        (false, true) => CloneMethod::Git,
+        (false, false) => CloneMethod::Tarball,
+    }
+}
+
+/// Clones in flight, by destination, so two calls for one repo never interleave.
+static IN_FLIGHT: LazyLock<std::sync::Mutex<HashSet<PathBuf>>> = LazyLock::new(Default::default);
+
+/// Holds a destination for one clone call and frees it when dropped.
+struct InFlight(PathBuf);
+
+impl InFlight {
+    fn claim(dest: &Path) -> Result<Self> {
+        let mut set = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+        if !set.insert(dest.to_path_buf()) {
+            bail!(
+                "{} is already being cloned; try again when that call finishes",
+                dest.display()
+            );
+        }
+        Ok(Self(dest.to_path_buf()))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        IN_FLIGHT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// The reply for a checkout already on disk, or `None` to clone. A tarball checkout is reused
+/// only with its base record; one with neither a record nor `.git` is a fetch that was cut
+/// short, and since the clone folder is this tool's scratch space it is removed and fetched again.
+fn cached_reply(dest: &Path, method: CloneMethod) -> Result<Option<Value>> {
+    if !dest.exists() {
+        return Ok(None);
+    }
+    let path = dest.display().to_string();
+    if method != CloneMethod::Tarball || dest.join(".git").exists() {
+        return Ok(Some(json!({ "path": path, "cached": true })));
+    }
+    if let Some(base) = tarball::load_base(dest) {
+        let reply =
+            json!({ "path": path, "cached": true, "via": "tarball", "commit": base.commit });
+        return Ok(Some(reply));
+    }
+    std::fs::remove_dir_all(dest).with_context(|| format!("could not clear {path}"))?;
+    Ok(None)
+}
+
+fn tarball_reply(path: &str, fetched: &tarball::Fetched) -> Value {
+    let shown: Vec<&String> = fetched
+        .skipped
+        .iter()
+        .take(tarball::SKIPPED_SHOWN)
+        .collect();
+    json!({
+        "path": path,
+        "cached": false,
+        "via": "tarball",
+        "commit": fetched.base.commit,
+        "files": fetched.base.files.len(),
+        "base_record": tarball::base_record_path(Path::new(path)).display().to_string(),
+        "skipped_count": fetched.skipped.len(),
+        "skipped": shown,
+    })
+}
+
 /// Shallow checkouts land here so a repo can be searched with grep and read_file.
 fn clone_root() -> PathBuf {
     std::env::temp_dir().join("hq-github-clones")
@@ -379,7 +470,9 @@ impl HqTool for GithubCloneTool {
 
     fn description(&self) -> &str {
         "Shallow-clone a GitHub repo (owner/name) into a scratch folder and return its path, so it can be \
-         searched with grep and read_file. Read-only use: the checkout is for reading, not for committing or pushing."
+         searched with grep and read_file. Without git or gh installed it downloads the default branch's tarball \
+         instead (no history, links and .git entries left out). Read-only use: the checkout is for reading, not for \
+         committing or pushing."
     }
 
     fn category(&self) -> &str {
@@ -397,15 +490,22 @@ impl HqTool for GithubCloneTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let repo = repo(&args)?;
         let dest = clone_root().join(&repo);
-        if dest.exists() {
-            return Ok(json!({ "path": dest.display().to_string(), "cached": true }));
+        let _claim = InFlight::claim(&dest)?;
+        let method = clone_method(which::which("gh").is_ok(), which::which("git").is_ok());
+        if let Some(reply) = cached_reply(&dest, method)? {
+            return Ok(reply);
         }
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
         let dest_arg = dest.display().to_string();
-        let have_gh = which::which("gh").is_ok();
-        if have_gh {
+        // A base record beside a git checkout would describe files git did not fetch.
+        let _ = std::fs::remove_file(tarball::base_record_path(&dest));
+        if method == CloneMethod::Tarball {
+            let fetched = tarball::fetch(API_HOST_URL, &repo, &dest).await?;
+            return Ok(tarball_reply(&dest_arg, &fetched));
+        }
+        if method == CloneMethod::Gh {
             let argv = [
                 "repo",
                 "clone",
@@ -442,6 +542,55 @@ mod tests {
 
     fn call(v: Value) -> Result<GhCall> {
         build_call(&v)
+    }
+
+    #[test]
+    fn a_tarball_checkout_is_reused_only_with_its_base_record() {
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("o/r");
+        assert!(cached_reply(&dest, CloneMethod::Tarball).unwrap().is_none());
+
+        std::fs::create_dir_all(dest.join(".git")).unwrap();
+        let git = cached_reply(&dest, CloneMethod::Git).unwrap().unwrap();
+        assert_eq!(git["cached"], true);
+        // A git checkout stays usable after git is gone from the machine.
+        let kept = cached_reply(&dest, CloneMethod::Tarball).unwrap().unwrap();
+        assert_eq!(kept["cached"], true);
+        std::fs::remove_dir(dest.join(".git")).unwrap();
+
+        let base = tarball::Base {
+            repo: "o/r".into(),
+            commit: "abc".into(),
+            files: Vec::new(),
+        };
+        let record = tarball::base_record_path(&dest);
+        std::fs::write(&record, serde_json::to_vec(&base).unwrap()).unwrap();
+        let reply = cached_reply(&dest, CloneMethod::Tarball).unwrap().unwrap();
+        assert_eq!(reply["commit"], "abc");
+
+        std::fs::write(&record, b"{ truncated").unwrap();
+        assert!(cached_reply(&dest, CloneMethod::Tarball).unwrap().is_none());
+        assert!(
+            !dest.exists(),
+            "a checkout without a usable record is cleared to fetch again"
+        );
+    }
+
+    #[test]
+    fn one_destination_is_cloned_by_one_call_at_a_time() {
+        let dest = Path::new("/nowhere/o/r-in-flight-test");
+        let first = InFlight::claim(dest).unwrap();
+        assert!(InFlight::claim(dest).is_err());
+        drop(first);
+        assert!(InFlight::claim(dest).is_ok());
+    }
+
+    #[test]
+    fn clone_prefers_gh_then_git_then_the_tarball() {
+        assert_eq!(clone_method(true, true), CloneMethod::Gh);
+        assert_eq!(clone_method(true, false), CloneMethod::Gh);
+        assert_eq!(clone_method(false, true), CloneMethod::Git);
+        assert_eq!(clone_method(false, false), CloneMethod::Tarball);
     }
 
     #[test]
