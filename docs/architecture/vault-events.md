@@ -121,6 +121,12 @@ daemon:
   `hybrid` and `semantic` searches match notes by meaning; with `remote`, queries are not
   embedded and those modes are keyword searches. On a phone, `local` embeds even with
   `mobile.data_saver` on, since it uses no data after the model download.
+- With `local`, the inbox triage (recent untagged notes in `Notebooks/`) asks no model: a note
+  takes the tags that at least two of its closest tagged notes share (similarity 0.4 or more,
+  three tags at most), or stays untagged. It also runs under the data saver. With `remote` it
+  is an LLM classification and needs `openrouter_api_key`.
+- The provider is fixed while `hq` runs: a config reload that changes it is refused, and a
+  restart applies it.
 
 Each vector is stored with its model's label (`model2vec/potion-base-8M@<revision>` for local),
 and search compares a query only with vectors from the same model. Switching providers marks
