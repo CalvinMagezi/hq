@@ -595,8 +595,10 @@ fn remote(name: &str, url: &str) -> crate::config::RemoteMcpServer {
 
 #[test]
 fn paired_hubs_join_the_remote_servers_and_a_configured_name_wins() {
-    let mut cfg = crate::HqConfig::default();
-    cfg.remote_mcp = vec![remote("phone", "https://example.com/mcp")];
+    let cfg = crate::HqConfig {
+        remote_mcp: vec![remote("phone", "https://example.com/mcp")],
+        ..Default::default()
+    };
     let all = cfg.remote_mcp_with(vec![
         remote("phone", "http://127.0.0.1:47400/mcp"),
         remote("tablet", "http://127.0.0.1:47401/mcp"),
@@ -613,9 +615,11 @@ fn paired_hubs_join_the_remote_servers_and_a_configured_name_wins() {
 
 #[test]
 fn task_and_search_peers_resolve_among_the_merged_remotes() {
-    let mut cfg = crate::HqConfig::default();
-    cfg.task_peer = Some("tablet".into());
-    cfg.web_search_peer = Some("tablet".into());
+    let cfg = crate::HqConfig {
+        task_peer: Some("tablet".into()),
+        web_search_peer: Some("tablet".into()),
+        ..Default::default()
+    };
     assert!(cfg.task_peer_server().is_err());
     let all = cfg.remote_mcp_with(vec![remote("tablet", "http://127.0.0.1:47401/mcp")]);
     assert_eq!(cfg.task_peer_in(&all).unwrap().unwrap().name, "tablet");

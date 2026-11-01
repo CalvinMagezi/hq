@@ -151,7 +151,7 @@ impl Desktop {
 
     /// Every paired hub and what Claude Code and Claude Desktop hold for it.
     pub async fn claude_status(&self) -> Result<Vec<claude::HubView>> {
-        self.with_claude(|db, t| claude::views(db, t)).await
+        self.with_claude(claude::views).await
     }
 
     /// Adds a paired hub to Claude Code and Claude Desktop, or takes it out.
