@@ -22,6 +22,7 @@ export const links = {
   windows: `${REPO_BLOB}/docs/WINDOWS.md`,
   hqMobile: `${REPO_BLOB}/docs/HQ_MOBILE.md`,
   androidApp: `${REPO_BLOB}/apps/android/README.md`,
+  androidApk: `${REPO}/releases/latest/download/agent-hq-android.apk`,
   docker: `${REPO_BLOB}/docs/DOCKER.md`,
   pairing: `${REPO_BLOB}/docs/PAIRING.md`,
   connector: `${REPO_BLOB}/docs/CLAUDE_CONNECTOR.md`,
