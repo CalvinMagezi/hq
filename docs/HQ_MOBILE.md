@@ -137,7 +137,7 @@ and adds, replaces or removes one. `hq` restarts to read the change.
 
 The phone can pair with another machine of its owner by QR code and then be reached by key, with no
 account and no VPN (`docs/PAIRING.md`, `docs/security/PAIRING.md`). The app has three parts for it,
-all new files (`apps/android/.../bridge/`, `ui/pairing/`, `ui/connect/`):
+all new files (`apps/android/.../bridge/`, `ui/pairing/`):
 
 - **`hq bridge run`**, a child process of the hub service. It owns the iroh endpoint and the paired
   list. The app talks to it in JSON lines on its standard input and output: no socket, no port,
@@ -196,10 +196,9 @@ foreground service, so it runs for as long as `hq` does. What a sleeping phone t
 `docs/plans/native-bridge/w4-measurements.md` and in the risk section of
 `docs/plans/native-bridge-sprint.md`.
 
-**Connect Claude** (`ConnectClaudeActivity`) shows the address to give claude.ai and an Arm button
-(`POST /api/oauth/connector/arm`, the same window the web app opens). The address is what hq reports once
-`mcp_connector` is on. Until the edge and the device's own TLS (workstreams W1 and W2) are merged, a
-stand-in address in `files/connector_url` shows the screen with one; Arm stays off for a stand-in.
+**Claude on the phone.** The app has no Connect Claude screen: the public claude.ai connector is retired
+(`docs/plans/native-bridge-sprint.md`). Settings, under Your accounts, says that Claude Code and Claude
+Desktop reach HQ through the owner's laptop while it is paired with the phone.
 
 Diagnostics for `adb`, on the pairing screen's intent (it needs a permission only `adb` holds):
 `--es keep <device id>` starts the `keep` trace, `--es keep ""` stops it, `--ez watch false` stops the app

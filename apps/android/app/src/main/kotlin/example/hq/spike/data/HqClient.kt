@@ -248,14 +248,6 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** Adds a task with a repeat key; true when HQ already had one with that key and so added nothing. */
     suspend fun createTaskOnce(body: JSONObject): Boolean = send(authed("/api/tasks").post(json(body)).build()) { JSONObject(it).optBoolean("deduplicated") }
 
-    /** The claude.ai connector as hq reports it: whether it is on, the address Claude is given, the arming window, who is connected. */
-    suspend fun connectorStatus(): JSONObject = send(authed("/api/oauth/connector").build()) { JSONObject(it) }
-
-    /** Lets one new client connect for [minutes]; returns when the window ends, in seconds since 1970. */
-    suspend fun armConnector(minutes: Int): Long = send(authed("/api/oauth/connector/arm").post(json(JSONObject().put("minutes", minutes))).build()) { JSONObject(it).optLong("armed_until") }
-
-    suspend fun disarmConnector() = send(authed("/api/oauth/connector/disarm").post(json(JSONObject())).build()) { }
-
     suspend fun taskComments(id: String): List<TaskComment> =
         send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/comments").build()) { text ->
             JSONObject(text).optJSONArray("comments").objects().map { TaskComment(it.optString("id"), it.optString("author", ""), it.optString("body", ""), it.optString("created_at", "")) }

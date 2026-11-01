@@ -12,7 +12,6 @@ import org.json.JSONObject
 data class SettingsSnapshot(
     val settings: JSONObject? = null,
     val chatApps: JSONObject? = null,
-    val connector: JSONObject? = null,
     val devices: JSONObject? = null,
     val budgets: JSONObject? = null,
     val health: JSONObject? = null,
@@ -27,11 +26,11 @@ data class SettingsSnapshot(
     val vault: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
-data class HomeGroup(val title: String, val rows: List<HomeRow>)
+data class HomeGroup(val title: String, val rows: List<HomeRow>, val note: String? = null)
 
 /** A line on a read-only page: a title with its value, and a sentence that says what it means. */
 data class FactRow(val title: String, val value: String, val text: String? = null, val good: Boolean = false, val opens: SettingsPage? = null)
@@ -107,20 +106,7 @@ object SettingsWords {
         }
     }
 
-    /** Grants that still let a client in: not revoked and not past their end. */
-    fun liveGrants(c: JSONObject?, now: Instant): List<JSONObject> =
-        c.arr("grants").items().filter { g -> time(g, "revoked_at") == null && (time(g, "expires_at")?.isAfter(now) ?: true) }
-
     fun clock(seconds: Long): String = String.format(java.util.Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
-
-    fun connectorStatus(c: JSONObject?, now: Instant): String {
-        if (c == null) return NOT_ANSWERED
-        if (!c.optBoolean("enabled")) return "Off"
-        val left = time(c, "armed_until")?.let { Duration.between(now, it).seconds }?.takeIf { it > 0 }
-        val n = liveGrants(c, now).size
-        val connected = if (n == 0) "none connected" else "$n connected"
-        return (if (left != null) "Open for ${clock(left)}" else "Closed") + " · $connected"
-    }
 
     fun devicesStatus(d: JSONObject?): String {
         if (d == null) return NOT_ANSWERED
@@ -153,9 +139,9 @@ object SettingsWords {
             "Your accounts", listOf(
                 HomeRow(SettingsPage.Keys, "key", "AI service and keys", keysStatus(snap.settings, snap.providers)),
                 HomeRow(SettingsPage.Messaging, "chat", "Messaging apps", messagingStatus(snap.chatApps)),
-                HomeRow(SettingsPage.Claude, "plug", "Connect Claude", connectorStatus(snap.connector, now)),
                 HomeRow(SettingsPage.Devices, "phone", "Other devices", devicesStatus(snap.devices)),
             ),
+            note = CLAUDE_VIA_LAPTOP,
         ),
         HomeGroup("How HQ behaves", listOf(HomeRow(SettingsPage.Safety, "shield", "Safety and limits", if (snap.settings == null) NOT_ANSWERED else "Read only"))),
         HomeGroup(
@@ -497,25 +483,8 @@ object SettingsWords {
         else -> serverText ?: TOKEN_REFUSED
     }
 
-    // ------------------------------------------------------------ Connect Claude
+    const val CLAUDE_VIA_LAPTOP = "Claude Code and Claude Desktop reach HQ through your laptop while it is paired with this phone."
 
-    data class Grant(val id: String, val client: String, val scope: String, val since: String)
-
-    fun scopeWords(scope: String) = when (scope) { "read_only" -> "Read only"; "tasks" -> "Tasks"; "full" -> "Full"; else -> scope }
-
-    fun grants(c: JSONObject?, now: Instant, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<Grant> = liveGrants(c, now).map {
-        Grant(it.optString("id"), it.text("label") ?: it.text("client_name") ?: "A client", scopeWords(it.optString("grant_scope")), dayOf(time(it, "created_at"), zone))
-    }
-
-    /** Whether new connections are open, for how long, and when it closes on its own (local HH:mm). */
-    data class Window(val open: Boolean, val left: String, val closesAt: String)
-
-    fun window(c: JSONObject?, now: Instant, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Window {
-        val until = time(c, "armed_until")?.takeIf { it.isAfter(now) } ?: return Window(false, "", "")
-        return Window(true, clock(Duration.between(now, until).seconds), until.atZone(zone).toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
-    }
-
-    val CLAUDE_OFF_WORDS = ModeWords("Disconnect Claude everywhere?", "Every Claude connected to this HQ loses access now, and new connections stay closed until you open them again.", "Disconnect")
     val SIGN_OUT_ALL_WORDS = ModeWords("Sign out everywhere?", "Every other device is signed out, and so is any sign-in link you made earlier. Claude connections end too. HQ restarts for a moment.", "Sign out")
 
     /** The name HQ gives the one sign-in that "Sign out everywhere" leaves behind. */

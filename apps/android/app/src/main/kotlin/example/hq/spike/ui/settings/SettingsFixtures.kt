@@ -4,7 +4,7 @@ import example.hq.spike.ui.firstrun.FirstRunWords
 import java.time.Instant
 import org.json.JSONObject
 
-/** Fixed Settings screens for checking against the design with no hq: `--es fixture s-home`, `s-safety`, `s-keys`, `s-chat`, `s-claude`, `s-devices`, `s-spend`, `s-about`, `s-down`. */
+/** Fixed Settings screens for checking against the design with no hq: `--es fixture s-home`, `s-safety`, `s-keys`, `s-chat`, `s-devices`, `s-spend`, `s-about`, `s-down`. */
 fun settingsFixture(name: String?): SettingsUi? {
     val now = Instant.now()
     fun future(seconds: Long) = now.plusSeconds(seconds).epochSecond
@@ -23,9 +23,6 @@ fun settingsFixture(name: String?): SettingsUi? {
     )
     val chat = JSONObject(
         """{"telegram":{"token_set":true,"enabled":true,"owner":{"paired":true},"bot":{"username":"example_bot"},"relay":{"status":"connected","current":true}},"discord":{"token_set":true,"enabled":true,"relay":{"status":"connected","current":false}}}""",
-    )
-    val connector = JSONObject(
-        """{"enabled":true,"url":"https://hq.example.ts.net/mcp","armed_until":${future(581)},"grants":[{"id":"g1","label":"Claude","grant_scope":"read_only","created_at":${now.minusSeconds(90_000).epochSecond},"expires_at":${future(86_400)},"last_used_at":null,"revoked_at":null}]}""",
     )
     val devices = JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":${now.minusSeconds(170_000).epochSecond},"last_used_at":${now.minusSeconds(10_800).epochSecond},"expires_at":null}]}""")
     val budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":2.1,"pct":42,"state":"ok","resets_at":${future(32_400)}},{"name":"openrouter","scope":"provider:openrouter","period":"week","action":"notify","limit_usd":10,"spent_usd":9.5,"pct":95,"state":"warning","resets_at":${future(259_200)}}]}""")
@@ -49,7 +46,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
     )
     val channels = listOf(ChannelFacts("needs", "Needs you", 4, true), ChannelFacts("updates", "Updates", 3, false), ChannelFacts("hub", "HQ is running", 2, false))
-    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
+    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
     return when (name) {
         "s-home" -> base
         "s-loading" -> SettingsUi(open = true, loaded = false, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
@@ -58,7 +55,6 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-helpers" -> base.copy(stack = listOf(SettingsPage.Safety), safetyTab = SettingsWords.SafetyTab.Helpers)
         "s-keys" -> base.copy(stack = listOf(SettingsPage.Keys))
         "s-chat" -> base.copy(stack = listOf(SettingsPage.Messaging))
-        "s-claude" -> base.copy(stack = listOf(SettingsPage.Claude))
         "s-devices" -> base.copy(stack = listOf(SettingsPage.Devices))
         "s-keep" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(autoRevokeOff = true, samsung = true, lastStop = LastStop(android.app.ApplicationExitInfo.REASON_LOW_MEMORY, now.minusSeconds(172_800))))
         "s-keep-bad" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false))
