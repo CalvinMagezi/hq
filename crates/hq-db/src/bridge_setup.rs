@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use chrono::Utc;
+use hq_core::config::{HqConfig, RemoteMcpServer};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
@@ -107,6 +108,41 @@ pub fn list_in(conn: &Connection) -> Result<Vec<Setup>> {
     ))?;
     let rows = stmt.query_map([], row)?.collect::<rusqlite::Result<_>>()?;
     Ok(rows)
+}
+
+/// The path every machine reaches a hub's MCP endpoint at, through its forward.
+pub const HUB_MCP_PATH: &str = "/mcp";
+
+/// The hubs a machine was set up with, as remote MCP servers named after the hub. A hub whose key
+/// the machine never got is skipped, since it could not be called.
+pub fn hub_remotes(setups: &[Setup]) -> Vec<RemoteMcpServer> {
+    setups
+        .iter()
+        .filter(|s| s.is_hub())
+        .filter_map(|s| {
+            Some(RemoteMcpServer {
+                name: s.peer_name.clone(),
+                url: format!("http://127.0.0.1:{}{HUB_MCP_PATH}", s.local_port),
+                api_key: Some(s.mcp_key.clone()?),
+                live_user_turn_only: true,
+            })
+        })
+        .collect()
+}
+
+/// The remote MCP servers in force: `remote_mcp` from config plus the hubs pairing set up, with
+/// the configured entry winning a name clash ([`HqConfig::remote_mcp_with`]). Every reader of
+/// remote servers (tools, `hq mcp-serve --remote`, `task_peer`) calls this. A missing or older
+/// database means no hubs, never an error.
+pub fn resolve_remote_mcp(config: &HqConfig) -> Vec<RemoteMcpServer> {
+    config.remote_mcp_with(hub_remotes(&setups_of(config)))
+}
+
+/// The setup rows of the instance `config` names, none when its database is missing or too old.
+pub fn setups_of(config: &HqConfig) -> Vec<Setup> {
+    Database::open_existing(&config.db_path())
+        .and_then(|db| list(&db))
+        .unwrap_or_default()
 }
 
 /// Records a setup, and on a hub the hash of a key minted for it, in one transaction. Nothing is
@@ -280,5 +316,52 @@ mod tests {
         assert_eq!(get(&db, PEER).unwrap(), None);
         assert!(!has_live_key(&db, PEER).unwrap());
         assert!(peers::is_paired(&db, PEER).unwrap(), "still paired");
+    }
+
+    fn hub_row(key: Option<&str>) -> Setup {
+        Setup {
+            peer_role: ROLE_HUB.into(),
+            peer_name: "phone".into(),
+            local_port: 47_410,
+            mcp_key: key.map(str::to_string),
+            ..machine_row()
+        }
+    }
+
+    #[test]
+    fn a_hub_setup_becomes_a_remote_named_after_the_hub() {
+        let key = new_device_key();
+        let remotes = hub_remotes(&[machine_row(), hub_row(Some(&key))]);
+        assert_eq!(remotes.len(), 1);
+        assert_eq!(remotes[0].name, "phone");
+        assert_eq!(remotes[0].url, "http://127.0.0.1:47410/mcp");
+        assert_eq!(remotes[0].api_key.as_deref(), Some(key.as_str()));
+        assert!(hub_remotes(&[hub_row(None)]).is_empty());
+    }
+
+    #[test]
+    fn the_resolver_reads_the_vault_database_and_config_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = HqConfig {
+            vault_path: dir.path().to_path_buf(),
+            ..HqConfig::default()
+        };
+        assert!(resolve_remote_mcp(&config).is_empty(), "no database yet");
+        let db = Database::open(&config.db_path()).unwrap();
+        peers::add_peer(&db, PEER, "phone", &[], &[]).unwrap();
+        assert!(record(&db, &hub_row(Some(&new_device_key())), None).unwrap());
+        assert_eq!(
+            resolve_remote_mcp(&config)[0].url,
+            "http://127.0.0.1:47410/mcp"
+        );
+        config.remote_mcp.push(RemoteMcpServer {
+            name: "phone".into(),
+            url: "https://example.com/mcp".into(),
+            api_key: None,
+            live_user_turn_only: true,
+        });
+        let all = resolve_remote_mcp(&config);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].url, "https://example.com/mcp");
     }
 }

@@ -92,7 +92,13 @@ pub fn create_default_registry(
             )
         })
         .unwrap_or((None, None, true));
-    web::set_search_peer(config.and_then(|c| c.web_search_peer_server()).cloned());
+    let remotes = config.map(hq_db::bridge_setup::resolve_remote_mcp);
+    web::set_search_peer(
+        config
+            .zip(remotes.as_deref())
+            .and_then(|(c, r)| c.web_search_peer_in(r))
+            .cloned(),
+    );
     tools.push(Box::new(web::WebSearchHqTool::new(
         searxng_url,
         brave_api_key,
@@ -112,8 +118,8 @@ pub fn create_default_registry(
         vault_path.clone(),
         db.clone(),
     ));
-    if let Some(cfg) = config {
-        tools.extend(remote_mcp::create_remote_mcp_tools(&cfg.remote_mcp, None));
+    if let Some(remotes) = &remotes {
+        tools.extend(remote_mcp::create_remote_mcp_tools(remotes, None));
     }
 
     let mut registry = ToolRegistry::new();

@@ -4,8 +4,8 @@ Status: implemented on 2026-10-31 (MOBILE-FIRST-002); approved by the owner the 
 shipped is in `docs/PAIRING.md` ("What pairing sets up") and `docs/security/PAIRING.md` section 15.
 It differs from this note in four places: the setup table is `bridge_setup` (migration 106), not a
 column; only the machine speaks first and only a serving hub answers; a repeat message keeps the
-one live key instead of minting another; and adding HQ to Claude Code or Claude Desktop is not
-part of this step. Builds on `hq bridge` services and
+one live key instead of minting another; and adding HQ to Claude Code or Claude Desktop is
+a separate step (MOBILE-FIRST-011, `hq claude`, `docs/PAIRING.md` "Using HQ in Claude"). Builds on `hq bridge` services and
 forwards (PR #321) and on what test zero had to do by hand on 2026-10-31.
 
 ## The problem

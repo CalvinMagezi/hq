@@ -18,6 +18,8 @@ const COMMANDS: &[&str] = &[
     "pairing_submit",
     "pairing_decline",
     "pairing_revoke",
+    "claude_status",
+    "claude_change",
 ];
 
 fn main() {

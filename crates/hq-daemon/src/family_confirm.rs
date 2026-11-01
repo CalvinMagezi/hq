@@ -54,10 +54,8 @@ pub async fn resolve_family_action(
                     ));
                 }
             };
-            let server = config
-                .remote_mcp
-                .iter()
-                .find(|s| s.name == pending.server_name);
+            let remotes = hq_db::bridge_setup::resolve_remote_mcp(&config);
+            let server = remotes.iter().find(|s| s.name == pending.server_name);
             let Some(server) = server else {
                 let err_reply = format!(
                     "Approved by the owner, but remote MCP server '{}' is no longer configured.",

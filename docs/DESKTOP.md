@@ -79,6 +79,18 @@ Devices on the same network pair directly. The relay setting defaults to `none`;
 data needs a relay (`relay` in settings: `default` for n0's public relays, which are for development
 and testing only, or a relay URL you run).
 
+## Using HQ in Claude
+
+The Claude tab lists each hub this computer is paired with and whether Claude Code and Claude
+Desktop hold it. **Add** writes the entries `hq claude add` does (`docs/PAIRING.md`, "Using HQ in
+Claude") and **Remove** takes out only those. The tab reads Claude when it opens and after a
+change, not on the three-second refresh, because reading Claude Code runs its program.
+
+Claude Desktop is told to start `hq`, so the app needs that program's absolute path: the one the
+Host button uses (next to the app, in `~/bin`, or on `PATH`, or the path set in Settings). When it
+cannot find one, Add says so instead of writing a bare `hq`. **Revoke** on a device removes its
+entries in Claude before it revokes.
+
 ## Settings
 
 `~/.hq/desktop/settings.json`, owner-only, created when you first save a setting. Unknown keys are

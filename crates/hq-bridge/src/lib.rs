@@ -7,6 +7,7 @@
 //! throwaway endpoint per ticket, closed when the ticket is spent, expired or burned).
 
 pub mod bridge;
+pub mod claude;
 pub mod code;
 pub mod dns;
 pub mod door;

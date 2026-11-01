@@ -15,12 +15,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
 const RELAY_ERROR: i64 = -32603;
 
 pub async fn run(config: &HqConfig, name: &str) -> Result<()> {
-    let server = config
-        .remote_mcp
-        .iter()
+    let server = hq_db::bridge_setup::resolve_remote_mcp(config)
+        .into_iter()
         .find(|s| s.name == name)
-        .with_context(|| format!("no remote_mcp entry is named `{name}`"))?
-        .clone();
+        .with_context(|| format!("no remote_mcp entry is named `{name}`"))?;
     let mut relay = Relay::new(server)?;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut out = tokio::io::stdout();

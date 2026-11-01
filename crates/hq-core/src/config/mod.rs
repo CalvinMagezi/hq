@@ -818,19 +818,48 @@ impl HqConfig {
             .join(".hq")
     }
 
+    /// `remote_mcp` plus the `extra` entries (the hubs pairing set up), configured entries first.
+    /// A configured entry wins a name clash, so a hand-written setup keeps working. This is the
+    /// one merge every reader of remote servers goes through (`hq_db::bridge_setup::resolve_remote_mcp`).
+    pub fn remote_mcp_with(&self, extra: Vec<RemoteMcpServer>) -> Vec<RemoteMcpServer> {
+        let mut all = self.remote_mcp.clone();
+        for server in extra {
+            if !all.iter().any(|s| s.name == server.name) {
+                all.push(server);
+            }
+        }
+        all
+    }
+
     /// The `remote_mcp` entry `web_search_peer` names, if both exist.
     pub fn web_search_peer_server(&self) -> Option<&RemoteMcpServer> {
+        self.web_search_peer_in(&self.remote_mcp)
+    }
+
+    /// [`Self::web_search_peer_server`] among already resolved `remotes`.
+    pub fn web_search_peer_in<'a>(
+        &self,
+        remotes: &'a [RemoteMcpServer],
+    ) -> Option<&'a RemoteMcpServer> {
         let name = self.web_search_peer.as_deref()?;
-        self.remote_mcp.iter().find(|s| s.name == name)
+        remotes.iter().find(|s| s.name == name)
     }
 
     /// The `remote_mcp` entry `task_peer` names. An error when `task_peer` names
     /// no entry, so `hq task` never falls back to a local database unnoticed.
     pub fn task_peer_server(&self) -> Result<Option<&RemoteMcpServer>, String> {
+        self.task_peer_in(&self.remote_mcp)
+    }
+
+    /// [`Self::task_peer_server`] among already resolved `remotes`.
+    pub fn task_peer_in<'a>(
+        &self,
+        remotes: &'a [RemoteMcpServer],
+    ) -> Result<Option<&'a RemoteMcpServer>, String> {
         let Some(name) = self.task_peer.as_deref() else {
             return Ok(None);
         };
-        self.remote_mcp
+        remotes
             .iter()
             .find(|s| s.name == name)
             .map(Some)

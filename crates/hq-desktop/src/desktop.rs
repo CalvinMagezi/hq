@@ -1,5 +1,6 @@
 //! The app as a whole: settings, the host, pairing and the proxy, wired from the HQ config. The Tauri shell holds one of these and calls into it.
 
+use crate::claude;
 use crate::host::{self, HostController, HostSpec};
 use crate::pairing::{HubServices, PairingConfig, PairingController};
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
@@ -49,12 +50,22 @@ impl DesktopInit {
     }
 }
 
+/// What a revoke did, for the window.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Revoked {
+    pub revoked: bool,
+    /// Set when HQ's entries could not all be taken out of Claude.
+    pub claude_warning: Option<String>,
+}
+
 pub struct Desktop {
     dir: PathBuf,
     settings: Mutex<Settings>,
     config: HqConfig,
     pub host: HostController,
     pub pairing: PairingController,
+    /// The `hq` program the host runs, and the one Claude Desktop is told to start.
+    hq_program: PathBuf,
     proxy: AsyncMutex<Option<ProxyHandle>>,
     upstream: SocketAddr,
 }
@@ -100,6 +111,7 @@ impl Desktop {
         // A missing program is reported when the host is started, not when the app opens.
         let program = host::locate_hq(settings.hq_path.as_deref(), &candidates)
             .unwrap_or_else(|_| PathBuf::from("hq"));
+        let hq_program = program.clone();
         let host = HostController::new(HostSpec::for_config(
             program,
             init.dir.join(HOST_LOG),
@@ -139,8 +151,50 @@ impl Desktop {
             config: init.config,
             host,
             pairing,
+            hq_program,
             proxy: AsyncMutex::new(None),
             upstream,
+        })
+    }
+
+    /// Every paired hub and what Claude Code and Claude Desktop hold for it.
+    pub async fn claude_status(&self) -> Result<Vec<claude::HubView>> {
+        self.with_claude(claude::views).await
+    }
+
+    /// Adds a paired hub to Claude Code and Claude Desktop, or takes it out.
+    pub async fn claude_change(&self, hub: String, add: bool) -> Result<claude::HubView> {
+        self.with_claude(move |db, t| claude::change(db, t, &hub, add))
+            .await
+    }
+
+    async fn with_claude<T: Send + 'static>(
+        &self,
+        work: impl FnOnce(&Database, &hq_bridge::claude::Targets) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let bin = claude::hq_program(&self.hq_program)?;
+        claude::blocking(self.config.db_path(), bin, work).await
+    }
+
+    /// Revokes a device. A hub's entries in Claude go first: the revoke deletes the setup that
+    /// names them, and a key that no longer works should not stay in Claude's config.
+    pub async fn revoke(&self, id: &str) -> Result<Revoked> {
+        let peer = id.to_string();
+        let cleanup = match claude::hq_program(&self.hq_program) {
+            Ok(bin) => {
+                claude::blocking(self.config.db_path(), bin, move |db, t| {
+                    Ok(hq_bridge::claude::remove_for_peer(db, t, &peer))
+                })
+                .await
+            }
+            Err(e) => Err(e),
+        };
+        // Claude being absent or its file being odd must not stop the revoke, only be said.
+        let claude_warning = claude::revoke_warning(cleanup);
+        let revoked = self.pairing.revoke(id).await?;
+        Ok(Revoked {
+            revoked,
+            claude_warning,
         })
     }
 

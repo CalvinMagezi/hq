@@ -201,6 +201,11 @@ enum Commands {
     #[command(subcommand)]
     Bridge(commands::bridge::BridgeAction),
 
+    /// Add HQ to Claude Code and Claude Desktop through the paired hub: add, status, remove (`hq claude --help`)
+    #[cfg(all(unix, feature = "bridge"))]
+    #[command(subcommand)]
+    Claude(commands::claude::ClaudeAction),
+
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
         /// serve (run the host in this terminal), status, stop, lockdown [reason] (stop every agent and refuse new ones), unlock (lift a lockdown; only on this machine), install (run it as a login service), sign <path> (macOS: give an hq binary the stable local signature when this machine has one), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate; with --gate-key, a server's key for the TCP gate), gate-key <host> (make this server's key for a host's TCP gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
@@ -976,7 +981,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Agents { .. }
         | Commands::Models { .. } => LiteRule::NotInLite,
         #[cfg(all(unix, feature = "bridge"))]
-        Commands::Bridge(_) => LiteRule::NotInLite,
+        Commands::Bridge(_) | Commands::Claude(_) => LiteRule::NotInLite,
         Commands::Install { .. }
         | Commands::Update(_)
         | Commands::UpdateDb { .. }
@@ -1294,6 +1299,8 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Connector(action) => commands::connector::run(config, action),
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Bridge(action) => commands::bridge::run(config, action).await,
+        #[cfg(all(unix, feature = "bridge"))]
+        Commands::Claude(action) => commands::claude::run(config, action),
         Commands::Decisions { days, site } => {
             commands::decisions::run(config, days, site.as_deref())
         }
@@ -1501,6 +1508,25 @@ mod net_args_tests {
             &["hq", "bridge", "join", "--digits", "123456", "x"],
         ] {
             assert!(Cli::try_parse_from(argv).is_err(), "{argv:?}");
+        }
+    }
+
+    #[cfg(all(unix, feature = "bridge"))]
+    #[test]
+    fn claude_commands_take_an_optional_hub_name_and_no_key() {
+        for ok in [
+            &["hq", "claude", "add"][..],
+            &["hq", "claude", "status", "phone"],
+            &["hq", "claude", "remove", "phone"],
+        ] {
+            assert!(Cli::try_parse_from(ok).is_ok(), "{ok:?}");
+        }
+        for bad in [
+            &["hq", "claude"][..],
+            &["hq", "claude", "add", "--key", "x"],
+            &["hq", "claude", "add", "a", "b"],
+        ] {
+            assert!(Cli::try_parse_from(bad).is_err(), "{bad:?}");
         }
     }
 
