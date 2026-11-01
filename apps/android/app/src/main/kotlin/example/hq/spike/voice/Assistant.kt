@@ -19,6 +19,9 @@ import android.util.Log
 class AssistantService : VoiceInteractionService() {
     override fun onReady() {
         super.onReady()
+        // Android would otherwise copy the text of whatever is on screen (and a screenshot) into this app on every
+        // press. HQ does not use it, so it is never collected.
+        setDisabledShowContext(VoiceInteractionSession.SHOW_WITH_ASSIST or VoiceInteractionSession.SHOW_WITH_SCREENSHOT)
         Log.i(TAG, "assistant ready")
     }
 

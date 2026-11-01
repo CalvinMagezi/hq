@@ -90,20 +90,23 @@ class Mouth(app: Context, scope: CoroutineScope) {
         framesWritten = 0
     }
 
-    fun close() {
-        stop()
-        queue.close()
-    }
-
     private fun speak(item: Queued) {
         val tts = engine ?: return
         val out = track ?: newTrack(tts.sampleRate()).also { track = it }
         if (out.playState != AudioTrack.PLAYSTATE_PLAYING) out.play()
-        tts.generateWithCallback(item.text, SPEAKER, SPEED) { samples ->
-            if (item.generation != generation.get()) return@generateWithCallback STOP
+        tts.generateWithCallback(item.text, SPEAKER, SPEED, Player(out, item.generation))
+    }
+
+    /**
+     * A class, not a lambda: the native side calls `invoke([F)Ljava/lang/Integer;`, which an invokedynamic lambda
+     * (Kotlin 2's default) does not have, and the process aborts on the first piece of audio.
+     */
+    private inner class Player(private val out: AudioTrack, private val ofGeneration: Int) : (FloatArray) -> Int {
+        override fun invoke(samples: FloatArray): Int {
+            if (ofGeneration != generation.get()) return STOP
             val wrote = out.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
             if (wrote > 0) framesWritten += wrote
-            if (wrote < 0 || item.generation != generation.get()) STOP else GO_ON
+            return if (wrote < 0 || ofGeneration != generation.get()) STOP else GO_ON
         }
     }
 

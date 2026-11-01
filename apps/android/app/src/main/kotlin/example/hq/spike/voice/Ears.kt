@@ -36,12 +36,13 @@ class Ears(app: Context) {
     /** Listens until a pause ends the request, [finishNow] is called, or the time limit; returns what was said. */
     // The voice screen asks for the microphone before it calls this.
     @SuppressLint("MissingPermission")
-    suspend fun hear(onPartial: (String) -> Unit): String = withContext(Dispatchers.IO) {
-        // Held for the whole loop so [close] cannot free the recogniser while it decodes; one read is 100 ms.
-        synchronized(lock) { hearLocked(onPartial) { isActive } }
+    suspend fun hear(onRecording: () -> Unit, onPartial: (String) -> Unit): String = withContext(Dispatchers.IO) {
+        // One listener at a time: a second sheet waits for the first loop to notice it was stopped (one read, 100 ms).
+        synchronized(lock) { hearLocked(onRecording, onPartial) { isActive } }
     }
 
-    private fun hearLocked(onPartial: (String) -> Unit, active: () -> Boolean): String {
+    /** [onRecording] fires once the microphone really records; opening it takes up to a second on a budget phone. */
+    private fun hearLocked(onRecording: () -> Unit, onPartial: (String) -> Unit, active: () -> Boolean): String {
         val engine = recognizer ?: throw IllegalStateException("prepare() first")
         val stream = engine.createStream()
         val minBuffer = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -51,6 +52,8 @@ class Ears(app: Context) {
             if (mic.state != AudioRecord.STATE_INITIALIZED) throw IOException("microphone did not open")
             mic.startRecording()
             val chunk = ShortArray(CHUNK)
+            if (mic.read(chunk, 0, chunk.size) < 0) throw IOException("microphone did not start")
+            onRecording()
             val started = SystemClock.elapsedRealtime()
             var shown = ""
             while (active() && !finishing && SystemClock.elapsedRealtime() - started < LONGEST_REQUEST_MS) {
@@ -81,14 +84,6 @@ class Ears(app: Context) {
     }
 
     fun stop() = finishNow()
-
-    fun close() {
-        finishing = true
-        synchronized(lock) {
-            recognizer?.release()
-            recognizer = null
-        }
-    }
 
     private companion object {
         const val RATE = 16_000

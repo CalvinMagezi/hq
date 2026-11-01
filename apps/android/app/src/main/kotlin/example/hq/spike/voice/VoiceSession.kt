@@ -1,11 +1,15 @@
 package example.hq.spike.voice
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import example.hq.spike.data.ChatConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -36,14 +40,21 @@ data class VoiceState(
  */
 class VoiceSession(app: Context, private val scope: CoroutineScope, private val connection: ChatConnection) {
     private val models = VoiceModels(app)
-    private val ears = Ears(app)
-    private val mouth = Mouth(app, scope)
+    private val ears = VoiceEngines.ears(app)
+    private val mouth = VoiceEngines.mouth(app)
     private val turn = VoiceTurn(connection.events) { content, thread, clientId -> connection.sendChat(content, thread, clientId) }
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state
 
     private var threadId: String? = null
     private var job: Job? = null
+
+    init {
+        // Phase changes with a monotonic clock, for latency runs from adb. Never the words: logcat is not private enough.
+        scope.launch {
+            _state.map { it.phase }.distinctUntilChanged().collect { Log.i(TAG, "phase=$it at=${SystemClock.elapsedRealtime()}") }
+        }
+    }
 
     fun micPressed() = when (_state.value.phase) {
         VoicePhase.NeedsModels -> download()
@@ -75,10 +86,11 @@ class VoiceSession(app: Context, private val scope: CoroutineScope, private val 
         _state.update { it.copy(phase = VoicePhase.Idle) }
     }
 
+    /** The engines stay loaded for the next request (see [VoiceEngines]); only this sheet's work stops. */
     fun close() {
         job?.cancel()
-        ears.close()
-        mouth.close()
+        ears.stop()
+        mouth.stop()
     }
 
     /** Fetches the models only after the owner tapped "Get" under the notice of what is downloaded and what is not sent. */
@@ -104,10 +116,15 @@ class VoiceSession(app: Context, private val scope: CoroutineScope, private val 
             return
         }
         _state.update { VoiceState(VoicePhase.Preparing, reply = it.reply) }
+        // The voice loads while the owner speaks; it is only needed once the request has been heard.
+        val voiceReady = scope.async { mouth.prepare() }
         ears.prepare()
-        mouth.prepare()
-        _state.update { it.copy(phase = VoicePhase.Listening, heard = "", problem = null) }
-        val words = ears.hear { partial -> _state.update { it.copy(heard = partial) } }.trim()
+        _state.update { it.copy(heard = "", problem = null) }
+        val words = ears.hear(
+            onRecording = { _state.update { it.copy(phase = VoicePhase.Listening) } },
+            onPartial = { partial -> _state.update { it.copy(heard = partial) } },
+        ).trim()
+        voiceReady.await()
         if (words.isEmpty()) return refuse(NOTHING_HEARD)
         _state.update { it.copy(phase = VoicePhase.Thinking, heard = words, reply = "") }
         turn.ask(words, threadId).collect(::onOutput)
@@ -122,7 +139,11 @@ class VoiceSession(app: Context, private val scope: CoroutineScope, private val 
                 _state.update { it.copy(phase = VoicePhase.Speaking, reply = (it.reply + " " + out.sentence).trim()) }
                 mouth.say(out.sentence)
             }
-            is TurnOutput.Failed -> _state.update { it.copy(problem = out.reason) }
+            is TurnOutput.Failed -> {
+                // Said as well as shown: someone who asked by voice may not be looking at the screen.
+                _state.update { it.copy(phase = VoicePhase.Speaking, problem = out.reason) }
+                mouth.say(out.reason)
+            }
             TurnOutput.Done -> Unit
         }
     }
