@@ -47,7 +47,7 @@ fn title_from_path(path: &str) -> String {
 pub fn hybrid_search(
     conn: &Connection,
     query: &str,
-    query_embedding: Option<&[f32]>,
+    query_embedding: Option<(&[f32], &str)>,
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
     let keyword_results = keyword_search(conn, query, limit * 2)?;
@@ -62,7 +62,8 @@ pub fn hybrid_search(
         }
     };
 
-    let semantic_results = semantic_search(conn, query_embedding, limit * 2)?;
+    let (query_embedding, model) = query_embedding;
+    let semantic_results = semantic_search(conn, query_embedding, model, limit * 2)?;
 
     // Find max scores for normalization (floor at 1.0 to avoid division by zero)
     let max_keyword = keyword_results

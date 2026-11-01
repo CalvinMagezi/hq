@@ -55,16 +55,17 @@ pub async fn run_embeddings(vault_path: &Path, db: &Database, config: &HqConfig)
 
     run_fts_sync(vault_path, db).await?;
 
-    // Lite, and a mobile instance with its data saver on, keep the keyword index current and
-    // send no note text anywhere for vectors.
+    // Lite, and a mobile instance with its data saver on and remote embeddings, keep only the
+    // keyword index current (`HqConfig::embeds_notes`).
     if !config.embeds_notes() {
         return Ok(());
     }
 
-    // Generate vector embeddings for up to 5 notes per cycle (rate-limited).
-    // OpenRouter when configured (e.g. the VPS, no local Ollama); Ollama otherwise.
+    // Vector embeddings for up to 5 notes per cycle (rate-limited), from the configured provider.
     let vault = hq_vault::VaultClient::new(vault_path.to_path_buf())?;
-    match hq_daemon::process_embeddings(&vault, db, 5, config.openrouter_api_key.as_deref()).await {
+    let provider = config.daemon.embedding_provider;
+    let key = config.openrouter_api_key.as_deref();
+    match hq_daemon::process_embeddings(&vault, db, 5, provider, key).await {
         Ok(n) if n > 0 => info!(embedded = n, "embeddings: vector embeddings generated"),
         Ok(_) => {}
         Err(e) => warn!(error = %e, "embeddings: vector embedding batch failed"),
@@ -133,7 +134,7 @@ pub async fn run_inbox_triage(vault_path: &Path, config: &HqConfig) -> Result<()
                 ..Default::default()
             };
 
-            match hq_llm::with_origin(hq_llm::origin::EMBEDDINGS, provider.chat(&request)).await {
+            match hq_llm::with_origin(hq_llm::origin::TRIAGE, provider.chat(&request)).await {
                 Ok(resp) => {
                     if let Ok(data) =
                         serde_json::from_str::<serde_json::Value>(&resp.message.content)

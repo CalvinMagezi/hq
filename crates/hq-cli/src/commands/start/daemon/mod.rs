@@ -143,8 +143,8 @@ pub async fn run_daemon(
     };
 
     // Embeddings follow edits: made when the watcher indexes notes, on a timer otherwise. Lite
-    // sends no note text anywhere, and a mobile instance with its data saver on keeps it local,
-    // so neither makes any.
+    // makes none, and a mobile instance with its data saver on makes them only on the device
+    // (`HqConfig::embeds_notes`).
     let embedding_worker = if !config.embeds_notes() {
         None
     } else {
@@ -155,6 +155,7 @@ pub async fn run_daemon(
         Some(hq_daemon::embedding_worker::spawn(
             vault_path.clone(),
             db.clone(),
+            config.daemon.embedding_provider,
             config.openrouter_api_key.clone(),
             changed,
             shutdown.clone(),

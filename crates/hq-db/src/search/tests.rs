@@ -161,10 +161,30 @@ fn test_semantic_search() {
     store_embedding(&conn, "a.md", &[1.0, 0.0, 0.0], "m").unwrap();
     store_embedding(&conn, "b.md", &[0.0, 1.0, 0.0], "m").unwrap();
 
-    let results = semantic_search(&conn, &[1.0, 0.0, 0.0], 10).unwrap();
+    let results = semantic_search(&conn, &[1.0, 0.0, 0.0], "m", 10).unwrap();
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].note_path, "a.md"); // most similar
     assert!((results[0].relevance - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn vectors_from_another_model_are_never_compared() {
+    let conn = setup_test_db();
+    for p in ["old.md", "new.md", "other.md"] {
+        index_note(&conn, p, p, "c", "").unwrap();
+    }
+    // A wide vector from the previous model whose first entries happen to match the query.
+    store_embedding(&conn, "old.md", &[1.0, 0.0, 5.0, 5.0], "remote").unwrap();
+    store_embedding(&conn, "new.md", &[0.6, 0.8], "local").unwrap();
+    store_embedding(&conn, "other.md", &[0.0, 1.0], "local").unwrap();
+
+    let hits = semantic_search(&conn, &[1.0, 0.0], "local", 10).unwrap();
+    let paths: Vec<&str> = hits.iter().map(|r| r.note_path.as_str()).collect();
+    assert_eq!(paths, ["new.md", "other.md"]);
+
+    let similar = find_similar_notes(&conn, "new.md", 5, 0.0).unwrap();
+    let paths: Vec<&str> = similar.iter().map(|r| r.note_path.as_str()).collect();
+    assert_eq!(paths, ["other.md"]);
 }
 
 #[test]
@@ -180,7 +200,7 @@ fn test_hybrid_search() {
     .unwrap();
     store_embedding(&conn, "a.md", &[1.0, 0.0], "m").unwrap();
 
-    let results = hybrid_search(&conn, "rust", Some(&[1.0, 0.0]), 10).unwrap();
+    let results = hybrid_search(&conn, "rust", Some((&[1.0, 0.0], "m")), 10).unwrap();
     assert!(!results.is_empty());
     assert_eq!(results[0].match_type, MatchType::Hybrid);
 }

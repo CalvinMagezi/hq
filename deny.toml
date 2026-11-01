@@ -109,6 +109,12 @@ exceptions = [{ allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" }]
 # Workspace crates do not yet set `license.workspace = true` (crates/ is out of
 # scope for the CI change). Drop these clarifications once they do.
 
+# model2vec-rs names its licence only through a file, which is the MIT licence.
+[[licenses.clarify]]
+crate = "model2vec-rs"
+expression = "MIT"
+license-files = [{ path = "LICENSE", hash = 0 }]
+
 [[licenses.clarify]]
 crate = "hq-agent"
 expression = "MIT"

@@ -19,6 +19,10 @@ rusqlite = { workspace = true }
 reqwest = { workspace = true }
 regex = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
+model2vec-rs = { workspace = true }
+# Not called directly: it picks the regex engine model2vec-rs builds with (see the workspace).
+tokenizers = { workspace = true }
 serde_yaml = { workspace = true }
 
 [dev-dependencies]

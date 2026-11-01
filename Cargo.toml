@@ -114,6 +114,11 @@ futures = "0.3"
 tokio-tungstenite = { version = "0.28", features = ["connect", "native-tls"] }
 sha2 = "0.10"
 hex = "0.4"
+# Static (Model2Vec) embeddings on the device; local-only keeps out the hf-hub downloader.
+model2vec-rs = { version = "0.4.0", default-features = false, features = ["local-only"] }
+# The tokenizer model2vec-rs uses, given a pure-Rust regex engine and nothing else: no C
+# oniguruma or C++ suffix array to cross-compile for Android, and no progress bar crate.
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 dirs = "6"
 hostname = "0.4"
 rand = "0.8"
