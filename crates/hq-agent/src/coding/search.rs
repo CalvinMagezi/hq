@@ -12,6 +12,8 @@ use super::{FIND_FILE_LIMIT, MAX_OUTPUT_BYTES, text_result, truncate_output};
 use std::path::Path;
 use std::time::Duration;
 
+const GREP_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Glob-based file finder.
 pub struct FindTool;
 
@@ -207,7 +209,7 @@ impl AgentTool for GrepTool {
 
         cmd.arg(pattern).arg(path);
 
-        let result = tokio::time::timeout(Duration::from_secs(30), cmd.output()).await;
+        let result = tokio::time::timeout(GREP_TIMEOUT, cmd.output()).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -218,15 +220,50 @@ impl AgentTool for GrepTool {
                     Ok(text_result(truncate_output(&stdout, MAX_OUTPUT_BYTES)))
                 }
             }
-            Ok(Err(e)) => {
-                // rg not found — provide a helpful message
-                Ok(text_result(format!(
-                    "Error running ripgrep: {}. Is `rg` installed?",
-                    e
-                )))
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                let fallback = Fallback {
+                    pattern: pattern.to_string(),
+                    path: path.to_string(),
+                    file_type: file_type.map(str::to_string),
+                    context: context.unwrap_or(0) as usize,
+                    case_insensitive,
+                };
+                Ok(text_result(search_without_rg(fallback).await))
             }
+            Ok(Err(e)) => Ok(text_result(format!("Error running ripgrep: {e}"))),
             Err(_) => Ok(text_result("Grep timed out after 30 seconds.")),
         }
+    }
+}
+
+/// What [`search_without_rg`] needs, owned so it can move to a blocking thread.
+struct Fallback {
+    pattern: String,
+    path: String,
+    file_type: Option<String>,
+    context: usize,
+    case_insensitive: bool,
+}
+
+/// The same search in plain Rust when `rg` is not installed, as on a phone.
+async fn search_without_rg(f: Fallback) -> String {
+    let joined = tokio::task::spawn_blocking(move || {
+        super::search_fallback::search(&super::search_fallback::Search {
+            pattern: &f.pattern,
+            path: Path::new(&f.path),
+            file_type: f.file_type.as_deref(),
+            context: f.context,
+            case_insensitive: f.case_insensitive,
+            max_output: MAX_OUTPUT_BYTES,
+            deadline: std::time::Instant::now() + GREP_TIMEOUT,
+        })
+    })
+    .await;
+    match joined {
+        Ok(Ok(out)) if out.is_empty() => "No matches found.".to_string(),
+        Ok(Ok(out)) => truncate_output(&out, MAX_OUTPUT_BYTES),
+        Ok(Err(e)) => format!("Search failed: {e:#}"),
+        Err(e) => format!("Search failed: {e}"),
     }
 }
 
