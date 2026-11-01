@@ -195,6 +195,9 @@ impl SessionBackend for ProviderChain {
         let backends = self.backends.clone();
         let label = self.label.clone();
         let request = request.clone();
+        // The generator below runs on first poll, after the caller's ledger scope has ended, so
+        // carry that scope in; otherwise every chained call is filed as `unknown`.
+        let ctx = hq_llm::current_context();
 
         let stream = async_stream::stream! {
             let total = backends.len();
@@ -212,7 +215,7 @@ impl SessionBackend for ProviderChain {
                     continue;
                 }
 
-                match backend.start(&request).await {
+                match hq_llm::SESSION_CONTEXT.scope(ctx.clone(), backend.start(&request)).await {
                     Ok(stream) => match Self::commit_or_failover(stream, !is_last).await {
                         CommitOutcome::Committed(mut committed) => {
                             // Announce which backend actually committed (may be a

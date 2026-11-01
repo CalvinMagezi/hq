@@ -42,8 +42,8 @@ pub use instrument::{ExternalCall, InstrumentedProvider, Instruments, usage_from
 pub use ollama::OllamaProvider;
 pub use openai_compat::OpenRouterProvider;
 pub use outcome_sink::{
-    OutcomeEvent, SESSION_CONTEXT, SessionContext, SharedSink, TaskOutcomeSink, origin,
-    unscoped_calls, with_default_origin, with_origin,
+    OutcomeEvent, SESSION_CONTEXT, SessionContext, SharedSink, TaskOutcomeSink, current_context,
+    origin, unscoped_calls, with_default_origin, with_origin,
 };
 pub use provider::{ChatRequest, ChatResponse, LlmError, LlmProvider, StreamChunk};
 pub use router::{CostTier, LlmRouter, TaskHint};
