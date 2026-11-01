@@ -194,7 +194,7 @@ fn a_remote_native_host_works_through_the_gate() {
 
     let req = LaunchRequest {
         name: "hs-remote".into(),
-        kind: "pi".into(),
+        kind: "opencode".into(),
         cwd: std::env::temp_dir().to_string_lossy().into(),
         label: "t".into(),
         env: vec![],

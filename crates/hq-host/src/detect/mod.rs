@@ -255,6 +255,8 @@ const BUILTIN: &[&str] = &[
     include_str!("manifests/claude.toml"),
     include_str!("manifests/codex.toml"),
     include_str!("manifests/copilot.toml"),
+    include_str!("manifests/antigravity.toml"),
+    include_str!("manifests/pi.toml"),
 ];
 
 impl Detector {

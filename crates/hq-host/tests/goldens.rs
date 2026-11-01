@@ -4,7 +4,7 @@
 //!
 //! Where an agent could say what it was doing, the label comes from the agent:
 //! Claude Code's own `SessionStart`, `UserPromptSubmit`, `Stop` and
-//! `Notification` hooks. Codex and Copilot have no such hook, so their labels
+//! `Notification` hooks. Codex, Copilot and Antigravity have no such hook, so their labels
 //! come from what was on screen (a dialog waiting for a choice, "esc to
 //! interrupt" mid-turn). The Copilot screens come from a throwaway session in a
 //! scratch folder, with the folder's path replaced.
@@ -64,6 +64,47 @@ fn codex_screens_from_real_sessions_are_detected_correctly() {
 #[test]
 fn copilot_screens_from_real_sessions_are_detected_correctly() {
     assert!(check_agent("copilot") >= 10);
+}
+
+#[test]
+fn antigravity_screens_from_real_sessions_are_detected_correctly() {
+    assert!(check_agent("antigravity") >= 2);
+}
+
+#[test]
+fn pi_screens_from_real_sessions_are_detected_correctly() {
+    assert!(check_agent("pi") >= 2);
+}
+
+/// A pi screen with neither the spinner nor its footer reads unknown, never idle.
+#[test]
+fn a_pi_screen_without_a_known_footer_is_unknown() {
+    let got = Detector::builtin()
+        .detect(
+            "pi",
+            DetectInput {
+                screen: "some other view\n\n nothing pi drew",
+                osc_title: "",
+            },
+        )
+        .unwrap();
+    assert_eq!(got.state, AgentState::Unknown, "rule {:?}", got.rule);
+}
+
+/// The host looks Antigravity up by its binary name, and a screen with neither
+/// footer (a dialog no rule knows yet) reads unknown, never idle.
+#[test]
+fn an_antigravity_screen_without_a_known_footer_is_unknown() {
+    let got = Detector::builtin()
+        .detect(
+            "agy",
+            DetectInput {
+                screen: ">\n Allow this command?\n 1. Yes\n 2. No",
+                osc_title: "",
+            },
+        )
+        .unwrap();
+    assert_eq!(got.state, AgentState::Unknown, "rule {:?}", got.rule);
 }
 
 /// A screen the rules do not recognise is unknown for Copilot, never idle: idle

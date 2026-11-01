@@ -138,7 +138,7 @@ Rule files are TOML (the format and its provenance are in `docs/provenance/herdr
 region and a gate of phrases or patterns, and the matching rule with the highest
 priority decides. They are built into the binary (`crates/hq-host/src/detect/manifests/`);
 there is no fetching from anywhere at run time. Screens captured from real
-Claude Code and Codex sessions, each labelled with the state the agent was really
+Claude Code, Codex, Copilot CLI, Antigravity CLI and pi sessions, each labelled with the state the agent was really
 in, are in `crates/hq-host/tests/fixtures/` and are checked on every test run.
 
 ### Dialogs as data
