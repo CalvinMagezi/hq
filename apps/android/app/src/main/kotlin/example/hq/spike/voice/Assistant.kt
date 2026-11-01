@@ -12,6 +12,7 @@ import android.service.voice.VoiceInteractionSessionService
 import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
 import android.util.Log
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,27 +54,34 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context) {
 /**
  * An assistant must name a recognition service, and some phones then make it the default speech recogniser. So
  * this one really recognises, with the same on-device model, and other apps' dictation keeps working and stays on
- * the phone. Android lets only callers that hold the microphone permission in (RecognitionService checks it).
+ * the phone. Android lets only callers that hold the microphone permission in (RecognitionService checks it); they
+ * get their own words back and nothing else. While the voice sheet holds the microphone they get "busy".
  */
 class OnDeviceRecognitionService : RecognitionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var job: Job? = null
+    @Volatile private var hearing = AtomicBoolean(true)
 
     override fun onStartListening(recognizerIntent: Intent?, listener: Callback?) {
         val caller = listener ?: return
         job?.cancel()
         if (!VoiceModels(this).ready()) return tell(caller) { it.error(NO_MODELS) }
         val ears = VoiceEngines.ears(applicationContext)
+        val stop = AtomicBoolean(false).also { hearing = it }
         job = scope.launch {
             try {
                 ears.prepare()
                 val text = ears.hear(
+                    stop,
+                    wait = false,
                     onRecording = { tell(caller) { it.readyForSpeech(Bundle()) } },
                     onPartial = { partial -> tell(caller) { it.partialResults(results(partial)) } },
                 )
                 tell(caller) { if (text.isBlank()) it.error(SpeechRecognizer.ERROR_NO_MATCH) else it.results(results(text)) }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: Ears.Busy) {
+                tell(caller) { it.error(SpeechRecognizer.ERROR_RECOGNIZER_BUSY) }
             } catch (e: Exception) {
                 Log.w(TAG, "dictation for another app failed", e)
                 tell(caller) { it.error(SpeechRecognizer.ERROR_CLIENT) }
@@ -81,11 +89,12 @@ class OnDeviceRecognitionService : RecognitionService() {
         }
     }
 
-    override fun onStopListening(listener: Callback?) = VoiceEngines.ears(applicationContext).finishNow()
+    /** Ends this service's own request only; the voice sheet's listening is never touched from here. */
+    override fun onStopListening(listener: Callback?) = hearing.set(true)
 
     override fun onCancel(listener: Callback?) {
         job?.cancel()
-        VoiceEngines.ears(applicationContext).stop()
+        hearing.set(true)
     }
 
     override fun onDestroy() {

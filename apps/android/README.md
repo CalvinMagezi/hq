@@ -108,8 +108,9 @@ or to ask a follow-up in the same chat. On a Galaxy A32 the side key opens only 
 Home there.
 
 What stays on the phone: the audio and its recognition (sherpa-onnx streaming Zipformer), the spoken reply
-(sherpa-onnx with the LJ Speech Piper voice), and the screen. The microphone is open only while the sheet is
-showing; audio is read in 100 ms pieces, decoded and dropped, never written. The assistant turns off
+(sherpa-onnx with the LJ Speech Piper voice), and the screen. For HQ the microphone is open only while the
+sheet is showing (another app's dictation, below, opens it for that app); audio is read in 100 ms pieces,
+decoded and dropped, never written. The assistant turns off
 Android's assist data and screenshot, so the screen's text is never copied into the app. What leaves the
 phone: the words of the request, to whatever chat model HQ is configured with, exactly as a typed message.
 

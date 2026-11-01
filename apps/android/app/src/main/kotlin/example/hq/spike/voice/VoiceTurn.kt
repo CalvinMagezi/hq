@@ -41,6 +41,8 @@ class VoiceTurn(
         val listening = CompletableDeferred<Unit>()
         val lastHeard = AtomicLong(System.currentTimeMillis())
         val started = AtomicBoolean(false)
+        // Whoever ends the turn first (the reply itself or a watcher) is the only ending sent.
+        val ended = AtomicBoolean(false)
         val reading = launch {
             val words = SpokenText()
             var thread: String? = null
@@ -52,6 +54,7 @@ class VoiceTurn(
                     started.set(true)
                     emit(TurnOutput.Thread(step.thread))
                 }
+                if (step.ends && !ended.compareAndSet(false, true)) return@transformWhile false
                 step.out.forEach { emit(it) }
                 !step.ends
             }.collect { send(it) }
@@ -62,8 +65,6 @@ class VoiceTurn(
             send(TurnOutput.Failed(NOT_CONNECTED))
             return@channelFlow
         }
-        // The first watcher to fire ends the turn; the reader's own ending wins if it came first.
-        val ended = AtomicBoolean(false)
         suspend fun endWith(reason: String) {
             if (!reading.isActive || !ended.compareAndSet(false, true)) return
             reading.cancel()
@@ -71,6 +72,8 @@ class VoiceTurn(
         }
         val watching = launch {
             launch {
+                // A frame can be queued before the socket finishes opening; only a drop after it opened counts.
+                connected.first { it }
                 connected.first { !it }
                 endWith(CONNECTION_LOST)
             }

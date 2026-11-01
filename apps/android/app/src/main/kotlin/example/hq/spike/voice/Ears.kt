@@ -15,34 +15,50 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.ReentrantLock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 /**
  * Speech to text on the phone. Audio goes from the microphone into the recogniser in 100 ms pieces and is dropped
- * as soon as it is read: nothing is written to storage and nothing is sent anywhere.
+ * as soon as it is read: nothing is written to storage and nothing is sent anywhere. The words go back only to the
+ * caller: the voice sheet, or an app that asked for dictation through [OnDeviceRecognitionService].
  */
 class Ears(app: Context) {
     private val models = VoiceModels(app)
-    private var recognizer: OnlineRecognizer? = null
-    @Volatile private var finishing = false
-    private val lock = Any()
+    @Volatile private var recognizer: OnlineRecognizer? = null
+    private val prepareLock = Any()
+    /** One microphone user at a time: the voice sheet, or another app's dictation. */
+    private val micLock = ReentrantLock()
+
+    /** Another listener holds the microphone. */
+    class Busy : Exception("the microphone is in use by another request")
 
     suspend fun prepare() = withContext(Dispatchers.Default) {
-        synchronized(lock) { if (recognizer == null) recognizer = OnlineRecognizer(null, config(models.stt)) }
+        synchronized(prepareLock) { if (recognizer == null) recognizer = OnlineRecognizer(null, config(models.stt)) }
     }
 
-    /** Listens until a pause ends the request, [finishNow] is called, or the time limit; returns what was said. */
-    // The voice screen asks for the microphone before it calls this.
+    /**
+     * Listens until a pause ends the request, [stop] is set, or the time limit; returns what was said. Each caller
+     * owns its [stop] flag, so ending one request never ends another. With [wait] false a busy microphone throws
+     * [Busy] at once instead of queueing.
+     */
+    // Every caller holds the microphone permission: the voice screen asks for it, and Android checks dictation callers.
     @SuppressLint("MissingPermission")
-    suspend fun hear(onRecording: () -> Unit, onPartial: (String) -> Unit): String = withContext(Dispatchers.IO) {
-        // One listener at a time: a second sheet waits for the first loop to notice it was stopped (one read, 100 ms).
-        synchronized(lock) { hearLocked(onRecording, onPartial) { isActive } }
-    }
+    suspend fun hear(stop: AtomicBoolean, wait: Boolean = true, onRecording: () -> Unit, onPartial: (String) -> Unit): String =
+        withContext(Dispatchers.IO) {
+            if (wait) micLock.lock() else if (!micLock.tryLock()) throw Busy()
+            try {
+                hearLocked(stop, onRecording, onPartial) { isActive }
+            } finally {
+                micLock.unlock()
+            }
+        }
 
     /** [onRecording] fires once the microphone really records; opening it takes up to a second on a budget phone. */
-    private fun hearLocked(onRecording: () -> Unit, onPartial: (String) -> Unit, active: () -> Boolean): String {
+    private fun hearLocked(stop: AtomicBoolean, onRecording: () -> Unit, onPartial: (String) -> Unit, active: () -> Boolean): String {
         val engine = recognizer ?: throw IllegalStateException("prepare() first")
         val minBuffer = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val mic = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, BUFFER_BYTES))
@@ -52,7 +68,6 @@ class Ears(app: Context) {
             mic.release()
             throw e
         }
-        finishing = false
         return try {
             if (mic.state != AudioRecord.STATE_INITIALIZED) throw IOException("microphone did not open")
             mic.startRecording()
@@ -62,11 +77,12 @@ class Ears(app: Context) {
             onRecording()
             val started = SystemClock.elapsedRealtime()
             var shown = ""
-            while (active() && !finishing && SystemClock.elapsedRealtime() - started < LONGEST_REQUEST_MS) {
+            while (active() && !stop.get() && SystemClock.elapsedRealtime() - started < LONGEST_REQUEST_MS) {
                 stream.acceptWaveform(FloatArray(n) { chunk[it] / PCM_SCALE }, RATE)
                 while (engine.isReady(stream)) engine.decode(stream)
                 val text = engine.getResult(stream).text
-                if (text != shown) {                    shown = text
+                if (text != shown) {
+                    shown = text
                     onPartial(readable(text))
                 }
                 if (engine.isEndpoint(stream)) break
@@ -83,12 +99,6 @@ class Ears(app: Context) {
             stream.release()
         }
     }
-
-    fun finishNow() {
-        finishing = true
-    }
-
-    fun stop() = finishNow()
 
     private companion object {
         const val RATE = 16_000

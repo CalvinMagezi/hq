@@ -3,6 +3,7 @@ package example.hq.spike.voice
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import example.hq.spike.data.ChatConnection
@@ -49,6 +50,8 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     private var threadId: String? = null
     private var job: Job? = null
+    /** This sheet's own stop switch for the request it is hearing; dictation for other apps has its own. */
+    @Volatile private var hearing = AtomicBoolean(true)
 
     init {
         // Phase changes with a monotonic clock, for latency runs from adb. Never the words: logcat is not private enough.
@@ -59,17 +62,20 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     fun micPressed() = when (_state.value.phase) {
         VoicePhase.NeedsModels -> download()
-        VoicePhase.Listening -> ears.finishNow()
+        VoicePhase.Listening -> hearing.set(true)
         VoicePhase.Preparing, VoicePhase.Downloading -> Unit
         VoicePhase.Thinking, VoicePhase.Speaking -> { interrupt(); listen() }
         VoicePhase.Idle -> listen()
     }
 
-    fun listen() {
+    fun listen() = run { hearThenAsk() }
+
+    /** Every piece of work the sheet starts goes through here: one at a time, and a failure is shown, never a crash. */
+    private fun run(work: suspend () -> Unit) {
         job?.cancel()
         job = scope.launch {
             try {
-                hearThenAsk()
+                work()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -90,15 +96,12 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
     /** The engines stay loaded for the next request (see [VoiceEngines]); only this sheet's work stops. */
     fun close() {
         job?.cancel()
-        ears.stop()
+        hearing.set(true)
         mouth.stop()
     }
 
     /** Starts the models' download only after the owner tapped "Get" under the notice of what is fetched and what is not sent. */
-    private fun download() {
-        job?.cancel()
-        job = scope.launch { downloadThenListen(VoiceEngines.download(app)) }
-    }
+    private fun download() = run { downloadThenListen(VoiceEngines.download(app)) }
 
     /** Follows the process-wide download; leaving the sheet stops this wait, not the download. */
     private suspend fun downloadThenListen(running: Deferred<Unit>) {
@@ -130,7 +133,9 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
         val voiceReady = scope.async { mouth.prepare() }
         ears.prepare()
         _state.update { it.copy(heard = "", problem = null) }
+        val stop = AtomicBoolean(false).also { hearing = it }
         val words = ears.hear(
+            stop,
             onRecording = { _state.update { it.copy(phase = VoicePhase.Listening) } },
             onPartial = { partial -> _state.update { it.copy(heard = partial) } },
         ).trim()
@@ -160,7 +165,7 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     private fun interrupt() {
         job?.cancel()
-        ears.stop()
+        hearing.set(true)
         mouth.stop()
         if (_state.value.phase == VoicePhase.Thinking || _state.value.phase == VoicePhase.Speaking) threadId?.let(connection::stop)
     }

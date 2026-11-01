@@ -1,6 +1,8 @@
 package example.hq.spike.voice
 
 import example.hq.spike.data.ChatEvent
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.toList
@@ -62,11 +64,25 @@ class VoiceTurnTest {
     fun aDroppedSocketEndsTheTurn() = runBlocking {
         val events = bus()
         val connected = MutableStateFlow(true)
-        val out = turn(events, mutableListOf(), connected = connected) { id ->
+        val dropping = launch {
+            delay(DROP_AFTER_MS)
             connected.value = false
+        }
+        val out = turn(events, mutableListOf(), connected = connected) { id ->
             listOf(ChatEvent.TurnStart("t3", id, null), ChatEvent.Text("t3", "Half an"))
         }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
+        dropping.join()
         assertEquals(TurnOutput.Failed(VoiceTurn.CONNECTION_LOST), out.last())
+    }
+
+    @Test
+    fun aSocketStillOpeningIsNotADrop() = runBlocking {
+        val events = bus()
+        val connected = MutableStateFlow(false)
+        val out = turn(events, mutableListOf(), connected = connected) { id ->
+            listOf(ChatEvent.TurnStart("t5", id, null), ChatEvent.Text("t5", "Fine. "), ChatEvent.TurnEnd("t5", "m5", false))
+        }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
+        assertEquals(listOf(TurnOutput.Thread("t5"), TurnOutput.Say("Fine."), TurnOutput.Done), out)
     }
 
     @Test
@@ -142,5 +158,6 @@ class VoiceTurnTest {
 
     private companion object {
         const val TIMEOUT_MS = 5_000L
+        const val DROP_AFTER_MS = 100L
     }
 }
