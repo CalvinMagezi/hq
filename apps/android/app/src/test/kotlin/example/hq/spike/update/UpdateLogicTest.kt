@@ -78,4 +78,12 @@ class UpdateLogicTest {
         states.forEach { assertTrue(UpdateLogic.words(it).isNotBlank()) }
         assertNotNull(UpdateLogic.words(UpdateState.Available(m)).takeIf { "0.9.1-main.7" in it })
     }
+
+    @Test fun aStoppedOrBlockedInstallSaysWhatToDo() {
+        assertEquals(UpdateState.UpToDate, UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_SUCCESS, null))
+        assertEquals(UpdateState.Failed(UpdateLogic.STOPPED), UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_FAILURE_ABORTED, null))
+        assertEquals(UpdateState.Failed(UpdateLogic.BLOCKED), UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_FAILURE_BLOCKED, "x"))
+        assertEquals(UpdateState.Failed("INSTALL_FAILED_X"), UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_FAILURE, "INSTALL_FAILED_X"))
+        assertEquals(UpdateState.Failed(UpdateLogic.NOT_INSTALLED), UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_FAILURE, " "))
+    }
 }
