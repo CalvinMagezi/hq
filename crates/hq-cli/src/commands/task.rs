@@ -289,9 +289,14 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
         }
         Ok(s)
     };
-    let peer = match config.task_peer_server().map_err(anyhow::Error::msg)? {
+    let setups = hq_db::bridge_setup::setups_of(config);
+    let remotes = config.remote_mcp_with(hq_db::bridge_setup::hub_remotes(&setups));
+    let peer = match config.task_peer_in(&remotes).map_err(anyhow::Error::msg)? {
         Some(peer) => Some(peer.clone()),
-        None => bridge_task_peer(config),
+        None => task_peer_from_setup(&setups).and_then(|hub| {
+            // A configured entry of the same name wins over the one pairing made.
+            remotes.iter().find(|s| s.name == hub.name).cloned()
+        }),
     };
     let (tool, args) = call_for(&cmd, &mut read_stdin)?;
     let value = match &peer {
@@ -304,28 +309,11 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
 
 /// With no `task_peer` configured, a machine paired through the bridge with exactly one hub sends
 /// its tasks there, through its forward to the hub and with the key the hub minted for it.
-fn bridge_task_peer(config: &HqConfig) -> Option<hq_core::config::RemoteMcpServer> {
-    let path = config.db_path();
-    let db = path
-        .exists()
-        .then(|| hq_db::Database::open(&path).ok())
-        .flatten()?;
-    task_peer_from_setup(&hq_db::bridge_setup::list(&db).ok()?)
-}
-
 fn task_peer_from_setup(
     setups: &[hq_db::bridge_setup::Setup],
 ) -> Option<hq_core::config::RemoteMcpServer> {
-    let hubs: Vec<_> = setups.iter().filter(|s| s.is_hub()).collect();
-    let [hub] = hubs.as_slice() else {
-        return None;
-    };
-    Some(hq_core::config::RemoteMcpServer {
-        name: hub.peer_name.clone(),
-        url: format!("http://127.0.0.1:{}/mcp", hub.local_port),
-        api_key: Some(hub.mcp_key.clone()?),
-        live_user_turn_only: true,
-    })
+    let mut hubs = hq_db::bridge_setup::hub_remotes(setups);
+    (hubs.len() == 1).then(|| hubs.remove(0))
 }
 
 /// A peer that accepts the connection and never answers would otherwise hang the terminal.

@@ -583,3 +583,41 @@ fn the_agent_sandbox_profile_and_credentials_setting_load_from_yaml() {
         assert_eq!(cfg.agent_host.sandbox.hide_credentials, hide, "{text}");
     }
 }
+
+fn remote(name: &str, url: &str) -> crate::config::RemoteMcpServer {
+    crate::config::RemoteMcpServer {
+        name: name.into(),
+        url: url.into(),
+        api_key: Some("k".into()),
+        live_user_turn_only: true,
+    }
+}
+
+#[test]
+fn paired_hubs_join_the_remote_servers_and_a_configured_name_wins() {
+    let mut cfg = crate::HqConfig::default();
+    cfg.remote_mcp = vec![remote("phone", "https://example.com/mcp")];
+    let all = cfg.remote_mcp_with(vec![
+        remote("phone", "http://127.0.0.1:47400/mcp"),
+        remote("tablet", "http://127.0.0.1:47401/mcp"),
+    ]);
+    let seen: Vec<_> = all.iter().map(|s| (&*s.name, &*s.url)).collect();
+    assert_eq!(
+        seen,
+        [
+            ("phone", "https://example.com/mcp"),
+            ("tablet", "http://127.0.0.1:47401/mcp")
+        ]
+    );
+}
+
+#[test]
+fn task_and_search_peers_resolve_among_the_merged_remotes() {
+    let mut cfg = crate::HqConfig::default();
+    cfg.task_peer = Some("tablet".into());
+    cfg.web_search_peer = Some("tablet".into());
+    assert!(cfg.task_peer_server().is_err());
+    let all = cfg.remote_mcp_with(vec![remote("tablet", "http://127.0.0.1:47401/mcp")]);
+    assert_eq!(cfg.task_peer_in(&all).unwrap().unwrap().name, "tablet");
+    assert_eq!(cfg.web_search_peer_in(&all).unwrap().name, "tablet");
+}
