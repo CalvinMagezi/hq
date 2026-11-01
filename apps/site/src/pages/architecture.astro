@@ -180,7 +180,7 @@ const updateSteps = [
           <p>
             Four crates connect devices. <code>hq-bridge</code> pairs machines with a one-time QR code and
             reconnects them by key. <code>hq-edge</code> is a blind public forwarder that routes by TLS server
-            name to a registered device. <code>hq-net</code> sets up a private WireGuard network, and
+            name to a registered device. <code>hq-net</code> sets up an optional private WireGuard network, and
             <code>hq-tunnel</code> is a userspace WireGuard peer for a phone. <code>hq-cli</code> ties them into
             the binary, and <code>hq-desktop</code> holds the macOS desktop app's logic with no GUI dependency.
           </p>
@@ -667,14 +667,24 @@ const updateSteps = [
           <p class="eyebrow">12</p>
           <h2 id="topologies-h" class="h2-sm">Deployment topologies</h2>
           <p>
+            <strong>Phone as home base.</strong> The phone runs HQ and holds the vault. A laptop, a desktop or a
+            VPS joins it by QR code and six digits (<code>hq bridge pair</code>), then reaches it directly over
+            an encrypted peer-to-peer link: iroh dials by key, punches through routers, and uses a relay only as
+            a fallback. No Tailscale, WireGuard or VPN is needed between your own machines. The phone starts
+            coding agents on the paired machines and answers their questions, and the laptop opens the phone's
+            web app and HQ tools. Claude Code, Claude Desktop and Claude Code Remote Control reach HQ through the
+            laptop while it is on. See <a href={links.pairing}>docs/PAIRING.md</a>.
+          </p>
+          <p>
             <strong>Laptop only.</strong> Run <code>hq start all</code>. The web server binds to loopback. Set
             <code>web_auth_token</code> on a shared machine. This is the default and needs no network setup.
           </p>
           <p>
-            <strong>VPS plus Tailscale.</strong> Provision a Debian or Ubuntu box with
+            <strong>A VPS on its own.</strong> Provision a Debian or Ubuntu box with
             <code>deploy/setup-vps.sh</code>, install the signed updater with <code>deploy/install.sh</code>,
-            and keep HQ on loopback. Caddy bridges to <code>tailscale serve</code>, which terminates HTTPS on
-            your tailnet only, so the UI never touches the public internet. List every origin you serve the UI
+            and keep HQ on loopback. Pair it with your phone, or put Caddy in front and reach it through a
+            private network you already run (Tailscale is one optional way), so the UI never touches the public
+            internet. List every origin you serve the UI
             from in <code>web_allowed_origins</code>. HQ on the VPS can then drive the host on a laptop over the
             gated ssh key.
           </p>
@@ -691,9 +701,9 @@ const updateSteps = [
             <a href={`${REPO_BLOB}/docs/HQ_LITE.md`}>docs/HQ_LITE.md</a>.
           </p>
           <p>
-            <strong>An Android phone (developer preview).</strong> The <code>mobile</code> profile is Full HQ for
-            a machine with no shell sandbox, no <code>git</code> and no self-updater, plus a data saver. The APK
-            is one you build yourself from <code>apps/android</code>. It is not yet verified that a sleeping,
+            <strong>An Android phone.</strong> The <code>mobile</code> profile is Full HQ for
+            a machine with no shell sandbox, no <code>git</code> and no self-updater, plus a data saver. Install
+            the signed app from the download link; the source is in <code>apps/android</code>. It is not yet verified that a sleeping,
             unplugged phone answers in time. See <a href={`${REPO_BLOB}/docs/HQ_MOBILE.md`}>docs/HQ_MOBILE.md</a>
             and <a href={`${REPO_BLOB}/apps/android/README.md`}>apps/android/README.md</a>.
           </p>
@@ -705,34 +715,31 @@ const updateSteps = [
             <a href={`${REPO_BLOB}/docs/EDGE.md`}>docs/EDGE.md</a>.
           </p>
           <p>
-            <strong>A private network, with <code>hq net</code>.</strong> A WireGuard hub on a Linux server and
+            <strong>An optional private network, with <code>hq net</code>.</strong> Not needed to join your own
+            machines to the phone. A WireGuard hub on a Linux server and
             your own devices as spokes, so the web UI, <code>/mcp</code> and the host gate are reachable only
             from devices you admitted. Release builds do not include the root applier yet, so that step builds
             it from source. See <a href={`${REPO_BLOB}/docs/PRIVATE_NETWORK.md`}>docs/PRIVATE_NETWORK.md</a>.
           </p>
           <p>
-            Two shapes publish anything. A plain MCP endpoint goes through a proxy that exposes
-            <code>/mcp</code> and <code>/health</code> and nothing else, with an API key set. The claude.ai
-            connector publishes <code>/mcp</code>, <code>/oauth/token</code>, <code>/oauth/revoke</code> and the
-            <code>/.well-known/oauth-*</code> metadata documents, and the consent page stays private
-            (<a href={`${REPO_BLOB}/docs/CLAUDE_CONNECTOR.md`}>docs/CLAUDE_CONNECTOR.md</a>,
-            <a href={`${REPO_BLOB}/deploy/Caddyfile.connector`}>deploy/Caddyfile.connector</a>). <code>/ws</code>
+            Only one shape publishes anything: a plain MCP endpoint goes through a proxy that exposes
+            <code>/mcp</code> and <code>/health</code> and nothing else, with an API key set. <code>/ws</code>
             and <code>/api</code> must never be public. A host runs one deploy path only: the pull updater, or a
             manual build, not both. Steps are on the <a href="/install/">install page</a> and in
             <a href={links.deployReadme}>deploy/README.md</a>.
           </p>
         </div>
         <div class="doc-viz">
-          <div class="viz topo-viz" role="img" aria-label="A request travels from a phone over the tailnet to Caddy on loopback and then to HQ. Only the MCP and connector paths may be public.">
-            <span class="label">VPS plus Tailscale</span>
+          <div class="viz topo-viz" role="img" aria-label="A laptop or server pairs with the phone, then reaches HQ over an encrypted peer-to-peer link. Only a keyed MCP endpoint may be public.">
+            <span class="label">Phone as home base</span>
             <span class="tp-track"><span class="tpk"></span></span>
             <span class="topo">
-              <span class="pill glass-light">Phone</span><span class="arrow" aria-hidden="true">&#8250;</span>
-              <span class="pill glass-light">Tailnet HTTPS</span><span class="arrow" aria-hidden="true">&#8250;</span>
-              <span class="pill glass-light">Caddy 127.0.0.1</span><span class="arrow" aria-hidden="true">&#8250;</span>
-              <span class="pill pill-green">HQ on loopback</span>
+              <span class="pill glass-light">Laptop or VPS</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="pill glass-light">Paired link</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="pill glass-light">QR + six digits</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="pill pill-green">Phone (HQ)</span>
             </span>
-            <span class="public glass-light"><strong>Public:</strong> only <code>/mcp</code> and <code>/health</code> with a key, or the connector's OAuth paths.</span>
+            <span class="public glass-light"><strong>Public:</strong> only <code>/mcp</code> and <code>/health</code> with a key, and nothing else.</span>
           </div>
           <details class="more"><summary>Full diagram and text description</summary><Diagram d={topologies} /></details>
         </div>

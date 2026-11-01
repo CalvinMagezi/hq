@@ -102,8 +102,8 @@ const dry = 'hq update --apply --dry-run';
         </article>
         <article class="gcard reveal reveal-2">
           <div class="mini" aria-hidden="true"><span class="bubble"><span class="pill glass-light">Phone</span><span class="pill pill-green">HQ</span></span><span class="tpacket"></span></div>
-          <h3>Private network</h3>
-          <p class="body">HQ stays on loopback behind <code>tailscale serve</code> or a reverse proxy. List the served origins in <code>web_allowed_origins</code>.</p>
+          <h3>Paired or private network</h3>
+          <p class="body">Machines paired with the phone reach each other over an encrypted peer-to-peer link, and only paired devices are admitted. Otherwise HQ stays on loopback behind a reverse proxy, or <code>tailscale serve</code> if you already run a tailnet. List the served origins in <code>web_allowed_origins</code>.</p>
         </article>
         <article class="gcard reveal reveal-3">
           <div class="mini" aria-hidden="true">
@@ -113,17 +113,7 @@ const dry = 'hq update --apply --dry-run';
             <span class="lane ln3"><span class="no glass-light">/ws and /api</span></span>
           </div>
           <h3>Public /mcp</h3>
-          <p class="body">Only through a proxy that exposes <code>/mcp</code> and <code>/health</code> and nothing else, with <code>AGENTHQ_API_KEY</code> set. The claude.ai connector publishes its own set of paths instead (next card). <code>/ws</code> and <code>/api</code> must never be public.</p>
-        </article>
-        <article class="gcard reveal">
-          <div class="mini" aria-hidden="true">
-            <span class="gate"></span>
-            <span class="lane ln1"><span class="ok">/mcp + OAuth</span></span>
-            <span class="lane ln2"><span class="ok ok-2">/oauth/token</span></span>
-            <span class="lane ln3"><span class="no glass-light">consent page</span></span>
-          </div>
-          <h3>claude.ai connector</h3>
-          <p class="body">Off by default. The public paths are <code>/mcp</code>, <code>/oauth/token</code>, <code>/oauth/revoke</code> and the <code>/.well-known/oauth-*</code> documents; the consent page stays private. You approve each connection as Read only, Tasks or Full. In Full, risky calls (mail, config, terminal panes, commits and similar) wait for your approval, and every call is logged. See <a href={`${REPO_BLOB}/docs/CLAUDE_CONNECTOR.md`}>docs/CLAUDE_CONNECTOR.md</a> and <a href={`${REPO_BLOB}/docs/security/CONNECTOR_TLS.md`}>the connector TLS threat model</a>.</p>
+          <p class="body">Only through a proxy that exposes <code>/mcp</code> and <code>/health</code> and nothing else, with <code>AGENTHQ_API_KEY</code> set. <code>/ws</code> and <code>/api</code> must never be public.</p>
         </article>
         <article class="gcard reveal reveal-2">
           <div class="mini" aria-hidden="true"><span class="bubble"><span class="pill glass-light">Edge</span><span class="pill pill-green">Device TLS</span></span><span class="tpacket"></span></div>
@@ -132,7 +122,7 @@ const dry = 'hq update --apply --dry-run';
         </article>
         <article class="gcard reveal reveal-3">
           <div class="mini" aria-hidden="true"><span class="loop"><code>mobile</code></span><span class="orbit"><i></i></span></div>
-          <h3>Phone (developer preview)</h3>
+          <h3>Phone</h3>
           <p class="body">The Android build runs the <code>mobile</code> profile: no agent shell, since a phone has no sandbox backend, no <code>git</code> and no self-updater. You build the APK yourself. It pairs with another machine by QR code and six typed digits. See <a href={`${REPO_BLOB}/docs/security/PAIRING.md`}>the pairing threat model</a> and, for the macOS app, <a href={`${REPO_BLOB}/docs/security/DESKTOP.md`}>the desktop threat model</a>.</p>
         </article>
       </div>
