@@ -20,6 +20,8 @@ rand = { workspace = true }
 tracing = { workspace = true }
 data-encoding = "2"
 qrcodegen = "1.8"
+chrono = { workspace = true }
+dirs = { workspace = true }
 subtle = "2"
 url = { workspace = true }
 

@@ -3336,7 +3336,9 @@ name = "hq-bridge"
 version = "0.9.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "data-encoding",
+ "dirs",
  "hq-core",
  "hq-db",
  "hq-gate",
