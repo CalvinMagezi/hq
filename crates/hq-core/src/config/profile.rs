@@ -93,12 +93,14 @@ impl Default for MobileConfig {
 }
 
 impl HqConfig {
-    /// Whether this instance sends note text to an embedding provider. Lite never does, and a
-    /// mobile instance does not while its data saver is on.
+    /// Whether this instance embeds notes. Lite never does. A mobile instance with its data
+    /// saver on does only with the local embedder, which keeps note text on the device and uses
+    /// no data after its one model download.
     pub fn embeds_notes(&self) -> bool {
+        let local = self.daemon.embedding_provider == super::EmbeddingProvider::Local;
         match self.profile {
             Profile::Lite => false,
-            Profile::Mobile => !self.mobile.data_saver,
+            Profile::Mobile => !self.mobile.data_saver || local,
             Profile::Full => true,
         }
     }
@@ -857,6 +859,16 @@ mod tests {
         assert!(!with(Profile::Lite, true).embeds_notes());
         assert!(!with(Profile::Mobile, true).embeds_notes());
         assert!(with(Profile::Mobile, false).embeds_notes());
+
+        let mut saving_local = with(Profile::Mobile, true);
+        saving_local.daemon.embedding_provider = super::super::EmbeddingProvider::Local;
+        assert!(
+            saving_local.embeds_notes(),
+            "local embeddings send nothing anywhere"
+        );
+        let mut lite_local = with(Profile::Lite, false);
+        lite_local.daemon.embedding_provider = super::super::EmbeddingProvider::Local;
+        assert!(!lite_local.embeds_notes());
     }
 
     #[test]

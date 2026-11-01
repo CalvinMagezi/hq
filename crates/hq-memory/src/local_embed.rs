@@ -40,8 +40,15 @@ const MODEL_FILES: [(&str, &str); 3] = [
 /// default of 512 would describe a long note by its opening only.
 const MAX_TOKENS: usize = 2048;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// The largest model file accepted; the real ones are under 30 MB.
+const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
+/// After a failed fetch or load, calls fail at once for this long instead of each waiting on
+/// the network again; searches fall back to keywords meanwhile.
+const RETRY_AFTER: Duration = Duration::from_secs(600);
 
 static MODEL: OnceCell<Arc<StaticModel>> = OnceCell::const_new();
+static LAST_FAILURE: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
 
 /// Where the model files live: `~/.hq/models/potion-base-8M`.
 pub fn local_model_dir() -> PathBuf {
@@ -53,10 +60,7 @@ pub fn local_model_dir() -> PathBuf {
 /// Embed `text` on this machine, fetching and checking the model files on first use. A failed
 /// fetch or load is returned as an error and tried again on the next call.
 pub async fn generate_embedding_local(text: &str) -> Result<Vec<f32>> {
-    let model = MODEL
-        .get_or_try_init(|| load(local_model_dir()))
-        .await?
-        .clone();
+    let model = model().await?;
     let text = text.to_string();
     let started = Instant::now();
     let embedding = tokio::task::spawn_blocking(move || {
@@ -71,6 +75,24 @@ pub async fn generate_embedding_local(text: &str) -> Result<Vec<f32>> {
         bail!("the local model returned an empty embedding");
     }
     Ok(embedding)
+}
+
+async fn model() -> Result<Arc<StaticModel>> {
+    if let Some(model) = MODEL.get() {
+        return Ok(model.clone());
+    }
+    let failed_at = *LAST_FAILURE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(at) = failed_at.filter(|at| at.elapsed() < RETRY_AFTER) {
+        bail!(
+            "the local embedding model is unavailable; retrying in {}s",
+            (RETRY_AFTER - at.elapsed()).as_secs()
+        );
+    }
+    let loaded = MODEL.get_or_try_init(|| load(local_model_dir())).await;
+    if loaded.is_err() {
+        *LAST_FAILURE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    }
+    Ok(loaded?.clone())
 }
 
 /// Files the ledger row so the spend report shows local embeddings beside remote ones.
@@ -116,13 +138,14 @@ async fn ensure_model_files(dir: &Path) -> Result<()> {
         let url = format!("{DOWNLOAD_BASE}/{REPO}/resolve/{REVISION}/{name}");
         tracing::info!(%url, "downloading local embedding model file");
         let bytes = download(&url).await?;
-        install(&bytes, &target, sha256).await?;
+        install(Arc::new(bytes), &target, sha256).await?;
     }
     Ok(())
 }
 
 async fn download(url: &str) -> Result<Vec<u8>> {
     let client = reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
         .timeout(DOWNLOAD_TIMEOUT)
         .build()
         .context("building the download client")?;
@@ -134,31 +157,46 @@ async fn download(url: &str) -> Result<Vec<u8>> {
     if !response.status().is_success() {
         bail!("fetching {url}: HTTP {}", response.status());
     }
-    Ok(response.bytes().await?.to_vec())
+    if response
+        .content_length()
+        .is_some_and(|n| n > MAX_FILE_BYTES)
+    {
+        bail!("fetching {url}: larger than {MAX_FILE_BYTES} bytes");
+    }
+    let bytes = response.bytes().await?;
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        bail!("fetching {url}: larger than {MAX_FILE_BYTES} bytes");
+    }
+    Ok(bytes.to_vec())
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
+/// SHA-256 of a model file, off the async threads: hashing 30 MB takes a while on a phone.
+async fn sha256_hex(bytes: Arc<Vec<u8>>) -> Result<String> {
+    Ok(tokio::task::spawn_blocking(move || hex::encode(Sha256::digest(bytes.as_slice()))).await?)
 }
 
 async fn file_matches(path: &Path, sha256: &str) -> bool {
     match tokio::fs::read(path).await {
-        Ok(bytes) => sha256_hex(&bytes) == sha256,
+        Ok(bytes) => sha256_hex(Arc::new(bytes))
+            .await
+            .is_ok_and(|actual| actual == sha256),
         Err(_) => false,
     }
 }
 
-/// Write `bytes` to `target` only if they hash to `sha256`.
-async fn install(bytes: &[u8], target: &Path, sha256: &str) -> Result<()> {
-    let actual = sha256_hex(bytes);
+/// Write `bytes` to `target` only if they hash to `sha256`. The temporary name is unique to this
+/// process, so two processes fetching at once never rename each other's half-written file; the
+/// rename is atomic, so the target is always one complete, checked file.
+async fn install(bytes: Arc<Vec<u8>>, target: &Path, sha256: &str) -> Result<()> {
+    let actual = sha256_hex(bytes.clone()).await?;
     if actual != sha256 {
         bail!(
             "{} does not match its pinned hash (got {actual}, want {sha256})",
             target.display()
         );
     }
-    let partial = target.with_extension("part");
-    tokio::fs::write(&partial, bytes)
+    let partial = target.with_extension(format!("part-{}", std::process::id()));
+    tokio::fs::write(&partial, bytes.as_slice())
         .await
         .with_context(|| format!("writing {}", partial.display()))?;
     tokio::fs::rename(&partial, target)
@@ -175,20 +213,19 @@ mod tests {
     async fn a_file_whose_hash_does_not_match_is_never_installed() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("model.safetensors");
-        let err = install(b"truncated", &target, MODEL_FILES[1].1)
+        let err = install(Arc::new(b"truncated".to_vec()), &target, MODEL_FILES[1].1)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("pinned hash"), "{err}");
-        assert!(!target.exists());
-        assert!(!target.with_extension("part").exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[tokio::test]
     async fn a_matching_file_is_installed_and_then_recognised() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("x.json");
-        let body = b"{}";
-        let sha = sha256_hex(body);
+        let body = Arc::new(b"{}".to_vec());
+        let sha = sha256_hex(body.clone()).await.unwrap();
         install(body, &target, &sha).await.unwrap();
         assert!(file_matches(&target, &sha).await);
         assert!(!file_matches(&target, MODEL_FILES[0].1).await);

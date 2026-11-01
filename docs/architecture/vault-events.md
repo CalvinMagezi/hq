@@ -119,7 +119,8 @@ daemon:
   used without the network, which is also how an offline machine is set up: copy them in.
   Local never falls back to a remote provider. It also embeds `vault_search` queries, so
   `hybrid` and `semantic` searches match notes by meaning; with `remote`, queries are not
-  embedded and those modes are keyword searches.
+  embedded and those modes are keyword searches. On a phone, `local` embeds even with
+  `mobile.data_saver` on, since it uses no data after the model download.
 
 Each vector is stored with its model's label (`model2vec/potion-base-8M@<revision>` for local),
 and search compares a query only with vectors from the same model. Switching providers marks

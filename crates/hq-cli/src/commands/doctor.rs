@@ -422,7 +422,7 @@ fn report_search_index(config: &HqConfig) {
     for Line(label, text) in lines {
         println!("  {label}  {text}");
     }
-    // Lite and a mobile instance with its data saver on run no embedding worker, so there is
+    // Lite, and a mobile instance with its data saver on and remote embeddings, run no worker, so there is
     // nothing to report and "no report yet" would never clear.
     if config.embeds_notes() {
         for Line(label, text) in embedding_worker_lines(worker.as_ref(), chrono::Utc::now()) {

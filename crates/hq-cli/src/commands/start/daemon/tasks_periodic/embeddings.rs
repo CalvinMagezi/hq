@@ -55,8 +55,8 @@ pub async fn run_embeddings(vault_path: &Path, db: &Database, config: &HqConfig)
 
     run_fts_sync(vault_path, db).await?;
 
-    // Lite, and a mobile instance with its data saver on, keep the keyword index current and
-    // send no note text anywhere for vectors.
+    // Lite, and a mobile instance with its data saver on and remote embeddings, keep only the
+    // keyword index current (`HqConfig::embeds_notes`).
     if !config.embeds_notes() {
         return Ok(());
     }
