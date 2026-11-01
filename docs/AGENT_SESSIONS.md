@@ -210,6 +210,43 @@ next call's `after`. The Spark scope reads sessions, logs and events and nothing
 cannot answer, send, start or stop a session. Answering stays with the owner's phone, the web
 app, or a full key.
 
+### Reacting without polling, per client
+
+Each kind of agent hears about other sessions in the way it can take it:
+
+| Client | How it hears | Limits |
+|---|---|---|
+| An agent HQ runs (Claude Code, Copilot, agy, pi, Codex and the rest) | `harness_session_subscribe` (or `observe` at spawn): a message typed in at its next idle | Needs a task; at most 10 sessions; chains stop after three rounds |
+| Claude Code in a terminal, outside HQ | `hq sessions channel` as a channel: an idle session wakes on each event | Claude Code's channels are a research preview, terminal only |
+| Claude Code's Monitor tool, Codex, scripts, any background shell | `hq sessions watch`: one JSON line per event | A Monitor watch lasts at most 30 minutes: use `--until` and start it again |
+| Claude Desktop and other MCP chats | Loop on `harness_session_events` with `wait_secs` | One model turn per wait; no way to push into the chat |
+
+`hq sessions watch` follows this machine's HQ, or a paired one with `--remote <name>` (the
+`remote_mcp` name, such as the hub a bridge pairing added). It starts from now (or `--after
+<event id>`), prints only `--kinds` when given, and exits after the first event in `--until`:
+
+```
+hq sessions watch --remote server --session hs-pi-1a2b3c --until finished --until blocked
+hq sessions watch --task FR-053 --kinds blocked --kinds exited
+```
+
+`hq sessions channel` takes the same flags and is a stdio MCP server that declares
+`claude/channel`. Each event reaches Claude as `<channel source="hq-sessions"
+session_id="..." kind="...">` with only the session id, the kind and the event id, never text
+an agent wrote; Claude reads the rest with `harness_session_events` or `harness_session_logs`.
+While channels are in preview, Claude Code loads a server it did not ship only with the
+development flag, and only from an MCP config file (a project `.mcp.json` or user settings),
+not from `--mcp-config`:
+
+```json
+{"mcpServers": {"hq-sessions": {"type": "stdio", "command": "hq",
+  "args": ["sessions", "channel", "--remote", "server", "--task", "FR-053"]}}}
+```
+
+```
+claude --dangerously-load-development-channels server:hq-sessions
+```
+
 ## Command policies
 
 A coding agent that asks before every command waits on whoever is there to answer, and one
