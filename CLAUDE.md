@@ -68,7 +68,8 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   (`crates/hq-tools/src/harness_session/category.rs`): every session has a
   `purpose` (`code`, `monitor`, `research`, `review`, `general`), a
   general-purpose agent refuses `code`, a monitor or reviewer never moves its
-  task, and one given sessions to `observe` hears their finished turns, blocks
+  task, and any session given sessions to `observe` (at spawn, or at run time with
+  `harness_session_subscribe`) hears their finished turns, blocks
   and exits through the task-thread messages the supervisor delivers. They get
   no HQ token. The **Agentic Stack** (`stack:` config,
   `crates/hq-tools/src/harness_session/stack.rs`, daemon task `stack-dispatch`,

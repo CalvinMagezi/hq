@@ -188,12 +188,51 @@ pub fn report_to_parent(
         _ => format!("Delegated session {} {event}.", child.id),
     };
     let from = child.id.clone();
-    let message = db.with_conn(move |c| t::add_message(c, &task, &from, &parent, &body, None))?;
+    let message = db.with_conn(move |c| {
+        let depth = registry::relay_depth(c, &from)? + 1;
+        t::add_relay_message(c, &task, &from, &parent, &body, depth)
+    })?;
     Ok(Some(message.id))
 }
 
-/// Tells every running session that observes `observed` (a monitor or reviewer
-/// given it to watch) that it finished a turn, blocked or exited, with the tail
+/// How many relays deep a chain of sessions waking each other may go: A finishing wakes B,
+/// B finishing wakes C, and so on. Past this, observers are not told and the owner is.
+pub const MAX_RELAY_DEPTH: i64 = 3;
+
+/// Whether `observed`'s turn is deep enough in a relay chain that its observers stay quiet.
+/// The owner hears once per chain, when it first reaches the cap.
+fn relay_capped(db: &Database, observed: &HarnessSessionRow, kind: &str) -> Result<bool> {
+    let id = observed.id.clone();
+    let depth = db.with_conn(move |c| registry::relay_depth(c, &id))?;
+    if depth < MAX_RELAY_DEPTH {
+        return Ok(false);
+    }
+    if depth == MAX_RELAY_DEPTH {
+        let (id, detail) = (
+            observed.id.clone(),
+            json!({ "kind": kind, "depth": depth }).to_string(),
+        );
+        db.with_conn(move |c| {
+            registry::record_event(c, &id, "relay_capped", "hq", Some(&detail)).map(|_| ())
+        })?;
+        let item = hq_core::types::ValueItem::new(
+            "harness-sessions",
+            hq_core::types::ValueKind::Fyi,
+            "Sessions kept waking each other",
+            format!(
+                "Session {} {kind} after {depth} sessions in a row woke each other, so the sessions watching it were not told. Send it or them an instruction to start again.",
+                observed.id
+            ),
+        );
+        if let Err(e) = hq_db::value_items::insert(db, &item) {
+            tracing::warn!(session = %observed.id, error = %e, "a2a: the relay cap notice was not recorded");
+        }
+    }
+    Ok(true)
+}
+
+/// Tells every running session that observes `observed` for `kind` (given it at spawn
+/// or subscribed since) that it finished a turn, blocked or exited, with the tail
 /// of its output, as a message on the observer's own task thread. An observer
 /// without a task gets nothing, since there is no thread to keep the message
 /// on. The supervisor types it in when the observer is next idle. Returns the
@@ -201,12 +240,13 @@ pub fn report_to_parent(
 pub fn report_to_observers(
     db: &Database,
     observed: &HarnessSessionRow,
+    kind: &str,
     event: &str,
     output: &str,
 ) -> Result<Vec<String>> {
-    let id = observed.id.clone();
-    let observers = db.with_conn(move |c| registry::running_observers(c, &id))?;
-    if observers.is_empty() {
+    let (id, k) = (observed.id.clone(), kind.to_string());
+    let observers = db.with_conn(move |c| registry::running_observers(c, &id, &k))?;
+    if observers.is_empty() || relay_capped(db, observed, kind)? {
         return Ok(Vec::new());
     }
     let body = match (last_reply(output), tail_of(output)) {
@@ -233,7 +273,10 @@ pub fn report_to_observers(
             continue;
         };
         let (from, to, body) = (observed.id.clone(), observer.id.clone(), body.clone());
-        db.with_conn(move |c| t::add_message(c, &task, &from, &to, &body, None))?;
+        db.with_conn(move |c| {
+            let depth = registry::relay_depth(c, &from)? + 1;
+            t::add_relay_message(c, &task, &from, &to, &body, depth)
+        })?;
         told.push(observer.id);
     }
     Ok(told)
@@ -1058,7 +1101,11 @@ pub fn deliver_next(
         .take(12)
         .collect();
     match send(&render(sender, &label, &message.body, &nonce)) {
-        Ok(()) => Ok(Some(message.id)),
+        Ok(()) => {
+            let (to, id) = (to_session.to_string(), message.id);
+            db.with_conn(move |c| registry::set_relay_depth(c, &to, Some(id)))?;
+            Ok(Some(message.id))
+        }
         Err(e) => {
             let id = message.id;
             db.with_conn(move |c| t::release_message(c, id))?;
@@ -1198,14 +1245,19 @@ mod tests {
                 .unwrap()
                 .unwrap();
         w.db.with_conn(|c| {
-            registry::add_observed(c, "hs-b", &["hs-a".to_string()])?;
-            registry::add_observed(c, "hs-loose", &["hs-a".to_string()])?;
-            registry::add_observed(c, "hs-other", &["hs-a".to_string()])
+            registry::add_observed(c, "hs-b", &["hs-a".to_string()], None)?;
+            registry::add_observed(c, "hs-loose", &["hs-a".to_string()], None)?;
+            registry::add_observed(c, "hs-other", &["hs-a".to_string()], None)
         })
         .unwrap();
-        let told =
-            report_to_observers(&w.db, &observed, "finished a turn", "⏺ All tests pass.\n❯ ")
-                .unwrap();
+        let told = report_to_observers(
+            &w.db,
+            &observed,
+            "finished",
+            "finished a turn",
+            "⏺ All tests pass.\n❯ ",
+        )
+        .unwrap();
         assert_eq!(
             told,
             vec!["hs-b".to_string(), "hs-other".to_string()],
@@ -1234,10 +1286,64 @@ mod tests {
                 .unwrap()
                 .unwrap();
         assert!(
-            report_to_observers(&w.db, &other, "exited", "")
+            report_to_observers(&w.db, &other, "exited", "exited", "")
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn sessions_watching_each_other_stop_waking_each_other_at_the_cap() {
+        let w = world();
+        w.db.with_conn(|c| {
+            registry::add_observed(c, "hs-a", &["hs-b".to_string()], None)?;
+            registry::add_observed(c, "hs-b", &["hs-a".to_string()], None)
+        })
+        .unwrap();
+        let row = |id: &str| {
+            let id = id.to_string();
+            w.db.with_conn(move |c| registry::get(c, &id))
+                .unwrap()
+                .unwrap()
+        };
+        let notices = || {
+            w.db.with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM value_items WHERE title = 'Sessions kept waking each other'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .unwrap()
+        };
+        // A finishes a turn someone asked for; then each finish wakes the other.
+        let (mut finishing, mut woken) = ("hs-a", "hs-b");
+        let mut relays = 0;
+        loop {
+            let told =
+                report_to_observers(&w.db, &row(finishing), "finished", "finished a turn", "")
+                    .unwrap();
+            if told.is_empty() {
+                break;
+            }
+            assert!(deliver_next(&w.db, woken, |_| Ok(())).unwrap().is_some());
+            relays += 1;
+            assert!(relays <= MAX_RELAY_DEPTH, "the chain did not stop");
+            (finishing, woken) = (woken, finishing);
+        }
+        assert_eq!(relays, MAX_RELAY_DEPTH);
+        assert_eq!(notices(), 1, "the owner hears once");
+        let events =
+            w.db.with_conn(|c| registry::list_events(c, finishing, 20))
+                .unwrap();
+        assert!(events.iter().any(|e| e.kind == "relay_capped"));
+
+        // Someone giving it new input starts a fresh chain.
+        w.db.with_conn(|c| registry::set_relay_depth(c, finishing, None))
+            .unwrap();
+        let told =
+            report_to_observers(&w.db, &row(finishing), "finished", "finished a turn", "").unwrap();
+        assert_eq!(told.len(), 1);
     }
 
     #[test]

@@ -138,12 +138,6 @@ impl Purpose {
     pub fn does_the_tasks_work(self) -> bool {
         !matches!(self, Purpose::Monitor | Purpose::Review)
     }
-
-    /// Whether a session with this purpose may be given other sessions to
-    /// observe: their finished turns, blocks and exits are relayed to it.
-    pub fn may_observe(self) -> bool {
-        matches!(self, Purpose::Monitor | Purpose::Review)
-    }
 }
 
 /// Which purpose a new session has: the one asked for, else the harness's
@@ -206,12 +200,10 @@ mod tests {
     }
 
     #[test]
-    fn only_monitors_and_reviewers_observe_and_they_never_move_a_task() {
-        for p in Purpose::ALL {
-            assert_eq!(p.may_observe(), !p.does_the_tasks_work(), "{p:?}");
-        }
+    fn monitors_and_reviewers_never_move_a_task() {
         assert!(Purpose::Research.does_the_tasks_work());
-        assert!(Purpose::Monitor.may_observe());
+        assert!(!Purpose::Monitor.does_the_tasks_work());
+        assert!(!Purpose::Review.does_the_tasks_work());
     }
 
     #[test]

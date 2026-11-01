@@ -133,7 +133,7 @@ pub(super) struct Launch<'a> {
     pub(super) parent: Option<(&'a str, i64)>,
     pub(super) goal: GoalText<'a>,
     pub(super) purpose: Purpose,
-    /// Sessions this one watches; only a monitor or reviewer has any.
+    /// Sessions this one watches.
     pub(super) observe: &'a [String],
     /// A brief the agent runs once and exits on (a stack specialist's run),
     /// in place of an interactive start. No prompt is typed and a host restart
@@ -561,7 +561,7 @@ pub(super) fn record_placement(
             registry::set_parent(c, name, parent, *depth)?;
         }
         if !observe.is_empty() {
-            registry::add_observed(c, name, &observe)?;
+            registry::add_observed(c, name, &observe, None)?;
         }
         if goal.0.is_some() || goal.1.is_some() {
             registry::set_goal(
@@ -828,7 +828,7 @@ pub(crate) async fn spawn_on(
 ) -> Result<Value> {
     let harness = resolve(req.harness)?.with_model(req.model)?;
     let purpose = purpose_for(&harness, req.purpose)?;
-    check_observe(req.observe, purpose, req.mission_id.is_some())?;
+    check_observe(req.observe.len(), req.mission_id.is_some())?;
     // Before anything is launched, so a wrong id never costs a workspace.
     for id in req.observe {
         if db.with_conn(|c| registry::get(c, id))?.is_none() {
@@ -953,26 +953,19 @@ pub(crate) async fn spawn_on(
     Ok(with_watch_state(db, &session_id, report))
 }
 
-/// A session may be given others to observe only as a monitor or reviewer, and
-/// only when it works on a task, since the task thread is where what it sees is
-/// recorded. The ids are checked by the caller before the launch and again in
-/// the write that records the row.
-pub(super) fn check_observe(observe: &[String], purpose: Purpose, has_task: bool) -> Result<()> {
-    if observe.is_empty() {
+/// A session may observe others only when it works on a task, since the task thread is where
+/// what it hears is kept, and only up to `MAX_OBSERVED` of them. Shared by a spawn's `observe`
+/// and `harness_session_subscribe`; the ids are checked again in the write that records them.
+pub(super) fn check_observe(watching: usize, has_task: bool) -> Result<()> {
+    if watching == 0 {
         return Ok(());
-    }
-    if !purpose.may_observe() {
-        bail!(
-            "only a session with purpose monitor or review can be given sessions to observe (this one is {})",
-            purpose.as_str()
-        );
     }
     if !has_task {
         bail!(
             "a session that observes others needs a task_id: its task thread is where what it sees is kept"
         );
     }
-    if observe.len() > registry::MAX_OBSERVED {
+    if watching > registry::MAX_OBSERVED {
         bail!(
             "at most {} sessions can be observed by one session",
             registry::MAX_OBSERVED

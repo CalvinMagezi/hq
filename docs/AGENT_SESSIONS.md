@@ -825,13 +825,21 @@ hands them, and that is mechanical rather than a matter of prompt wording:
   reviewer finishing a turn does not put a coding task into review. `research` and `general`
   sessions do their task's own work and move it like a coding session does. Several research
   sessions can run at once; each is an ordinary session with its own task.
-- **Observing other sessions.** A monitor or reviewer started with `task_id` can be given
-  `observe: [session ids]` (at most 10). When an observed session finishes a turn, blocks at a
+- **Observing other sessions.** Any session started with `task_id` can be given
+  `observe: [session ids]` (at most 10), whatever its harness or purpose. When an observed session finishes a turn, blocks at a
   dialog or exits, the supervisor leaves the observer a message on the observer's task thread,
   with the observed agent's last reply or screen tail, and types it in when the observer is
   next idle, the same route a delegated child uses to report to its parent. The text is the
   observed agent's screen and is presented as such, never as an instruction. Spawn reports
   `observing` and says so in `observing_note`. The ids are checked before anything launches.
+- **Subscribing while running.** `harness_session_subscribe(session_ids, kinds?)` does the same
+  for a session that is already running, so a Copilot coder can hear when the agy session it
+  waits on finishes without polling. A session subscribes only itself, needs a task, and may
+  watch its own team or sessions on its task; the owner can wire any pair with `observer`.
+  `kinds` narrows it to some of `finished`, `blocked` and `exited`. `harness_session_unsubscribe`
+  stops it. Sessions that keep waking each other (A's turn wakes B, B's wakes A) stop after
+  three rounds: the observers are not told, the session logs `relay_capped`, and the owner's
+  inbox says so. Any other input to the session starts a fresh count.
 
 ```
 harness_session_spawn(harness: "hermes", purpose: "monitor", task_id: "FR-053",

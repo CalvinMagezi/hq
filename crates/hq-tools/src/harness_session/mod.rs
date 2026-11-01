@@ -30,6 +30,7 @@ mod preflight;
 pub mod spec;
 pub mod stack;
 pub mod stats;
+pub mod subscribe;
 pub mod team;
 pub mod tools;
 

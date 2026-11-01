@@ -137,6 +137,8 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "harness_session_logs",
     "harness_session_events",
     "harness_session_wait",
+    "harness_session_subscribe",
+    "harness_session_unsubscribe",
     "agent_message_send",
     "agent_delegate",
     "team_roster",

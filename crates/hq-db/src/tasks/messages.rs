@@ -42,6 +42,24 @@ pub fn add_message(
     )?)
 }
 
+/// A message a relay writes (an observer report, a delegated session telling its parent),
+/// carrying `relay_depth` so a chain of agents waking each other can be capped.
+pub fn add_relay_message(
+    conn: &Connection,
+    task_id: &str,
+    from_session: &str,
+    to_session: &str,
+    body: &str,
+    relay_depth: i64,
+) -> Result<TaskComment> {
+    let message = add_message(conn, task_id, from_session, to_session, body, None)?;
+    conn.execute(
+        "UPDATE task_comments SET relay_depth = ?2 WHERE id = ?1",
+        params![message.id, relay_depth],
+    )?;
+    Ok(message)
+}
+
 /// Like `add_message`, but inserts only while `from_session` has sent fewer than
 /// `limit` messages in the last `window_minutes`, decided in the same statement so
 /// concurrent senders cannot slip past it. None when the limit is reached.
