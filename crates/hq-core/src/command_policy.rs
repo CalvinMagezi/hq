@@ -716,15 +716,21 @@ impl Policy {
 
     /// Judges a file edit or a path: inside the session's folder is allowed, anything else
     /// goes to the owner.
-    pub fn decide_path(&self, path: &str, folder: &str) -> Decision {
-        let inside = within(path.trim(), folder);
-        match inside {
-            true => Decision::Allow {
+    pub fn decide_path(&self, path: &str, folder: &str, base: Option<&str>) -> Decision {
+        // A dialog may list several paths, one per line, and a link as "link -> target".
+        let paths: Vec<&str> = path
+            .lines()
+            .flat_map(|line| line.split("->"))
+            .map(str::trim)
+            .collect();
+        let judged = paths.iter().any(|p| !p.is_empty());
+        if judged && paths.iter().all(|p| within(p, folder, base)) {
+            return Decision::Allow {
                 rule: "inside the session's folder".into(),
-            },
-            false => Decision::Escalate {
-                reason: "it is outside the session's folder".into(),
-            },
+            };
+        }
+        Decision::Escalate {
+            reason: "it is outside the session's folder".into(),
         }
     }
 
@@ -764,20 +770,28 @@ impl Policy {
     }
 }
 
-/// Lexically normalised `path` (relative to `folder` when not absolute) is `folder` or below
-/// it. A `..` that leaves `folder` is outside.
-fn within(path: &str, folder: &str) -> bool {
+/// Lexically normalised `path` (relative to `base` when inside `folder`, else `folder`)
+/// is `folder` or below it. A `..` that leaves `folder` is outside.
+fn within(path: &str, folder: &str, base: Option<&str>) -> bool {
     if path.is_empty() || folder.is_empty() {
         return false;
     }
-    let base = normalise(Path::new(folder));
+    let Some(folder_base) = normalise(Path::new(folder)) else {
+        return false;
+    };
     let joined = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
-        Path::new(folder).join(path)
+        // A relative path is trusted only against a known directory inside the folder: a cd
+        // that is relative, or leads outside, leaves its real directory unknown.
+        let root = match base {
+            None => PathBuf::from(folder),
+            Some(b) if Path::new(b).is_absolute() && within(b, folder, None) => PathBuf::from(b),
+            Some(_) => return false,
+        };
+        root.join(path)
     };
-    let Some(base) = base else { return false };
-    normalise(&joined).is_some_and(|p| p.starts_with(&base))
+    normalise(&joined).is_some_and(|p| p.starts_with(&folder_base))
 }
 
 fn normalise(p: &Path) -> Option<PathBuf> {
@@ -1007,23 +1021,73 @@ mod tests {
     fn paths_inside_the_folder_are_allowed_and_the_rest_escalate() {
         let b = policy(BUILDER);
         assert_eq!(
-            b.decide_path("/w/app/src/lib.rs", "/w/app").as_str(),
+            b.decide_path("/w/app/src/lib.rs", "/w/app", None).as_str(),
             "allow"
         );
-        assert_eq!(b.decide_path("src/lib.rs", "/w/app").as_str(), "allow");
         assert_eq!(
-            b.decide_path("/w/app/../other", "/w/app").as_str(),
+            b.decide_path("src/lib.rs", "/w/app", None).as_str(),
+            "allow"
+        );
+        assert_eq!(
+            b.decide_path("/w/app/../other", "/w/app", None).as_str(),
             "escalate"
         );
         assert_eq!(
-            b.decide_path("../../etc/passwd", "/w/app").as_str(),
+            b.decide_path("../../etc/passwd", "/w/app", None).as_str(),
             "escalate"
         );
         assert_eq!(
-            b.decide_path("/w/application", "/w/app").as_str(),
+            b.decide_path("/w/application", "/w/app", None).as_str(),
             "escalate"
         );
-        assert_eq!(b.decide_path("", "/w/app").as_str(), "escalate");
+        assert_eq!(b.decide_path("", "/w/app", None).as_str(), "escalate");
+    }
+
+    #[test]
+    fn paths_with_base_or_multiple_lines_judge_every_path() {
+        let b = policy(BUILDER);
+        assert_eq!(
+            b.decide_path("src/lib.rs\nsrc/main.rs", "/w/app", None)
+                .as_str(),
+            "allow"
+        );
+        assert_eq!(
+            b.decide_path("src/lib.rs\n/etc/passwd", "/w/app", None)
+                .as_str(),
+            "escalate"
+        );
+        assert_eq!(
+            b.decide_path("/w/app/link -> /etc/passwd", "/w/app", None)
+                .as_str(),
+            "escalate"
+        );
+        assert_eq!(
+            b.decide_path("../lib.rs", "/w/app", Some("/w/app/src"))
+                .as_str(),
+            "allow"
+        );
+        assert_eq!(
+            b.decide_path("src/lib.rs", "/w/app", Some("/outside/dir"))
+                .as_str(),
+            "escalate",
+            "a cd outside the folder leaves the real directory unknown"
+        );
+        assert_eq!(
+            b.decide_path("lib.rs", "/w/app", Some("../..")).as_str(),
+            "escalate",
+            "a relative cd leaves the real directory unknown"
+        );
+        assert_eq!(
+            b.decide_path("/w/app/src/lib.rs", "/w/app", Some("../.."))
+                .as_str(),
+            "allow",
+            "an absolute path is judged on its own"
+        );
+        assert_eq!(
+            b.decide_path("../../outside.rs", "/w/app", Some("/w/app/src"))
+                .as_str(),
+            "escalate"
+        );
     }
 
     #[test]

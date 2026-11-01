@@ -94,6 +94,9 @@ pub(super) struct RawDialog {
     remember: Option<String>,
     /// Options that open a text field instead of answering.
     typed: Option<String>,
+    /// A regex whose capture (named `cwd` or group 1) is the directory the shell command cd'd into.
+    #[serde(default)]
+    cwd: Option<String>,
     #[serde(default)]
     answer: AnswerMethod,
     /// Keys that dismiss the dialog without picking an option.
@@ -119,6 +122,7 @@ pub struct DialogSpec {
     selected: Option<Regex>,
     remember: Option<Regex>,
     typed: Option<Regex>,
+    cwd: Option<Regex>,
     pub answer: AnswerMethod,
     pub decline: Vec<String>,
 }
@@ -164,6 +168,7 @@ impl DialogSpec {
             selected: optional(&raw.selected)?,
             remember: optional(&raw.remember)?,
             typed: optional(&raw.typed)?,
+            cwd: optional(&raw.cwd)?,
             answer: raw.answer,
             decline: raw.decline.clone(),
         })
@@ -198,6 +203,7 @@ pub struct Dialog {
     pub truncated: bool,
     pub answer: AnswerMethod,
     pub decline: Vec<String>,
+    pub cwd: Option<String>,
 }
 
 impl Dialog {
@@ -358,6 +364,7 @@ pub fn extract(spec: &DialogSpec, lines: &[String]) -> Option<Dialog> {
     if let Some(c) = command.as_mut() {
         truncated |= cap(c, MAX_DIALOG_BYTES);
     }
+    let cwd = cwd_of(spec, &lines[..top]);
     Some(Dialog {
         kind,
         question,
@@ -367,7 +374,36 @@ pub fn extract(spec: &DialogSpec, lines: &[String]) -> Option<Dialog> {
         truncated,
         answer: spec.answer,
         decline: spec.decline.clone(),
+        cwd,
     })
+}
+
+fn cwd_of(spec: &DialogSpec, lines_above: &[String]) -> Option<String> {
+    let re = spec.cwd.as_ref()?;
+    let mut non_empty = 0;
+    for line in lines_above.iter().rev() {
+        let unboxed = unbox(line).trim();
+        if unboxed.is_empty() {
+            continue;
+        }
+        non_empty += 1;
+        if non_empty > 10 {
+            break;
+        }
+        if let Some(caps) = re.captures_iter(unboxed).last() {
+            let captured = caps.name("cwd").or_else(|| caps.get(1));
+            if let Some(m) = captured {
+                let path = m.as_str().trim();
+                if !path.is_empty() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+        if unboxed.starts_with("$ ") || unboxed.starts_with("● ") || unboxed.starts_with("❯ ") {
+            break;
+        }
+    }
+    None
 }
 
 fn command_of(spec: &DialogSpec, body: &[&str]) -> Option<String> {
@@ -537,5 +573,32 @@ selected = '^ ❯'
         assert_eq!(unbox("│   2. Yes   │"), "   2. Yes");
         assert_eq!(unbox("plain  "), "plain");
         assert_eq!(unbox("│      │"), "");
+    }
+
+    #[test]
+    fn cwd_extracted_from_shell_line_above_dialog() {
+        const WITH_CWD: &str = r#"
+kind = "other"
+kind_when = [{ kind = "path", line = 'allow path access' }]
+top = '^╭'
+footer = 'enter to select'
+command_block = ['^\s+╭', '^\s+╰']
+option = '^\s*(?:❯\s*)?(?P<num>\d+)\.\s+(?P<label>\S.*)$'
+cwd = '(?i)\bcd\s+"?(?P<cwd>/[^"\s;&]+)'
+"#;
+        let screen = lines(
+            " $ Shell Allow path access\n\
+               cd /dir1 && cd /W/apps/android && sed ...\n\
+             ╭──────────────╮\n\
+             │ allow path access │\n\
+             │ ╭──────────╮ │\n\
+             │ │ path.txt │ │\n\
+             │ ╰──────────╯ │\n\
+             │ ❯ 1. Yes     │\n\
+             │ enter to select │\n\
+             ╰──────────────╯",
+        );
+        let d = extract(&spec(WITH_CWD), &screen).unwrap();
+        assert_eq!(d.cwd.as_deref(), Some("/W/apps/android"));
     }
 }

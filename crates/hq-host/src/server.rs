@@ -1145,6 +1145,9 @@ fn dialog_json(d: &Dialog, full: bool) -> Value {
         "options": options,
         "truncated": cut,
     });
+    if let Some(cwd) = &d.cwd {
+        v["cwd"] = json!(cwd);
+    }
     if full {
         v["text"] = json!(d.text);
         v["decline_keys"] = json!(d.decline);

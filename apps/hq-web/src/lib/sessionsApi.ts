@@ -106,6 +106,7 @@ export interface PendingDialog {
   command: string | null
   options: DialogOption[]
   truncated: boolean
+  cwd?: string | null
 }
 
 export interface AnswerPayload {

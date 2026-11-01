@@ -87,7 +87,7 @@ pub fn judge(policy: &Policy, dialog: &PendingDialog, folder: &str) -> Option<De
     let subject = dialog.command.as_deref().unwrap_or_default();
     let decision = match dialog.kind.as_str() {
         "command" => policy.decide(subject),
-        "edit" | "path" => policy.decide_path(subject, folder),
+        "edit" | "path" => policy.decide_path(subject, folder, dialog.cwd.as_deref()),
         _ => return None,
     };
     // A dialog cut short may hide the part that matters, so only a deny of what is visible
@@ -289,5 +289,52 @@ pub fn post_summary(db: &Arc<Database>, row: &HarnessSessionRow) {
     });
     if let Err(e) = posted {
         tracing::warn!(session = %row.id, error = %e, "the command policy summary was not posted");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn judge_end_to_end_allows_paths_inside_cwd_and_escalates_outside() {
+        let builder = hq_core::command_policy::resolve("builder", &Default::default())
+            .unwrap()
+            .unwrap();
+        let dialog = |kind: &str, command: &str, cwd: Option<&str>| PendingDialog {
+            kind: kind.into(),
+            question: Some("Allow path access?".into()),
+            command: Some(command.into()),
+            options: vec![],
+            truncated: false,
+            text: None,
+            cwd: cwd.map(str::to_string),
+        };
+        // Relative path inside session folder via cwd allows.
+        let d1 = dialog(
+            "path",
+            "../../../../java/example/hq/spike/*.java",
+            Some("/W/apps/android/app/src/main/kotlin/example/hq/spike"),
+        );
+        assert_eq!(
+            judge(&builder, &d1, "/W").map(|d| d.as_str()),
+            Some("allow")
+        );
+        // Relative path that leaves the folder escalates.
+        let d2 = dialog(
+            "path",
+            "../../../../../../../../../../outside/*.java",
+            Some("/W/apps/android/app/src/main/kotlin/example/hq/spike"),
+        );
+        assert_eq!(
+            judge(&builder, &d2, "/W").map(|d| d.as_str()),
+            Some("escalate")
+        );
+        // Path dialog with no cwd resolves against folder.
+        let d3 = dialog("path", "src/lib.rs", None);
+        assert_eq!(
+            judge(&builder, &d3, "/W").map(|d| d.as_str()),
+            Some("allow")
+        );
     }
 }

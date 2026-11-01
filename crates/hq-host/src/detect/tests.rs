@@ -166,3 +166,52 @@ fn overrides_replace_built_ins_and_bad_files_are_reported() {
         .unwrap();
     assert_eq!(got.state, AgentState::Blocked);
 }
+
+#[test]
+fn copilot_screen_with_cd_command_yields_cwd() {
+    let d = Detector::builtin();
+    let screen = "\
+ $ Shell Allow path access\n\
+   cd /W/apps/android/app/src/main/kotlin/example/hq/spike && sed -i '' 's/foo/bar/g' *.java\n\
+\n\
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮\n\
+│ Allow path access                                                                                                    │\n\
+│ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │\n\
+│ This action may read or write the following path outside the paths currently allowed for this session.               │\n\
+│                                                                                                                      │\n\
+│ ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ │\n\
+│ │ ../../../../java/example/hq/spike/*.java                                                                         │ │\n\
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │\n\
+│                                                                                                                      │\n\
+│ Do you want to allow this?                                                                                           │\n\
+│                                                                                                                      │\n\
+│   1. Yes                                                                                                             │\n\
+│ ❯ 2. Yes, and remember this path for this session                                                                    │\n\
+│   3. No (Esc)                                                                                                        │\n\
+│                                                                                                                      │\n\
+│ ↑/↓ to navigate · enter to select · esc to cancel                                                                    │\n\
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯";
+    let detected = d
+        .detect(
+            "copilot",
+            Input {
+                screen,
+                osc_title: "",
+            },
+        )
+        .expect("copilot detected");
+    assert_eq!(detected.state, AgentState::Blocked);
+    let rule = detected.rule.expect("approval rule");
+    let lines: Vec<String> = screen.lines().map(str::to_string).collect();
+    let dialog = d
+        .dialog("copilot", &rule, &lines)
+        .expect("dialog extracted");
+    assert_eq!(
+        dialog.cwd.as_deref(),
+        Some("/W/apps/android/app/src/main/kotlin/example/hq/spike")
+    );
+    assert_eq!(
+        dialog.command.as_deref(),
+        Some("../../../../java/example/hq/spike/*.java")
+    );
+}
