@@ -59,6 +59,21 @@ The app reads that config and changes three things:
   than asking `/health`, which `hq host serve` does not have. Without a hub the button runs
   `hq start all` as before.
 
+## Opening your phone's HQ for the first time
+
+Once this laptop is paired with the phone, **Open HQ** shows the phone's HQ: your vault, chats, tasks
+and inbox, the same as on the phone. The first time, the window asks you to sign in, because the app
+never copies a credential into it. Sign in once with a code from the phone:
+
+1. On the phone, open HQ, then **Settings**, **Devices**, and press **Sign in another device**.
+2. In the laptop's window, type the code it shows into the **Use code** box (or paste the login link
+   into the box under it) and press the button next to it.
+
+The window stays signed in after that. A code works once and expires within minutes; the phone's
+Devices list shows the laptop afterwards, and signing it out there takes its access away. Without the
+app, the same steps work in a browser at the forward's address, which keeps its own sign-in:
+`hq bridge serve` prints it as `Forwarding 127.0.0.1:<port> to web on <phone id>`.
+
 ## Pairing a device
 
 1. Devices, **Switch on**, then **Show pairing code**.

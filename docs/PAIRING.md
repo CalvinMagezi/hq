@@ -290,7 +290,10 @@ the claude.ai connector's OAuth paths. A forward listens on loopback only. The s
 own protocol name (`hq/svc/1`), offered only by a machine that has services, and admitted only from
 paired peers; revoking a peer closes its open streams.
 
-The web app keeps its sign-in per address, so open it at the forward's address and sign in there.
+The web app keeps its sign-in per address, so open it at the forward's address and sign in there
+once: on the phone, Settings, Devices, **Sign in another device**, then type the code into the
+**Use code** box on the laptop. The desktop app's **Open HQ** window is one more address and signs in
+the same way ([DESKTOP.md](DESKTOP.md#opening-your-phones-hq-for-the-first-time)).
 List that origin in the phone's `web_allowed_origins` if the browser shows it as refused.
 
 ## What listens, and when
