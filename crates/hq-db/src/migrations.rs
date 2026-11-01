@@ -391,8 +391,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/105_session_policies.sql"),
     ),
     (
-        "106_session_checkout_start",
-        include_str!("../sql/106_session_checkout_start.sql"),
+        "106_bridge_setup",
+        include_str!("../sql/106_bridge_setup.sql"),
+    ),
+    (
+        "107_session_checkout_start",
+        include_str!("../sql/107_session_checkout_start.sql"),
     ),
 ];
 

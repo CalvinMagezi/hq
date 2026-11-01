@@ -1,8 +1,8 @@
 name: Android app
 
 # Builds the hub app with Gradle (no hq inside), runs its unit tests and the NewApi lint check that
-# keeps post-Android-8 APIs out. The phone APK is built by hand (apps/android/README.md) because it
-# packages binaries that android.yml builds.
+# keeps post-Android-8 APIs out. The signed release APK is built by release.yml, which packages the
+# binary android.yml builds; a phone test build by hand is in apps/android/README.md.
 on:
   pull_request:
     branches: [main]

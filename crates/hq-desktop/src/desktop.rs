@@ -1,9 +1,7 @@
-//! The app as a whole: settings, the host, pairing, the proxy and Connect Claude, wired from the
-//! HQ config. The Tauri shell holds one of these and calls into it.
+//! The app as a whole: settings, the host, pairing and the proxy, wired from the HQ config. The Tauri shell holds one of these and calls into it.
 
-use crate::connect::ConnectClient;
 use crate::host::{self, HostController, HostSpec};
-use crate::pairing::{PairingConfig, PairingController};
+use crate::pairing::{HubServices, PairingConfig, PairingController};
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
 use crate::settings::{Settings, create_private_dir};
 use anyhow::{Context, Result, bail};
@@ -61,9 +59,13 @@ pub struct Desktop {
     upstream: SocketAddr,
 }
 
-/// Where HQ's web server is reachable from this machine. The app talks to it only over loopback,
-/// so a host that listens on one non-loopback address cannot be used.
+/// Where the window's HQ is reachable from this machine: the paired hub's web app on its forward
+/// when the config has one, else this machine's own web server. The app talks to either only over
+/// loopback, so a host that listens on one non-loopback address cannot be used.
 pub fn upstream_addr(config: &HqConfig) -> Result<SocketAddr> {
+    if let Some(hub) = config.bridge.hub_web_listen() {
+        return Ok(hub);
+    }
     let bind: IpAddr = config
         .web_bind
         .parse()
@@ -98,10 +100,10 @@ impl Desktop {
         // A missing program is reported when the host is started, not when the app opens.
         let program = host::locate_hq(settings.hq_path.as_deref(), &candidates)
             .unwrap_or_else(|_| PathBuf::from("hq"));
-        let host = HostController::new(HostSpec::for_hq(
+        let host = HostController::new(HostSpec::for_config(
             program,
             init.dir.join(HOST_LOG),
-            init.config.ws_port,
+            &init.config,
         ));
         let name = if settings.device_name.trim().is_empty() {
             hostname::get()
@@ -126,7 +128,11 @@ impl Desktop {
             },
             move || Database::open(&db_path),
             None,
-        );
+        )
+        .with_services(HubServices {
+            config: init.config.bridge.clone(),
+            ws_port: init.config.ws_port,
+        });
         Ok(Self {
             dir: init.dir,
             settings: Mutex::new(settings),
@@ -165,39 +171,20 @@ impl Desktop {
         Ok(slot.as_ref().expect("just set").origin())
     }
 
-    /// The address of the main window: the proxy, with the web token in the fragment so HQ's web
-    /// app signs itself in. The fragment never goes to the proxy or HQ; it stays in the window.
+    /// The address of the main window: the proxy, with this machine's web token in the fragment so
+    /// its own HQ signs itself in. The fragment never goes to the proxy or HQ; it stays in the
+    /// window. A paired hub has its own token, so the person signs in to it once in the window.
     pub async fn main_window_url(&self) -> Result<String> {
         let origin = self.proxy_origin().await?;
-        Ok(
-            match self
-                .config
-                .web_auth_token
-                .as_deref()
-                .filter(|t| !t.trim().is_empty())
-            {
-                Some(token) => format!("{origin}/#token={token}"),
-                None => format!("{origin}/"),
-            },
-        )
-    }
-
-    pub async fn connect(&self) -> Result<ConnectClient> {
-        let local = format!("http://127.0.0.1:{}", self.settings().proxy_port);
-        ConnectClient::new(
-            format!("http://{}", self.upstream),
-            self.config
-                .web_auth_token
-                .clone()
-                .filter(|t| !t.trim().is_empty()),
-            local,
-        )
-    }
-
-    /// The link that signs a browser in to HQ with a one-time code, on the app's own address.
-    pub async fn sign_in_link(&self) -> Result<String> {
-        let code = self.connect().await?.sign_in_code().await?;
-        Ok(format!("{}/#code={code}", self.proxy_origin().await?))
+        let local_token = self
+            .config
+            .web_auth_token
+            .as_deref()
+            .filter(|t| !t.trim().is_empty() && self.config.bridge.hub_web_listen().is_none());
+        Ok(match local_token {
+            Some(token) => format!("{origin}/#token={token}"),
+            None => format!("{origin}/"),
+        })
     }
 
     /// Runs once when the app opens: starts the host only if the person's setting says so.
@@ -285,6 +272,34 @@ mod tests {
         ] {
             assert!(upstream_addr(&config(bad)).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_window_shows_the_paired_hub_when_there_is_a_web_forward() {
+        let forward = |service: &str, listen: &str| hq_core::config::BridgeForward {
+            peer: "abc".into(),
+            service: service.into(),
+            listen: listen.into(),
+        };
+        let mut with_hub = config("127.0.0.1");
+        with_hub.bridge.forwards = vec![
+            forward("gate", "127.0.0.1:47490"),
+            forward("web", "127.0.0.1:47480"),
+        ];
+        assert_eq!(
+            upstream_addr(&with_hub).unwrap(),
+            "127.0.0.1:47480".parse().unwrap()
+        );
+        // The hub replaces the local HQ, so a local bind the app cannot use no longer matters.
+        with_hub.web_bind = "192.168.1.9".into();
+        assert!(upstream_addr(&with_hub).is_ok());
+
+        let mut other_forwards_only = config("127.0.0.1");
+        other_forwards_only.bridge.forwards = vec![forward("gate", "127.0.0.1:47490")];
+        assert_eq!(
+            upstream_addr(&other_forwards_only).unwrap(),
+            "127.0.0.1:6001".parse().unwrap()
+        );
     }
 
     #[cfg(unix)]

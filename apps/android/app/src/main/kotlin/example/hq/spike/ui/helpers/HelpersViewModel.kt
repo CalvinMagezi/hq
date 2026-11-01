@@ -242,14 +242,25 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Sends enter or esc to a helper that is waiting, but only after a fresh read of its live screen shows the very dialog the
+     * Answers a helper that is waiting through its dialog alert when it has one. Without one, sends enter or esc, but only after a fresh read of its live screen shows the very dialog the
      * owner was shown ([shown], the one the button was drawn for), and, for enter, a highlighted choice that is a plain yes.
      */
     private fun answer(id: String, key: String, done: String, shown: BlockedPrompt?) {
         if (!answering.add(id)) return
         if (_state.value.open?.id == id) editOpen { it.copy(answering = true, error = null) }
+        val decision = HelperWords.decisionFor(_state.value.rows, id)
         viewModelScope.launch {
             try {
+                if (decision != null) {
+                    // HQ raised an alert for this dialog: the server answers that exact one (the yes once it chose) and refuses one that moved on.
+                    client.answerDialog(decision.notificationId, if (key == "enter") "approve" else "decline")
+                    generation++
+                    shown?.let { answered[id] = it.block to System.currentTimeMillis() }
+                    closeIfOpen(id)
+                    say(done)
+                    refresh()
+                    return@launch
+                }
                 // A read of its own, not the poll's: the poll's is cached for a second and could be older than the dialog.
                 val screen = client.helperScreen(id, CHECK_LINES)
                 val check = HelperWords.checkAnswer(shown, screen.lines, key, screen.live)
@@ -264,7 +275,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                     refuse(id, HelperWords.checkWords(check))
                 }
             } catch (e: HqUnavailable) {
-                if (e.message?.contains("HTTP 409") == true) { closeIfOpen(id); say("That helper is no longer running."); refresh() }
+                if (e.message?.contains("HTTP 409") == true) { closeIfOpen(id); say(if (decision != null) "Already answered." else "That helper is no longer running."); refresh() }
                 else tell(id, "Couldn't send your answer. HQ didn't reply. It may be restarting.")
             } finally {
                 answering.remove(id)

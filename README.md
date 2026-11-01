@@ -484,6 +484,11 @@ To write it by hand, add this to your project `.mcp.json`:
 }
 ```
 
+When the HQ you use runs on another machine (a phone reached over `hq bridge`, or a server), add it
+as a `remote_mcp` entry and let a stdio-only client such as Claude Desktop reach it through
+`hq mcp-serve --remote <name>`: every message goes to that entry's URL with its key, and nothing runs
+against this machine's vault. Clients that speak HTTP (Claude Code) can use the URL directly.
+
 ### Available Tool Categories
 
 | Category | Examples |

@@ -5,7 +5,6 @@
 use crate::Startup;
 use hq_desktop::{
     Desktop,
-    connect::{ConnectView, DEFAULT_ARM_MINUTES},
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
     settings::Settings,
@@ -38,10 +37,6 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         pairing_submit,
         pairing_decline,
         pairing_revoke,
-        connect_status,
-        connect_arm,
-        connect_disarm,
-        connect_sign_in_link,
     ]
 }
 
@@ -137,34 +132,4 @@ fn pairing_decline(app: App<'_>, id: u64) -> bool {
 #[tauri::command]
 async fn pairing_revoke(app: App<'_>, id: String) -> Reply<bool> {
     app.pairing.revoke(&id).await.map_err(shown)
-}
-
-#[tauri::command]
-async fn connect_status(app: App<'_>) -> Reply<ConnectView> {
-    Ok(app.connect().await.map_err(shown)?.status().await)
-}
-
-#[tauri::command]
-async fn connect_arm(app: App<'_>) -> Reply<i64> {
-    app.connect()
-        .await
-        .map_err(shown)?
-        .arm(DEFAULT_ARM_MINUTES)
-        .await
-        .map_err(shown)
-}
-
-#[tauri::command]
-async fn connect_disarm(app: App<'_>) -> Reply<()> {
-    app.connect()
-        .await
-        .map_err(shown)?
-        .disarm()
-        .await
-        .map_err(shown)
-}
-
-#[tauri::command]
-async fn connect_sign_in_link(app: App<'_>) -> Reply<String> {
-    app.sign_in_link().await.map_err(shown)
 }

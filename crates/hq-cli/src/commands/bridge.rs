@@ -5,8 +5,11 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use hq_bridge::{
-    Bridge, BridgeConfig, EdgeDoor, EndpointId, JoinResult, RelayMode, Ticket, Tuning,
-    code::printable, echo, echo_handler, qr,
+    Bridge, BridgeConfig, EdgeDoor, EndpointId, JoinResult, RelayMode, Role, SetupConfig, Ticket,
+    Tuning,
+    code::printable,
+    echo, echo_handler, qr,
+    setup::{SVC_GATE, SVC_WEB},
 };
 use hq_core::config::{DoorListen, DoorTarget, HqConfig};
 use hq_db::{Database, bridge as peers};
@@ -26,6 +29,19 @@ const MIN_TTL_SECS: u64 = 10;
 const MAX_TTL_SECS: u64 = 3_600;
 /// A pasted link is a few hundred characters; this is far more than any ticket.
 const LINK_READ_MAX: u64 = 4_096;
+/// How long a hub that just paired waits for the machine's setup.
+const SETUP_WAIT: Duration = Duration::from_secs(60);
+/// Any host name: only the directory of `gate_key_path` is wanted.
+const KEY_DIR_PROBE: &str = "probe";
+
+/// This machine's part in setup after pairing (`docs/PAIRING.md`, "What pairing sets up").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum RoleArg {
+    /// Runs coding agents for a hub: offers its host gate, and sets itself up with the hub
+    Machine,
+    /// Holds HQ, like the phone app: offers its web app and `/mcp`, and answers setup
+    Hub,
+}
 
 #[derive(Args, Clone)]
 pub struct NetArgs {
@@ -53,6 +69,20 @@ pub struct NetArgs {
     /// address, but the other side then needs a relay to find the direct path
     #[arg(long)]
     no_addrs: bool,
+    /// This machine's part in setup after pairing: machine (the default, except for `run`) or
+    /// hub (the default for `run`, the phone app's helper)
+    #[arg(long = "as", value_enum)]
+    role: Option<RoleArg>,
+}
+
+impl NetArgs {
+    fn role_or(&self, default: Role) -> Role {
+        match self.role {
+            Some(RoleArg::Machine) => Role::Machine,
+            Some(RoleArg::Hub) => Role::Hub,
+            None => default,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -95,7 +125,8 @@ pub enum BridgeAction {
     },
     /// Forget the edge. A running `serve` stops serving it at its next stream
     ForgetEdge,
-    /// Keep this machine reachable by its paired peers until interrupted (echo service)
+    /// Keep this machine reachable by its paired peers until interrupted: the echo service, the
+    /// services in `bridge.services` and the local ports in `bridge.forwards`
     Serve {
         #[command(flatten)]
         net: NetArgs,
@@ -214,7 +245,117 @@ fn edge_door_with(net: &NetArgs, config: Option<&HqConfig>) -> Result<Option<Edg
     Ok(Some(EdgeDoor::new(target)))
 }
 
-async fn start(net: &NetArgs, db: Database, serve: bool) -> Result<Bridge> {
+/// The services in `bridge.services`, checked, or `None` when there are none. A service may not
+/// lead to the main web port: paired devices get the web app through `bridge.web_listen`, the door
+/// that keeps the connector's paths and credentials out.
+fn bridge_services(
+    config: Option<&HqConfig>,
+    role: Option<Role>,
+) -> Result<Option<hq_bridge::Services>> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+    // What setup offers, unless the config names that service itself; the shared check then
+    // validates both alike.
+    let offered = match role {
+        Some(Role::Machine) => loopback_gate(config).map(|a| (SVC_GATE, a)),
+        Some(Role::Hub) => config
+            .bridge
+            .web_listen()
+            .ok()
+            .flatten()
+            .map(|a| (SVC_WEB, a)),
+        None => None,
+    };
+    let mut bridge = config.bridge.clone();
+    if let Some((name, addr)) = offered {
+        bridge
+            .services
+            .entry(name.to_string())
+            .or_insert_with(|| addr.to_string());
+    }
+    hq_bridge::services_from_config(&bridge, config.ws_port)
+}
+
+/// The host gate's address when the hub can use it through the bridge: on loopback, and admitting
+/// that loopback address (bridge traffic arrives from it). The owner's gate is never moved here.
+fn loopback_gate(config: &HqConfig) -> Option<SocketAddr> {
+    let host = &config.agent_host;
+    let addr: SocketAddr = host.gate_listen.as_deref()?.parse().ok()?;
+    let admitted = host
+        .gate_allowed_sources
+        .iter()
+        .any(|a| a.parse::<std::net::IpAddr>().ok() == Some(addr.ip()));
+    (addr.ip().is_loopback() && addr.port() != 0 && admitted).then_some(addr)
+}
+
+/// What this machine brings to setup, from the config. Every path is the one HQ already uses.
+fn setup_config(config: Option<&HqConfig>, role: Role) -> SetupConfig {
+    let fallback = HqConfig::default();
+    let config = config.unwrap_or(&fallback);
+    let host = &config.agent_host;
+    let key_dir = hq_tools::agent_host::gate_key_path(KEY_DIR_PROBE)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
+    let mut cfg = SetupConfig::new(
+        role,
+        hq_tools::agent_host::gate_authorized_keys_path(host),
+        key_dir,
+    );
+    cfg.gate = role == Role::Machine && loopback_gate(config).is_some();
+    cfg.web = role == Role::Hub && matches!(config.bridge.web_listen(), Ok(Some(_)));
+    cfg.reserved_names = host.hosts.keys().cloned().collect();
+    cfg.reserved_names
+        .extend(config.remote_mcp.iter().map(|s| s.name.clone()));
+    let forwards = config.bridge.forwards().unwrap_or_default();
+    cfg.reserved_ports = forwards.iter().map(|f| f.listen.port()).collect();
+    cfg.configured_forwards = forwards
+        .into_iter()
+        .map(|f| (canonical_id(&f.peer), f.service))
+        .collect();
+    cfg
+}
+
+/// A peer id as the database spells it, whatever spelling the config used.
+fn canonical_id(peer: &str) -> String {
+    let peer = peer.trim();
+    peer.parse::<EndpointId>()
+        .or_else(|_| peer.to_ascii_lowercase().parse())
+        .map(|id| id.to_string())
+        .unwrap_or_else(|_| peer.to_string())
+}
+
+/// One line on what a machine without a usable gate is missing, so the hub can reach it.
+fn gate_hint(config: Option<&HqConfig>, role: Role) {
+    if role == Role::Machine && config.and_then(loopback_gate).is_none() {
+        eprintln!(
+            "note: the host gate is not offered to the hub. Set agent_host.gate_listen to a loopback address (127.0.0.1:<port>) with that address in agent_host.gate_allowed_sources, and run `hq host serve`."
+        );
+    }
+}
+
+/// Opens every forward in `bridge.forwards` on this bridge. A port that cannot be bound fails the
+/// whole start, so a half-working setup is never mistaken for a working one.
+async fn start_forwards(bridge: &Bridge, config: Option<&HqConfig>) -> Result<()> {
+    let Some(config) = config else {
+        return Ok(());
+    };
+    let forwards = hq_bridge::start_forwards(bridge, &config.bridge).await?;
+    for f in &forwards.status {
+        if f.running_elsewhere {
+            bail!(
+                "bridge.forwards: could not listen on {}: already in use",
+                f.listen
+            );
+        }
+        eprintln!("Forwarding {} to {} on {}.", f.listen, f.service, f.peer);
+    }
+    Ok(())
+}
+
+/// Starts this machine's bridge. With `setup`, it takes part in setup after pairing in that role.
+async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) -> Result<Bridge> {
     let bind: Vec<SocketAddr> = if net.bind.is_empty() {
         vec![DEFAULT_BIND.parse()?]
     } else {
@@ -222,7 +363,14 @@ async fn start(net: &NetArgs, db: Database, serve: bool) -> Result<Bridge> {
     };
     let relay = relay_mode(&resolve_relay(&net.relay, &db)?)?;
     let door = if serve { edge_door(net)? } else { None };
-    Bridge::start_with_edge_door(
+    let config = HqConfig::load().ok();
+    let services = if serve {
+        bridge_services(config.as_ref(), setup)?
+    } else {
+        None
+    };
+    let setup = setup.map(|role| setup_config(config.as_ref(), role));
+    Bridge::start_with_setup(
         BridgeConfig {
             key: key_path(net)?,
             bind,
@@ -234,6 +382,8 @@ async fn start(net: &NetArgs, db: Database, serve: bool) -> Result<Bridge> {
         db,
         serve.then(echo_handler),
         door,
+        services,
+        setup,
     )
     .await
 }
@@ -275,7 +425,8 @@ pub(crate) async fn typed_digits_match(expected: &str) -> bool {
 }
 
 async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
-    let bridge = start(net, db, false).await?;
+    let role = net.role_or(Role::Machine);
+    let bridge = start(net, db, false, Some(role)).await?;
     let mut open = bridge
         .open_ticket(Tuning {
             ttl,
@@ -319,8 +470,53 @@ async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
         _ = open.closed() => {}
         _ = tokio::signal::ctrl_c() => {}
     }
+    let joiner = request.joiner.to_string();
+    if accept && peers::is_paired(bridge.db(), &joiner).unwrap_or(false) {
+        after_pairing(&bridge, &joiner, role).await;
+    }
     bridge.shutdown().await;
     Ok(())
+}
+
+/// Setup right after a pairing: a machine runs it, a hub waits for the machine to. A failure
+/// leaves the pairing as it is; the next `hq bridge serve` tries again.
+async fn after_pairing(bridge: &Bridge, peer: &str, role: Role) {
+    if role == Role::Hub {
+        return match bridge.wait_setup(peer, SETUP_WAIT).await {
+            Some(s) => println!(
+                "Set up \"{}\": it is a host here, and its agents can reach this HQ.",
+                printable(&s.peer_name, SHOWN_CHARS)
+            ),
+            None => println!(
+                "The machine has not set itself up yet; it does when it next runs `hq bridge serve`."
+            ),
+        };
+    }
+    match bridge.set_up(peer).await {
+        Ok(outcome) => report_setup(&outcome),
+        Err(e) => println!(
+            "Paired, but not set up yet: {e:#}. `hq bridge serve` tries again when the other device is serving."
+        ),
+    }
+}
+
+fn report_setup(outcome: &hq_bridge::SetupOutcome) {
+    let s = &outcome.setup;
+    let name = printable(&s.peer_name, SHOWN_CHARS);
+    println!(
+        "Set up with \"{name}\": its web app and /mcp are at http://127.0.0.1:{}/ while `hq bridge serve` runs here.",
+        s.local_port
+    );
+    if !s.peer_offers {
+        println!(
+            "note: \"{name}\" does not offer its web app yet (bridge.web_listen is unset there)."
+        );
+    }
+    if outcome.key_missing() {
+        println!(
+            "note: \"{name}\" kept the key it made for this machine earlier and this machine has no copy. Pair again to get a new one."
+        );
+    }
 }
 
 fn read_link(arg: Option<String>) -> Result<String> {
@@ -342,7 +538,8 @@ fn read_link(arg: Option<String>) -> Result<String> {
 
 async fn join(net: &NetArgs, db: Database, link: &str) -> Result<()> {
     let ticket = Ticket::parse(link)?;
-    let bridge = start(net, db, false).await?;
+    let role = net.role_or(Role::Machine);
+    let bridge = start(net, db, false, Some(role)).await?;
     let result = bridge
         .join(&ticket, &Tuning::default(), |sas| {
             println!(
@@ -350,18 +547,23 @@ async fn join(net: &NetArgs, db: Database, link: &str) -> Result<()> {
             );
         })
         .await;
+    let outcome = match result {
+        Ok(JoinResult::Paired(joined)) => {
+            println!(
+                "Paired with \"{}\" ({}).",
+                printable(&joined.card.name, SHOWN_CHARS),
+                joined.card.id
+            );
+            after_pairing(&bridge, &joined.card.id, role).await;
+            Ok(())
+        }
+        Ok(JoinResult::Refused(why)) => Err(anyhow!("refused: {why}")),
+        Ok(JoinResult::Declined { .. }) => Err(anyhow!("the other machine did not accept")),
+        Err(e) => Err(e),
+    };
     // Close the endpoint on every path, so a failure does not end in a second, noisy error.
     bridge.shutdown().await;
-    match result? {
-        JoinResult::Paired(joined) => println!(
-            "Paired with \"{}\" ({}).",
-            printable(&joined.card.name, SHOWN_CHARS),
-            joined.card.id
-        ),
-        JoinResult::Refused(why) => bail!("refused: {why}"),
-        JoinResult::Declined { .. } => bail!("the other machine did not accept"),
-    }
-    Ok(())
+    outcome
 }
 
 /// Registers with an edge and says what that gives this device, and what it does not yet.
@@ -376,7 +578,7 @@ async fn register(net: &NetArgs, db: Database, link: &str, replace: bool) -> Res
             current.id
         );
     }
-    let bridge = start(net, db.clone(), false).await?;
+    let bridge = start(net, db.clone(), false, None).await?;
     let result = bridge
         .register(&ticket, &Tuning::default(), |sas| {
             println!(
@@ -439,22 +641,46 @@ fn forget_edge(db: &Database) -> Result<()> {
 }
 
 async fn serve(net: &NetArgs, db: Database) -> Result<()> {
-    let bridge = start(net, db, true).await?;
+    let role = net.role_or(Role::Machine);
+    let bridge = start(net, db, true, Some(role)).await?;
+    start_set_up(&bridge, role).await?;
     println!("Serving paired peers as {}; ctrl-c to stop.", bridge.id());
     tokio::signal::ctrl_c().await?;
     bridge.shutdown().await;
     Ok(())
 }
 
+/// The forwards, configured and set up, and on a machine setup with every paired peer that has
+/// none yet (a peer that is not a hub, or not serving, is tried again at the next start).
+async fn start_set_up(bridge: &Bridge, role: Role) -> Result<()> {
+    let config = HqConfig::load().ok();
+    start_forwards(bridge, config.as_ref()).await?;
+    bridge.keep_setup()?;
+    gate_hint(config.as_ref(), role);
+    if role != Role::Machine {
+        return Ok(());
+    }
+    for (peer, result) in bridge.set_up_all().await? {
+        match result {
+            Ok(outcome) => report_setup(&outcome),
+            Err(e) => tracing::info!(%peer, "bridge setup not done: {e:#}"),
+        }
+    }
+    Ok(())
+}
+
 async fn run_control(net: &NetArgs, db: Database) -> Result<()> {
     let relay = resolve_relay(&net.relay, &db)?;
-    let bridge = start(net, db, true).await?;
+    // The phone app's helper: a hub unless told otherwise.
+    let role = net.role_or(Role::Hub);
+    let bridge = start(net, db, true, Some(role)).await?;
+    start_set_up(&bridge, role).await?;
     let input = tokio::io::BufReader::new(tokio::io::stdin());
     super::bridge_control::serve(bridge, relay, device_name(net), input, tokio::io::stdout()).await
 }
 
 async fn ping(net: &NetArgs, db: Database, peer: &str, count: usize) -> Result<()> {
-    let bridge = start(net, db, false).await?;
+    let bridge = start(net, db, false, None).await?;
     let result = ping_peer(&bridge, peer, count).await;
     bridge.shutdown().await;
     result
@@ -516,12 +742,23 @@ fn revoke(db: &Database, id: &str) -> Result<()> {
     } else {
         println!("{id} is not an active peer.");
     }
+    // The revoke removed the setup row; the hub's gate line written for it goes too.
+    let authorized = setup_config(HqConfig::load().ok().as_ref(), Role::Machine).authorized_keys;
+    match hq_bridge::setup::prune_gate_lines(db, &authorized) {
+        Ok(0) => {}
+        Ok(_) => println!("Removed its key from {}.", authorized.display()),
+        Err(e) => eprintln!(
+            "warning: its key is still in {}: {e:#}. A running `hq bridge serve` removes it.",
+            authorized.display()
+        ),
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn net(relay: &str, edge_door: Option<&str>) -> NetArgs {
         NetArgs {
@@ -531,6 +768,7 @@ mod tests {
             key: None,
             name: None,
             no_addrs: false,
+            role: None,
         }
     }
 
@@ -543,6 +781,21 @@ mod tests {
             .unwrap()
             .public();
         assert_eq!(hq_bridge::device_label(&id), hq_edge::device_label(&id));
+    }
+
+    #[test]
+    fn a_service_may_not_lead_to_the_main_web_port() {
+        let mut config = HqConfig::default();
+        assert!(bridge_services(Some(&config), None).unwrap().is_none());
+        config.ws_port = 5678;
+        config.bridge.services =
+            BTreeMap::from([("web".to_string(), "127.0.0.1:5678".to_string())]);
+        assert!(bridge_services(Some(&config), None).is_err());
+        config.bridge.services =
+            BTreeMap::from([("web".to_string(), "127.0.0.1:5690".to_string())]);
+        assert!(bridge_services(Some(&config), None).unwrap().is_some());
+        config.bridge.services = BTreeMap::from([("web".to_string(), "0.0.0.0:5690".to_string())]);
+        assert!(bridge_services(Some(&config), None).is_err());
     }
 
     #[test]
@@ -617,5 +870,87 @@ mod tests {
         for as_given in ["none", "default", "https://other.example.org"] {
             assert_eq!(resolve_relay(as_given, &db).unwrap(), as_given);
         }
+    }
+
+    fn targets(config: &HqConfig, role: Role) -> BTreeMap<String, hq_bridge::DoorTarget> {
+        bridge_services(Some(config), Some(role))
+            .unwrap()
+            .map(|s| s.targets)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_bridge_setup_machine_offers_a_loopback_gate_that_admits_loopback_only() {
+        let mut config = HqConfig::default();
+        assert!(
+            targets(&config, Role::Machine).is_empty(),
+            "no gate, nothing"
+        );
+        config.agent_host.gate_listen = Some("127.0.0.1:7747".into());
+        assert!(
+            targets(&config, Role::Machine).is_empty(),
+            "loopback not admitted"
+        );
+        config.agent_host.gate_allowed_sources = vec!["127.0.0.1".into()];
+        let offered = targets(&config, Role::Machine);
+        assert!(
+            matches!(offered.get(SVC_GATE), Some(hq_bridge::DoorTarget::Tcp(a)) if a.port() == 7747),
+            "{offered:?}"
+        );
+        assert!(setup_config(Some(&config), Role::Machine).gate);
+        assert!(
+            targets(&config, Role::Hub).is_empty(),
+            "a hub offers no gate"
+        );
+        // A gate on the tunnel stays where the owner put it, and is not offered.
+        config.agent_host.gate_listen = Some("100.64.0.2:7747".into());
+        config.agent_host.gate_allowed_sources = vec!["100.64.0.1".into()];
+        assert!(targets(&config, Role::Machine).is_empty());
+        assert!(!setup_config(Some(&config), Role::Machine).gate);
+    }
+
+    #[test]
+    fn a_bridge_setup_hub_offers_its_door_and_the_config_wins() {
+        let mut config = HqConfig::default();
+        assert!(targets(&config, Role::Hub).is_empty());
+        config.bridge.web_listen = Some("127.0.0.1:5690".into());
+        assert!(matches!(
+            targets(&config, Role::Hub).get(SVC_WEB),
+            Some(hq_bridge::DoorTarget::Tcp(a)) if a.port() == 5690
+        ));
+        assert!(setup_config(Some(&config), Role::Hub).web);
+        config.bridge.services =
+            BTreeMap::from([("web".to_string(), "127.0.0.1:5691".to_string())]);
+        assert!(matches!(
+            targets(&config, Role::Hub).get(SVC_WEB),
+            Some(hq_bridge::DoorTarget::Tcp(a)) if a.port() == 5691
+        ));
+    }
+
+    #[test]
+    fn bridge_setup_never_takes_a_configured_name_port_or_forward() {
+        let mut config = HqConfig::default();
+        config.agent_host.hosts.insert(
+            "laptop".into(),
+            serde_yaml::from_str("ssh: \"me@100.64.0.1\"").unwrap(),
+        );
+        let id = hq_bridge::key::load_or_create_key(&tempfile::tempdir().unwrap().path().join("k"))
+            .unwrap()
+            .public()
+            .to_string();
+        config.bridge.forwards = vec![hq_core::config::BridgeForward {
+            peer: id.to_uppercase(),
+            service: "web".into(),
+            listen: "127.0.0.1:47480".into(),
+        }];
+        let setup = setup_config(Some(&config), Role::Machine);
+        assert!(setup.reserved_names.contains(&"laptop".to_string()));
+        assert_eq!(setup.reserved_ports, [47_480]);
+        assert_eq!(setup.configured_forwards, [(id, "web".to_string())]);
+        assert!(
+            setup.authorized_keys.ends_with("gate_authorized_keys"),
+            "{:?}",
+            setup.authorized_keys
+        );
     }
 }

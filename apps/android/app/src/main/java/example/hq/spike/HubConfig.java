@@ -51,13 +51,23 @@ final class HubConfig {
             if (eq < 1) throw bad(i, "expected NAME=value");
             String name = line.substring(0, eq);
             String value = line.substring(eq + 1);
-            if (!isCredentialName(name)) throw bad(i, RESERVED.equals(name) ? "name reserved for the app" : "name not allowed");
-            if (value.length() > MAX_VALUE_CHARS) throw bad(i, "value too long");
-            if (hasControlChar(value)) throw bad(i, "control character in value");
+            String problem = entryProblem(name, value);
+            if (problem != null) throw bad(i, problem);
             if (out.put(name, value) != null) throw bad(i, "name repeated");
             if (out.size() > MAX_SECRETS) throw bad(i, "too many names");
         }
         return out;
+    }
+
+    /**
+     * Why a name and value may not be stored, or null when they may. The one rule behind secrets.in, the
+     * first-run screens and Settings; an empty value passes, because secrets.in uses it to remove a name.
+     */
+    static String entryProblem(String name, String value) {
+        if (!isCredentialName(name)) return RESERVED.equals(name) ? "name reserved for the app" : "name not allowed";
+        if (value.length() > MAX_VALUE_CHARS) return "value too long";
+        if (hasControlChar(value)) return "control character in value";
+        return null;
     }
 
     /** True for a name a credential file may set; the same rule filters what is already stored. */
@@ -97,6 +107,17 @@ final class HubConfig {
         Map<String, String> env = new LinkedHashMap<>(secrets);
         env.putAll(fixed);
         return env;
+    }
+
+    /**
+     * A relay stays off until it is switched on, and a switch is not a credential name, so a bot token stored
+     * through the app turns its relay on here, for the child only. It takes effect in Active mode.
+     */
+    static Map<String, String> relaySwitches(Map<String, String> secrets) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (secrets.containsKey("HQ_RELAY__TELEGRAM_TOKEN")) out.put("HQ_RELAY__TELEGRAM_ENABLED", "true");
+        if (secrets.containsKey("HQ_RELAY__DISCORD_TOKEN")) out.put("HQ_RELAY__DISCORD_ENABLED", "true");
+        return out;
     }
 
     /** The relays and the scheduler run only when files/mode says "active"; anything else is standby. */

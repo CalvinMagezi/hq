@@ -6,6 +6,7 @@ license.workspace = true
 description = "Native Bridge pairing: a one-time ticket, six typed digits, then reconnect by key over iroh"
 
 [dependencies]
+hq-core = { workspace = true }
 hq-db = { workspace = true }
 # Pinned exactly: the spike's lock file (the phone measurements in docs/plans/native-bridge/spike-f)
 # resolved 1.4.1, and iroh's API still moves between minor versions.
@@ -21,6 +22,10 @@ data-encoding = "2"
 qrcodegen = "1.8"
 subtle = "2"
 url = { workspace = true }
+
+# The host gate's key files, for setup after pairing (`setup.rs`). Unix only, like the gate.
+[target.'cfg(unix)'.dependencies]
+hq-gate = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

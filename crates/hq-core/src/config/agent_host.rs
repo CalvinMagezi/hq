@@ -20,6 +20,9 @@ pub fn detect_overrides_dir() -> std::path::PathBuf {
     super::HqConfig::hq_dir().join("detect")
 }
 
+/// The control socket `hq host serve` binds inside [`native_host_dir`]; the same name as in `hq-host`.
+pub const HOST_SOCKET_FILE: &str = "host.sock";
+
 pub fn native_host_dir() -> std::path::PathBuf {
     match std::env::var_os("HQ_HOST_DIR") {
         Some(dir) if !dir.is_empty() => dir.into(),

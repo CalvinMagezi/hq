@@ -29,6 +29,9 @@ env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.98.1"
   BUN_VERSION: "1.3.14"
+  # Caddy for the Android APK (linux/arm64), pinned by version and checksum like the other tools.
+  CADDY_VERSION: "2.11.7"
+  CADDY_ARM64_SHA256: "d8fc6d179a5d283028a472a5618564f6ad8a86fed513e64f032b3b0b7cc45e42"
 
 # Linux binaries are built on ubuntu-22.04 images so they only need glibc 2.35 and
 # run on Ubuntu 22.04 hosts and newer. A newer runner image links against a newer
@@ -131,10 +134,10 @@ jobs:
           - platform: linux-aarch64
             runner: ubuntu-22.04-arm
           - platform: darwin-aarch64
-            runner: macos-14
+            runner: macos-15
           # Intel Macs, cross-compiled on the Apple Silicon runner and checked under Rosetta.
           - platform: darwin-x86_64
-            runner: macos-14
+            runner: macos-15
             target: x86_64-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -371,3 +374,173 @@ jobs:
             gh release create channel-main --title "channel-main" --prerelease \
               --notes "Signed pointer to the latest main build. Not a downloadable build."
           gh release upload channel-main dist-release/channel-main.json dist-release/channel-main.json.minisig --clobber
+
+  # The same hq the release builds, for 64-bit Android, with the release key compiled in.
+  # No secrets, no environment: it runs repository build code.
+  android-hq:
+    name: Build hq for Android
+    if: github.ref == 'refs/heads/main'
+    needs: [version]
+    permissions:
+      contents: read # checkout only
+    uses: ./.github/workflows/android.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  # Builds the signed APK. This job runs Gradle with the app signing keystore, so it is a separate
+  # job from `android-publish`, which holds the minisign key and runs no build code. The keystore is
+  # written to a temporary file and deleted at the end, whatever happens.
+  android-apk:
+    name: Build Android APK
+    needs: [test, version, android-hq, web]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: read # checkout only
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hq-android-arm64
+          path: android-in/hq
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: web-dist
+          path: android-in/web
+
+      - name: Check hq and fetch the pinned Caddy
+        run: |
+          (cd android-in/hq && sha256sum -c hq-android-arm64.sha256)
+          mkdir -p android-in/caddy
+          url="https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_arm64.tar.gz"
+          curl -fsSL --retry 3 -o android-in/caddy.tar.gz "$url"
+          echo "$CADDY_ARM64_SHA256  android-in/caddy.tar.gz" | sha256sum -c -
+          tar -xzf android-in/caddy.tar.gz -C android-in/caddy caddy
+
+      - name: Install an Android platform
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+
+      - name: Check the Gradle wrapper jar
+        run: echo "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  apps/android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+
+      - name: Decode the keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] || { echo "ANDROID_RELEASE_KEYSTORE_B64 is not set in the release environment" >&2; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "HQ_RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build the release APK
+        working-directory: apps/android
+        env:
+          HQ_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          HQ_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          # versionCode rises with every release run, which is all Android needs to accept the update.
+          ./gradlew :app:assembleRelease --no-daemon --console=plain \
+            -Phq.bin="$GITHUB_WORKSPACE/android-in/hq/hq-android-arm64" \
+            -Phq.caddy="$GITHUB_WORKSPACE/android-in/caddy/caddy" \
+            -Phq.web="$GITHUB_WORKSPACE/android-in/web" \
+            -Phq.versionCode="$RUN_NUMBER" -Phq.versionName="$VERSION"
+
+      - name: Check the APK is signed by the release key
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          apk=apps/android/app/build/outputs/apk/release/app-release.apk
+          bash scripts/release/android-check.sh "$apk"
+          mkdir -p android-out
+          cp "$apk" android-out/agent-hq-android.apk
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-apk
+          path: android-out/agent-hq-android.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Delete the keystore
+        if: always()
+        run: |
+          if command -v shred > /dev/null; then shred -u "$RUNNER_TEMP/release.jks" 2> /dev/null || true; fi
+          rm -f "$RUNNER_TEMP/release.jks"
+
+  # Runs no build code: re-checks the APK, describes it, signs the description with the minisign key
+  # and attaches everything to the release `sign` published.
+  android-publish:
+    name: Sign and publish Android APK
+    needs: [version, sign, android-apk]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write # upload assets
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: ${{ needs.version.outputs.tag }}
+    steps:
+      - name: Refuse any ref but main
+        env:
+          REF: ${{ github.ref }}
+        run: '[ "$REF" = "refs/heads/main" ] || { echo "release runs from main only" >&2; exit 1; }'
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release
+            release
+          sparse-checkout-cone-mode: false
+
+      - name: Install pinned minisign and jq
+        run: |
+          dir=$(bash scripts/release/install-tools.sh "$RUNNER_TEMP/tools")
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: android-apk
+          path: android-out
+
+      - name: Describe the APK
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          [ "$(ls android-out)" = "agent-hq-android.apk" ] || { echo "android-out holds more than the APK" >&2; exit 1; }
+          bash scripts/release/android-channel.sh --apk android-out/agent-hq-android.apk --version "$VERSION" --tag "$TAG" \
+            --repo "$GH_REPO" --out android-out/android-channel.json
+          (cd android-out && sha256sum agent-hq-android.apk > agent-hq-android.apk.sha256)
+          cat android-out/android-channel.json
+
+      - name: Sign the update manifest
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          bash scripts/release/sign.sh android-out/android-channel.json
+          minisign -V -p release/minisign.pub -m android-out/android-channel.json -x android-out/android-channel.json.minisig
+
+      - name: Attach to the release and the main channel
+        run: |
+          gh release upload "$TAG" android-out/agent-hq-android.apk android-out/agent-hq-android.apk.sha256 \
+            android-out/android-channel.json android-out/android-channel.json.minisig
+          gh release upload channel-main android-out/android-channel.json android-out/android-channel.json.minisig --clobber

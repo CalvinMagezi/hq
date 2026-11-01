@@ -8,14 +8,15 @@ name = "hq"
 path = "src/main.rs"
 
 [features]
-default = ["discord", "telegram"]
+default = ["discord", "telegram", "bridge"]
 discord = ["hq-relay/discord"]
 telegram = ["hq-relay/telegram"]
 # `hq net tunnel`: this device as a userspace WireGuard peer (the phone app builds with it; a
 # server build leaves it out). Unix only: the dependency is not pulled on Windows.
 tunnel = ["dep:hq-tunnel", "dep:libc", "dep:zeroize"]
-# `hq bridge`: pair machines with a QR code and reach them by key over iroh. Off by default, and
-# nothing listens until a command is run. Unix only: the dependencies are not pulled on Windows.
+# `hq bridge`: pair machines with a QR code and reach them by key over iroh. On by default so every
+# installed laptop or server can pair with a phone; nothing listens until a command is run. Unix
+# only: the dependencies are not pulled on Windows, where the commands are compiled out.
 bridge = ["dep:hq-bridge", "hq-edge/invite"]
 
 [dependencies]

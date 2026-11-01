@@ -3337,7 +3337,9 @@ version = "0.9.1"
 dependencies = [
  "anyhow",
  "data-encoding",
+ "hq-core",
  "hq-db",
+ "hq-gate",
  "iroh",
  "qrcodegen",
  "rand 0.8.8",
@@ -3513,6 +3515,7 @@ dependencies = [
  "hq-bridge",
  "hq-core",
  "hq-db",
+ "hq-host",
  "libc",
  "qrcodegen",
  "reqwest 0.12.28",

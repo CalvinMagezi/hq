@@ -43,9 +43,17 @@ interface Peer {
   paired_at: number
   last_seen_at: number | null
 }
+interface Forward {
+  service: string
+  peer_short: string
+  listen: string
+  running_elsewhere: boolean
+}
 interface Pairing {
   running: boolean
   host: { id: string; short_id: string; name: string; addrs: string[] } | null
+  services: string[]
+  forwards: Forward[]
   ticket: Ticket | null
   pending: Pending[]
   peers: Peer[]
@@ -54,15 +62,6 @@ interface Pairing {
 type Submitted =
   | { result: 'accepted' | 'declined' | 'too_late' | 'not_digits' | 'unknown' }
   | { result: 'wrong_digits'; tries_left: number }
-interface Connect {
-  reach: 'unreachable' | 'needs_sign_in' | 'ok'
-  enabled: boolean
-  connector_url: string | null
-  armed_until: number | null
-  grants: number
-  local_consent: string
-  notes: string[]
-}
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const node = document.getElementById(id)
@@ -280,6 +279,18 @@ function renderPeers(peers: Peer[]) {
   }
 }
 
+function renderForwards(state: Pairing) {
+  if (unchanged('forwards', [state.services, state.forwards])) return
+  const list = $('forwards')
+  list.replaceChildren()
+  for (const name of state.services) list.append(el('li', `This computer offers its ${name} service to paired devices.`))
+  for (const f of state.forwards) {
+    const where = f.running_elsewhere ? 'running elsewhere' : 'listening'
+    list.append(el('li', `The ${f.service} service of device ${f.peer_short} is on ${f.listen} (${where}).`))
+  }
+  $('forwards-block').hidden = list.children.length === 0
+}
+
 async function refreshDevices() {
   const state = await invoke<Pairing>('pairing_snapshot')
   $('devices-off').hidden = state.running
@@ -295,6 +306,7 @@ async function refreshDevices() {
     $('ticket-expires').textContent = `at ${clock(state.ticket.expires_at)}`
     if (state.ticket.qr) drawQr($<HTMLCanvasElement>('qr'), state.ticket.qr)
   }
+  renderForwards(state)
   renderPending(state.pending)
   renderPeers(state.peers)
   if (state.peers_error) $('devices-error').textContent = state.peers_error
@@ -326,57 +338,10 @@ $('cancel-ticket').addEventListener('click', () =>
 )
 $('copy-link').addEventListener('click', () => void copy($('ticket-link').textContent ?? ''))
 
-// Connect Claude
-async function refreshClaude() {
-  const view = await invoke<Connect>('connect_status')
-  const state = $('claude-state')
-  state.replaceChildren()
-  const label = {
-    unreachable: 'The HQ host is not running.',
-    needs_sign_in: 'HQ did not accept this app. Set web_auth_token in the HQ config.',
-    ok: view.enabled ? 'The connector is on.' : 'The connector is off.',
-  }[view.reach]
-  state.append(el('span', label, 'badge'))
-  if (view.reach === 'ok' && view.enabled) state.append(el('span', `${view.grants} connected`, 'muted'))
-  $('claude-url-block').hidden = !view.connector_url
-  $('claude-url').textContent = view.connector_url ?? ''
-  const notes = $('claude-notes')
-  notes.replaceChildren(...view.notes.map((n) => el('li', n)))
-  const open = view.armed_until !== null && view.armed_until * 1000 > Date.now()
-  $('armed').textContent = open ? `Accepting one new connection until ${clock(view.armed_until ?? 0)}.` : 'Not accepting new connections.'
-  $<HTMLButtonElement>('arm').disabled = !(view.reach === 'ok' && view.enabled)
-  $<HTMLButtonElement>('disarm').disabled = !open
-  $('local-consent').textContent = view.local_consent
-}
-
-$('arm').addEventListener('click', () =>
-  guarded('claude-error', async () => {
-    await invoke('connect_arm')
-    await refreshClaude()
-  }),
-)
-$('disarm').addEventListener('click', () =>
-  guarded('claude-error', async () => {
-    await invoke('connect_disarm')
-    await refreshClaude()
-  }),
-)
-$('copy-url').addEventListener('click', () => void copy($('claude-url').textContent ?? ''))
-$('signin').addEventListener('click', () =>
-  guarded('claude-error', async () => {
-    const link = await invoke<string>('connect_sign_in_link')
-    $('signin-link').textContent = link
-    $('signin-out').hidden = false
-  }),
-)
-$('open-signin').addEventListener('click', () =>
-  guarded('claude-error', () => invoke('open_in_browser', { url: $('signin-link').textContent ?? '' })),
-)
-
 // Refresh
 async function refresh() {
   const visible = TABS.find((t) => !$(`tab-${t}`).hidden)
-  const work = { host: refreshHost, devices: refreshDevices, claude: refreshClaude }[visible ?? 'host']
+  const work = { host: refreshHost, devices: refreshDevices, claude: async () => {} }[visible ?? 'host']
   try {
     await work()
   } catch (e) {

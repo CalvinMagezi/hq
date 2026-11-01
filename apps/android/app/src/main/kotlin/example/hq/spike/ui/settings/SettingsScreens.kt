@@ -1,5 +1,7 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.ui.firstrun.FirstRunWords
+import example.hq.spike.ui.firstrun.StoredKeysPage
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -62,6 +64,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.update.UpdateLogic
+import example.hq.spike.update.UpdateState
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.shell.HqIcons
@@ -120,6 +124,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.CaptureWidgets -> "Capture and widgets"
     SettingsPage.SetupApp -> "Set up"
     SettingsPage.PairApp -> "Pair"
+    SettingsPage.StoredKeys -> FirstRunWords.KEYS_TITLE
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -155,6 +160,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.CaptureWidgets -> CaptureWidgets(ui, actions)
                 SettingsPage.SetupApp -> SetupApp(ui, actions)
                 SettingsPage.PairApp -> PairApp(ui, actions)
+                SettingsPage.StoredKeys -> StoredKeysPage()
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
                 SettingsPage.Computers -> ReadOnlyList(ui, "No computer is listed.") { Facts(SettingsWords.computerRows(ui.snap.settings)) }
@@ -1056,6 +1062,8 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
                 FactRow("HQ", ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: "Not answering"),
             ) + listOfNotNull(SettingsWords.notesCount(ui.snap)?.let { FactRow("Notes", it) }),
         )
+        Label("Updates")
+        UpdateGroup(ui, actions)
         Label("Support")
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = actions.onCopyDiagnostics).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1067,6 +1075,30 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
                 Text(if (ui.restarting) "Restarting HQ\u2026" else "Restart HQ", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
                 if (ui.restarting) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
             }
+        }
+    }
+}
+
+/** Checks for a newer AgentHQ build on GitHub Releases; the install only starts when the owner taps it. */
+@Composable
+private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
+    val state = ui.update
+    val working = state == UpdateState.Checking || state == UpdateState.Downloading
+    Group {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !working, role = Role.Button) { if (state is UpdateState.Available) actions.onInstallUpdate(state.manifest) else actions.onCheckUpdate() }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                Text(if (state is UpdateState.Available) "Install update" else "Check for updates", style = HqType.BodyBold, color = Mts.Ink)
+                Text(UpdateLogic.words(state), style = HqType.BodySm, color = if (state is UpdateState.Failed) Mts.Amber else Mts.InkMuted)
+            }
+            if (working) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+        }
+        Divider()
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { actions.onUpdateMain(!ui.updateMain) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                Text("Follow every build of main", style = HqType.BodyBold, color = Mts.Ink)
+                Text(if (ui.updateMain) "Newest builds, before they are promoted" else "Only builds the owner promoted", style = HqType.BodySm, color = Mts.InkMuted)
+            }
+            Text(if (ui.updateMain) "On" else "Off", style = HqType.BodySmBold, color = Mts.Ink)
         }
     }
 }

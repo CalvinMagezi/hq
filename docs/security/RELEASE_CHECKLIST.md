@@ -29,6 +29,17 @@ must be green on that exact tag before anything is published.
       and `minisign -V -p release/minisign.pub` accepts the signature. The
       key used is the same `MINISIGN_KEY` as the manifest, available only to
       the `release` environment; the Lite build job has no secrets.
+- [ ] **Android APK.** The newest main release carries `agent-hq-android.apk`,
+      its `.sha256`, and `android-channel.json` with `android-channel.json.minisig`
+      (`minisign -V -p release/minisign.pub` accepts it). `apksigner verify
+      --print-certs` shows exactly one signer whose SHA-256 is
+      `FC:6B:48:A7:9F:DC:3D:EA:90:45:86:4B:7A:09:A0:F9:CC:99:2C:B2:40:66:A3:D6:43:91:FF:41:2A:07:29:5A`
+      (the release workflow fails otherwise, through `scripts/release/android-check.sh`) and the
+      app id is `online.agenthq.app`. The keystore (`ANDROID_RELEASE_KEYSTORE_B64`) exists only in the
+      `release` environment and in an offline backup; the build job deletes its decoded copy. The
+      keystore job runs Gradle and has no minisign key; the job that holds the minisign key runs no
+      build code. Plan: before 2027, register the app id and this signing key in Google's Android
+      developer verification (not enforced in Uganda earlier), and keep the key for the life of the id.
 - [ ] **Personal defaults.** No owner-specific hostnames, paths or endpoints
       in default config.
 

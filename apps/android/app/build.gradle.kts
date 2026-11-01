@@ -6,23 +6,58 @@ plugins {
 
 // The hq and Caddy binaries and the built web app are inputs, not repository files. Pass them as
 // -Phq.bin=, -Phq.caddy= and -Phq.web= (README). Without them the APK still builds, minus hq, which is
-// what CI needs.
+// what CI needs for its unit tests and lint.
 val hqBin = providers.gradleProperty("hq.bin")
 val caddyBin = providers.gradleProperty("hq.caddy")
 val webDir = providers.gradleProperty("hq.web")
 val keystore = providers.gradleProperty("hq.keystore")
 val generated = layout.buildDirectory.dir("generated/hq")
 
-// A phone build needs all four inputs. A missing or misspelled path would otherwise be skipped and the APK
-// would install over the working app without hq, or signed with the wrong key, so fail here instead.
-val phoneInputs = mapOf("hq.bin" to hqBin, "hq.caddy" to caddyBin, "hq.web" to webDir, "hq.keystore" to keystore)
-if (phoneInputs.values.any { it.isPresent }) {
-    phoneInputs.forEach { (name, value) ->
-        val path = value.orNull
-            ?: throw GradleException("-P$name is missing: a phone build needs hq.bin, hq.caddy, hq.web and hq.keystore together")
-        if (!File(path).isAbsolute || !File(path).exists()) {
-            throw GradleException("-P$name=$path is not an existing absolute path")
+// The release key comes from the environment (CI decodes it from a secret); it is never a repository file
+// or a Gradle property, so it cannot leak through a build scan or a checked-in gradle.properties.
+val releaseKeystore = providers.environmentVariable("HQ_RELEASE_KEYSTORE")
+val releaseKeystorePassword = providers.environmentVariable("HQ_RELEASE_KEYSTORE_PASSWORD")
+val releaseKeyAlias = providers.environmentVariable("HQ_RELEASE_KEY_ALIAS")
+val versionCodeProperty = providers.gradleProperty("hq.versionCode")
+val versionNameProperty = providers.gradleProperty("hq.versionName")
+
+fun requireAbsolutePath(name: String, path: String) {
+    if (!File(path).isAbsolute || !File(path).exists()) {
+        throw GradleException("-P$name=$path is not an existing absolute path")
+    }
+}
+
+// A phone build needs hq, Caddy and the web app together. A missing or misspelled path would otherwise be
+// skipped and the APK would install over the working app without hq, so fail here instead.
+val hqInputs = mapOf("hq.bin" to hqBin, "hq.caddy" to caddyBin, "hq.web" to webDir)
+if (hqInputs.values.any { it.isPresent } || keystore.isPresent) {
+    hqInputs.forEach { (name, value) -> value.orNull?.let { requireAbsolutePath(name, it) } }
+    keystore.orNull?.let { requireAbsolutePath("hq.keystore", it) }
+}
+
+// Checked when the task graph is known, so a debug build, tests and lint need none of the release inputs.
+gradle.taskGraph.whenReady {
+    val packaged = allTasks.map { it.path }
+    fun missingInputs() = hqInputs.filterValues { !it.isPresent }.keys.map { "-P$it" }
+    if (":app:packageRelease" in packaged) {
+        val missingKey = mapOf(
+            "HQ_RELEASE_KEYSTORE" to releaseKeystore,
+            "HQ_RELEASE_KEYSTORE_PASSWORD" to releaseKeystorePassword,
+            "HQ_RELEASE_KEY_ALIAS" to releaseKeyAlias,
+        ).filterValues { !it.isPresent }.keys
+        if (missingKey.isNotEmpty()) {
+            throw GradleException(
+                "A release build is signed with the release key and with nothing else. Set ${missingKey.joinToString()} " +
+                    "(CI does this from its secrets; see apps/android/README.md). Never build a release locally without them."
+            )
         }
+        if (!File(releaseKeystore.get()).isFile) throw GradleException("HQ_RELEASE_KEYSTORE=${releaseKeystore.get()} is not a file")
+        if (missingInputs().isNotEmpty()) {
+            throw GradleException("A release build needs hq, Caddy and the web app: ${missingInputs().joinToString()} is missing")
+        }
+    }
+    if (":app:packageDebug" in packaged && hqInputs.values.any { it.isPresent } && !keystore.isPresent) {
+        throw GradleException("-Phq.keystore is missing: a phone build needs hq.bin, hq.caddy, hq.web and hq.keystore together")
     }
 }
 
@@ -39,15 +74,19 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        // The id and the signing key must stay as they are: the installed phone keeps its vault, its
-        // Keystore key and its sessions only if an update has the same id and the same signature.
+        // The public id and the release key are fixed from here on: an installed phone keeps its vault, its
+        // Keystore key and its sessions only if an update has the same id and the same signature. The Java
+        // and Kotlin package (namespace) is a different thing and stays example.hq.spike.
         // -Phq.appId= installs a second copy beside the real app for a test on a phone (its own data, its own
         // Keystore key); it is never a release id. Leave it out for the build that updates the installed app.
-        applicationId = providers.gradleProperty("hq.appId").getOrElse("example.hq.spike")
+        applicationId = providers.gradleProperty("hq.appId").getOrElse("online.agenthq.app")
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "hub"
+        // CI passes a number that only grows (the workflow run number); a phone refuses a lower one.
+        versionCode = versionCodeProperty.map(String::toInt).getOrElse(1)
+        versionName = versionNameProperty.getOrElse("dev")
+        // shortcuts.xml cannot use a manifest placeholder, so its target package is a resource.
+        resValue("string", "hq_application_id", applicationId!!)
         ndk { abiFilters += "arm64-v8a" }
     }
 
@@ -58,12 +97,29 @@ android {
             keyAlias = "debug"
             keyPassword = "android"
         }
+        create("release") {
+            releaseKeystore.orNull?.let { storeFile = file(it) }
+            // One password protects the store and the key.
+            storePassword = releaseKeystorePassword.orNull
+            keyAlias = releaseKeyAlias.orNull
+            keyPassword = releaseKeystorePassword.orNull
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
     }
     buildTypes {
         debug {
             // Stays debuggable on purpose: `adb shell run-as` is how credentials and a restored vault are placed
             // until the app has its own credential form (see TECHDEBT.md).
             if (keystore.isPresent) signingConfig = signingConfigs.getByName("hq")
+        }
+        release {
+            isDebuggable = false
+            // hq and Caddy are shipped as they are, so there is no code to shrink.
+            isMinifyEnabled = false
+            // Left unset without the key; the task graph check above stops the build first.
+            if (releaseKeystore.isPresent) signingConfig = signingConfigs.getByName("release")
         }
     }
 

@@ -1,12 +1,13 @@
 # Joining a machine to your HQ
 
 A machine that should run coding agents for your HQ (a laptop, a workstation, a WSL2 install on
-Windows) pairs with it in four steps. A person or an agent can do all of them; the commands
-print what to do next.
+Windows) joins it by pairing with the phone: scan, type six digits, done. Pairing sets up both
+sides with no configuration ([PAIRING.md](PAIRING.md), "What pairing sets up"). The older path
+over Tailscale with a join code still works; it is at the end of this page.
 
-You need: the machine and the HQ on the same Tailscale tailnet, an `hq` binary on the machine
-(`~/.local/bin/hq`, from a [release](https://github.com/CalvinMagezi/hq/releases)), and the coding
-agent you want (for example Claude Code) installed and signed in on the machine.
+You need: an `hq` binary on the machine built with pairing (`~/.local/bin/hq`, from a
+[release](https://github.com/CalvinMagezi/hq/releases)), and the coding agent you want (for example
+Claude Code) installed and signed in on the machine.
 
 ## Get `hq` on the machine
 
@@ -21,7 +22,43 @@ tar xzf hq.tgz && mkdir -p ~/.local/bin && install -m 755 hq ~/.local/bin/hq
 
 Releases ship a `SHA256SUMS` file next to the archives; check the archive against it.
 
-## 1. On the machine
+## Pair the machine with the phone
+
+1. On the machine, let the host's gate listen on loopback, where bridge traffic arrives, in
+   `~/.hq/config.yaml`:
+
+   ```yaml
+   agent_host:
+     gate_listen: 127.0.0.1:7747
+     gate_allowed_sources: [127.0.0.1]
+   ```
+
+   and install the host as a login service (`hq host install`; a host already running needs a
+   restart to read the change).
+2. On the phone, open paired devices and show the pairing code. On the machine:
+
+   ```
+   hq bridge join
+   ```
+
+   and paste or scan the link. The machine shows six digits; type them on the phone.
+3. On the machine, keep the bridge up (as a login service, or in a terminal):
+
+   ```
+   hq bridge serve
+   ```
+
+The phone now lists the machine as a host, its agents call back to the phone's HQ, and `hq task` on
+the machine reaches the phone's tasks. Revoking the machine on the phone, or the phone on the
+machine (`hq bridge revoke <id>`), undoes it.
+
+## Older setup: Tailscale and a join code
+
+For an HQ that is not on a phone, or a machine without pairing, the machine and the HQ can be on the
+same Tailscale tailnet instead, joined in four steps. A person or an agent can do all of them; the
+commands print what to do next.
+
+### 1. On the machine
 
 ```
 hq host join
@@ -40,7 +77,7 @@ folder again each time it starts, so deleting it is harmless. On macOS the syste
 Security, Files and Folders). Until then the Workbench page shows that computer as unable to start
 agents here and says why.
 
-## 2. On the HQ
+### 2. On the HQ
 
 ```
 hq host add hqjoin1.…
@@ -49,12 +86,12 @@ hq host add hqjoin1.…
 or have the HQ's agent call the `host_add` tool with the code. It creates a key for the machine,
 records it as a host, and prints one command that starts with `hq host authorize`.
 
-## 3. On the machine
+### 3. On the machine
 
 Run that `hq host authorize …` command. It lets the HQ's key (and only that key, and only from the
 HQ's address) call the host.
 
-## 4. On the HQ
+### 4. On the HQ
 
 ```
 hq host check <name>
@@ -74,12 +111,13 @@ and read and write only a short list of paths. See [AGENT_HOST.md](AGENT_HOST.md
 
 The host runs on Linux and macOS, so on Windows it runs inside WSL2 (Ubuntu). The WSL2 setup,
 including the Tailscale and sandbox settings WSL2 needs, is in [WINDOWS.md](WINDOWS.md); once
-Ubuntu is ready, follow steps 1 to 4 above inside it.
+Ubuntu is ready, pair from inside it as above (or follow the older steps 1 to 4).
 
 ## If you are an agent setting this up
 
-Run the commands exactly as written, in order, and read each one's output before the next: the join
-code goes to the HQ, the `authorize` command comes back to the machine. Do not run
+Run the commands exactly as written, in order, and read each one's output before the next. With
+pairing, the person types the six digits on the phone; never type them for them. On the older path,
+the join code goes to the HQ and the `authorize` command comes back to the machine. Do not run
 `hq host serve --allow-unsandboxed` or edit `authorized_keys` by hand; `hq host authorize` writes the
 pinned line. If `hq host install` refuses the binary's location, copy `hq` to `~/.local/bin` and run it
 from there.

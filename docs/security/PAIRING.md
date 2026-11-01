@@ -39,11 +39,11 @@ alone. The same exchange, under another protocol name, registers a device with a
 ## 3. Listeners
 
 Nothing in `hq-bridge` starts on its own, and the `hq` binary does not call it at start-up.
-`hq bridge` exists only when built with the `bridge` feature (off by default, Unix only).
+`hq bridge` is in every Linux and macOS build (the default `bridge` feature); Windows builds leave it out.
 
 | Listener | Exists | Accepts | From |
 |---|---|---|---|
-| Long-term endpoint, one UDP socket | From `Bridge::start` with a handler until `shutdown`. Without a handler it only dials out and accepts no protocol | `hq/bridge/1` | Peers on the paired list; others are closed at the handshake (403) |
+| Long-term endpoint, one UDP socket | From `Bridge::start` with a handler until `shutdown`. Without a handler it only dials out and accepts no protocol | `hq/bridge/1`, and `hq/svc/1` when services are configured (section 14) | Peers on the paired list; others are closed at the handshake (403) |
 | Throwaway endpoint, one UDP socket per open ticket | From `Bridge::open_ticket` (or `OpenTicket::open`) until the ticket ends | `hq/pair/<v>` or `hq/register/<v>`, one purpose per ticket | Anyone who has the ticket, until it is used, expires, is burned, or the source is shut out |
 
 On Android the phone app runs `hq bridge run` as a child process of the hub service (section 12). It
@@ -360,3 +360,79 @@ door, where TLS, the path filter and OAuth still stand in the way. The piped str
 to a loopback port: any bug in the door is reachable by the edge, which is why the door is the
 connector's own gate (`docs/security/CONNECTOR_TLS.md`) and nothing else.
 
+## 14. Services and forwards between paired machines
+
+Paired machines reach each other's services over a third protocol name, `hq/svc/1`
+(`crates/hq-bridge/src/services.rs`). The first bytes of a stream name a service; the machine that
+offers it maps the name to a loopback target from its own configuration and pipes the stream there.
+A forward is the client side: a loopback port whose connections each become one stream.
+
+| # | Who | Tries | What happens | Test |
+|---|---|---|---|---|
+| S1 | A stranger, or the edge | Opens `hq/svc/1` | Closed at the handshake: the gate admits paired peers only, as for `hq/bridge/1` | `a_machine_that_is_not_paired_gets_nothing` |
+| S2 | A paired peer | Names a service this machine does not offer, or a malformed name | One status byte says "unknown" and the stream ends; nothing is dialed. A name is 1 to 32 bytes of `a-z0-9-` | `an_unknown_service_is_refused_by_name`, `names_are_short_lowercase_ascii` |
+| S3 | A paired peer | Aims a stream at another address | The protocol carries a name, never an address. Targets are a loopback address with a fixed port or an absolute socket path, checked at start | `services_lead_to_loopback_ports_or_socket_paths_only` |
+| S4 | A paired peer | Uses the web app as loopback, to skip sign-in | The web server's own port may not be a service (`hq bridge serve` refuses it). The paired-devices door (`bridge.web_listen`) opens only with the configured web token set (a device token alone is not enough: revoking the last one would turn sign-in off) and `HQ_MCP_DEV_NO_AUTH` off. It strips every forwarding and tunnel-identity header a device sends and marks each request as forwarded, so the development switch cannot apply even if turned on later | `a_service_may_not_lead_to_the_main_web_port`, `stays_shut_without_sign_in_or_with_the_dev_switch` |
+| S5 | A paired peer | Uses the connector through the bridge, or a connector grant on `/mcp` | The paired-devices door answers 404 for `/oauth/*`, `/.well-known/*` and `/mcp/*`, and passes `/mcp` only with a configured API key or the session token of an agent HQ launched (`agent_host.agent_mcp_url`): a connector grant or the web token is refused before any handler runs, and a revoked session token is refused like any other. The two doors share no path and no credential | `serves_the_owners_api_and_keyed_mcp_and_nothing_of_the_connectors` |
+| S6 | A revoked peer | Keeps an open stream | `Bridge::revoke` closes its connections at once. A revoke from another process is seen within a second on connections the peer opened (each rechecks the list), and by a forward before its next local connection, which then closes the connection it kept to that peer | `revoking_closes_open_streams_and_refuses_new_ones`, `a_forward_stops_when_its_peer_is_revoked_from_another_process` |
+| S7 | A paired peer, or a local process | Opens many streams or local connections | At most 64 service streams piped at once over all peers, extra ones dropped and counted; a direction silent for an hour is ended. A forward handles 256 local connections at once and gives up dialing after 20 s | shared with the edge door (E6) |
+| S8 | Another local user | Connects to a forward's port | A forward listens on loopback, so any local process can use it, with whatever credentials the far service asks for (the web token, an API key, the host gate's signed challenge). Use forwards on single-user machines | residual risk |
+
+Departure from the two-doors plan: `docs/plans/zero-setup-pairing.md` keeps `/mcp` off the
+own-devices door entirely. The laptop needs the phone's `/mcp` for `task_peer` and `remote_mcp`, so
+this door serves it to API keys, which is the credential that path already used before the
+bridge. Agents HQ launches on a paired laptop call back to `/mcp` with their own session token, so
+that token is accepted too: it is minted per session, scoped by the session allowlist and revoked
+when the session ends. Connector grants still work only on the connector's own door.
+
+Residual risks: a paired device is trusted with whatever the services it can name lead to, so offer
+only what the owner's other devices need. The relay (when one is used) sees that two machines talk
+and how much, never content.
+
+## 15. Setup after pairing (`hq/setup/1`)
+
+A fourth protocol name, `hq/setup/1` (`crates/hq-bridge/src/setup.rs`), wires a hub and a machine
+once they are paired (`docs/PAIRING.md`, "What pairing sets up"; design in
+`docs/plans/pairing-autoconfig.md`). The pairing protocol itself is unchanged: a peer that does not
+speak setup stays paired with nothing set up.
+
+What each message may set:
+
+- **Machine to hub** `{v, role:"machine", name, gate, mcp_port}`. `name` becomes the hub's host name,
+  only as a slug (lowercase letters, digits and `-`, at most 23 characters, the peer id's first 8 hex
+  added when the name is taken, built in or configured); it is never used as given. `gate` says
+  whether the hub should expect the service `gate`. `mcp_port` is the machine's own forward port,
+  used only to write the URL agents on that machine call back to
+  (`http://127.0.0.1:<mcp_port>/mcp`); it must lie from 47400 to 47999, and the hub listens on
+  nothing because of it.
+- **Hub to machine** `{v, role:"hub", name, web, mcp_key, gate_key}`. `name` becomes the machine's
+  name for the hub, as a slug. `mcp_key` is a per-device key (`hqd_` and 64 hex), or empty when the
+  hub already holds a live one for this machine. `gate_key` is written to the machine's
+  `gate_authorized_keys` with `from=127.0.0.1` and the label `bridge:<first 8 hex of the hub's id>`,
+  through the gate's own checked file code, unless that line is already there.
+
+Neither message carries an address, and each side picks its own ports. The rules and the test that
+holds each one:
+
+| # | Who | Tries | What happens | Test |
+|---|---|---|---|---|
+| U1 | A stranger, or the edge | Opens `hq/setup/1` | Closed at the handshake: the gate admits paired peers only. Nothing is stored or minted | `a_stranger_gets_nothing_and_two_machines_set_nothing_up` |
+| U2 | A paired machine | Pairs with another machine, or a hub sends a machine's message | Only a hub accepts the protocol, and a hub refuses a message that says `role:"hub"`; a machine refuses an answer that is not from a hub. Two machines or two hubs set nothing up | `a_stranger_gets_nothing_and_two_machines_set_nothing_up`, `messages_with_unknown_fields_a_wrong_version_or_too_many_bytes_are_refused` |
+| U3 | A paired peer | Sends more than 4 KiB, an unknown field (an address, say), a missing field or another version | The message is refused before anything is stored, and the connection is closed | `a_bad_message_from_a_paired_peer_sets_nothing_up`, `messages_with_unknown_fields_a_wrong_version_or_too_many_bytes_are_refused` |
+| U4 | A paired peer | Picks a name that is a path (`../../x`), a built-in host or a configured one | The name is cut to a slug and suffixed when taken, so it can never name a file outside `~/.hq/gate/` or replace a configured host | `a_chosen_name_becomes_a_plain_slug_and_never_a_path`, `bridge_setup_never_takes_a_configured_name_port_or_forward` |
+| U5 | A paired machine | Runs setup again, to collect more keys | A machine with a setup row sends nothing. A hub that gets a message for a peer it already set up keeps the host name, the port and the one live key, and answers with an empty key: there is never more than one live key per device. Only a new pairing (which needs the six digits again) starts setup over: `bridge::add_peer` deletes the old row and revokes the old key in its transaction | `running_setup_again_keeps_the_ports_and_mints_no_second_key`, `pairing_again_after_a_one_sided_revoke_gets_a_fresh_key`, `pairing_an_active_peer_again_starts_its_setup_over` |
+| U6 | Anyone with the machine's key | Uses it on the hub | It opens `/mcp` with the owner's full scope (owner decision, 2026-10-31) on the paired-devices door and the main port. The hub stores only its sha256. The connector's TLS door refuses it like every credential that is not a connector grant | `a_paired_devices_key_has_full_scope_and_dies_with_the_pairing`, `a_paired_devices_key_opens_mcp_until_the_device_is_revoked`, `the_connector_door_never_accepts_the_credentials_of_the_own_devices_door` |
+| U7 | A revoked peer | Keeps using what setup gave it | `bridge::revoke` revokes the device key and deletes the setup row in the same transaction, from every caller (the CLI, the phone's control loop, the desktop app, `Bridge::revoke`). The running bridge closes the setup forward and, on a machine, removes the hub's gate line at once or within two seconds when the revoke came from another process | `revoking_the_peer_revokes_its_key_and_deletes_its_setup`, `revoking_on_the_machine_undoes_its_side`, `revoking_on_the_hub_undoes_its_side`, `a_revoke_from_another_process_is_swept_by_the_running_bridge` |
+| U8 | Setup | Moves the owner's gate, or rewrites their config | Never. The machine offers `gate` only when `agent_host.gate_listen` is a loopback address in `gate_allowed_sources`; the hub offers `web` only with `bridge.web_listen`. A configured service, forward, host or remote MCP name wins over setup's. Nothing is written to `config.yaml` | `a_bridge_setup_machine_offers_a_loopback_gate_that_admits_loopback_only`, `a_bridge_setup_hub_offers_its_door_and_the_config_wins`, `a_host_configured_by_hand_wins` |
+| U9 | Another local user | Reads the machine's stored key | The key sits in the machine's database (`bridge_setup.mcp_key`), the same trust as `remote_mcp.api_key` in the config today. Single-user machines, as for forwards (S8) | residual risk |
+
+Removing a gate line touches only lines whose label is exactly `bridge:` and eight lowercase hex
+characters with no setup row behind them; every other line is kept byte for byte, and the file is
+replaced whole after the same ownership and mode checks the gate uses when it reads it
+(`removing_drops_only_the_picked_lines_and_keeps_the_rest_as_written`).
+
+Residual risks: the machine's key opens the hub's whole `/mcp`, so a machine that is stolen while
+paired has the owner's tools until it is revoked. The hub's gate key for a revoked machine stays in
+`~/.hq/gate/`; the machine no longer authorizes it once it revokes too, and the hub never offers it
+anything else. A revoke reaches only the side that made it; the other side's forward stops working
+because the gate refuses the revoked key, and its row stays until it revokes as well.

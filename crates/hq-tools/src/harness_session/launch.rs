@@ -339,7 +339,10 @@ fn mcp_access(
     harness: &Harness,
     session_id: &str,
 ) -> Option<McpAccess> {
-    let Some(url) = agent_host_config().agent_mcp_url else {
+    // A machine paired through the bridge calls back through its own forward to this hub.
+    let cfg = agent_host_config();
+    let setup_url = crate::agent_host::bridge_hosts::mcp_url_in(db, &cfg, host.name());
+    let Some(url) = setup_url.or(cfg.agent_mcp_url) else {
         // No endpoint now: an older secret of a resumed session must not revive.
         let id = session_id.to_string();
         let _ = db.with_conn(move |c| hq_db::session_tokens::revoke(c, &id));

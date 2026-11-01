@@ -154,7 +154,10 @@ the web app, list every dialog the task's sessions and their teams wait on the o
 comes with its question, command or path, and options, for example a command a policy left to
 you or a question an agent asked. Allow once and Decline there answer through the same route
 as the phone's notification buttons, so a dialog that moved on is refused and the answer is
-recorded with who gave it.
+recorded with who gave it. The phone's Helpers screen does the same: `GET /api/harness-sessions`
+carries each running session's open dialog as `decision` (`item_id`, `seq`, `options`,
+`question`), and every screen that answers uses that alert when there is one. Only a helper
+with no alert, such as one on an older server, is answered by reading its terminal and sending keys.
 
 ## Following sessions by events
 

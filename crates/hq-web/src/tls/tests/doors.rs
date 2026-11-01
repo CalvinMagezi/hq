@@ -125,6 +125,7 @@ async fn the_connector_door_never_accepts_the_credentials_of_the_own_devices_doo
         .with_conn(|c| hq_db::session_tokens::mint(c, "sess-1"))
         .unwrap();
     let grant = mint_grant(&w.state);
+    let paired_key = crate::mcp_http::paired_device_key(&w.state.db, "aa11");
     let (own_addr, _task) = own_devices_door(w.router.clone()).await;
 
     // What door 1 accepts today.
@@ -173,6 +174,14 @@ async fn the_connector_door_never_accepts_the_credentials_of_the_own_devices_doo
         (
             "web token as a key",
             vec![("x-api-key", WEB_TOKEN.to_string())],
+        ),
+        (
+            "paired device key",
+            vec![("authorization", format!("Bearer {paired_key}"))],
+        ),
+        (
+            "paired device key as a key",
+            vec![("x-api-key", paired_key.clone())],
         ),
         (
             "session token beside a good grant",

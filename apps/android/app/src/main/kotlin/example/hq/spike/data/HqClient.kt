@@ -356,7 +356,16 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val reachable: Boolean,
         val detail: String?,
         val archived: Boolean,
+        /** The dialog HQ raised an alert for, if the helper waits on one; the server answers it, the screen is not parsed. */
+        val decision: HelperDecision? = null,
     )
+
+    data class HelperOption(val id: Int, val label: String, val remember: Boolean, val typed: Boolean)
+
+    data class HelperDecision(val itemId: String, val seq: Long, val options: List<HelperOption>, val question: String?) {
+        /** The id the notification routes take for this dialog's inbox item. */
+        val notificationId: String get() = "val_$itemId"
+    }
 
     data class HelperHost(val name: String, val reachable: Boolean, val error: String?)
 
@@ -612,5 +621,18 @@ internal fun helperRows(text: String): List<HqClient.HelperRow> = JSONObject(tex
         o.optStringOrNull("goal"), o.optJSONObject("task")?.optStringOrNull("title"),
         if (o.isNull("alive") || !o.has("alive")) null else o.optBoolean("alive"),
         o.optBoolean("reachable", true), o.optStringOrNull("detail"), o.optBoolean("archived", false),
+        helperDecision(o.optJSONObject("decision")),
     )
+}
+
+/** The open dialog of a helper, or null when absent or unreadable (the screen path then stays in use). */
+internal fun helperDecision(d: JSONObject?): HqClient.HelperDecision? {
+    val itemId = d?.optStringOrNull("item_id")?.ifBlank { null } ?: return null
+    if (!d.has("seq") || d.isNull("seq")) return null
+    // optJSONObject, not objects(): one odd option must not take the whole helper list down.
+    val options = (0 until (d.optJSONArray("options")?.length() ?: 0)).mapNotNull { i ->
+        val o = d.optJSONArray("options")?.optJSONObject(i) ?: return@mapNotNull null
+        o.optStringOrNull("label")?.let { HqClient.HelperOption(o.optInt("id"), it, o.optBoolean("remember", false), o.optBoolean("typed", false)) }
+    }
+    return HqClient.HelperDecision(itemId, d.optLong("seq"), options, d.optStringOrNull("question"))
 }

@@ -1,5 +1,6 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.ui.firstrun.FirstRunWords
 import android.app.ActivityManager
 import android.app.Application
 import android.app.NotificationManager
@@ -24,6 +25,10 @@ import example.hq.spike.capture.TasksWidget
 import example.hq.spike.capture.Widgets
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
+import example.hq.spike.update.ChannelManifest
+import example.hq.spike.update.UpdateChannel
+import example.hq.spike.update.UpdateState
+import example.hq.spike.update.Updater
 import java.io.File
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
@@ -89,6 +94,9 @@ data class SettingsUi(
     val askReplace: String? = null,
     /** Why signing in to a server HQ did not work, shown under its fields. */
     val serverError: String? = null,
+    /** The in-app updater: what it last found, and whether the owner follows every build of main instead of promoted ones. */
+    val update: UpdateState = UpdateState.Idle,
+    val updateMain: Boolean = false,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 
@@ -142,6 +150,9 @@ class SettingsActions(
     val onDiscard: (String) -> Unit = {},
     /** One read of everything Settings shows; the page calls it every few seconds while it is showing and the app is in front. */
     val onRefresh: suspend () -> Unit = {},
+    val onCheckUpdate: () -> Unit = {},
+    val onInstallUpdate: (ChannelManifest) -> Unit = {},
+    val onUpdateMain: (Boolean) -> Unit = {},
 )
 
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
@@ -193,7 +204,18 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onServerConnect = ::connectServer,
         onServerDisconnect = ::disconnectServer,
         onRefresh = ::refreshNow,
+        onCheckUpdate = { viewModelScope.launch(Dispatchers.IO) { Updater.check(ctx()) } },
+        onInstallUpdate = { m -> viewModelScope.launch(Dispatchers.IO) { Updater.install(ctx(), m) } },
+        onUpdateMain = { main ->
+            Updater.setChannel(ctx(), if (main) UpdateChannel.Main else UpdateChannel.Stable)
+            _state.update { it.copy(updateMain = main) }
+        },
     )
+
+    init {
+        _state.update { it.copy(updateMain = Updater.channel(app) == UpdateChannel.Main) }
+        viewModelScope.launch { Updater.state.collect { s -> _state.update { it.copy(update = s) } } }
+    }
 
     /** Closes Settings and every page inside it. */
     fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null, askClaudeOff = false, askSignOutAll = false, deviceCode = null, setup = null, pair = null, askDisconnect = null, askReplace = null) }
@@ -269,6 +291,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(it, Instant.now()).checked.any { r -> !r.ok } }),
             HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else "Needs you ${if (on(AlertPoster.NEEDS)) "on" else "off"} · Updates ${if (on(AlertPoster.UPDATES)) "on" else "off"}", warn = !allowed),
             HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
+            HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
         )
     }
 

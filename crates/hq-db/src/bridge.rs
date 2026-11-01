@@ -36,7 +36,8 @@ fn strings(json: &str) -> Vec<String> {
 
 /// Records a pairing. Pairing a key that was revoked brings it back with the new details. Empty
 /// relay or address lists keep what is already known: a pairing that learned nothing new must not
-/// forget how to dial the peer.
+/// forget how to dial the peer. A new pairing starts setup over (`bridge_setup`): whatever was set
+/// up before, and its device key, go in the same transaction.
 pub fn add_peer(
     db: &Database,
     id: &str,
@@ -45,7 +46,8 @@ pub fn add_peer(
     addrs: &[String],
 ) -> Result<()> {
     db.with_conn(|c| {
-        c.execute(
+        let tx = c.unchecked_transaction()?;
+        tx.execute(
             "INSERT INTO bridge_peers (id, label, relays, addrs, paired_at) \
              VALUES (?1, ?2, ?3, ?4, ?5) \
              ON CONFLICT(id) DO UPDATE SET label = excluded.label, \
@@ -60,6 +62,8 @@ pub fn add_peer(
                 now()
             ],
         )?;
+        crate::bridge_setup::forget(&tx, id)?;
+        tx.commit()?;
         Ok(())
     })
 }
@@ -75,13 +79,18 @@ pub fn is_paired(db: &Database, id: &str) -> Result<bool> {
     })
 }
 
-/// Revokes a peer. Returns whether it was paired and active.
+/// Revokes a peer, and in the same transaction undoes what pairing set up with it: its device
+/// keys are revoked and its setup row is deleted (`bridge_setup`). Files and listeners that the
+/// setup made are swept by whoever owns them. Returns whether it was paired and active.
 pub fn revoke(db: &Database, id: &str) -> Result<bool> {
     db.with_conn(|c| {
-        let n = c.execute(
+        let tx = c.unchecked_transaction()?;
+        let n = tx.execute(
             "UPDATE bridge_peers SET revoked_at = ?2 WHERE id = ?1 AND revoked_at IS NULL",
             params![id, now()],
         )?;
+        crate::bridge_setup::forget(&tx, id)?;
+        tx.commit()?;
         Ok(n > 0)
     })
 }
