@@ -110,7 +110,9 @@ impl HqTool for GithubWriteTool {
 
 impl GithubWriteTool {
     async fn run(&self, request: Request, token: String) -> Result<Value> {
-        request.refuse_secret(&token)?;
+        let mut secrets = env_secrets();
+        secrets.push(token.clone());
+        request.refuse_secret(&secrets)?;
         let checkout = self.clones.join(&request.repo);
         let records = self.records.join(&request.repo);
         let _claim = InFlight::claim(&checkout)?;
@@ -123,17 +125,19 @@ impl GithubWriteTool {
                 )
             })?;
         let found = {
-            let (checkout, base, secrets) = (checkout.clone(), base.clone(), vec![token.clone()]);
-            tokio::task::spawn_blocking(move || changes(&checkout, &base, &secrets)).await??
+            let (checkout, clones, base) = (checkout.clone(), self.clones.clone(), base.clone());
+            tokio::task::spawn_blocking(move || changes(&checkout, &clones, &base, &secrets))
+                .await??
         };
         if found.is_empty() {
             bail!("nothing changed since commit {}", base.commit);
         }
         let api = Api::new(&self.api_base, &request.repo, token)?;
         let pushed = publish(&api, &request, &base, &found, &records).await?;
-        let pr = match (request.open_pr, &pushed) {
-            (true, Some(_)) => Some(open_pr(&api, &request).await?),
-            _ => None,
+        // Even when nothing new was pushed: an earlier call may have pushed and then failed to open it.
+        let pr = match request.open_pr {
+            true => Some(open_pr(&api, &request).await?),
+            false => None,
         };
         Ok(reply(&request, pushed.as_ref(), &found, pr))
     }
@@ -182,12 +186,12 @@ impl Request {
                 bail!("`{field}` is longer than {max} characters");
             }
         }
-        request.refuse_secret("")?;
+        request.refuse_secret(&[])?;
         Ok(request)
     }
 
     /// The branch, message, title and body are published too, so they are scanned like files.
-    fn refuse_secret(&self, token: &str) -> Result<()> {
+    fn refuse_secret(&self, secrets: &[String]) -> Result<()> {
         let fields = [
             ("branch", &self.branch),
             ("message", &self.message),
@@ -195,13 +199,29 @@ impl Request {
             ("body", &self.body),
         ];
         for (name, value) in fields {
-            let leaked = !token.is_empty() && value.contains(token);
+            let leaked = secrets
+                .iter()
+                .any(|s| !s.is_empty() && value.contains(s.as_str()));
             if leaked || hq_core::redact::looks_like_credential(value) {
                 bail!("`{name}` holds something shaped like a credential; nothing was pushed");
             }
         }
         Ok(())
     }
+}
+
+/// Values of this process's secret-named variables, refused verbatim wherever they appear,
+/// whatever their shape. Short values are left out: they would match ordinary text.
+fn env_secrets() -> Vec<String> {
+    const SECRET_NAME_ENDINGS: [&str; 5] = ["_KEY", "_TOKEN", "_SECRET", "_PASSWORD", "_PAT"];
+    const MIN_SECRET_CHARS: usize = 12;
+    std::env::vars()
+        .filter(|(name, value)| {
+            let name = name.to_ascii_uppercase();
+            SECRET_NAME_ENDINGS.iter().any(|e| name.ends_with(e)) && value.len() >= MIN_SECRET_CHARS
+        })
+        .map(|(_, value)| value)
+        .collect()
 }
 
 /// Plain names joined by `/`, each one a name git accepts for a branch component.
@@ -445,7 +465,10 @@ fn remember_pushed(records: &Path, branch: &str, commit: &str) -> Result<()> {
     let excess = shas.len().saturating_sub(PUSHED_KEPT);
     shas.drain(..excess);
     std::fs::create_dir_all(records)?;
-    let tmp = records.join(format!("{PUSHED_RECORD_FILE}.tmp"));
+    let tmp = records.join(format!(
+        "{PUSHED_RECORD_FILE}.{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
     std::fs::write(&tmp, serde_json::to_vec_pretty(&all)?)?;
     std::fs::rename(&tmp, records.join(PUSHED_RECORD_FILE))?;
     Ok(())
@@ -453,7 +476,8 @@ fn remember_pushed(records: &Path, branch: &str, commit: &str) -> Result<()> {
 
 fn reply(req: &Request, pushed: Option<&Pushed>, found: &[Change], pr: Option<String>) -> Value {
     let Some(pushed) = pushed else {
-        return json!({"branch": req.branch, "unchanged": true, "note": "the branch already holds exactly these changes"});
+        let note = "the branch already holds exactly these changes";
+        return json!({"branch": req.branch, "unchanged": true, "note": note, "pull_request": pr});
     };
     let (deleted, written): (Vec<&Change>, Vec<&Change>) =
         found.iter().partition(|c| c.content.is_none());

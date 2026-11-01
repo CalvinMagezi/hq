@@ -16,13 +16,13 @@ const OLD_TREE: &str = "7777777777777777777777777777777777777777";
 const PR_URL: &str = "https://github.com/o/r/pull/7";
 const TOKEN: &str = "github_pat_11TESTTOKEN0123456789_abcdefghijklmnop";
 
-fn base_file(path: &str, content: &[u8], flagged: bool) -> BaseFile {
+fn base_file(path: &str, content: &[u8]) -> BaseFile {
     BaseFile {
         path: path.into(),
         mode: "100644".into(),
         sha256: hex::encode(Sha256::digest(content)),
         size: content.len() as u64,
-        flagged,
+        known_secrets: crate::github::tarball::secret_hashes(content),
     }
 }
 
@@ -49,9 +49,9 @@ impl Fixture {
             fs::write(dest.join(name), b"same").unwrap();
         }
         let mut files = vec![
-            base_file("edit.txt", b"same", false),
-            base_file("gone.txt", b"old", false),
-            base_file("keep.txt", b"same", false),
+            base_file("edit.txt", b"same"),
+            base_file("gone.txt", b"old"),
+            base_file("keep.txt", b"same"),
         ];
         files.extend(extra.iter().cloned());
         let base = Base {
@@ -76,7 +76,12 @@ impl Fixture {
     }
 
     fn changes(&self) -> Result<Vec<Change>> {
-        changes(&self.dest, &self.base(), &[TOKEN.to_string()])
+        changes(
+            &self.dest,
+            &self.root.path().join("clones"),
+            &self.base(),
+            &[TOKEN.to_string()],
+        )
     }
 
     fn tool(&self, server: &MockServer) -> GithubWriteTool {
@@ -141,7 +146,11 @@ fn credentials_and_oversized_text_are_refused_before_anything_is_pushed() {
 #[test]
 fn the_live_token_is_refused_in_text_even_when_its_shape_is_unknown() {
     let request = parse(&args("x", "the token is plain-looking-value-123")).unwrap();
-    assert!(request.refuse_secret("plain-looking-value-123").is_err());
+    assert!(
+        request
+            .refuse_secret(&["plain-looking-value-123".to_string()])
+            .is_err()
+    );
 }
 
 #[test]
@@ -244,7 +253,7 @@ fn git_metadata_workflows_and_credentials_refuse_the_push() {
 #[test]
 fn a_file_that_already_held_a_credential_shape_may_still_be_edited() {
     let fixture = "TEST_API_TOKEN=abcd1234abcd1234abcd\n";
-    let f = Fixture::with(&[base_file(".env.example", fixture.as_bytes(), true)]);
+    let f = Fixture::with(&[base_file(".env.example", fixture.as_bytes())]);
     fs::write(
         f.dest.join(".env.example"),
         format!("{fixture}# a comment\n"),
@@ -253,18 +262,72 @@ fn a_file_that_already_held_a_credential_shape_may_still_be_edited() {
     let found = f.changes().unwrap();
     assert!(found.iter().any(|c| c.path == ".env.example"));
 
-    let f = Fixture::with(&[base_file(".env.example", fixture.as_bytes(), true)]);
+    let f = Fixture::with(&[base_file(".env.example", fixture.as_bytes())]);
     fs::write(f.dest.join(".env.example"), format!("{fixture}{TOKEN}\n")).unwrap();
     assert!(
         f.changes().is_err(),
         "the live token is refused even in a flagged file"
     );
+
+    let f = Fixture::with(&[base_file(".env.example", fixture.as_bytes())]);
+    let added = format!("sk-ant-api03-{}", "z9".repeat(20));
+    fs::write(
+        f.dest.join(".env.example"),
+        format!("{fixture}OTHER={added}\n"),
+    )
+    .unwrap();
+    assert!(
+        f.changes().is_err(),
+        "a new credential shape in a flagged file is refused"
+    );
+}
+
+#[test]
+fn a_checkout_that_lost_most_of_its_files_is_not_pushed_as_deletions() {
+    let many: Vec<BaseFile> = (0..40)
+        .map(|i| base_file(&format!("f{i}.txt"), b"x"))
+        .collect();
+    let f = Fixture::with(&many);
+    fs::write(f.dest.join("gone.txt"), b"old").unwrap();
+    let err = f.changes().unwrap_err().to_string();
+    assert!(err.contains("fetch again"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_checkout_that_resolves_outside_the_clone_folder_is_refused() {
+    let f = Fixture::new();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let owner = f.root.path().join("clones/o");
+    fs::rename(&owner, elsewhere.path().join("o")).unwrap();
+    std::os::unix::fs::symlink(elsewhere.path().join("o"), &owner).unwrap();
+    let err = f.changes().unwrap_err().to_string();
+    assert!(err.contains("outside the clone folder"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pipe_where_a_file_was_never_hangs_the_read() {
+    let f = Fixture::new();
+    let pipe = f.dest.join("pipe");
+    let c_path = std::ffi::CString::new(pipe.to_str().unwrap()).unwrap();
+    // SAFETY: a valid NUL-terminated path and a plain mode.
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let dest = f.dest.canonicalize().unwrap();
+    std::thread::spawn(move || {
+        let _ = tx.send(super::super::changes::read_plain_for_test(&dest, "pipe").is_err());
+    });
+    let refused = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the read hung on a pipe");
+    assert!(refused);
 }
 
 #[test]
 fn only_a_changed_file_is_held_to_the_push_size_cap() {
     let big = vec![b'x'; MIB_TEST * 6];
-    let f = Fixture::with(&[base_file("big.bin", &big, false)]);
+    let f = Fixture::with(&[base_file("big.bin", &big)]);
     fs::write(f.dest.join("big.bin"), &big).unwrap();
     fs::write(f.dest.join("gone.txt"), b"old").unwrap();
     assert!(
@@ -544,4 +607,56 @@ async fn nothing_changed_no_checkout_and_a_leaked_token_are_refused_before_githu
         .unwrap_err();
     assert!(err.to_string().contains("credential"), "{err}");
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_retry_after_the_pr_failed_opens_it_without_a_new_commit() {
+    let f = Fixture::new();
+    fs::write(f.dest.join("edit.txt"), b"different").unwrap();
+    remember_pushed(&f.records, "hq/fix", OUR_EARLIER).unwrap();
+    let server = github(Some((OUR_EARLIER, NEW_TREE)), 200).await;
+    let reply = f
+        .tool(&server)
+        .run(parse(&args("fix", "m")).unwrap(), TOKEN.into())
+        .await
+        .unwrap();
+    assert_eq!(reply["unchanged"], true);
+    assert_eq!(reply["pull_request"], PR_URL);
+    assert!(bodies(&server, "POST", "git/commits").await.is_empty());
+}
+
+#[tokio::test]
+async fn a_pushed_record_that_is_not_ours_to_trust_claims_no_branch() {
+    let f = Fixture::new();
+    fs::write(f.dest.join("edit.txt"), b"different").unwrap();
+    fs::write(f.records.join(PUSHED_RECORD_FILE), b"[\"not\", \"a map\"]").unwrap();
+    let server = github(Some((OUR_EARLIER, OLD_TREE)), 200).await;
+    let err = f
+        .tool(&server)
+        .run(parse(&args("fix", "m")).unwrap(), TOKEN.into())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("did not push"), "{err}");
+}
+
+#[tokio::test]
+async fn a_redirect_is_never_followed_with_the_write_token() {
+    let f = Fixture::new();
+    fs::write(f.dest.join("edit.txt"), b"different").unwrap();
+    let server = MockServer::start().await;
+    let elsewhere = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{REPO}/git/commits/{BASE_SHA}")))
+        .respond_with(
+            ResponseTemplate::new(301).insert_header("location", elsewhere.uri().as_str()),
+        )
+        .mount(&server)
+        .await;
+    let err = f
+        .tool(&server)
+        .run(parse(&args("fix", "m")).unwrap(), TOKEN.into())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("301"), "{err}");
+    assert!(elsewhere.received_requests().await.unwrap().is_empty());
 }

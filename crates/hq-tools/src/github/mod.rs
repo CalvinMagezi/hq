@@ -461,7 +461,6 @@ fn tarball_reply(path: &str, fetched: &tarball::Fetched) -> Value {
         "via": "tarball",
         "commit": fetched.base.commit,
         "files": fetched.base.files.len(),
-
         "skipped_count": fetched.skipped.len(),
         "skipped": shown,
     })
@@ -472,6 +471,20 @@ fn tarball_reply(path: &str, fetched: &tarball::Fetched) -> Value {
 /// worker cannot rewrite the records its own pushes are checked against.
 pub fn records_root() -> PathBuf {
     hq_core::config::HqConfig::hq_dir().join("github")
+}
+
+/// Creates the clone folder readable by this user only. In a shared temp directory another user
+/// could have made it first; setting its mode then fails, and nothing is cloned into it.
+fn make_private_root(root: &Path) -> Result<()> {
+    std::fs::create_dir_all(root)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        const OWNER_ONLY: u32 = 0o700;
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(OWNER_ONLY))
+            .with_context(|| format!("{} is not this user's to clone into", root.display()))?;
+    }
+    Ok(())
 }
 
 /// Shallow checkouts land here so a repo can be searched with grep and read_file.
@@ -513,6 +526,7 @@ impl HqTool for GithubCloneTool {
         if let Some(reply) = cached_reply(&dest, &records, method)? {
             return Ok(reply);
         }
+        make_private_root(&clone_root())?;
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }

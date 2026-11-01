@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 
-use super::tarball::{Base, BaseFile, is_git_dir};
+use super::tarball::{Base, BaseFile, is_git_dir, secret_hashes};
 
 const MIB: u64 = 1024 * 1024;
 /// GitHub's secondary rate limits make one blob request per file the cost to watch.
@@ -19,6 +19,9 @@ const MAX_PUSH_TOTAL_BYTES: u64 = 25 * MIB;
 const COPY_BUF: usize = 64 * 1024;
 /// The unpack's record cap, so every checkout it makes can be pushed from.
 const MAX_WALKED_FILES: usize = 200_000;
+/// More deletions than this, and more than a tenth of the files, look like a lost checkout.
+const MAX_UNASKED_DELETIONS: usize = 20;
+const DELETION_SHARE_DENOMINATOR: usize = 10;
 /// Workflows run with the repository's secrets before anyone reviews the pull request.
 const WORKFLOW_DIR: &str = ".github";
 const MODE_EXECUTABLE: &str = "100755";
@@ -35,8 +38,13 @@ pub(super) struct Change {
 /// Every file that differs from `base`. Refuses the whole set on a link, a hard link, a `.git`
 /// or `.github` entry, a file too large, too many changes, or anything shaped like a credential
 /// (or equal to one of `secrets`), so nothing is published by accident.
-pub(super) fn changes(checkout: &Path, base: &Base, secrets: &[String]) -> Result<Vec<Change>> {
-    let root = checked_root(checkout)?;
+pub(super) fn changes(
+    checkout: &Path,
+    clones: &Path,
+    base: &Base,
+    secrets: &[String],
+) -> Result<Vec<Change>> {
+    let root = checked_root(checkout, clones)?;
     let known: BTreeMap<&str, &BaseFile> =
         base.files.iter().map(|f| (f.path.as_str(), f)).collect();
     let mut seen = BTreeSet::new();
@@ -55,6 +63,13 @@ pub(super) fn changes(checkout: &Path, base: &Base, secrets: &[String]) -> Resul
         }
         out.push(change);
         check_count(out.len())?;
+    }
+    let missing = known.keys().filter(|p| !seen.contains(**p)).count();
+    if missing > MAX_UNASKED_DELETIONS && missing * DELETION_SHARE_DENOMINATOR > known.len() {
+        bail!(
+            "{missing} files of the fetched commit are gone from the checkout, more than a change \
+             would delete; the phone may have cleared its cache, so fetch again"
+        );
     }
     for (path, file) in &known {
         if !seen.contains(*path) {
@@ -86,13 +101,18 @@ fn refuse_workflow(rel: &str) -> Result<()> {
     Ok(())
 }
 
-/// The checkout's canonical path, refusing a checkout that is itself a link.
-fn checked_root(checkout: &Path) -> Result<PathBuf> {
+/// The checkout's canonical path, refusing a checkout that is itself a link or that resolves
+/// outside the clone folder (a linked `owner/` folder in a shared temp directory).
+fn checked_root(checkout: &Path, clones: &Path) -> Result<PathBuf> {
     let meta = fs::symlink_metadata(checkout).context("the checkout is missing; fetch it again")?;
     if !meta.is_dir() {
         bail!("the checkout is not a plain folder");
     }
-    Ok(checkout.canonicalize()?)
+    let root = checkout.canonicalize()?;
+    if !root.starts_with(clones.canonicalize()?) {
+        bail!("the checkout resolves outside the clone folder; nothing was pushed");
+    }
+    Ok(root)
 }
 
 /// Paths of every regular file under `root`, relative and `/`-joined. Links are refused, never
@@ -157,7 +177,8 @@ fn changed_file(
             MAX_PUSH_FILE_BYTES / MIB
         );
     };
-    refuse_secrets(rel, &content, base.is_some_and(|b| b.flagged), secrets)?;
+    let known = base.map_or(&[][..], |b| b.known_secrets.as_slice());
+    refuse_secrets(rel, &content, known, secrets)?;
     Ok(Some(Change {
         path: rel.to_string(),
         mode: mode.to_string(),
@@ -172,20 +193,15 @@ struct Plain {
     content: Option<Vec<u8>>,
 }
 
-/// A file that held a credential shape when fetched (a test fixture, an example env file) may
-/// still be edited; any file is refused when it contains one of the live `secrets` verbatim.
-fn refuse_secrets(
-    rel: &str,
-    content: &[u8],
-    already_flagged: bool,
-    secrets: &[String],
-) -> Result<()> {
+/// Refuses a credential shape the file did not hold when fetched (`known` are their hashes, so
+/// a test fixture may still be edited), and any of the live `secrets` verbatim.
+fn refuse_secrets(rel: &str, content: &[u8], known: &[String], secrets: &[String]) -> Result<()> {
     let text = String::from_utf8_lossy(content);
     let leaked = secrets
         .iter()
         .any(|s| !s.is_empty() && text.contains(s.as_str()));
-    let shaped = !already_flagged && hq_core::redact::looks_like_credential(&text);
-    if leaked || shaped || hq_core::redact::looks_like_credential(rel) {
+    let added = secret_hashes(content).iter().any(|h| !known.contains(h));
+    if leaked || added || hq_core::redact::looks_like_credential(rel) {
         bail!("{rel} holds something shaped like a credential; nothing was pushed");
     }
     Ok(())
@@ -201,6 +217,13 @@ fn read_plain(root: &Path, rel: &str) -> Result<Plain> {
     }
     let mut file = open_no_follow(&path)
         .with_context(|| format!("{rel} could not be opened as a plain file"))?;
+    // The parent was checked before the open; a folder swapped for a link in between is caught
+    // by asking the open handle where it really is.
+    if let Some(real) = opened_path(&file)
+        && !real.starts_with(root)
+    {
+        bail!("{rel} resolved outside the checkout while being opened; nothing was pushed");
+    }
     let meta = file.metadata()?;
     if !meta.is_file() || hard_links(&meta) > 1 {
         bail!("{rel} is not a plain file with a single name; only plain files are pushed");
@@ -228,13 +251,46 @@ fn read_plain(root: &Path, rel: &str) -> Result<Plain> {
     })
 }
 
+#[cfg(test)]
+pub(super) fn read_plain_for_test(root: &Path, rel: &str) -> Result<()> {
+    read_plain(root, rel).map(|_| ())
+}
+
+/// `O_NONBLOCK` so a pipe swapped in after the walk cannot hang the open; the handle check
+/// that follows refuses anything that is not a plain file.
 #[cfg(unix)]
 fn open_no_follow(path: &Path) -> std::io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
+}
+
+/// Where an open handle really is, from the kernel rather than the path used to open it.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn opened_path(file: &fs::File) -> Option<PathBuf> {
+    use std::os::fd::AsRawFd;
+    fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn opened_path(file: &fs::File) -> Option<PathBuf> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf = vec![0u8; libc::PATH_MAX as usize];
+    // SAFETY: F_GETPATH writes at most PATH_MAX bytes into `buf`, which is that long.
+    let rc = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr()) };
+    if rc == -1 {
+        return None;
+    }
+    let len = buf.iter().position(|b| *b == 0)?;
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(&buf[..len])))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+fn opened_path(_file: &fs::File) -> Option<PathBuf> {
+    None
 }
 
 #[cfg(not(unix))]

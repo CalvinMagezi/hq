@@ -76,9 +76,11 @@ pub(crate) struct BaseFile {
     pub mode: String,
     pub sha256: String,
     pub size: u64,
-    /// Already held a credential-shaped string when fetched, so an edit to it is not a new leak.
+    /// SHA-256 of each credential-shaped string the file already held when fetched (a test fixture,
+    /// an example env file), so an edit that keeps them is not a new leak and one that adds any
+    /// other is.
     #[serde(default)]
-    pub flagged: bool,
+    pub known_secrets: Vec<String>,
 }
 
 /// The commit a checkout came from and every file it holds, kept beside the checkout.
@@ -187,16 +189,17 @@ pub(crate) async fn fetch(
         files: unpacked.files,
     };
     fs::write(&record_tmp.path, serde_json::to_vec_pretty(&base)?)?;
-    fs::rename(&staging.path, dest)
-        .with_context(|| format!("could not move the checkout to {}", dest.display()))?;
-    staging.disarm();
-    // Only now is `dest` known to be this fetch's, so an earlier record may be replaced.
+    // The record goes first: a crash before the checkout lands leaves a record with no
+    // checkout, which is fetched again, never an old record beside a new checkout.
     let record = base_record_path(records);
-    if let Err(e) = fs::rename(&record_tmp.path, &record) {
-        let _ = fs::remove_dir_all(dest);
-        return Err(e).context("could not save the checkout's base record");
-    }
+    fs::rename(&record_tmp.path, &record).context("could not save the checkout's base record")?;
     record_tmp.disarm();
+    if let Err(e) = fs::rename(&staging.path, dest) {
+        let _ = fs::remove_file(&record);
+        return Err(e)
+            .with_context(|| format!("could not move the checkout to {}", dest.display()));
+    }
+    staging.disarm();
     Ok(Fetched {
         base,
         skipped: unpacked.skipped,
@@ -570,8 +573,20 @@ fn write_file<R: Read>(
         .to_string(),
         sha256: hex::encode(hasher.finalize()),
         size,
-        flagged: hq_core::redact::looks_like_credential(&String::from_utf8_lossy(&scanned)),
+        known_secrets: secret_hashes(&scanned),
     }))
+}
+
+/// Hashes of the credential-shaped strings in `content`, never the strings themselves.
+pub(super) fn secret_hashes(content: &[u8]) -> Vec<String> {
+    let mut hashes: Vec<String> =
+        hq_core::redact::credential_spans(&String::from_utf8_lossy(content))
+            .iter()
+            .map(|s| hex::encode(Sha256::digest(s.as_bytes())))
+            .collect();
+    hashes.sort();
+    hashes.dedup();
+    hashes
 }
 
 #[cfg(unix)]

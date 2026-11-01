@@ -57,7 +57,7 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 /// so counters such as `max_tokens: 4096` are left alone.
 static SECRET_ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)\b([A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD))(\s*[:=]\s*)(["']?)([^\s"']{8,})"#,
+        r#"(?i)\b([A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD))(["']?\s*[:=]\s*)(["']?)([^\s"']{8,})"#,
     )
     .expect("static assignment pattern must compile")
 });
@@ -95,34 +95,41 @@ pub fn redact_secrets(text: &str) -> String {
 /// also rewrites `token: expired`-style prose; this one is for deciding whether
 /// to refuse sending text out, where a false positive blocks legitimate work.
 pub fn looks_like_credential(text: &str) -> bool {
+    !credential_spans(text).is_empty()
+}
+
+/// Every credential-shaped piece of `text` that [`looks_like_credential`] reacts to, so a caller
+/// can tell a credential that was already there (a test fixture) from one that was added.
+pub fn credential_spans(text: &str) -> Vec<String> {
     const CREDENTIAL_MIN_LEN: usize = 16;
     let credential_like = |value: &str| {
         value.len() >= CREDENTIAL_MIN_LEN
             && value.bytes().any(|b| b.is_ascii_digit())
             && value.bytes().any(|b| b.is_ascii_alphabetic())
     };
-    let prefixed = SECRET_PATTERNS
+    let tokenish = |s: &str| {
+        s.bytes().any(|b| b.is_ascii_digit()) && s.bytes().any(|b| b.is_ascii_uppercase())
+    };
+    let mut spans: Vec<String> = SECRET_PATTERNS
         .iter()
         .enumerate()
         // Index 4 is the Bearer pattern, which also matches ordinary words after "bearer".
         .filter(|(i, _)| *i != 4)
-        .any(|(_, p)| p.is_match(text));
-    if prefixed {
-        return true;
-    }
-    let bot_token = BOT_TOKEN_PATTERN.captures_iter(text).any(|c| {
-        let tokenish = |s: &str| {
-            s.bytes().any(|b| b.is_ascii_digit()) && s.bytes().any(|b| b.is_ascii_uppercase())
-        };
-        tokenish(&c[1]) && tokenish(&c[3])
-    });
-    bot_token
-        || SECRET_ASSIGNMENT
-            .captures_iter(text)
-            .any(|c| credential_like(&c[4]))
-        || BEARER_VALUE
-            .captures_iter(text)
-            .any(|c| credential_like(&c[1]))
+        .flat_map(|(_, p)| p.find_iter(text).map(|m| m.as_str().to_string()))
+        .collect();
+    let bot_tokens = BOT_TOKEN_PATTERN
+        .captures_iter(text)
+        .filter(|c| tokenish(&c[1]) && tokenish(&c[3]));
+    spans.extend(bot_tokens.map(|c| c[0].to_string()));
+    let assigned = SECRET_ASSIGNMENT
+        .captures_iter(text)
+        .filter(|c| credential_like(&c[4]));
+    spans.extend(assigned.map(|c| c[4].to_string()));
+    let bearers = BEARER_VALUE
+        .captures_iter(text)
+        .filter(|c| credential_like(&c[1]));
+    spans.extend(bearers.map(|c| c[1].to_string()));
+    spans
 }
 
 /// The value after `Bearer`, for [`looks_like_credential`].
@@ -227,6 +234,10 @@ mod tests {
         assert!(!looks_like_credential(
             "let api_key = std::env::var(\"API_KEY\")?;"
         ));
+        assert!(
+            looks_like_credential(&format!(r#"{{"api_key": "{}"}}"#, "a1b2c3d4e5".repeat(2))),
+            "the JSON form"
+        );
     }
 
     #[test]

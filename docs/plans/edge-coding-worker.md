@@ -39,13 +39,18 @@ search and edit tools in `libhq.so`, so the worker costs no new binary. The mode
   backstop.
 - **Records the worker cannot touch.** The base commit and the commits pushed per branch live in
   `<hq dir>/github/<owner>/<repo>/` (`base.json`, `pushed.json`), which `governance::secrets`
-  denies to every file tool. A worker can therefore neither point a push at another commit nor
-  claim someone else's branch as its own.
-- **Only the checkout is read.** The tool walks the `github_clone` checkout and reads each file
-  with `O_NOFOLLOW`, checking the open handle (one name, a plain file) and that its parent still
-  resolves inside the checkout. Links, hard links, special files and `.git` entries refuse the
+    denies to every file tool. A worker can therefore neither point a push at another commit nor
+  claim someone else's branch as its own. The denial binds file tools and the shell's path
+  classifier; a session with a shell can still reach the folder through an obfuscated path,
+  which is one more reason the worker preset has no shell.
+- **Only the checkout is read.** The checkout must resolve inside the clone folder, which is
+  created readable by its owner only. Each file is opened with `O_NOFOLLOW | O_NONBLOCK`, so a
+  pipe swapped in cannot hang the call. The open handle is checked for one name and a plain file,
+  and the kernel's own path for it (`/proc/self/fd`, `F_GETPATH`) must be inside the checkout. Links, hard links, special files and `.git` entries refuse the
   push, so a link to a secret outside the checkout cannot be published. Caps: 100 changed files,
-  5 MiB per changed file, 25 MiB per push.
+    5 MiB per changed file, 25 MiB per push. A checkout missing more than 20 files, and more than a
+  tenth of the fetched commit, is taken for a cleared cache and fetched again rather than pushed
+  as deletions.
 - **No workflow files.** A changed path under `.github/` refuses the push. A pull request from an
   `hq/` branch in the same repository runs CI with the repository's Actions secrets before anyone
   reviews it, so a repository a worker pushes to should hold no Actions secrets, or gate them
@@ -59,10 +64,11 @@ the tool useless. The risk taint guards against here is exfiltration: an injecte
 that gets a secret published. That is handled at the boundary instead:
 
 - every changed file, its path, and the branch name, commit message, pull request title and body
-  are scanned with `hq_core::redact::looks_like_credential` and compared with the write token
-  itself, and a match refuses the whole push (the refusal names the file, never the value). A
-  file that already held a credential shape when fetched (a test fixture, an `.env.example`) may
-  be edited, but never to include the live token;
+    are scanned for credential shapes (`hq_core::redact::credential_spans`) and compared verbatim
+  with the write token and every secret-named variable in HQ's environment, and a match refuses
+  the whole push (the refusal names the file, never the value). The base record keeps hashes of
+  the shapes each file already held when fetched, so a test fixture or an `.env.example` may be
+  edited, but any shape it did not hold, and any live secret, is refused;
 - a tainted session cannot read secret files in the first place (`governance/secrets.rs`);
 - everything lands in a pull request that a person reviews before it reaches the default branch.
 
