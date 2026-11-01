@@ -107,7 +107,10 @@ pub fn create_default_registry(
     tools.push(Box::new(web::WebFetchHqTool));
 
     tools.extend(coding::create_coding_tools());
-    tools.extend(github::create_github_tools());
+    let write_repos = config
+        .map(|c| c.github_write.repos.clone())
+        .unwrap_or_default();
+    tools.extend(github::create_github_tools(&write_repos));
     tools.extend(system_info::create_system_info_tools(vault_path.clone()));
     tools.extend(budget_status::create_budget_status_tools(db.clone()));
     tools.extend(notify::create_notify_tools(db.clone(), config));

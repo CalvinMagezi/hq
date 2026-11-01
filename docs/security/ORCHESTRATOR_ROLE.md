@@ -10,7 +10,7 @@ The limits are in code (tool catalog, sandbox, guardian), not in the prompt.
 
 Everything an Implementor web-chat turn has, minus the tools that change files, git history or
 HQ's own config: `edit_file`, `write_file`, `file_edit_batch`, `rollback_file`, `git_commit`,
-`git_pr` and `config_manage` (`ORCHESTRATOR_REMOVED_TOOLS` in `crates/hq-agent/src/builder.rs`).
+`git_pr`, `github_write` and `config_manage` (`ORCHESTRATOR_REMOVED_TOOLS` in `crates/hq-agent/src/builder.rs`).
 It keeps reading and searching (`read_file`, `grep`, `find_files`, LSP, `git_log`, `git_diff`,
 `git_status`), the vault, tasks, memory, web, `convert_*`, and every tool for starting and steering
 coding sessions (`harness_session_*`, `host_*`, `spawn_subagents`).

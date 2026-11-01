@@ -8,6 +8,8 @@ pub struct ConfigTool;
 
 const MAX_KEY_CHARS: usize = 64;
 const MAX_VALUE_CHARS: usize = 500;
+/// Keys only the owner sets by editing the file: they widen what an agent may push or reach.
+const OWNER_ONLY_KEYS: &[&str] = &["github_write"];
 
 /// A top-level key made of plain identifier characters, so it can never carry YAML structure.
 fn check_key(key: &str) -> Result<()> {
@@ -117,6 +119,9 @@ impl HqTool for ConfigTool {
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("missing value"))?;
                 check_key(key)?;
+                if OWNER_ONLY_KEYS.contains(&key) {
+                    anyhow::bail!("`{key}` is set only by the owner, in the config file itself");
+                }
                 let scalar = yaml_scalar(value)?;
 
                 if let Some(parent) = config_path.parent() {
@@ -163,6 +168,13 @@ impl HqTool for ConfigTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_github_write_allowlist_cannot_be_set_by_a_tool_call() {
+        let args = json!({"action": "set", "key": "github_write", "value": "o/r"});
+        let err = ConfigTool.execute(args).await.unwrap_err();
+        assert!(err.to_string().contains("only by the owner"));
+    }
 
     #[test]
     fn keys_are_plain_and_exact_and_values_stay_on_one_line() {

@@ -36,6 +36,8 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"AKIA[0-9A-Z]{16}",
         r"(?i)(?:bearer|authorization:\s*bearer)\s+[A-Za-z0-9._~+/-]{16,}=*",
         r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        // GitHub fine-grained personal access tokens.
+        r"github_pat_[A-Za-z0-9_]{22,}",
         // HQ's own web device tokens (`hq_db::web_auth`). Kept last: the Bearer index above is fixed.
         r"hqw_[0-9a-f]{64}",
     ]
@@ -201,6 +203,13 @@ pub fn fmt_redacted<T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fine_grained_github_token_is_a_credential() {
+        let token = format!("github_pat_{}", "11ABCDEFG0123456789_abcdefghijklmnop");
+        assert!(looks_like_credential(&format!("token = {token}")));
+        assert!(!redact_secrets(&token).contains("github_pat_11"));
+    }
 
     #[test]
     fn redacts_known_secret_shapes() {

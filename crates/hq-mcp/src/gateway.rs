@@ -520,6 +520,7 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "git_commit",
     "git_pr",
     "github_clone",
+    "github_write",
     "host_send",
     "host_read",
     "convert_to_markdown",

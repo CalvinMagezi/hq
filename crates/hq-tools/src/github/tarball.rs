@@ -458,7 +458,7 @@ fn forbidden_in_a_name(c: char) -> bool {
 }
 
 /// Git's own folder under any spelling a file system treats as the same name.
-fn is_git_dir(part: &str) -> bool {
+pub(super) fn is_git_dir(part: &str) -> bool {
     let name = part.trim_end_matches(['.', ' ']).to_ascii_lowercase();
     name == ".git" || name == "git~1"
 }

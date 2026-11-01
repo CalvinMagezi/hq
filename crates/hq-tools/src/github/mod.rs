@@ -16,7 +16,11 @@ use std::time::Duration;
 
 use crate::registry::HqTool;
 
+mod changes;
 mod tarball;
+mod write;
+
+pub use write::GithubWriteTool;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -253,8 +257,14 @@ async fn http_get_accepting(path: &str, accept: &str, max_chars: usize) -> Resul
     Ok(cap_to(body, max_chars))
 }
 
-pub fn create_github_tools() -> Vec<Box<dyn HqTool>> {
-    vec![Box::new(GithubReadTool), Box::new(GithubCloneTool)]
+/// The read tools, plus `github_write`, which refuses every call until the owner lists
+/// repositories in `github_write.repos`.
+pub fn create_github_tools(write_repos: &[String]) -> Vec<Box<dyn HqTool>> {
+    vec![
+        Box::new(GithubReadTool),
+        Box::new(GithubCloneTool),
+        Box::new(GithubWriteTool::new(write_repos.to_vec())),
+    ]
 }
 
 pub struct GithubReadTool;

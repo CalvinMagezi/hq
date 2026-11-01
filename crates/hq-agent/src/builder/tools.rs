@@ -230,9 +230,11 @@ impl SessionBuilder {
             hq_tools::slash_commands::SlashCommandManageTool::new(vault_path.to_path_buf()),
         ));
 
-        // Read-only GitHub access that works without a shell, so an orchestrator
-        // whose bash has no network can still study a repo.
-        tools.extend(hq_tools::github::create_github_tools());
+        // GitHub without a shell: reads for every session, and github_write for the
+        // repositories the owner listed (an orchestrator loses it with the other writers).
+        tools.extend(hq_tools::github::create_github_tools(
+            &self.config.github_write.repos,
+        ));
 
         // Live host capability checks, so the agent can confirm what is
         // installed instead of guessing.
