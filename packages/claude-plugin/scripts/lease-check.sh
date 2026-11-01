@@ -23,6 +23,9 @@ if not session or not os.path.isfile(path):
     sys.exit(0)
 
 claims = releases = 0
+# Claude Code also logs each request as an api-request-blob that repeats earlier tool calls, so
+# a call is counted once by its id.
+seen_ids = set()
 with open(path, encoding="utf-8", errors="replace") as transcript:
     for line in transcript:
         if "hq_call" not in line:
@@ -39,6 +42,10 @@ with open(path, encoding="utf-8", errors="replace") as transcript:
                 continue
             if not str(block.get("name", "")).endswith("hq_call"):
                 continue
+            call_id = block.get("id")
+            if call_id in seen_ids:
+                continue
+            seen_ids.add(call_id)
             tool = (block.get("input") or {}).get("tool")
             claims += tool in CLAIMS
             releases += tool in RELEASES
