@@ -15,6 +15,10 @@ fn opts(pattern: &str, path: &Path) -> Search {
     }
 }
 
+fn matches(o: &Search) -> String {
+    search(o).unwrap().matches
+}
+
 fn tree() -> tempfile::TempDir {
     let root = tempfile::tempdir().unwrap();
     let p = root.path();
@@ -36,24 +40,25 @@ fn shown(root: &Path, rel: &str) -> String {
 #[test]
 fn matches_print_path_line_and_text_and_skip_ignored_places() {
     let root = tree();
-    let out = search(&opts("^fn", root.path())).unwrap();
+    let found = search(&opts("^fn", root.path())).unwrap();
     let main = shown(root.path(), "src/main.rs");
     let notes = shown(root.path(), "src/notes.md");
     let expected =
         format!("{main}:1:fn main() {{}}\n{main}:2:fn helper() {{}}\n{notes}:1:fn in prose\n");
-    assert_eq!(out, expected);
+    assert_eq!(found.matches, expected);
+    assert!(found.notes.is_empty(), "{:?}", found.notes);
 }
 
 #[test]
 fn file_types_follow_ripgrep_names_and_fall_back_to_an_extension() {
     let root = tempfile::tempdir().unwrap();
-    for name in ["a.rs", "b.tsx", "c.h", "d.py", "e.zig"] {
+    for name in ["a.rs", "b.tsx", "c.h", "d.py", "e.zig", ".eslintrc.js"] {
         fs::write(root.path().join(name), "needle\n").unwrap();
     }
     let found = |file_type: &str| {
         let mut o = opts("needle", root.path());
         o.file_type = Some(file_type.to_string());
-        search(&o).unwrap().lines().count()
+        matches(&o).lines().count()
     };
     assert_eq!(found("rust"), 1);
     assert_eq!(found("rs"), 1);
@@ -61,15 +66,20 @@ fn file_types_follow_ripgrep_names_and_fall_back_to_an_extension() {
     assert_eq!(found("c"), 1, "ripgrep's c includes headers");
     assert_eq!(found("python"), 1);
     assert_eq!(found("zig"), 1, "an unknown name is an extension");
+    assert_eq!(
+        found("js"),
+        0,
+        "a hidden file is skipped with a type as without one"
+    );
 }
 
 #[test]
 fn case_insensitivity_widens_the_match() {
     let root = tree();
     let mut o = opts("FN HELPER", root.path());
-    assert!(search(&o).unwrap().is_empty());
+    assert!(matches(&o).is_empty());
     o.case_insensitive = true;
-    assert!(search(&o).unwrap().ends_with(":2:fn helper() {}\n"));
+    assert!(matches(&o).ends_with(":2:fn helper() {}\n"));
 }
 
 #[test]
@@ -81,7 +91,7 @@ fn context_lines_use_dashes_and_groups_are_separated() {
     o.context = 1;
     let f = file.display();
     let expected = format!("{f}-1-x\n{f}:2:hit\n{f}-3-y\n--\n{f}-5-w\n{f}:6:hit\n{f}-7-v\n");
-    assert_eq!(search(&o).unwrap(), expected);
+    assert_eq!(matches(&o), expected);
 }
 
 #[test]
@@ -93,7 +103,7 @@ fn adjacent_and_overlapping_context_prints_each_line_once_without_a_separator() 
     o.context = 1;
     let f = file.display();
     let expected = format!("{f}:1:hit\n{f}-2-mid\n{f}:3:hit\n{f}-4-x\n{f}-5-y\n{f}:6:hit\n");
-    assert_eq!(search(&o).unwrap(), expected);
+    assert_eq!(matches(&o), expected);
 }
 
 #[test]
@@ -105,7 +115,7 @@ fn context_groups_in_different_files_are_separated_as_ripgrep_does() {
     o.context = 1;
     let (a, b) = (shown(root.path(), "a.txt"), shown(root.path(), "b.txt"));
     let expected = format!("{a}-1-a\n{a}:2:hit\n--\n{b}:1:hit\n{b}-2-b\n");
-    assert_eq!(search(&o).unwrap(), expected);
+    assert_eq!(matches(&o), expected);
 }
 
 #[test]
@@ -115,18 +125,26 @@ fn a_huge_context_neither_panics_nor_loses_lines() {
     fs::write(&file, "a\nhit\nb").unwrap();
     let mut o = opts("hit", &file);
     o.context = usize::MAX;
-    assert_eq!(search(&o).unwrap().lines().count(), 3);
+    assert_eq!(matches(&o).lines().count(), 3);
 }
 
 #[test]
-fn skipped_files_are_counted_in_a_note() {
+fn files_that_might_have_matched_are_noted_by_cause_and_binaries_are_silent() {
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("blob.bin"), b"needle\0binary").unwrap();
     fs::write(root.path().join("latin1.txt"), b"needle \xe9\n").unwrap();
     let big = vec![b'x'; MAX_FILE_BYTES as usize + 1];
     fs::write(root.path().join("big.txt"), big).unwrap();
-    let out = search(&opts("needle", root.path())).unwrap();
-    assert!(out.contains("skipped 3 file(s)"), "{out}");
+    let found = search(&opts("needle", root.path())).unwrap();
+    assert!(found.matches.is_empty());
+    assert_eq!(found.notes.len(), 2, "{:?}", found.notes);
+    assert!(
+        found
+            .notes
+            .iter()
+            .any(|n| n.starts_with("1 file(s)") && n.contains("larger than"))
+    );
+    assert!(found.notes.iter().any(|n| n.contains("not UTF-8")));
 }
 
 #[test]
@@ -134,8 +152,12 @@ fn a_search_past_its_deadline_says_its_results_are_incomplete() {
     let root = tree();
     let mut o = opts("fn", root.path());
     o.deadline = Instant::now() - Duration::from_secs(1);
-    let out = search(&o).unwrap();
-    assert!(out.contains("stopped at the time limit"), "{out}");
+    let found = search(&o).unwrap();
+    assert!(
+        found.notes.iter().any(|n| n.contains("time limit")),
+        "{:?}",
+        found.notes
+    );
 }
 
 #[test]
@@ -144,9 +166,21 @@ fn the_output_limit_stops_the_search_and_says_so() {
     fs::write(root.path().join("a.txt"), "hit\n".repeat(1000)).unwrap();
     let mut o = opts("hit", root.path());
     o.max_output = 100;
-    let out = search(&o).unwrap();
-    assert!(out.lines().count() < 10, "{out}");
-    assert!(out.contains("stopped at the output limit"));
+    let found = search(&o).unwrap();
+    assert!(found.matches.lines().count() < 10, "{}", found.matches);
+    assert!(found.notes.iter().any(|n| n.contains("output limit")));
+}
+
+#[test]
+fn a_search_that_finished_is_never_called_incomplete() {
+    let root = tempfile::tempdir().unwrap();
+    let line = "the only hit is long enough to pass the limit\n";
+    fs::write(root.path().join("a.txt"), line).unwrap();
+    let mut o = opts("hit", root.path());
+    o.max_output = 1;
+    let found = search(&o).unwrap();
+    assert_eq!(found.matches.lines().count(), 1);
+    assert!(found.notes.is_empty(), "{:?}", found.notes);
 }
 
 #[test]
@@ -158,27 +192,36 @@ fn a_bad_pattern_and_a_missing_path_are_errors() {
 
 #[cfg(unix)]
 #[test]
+fn an_unreadable_start_folder_is_an_error_not_an_empty_answer() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let locked = root.path().join("locked");
+    fs::create_dir(&locked).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    let readable_anyway = fs::read_dir(&locked).is_ok();
+    let result = search(&opts("x", &locked));
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    // A root user reads every folder, so the check means something only for anyone else.
+    if !readable_anyway {
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn links_inside_are_not_followed_but_a_linked_start_path_is() {
     let root = tree();
     let outside = tempfile::tempdir().unwrap();
     fs::write(outside.path().join("secret.txt"), "fn outside\n").unwrap();
     std::os::unix::fs::symlink(outside.path(), root.path().join("src/link")).unwrap();
-    assert!(search(&opts("outside", root.path())).unwrap().is_empty());
+    assert!(matches(&opts("outside", root.path())).is_empty());
 
     let linked_file = root.path().join("file-link.rs");
     std::os::unix::fs::symlink(root.path().join("src/main.rs"), &linked_file).unwrap();
-    assert!(
-        search(&opts("helper", &linked_file))
-            .unwrap()
-            .contains(":2:fn helper")
-    );
+    assert!(matches(&opts("helper", &linked_file)).contains(":2:fn helper"));
     let linked_dir = root.path().join("dir-link");
     std::os::unix::fs::symlink(root.path().join("src"), &linked_dir).unwrap();
-    assert!(
-        search(&opts("helper", &linked_dir))
-            .unwrap()
-            .contains(":2:fn helper")
-    );
+    assert!(matches(&opts("helper", &linked_dir)).contains(":2:fn helper"));
 }
 
 /// Runs through `GrepTool` itself, so it covers whichever engine this machine has. Run the test
@@ -188,8 +231,12 @@ async fn grep_finds_a_match_with_or_without_rg() {
     use crate::tools::AgentTool;
     let root = tempfile::tempdir().unwrap();
     fs::write(root.path().join("a.rs"), "fn needle() {}\n").unwrap();
-    let args = serde_json::json!({"pattern": "needle", "path": root.path().display().to_string(), "file_type": "rust"});
+    let path = root.path().display().to_string();
+    let args = serde_json::json!({"pattern": "needle", "path": path, "file_type": "rust"});
     let result = crate::coding::GrepTool.execute("t", args).await.unwrap();
     let text = &result.content[0].text;
     assert!(text.contains("a.rs:1:fn needle() {}"), "{text}");
+    let none = serde_json::json!({"pattern": "absent", "path": path});
+    let result = crate::coding::GrepTool.execute("t", none).await.unwrap();
+    assert!(result.content[0].text.starts_with("No matches found."));
 }

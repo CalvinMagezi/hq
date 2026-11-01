@@ -48,15 +48,22 @@ pub(super) struct Search {
     pub file_type: Option<String>,
     pub context: usize,
     pub case_insensitive: bool,
-    /// Stop collecting once the output is this long; the caller truncates and says so.
+    /// Stop collecting matches once they are this long; the caller truncates and says so.
     pub max_output: usize,
     pub deadline: Instant,
 }
 
-/// Lines matching the pattern as `path:line:text`, with `path-line-text` context lines and `--`
-/// between groups, the shape `rg --no-heading --line-number` prints. Notes are appended when the
-/// search stopped early or skipped files, so a short answer is never mistaken for a full one.
-pub(super) fn search(opts: &Search) -> Result<String> {
+/// What a search found, and what the agent must know about how far it got.
+#[derive(Debug, Default)]
+pub(super) struct Found {
+    /// Lines as `rg --no-heading --line-number` prints them: `path:line:text` for matches,
+    /// `path-line-text` for context, `--` between groups.
+    pub matches: String,
+    /// Plain sentences about files left out or a search cut short; empty when it covered all.
+    pub notes: Vec<String>,
+}
+
+pub(super) fn search(opts: &Search) -> Result<Found> {
     let regex = RegexBuilder::new(&opts.pattern)
         .case_insensitive(opts.case_insensitive)
         .build()
@@ -66,7 +73,7 @@ pub(super) fn search(opts: &Search) -> Result<String> {
         regex,
         extensions: opts.file_type.as_deref().map(extensions_for),
         out: String::new(),
-        skipped: 0,
+        skipped: Skipped::default(),
         stopped: None,
     };
     // The start path may be a link (a symlinked checkout); links inside it are never followed.
@@ -75,6 +82,7 @@ pub(super) fn search(opts: &Search) -> Result<String> {
     if meta.is_file() {
         run.search_file(&opts.path);
     } else {
+        fs::read_dir(&opts.path).with_context(|| format!("cannot read {}", opts.path.display()))?;
         run.walk(&opts.path);
     }
     Ok(run.finish())
@@ -91,18 +99,58 @@ fn extensions_for(file_type: &str) -> Vec<String> {
     }
 }
 
+/// Why a file was not searched. Binary files are left out silently, as ripgrep does.
+enum Skip {
+    Binary,
+    TooLarge,
+    NotText,
+    Unreadable,
+}
+
+/// Files that might have held a match but were not searched, by cause.
+#[derive(Default)]
+struct Skipped {
+    too_large: usize,
+    not_text: usize,
+    unreadable: usize,
+}
+
+impl Skipped {
+    fn count(&mut self, why: Skip) {
+        match why {
+            Skip::Binary => {}
+            Skip::TooLarge => self.too_large += 1,
+            Skip::NotText => self.not_text += 1,
+            Skip::Unreadable => self.unreadable += 1,
+        }
+    }
+
+    fn notes(&self) -> Vec<String> {
+        let mb = MAX_FILE_BYTES / (1024 * 1024);
+        [
+            (self.too_large, format!("larger than {mb} MB")),
+            (self.not_text, "not UTF-8 text".to_string()),
+            (self.unreadable, "unreadable".to_string()),
+        ]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, why)| format!("{n} file(s) were not searched because they are {why}."))
+        .collect()
+    }
+}
+
 struct Run<'a> {
     opts: &'a Search,
     regex: Regex,
     extensions: Option<Vec<String>>,
     out: String,
-    /// Files left out for size, binary content or encoding.
-    skipped: usize,
+    skipped: Skipped,
     /// Why the search ended before covering everything.
     stopped: Option<&'static str>,
 }
 
 impl Run<'_> {
+    /// Asked only before more work, so a search that finished is never called incomplete.
     fn should_stop(&mut self) -> bool {
         if self.stopped.is_some() {
             return true;
@@ -120,6 +168,7 @@ impl Run<'_> {
         let mut pending = vec![root.to_path_buf()];
         while let Some(dir) = pending.pop() {
             let Ok(entries) = fs::read_dir(&dir) else {
+                self.skipped.count(Skip::Unreadable);
                 continue;
             };
             let mut entries: Vec<_> = entries.flatten().collect();
@@ -139,7 +188,10 @@ impl Run<'_> {
         let Ok(kind) = entry.file_type() else { return };
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if kind.is_dir() && !is_skipped_dir(&name) {
+        if name.starts_with('.') {
+            return;
+        }
+        if kind.is_dir() && !SKIPPED_DIRS.contains(&&*name) {
             subdirs.push(entry.path());
         } else if kind.is_file() && has_extension(&name, self.extensions.as_deref()) {
             self.search_file(&entry.path());
@@ -147,9 +199,9 @@ impl Run<'_> {
     }
 
     fn search_file(&mut self, path: &Path) {
-        let Some(text) = read_text(path) else {
-            self.skipped += 1;
-            return;
+        let text = match read_text(path) {
+            Ok(text) => text,
+            Err(why) => return self.skipped.count(why),
         };
         let lines: Vec<&str> = text.lines().collect();
         let matched: Vec<bool> = lines.iter().map(|l| self.regex.is_match(l)).collect();
@@ -163,6 +215,9 @@ impl Run<'_> {
             if from > end {
                 continue;
             }
+            if self.should_stop() {
+                return;
+            }
             let joins_previous = last_printed.is_some_and(|last| from == last + 1);
             if context > 0 && !self.out.is_empty() && !joins_previous {
                 self.out.push_str(GROUP_SEPARATOR);
@@ -174,54 +229,44 @@ impl Run<'_> {
                     .push_str(&format!("{shown}{mark}{}{mark}{line}\n", i + 1));
             }
             last_printed = Some(end);
-            if self.should_stop() {
-                return;
-            }
         }
     }
 
-    fn finish(mut self) -> String {
-        if self.skipped > 0 {
-            self.out.push_str(&format!(
-                "(skipped {} file(s) that are binary, larger than {} MB or not UTF-8)\n",
-                self.skipped,
-                MAX_FILE_BYTES / (1024 * 1024)
-            ));
-        }
+    fn finish(self) -> Found {
+        let mut notes = self.skipped.notes();
         if let Some(why) = self.stopped {
-            self.out.push_str(&format!(
-                "(the search stopped at {why}; results are incomplete)\n"
+            notes.push(format!(
+                "The search stopped at {why}, so these results are incomplete."
             ));
         }
-        self.out
+        Found {
+            matches: self.out,
+            notes,
+        }
     }
-}
-
-fn is_skipped_dir(name: &str) -> bool {
-    name.starts_with('.') || SKIPPED_DIRS.contains(&name)
 }
 
 fn has_extension(name: &str, extensions: Option<&[String]>) -> bool {
     let Some(extensions) = extensions else {
-        return !name.starts_with('.');
+        return true;
     };
     let ext = Path::new(name).extension().and_then(|e| e.to_str());
     ext.is_some_and(|ext| extensions.iter().any(|e| e == ext))
 }
 
-/// The file's text, or `None` when it is too large, binary or not UTF-8.
-fn read_text(path: &Path) -> Option<String> {
-    let mut file = fs::File::open(path).ok()?;
-    if file.metadata().ok()?.len() > MAX_FILE_BYTES {
-        return None;
+fn read_text(path: &Path) -> std::result::Result<String, Skip> {
+    let mut file = fs::File::open(path).map_err(|_| Skip::Unreadable)?;
+    let len = file.metadata().map_err(|_| Skip::Unreadable)?.len();
+    if len > MAX_FILE_BYTES {
+        return Err(Skip::TooLarge);
     }
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).ok()?;
+    file.read_to_end(&mut bytes).map_err(|_| Skip::Unreadable)?;
     let sniff = &bytes[..bytes.len().min(BINARY_SNIFF_BYTES)];
     if sniff.contains(&0) {
-        return None;
+        return Err(Skip::Binary);
     }
-    String::from_utf8(bytes).ok()
+    String::from_utf8(bytes).map_err(|_| Skip::NotText)
 }
 
 #[cfg(test)]

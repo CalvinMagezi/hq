@@ -242,12 +242,21 @@ impl AgentTool for GrepTool {
 /// The same search in plain Rust when `rg` is not installed, as on a phone.
 async fn search_without_rg(search: super::search_fallback::Search) -> String {
     let joined = tokio::task::spawn_blocking(move || super::search_fallback::search(&search)).await;
-    match joined {
-        Ok(Ok(out)) if out.is_empty() => "No matches found.".to_string(),
-        Ok(Ok(out)) => truncate_output(&out, MAX_OUTPUT_BYTES),
-        Ok(Err(e)) => format!("Search failed: {e:#}"),
-        Err(e) => format!("Search failed: {e}"),
+    let found = match joined {
+        Ok(Ok(found)) => found,
+        Ok(Err(e)) => return format!("Search failed: {e:#}"),
+        Err(e) => return format!("Search failed: {e}"),
+    };
+    let mut text = if found.matches.is_empty() {
+        "No matches found.".to_string()
+    } else {
+        truncate_output(&found.matches, MAX_OUTPUT_BYTES)
+    };
+    // After truncation, so a note about how far the search got is never the part cut off.
+    for note in found.notes {
+        text.push_str(&format!("\n{note}"));
     }
+    text
 }
 
 // ─── LsTool ─────────────────────────────────────────────────────
