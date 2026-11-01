@@ -14,7 +14,9 @@
 //! carries no address and no port the receiver must listen on. Only a serving hub accepts the
 //! protocol, and the gate in `bridge.rs` admits paired peers only.
 
-use crate::bridge::{Dialer, Live, LiveGuard, REJECT_REVOKED, still_paired};
+use crate::bridge::{
+    Dialer, Live, LiveGuard, REASON_REVOKED, REJECT_REVOKED, peer_revoked_us, still_paired,
+};
 use crate::code::printable;
 use crate::services::run_forward;
 use crate::wire::MAX_NAME_CHARS;
@@ -354,6 +356,7 @@ pub(crate) struct SetupProtocol {
     pub db: Database,
     pub live: Arc<Live>,
     pub state: Arc<SetupState>,
+    pub revoker: crate::bridge::Revoker,
 }
 
 impl std::fmt::Debug for SetupProtocol {
@@ -368,7 +371,7 @@ impl ProtocolHandler for SetupProtocol {
         let token = self.live.register(id, conn.weak_handle());
         let _guard = LiveGuard::new(self.live.clone(), id, token);
         if !still_paired(&self.db, id).await {
-            conn.close(REJECT_REVOKED.into(), b"revoked");
+            conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
             return Ok(());
         }
         let answered = tokio::time::timeout(EXCHANGE_TIMEOUT, self.answer(&conn, id)).await;
@@ -376,11 +379,17 @@ impl ProtocolHandler for SetupProtocol {
             Ok(Ok(())) => {
                 // Wait for the machine to read the answer and close, or closing would cut it off.
                 let _ = tokio::time::timeout(EXCHANGE_TIMEOUT, conn.closed()).await;
+                if peer_revoked_us(conn.close_reason().as_ref()) {
+                    let _ = self.revoker.revoke(&id).await;
+                }
                 return Ok(());
             }
             Ok(Err(e)) => format!("{e:#}"),
             Err(_) => "it timed out".to_string(),
         };
+        if peer_revoked_us(conn.close_reason().as_ref()) {
+            let _ = self.revoker.revoke(&id).await;
+        }
         tracing::warn!(peer = %id.fmt_short(), "bridge setup refused: {why}");
         conn.close(REJECT_SETUP.into(), b"setup refused");
         Ok(())
@@ -507,10 +516,30 @@ async fn exchange(dialer: &Dialer, peer: &str, hello: &MachineHello) -> Result<H
         .dial(peer, SETUP_ALPN)
         .await
         .context("the peer does not answer setup (it may not be a hub, or not be serving)")?;
-    let (mut send, mut recv) = conn.open_bi().await?;
+    let (mut send, mut recv) = match conn.open_bi().await {
+        Ok(streams) => streams,
+        Err(e) => {
+            if peer_revoked_us(conn.close_reason().as_ref())
+                && let Ok(id) = peer.parse::<EndpointId>()
+            {
+                let _ = dialer.revoke(&id).await;
+            }
+            return Err(e.into());
+        }
+    };
     write_msg(&mut send, hello).await?;
     send.finish()?;
-    let reply: HubReply = read_msg(&mut recv).await?;
+    let reply: HubReply = match read_msg(&mut recv).await {
+        Ok(reply) => reply,
+        Err(e) => {
+            if peer_revoked_us(conn.close_reason().as_ref())
+                && let Ok(id) = peer.parse::<EndpointId>()
+            {
+                let _ = dialer.revoke(&id).await;
+            }
+            return Err(e);
+        }
+    };
     conn.close(0u32.into(), b"done");
     check_reply(&reply)?;
     Ok(reply)

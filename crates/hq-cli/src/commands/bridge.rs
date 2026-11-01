@@ -16,6 +16,7 @@ use hq_db::{Database, bridge as peers};
 use std::{
     net::SocketAddr,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -354,6 +355,21 @@ async fn start_forwards(bridge: &Bridge, config: Option<&HqConfig>) -> Result<()
     Ok(())
 }
 
+/// Cleans up anything setup made outside hq-bridge: Claude entries on a machine, gate key on a hub.
+pub fn cleanup_peer_outside_bridge(db: &Database, peer: &str) {
+    super::claude::remove_for_revoke(db, peer);
+    if let Ok(Some(setup)) = hq_db::bridge_setup::get(db, peer)
+        && setup.peer_role == hq_db::bridge_setup::ROLE_MACHINE
+    {
+        let key_path = hq_tools::agent_host::gate_key_path(&setup.peer_name);
+        if let Err(e) = std::fs::remove_file(&key_path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!("could not remove gate key {}: {e}", key_path.display());
+        }
+    }
+}
+
 /// Starts this machine's bridge. With `setup`, it takes part in setup after pairing in that role.
 async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) -> Result<Bridge> {
     let bind: Vec<SocketAddr> = if net.bind.is_empty() {
@@ -370,7 +386,7 @@ async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) ->
         None
     };
     let setup = setup.map(|role| setup_config(config.as_ref(), role));
-    Bridge::start_with_setup(
+    let bridge = Bridge::start_with_setup(
         BridgeConfig {
             key: key_path(net)?,
             bind,
@@ -379,13 +395,18 @@ async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) ->
             with_addrs: !net.no_addrs,
             advertise: Vec::new(),
         },
-        db,
+        db.clone(),
         serve.then(echo_handler),
         door,
         services,
         setup,
     )
-    .await
+    .await?;
+    let db_clone = db.clone();
+    bridge.set_on_revoked(Arc::new(move |peer: &str| {
+        cleanup_peer_outside_bridge(&db_clone, peer);
+    }));
+    Ok(bridge)
 }
 
 pub async fn run(config: &HqConfig, action: BridgeAction) -> Result<()> {
@@ -695,12 +716,29 @@ async fn ping(net: &NetArgs, db: Database, peer: &str, count: usize) -> Result<(
 
 async fn ping_peer(bridge: &Bridge, peer: &str, count: usize) -> Result<()> {
     let started = Instant::now();
-    let conn = bridge.connect(peer).await?;
+    let conn = match bridge.connect(peer).await {
+        Ok(conn) => conn,
+        Err(e) => {
+            if let Ok(id) = peer.parse::<EndpointId>()
+                && hq_bridge::peer_revoked_us(hq_bridge::error_close_reason(&e))
+            {
+                let _ = bridge.revoke(&id).await;
+            }
+            return Err(e);
+        }
+    };
     println!("Connected in {:?}.", started.elapsed());
     let mut times = Vec::new();
     for _ in 0..count.max(1) {
         let t = Instant::now();
-        echo(&conn, b"ping").await?;
+        if let Err(e) = echo(&conn, b"ping").await {
+            if hq_bridge::peer_revoked_us(conn.close_reason().as_ref())
+                && let Ok(id) = peer.parse::<EndpointId>()
+            {
+                let _ = bridge.revoke(&id).await;
+            }
+            return Err(e);
+        }
         times.push(t.elapsed());
     }
     times.sort();
@@ -744,8 +782,8 @@ fn revoke(db: &Database, id: &str) -> Result<()> {
         .parse()
         .map_err(|_| anyhow!("{id} is not a machine id (see `hq bridge peers`)"))?;
     let id = id.to_string();
-    // Before the revoke deletes the setup that names the hub.
-    super::claude::remove_for_revoke(db, &id);
+    // Before the revoke deletes the setup that names the hub or machine.
+    cleanup_peer_outside_bridge(db, &id);
     if peers::revoke(db, &id)? {
         println!("Revoked {id}. A machine serving it stops at its next request.");
     } else {

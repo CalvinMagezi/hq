@@ -519,21 +519,25 @@ impl Control {
     /// Connects to a paired peer, trying again until `window` ends. A peer that is not paired is
     /// refused at once: retrying cannot change that.
     async fn dial(&self, peer: &str, window: Duration) -> Result<Connection> {
-        let id: EndpointId = peer
+        let _id: EndpointId = peer
             .parse()
             .map_err(|_| anyhow!("that is not a device id"))?;
-        let db = self.bridge.db().clone();
-        let key = id.to_string();
-        let paired = tokio::task::spawn_blocking(move || peers::is_paired(&db, &key)).await??;
-        if !paired {
+        if !self.on_list(peer).await {
             return Err(anyhow!("that device is not paired"));
         }
         let end = Instant::now() + window;
         let mut changes = self.network.subscribe();
         loop {
             let attempt = DIAL_ATTEMPT.min(end.saturating_duration_since(Instant::now()));
-            if let Ok(Ok(conn)) = timeout(attempt, self.bridge.connect(peer)).await {
+            let res = timeout(attempt, self.bridge.connect(peer)).await;
+            if let Ok(Ok(conn)) = res {
                 return Ok(conn);
+            }
+            if let Ok(Err(e)) = res {
+                let revoked = hq_bridge::peer_revoked_us(hq_bridge::error_close_reason(&e));
+                if revoked || !self.on_list(peer).await {
+                    return Err(e);
+                }
             }
             if Instant::now() >= end {
                 return Err(anyhow!("could not reach that device"));
@@ -566,7 +570,14 @@ impl Control {
                 let t = Instant::now();
                 match timeout(KEEP_ECHO_LIMIT, echo(&conn, b"ping")).await {
                     Ok(Ok(())) => times.push(t.elapsed()),
-                    _ => break,
+                    _ => {
+                        if hq_bridge::peer_revoked_us(conn.close_reason().as_ref())
+                            && let Ok(id) = id.parse::<EndpointId>()
+                        {
+                            let _ = this.bridge.revoke(&id).await;
+                        }
+                        break;
+                    }
                 }
             }
             times.sort();

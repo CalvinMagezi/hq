@@ -193,9 +193,14 @@ Right after the six digits match, the machine sends one setup message on its own
 Ports are picked on each side from 47400 to 47999 and kept. What was set up lives in the database
 (`bridge_setup`), never in `config.yaml`; the hub keeps only a hash of the machine's key. A restart,
 or running setup again, reuses the ports and the key; a new pairing starts setup over with a new
-key and revokes the old one. Revoking the peer, from either side, undoes that
-side's part: the forward closes, the gate line is removed, the key stops working and the host
-disappears.
+key and revokes the old one.
+
+Revoking the peer from either side cleans both sides of the pairing. The revoking side marks the peer
+revoked, removes its setup row and device keys, prunes gate lines, closes forward listeners, and closes
+open connections with code 403 and reason `revoked`. The other side learns of the revocation from this
+connection close (or on its next dial if it was offline or disconnected) and runs the same local cleanup.
+The registered cleanup callback removes Claude entries on a machine and deletes the host gate key file
+on a hub.
 
 ```bash
 # On the laptop, with the phone app open on its pairing screen:
