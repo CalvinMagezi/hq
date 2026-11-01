@@ -81,11 +81,16 @@ fn drivers_of(rows: Vec<UsageRow>) -> Vec<Driver> {
 }
 
 pub fn drivers(db: &Database, now: i64) -> Result<Drivers> {
-    let since = now - DRIVER_WINDOW_DAYS * SECS_PER_DAY;
+    breakdown(db, now, DRIVER_WINDOW_DAYS, DRIVER_COUNT)
+}
+
+/// Spend by model and by origin over the last `days`, biggest first, at most `limit` of each.
+pub fn breakdown(db: &Database, now: i64, days: i64, limit: usize) -> Result<Drivers> {
+    let since = now - days * SECS_PER_DAY;
     db.with_conn(|conn| {
         Ok(Drivers {
-            models: drivers_of(top_drivers(conn, GroupBy::Model, since, DRIVER_COUNT)?),
-            origins: drivers_of(top_drivers(conn, GroupBy::Origin, since, DRIVER_COUNT)?),
+            models: drivers_of(top_drivers(conn, GroupBy::Model, since, limit)?),
+            origins: drivers_of(top_drivers(conn, GroupBy::Origin, since, limit)?),
         })
     })
 }
@@ -218,6 +223,22 @@ mod tests {
         );
         assert_eq!(d.origins[0].name, "chat");
         assert!((d.origins[0].usd - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_breakdown_reaches_past_the_driver_window_and_count() {
+        let db = Database::open_memory().unwrap();
+        for (i, origin) in ["chat", "memory", "supervisor", "verification"]
+            .iter()
+            .enumerate()
+        {
+            spend(&db, NOW - 60, "m", origin, 1.0 + i as f64);
+        }
+        spend(&db, NOW - 20 * SECS_PER_DAY, "m", "skill_review", 9.0);
+        assert_eq!(drivers(&db, NOW).unwrap().origins.len(), DRIVER_COUNT);
+        let wide = breakdown(&db, NOW, 30, 10).unwrap();
+        assert_eq!(wide.origins.len(), 5);
+        assert_eq!(wide.origins[0].name, "skill_review");
     }
 
     #[test]
