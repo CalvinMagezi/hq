@@ -1,0 +1,41 @@
+# Agent HQ's own rules for the Antigravity CLI (agy, Gemini), written from
+# screens of Antigravity CLI 1.4.8 captured on 2026-11-01
+# (tests/fixtures/antigravity).
+#
+# agy keeps its empty prompt box on screen while it works, so the box says
+# nothing about the state. The footer line under it does: "? for shortcuts"
+# when it waits for input, "esc to cancel" during a turn. Every rule reads only
+# the last non-empty line, so text quoted higher up in the conversation never
+# counts. Idle is claimed only when the idle footer is on screen; anything the
+# rules do not recognise (a dialog included, since none has been captured yet)
+# reads unknown, never idle.
+id = "antigravity"
+version = "2026.11.01.1"
+min_engine_version = 4
+updated_at = "2026-11-01T00:00:00Z"
+aliases = ["agy"]
+
+[[rules]]
+id = "working_footer"
+state = "working"
+priority = 960
+region = "bottom_non_empty_lines(1)"
+visible_working = true
+# "esc to cancel ... Gemini 3.8 Flash · high", under a braille spinner line.
+contains = ["esc to cancel"]
+
+[[rules]]
+id = "idle_footer"
+state = "idle"
+priority = 900
+region = "bottom_non_empty_lines(1)"
+visible_idle = true
+# "? for shortcuts ... Gemini 3.8 Flash · high"; the model name varies.
+contains = ["? for shortcuts"]
+
+[[rules]]
+id = "unrecognised"
+state = "unknown"
+priority = 0
+# No gate: matches every screen, so a screen none of the rules above know reads
+# unknown instead of the engine's default idle.
