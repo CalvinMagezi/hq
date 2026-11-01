@@ -137,11 +137,12 @@ impl AgentTool for GrepTool {
 
     fn description(&self) -> &str {
         concat!(
-            "Searches file contents using ripgrep. Supports full regex syntax.\n\n",
+            "Searches file contents using ripgrep, or an equivalent built-in search where ripgrep is not \
+             installed. Supports full regex syntax.\n\n",
             "Parameters:\n",
             "- pattern: regex to match (e.g., \"fn handle_\\\\w+\", \"class.*implements\")\n",
             "- path: directory to search (default: current)\n",
-            "- file_type: filter by language (\"rs\", \"ts\", \"py\", etc.)\n",
+            "- file_type: filter by ripgrep type name (\"rust\", \"ts\", \"py\", \"dart\", etc.)\n",
             "- context: lines of context before/after each match\n",
             "- case_insensitive: true for case-insensitive search\n\n",
             "Prefer this over bash grep or rg for content search. Times out after 30 seconds.",
@@ -221,14 +222,16 @@ impl AgentTool for GrepTool {
                 }
             }
             Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                let fallback = Fallback {
+                let search = super::search_fallback::Search {
                     pattern: pattern.to_string(),
-                    path: path.to_string(),
+                    path: std::path::PathBuf::from(path),
                     file_type: file_type.map(str::to_string),
-                    context: context.unwrap_or(0) as usize,
+                    context: context.map_or(0, |c| usize::try_from(c).unwrap_or(usize::MAX)),
                     case_insensitive,
+                    max_output: MAX_OUTPUT_BYTES,
+                    deadline: std::time::Instant::now() + GREP_TIMEOUT,
                 };
-                Ok(text_result(search_without_rg(fallback).await))
+                Ok(text_result(search_without_rg(search).await))
             }
             Ok(Err(e)) => Ok(text_result(format!("Error running ripgrep: {e}"))),
             Err(_) => Ok(text_result("Grep timed out after 30 seconds.")),
@@ -236,29 +239,9 @@ impl AgentTool for GrepTool {
     }
 }
 
-/// What [`search_without_rg`] needs, owned so it can move to a blocking thread.
-struct Fallback {
-    pattern: String,
-    path: String,
-    file_type: Option<String>,
-    context: usize,
-    case_insensitive: bool,
-}
-
 /// The same search in plain Rust when `rg` is not installed, as on a phone.
-async fn search_without_rg(f: Fallback) -> String {
-    let joined = tokio::task::spawn_blocking(move || {
-        super::search_fallback::search(&super::search_fallback::Search {
-            pattern: &f.pattern,
-            path: Path::new(&f.path),
-            file_type: f.file_type.as_deref(),
-            context: f.context,
-            case_insensitive: f.case_insensitive,
-            max_output: MAX_OUTPUT_BYTES,
-            deadline: std::time::Instant::now() + GREP_TIMEOUT,
-        })
-    })
-    .await;
+async fn search_without_rg(search: super::search_fallback::Search) -> String {
+    let joined = tokio::task::spawn_blocking(move || super::search_fallback::search(&search)).await;
     match joined {
         Ok(Ok(out)) if out.is_empty() => "No matches found.".to_string(),
         Ok(Ok(out)) => truncate_output(&out, MAX_OUTPUT_BYTES),
