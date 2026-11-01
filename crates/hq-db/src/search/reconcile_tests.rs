@@ -137,7 +137,7 @@ fn a_deleted_note_leaves_nothing_behind_in_any_derived_table() {
     assert_eq!(rows(&conn, "Notebooks/gone.md"), (0, 0, 0, 0));
     assert_eq!(link_rows(&conn, "Notebooks/gone.md"), 0);
     assert_eq!(rows(&conn, "Notebooks/kept.md"), (1, 1, 1, 1));
-    let semantic = semantic_search(&conn, &[1.0, 2.0, 3.0], 10).unwrap();
+    let semantic = semantic_search(&conn, &[1.0, 2.0, 3.0], "m", 10).unwrap();
     assert!(semantic.iter().all(|r| r.note_path != "Notebooks/gone.md"));
 }
 
@@ -681,7 +681,7 @@ fn semantic_search_never_returns_a_note_that_is_gone_from_the_index() {
     // A stale embedding the old delete path left behind: no keyword-index row.
     store_embedding(&conn, "Notebooks/deleted.md", &[1.0, 0.0], "m").unwrap();
 
-    let found = semantic_search(&conn, &[1.0, 0.0], 10).unwrap();
+    let found = semantic_search(&conn, &[1.0, 0.0], "m", 10).unwrap();
     let paths: Vec<_> = found.iter().map(|r| r.note_path.as_str()).collect();
     assert_eq!(paths, vec!["Notebooks/live.md"]);
 
@@ -711,7 +711,7 @@ fn which_embeddings_a_capped_search_loads_does_not_depend_on_row_order() {
         .unwrap();
     }
     let order = |conn: &Connection| -> Vec<String> {
-        semantic_search(conn, &[1.0, 0.0], 10)
+        semantic_search(conn, &[1.0, 0.0], "m", 10)
             .unwrap()
             .into_iter()
             .map(|r| r.note_path)

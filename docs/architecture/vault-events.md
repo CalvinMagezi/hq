@@ -103,6 +103,29 @@ the file's. Failures back off (30 seconds doubling to 15 minutes) and three fail
 stop the cycle. Lite never embeds. Deleted notes lose their embeddings in the same step as
 their index rows, and semantic search only returns notes that are still indexed.
 
+Where vectors come from is `daemon.embedding_provider`:
+
+```yaml
+daemon:
+  embedding_provider: local   # default: remote
+```
+
+- `remote` (the default): OpenRouter when `openrouter_api_key` is set, Ollama on this machine
+  otherwise. Note text leaves the machine with every embedding.
+- `local`: a static Model2Vec model (`potion-base-8M`, about 30 MB on disk and 36 MB in memory)
+  runs in the `hq` process. The first use downloads three files from a pinned Hugging Face
+  revision into `~/.hq/models/potion-base-8M` and checks each against a pinned SHA-256; a
+  file that does not match is never installed. Files already there with the right hashes are
+  used without the network, which is also how an offline machine is set up: copy them in.
+  Local never falls back to a remote provider. It also embeds `vault_search` queries, so
+  `hybrid` and `semantic` searches match notes by meaning; with `remote`, queries are not
+  embedded and those modes are keyword searches.
+
+Each vector is stored with its model's label (`model2vec/potion-base-8M@<revision>` for local),
+and search compares a query only with vectors from the same model. Switching providers marks
+every note for re-embedding; until that finishes, notes not yet re-embedded are found by
+keyword only.
+
 ## Provenance: who wrote which version
 
 `crates/hq-db/src/provenance.rs`, tables `note_provenance` and `note_review_events`

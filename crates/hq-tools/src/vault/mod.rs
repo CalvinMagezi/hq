@@ -174,7 +174,10 @@ pub fn create_vault_tools(
     if let Some(db) = db {
         tools.push(Box::new(NoteReviewTool::new(vault.clone(), db.clone())));
         tools.push(Box::new(NoteProvenanceTool::new(vault.clone(), db.clone())));
-        tools.push(Box::new(VaultSearchTool::new(db.clone())));
+        tools.push(Box::new(
+            VaultSearchTool::new(db.clone())
+                .with_query_embedder(graph::configured_query_embedder()),
+        ));
         tools.push(Box::new(VaultFindSimilarTool::new(db.clone())));
         tools.push(Box::new(VaultTagsTool::new(db.clone())));
         tools.push(Box::new(
@@ -360,6 +363,30 @@ mod vault_tools_tests {
         let results = res["results"].as_array().unwrap();
         assert_eq!(results.len(), 2);
         assert_eq!(results[0]["path"], "Notebooks/b.md");
+    }
+
+    #[tokio::test]
+    async fn vault_search_finds_a_note_by_meaning_when_an_embedder_is_set() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        db.with_conn(|conn| {
+            hq_db::search::index_note(conn, "Notebooks/pair.md", "Pairing", "scan the code", "")?;
+            hq_db::search::index_note(conn, "Notebooks/bread.md", "Bread", "flour and yeast", "")?;
+            hq_db::search::store_embedding(conn, "Notebooks/pair.md", &[1.0, 0.0], "fake")?;
+            hq_db::search::store_embedding(conn, "Notebooks/bread.md", &[0.0, 1.0], "fake")?;
+            Ok(())
+        })
+        .unwrap();
+        let embedder: graph::QueryEmbedder = Arc::new(|_| Box::pin(async { Ok(vec![1.0, 0.0]) }));
+        let tool = VaultSearchTool::new(db.clone())
+            .with_query_embedder(Some((embedder, "fake".to_string())));
+
+        // No word of the query appears in either note.
+        let query = json!({ "query": "connect my laptop", "mode": "semantic" });
+        let res = tool.execute(query.clone()).await.unwrap();
+        assert_eq!(res["results"][0]["path"], "Notebooks/pair.md");
+
+        let plain = VaultSearchTool::new(db).execute(query).await.unwrap();
+        assert_eq!(plain["count"], 0);
     }
 
     #[tokio::test]

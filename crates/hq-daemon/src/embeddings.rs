@@ -14,6 +14,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
+use hq_core::config::EmbeddingProvider;
 use hq_db::Database;
 use hq_db::search::{
     NOTEBOOKS_DIR, PathOutcome, content_hash, pending_embeddings, reconcile_path,
@@ -35,11 +36,20 @@ static RUN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 pub type Embedder =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<Vec<f32>>> + Send>> + Send + Sync>;
 
-/// The embedder to use and the model name its vectors are labeled with: OpenRouter if
-/// `openrouter_api_key` is `Some`, otherwise Ollama's local `/api/embeddings` endpoint.
-pub fn embedder_for(openrouter_api_key: Option<&str>) -> (Embedder, String) {
-    match openrouter_api_key {
-        Some(key) => {
+/// The embedder to use and the model name its vectors are labeled with. `Local` never falls
+/// back to a remote provider: the owner chose to keep note text on this machine.
+pub fn embedder_for(
+    provider: EmbeddingProvider,
+    openrouter_api_key: Option<&str>,
+) -> (Embedder, String) {
+    match (provider, openrouter_api_key) {
+        (EmbeddingProvider::Local, _) => {
+            let embedder: Embedder = Arc::new(|text| {
+                Box::pin(async move { hq_memory::generate_embedding_local(&text).await })
+            });
+            (embedder, hq_memory::LOCAL_EMBEDDING_MODEL.to_string())
+        }
+        (EmbeddingProvider::Remote, Some(key)) => {
             let key = key.to_string();
             let embedder: Embedder = Arc::new(move |text| {
                 let key = key.clone();
@@ -47,7 +57,7 @@ pub fn embedder_for(openrouter_api_key: Option<&str>) -> (Embedder, String) {
             });
             (embedder, hq_memory::openrouter_embedding_model())
         }
-        None => {
+        (EmbeddingProvider::Remote, None) => {
             let embedder: Embedder =
                 Arc::new(|text| Box::pin(async move { generate_embedding(&text).await }));
             (embedder, "nomic-embed-text".to_string())
@@ -214,8 +224,7 @@ fn forget_if_gone(
 
 /// Process a batch of notes that need vector embeddings (up to `batch_size`).
 ///
-/// Generates embeddings via OpenRouter if `openrouter_api_key` is `Some`, otherwise via Ollama's
-/// local `/api/embeddings` endpoint, and stores the results labeled with the model that produced
+/// Generates embeddings with `embedder_for`, and stores the results labeled with the model that produced
 /// them and the hash of the note they came from.
 ///
 /// Returns the number of notes successfully embedded.
@@ -223,9 +232,10 @@ pub async fn process_embeddings(
     vault: &VaultClient,
     db: &Database,
     batch_size: usize,
+    provider: EmbeddingProvider,
     openrouter_api_key: Option<&str>,
 ) -> Result<usize> {
-    let (embedder, model) = embedder_for(openrouter_api_key);
+    let (embedder, model) = embedder_for(provider, openrouter_api_key);
     let mut skip = HashSet::new();
     let report = embed_pending(vault, db, &model, &embedder, batch_size, &mut skip).await?;
     Ok(report.embedded)
@@ -575,7 +585,9 @@ mod tests {
         let rig = Rig::new();
         let vault = VaultClient::new(Path::new(rig.dir.path()).to_path_buf()).unwrap();
         assert_eq!(
-            process_embeddings(&vault, &rig.db, 5, None).await.unwrap(),
+            process_embeddings(&vault, &rig.db, 5, EmbeddingProvider::Remote, None)
+                .await
+                .unwrap(),
             0
         );
     }

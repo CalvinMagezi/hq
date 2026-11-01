@@ -5,20 +5,65 @@ use async_trait::async_trait;
 use hq_db::Database;
 use hq_vault::VaultClient;
 use serde_json::{Value, json};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use super::{validate_path, validate_path_in_vault};
 use crate::registry::HqTool;
 
+/// Turns a search query into a vector with the model the notes were embedded with.
+pub type QueryEmbedder =
+    Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<Vec<f32>>> + Send>> + Send + Sync>;
+
 /// Multi-modal search tool: supports hybrid (FTS5 + embeddings), keyword, and semantic search modes.
 pub struct VaultSearchTool {
     db: Arc<Database>,
+    /// The embedder and the model label its vectors are stored under. Without one, hybrid and
+    /// semantic searches are keyword searches.
+    query_embedder: Option<(QueryEmbedder, String)>,
 }
 
 impl VaultSearchTool {
     pub fn new(db: Arc<Database>) -> Self {
-        Self { db }
+        Self {
+            db,
+            query_embedder: None,
+        }
     }
+
+    pub fn with_query_embedder(mut self, embedder: Option<(QueryEmbedder, String)>) -> Self {
+        self.query_embedder = embedder;
+        self
+    }
+
+    /// The query as a vector, when this search mode uses one and an embedder is set. A failure
+    /// only costs the semantic half of the search, so it is logged and the search goes on.
+    async fn query_vector(&self, query: &str, mode: &str) -> Option<(Vec<f32>, String)> {
+        let (embed, model) = self.query_embedder.as_ref()?;
+        if !matches!(mode, "hybrid" | "semantic") || query.trim().is_empty() {
+            return None;
+        }
+        match embed(query.to_string()).await {
+            Ok(vector) => Some((vector, model.clone())),
+            Err(e) => {
+                tracing::warn!(error = %e, "vault_search: query embedding failed, keyword only");
+                None
+            }
+        }
+    }
+}
+
+/// The on-device embedder when the owner chose local embeddings. A remote one is never used for
+/// queries: it would turn every search into a paid network call.
+pub fn configured_query_embedder() -> Option<(QueryEmbedder, String)> {
+    let config = hq_core::config::HqConfig::load().ok()?;
+    if config.daemon.embedding_provider != hq_core::config::EmbeddingProvider::Local {
+        return None;
+    }
+    let embedder: QueryEmbedder =
+        Arc::new(|q| Box::pin(async move { hq_memory::generate_embedding_local(&q).await }));
+    Some((embedder, hq_memory::LOCAL_EMBEDDING_MODEL.to_string()))
 }
 
 #[async_trait]
@@ -85,6 +130,7 @@ impl HqTool for VaultSearchTool {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
+        let query_vector = self.query_vector(&query, mode).await;
         let db = self.db.clone();
         let mode_owned = mode.to_string();
         let query_owned = query.clone();
@@ -99,10 +145,12 @@ impl HqTool for VaultSearchTool {
                 let mut results = match mode_owned.as_str() {
                     "recent" => hq_db::search::recent_notes(conn, limit * 2)?,
                     "keyword" => hq_db::search::keyword_search(conn, &query_owned, limit * 2)?,
-                    "semantic" => {
-                        hq_db::search::hybrid_search(conn, &query_owned, None, limit * 2)?
+                    _ => {
+                        let vector = query_vector
+                            .as_ref()
+                            .map(|(v, model)| (v.as_slice(), model.as_str()));
+                        hq_db::search::hybrid_search(conn, &query_owned, vector, limit * 2)?
                     }
-                    _ => hq_db::search::hybrid_search(conn, &query_owned, None, limit * 2)?,
                 };
 
                 results.retain(|r| {

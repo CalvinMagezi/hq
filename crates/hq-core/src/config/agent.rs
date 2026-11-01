@@ -31,6 +31,21 @@ pub struct DaemonConfig {
     /// Embedding interval in seconds
     #[serde(default = "default_embed_interval")]
     pub embedding_interval_secs: u64,
+
+    /// Where note vectors come from. `local` needs no network once its model is on disk.
+    #[serde(default)]
+    pub embedding_provider: EmbeddingProvider,
+}
+
+/// The source of note embeddings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EmbeddingProvider {
+    /// OpenRouter when an API key is configured, Ollama on this machine otherwise.
+    #[default]
+    Remote,
+    /// A small static model on this machine, downloaded once and checked against pinned hashes.
+    Local,
 }
 
 fn default_embed_batch() -> usize {
@@ -46,6 +61,7 @@ impl Default for DaemonConfig {
         Self {
             embedding_batch_size: default_embed_batch(),
             embedding_interval_secs: default_embed_interval(),
+            embedding_provider: EmbeddingProvider::default(),
         }
     }
 }

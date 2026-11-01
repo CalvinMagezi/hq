@@ -21,6 +21,8 @@ pub mod origin {
     pub const VERIFICATION: &str = "verification";
     pub const COMPACTION: &str = "compaction";
     pub const EMBEDDINGS: &str = "embeddings";
+    /// The inbox triage that suggests tags for new notes with a model.
+    pub const TRIAGE: &str = "triage";
     pub const IMAGEGEN: &str = "imagegen";
     pub const SUPERVISOR: &str = "supervisor";
     pub const SETUP: &str = "setup";

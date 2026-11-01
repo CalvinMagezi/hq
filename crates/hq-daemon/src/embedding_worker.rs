@@ -155,6 +155,7 @@ pub fn read(vault_path: &Path) -> Option<EmbeddingWorkerStatus> {
 pub fn spawn(
     vault_path: PathBuf,
     db: Arc<Database>,
+    provider: hq_core::config::EmbeddingProvider,
     openrouter_api_key: Option<String>,
     changed: Arc<Notify>,
     shutdown: ShutdownSignal,
@@ -169,7 +170,7 @@ pub fn spawn(
                 return;
             }
         };
-        let (embedder, model) = embedder_for(openrouter_api_key.as_deref());
+        let (embedder, model) = embedder_for(provider, openrouter_api_key.as_deref());
         info!(model = %model, "embedding worker: running");
         run_worker(
             vault,

@@ -174,9 +174,13 @@ pub fn get_embedding(conn: &Connection, path: &str) -> Result<Option<Vec<f32>>> 
 
 /// Semantic search: load ALL stored embeddings, compute cosine similarity against
 /// the query embedding, return the top `limit` results sorted by similarity desc.
+///
+/// Only vectors made by `model` are compared: while notes are re-embedded with a new model the
+/// table holds vectors of different sizes and meanings, and mixing them gives meaningless scores.
 pub fn semantic_search(
     conn: &Connection,
     query_embedding: &[f32],
+    model: &str,
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
     // Cap the number of loaded embeddings to avoid OOM on very large vaults.
@@ -185,12 +189,12 @@ pub fn semantic_search(
     // cap bites, the most recently embedded come first, the same every time.
     let mut stmt = conn.prepare(&format!(
         "SELECT note_path, embedding FROM embeddings
-          WHERE {LIVE_NOTE}
+          WHERE model = ?1 AND {LIVE_NOTE}
           ORDER BY embedded_at DESC, note_path
           LIMIT 10000"
     ))?;
     let rows: Vec<(String, Vec<u8>)> = stmt
-        .query_map([], |row| {
+        .query_map([model], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -272,6 +276,7 @@ pub fn find_similar_notes(
     let mut stmt = conn.prepare(&format!(
         "SELECT note_path, embedding FROM embeddings
           WHERE note_path != ?1 AND {LIVE_NOTE}
+            AND model = (SELECT model FROM embeddings WHERE note_path = ?1)
           ORDER BY embedded_at DESC, note_path
           LIMIT 10000"
     ))?;

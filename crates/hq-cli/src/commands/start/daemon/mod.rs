@@ -155,6 +155,7 @@ pub async fn run_daemon(
         Some(hq_daemon::embedding_worker::spawn(
             vault_path.clone(),
             db.clone(),
+            config.daemon.embedding_provider,
             config.openrouter_api_key.clone(),
             changed,
             shutdown.clone(),
