@@ -91,5 +91,10 @@ jobs:
           fi
           minisign -V -p release/minisign.pub -m promote-android/android-channel.json -x promote-android/android-channel.json.minisig -q
           [ "$(jq -r .version promote-android/android-channel.json)" = "${TAG#v}" ] || { echo "android manifest version does not match the tag" >&2; exit 1; }
-          gh release upload channel-stable promote-android/android-channel.json promote-android/android-channel.json.minisig --clobber
+          # The APK goes along so the website can link one fixed address (releases/latest/download/...).
+          gh release download "$TAG" --dir promote-android --pattern agent-hq-android.apk --pattern agent-hq-android.apk.sha256
+          (cd promote-android && sha256sum -c agent-hq-android.apk.sha256)
+          [ "$(sha256sum promote-android/agent-hq-android.apk | cut -d' ' -f1)" = "$(jq -r .sha256 promote-android/android-channel.json)" ] || { echo "the APK does not match its signed manifest" >&2; exit 1; }
+          gh release upload channel-stable promote-android/android-channel.json promote-android/android-channel.json.minisig \
+            promote-android/agent-hq-android.apk promote-android/agent-hq-android.apk.sha256 --clobber
           gh release edit channel-stable --latest
