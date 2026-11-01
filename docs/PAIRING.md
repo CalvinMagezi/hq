@@ -199,8 +199,9 @@ Revoking the peer from either side cleans both sides of the pairing. The revokin
 revoked, removes its setup row and device keys, prunes gate lines, closes forward listeners, and closes
 open connections with code 403 and reason `revoked`. The other side learns of the revocation from this
 connection close (or on its next dial if it was offline or disconnected) and runs the same local cleanup.
-The registered cleanup callback removes Claude entries on a machine and deletes the host gate key file
-on a hub.
+Only an explicit revoke says `revoked`: a peer this side has no row for hears `not paired`, and a
+database error `unavailable`, and neither drops the other side's pairing. A hub deletes the gate key
+it made for a revoked machine; a revoke learned from the peer also removes the Claude entries for it.
 
 ```bash
 # On the laptop, with the phone app open on its pairing screen:

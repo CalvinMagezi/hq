@@ -79,6 +79,34 @@ pub fn is_paired(db: &Database, id: &str) -> Result<bool> {
     })
 }
 
+/// Where a peer stands on the list. Only [`Standing::Revoked`] is an answer the peer may act on:
+/// a missing row can be a pairing still being recorded or a database restored from an older backup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Standing {
+    Paired,
+    /// The row is there with `revoked_at` set: an explicit revoke.
+    Revoked,
+    /// No row at all.
+    Unknown,
+}
+
+pub fn standing(db: &Database, id: &str) -> Result<Standing> {
+    db.with_conn(|c| {
+        let revoked_at: Option<Option<i64>> = c
+            .query_row(
+                "SELECT revoked_at FROM bridge_peers WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(match revoked_at {
+            None => Standing::Unknown,
+            Some(None) => Standing::Paired,
+            Some(Some(_)) => Standing::Revoked,
+        })
+    })
+}
+
 /// Revokes a peer, and in the same transaction undoes what pairing set up with it: its device
 /// keys are revoked and its setup row is deleted (`bridge_setup`). Files and listeners that the
 /// setup made are swept by whoever owns them. Returns whether it was paired and active.
@@ -303,6 +331,18 @@ mod tests {
         let history = list(&db, true).unwrap();
         assert_eq!(history.len(), 1);
         assert!(history[0].revoked_at.is_some(), "the history stays");
+    }
+
+    #[test]
+    fn standing_tells_a_revoke_from_a_peer_never_seen() {
+        let db = Database::open_memory().unwrap();
+        assert_eq!(standing(&db, ID).unwrap(), Standing::Unknown);
+        add_peer(&db, ID, "phone", &[], &[]).unwrap();
+        assert_eq!(standing(&db, ID).unwrap(), Standing::Paired);
+        revoke(&db, ID).unwrap();
+        assert_eq!(standing(&db, ID).unwrap(), Standing::Revoked);
+        add_peer(&db, ID, "phone", &[], &[]).unwrap();
+        assert_eq!(standing(&db, ID).unwrap(), Standing::Paired);
     }
 
     #[test]

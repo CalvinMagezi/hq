@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 
 const HOST_LOG: &str = "host.log";
+/// Where a hub's gate keys live under `~/.hq`, as the CLI's setup writes them.
+const GATE_KEY_DIR: &str = "gate";
 /// The longest closing may take in all: the host's grace period, a kill and a little slack.
 const SHUTDOWN_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 /// How long closing the pairing endpoints may take before the app stops waiting for them.
@@ -104,19 +106,7 @@ pub fn cleanup_peer_outside_bridge(
     hq_program: &Path,
     peer: &str,
 ) -> Result<Option<hq_bridge::claude::Report>> {
-    // Delete gate key if this device was a machine paired with us as a hub.
-    if let Ok(Some(setup)) = hq_db::bridge_setup::get(db, peer)
-        && setup.peer_role == hq_db::bridge_setup::ROLE_MACHINE
-    {
-        let key_path = hq_core::HqConfig::hq_dir()
-            .join("gate")
-            .join(format!("{}.key", setup.peer_name));
-        if let Err(e) = std::fs::remove_file(&key_path)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            tracing::warn!("could not remove gate key {}: {e}", key_path.display());
-        }
-    }
+    hq_bridge::setup::remove_machine_gate_key(db, &HqConfig::hq_dir().join(GATE_KEY_DIR), peer);
     let hq_bin = claude::hq_program(hq_program)?;
     let runner = hq_bridge::claude::SystemRunner::new();
     let targets = hq_bridge::claude::Targets {
@@ -157,6 +147,7 @@ impl Desktop {
         let db_path = init.config.db_path();
         let prog_for_cb = hq_program.clone();
         let db_path_for_cb = db_path.clone();
+        // Only a revoke the peer told us of: [`Desktop::revoke`] cleans up itself, to say how it went.
         let on_revoked: hq_bridge::RevokeCallback = Arc::new(move |peer: &str| {
             if let Ok(db) = Database::open(&db_path_for_cb) {
                 let _ = cleanup_peer_outside_bridge(&db, &prog_for_cb, peer);

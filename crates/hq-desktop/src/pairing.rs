@@ -209,15 +209,11 @@ impl PairingController {
         }
     }
 
-    /// Called when any peer is revoked, locally or learned from the peer.
+    /// Called when a peer tells us it revoked us, on a blocking thread. A revoke made here does
+    /// not call it: its caller cleans up.
     pub fn with_on_revoked(self, cb: hq_bridge::RevokeCallback) -> Self {
         *self.on_revoked.lock().unwrap() = Some(cb);
         self
-    }
-
-    /// Sets or replaces the revoke callback.
-    pub fn set_on_revoked(&self, cb: hq_bridge::RevokeCallback) {
-        *self.on_revoked.lock().unwrap() = Some(cb);
     }
 
     /// Offers `hub.config`'s services to paired devices and opens its forwards while the bridge is
@@ -453,9 +449,6 @@ impl PairingController {
             None => {
                 let db = self.db()?;
                 let key = id.to_string();
-                if let Some(ref cb) = *self.on_revoked.lock().unwrap() {
-                    cb(&key);
-                }
                 tokio::task::spawn_blocking(move || peers::revoke(&db, &key)).await??
             }
         };

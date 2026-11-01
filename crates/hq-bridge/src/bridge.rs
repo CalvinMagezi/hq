@@ -11,7 +11,7 @@ use crate::key::load_or_create_key;
 use crate::services::{SVC_ALPN, ServiceProtocol, Services};
 use crate::setup::{
     Role, SETUP_ALPN, SetupConfig, SetupOutcome, SetupProtocol, SetupState, machine_setup,
-    peers_without_setup, prune_gate_lines, spawn_forwards,
+    peers_without_setup, prune_gate_lines, remove_machine_gate_key, spawn_forwards,
 };
 use crate::ticket::{Purpose, Ticket};
 use crate::wire::{Card, MAX_DIAL_ITEMS};
@@ -43,12 +43,18 @@ pub const SERVICE_ALPN: &[u8] = b"hq/bridge/1";
 pub(crate) const REJECT_REVOKED: u32 = 403;
 pub(crate) const REASON_REVOKED: &[u8] = b"revoked";
 pub(crate) const REASON_NOT_EDGE: &[u8] = b"not the edge";
+/// A peer with no row here: it may still be recording the pairing, so it must not read "revoked".
+const REJECT_UNPAIRED: u32 = 403;
+pub(crate) const REASON_NOT_PAIRED: &[u8] = b"not paired";
+/// Our own list could not be read; the peer is told to come back, never that it was revoked.
+const REJECT_UNAVAILABLE: u32 = 503;
+pub(crate) const REASON_UNAVAILABLE: &[u8] = b"unavailable";
 const MAX_ECHO_BYTES: usize = 64 * 1024;
 const ONLINE_WAIT: Duration = Duration::from_secs(5);
 /// How often a hub that just paired looks for the machine's setup.
 const SETUP_POLL: Duration = Duration::from_millis(200);
 
-/// Called when a peer is revoked, with its endpoint id.
+/// Called with a peer's endpoint id when that peer revoked us. It runs on a blocking thread.
 pub type RevokeCallback = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Whether a connection close reason says the peer revoked us.
@@ -151,7 +157,7 @@ impl Live {
         handles
             .into_iter()
             .filter_map(|h| h.upgrade())
-            .map(|c| c.close(REJECT_REVOKED.into(), b"revoked"))
+            .map(|c| c.close(REJECT_REVOKED.into(), REASON_NOT_EDGE))
             .count()
     }
 
@@ -167,7 +173,7 @@ impl Live {
         handles
             .into_iter()
             .filter_map(|h| h.upgrade())
-            .map(|c| c.close(REJECT_REVOKED.into(), b"revoked"))
+            .map(|c| c.close(REJECT_REVOKED.into(), REASON_REVOKED))
             .count()
     }
 }
@@ -190,12 +196,30 @@ impl Drop for LiveGuard {
     }
 }
 
-/// Whether `id` is on the list. Any failure is "no": the gate fails closed.
-pub(crate) async fn still_paired(db: &Database, id: EndpointId) -> bool {
+/// Where `id` stands on the list. A database error stays an error: it is not an answer about `id`.
+pub(crate) async fn standing(db: &Database, id: EndpointId) -> Result<peers::Standing> {
     let db = db.clone();
-    tokio::task::spawn_blocking(move || peers::is_paired(&db, &id.to_string()).unwrap_or(false))
-        .await
-        .unwrap_or(false)
+    tokio::task::spawn_blocking(move || peers::standing(&db, &id.to_string())).await?
+}
+
+/// The close code and reason for a peer that may not come in, or `None` when it is paired. Only
+/// an explicit revoke says "revoked", because the peer drops its side of the pairing on that.
+pub(crate) fn refusal(standing: &Result<peers::Standing>) -> Option<(u32, &'static [u8])> {
+    match standing {
+        Ok(peers::Standing::Paired) => None,
+        Ok(peers::Standing::Revoked) => Some((REJECT_REVOKED, REASON_REVOKED)),
+        Ok(peers::Standing::Unknown) => Some((REJECT_UNPAIRED, REASON_NOT_PAIRED)),
+        Err(_) => Some((REJECT_UNAVAILABLE, REASON_UNAVAILABLE)),
+    }
+}
+
+/// Closes `conn` with the fitting reason unless its peer is paired. Returns whether it closed.
+pub(crate) async fn refused(db: &Database, conn: &Connection, id: EndpointId) -> bool {
+    let Some((code, reason)) = refusal(&standing(db, id).await) else {
+        return false;
+    };
+    conn.close(code.into(), reason);
+    true
 }
 
 /// Whether `id` is the edge this device registered with. Any failure is "no": the gate fails closed.
@@ -225,25 +249,20 @@ impl EndpointHooks for ServiceGate {
         // Two protocols, two lists: a paired peer may not open the edge protocol and the edge may
         // not open the service protocol, so neither can borrow the other's door.
         let paired_only = [SERVICE_ALPN, SVC_ALPN, SETUP_ALPN];
-        let allowed = if paired_only.contains(&conn.alpn()) {
-            still_paired(&self.db, conn.remote_id()).await
+        let refused = if paired_only.contains(&conn.alpn()) {
+            refusal(&standing(&self.db, conn.remote_id()).await)
         } else if conn.alpn() == EDGE_ALPN {
-            still_edge(&self.db, conn.remote_id()).await
+            let edge = still_edge(&self.db, conn.remote_id()).await;
+            (!edge).then_some((REJECT_REVOKED, REASON_NOT_EDGE))
         } else {
-            false
+            Some((REJECT_UNPAIRED, REASON_NOT_PAIRED))
         };
-        if allowed {
-            return AfterHandshakeOutcome::accept();
-        }
-        if conn.alpn() == EDGE_ALPN {
-            return AfterHandshakeOutcome::Reject {
-                error_code: REJECT_REVOKED.into(),
-                reason: REASON_NOT_EDGE.to_vec(),
-            };
-        }
-        AfterHandshakeOutcome::Reject {
-            error_code: REJECT_REVOKED.into(),
-            reason: REASON_REVOKED.to_vec(),
+        match refused {
+            None => AfterHandshakeOutcome::accept(),
+            Some((code, reason)) => AfterHandshakeOutcome::Reject {
+                error_code: code.into(),
+                reason: reason.to_vec(),
+            },
         }
     }
 }
@@ -275,14 +294,12 @@ impl ProtocolHandler for Service {
             id,
             token,
         };
-        if !still_paired(&self.db, id).await {
-            conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
+        if refused(&self.db, &conn, id).await {
             return Ok(());
         }
         self.touch(id);
         while let Ok((send, recv)) = conn.accept_bi().await {
-            if !still_paired(&self.db, id).await {
-                conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
+            if refused(&self.db, &conn, id).await {
                 break;
             }
             tokio::spawn((self.handler)(PeerStream {
@@ -292,7 +309,7 @@ impl ProtocolHandler for Service {
             }));
         }
         if peer_revoked_us(conn.close_reason().as_ref()) {
-            let _ = self.revoker.revoke(&id).await;
+            self.revoker.learned(&id).await;
         }
         Ok(())
     }
@@ -354,34 +371,26 @@ impl Drop for RevokingGuard {
 }
 
 impl Revoker {
+    /// A revoke made on this side. Its caller does any cleanup outside the bridge itself.
     pub(crate) async fn revoke(&self, peer: &EndpointId) -> Result<bool> {
-        let id = peer.to_string();
-        // Prevent concurrent duplicate revoke runs for the same peer
-        {
-            let mut revoking = self.revoking.lock().unwrap();
-            if !revoking.insert(*peer) {
-                return Ok(false);
+        let (db, id) = (self.db.clone(), peer.to_string());
+        let hub_keys = self
+            .setup
+            .as_ref()
+            .filter(|s| s.cfg.role == Role::Hub)
+            .map(|s| s.cfg.gate_key_dir.clone());
+        let changed = tokio::task::spawn_blocking(move || {
+            // Before the revoke deletes the setup row that names the key.
+            if let Some(dir) = hub_keys {
+                remove_machine_gate_key(&db, &dir, &id);
             }
-        }
-        let _guard = RevokingGuard {
-            peer: *peer,
-            revoking: self.revoking.clone(),
-        };
-
-        // Run outside cleanup while setup row is still in database
-        let is_paired = peers::is_paired(&self.db, &id).unwrap_or(false);
-        if is_paired {
-            let cb = self.on_revoked.lock().unwrap().clone();
-            if let Some(cb) = cb {
-                cb(&id);
-            }
-        }
-
-        let db = self.db.clone();
-        let id_str = id.clone();
-        let changed = tokio::task::spawn_blocking(move || peers::revoke(&db, &id_str)).await??;
+            peers::revoke(&db, &id)
+        })
+        .await??;
         self.live.close_all(peer);
         if let Some(state) = &self.setup {
+            // The revoke stands either way; a gate file that cannot be written is said, and the
+            // forwards task tries again.
             if state.cfg.role == Role::Machine {
                 let (db, path) = (self.db.clone(), state.cfg.authorized_keys.clone());
                 let pruned =
@@ -393,6 +402,34 @@ impl Revoker {
             state.wake();
         }
         Ok(changed)
+    }
+
+    /// The peer told us it revoked us: the callback runs once, while the setup row it may read is
+    /// still there, and then the same revoke as one made here.
+    pub(crate) async fn learned(&self, peer: &EndpointId) {
+        if !self.revoking.lock().unwrap().insert(*peer) {
+            return;
+        }
+        let _guard = RevokingGuard {
+            peer: *peer,
+            revoking: self.revoking.clone(),
+        };
+        let paired = matches!(standing(&self.db, *peer).await, Ok(peers::Standing::Paired));
+        if !paired {
+            return;
+        }
+        let callback = self.on_revoked.lock().unwrap().clone();
+        if let Some(callback) = callback {
+            let id = peer.to_string();
+            // It may run a program or open a database: not on a runtime thread. A panic in it
+            // must not stop the revoke.
+            if let Err(e) = tokio::task::spawn_blocking(move || callback(&id)).await {
+                tracing::warn!(peer = %peer.fmt_short(), "the revoke callback failed: {e}");
+            }
+        }
+        if let Err(e) = self.revoke(peer).await {
+            tracing::warn!(peer = %peer.fmt_short(), "the peer revoked us, but the revoke here failed: {e:#}");
+        }
     }
 }
 
@@ -411,16 +448,12 @@ impl Dialer {
         &self.db
     }
 
-    pub async fn revoke(&self, peer: &EndpointId) -> Result<bool> {
-        self.revoker.revoke(peer).await
-    }
-
-    /// Whether `peer` is on the list now. Any failure is "no".
-    pub(crate) async fn is_paired(&self, peer: &str) -> bool {
-        match peer.parse::<EndpointId>() {
-            Ok(id) => still_paired(&self.db, id).await,
-            Err(_) => false,
-        }
+    /// Where `peer` stands on the list now.
+    pub(crate) async fn standing(&self, peer: &str) -> Result<peers::Standing> {
+        let id: EndpointId = peer
+            .parse()
+            .map_err(|_| anyhow!("{peer} is not a machine id"))?;
+        standing(&self.db, id).await
     }
 
     /// Connects to a paired peer's services (`services::open_service` opens one on it).
@@ -442,20 +475,21 @@ impl Dialer {
         let conn = match self.endpoint.connect(target, alpn).await {
             Ok(conn) => conn,
             Err(err) => {
-                let any_err = anyhow::Error::from(err);
-                if peer_revoked_us(error_close_reason(&any_err)) {
-                    let _ = self.revoke(&id).await;
+                let err = anyhow::Error::from(err);
+                if peer_revoked_us(error_close_reason(&err)) {
+                    self.revoker.learned(&id).await;
                 }
-                return Err(any_err);
+                return Err(err);
             }
         };
-        // Watch for revocation close frame from peer while connection is alive
-        let conn_clone = conn.clone();
-        let revoker_clone = self.revoker.clone();
+        // Through the weak handle: a strong one here would keep the connection open for good.
+        let closed = conn.weak_handle().closed();
+        let revoker = self.revoker.clone();
         tokio::spawn(async move {
-            conn_clone.closed().await;
-            if peer_revoked_us(conn_clone.close_reason().as_ref()) {
-                let _ = revoker_clone.revoke(&id).await;
+            if let Some(closed) = closed.await
+                && peer_revoked_us(Some(&closed.reason))
+            {
+                revoker.learned(&id).await;
             }
         });
         // A revoke closes this one too, not only the connections the peer opened to us.
@@ -806,14 +840,15 @@ impl Bridge {
         self.dialer().dial(peer, alpn).await
     }
 
-    /// Sets an optional callback called when any peer is revoked.
+    /// Sets the callback run when a peer tells us it revoked us, before this side's revoke. A
+    /// revoke made here through [`Bridge::revoke`] does not run it: that caller cleans up itself.
     pub fn set_on_revoked(&self, callback: RevokeCallback) {
         *self.revoker.on_revoked.lock().unwrap() = Some(callback);
     }
 
-    /// Sets an optional callback called when any peer is revoked.
-    pub fn on_revoked(&self, callback: RevokeCallback) {
-        self.set_on_revoked(callback);
+    /// The callback [`Bridge::set_on_revoked`] set, so another can wrap it.
+    pub fn on_revoked(&self) -> Option<RevokeCallback> {
+        self.revoker.on_revoked.lock().unwrap().clone()
     }
 
     /// A handle that dials paired peers' services and outlives no part of this bridge it needs:
@@ -1038,6 +1073,29 @@ mod tests {
 
     fn me() -> EndpointId {
         SecretKey::generate().public()
+    }
+
+    fn closed_with(code: u32, reason: &[u8]) -> ConnectionError {
+        ConnectionError::ApplicationClosed(iroh::endpoint::ApplicationClose {
+            error_code: code.into(),
+            reason: reason.to_vec().into(),
+        })
+    }
+
+    #[test]
+    fn only_an_explicit_revoke_is_refused_as_revoked() {
+        let read_as_revoked = |standing: Result<peers::Standing>| {
+            refusal(&standing)
+                .is_some_and(|(code, reason)| peer_revoked_us(Some(&closed_with(code, reason))))
+        };
+        assert!(refusal(&Ok(peers::Standing::Paired)).is_none());
+        assert!(read_as_revoked(Ok(peers::Standing::Revoked)));
+        assert!(!read_as_revoked(Ok(peers::Standing::Unknown)));
+        assert!(!read_as_revoked(Err(anyhow!("database is locked"))));
+        assert_eq!(
+            refusal(&Err(anyhow!("database is locked"))),
+            Some((REJECT_UNAVAILABLE, REASON_UNAVAILABLE))
+        );
     }
 
     fn card(edge: &EndpointId) -> Card {

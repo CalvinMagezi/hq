@@ -37,7 +37,7 @@ fn with_targets<T>(f: impl FnOnce(&Targets) -> T) -> Result<T> {
     Ok(f(&targets))
 }
 
-fn print(report: &Report) -> bool {
+pub(crate) fn print(report: &Report) -> bool {
     for line in report.lines() {
         println!("{line}");
     }
@@ -97,16 +97,10 @@ pub async fn offer(config: &HqConfig, hub_name: &str) {
     }
 }
 
-/// Before a revoke deletes the setup that names the hub: takes its entries out of Claude.
-pub fn remove_for_revoke(db: &Database, peer: &str) {
-    let removed = with_targets(|t| claude::remove_for_peer(db, t, peer));
-    match removed {
-        Ok(Some(report)) => {
-            print(&report);
-        }
-        Ok(None) => {}
-        Err(e) => eprintln!("warning: could not remove HQ from Claude: {e:#}"),
-    }
+/// Before a revoke deletes the setup that names the hub: takes its entries out of Claude. It
+/// prints nothing: the caller says the report where it may (not on the phone app's channel).
+pub fn remove_for_revoke(db: &Database, peer: &str) -> Result<Option<Report>> {
+    with_targets(|t| claude::remove_for_peer(db, t, peer))
 }
 
 #[cfg(test)]

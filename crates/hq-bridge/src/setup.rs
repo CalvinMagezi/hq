@@ -14,9 +14,7 @@
 //! carries no address and no port the receiver must listen on. Only a serving hub accepts the
 //! protocol, and the gate in `bridge.rs` admits paired peers only.
 
-use crate::bridge::{
-    Dialer, Live, LiveGuard, REASON_REVOKED, REJECT_REVOKED, peer_revoked_us, still_paired,
-};
+use crate::bridge::{Dialer, Live, LiveGuard, peer_revoked_us, refused};
 use crate::code::printable;
 use crate::services::run_forward;
 use crate::wire::MAX_NAME_CHARS;
@@ -370,8 +368,7 @@ impl ProtocolHandler for SetupProtocol {
         let id = conn.remote_id();
         let token = self.live.register(id, conn.weak_handle());
         let _guard = LiveGuard::new(self.live.clone(), id, token);
-        if !still_paired(&self.db, id).await {
-            conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
+        if refused(&self.db, &conn, id).await {
             return Ok(());
         }
         let answered = tokio::time::timeout(EXCHANGE_TIMEOUT, self.answer(&conn, id)).await;
@@ -380,7 +377,7 @@ impl ProtocolHandler for SetupProtocol {
                 // Wait for the machine to read the answer and close, or closing would cut it off.
                 let _ = tokio::time::timeout(EXCHANGE_TIMEOUT, conn.closed()).await;
                 if peer_revoked_us(conn.close_reason().as_ref()) {
-                    let _ = self.revoker.revoke(&id).await;
+                    self.revoker.learned(&id).await;
                 }
                 return Ok(());
             }
@@ -388,7 +385,7 @@ impl ProtocolHandler for SetupProtocol {
             Err(_) => "it timed out".to_string(),
         };
         if peer_revoked_us(conn.close_reason().as_ref()) {
-            let _ = self.revoker.revoke(&id).await;
+            self.revoker.learned(&id).await;
         }
         tracing::warn!(peer = %id.fmt_short(), "bridge setup refused: {why}");
         conn.close(REJECT_SETUP.into(), b"setup refused");
@@ -516,30 +513,10 @@ async fn exchange(dialer: &Dialer, peer: &str, hello: &MachineHello) -> Result<H
         .dial(peer, SETUP_ALPN)
         .await
         .context("the peer does not answer setup (it may not be a hub, or not be serving)")?;
-    let (mut send, mut recv) = match conn.open_bi().await {
-        Ok(streams) => streams,
-        Err(e) => {
-            if peer_revoked_us(conn.close_reason().as_ref())
-                && let Ok(id) = peer.parse::<EndpointId>()
-            {
-                let _ = dialer.revoke(&id).await;
-            }
-            return Err(e.into());
-        }
-    };
+    let (mut send, mut recv) = conn.open_bi().await?;
     write_msg(&mut send, hello).await?;
     send.finish()?;
-    let reply: HubReply = match read_msg(&mut recv).await {
-        Ok(reply) => reply,
-        Err(e) => {
-            if peer_revoked_us(conn.close_reason().as_ref())
-                && let Ok(id) = peer.parse::<EndpointId>()
-            {
-                let _ = dialer.revoke(&id).await;
-            }
-            return Err(e);
-        }
-    };
+    let reply: HubReply = read_msg(&mut recv).await?;
     conn.close(0u32.into(), b"done");
     check_reply(&reply)?;
     Ok(reply)
@@ -592,6 +569,23 @@ fn authorize_hub(_cfg: &SetupConfig, _peer: &str, _key: &str) -> Result<()> {
     bail!("the host gate needs a unix system")
 }
 
+/// On a hub: deletes the gate key it made for the machine `peer`, while its setup row still names
+/// the file. A file already gone is fine; any other failure is said and the revoke goes on.
+pub fn remove_machine_gate_key(db: &Database, gate_key_dir: &std::path::Path, peer: &str) {
+    let Ok(Some(setup)) = rows::get(db, peer) else {
+        return;
+    };
+    if setup.is_hub() {
+        return;
+    }
+    let path = gate_key_dir.join(format!("{}.key", setup.peer_name));
+    if let Err(e) = std::fs::remove_file(&path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!("could not remove gate key {}: {e}", path.display());
+    }
+}
+
 /// Removes every gate line setup wrote for a hub that no longer has a setup row here (revoked,
 /// from this process or another). Lines the owner wrote are left alone. Returns how many went.
 #[cfg(unix)]
@@ -625,7 +619,7 @@ pub(crate) fn spawn_forwards(state: Arc<SetupState>, dialer: Dialer) {
     let task = tokio::spawn({
         let state = state.clone();
         async move {
-            let mut open: HashMap<u16, (String, JoinHandle<()>)> = HashMap::new();
+            let mut open = OpenForwards::default();
             loop {
                 reconcile(&state, &dialer, &mut open).await;
                 tokio::select! {
@@ -640,11 +634,20 @@ pub(crate) fn spawn_forwards(state: Arc<SetupState>, dialer: Dialer) {
     }
 }
 
-async fn reconcile(
-    state: &SetupState,
-    dialer: &Dialer,
-    open: &mut HashMap<u16, (String, JoinHandle<()>)>,
-) {
+/// The forwards setup opened, by port. Dropped with the task that owns them (a stopped bridge),
+/// they stop too: a detached forward would keep listening for a bridge that is gone.
+#[derive(Default)]
+struct OpenForwards(HashMap<u16, (String, JoinHandle<()>)>);
+
+impl Drop for OpenForwards {
+    fn drop(&mut self) {
+        for (_, (_, task)) in self.0.drain() {
+            task.abort();
+        }
+    }
+}
+
+async fn reconcile(state: &SetupState, dialer: &Dialer, open: &mut OpenForwards) {
     let db = dialer.db().clone();
     let listed = tokio::task::spawn_blocking(move || rows::list(&db)).await;
     let Ok(Ok(rows)) = listed else {
@@ -655,7 +658,7 @@ async fn reconcile(
         .filter(|s| !configured(state, s))
         .map(|s| (s.local_port, s))
         .collect();
-    open.retain(|port, (peer, task)| {
+    open.0.retain(|port, (peer, task)| {
         let keep = wanted.get(port).is_some_and(|s| &s.peer_id == peer) && !task.is_finished();
         if !keep {
             task.abort();
@@ -663,7 +666,7 @@ async fn reconcile(
         keep
     });
     for (port, setup) in wanted {
-        if open.contains_key(&port) {
+        if open.0.contains_key(&port) {
             continue;
         }
         match bind_forward(state, port).await {
@@ -674,7 +677,7 @@ async fn reconcile(
                     forward_service(setup).to_string(),
                     listener,
                 ));
-                open.insert(port, (setup.peer_id.clone(), task));
+                open.0.insert(port, (setup.peer_id.clone(), task));
             }
             Err(e) => tracing::warn!(port, "bridge setup forward: {e:#}"),
         }

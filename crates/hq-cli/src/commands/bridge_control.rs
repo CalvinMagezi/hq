@@ -122,6 +122,21 @@ where
     let (events, queue) = mpsc::channel(EVENT_QUEUE);
     let writer = tokio::spawn(write_events(output, queue));
     let (network, _) = watch::channel(0);
+    // A revoke the peer told us of refreshes the app's list as a local one does. The callback runs
+    // before the bridge's own revoke, so it writes the revoke first: the list the app asks for next
+    // must not still show the peer. The bridge's revoke after it closes connections and sweeps.
+    let cleanup = bridge.on_revoked();
+    // Weak: tasks that outlive the loop hold the callback, and must not keep the event queue open.
+    let (learned, db) = (events.downgrade(), bridge.db().clone());
+    bridge.set_on_revoked(Arc::new(move |peer: &str| {
+        if let Some(cleanup) = &cleanup {
+            cleanup(peer);
+        }
+        let changed = peers::revoke(&db, peer).unwrap_or(false);
+        if let Some(events) = learned.upgrade() {
+            let _ = events.try_send(json!({"event": "revoked", "id": peer, "changed": changed}));
+        }
+    }));
     let control = Arc::new(Control {
         bridge,
         events,
@@ -519,7 +534,7 @@ impl Control {
     /// Connects to a paired peer, trying again until `window` ends. A peer that is not paired is
     /// refused at once: retrying cannot change that.
     async fn dial(&self, peer: &str, window: Duration) -> Result<Connection> {
-        let _id: EndpointId = peer
+        let _: EndpointId = peer
             .parse()
             .map_err(|_| anyhow!("that is not a device id"))?;
         if !self.on_list(peer).await {
@@ -570,14 +585,8 @@ impl Control {
                 let t = Instant::now();
                 match timeout(KEEP_ECHO_LIMIT, echo(&conn, b"ping")).await {
                     Ok(Ok(())) => times.push(t.elapsed()),
-                    _ => {
-                        if hq_bridge::peer_revoked_us(conn.close_reason().as_ref())
-                            && let Ok(id) = id.parse::<EndpointId>()
-                        {
-                            let _ = this.bridge.revoke(&id).await;
-                        }
-                        break;
-                    }
+                    // A peer that revoked us is heard by the bridge, which says `revoked`.
+                    _ => break,
                 }
             }
             times.sort();
@@ -936,8 +945,26 @@ mod tests {
         host.send(json!({"cmd": "revoke", "id": phone_id})).await;
         assert_eq!(host.until("revoked").await["changed"], true);
         phone.send(json!({"cmd": "ping", "id": host_id})).await;
-        assert!(phone.until("ping").await["error"].is_string());
+        // The host's refusal says "revoked": the phone revokes too and tells the app, in either
+        // order with the failed ping.
+        let (mut learned, mut ping) = (None, None);
+        while learned.is_none() || ping.is_none() {
+            let event = phone.next().await;
+            match event["event"].as_str() {
+                Some("revoked") => learned = Some(event),
+                Some("ping") => ping = Some(event),
+                _ => {}
+            }
+        }
+        let learned = learned.unwrap();
+        assert_eq!(
+            (&learned["id"], &learned["changed"]),
+            (&json!(host_id), &json!(true))
+        );
+        assert!(ping.unwrap()["error"].is_string());
         assert_eq!(peers::list(&host.db, false).unwrap().len(), 0);
+        phone.send(json!({"cmd": "peers"})).await;
+        assert_eq!(phone.until("peers").await["peers"], json!([]));
     }
 
     #[tokio::test]

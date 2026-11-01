@@ -5,10 +5,7 @@
 //! Which peer may open the protocol (paired ones, and not the edge) is decided by the gate in
 //! `bridge.rs`; the security notes are in `docs/security/PAIRING.md`, section 14.
 
-use crate::bridge::{
-    Dialer, Live, LiveGuard, REASON_REVOKED, REJECT_REVOKED, error_close_reason, peer_revoked_us,
-    still_paired,
-};
+use crate::bridge::{Dialer, Live, LiveGuard, peer_revoked_us, refusal, refused};
 use crate::door::{DEFAULT_MAX_STREAMS, DoorTarget, RECHECK, check_target, connect, pipe};
 use anyhow::{Context, Result, anyhow, bail};
 use hq_db::Database;
@@ -118,8 +115,7 @@ impl ProtocolHandler for ServiceProtocol {
         // Register first, then read the list: a revoke in between is seen by one or the other.
         let token = self.live.register(id, conn.weak_handle());
         let _guard = LiveGuard::new(self.live.clone(), id, token);
-        if !still_paired(&self.db, id).await {
-            conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
+        if refused(&self.db, &conn, id).await {
             return Ok(());
         }
         let mut check = tokio::time::interval_at(tokio::time::Instant::now() + RECHECK, RECHECK);
@@ -127,8 +123,7 @@ impl ProtocolHandler for ServiceProtocol {
             tokio::select! {
                 stream = conn.accept_bi() => {
                     let Ok((send, recv)) = stream else { break };
-                    if !still_paired(&self.db, id).await {
-                        conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
+                    if refused(&self.db, &conn, id).await {
                         break;
                     }
                     let Ok(permit) = self.permits.clone().try_acquire_owned() else {
@@ -143,15 +138,14 @@ impl ProtocolHandler for ServiceProtocol {
                 }
                 // A revoke made in another process (the CLI) reaches open streams here.
                 _ = check.tick() => {
-                    if !still_paired(&self.db, id).await {
-                        conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
+                    if refused(&self.db, &conn, id).await {
                         break;
                     }
                 }
             }
         }
         if peer_revoked_us(conn.close_reason().as_ref()) {
-            let _ = self.revoker.revoke(&id).await;
+            self.revoker.learned(&id).await;
         }
         Ok(())
     }
@@ -261,20 +255,11 @@ async fn stream_to(
     kept: &tokio::sync::Mutex<Option<Connection>>,
 ) -> Result<(SendStream, RecvStream)> {
     let mut slot = kept.lock().await;
-    if !dialer.is_paired(peer).await {
+    if let Some((code, reason)) = refusal(&dialer.standing(peer).await) {
         if let Some(conn) = slot.take() {
-            conn.close(REJECT_REVOKED.into(), REASON_REVOKED);
+            conn.close(code.into(), reason);
         }
         bail!("{peer} is not a paired peer");
-    }
-    if let Some(conn) = slot.as_ref()
-        && peer_revoked_us(conn.close_reason().as_ref())
-    {
-        let _ = slot.take();
-        if let Ok(id) = peer.parse::<EndpointId>() {
-            let _ = dialer.revoke(&id).await;
-        }
-        bail!("{peer} revoked us");
     }
     let alive = slot
         .as_ref()
@@ -283,19 +268,10 @@ async fn stream_to(
     let conn = match alive {
         Some(conn) => conn,
         None => {
-            let conn = match tokio::time::timeout(DIAL_TIMEOUT, dialer.connect_service(peer)).await
-            {
-                Ok(Ok(c)) => c,
-                Ok(Err(e)) => {
-                    if peer_revoked_us(error_close_reason(&e))
-                        && let Ok(id) = peer.parse::<EndpointId>()
-                    {
-                        let _ = dialer.revoke(&id).await;
-                    }
-                    return Err(e);
-                }
-                Err(_) => bail!("the peer did not answer in time"),
-            };
+            // A "revoked" refusal here is heard by the dialer, which revokes on this side.
+            let conn = tokio::time::timeout(DIAL_TIMEOUT, dialer.connect_service(peer))
+                .await
+                .context("the peer did not answer in time")??;
             *slot = Some(conn.clone());
             conn
         }
@@ -303,13 +279,7 @@ async fn stream_to(
     drop(slot);
     match open_service(&conn, service).await {
         // The connection broke under us: one fresh dial. A refusal by the service is final.
-        Err(e) if conn.close_reason().is_some() => {
-            if peer_revoked_us(conn.close_reason().as_ref()) {
-                if let Ok(id) = peer.parse::<EndpointId>() {
-                    let _ = dialer.revoke(&id).await;
-                }
-                return Err(e);
-            }
+        Err(_) if conn.close_reason().is_some() => {
             let fresh = tokio::time::timeout(DIAL_TIMEOUT, dialer.connect_service(peer))
                 .await
                 .context("the peer did not answer in time")??;
