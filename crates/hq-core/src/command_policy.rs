@@ -717,43 +717,20 @@ impl Policy {
     /// Judges a file edit or a path: inside the session's folder is allowed, anything else
     /// goes to the owner.
     pub fn decide_path(&self, path: &str, folder: &str, base: Option<&str>) -> Decision {
-        let mut any_path = false;
-        for line in path.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if line.contains("->") {
-                let parts: Vec<&str> = line.split("->").map(str::trim).collect();
-                if parts.iter().any(|p| p.is_empty()) {
-                    return Decision::Escalate {
-                        reason: "it is outside the session's folder".into(),
-                    };
-                }
-                for p in parts {
-                    any_path = true;
-                    if !within(p, folder, base) {
-                        return Decision::Escalate {
-                            reason: "it is outside the session's folder".into(),
-                        };
-                    }
-                }
-            } else {
-                any_path = true;
-                if !within(line, folder, base) {
-                    return Decision::Escalate {
-                        reason: "it is outside the session's folder".into(),
-                    };
-                }
-            }
-        }
-        if !any_path {
-            return Decision::Escalate {
-                reason: "it is outside the session's folder".into(),
+        // A dialog may list several paths, one per line, and a link as "link -> target".
+        let paths: Vec<&str> = path
+            .lines()
+            .flat_map(|line| line.split("->"))
+            .map(str::trim)
+            .collect();
+        let judged = paths.iter().any(|p| !p.is_empty());
+        if judged && paths.iter().all(|p| within(p, folder, base)) {
+            return Decision::Allow {
+                rule: "inside the session's folder".into(),
             };
         }
-        Decision::Allow {
-            rule: "inside the session's folder".into(),
+        Decision::Escalate {
+            reason: "it is outside the session's folder".into(),
         }
     }
 
@@ -802,20 +779,17 @@ fn within(path: &str, folder: &str, base: Option<&str>) -> bool {
     let Some(folder_base) = normalise(Path::new(folder)) else {
         return false;
     };
-    let resolve_root = match base {
-        Some(b) if within(b, folder, None) => {
-            if Path::new(b).is_absolute() {
-                PathBuf::from(b)
-            } else {
-                Path::new(folder).join(b)
-            }
-        }
-        _ => PathBuf::from(folder),
-    };
     let joined = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
-        resolve_root.join(path)
+        // A relative path is trusted only against a known directory inside the folder: a cd
+        // that is relative, or leads outside, leaves its real directory unknown.
+        let root = match base {
+            None => PathBuf::from(folder),
+            Some(b) if Path::new(b).is_absolute() && within(b, folder, None) => PathBuf::from(b),
+            Some(_) => return false,
+        };
+        root.join(path)
     };
     normalise(&joined).is_some_and(|p| p.starts_with(&folder_base))
 }
@@ -1095,7 +1069,19 @@ mod tests {
         assert_eq!(
             b.decide_path("src/lib.rs", "/w/app", Some("/outside/dir"))
                 .as_str(),
-            "allow"
+            "escalate",
+            "a cd outside the folder leaves the real directory unknown"
+        );
+        assert_eq!(
+            b.decide_path("lib.rs", "/w/app", Some("../..")).as_str(),
+            "escalate",
+            "a relative cd leaves the real directory unknown"
+        );
+        assert_eq!(
+            b.decide_path("/w/app/src/lib.rs", "/w/app", Some("../.."))
+                .as_str(),
+            "allow",
+            "an absolute path is judged on its own"
         );
         assert_eq!(
             b.decide_path("../../outside.rs", "/w/app", Some("/w/app/src"))
