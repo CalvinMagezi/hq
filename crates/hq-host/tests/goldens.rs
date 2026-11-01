@@ -71,6 +71,26 @@ fn antigravity_screens_from_real_sessions_are_detected_correctly() {
     assert!(check_agent("antigravity") >= 2);
 }
 
+#[test]
+fn pi_screens_from_real_sessions_are_detected_correctly() {
+    assert!(check_agent("pi") >= 2);
+}
+
+/// A pi screen with neither the spinner nor its footer reads unknown, never idle.
+#[test]
+fn a_pi_screen_without_a_known_footer_is_unknown() {
+    let got = Detector::builtin()
+        .detect(
+            "pi",
+            DetectInput {
+                screen: "some other view\n\n nothing pi drew",
+                osc_title: "",
+            },
+        )
+        .unwrap();
+    assert_eq!(got.state, AgentState::Unknown, "rule {:?}", got.rule);
+}
+
 /// The host looks Antigravity up by its binary name, and a screen with neither
 /// footer (a dialog no rule knows yet) reads unknown, never idle.
 #[test]

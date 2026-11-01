@@ -1,0 +1,37 @@
+# Agent HQ's own rules for pi (the pi coding agent), written from screens of a
+# pi session on Claude Haiku 5.5 captured on 2026-11-01 (tests/fixtures/pi).
+#
+# pi keeps the same footer whether it works or waits: the folder and branch,
+# then a token and cost line ending in the model and thinking level. While it
+# works, a braille spinner line "Working..." sits just above the input box, so
+# working is read from the bottom few lines and idle only from the footer with
+# no spinner. pi asks no approval questions; anything the rules do not
+# recognise reads unknown, never idle.
+id = "pi"
+version = "2026.11.01.1"
+min_engine_version = 4
+updated_at = "2026-11-01T00:00:00Z"
+
+[[rules]]
+id = "working_spinner"
+state = "working"
+priority = 960
+region = "bottom_non_empty_lines(8)"
+visible_working = true
+# "⠦ Working..."; the braille glyph turns as it spins.
+line_regex = ['^\s*[\x{2800}-\x{28FF}]\s+Working\b']
+
+[[rules]]
+id = "idle_footer"
+state = "idle"
+priority = 900
+region = "bottom_non_empty_lines(1)"
+visible_idle = true
+# "↑44 ↓7.4k R495k ... claude-haiku-5-5 • low": tokens up and down, then the model.
+line_regex = ['^\s*↑\d', '•\s*(?:off|minimal|low|medium|high|xhigh)\s*$']
+
+[[rules]]
+id = "unrecognised"
+state = "unknown"
+priority = 0
+# No gate: a screen none of the rules above know reads unknown.

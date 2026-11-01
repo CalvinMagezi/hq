@@ -1,0 +1,45 @@
+ 08:47:49 [build] Complete!
+ EXIT=0
+
+ Took 1.9s
+
+
+
+ $ cd /Users/calvinmagezi/Documents/GitHub/hq-oss-site && git status --short && rm -f .hq-brief.md && git add
+ apps/site/src/pages/index.astro apps/site/src/pages/install.astro apps/site/public/llms.txt && git status --short &&
+ git commit -q -m "feat(site): download the signed Android app" && git log --oneline -1 && git status --short
+
+ ... (3 earlier lines, ctrl+o to expand)
+ ?? .hq-brief.md
+ M  apps/site/public/llms.txt
+ M  apps/site/src/pages/index.astro
+ M  apps/site/src/pages/install.astro
+ cd96d8a7 feat(site): download the signed Android app
+
+ Took 0.3s
+
+
+ I carried out the brief and committed it on feat/site-mobile-first as cd96d8a7 ("feat(site): download the signed
+ Android app"). I did not push.
+
+ Changes:
+ - apps/site/src/pages/index.astro: the phone card now reads "Download the app (Android 8+)". The primary button is
+   "Download for Android" and links to the permanent APK URL. The eyebrow is "Android app". The "Not there yet" item
+   now says the app is not in the Play Store and Play Protect may ask once.
+ - apps/site/src/pages/install.astro: the meta description, lede, TOC and eyebrow no longer say "early access". The
+   Android section now opens with a download button and a four-step numbered list (open link, allow installs, Install /
+   Install anyway, paste key or restore backup), plus the update path. The old gradlew/adb steps sit under a "Build it
+   yourself (developers)" heading, unchanged.
+ - apps/site/public/llms.txt: the Android line links the APK and says updates install from the app.
+ - .hq-brief.md is deleted, as the brief asked.
+
+ bun install && bun run build in apps/site passes (6 pages built).
+
+ I hardcoded the APK URL in the pages rather than adding it to the shared links config. Moving it there would be a
+ small follow-up if you want one source for the URL.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/project (feat/site-mobile-first)
+↑20 ↓3.8k R130k W21k CH98.5% $0.006 2.1%/1.0M (auto)                                              claude-haiku-5-5 • low
