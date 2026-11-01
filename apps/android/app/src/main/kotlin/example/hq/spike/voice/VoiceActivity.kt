@@ -49,6 +49,11 @@ import example.hq.spike.ui.theme.Mts
  */
 class VoiceActivity : ComponentActivity() {
     private lateinit var session: VoiceSession
+    private val unlocked = androidx.compose.runtime.mutableStateOf(false)
+    /** The unlock prompt is up; the sheet stays while it is, since the prompt itself hides the sheet. */
+    private var dismissing = false
+    /** A press (the first open or a new intent) waits for onResume to start. */
+    private var askOnResume = false
 
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) session.listen() else session.refuse(MIC_REFUSED)
@@ -63,14 +68,22 @@ class VoiceActivity : ComponentActivity() {
         setContent {
             HqTheme {
                 val state by session.state.collectAsState()
-                VoiceSheet(state, onMic = ::micPressed, onClose = ::finish)
+                if (unlocked.value) VoiceSheet(state, onMic = ::micPressed, onClose = ::finish)
             }
         }
-        unlockThen { micPressed() }
+        askOnResume = true
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        askOnResume = true
+    }
+
+    /** The unlock prompt can only be asked for by an activity that is showing, so a press is handled here. */
+    override fun onResume() {
+        super.onResume()
+        if (!askOnResume || dismissing) return
+        askOnResume = false
         unlockThen { micPressed() }
     }
 
@@ -78,7 +91,7 @@ class VoiceActivity : ComponentActivity() {
         super.onStop()
         // Nothing listens or speaks once the sheet is gone: the microphone is only ever open in front of the owner.
         session.quiet()
-        if (!isChangingConfigurations) finish()
+        if (!isChangingConfigurations && !dismissing) finish()
     }
 
     override fun onDestroy() {
@@ -94,20 +107,36 @@ class VoiceActivity : ComponentActivity() {
     /** HQ's notes and tasks are never shown or heard over the lock screen: the owner unlocks first. */
     private fun unlockThen(then: () -> Unit) {
         val keyguard = getSystemService(KeyguardManager::class.java)
-        if (!keyguard.isKeyguardLocked) return then()
+        if (!keyguard.isKeyguardLocked) {
+            unlocked.value = true
+            return then()
+        }
+        unlocked.value = false
+        dismissing = true
         keyguard.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
-            override fun onDismissSucceeded() = then()
-            override fun onDismissCancelled() = finish()
-            override fun onDismissError() = finish()
+            override fun onDismissSucceeded() {
+                dismissing = false
+                unlocked.value = true
+                then()
+            }
+
+            override fun onDismissCancelled() = gaveUp()
+
+            override fun onDismissError() = gaveUp()
         })
     }
+
+    private fun gaveUp() {
+        dismissing = false
+        finish()
+    }
+
 
     companion object {
         private const val MIC_REFUSED = "AgentHQ needs the microphone to hear you. Nothing you say leaves this phone as sound."
 
         fun intent(context: Context): Intent = Intent(context, VoiceActivity::class.java)
 
-        fun open(context: Context) = context.startActivity(intent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 

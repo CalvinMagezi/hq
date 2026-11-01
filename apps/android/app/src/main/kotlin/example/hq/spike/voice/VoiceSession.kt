@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.map
 import example.hq.spike.data.ChatConnection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,11 +39,11 @@ data class VoiceState(
  * One open voice sheet: hear, ask, speak, then wait for the next tap. A tap while HQ thinks or speaks interrupts
  * it and listens again. Follow-up questions stay in the same chat thread.
  */
-class VoiceSession(app: Context, private val scope: CoroutineScope, private val connection: ChatConnection) {
+class VoiceSession(private val app: Context, private val scope: CoroutineScope, private val connection: ChatConnection) {
     private val models = VoiceModels(app)
     private val ears = VoiceEngines.ears(app)
     private val mouth = VoiceEngines.mouth(app)
-    private val turn = VoiceTurn(connection.events) { content, thread, clientId -> connection.sendChat(content, thread, clientId) }
+    private val turn = VoiceTurn(connection.events, connection.connected, { content, thread, clientId -> connection.sendChat(content, thread, clientId) })
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state
 
@@ -93,25 +94,34 @@ class VoiceSession(app: Context, private val scope: CoroutineScope, private val 
         mouth.stop()
     }
 
-    /** Fetches the models only after the owner tapped "Get" under the notice of what is downloaded and what is not sent. */
+    /** Starts the models' download only after the owner tapped "Get" under the notice of what is fetched and what is not sent. */
     private fun download() {
         job?.cancel()
-        job = scope.launch {
-            try {
-                _state.update { VoiceState(VoicePhase.Downloading, notice = DOWNLOAD_NOTICE) }
-                models.fetch { part -> _state.update { it.copy(progress = part) } }
-                hearThenAsk()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "model download failed", e)
-                _state.update { VoiceState(VoicePhase.NeedsModels, notice = DOWNLOAD_NOTICE, problem = DOWNLOAD_FAILED) }
-            }
+        job = scope.launch { downloadThenListen(VoiceEngines.download(app)) }
+    }
+
+    /** Follows the process-wide download; leaving the sheet stops this wait, not the download. */
+    private suspend fun downloadThenListen(running: Deferred<Unit>) {
+        _state.update { VoiceState(VoicePhase.Downloading, notice = DOWNLOAD_NOTICE) }
+        val showing = scope.launch { VoiceEngines.progress.collect { part -> _state.update { it.copy(progress = part) } } }
+        try {
+            running.await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "model download failed", e)
+            _state.update { VoiceState(VoicePhase.NeedsModels, notice = DOWNLOAD_NOTICE, problem = DOWNLOAD_FAILED) }
+            return
+        } finally {
+            showing.cancel()
         }
+        hearThenAsk()
     }
 
     private suspend fun hearThenAsk() {
         if (!models.ready()) {
+            val running = VoiceEngines.downloading()
+            if (running != null) return downloadThenListen(running)
             _state.update { VoiceState(VoicePhase.NeedsModels, notice = DOWNLOAD_NOTICE) }
             return
         }

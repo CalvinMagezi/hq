@@ -44,29 +44,34 @@ class Ears(app: Context) {
     /** [onRecording] fires once the microphone really records; opening it takes up to a second on a budget phone. */
     private fun hearLocked(onRecording: () -> Unit, onPartial: (String) -> Unit, active: () -> Boolean): String {
         val engine = recognizer ?: throw IllegalStateException("prepare() first")
-        val stream = engine.createStream()
         val minBuffer = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val mic = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, CHUNK * 2) * 2)
+        val mic = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, BUFFER_BYTES))
+        val stream = try {
+            engine.createStream()
+        } catch (e: RuntimeException) {
+            mic.release()
+            throw e
+        }
         finishing = false
         return try {
             if (mic.state != AudioRecord.STATE_INITIALIZED) throw IOException("microphone did not open")
             mic.startRecording()
             val chunk = ShortArray(CHUNK)
-            if (mic.read(chunk, 0, chunk.size) < 0) throw IOException("microphone did not start")
+            var n = mic.read(chunk, 0, chunk.size)
+            if (n < 0) throw IOException("microphone did not start")
             onRecording()
             val started = SystemClock.elapsedRealtime()
             var shown = ""
             while (active() && !finishing && SystemClock.elapsedRealtime() - started < LONGEST_REQUEST_MS) {
-                val n = mic.read(chunk, 0, chunk.size)
-                if (n < 0) throw IOException("microphone read failed ($n)")
                 stream.acceptWaveform(FloatArray(n) { chunk[it] / PCM_SCALE }, RATE)
                 while (engine.isReady(stream)) engine.decode(stream)
                 val text = engine.getResult(stream).text
-                if (text != shown) {
-                    shown = text
+                if (text != shown) {                    shown = text
                     onPartial(readable(text))
                 }
                 if (engine.isEndpoint(stream)) break
+                n = mic.read(chunk, 0, chunk.size)
+                if (n < 0) throw IOException("microphone read failed ($n)")
             }
             chunk.fill(0)
             stream.inputFinished()
@@ -89,6 +94,8 @@ class Ears(app: Context) {
         const val RATE = 16_000
         const val CHUNK = RATE / 10
         const val PCM_SCALE = 32_768f
+        /** Three seconds of 16-bit audio, so a slow decode never makes Android drop what was said meanwhile. */
+        const val BUFFER_BYTES = RATE * 2 * 3
         const val LONGEST_REQUEST_MS = 30_000L
         const val FEATURE_DIM = 80
         const val THREADS = 2

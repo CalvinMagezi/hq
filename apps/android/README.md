@@ -102,7 +102,7 @@ higher or lower than the board.
 
 AgentHQ can take Google's place as the phone's assistant: Settings, Apps, Choose default apps, Digital
 assistant app, AgentHQ. Holding Home (or the assist gesture) then opens a voice sheet over whatever is on
-screen. It asks for the unlock first, listens, shows what it heard, sends those words to HQ's chat and
+screen. It does not open over the lock screen (unlock first). It listens, shows what it heard, sends those words to HQ's chat and
 reads the reply aloud a sentence at a time. Tap the button to stop listening early, to interrupt the reply,
 or to ask a follow-up in the same chat. On a Galaxy A32 the side key opens only the power menu, so hold
 Home there.
@@ -112,6 +112,12 @@ What stays on the phone: the audio and its recognition (sherpa-onnx streaming Zi
 showing; audio is read in 100 ms pieces, decoded and dropped, never written. The assistant turns off
 Android's assist data and screenshot, so the screen's text is never copied into the app. What leaves the
 phone: the words of the request, to whatever chat model HQ is configured with, exactly as a typed message.
+
+An assistant has to name a recognition service, and some phones then make it the default speech recogniser
+(the A32 on One UI 5 kept Google's). So `OnDeviceRecognitionService` is a real recogniser on the same
+on-device model, not a stub: any app that reaches it gets working dictation that stays on the phone. Android
+lets in only apps that hold the microphone permission. Before the models are downloaded it answers
+"language unavailable".
 
 The speech models (about 128 MB) are downloaded once, after the owner taps Get under a notice, from the
 sherpa-onnx releases on GitHub. Each archive has a pinned SHA-256 in `voice/VoiceModels.kt`, and only the

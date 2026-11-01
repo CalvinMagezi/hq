@@ -2,8 +2,10 @@ package example.hq.spike.voice
 
 import android.content.Context
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -45,34 +47,46 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
 
     private fun doneMark(dir: String, source: ModelSource) = File(File(root, dir), ".ok-" + source.sha256.take(MARK_CHARS))
 
+    /**
+     * A download cut short (screen off, lost signal) is kept and continued with a Range request next time; the
+     * checksum still covers every byte, so a resumed file is trusted no more than a fresh one.
+     */
     private suspend fun fetchOne(dir: File, source: ModelSource, progress: (Long) -> Unit) {
-        val partial = File(dir, ".download")
+        val partial = File(dir, ".download-" + source.sha256.take(MARK_CHARS))
+        if (partial.length() > source.bytes) partial.delete()
         val digest = MessageDigest.getInstance("SHA-256")
-        http.newCall(Request.Builder().url(source.url).build()).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("model download answered ${response.code}")
-            val body = response.body.byteStream()
-            partial.outputStream().use { out -> copy(body, out, digest, progress) }
+        var have = partial.length()
+        if (have > 0) partial.inputStream().use { copy(it, null, digest) {} }
+        if (have < source.bytes) {
+            val request = Request.Builder().url(source.url).apply { if (have > 0) header("Range", "bytes=$have-") }.build()
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("model download answered ${response.code}")
+                val resumed = have > 0 && response.code == HTTP_PARTIAL
+                if (!resumed) {
+                    digest.reset()
+                    have = 0
+                }
+                val base = have
+                FileOutputStream(partial, resumed).use { out -> copy(response.body.byteStream(), out, digest) { got -> progress(base + got) } }
+            }
         }
         val got = digest.digest().joinToString("") { "%02x".format(it) }
         if (got != source.sha256) {
             partial.delete()
             throw IOException("model download did not match its pinned checksum")
         }
-        try {
-            if (source.url.endsWith(TAR_BZ2)) unpack(partial, dir, source.files) else partial.copyTo(File(dir, source.files.values.single()), overwrite = true)
-        } finally {
-            partial.delete()
-        }
+        if (source.url.endsWith(TAR_BZ2)) unpack(partial, dir, source.files) else partial.copyTo(File(dir, source.files.values.single()), overwrite = true)
+        partial.delete()
     }
 
-    private suspend fun copy(input: InputStream, out: java.io.OutputStream, digest: MessageDigest, progress: (Long) -> Unit) {
+    private suspend fun copy(input: InputStream, out: OutputStream?, digest: MessageDigest, progress: (Long) -> Unit) {
         val buffer = ByteArray(BUFFER)
         var total = 0L
         while (true) {
             kotlin.coroutines.coroutineContext.ensureActive()
             val n = input.read(buffer)
             if (n < 0) break
-            out.write(buffer, 0, n)
+            out?.write(buffer, 0, n)
             digest.update(buffer, 0, n)
             total += n
             progress(total)
@@ -98,6 +112,7 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
 
     companion object {
         private const val TAR_BZ2 = ".tar.bz2"
+        private const val HTTP_PARTIAL = 206
         private const val BUFFER = 64 * 1024
         private const val MARK_CHARS = 12
         private const val RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"

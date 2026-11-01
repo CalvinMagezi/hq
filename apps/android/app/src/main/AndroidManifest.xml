@@ -74,7 +74,7 @@
       <intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter>
     </service>
     <service android:name=".voice.AssistantSessionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION"/>
-    <service android:name=".voice.NoRecognitionService" android:exported="true">
+    <service android:name=".voice.OnDeviceRecognitionService" android:exported="true">
       <intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter>
     </service>
     <activity android:name=".voice.VoiceActivity" android:exported="false" android:theme="@style/Theme.AgentHQ.Capture" android:excludeFromRecents="true" android:taskAffinity="" android:launchMode="singleTask" android:label="Hey HQ"/>

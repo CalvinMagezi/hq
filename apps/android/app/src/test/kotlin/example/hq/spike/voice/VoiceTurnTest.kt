@@ -2,6 +2,7 @@ package example.hq.spike.voice
 
 import example.hq.spike.data.ChatEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -42,14 +43,45 @@ class SpokenTextTest {
 }
 
 class VoiceTurnTest {
-    private fun turn(events: MutableSharedFlow<ChatEvent>, sent: MutableList<String>, accept: Boolean = true, script: (String) -> List<ChatEvent>) =
-        VoiceTurn(events) { content, _, clientId ->
-            sent += content
-            if (accept) script(clientId).forEach { check(events.tryEmit(it)) }
-            accept
-        }
+    private fun turn(
+        events: MutableSharedFlow<ChatEvent>,
+        sent: MutableList<String>,
+        accept: Boolean = true,
+        connected: MutableStateFlow<Boolean> = MutableStateFlow(true),
+        startWaitMs: Long = VoiceTurn.START_WAIT_MS,
+        script: (String) -> List<ChatEvent>,
+    ) = VoiceTurn(events, connected, { content, _, clientId ->
+        sent += content
+        if (accept) script(clientId).forEach { check(events.tryEmit(it)) }
+        accept
+    }, startWaitMs = startWaitMs)
 
     private fun bus() = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 64)
+
+    @Test
+    fun aDroppedSocketEndsTheTurn() = runBlocking {
+        val events = bus()
+        val connected = MutableStateFlow(true)
+        val out = turn(events, mutableListOf(), connected = connected) { id ->
+            connected.value = false
+            listOf(ChatEvent.TurnStart("t3", id, null), ChatEvent.Text("t3", "Half an"))
+        }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
+        assertEquals(TurnOutput.Failed(VoiceTurn.CONNECTION_LOST), out.last())
+    }
+
+    @Test
+    fun missedEventsEndTheTurn() = runBlocking {
+        val events = bus()
+        val out = turn(events, mutableListOf()) { id -> listOf(ChatEvent.TurnStart("t4", id, null), ChatEvent.Lagged(3)) }
+            .ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
+        assertEquals(listOf(TurnOutput.Thread("t4"), TurnOutput.Failed(VoiceTurn.MISSED)), out)
+    }
+
+    @Test
+    fun aQuestionHqNeverPicksUpTimesOut() = runBlocking {
+        val out = turn(bus(), mutableListOf(), startWaitMs = 50) { emptyList() }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
+        assertEquals(listOf(TurnOutput.Failed(VoiceTurn.NOT_STARTED)), out)
+    }
 
     @Test
     fun aReplyBecomesSentencesThenDone() = runBlocking {
