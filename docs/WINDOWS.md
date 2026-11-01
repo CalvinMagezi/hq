@@ -50,9 +50,8 @@ Two ways to use a Windows machine:
 
 - **HQ runs on this PC.** Install HQ inside WSL2, open the web app in your Windows browser.
   Coding agents run in the same WSL2 install.
-- **This PC runs the agents for an HQ somewhere else** (an HQ on a server, say). Install the
-  host inside WSL2 and pair it with that HQ. Pairing is the same for every machine; see
-  [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md).
+- **This PC runs coding agents for the HQ on your phone.** Install HQ inside WSL2 and pair it with
+  the phone by QR code. No VPN needed.
 
 You can do both on one PC.
 
@@ -123,7 +122,49 @@ install` and `hq host join` create. Open it from Windows Explorer at
 `\\wsl$\Ubuntu\home\<you>\Documents\HQ` (the Workbench page shows the exact path). It stays in the
 Linux file system on purpose: agents work much faster there and permissions behave correctly.
 
-## 4. Let an HQ on another machine use this PC
+## 4. Pair this PC with your phone
+
+Pair the Ubuntu shell with the phone, the same way as any machine in
+[JOIN_A_MACHINE.md](JOIN_A_MACHINE.md). Run these steps inside Ubuntu.
+
+If `hq` is not in `~/.local/bin` yet, get it first. Pick the newest tag on the
+[releases page](https://github.com/CalvinMagezi/hq/releases), then:
+
+```
+V=0.9.1-main.81
+curl -fsSL -o hq.tgz "https://github.com/CalvinMagezi/hq/releases/download/v$V/hq-$V-linux-x86_64.tar.gz"
+tar xzf hq.tgz && mkdir -p ~/.local/bin && install -m 755 hq ~/.local/bin/hq
+```
+
+1. Let the host's gate listen on loopback, where bridge traffic arrives, in `~/.hq/config.yaml`:
+
+   ```yaml
+   agent_host:
+     gate_listen: 127.0.0.1:7747
+     gate_allowed_sources: [127.0.0.1]
+   ```
+
+   then install the host as a login service with `hq host install`. A host already running needs a
+   restart to read the change.
+2. On the phone, open paired devices and show the pairing code. In Ubuntu run:
+
+   ```
+   hq bridge join
+   ```
+
+   and paste or scan the link. Ubuntu shows six digits; type them on the phone.
+3. Keep the bridge up. Run `hq bridge serve` as a service (WSL2 has systemd from step 1) or in a
+   terminal.
+
+The phone then lists this PC as a host, and its agents call back to the phone's HQ. Revoke it on the
+phone, or with `hq bridge revoke <id>` in Ubuntu.
+
+WSL2's network sits behind Windows. The bridge dials out from this PC, so nothing needs opening.
+
+### Older setup: Tailscale
+
+Only needed for an HQ that is not on your phone.
+
 
 Both machines need [Tailscale](https://tailscale.com). WSL2 has its own network, so install it
 **inside Ubuntu** (`curl -fsSL https://tailscale.com/install.sh | sh`, then
