@@ -50,7 +50,7 @@ const pickerOptions = [
 
 <Layout
   title="Install Agent HQ"
-  description="Install Agent HQ with a curl script, Homebrew, npx or Docker, on Windows, on a server with signed releases, or on an Android phone in early access, then pair your machines with it."
+  description="Install Agent HQ with a curl script, Homebrew, npx or Docker, on Windows, on a server with signed releases, or on an Android phone from a signed download, then pair your machines with it."
   path="/install/"
 >
   <section class="sec sec-hero" aria-labelledby="inst-h">
@@ -74,7 +74,7 @@ const pickerOptions = [
         </h1>
         <div class="rule rule-in" aria-hidden="true"></div>
         <p class="lede fade-in">
-          HQ is mobile first, so start with the phone: the Android app is in early access. Then put HQ on your
+          HQ is mobile first, so start with the phone: download the Android app. Then put HQ on your
           laptop or server with one command that downloads a verified release, for Linux and for Macs on Apple
           Silicon or Intel, and pair it with a QR code. Windows runs it in WSL2 or as HQ Lite. The server path
           installs signed releases and updates itself, and it is Linux only.
@@ -82,7 +82,7 @@ const pickerOptions = [
       </div>
       <nav aria-label="On this page">
         <ul class="toc">
-          <li><a href="#android">Android phone (early access)</a></li>
+          <li><a href="#android">Android phone</a></li>
           <li><a href="#pair">Pair a laptop or server</a></li>
           {curl.available && <li><a href="#script">Install script</a></li>}
           {brew.available && <li><a href="#homebrew">Homebrew</a></li>}
@@ -105,7 +105,7 @@ const pickerOptions = [
     <span class="orb orb-b o-bl slow" aria-hidden="true"></span>
     <div class="container stack">
       <div class="head">
-        <p class="eyebrow reveal">Android 8 or newer, arm64 · early access</p>
+        <p class="eyebrow reveal">Android 8 or newer, arm64</p>
         <h2 id="android-h" class="reveal">Start here: HQ on your Android phone</h2>
         <p class="lede reveal">
           HQ is mobile first: the phone is home base. The Android app runs <code>hq</code> as a foreground service with the
@@ -114,11 +114,31 @@ const pickerOptions = [
           a laptop or server and the phone starts and supervises them.
         </p>
         <p class="body reveal">
-          <strong>Early access.</strong> There is no published app yet. You build the APK yourself and install it with
-          <code>adb</code>, and <a href={links.repo}>the repo</a> is the place to follow progress. Relays are development
+          The app is not in the Play Store yet. Install the signed app from the link below. Relays are development
           relays today.
         </p>
       </div>
+      <p class="body reveal">
+        <a class="btn btn-primary btn-lg" href="https://github.com/CalvinMagezi/hq/releases/latest/download/agent-hq-android.apk">Download for Android</a>
+      </p>
+      <ol class="steps steps-grid">
+        <li class="gcard reveal">
+          <p>On the phone, open <a href="https://github.com/CalvinMagezi/hq/releases/latest/download/agent-hq-android.apk">the download link</a>.</p>
+        </li>
+        <li class="gcard reveal reveal-2">
+          <p>When Android asks, allow your browser to install unknown apps.</p>
+        </li>
+        <li class="gcard reveal">
+          <p>Tap Install. If Google Play Protect warns about an unknown developer, choose Install anyway (or let it scan first).</p>
+        </li>
+        <li class="gcard reveal reveal-2">
+          <p>Open the app and paste an AI model key (OpenRouter, Anthropic or another OpenAI-compatible service), or restore a backup.</p>
+        </li>
+      </ol>
+      <p class="body reveal">
+        Updates install from the app: Settings &gt; Backup and about &gt; Check for updates.
+      </p>
+      <h3 class="h2-sm reveal">Build it yourself (developers)</h3>
       <ol class="steps steps-grid">
         <li class="gcard reveal">
           <p>Build <code>hq</code> for the phone with the features the app needs.</p>

@@ -21,7 +21,7 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
 const hosts = [
   {
     name: 'An Android phone',
-    where: 'Early access, built by hand for now',
+    where: 'Download the app (Android 8+)',
     body: 'The home base. The daemon, chat, tasks, notes, inbox and both chat relays run on it, with a data saver for metered plans. Keep it on a charger. Coding agents run on your laptop or server, and the phone supervises them.',
     href: '#phone-h',
     tone: 'green',
@@ -116,7 +116,7 @@ const phoneShots = [
           <button type="button" class="btn btn-accent btn-sm" data-copy="hero-install" data-label="Copy" aria-label="Copy install command" hidden>Copy</button>
         </div>
         <div class="actions fade-in">
-          <a class="btn btn-primary btn-lg" href="/install/#android-h">Early access</a>
+          <a class="btn btn-primary btn-lg" href="https://github.com/CalvinMagezi/hq/releases/latest/download/agent-hq-android.apk">Download for Android</a>
           <a class="btn btn-lg" href="/architecture/">How it works</a>
           <a class="btn btn-lg" href={links.repo}>View on GitHub</a>
         </div>
@@ -202,7 +202,7 @@ const phoneShots = [
     <span class="orb orb-g o-br" aria-hidden="true"></span>
     <div class="container stack">
       <div class="head">
-        <p class="eyebrow reveal">Android app · early access</p>
+        <p class="eyebrow reveal">Android app</p>
         <h2 id="phone-h" class="reveal">Your phone is home base</h2>
         <p class="lede reveal">
           The Android app runs HQ itself as a foreground service. Chat, tasks, notes and an inbox of things
@@ -235,7 +235,7 @@ const phoneShots = [
         <div class="gcard">
           <h3>Not there yet</h3>
           <ul class="facts list-plain">
-            <li>No published app yet: you build the APK yourself and install it with adb</li>
+            <li>Not in the Play Store yet: you install the signed app from our download link, and Play Protect may ask you to confirm once</li>
             <li>Relays are development relays today, so do not count on a production one</li>
             <li>Not yet shown that a sleeping, unplugged phone always answers in time, so keep it on a charger</li>
             <li>No agent shell on the phone: Android has no sandbox HQ can use, so that tool is refused</li>
