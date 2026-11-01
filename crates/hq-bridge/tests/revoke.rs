@@ -256,16 +256,20 @@ async fn ran_once(seen: &Mutex<Vec<String>>, peer: &str) {
     );
 }
 
-/// The application close a refused dial carries, so a test knows the refusal came from the peer.
-/// The gate refuses after the handshake, so the dial may succeed and the connection then close.
-async fn refusal_of(dialed: anyhow::Result<Connection>) -> (u64, Vec<u8>) {
-    let reason = match dialed {
+/// How a dial ended: closed after the handshake, or refused during it.
+async fn close_of(dialed: anyhow::Result<Connection>) -> ConnectionError {
+    match dialed {
         Ok(conn) => with_timeout(conn.closed()).await,
         Err(e) => error_close_reason(&e)
             .cloned()
             .unwrap_or_else(|| panic!("the dial failed before the peer answered: {e:#}")),
-    };
-    match reason {
+    }
+}
+
+/// The application close a refused dial carries, so a test knows the refusal came from the peer.
+/// The gate refuses after the handshake, so the dial may succeed and the connection then close.
+async fn refusal_of(dialed: anyhow::Result<Connection>) -> (u64, Vec<u8>) {
+    match close_of(dialed).await {
         ConnectionError::ApplicationClosed(close) => {
             (close.error_code.into_inner(), close.reason.to_vec())
         }
@@ -350,7 +354,16 @@ async fn offline_revoke_cleans_up_on_first_dial() {
     assert!(machine.row(&hub).unwrap().is_some(), "row before the dial");
     let seen = count_callbacks(&machine);
     let refused = machine.bridge.connect_service(&hub.id()).await;
-    assert_eq!(refusal_of(refused).await, (403, b"revoked".to_vec()));
+    // The restarted machine's forwards dial too. When theirs hears the refusal first, the
+    // cleanup closes this dial on our side before the hub's close arrives.
+    match close_of(refused).await {
+        ConnectionError::ApplicationClosed(close) => assert_eq!(
+            (close.error_code.into_inner(), close.reason.to_vec()),
+            (403, b"revoked".to_vec())
+        ),
+        ConnectionError::LocallyClosed => {}
+        other => panic!("the dial was neither refused nor closed by the cleanup: {other:?}"),
+    }
 
     let cleaned = wait_for(|| {
         machine.row(&hub).as_ref().is_ok_and(|r| r.is_none())
