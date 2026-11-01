@@ -665,3 +665,43 @@ fn a_budget_refusal_fails_over_whatever_amounts_its_message_holds() {
     assert!(err.is_failoverable(), "{err}");
     assert!(err.to_string().contains("$0.0401"));
 }
+
+/// Records the ledger origin in force when `start()` runs, the moment the ledger captures it.
+struct OriginProbe {
+    seen: Arc<std::sync::Mutex<Option<&'static str>>>,
+}
+
+#[async_trait]
+impl SessionBackend for OriginProbe {
+    fn name(&self) -> &str {
+        "probe"
+    }
+    fn capabilities(&self) -> BackendCapabilities {
+        BackendCapabilities::full_api()
+    }
+    async fn start(&self, _request: &BackendRequest) -> Result<BackendEventStream, BackendError> {
+        *self.seen.lock().unwrap() = Some(hq_llm::current_context().origin);
+        Ok(Box::pin(tokio_stream::iter(vec![Ok(BackendEvent::Done)])))
+    }
+}
+
+#[tokio::test]
+async fn a_chained_call_keeps_the_callers_ledger_origin() {
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let chain = ProviderChain::new(
+        "c",
+        vec![Arc::new(OriginProbe { seen: seen.clone() }) as Arc<dyn SessionBackend>],
+    );
+    let ctx = hq_llm::SessionContext {
+        session_id: "s".into(),
+        turn_idx: 0,
+        origin: hq_llm::origin::CHAT,
+    };
+    // The session scopes only `start`; the stream is drained after that scope ends.
+    let mut stream = hq_llm::SESSION_CONTEXT
+        .scope(ctx, chain.start(&req()))
+        .await
+        .unwrap();
+    while stream.next().await.is_some() {}
+    assert_eq!(*seen.lock().unwrap(), Some(hq_llm::origin::CHAT));
+}
