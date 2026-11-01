@@ -5,6 +5,7 @@
 use crate::Startup;
 use hq_desktop::{
     Desktop,
+    claude::HubView,
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
     settings::Settings,
@@ -37,6 +38,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         pairing_submit,
         pairing_decline,
         pairing_revoke,
+        claude_status,
+        claude_change,
     ]
 }
 
@@ -131,5 +134,16 @@ fn pairing_decline(app: App<'_>, id: u64) -> bool {
 
 #[tauri::command]
 async fn pairing_revoke(app: App<'_>, id: String) -> Reply<bool> {
-    app.pairing.revoke(&id).await.map_err(shown)
+    app.revoke(&id).await.map_err(shown)
+}
+
+#[tauri::command]
+async fn claude_status(app: App<'_>) -> Reply<Vec<HubView>> {
+    app.claude_status().await.map_err(shown)
+}
+
+/// Adds a paired hub to Claude Code and Claude Desktop, or removes it.
+#[tauri::command]
+async fn claude_change(app: App<'_>, hub: String, add: bool) -> Reply<HubView> {
+    app.claude_change(hub, add).await.map_err(shown)
 }

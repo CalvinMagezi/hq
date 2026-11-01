@@ -59,6 +59,12 @@ interface Pairing {
   peers: Peer[]
   peers_error: string | null
 }
+interface ClaudeHub {
+  name: string
+  lines: [string, string]
+  added: boolean
+  failed: boolean
+}
 type Submitted =
   | { result: 'accepted' | 'declined' | 'too_late' | 'not_digits' | 'unknown' }
   | { result: 'wrong_digits'; tries_left: number }
@@ -125,6 +131,8 @@ function showTab(name: (typeof TABS)[number]) {
       .querySelector(`nav [data-tab="${tab}"]`)
       ?.setAttribute('aria-selected', String(tab === name))
   }
+  // Reading Claude runs its program, so it happens on opening the tab and after a change.
+  if (name === 'claude') void guarded('claude-error', refreshClaude)
   void refresh()
 }
 document.querySelectorAll<HTMLButtonElement>('nav [data-tab]').forEach((b) =>
@@ -337,6 +345,32 @@ $('cancel-ticket').addEventListener('click', () =>
   }),
 )
 $('copy-link').addEventListener('click', () => void copy($('ticket-link').textContent ?? ''))
+
+// Claude
+function renderClaude(hubs: ClaudeHub[]) {
+  const list = $('claude-hubs')
+  list.replaceChildren()
+  $('claude-empty').hidden = hubs.length > 0
+  for (const hub of hubs) {
+    const item = el('li')
+    const label = el('span')
+    label.append(el('strong', hub.name))
+    for (const line of hub.lines) label.append(el('br'), el('span', line, 'muted'))
+    const change = (add: boolean) =>
+      void guarded('claude-error', async () => {
+        const done = await invoke<ClaudeHub>('claude_change', { hub: hub.name, add })
+        if (done.failed) $('claude-error').textContent = done.lines.join(' ')
+        else toast(add ? 'Added. Restart Claude to see it.' : 'Removed.')
+        await refreshClaude()
+      })
+    item.append(label, button(hub.added ? 'Remove' : 'Add', () => change(!hub.added)))
+    list.append(item)
+  }
+}
+
+async function refreshClaude() {
+  renderClaude(await invoke<ClaudeHub[]>('claude_status'))
+}
 
 // Refresh
 async function refresh() {

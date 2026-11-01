@@ -6,6 +6,7 @@
 //! throwaway endpoint per QR code) exists only after a caller asks for it; see
 //! `docs/security/DESKTOP.md`.
 
+pub mod claude;
 pub mod desktop;
 pub mod host;
 pub mod pairing;

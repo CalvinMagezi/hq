@@ -21,6 +21,8 @@
     "allow-pairing-submit",
     "allow-pairing-decline",
     "allow-pairing-revoke",
+    "allow-claude-status",
+    "allow-claude-change",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]
