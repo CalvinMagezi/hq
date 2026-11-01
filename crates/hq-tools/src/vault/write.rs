@@ -88,11 +88,12 @@ impl HqTool for VaultWriteNoteTool {
 
         validate_write_path(self.vault.vault_path(), &path)?;
 
-        let mut frontmatter = std::collections::HashMap::new();
-        frontmatter.insert(
-            "title".to_string(),
-            serde_yaml::Value::String(title.clone()),
-        );
+        let NoteParts {
+            frontmatter,
+            title,
+            content,
+            tags,
+        } = note_parts(title, &content, tags);
 
         let note = hq_core::types::Note {
             title: title.clone(),
@@ -124,6 +125,78 @@ impl HqTool for VaultWriteNoteTool {
 
         let abs_path = self.vault.vault_path().join(&path_ret);
         Ok(json!({ "ok": true, "path": path_ret, "abs_path": abs_path.to_string_lossy() }))
+    }
+}
+
+/// What a written note is made of once frontmatter the caller put inside `content` is merged into
+/// the note's own. Without the merge that block landed in the body as a second frontmatter, its
+/// tags were never real tags, and search indexed the YAML as text.
+struct NoteParts {
+    frontmatter: std::collections::HashMap<String, serde_yaml::Value>,
+    title: String,
+    content: String,
+    tags: Vec<String>,
+}
+
+fn note_parts(title: String, content: &str, tags: Vec<String>) -> NoteParts {
+    let (mut frontmatter, body) =
+        match hq_core::frontmatter_utils::split_frontmatter(content.trim_start()) {
+            (Some(yaml), body) => match serde_yaml::from_str::<
+                std::collections::HashMap<String, serde_yaml::Value>,
+            >(yaml)
+            {
+                Ok(map) => (map, body.trim_start_matches(['\r', '\n']).to_string()),
+                Err(_) => (std::collections::HashMap::new(), content.to_string()),
+            },
+            (None, _) => (std::collections::HashMap::new(), content.to_string()),
+        };
+    let title = if title.is_empty() {
+        frontmatter
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_default()
+    } else {
+        title
+    };
+    frontmatter.insert("title".into(), serde_yaml::Value::String(title.clone()));
+
+    let mut all_tags = yaml_tags(frontmatter.get("tags"));
+    for tag in tags {
+        if !all_tags.contains(&tag) {
+            all_tags.push(tag);
+        }
+    }
+    if !all_tags.is_empty() {
+        let list = all_tags
+            .iter()
+            .cloned()
+            .map(serde_yaml::Value::String)
+            .collect();
+        frontmatter.insert("tags".into(), serde_yaml::Value::Sequence(list));
+    }
+    NoteParts {
+        frontmatter,
+        title,
+        content: body,
+        tags: all_tags,
+    }
+}
+
+/// Tags from a frontmatter value: a list, or one comma-separated string.
+fn yaml_tags(value: Option<&serde_yaml::Value>) -> Vec<String> {
+    match value {
+        Some(serde_yaml::Value::Sequence(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::to_string)
+            .collect(),
+        Some(serde_yaml::Value::String(s)) => s
+            .split(',')
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -290,5 +363,56 @@ impl HqTool for VaultPatchSectionTool {
         .await;
 
         Ok(json!({ "ok": true, "path": path, "patched_heading": heading }))
+    }
+}
+
+#[cfg(test)]
+mod note_parts_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn frontmatter_inside_content_becomes_the_notes_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
+        let tool = VaultWriteNoteTool::new(vault.clone());
+        let content = "---\ntitle: \"Edge notes\"\nstatus: draft\ntags:\n  - edge-ai\n  - android\n---\n\n# Edge notes\n\nBody.\n";
+        tool.execute(json!({
+            "path": "Notebooks/x.md",
+            "title": "",
+            "content": content,
+            "tags": ["android", "research"],
+        }))
+        .await
+        .unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("Notebooks/x.md")).unwrap();
+        assert_eq!(
+            raw.matches("---").count(),
+            2,
+            "one frontmatter block:\n{raw}"
+        );
+        let note = vault.read_note("Notebooks/x.md").unwrap();
+        assert_eq!(note.title, "Edge notes");
+        assert_eq!(note.tags, ["edge-ai", "android", "research"]);
+        assert_eq!(
+            note.frontmatter.get("status").and_then(|v| v.as_str()),
+            Some("draft")
+        );
+        assert!(note.content.starts_with("# Edge notes"), "{}", note.content);
+    }
+
+    #[test]
+    fn tags_given_as_an_argument_are_written_to_the_file() {
+        let parts = note_parts("T".into(), "plain body", vec!["a".into()]);
+        assert_eq!(parts.tags, ["a"]);
+        assert!(parts.frontmatter.contains_key("tags"));
+        assert_eq!(parts.content, "plain body");
+    }
+
+    #[test]
+    fn content_whose_frontmatter_does_not_parse_is_kept_as_written() {
+        let content = "---\n: : not yaml [\n---\nbody";
+        let parts = note_parts("T".into(), content, Vec::new());
+        assert_eq!(parts.content, content);
     }
 }
