@@ -12,6 +12,8 @@ use super::{FIND_FILE_LIMIT, MAX_OUTPUT_BYTES, text_result, truncate_output};
 use std::path::Path;
 use std::time::Duration;
 
+const GREP_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Glob-based file finder.
 pub struct FindTool;
 
@@ -135,11 +137,12 @@ impl AgentTool for GrepTool {
 
     fn description(&self) -> &str {
         concat!(
-            "Searches file contents using ripgrep. Supports full regex syntax.\n\n",
+            "Searches file contents using ripgrep, or an equivalent built-in search where ripgrep is not \
+             installed. Supports full regex syntax.\n\n",
             "Parameters:\n",
             "- pattern: regex to match (e.g., \"fn handle_\\\\w+\", \"class.*implements\")\n",
             "- path: directory to search (default: current)\n",
-            "- file_type: filter by language (\"rs\", \"ts\", \"py\", etc.)\n",
+            "- file_type: filter by ripgrep type name (\"rust\", \"ts\", \"py\", \"dart\", etc.)\n",
             "- context: lines of context before/after each match\n",
             "- case_insensitive: true for case-insensitive search\n\n",
             "Prefer this over bash grep or rg for content search. Times out after 30 seconds.",
@@ -207,7 +210,7 @@ impl AgentTool for GrepTool {
 
         cmd.arg(pattern).arg(path);
 
-        let result = tokio::time::timeout(Duration::from_secs(30), cmd.output()).await;
+        let result = tokio::time::timeout(GREP_TIMEOUT, cmd.output()).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -218,16 +221,42 @@ impl AgentTool for GrepTool {
                     Ok(text_result(truncate_output(&stdout, MAX_OUTPUT_BYTES)))
                 }
             }
-            Ok(Err(e)) => {
-                // rg not found — provide a helpful message
-                Ok(text_result(format!(
-                    "Error running ripgrep: {}. Is `rg` installed?",
-                    e
-                )))
+            Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                let search = super::search_fallback::Search {
+                    pattern: pattern.to_string(),
+                    path: std::path::PathBuf::from(path),
+                    file_type: file_type.map(str::to_string),
+                    context: context.map_or(0, |c| usize::try_from(c).unwrap_or(usize::MAX)),
+                    case_insensitive,
+                    max_output: MAX_OUTPUT_BYTES,
+                    deadline: std::time::Instant::now() + GREP_TIMEOUT,
+                };
+                Ok(text_result(search_without_rg(search).await))
             }
+            Ok(Err(e)) => Ok(text_result(format!("Error running ripgrep: {e}"))),
             Err(_) => Ok(text_result("Grep timed out after 30 seconds.")),
         }
     }
+}
+
+/// The same search in plain Rust when `rg` is not installed, as on a phone.
+async fn search_without_rg(search: super::search_fallback::Search) -> String {
+    let joined = tokio::task::spawn_blocking(move || super::search_fallback::search(&search)).await;
+    let found = match joined {
+        Ok(Ok(found)) => found,
+        Ok(Err(e)) => return format!("Search failed: {e:#}"),
+        Err(e) => return format!("Search failed: {e}"),
+    };
+    let mut text = if found.matches.is_empty() {
+        "No matches found.".to_string()
+    } else {
+        truncate_output(&found.matches, MAX_OUTPUT_BYTES)
+    };
+    // After truncation, so a note about how far the search got is never the part cut off.
+    for note in found.notes {
+        text.push_str(&format!("\n{note}"));
+    }
+    text
 }
 
 // ─── LsTool ─────────────────────────────────────────────────────

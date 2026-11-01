@@ -6,6 +6,7 @@ mod bash;
 mod file_io;
 mod rollback;
 mod search;
+mod search_fallback;
 
 pub use bash::BashTool;
 pub use file_io::{EditTool, ReadTool, WriteTool};
