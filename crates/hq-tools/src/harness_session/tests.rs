@@ -4323,7 +4323,7 @@ fn the_event_stream_reads_each_event_once_from_a_cursor() {
     let db = Arc::new(Database::open_memory().unwrap());
     event_world(&db);
     let owner = Reader::default();
-    let start = read(&db, &Scope::All, &owner, None, 10, Duration::ZERO).unwrap();
+    let start = read(&db, &Scope::All, &owner, None, 10).unwrap();
     let cursor = start["next"].as_i64().unwrap();
     db.with_conn(|c| {
         registry::record_event(
@@ -4337,24 +4337,73 @@ fn the_event_stream_reads_each_event_once_from_a_cursor() {
     })
     .unwrap();
     let team = Scope::Team("hs-lead".into());
-    let got = read(&db, &team, &owner, Some(cursor), 10, Duration::ZERO).unwrap();
+    let got = read(&db, &team, &owner, Some(cursor), 10).unwrap();
     assert_eq!(kinds(&got), ["hs-worker:blocked"]);
     assert_eq!(
         got["events"][0]["detail"]["seq"], 3,
         "detail comes back as data"
     );
     let next = got["next"].as_i64().unwrap();
-    let again = read(&db, &team, &owner, Some(next), 10, Duration::ZERO).unwrap();
+    let again = read(&db, &team, &owner, Some(next), 10).unwrap();
     assert!(kinds(&again).is_empty());
     assert_eq!(again["next"], next, "an empty read keeps the cursor");
 
-    let everything = read(&db, &Scope::All, &owner, Some(cursor), 1, Duration::ZERO).unwrap();
+    let everything = read(&db, &Scope::All, &owner, Some(cursor), 1).unwrap();
     assert_eq!(everything["more"], true, "one at a time");
+}
+
+#[tokio::test]
+async fn a_waiting_read_holds_until_its_event_lands() {
+    use events::{Feed, Reader, Scope, read, wait_read};
+    let db = Arc::new(Database::open_memory().unwrap());
+    event_world(&db);
+    let (owner, team) = (Reader::default(), Scope::Team("hs-lead".into()));
+    let next = read(&db, &team, &owner, None, 10).unwrap()["next"]
+        .as_i64()
+        .unwrap();
+    let feed = Feed::new(db.clone());
+
     let started = std::time::Instant::now();
-    read(&db, &team, &owner, Some(next), 10, Duration::from_secs(1)).unwrap();
+    let none = wait_read(
+        &db,
+        &feed,
+        &team,
+        &owner,
+        Some(next),
+        10,
+        Duration::from_secs(1),
+    )
+    .await
+    .unwrap();
+    assert!(kinds(&none).is_empty());
     assert!(
         started.elapsed() >= Duration::from_millis(900),
         "it waited for an event"
+    );
+
+    let writer = db.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        writer
+            .with_conn(|c| registry::record_event(c, "hs-worker", "finished", "supervisor", None))
+            .unwrap();
+    });
+    let started = std::time::Instant::now();
+    let got = wait_read(
+        &db,
+        &feed,
+        &team,
+        &owner,
+        Some(next),
+        10,
+        Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
+    assert_eq!(kinds(&got), ["hs-worker:finished"]);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "woken by the event, not the deadline"
     );
 }
 
@@ -4369,15 +4418,7 @@ fn a_task_reads_its_sessions_with_their_teams() {
         registry::record_event(c, "hs-other", "exited", "supervisor", None)
     })
     .unwrap();
-    let got = read(
-        &db,
-        &Scope::Task(task),
-        &Reader::default(),
-        Some(0),
-        10,
-        Duration::ZERO,
-    )
-    .unwrap();
+    let got = read(&db, &Scope::Task(task), &Reader::default(), Some(0), 10).unwrap();
     assert_eq!(kinds(&got), ["hs-lead:finished", "hs-worker:commit"]);
 }
 
@@ -4395,7 +4436,7 @@ fn a_reader_sees_only_what_it_may() {
         caller: Some("hs-worker".into()),
         connector: false,
     };
-    let own = read(&db, &Scope::All, &worker, Some(0), 10, Duration::ZERO).unwrap();
+    let own = read(&db, &Scope::All, &worker, Some(0), 10).unwrap();
     assert_eq!(kinds(&own), ["hs-worker:blocked"], "its team only");
     let err = read(
         &db,
@@ -4403,7 +4444,6 @@ fn a_reader_sees_only_what_it_may() {
         &worker,
         Some(0),
         10,
-        Duration::ZERO,
     )
     .unwrap_err()
     .to_string();
@@ -4413,7 +4453,7 @@ fn a_reader_sees_only_what_it_may() {
         caller: None,
         connector: true,
     };
-    let theirs = read(&db, &Scope::All, &connector, Some(0), 10, Duration::ZERO).unwrap();
+    let theirs = read(&db, &Scope::All, &connector, Some(0), 10).unwrap();
     assert_eq!(
         kinds(&theirs),
         ["hs-worker:blocked"],
@@ -4426,7 +4466,6 @@ fn a_reader_sees_only_what_it_may() {
             &connector,
             Some(0),
             10,
-            Duration::ZERO
         )
         .is_err()
     );
