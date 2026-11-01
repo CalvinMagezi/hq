@@ -67,6 +67,7 @@ pub struct PairingController {
     offered: Mutex<Vec<String>>,
     session: Arc<Mutex<Session>>,
     changed: watch::Sender<u64>,
+    on_revoked: Mutex<Option<hq_bridge::RevokeCallback>>,
 }
 
 #[derive(Default)]
@@ -204,7 +205,15 @@ impl PairingController {
             offered: Mutex::new(Vec::new()),
             session: Arc::default(),
             changed: watch::channel(0).0,
+            on_revoked: Mutex::new(None),
         }
+    }
+
+    /// Called when a peer tells us it revoked us, on a blocking thread. A revoke made here does
+    /// not call it: its caller cleans up.
+    pub fn with_on_revoked(self, cb: hq_bridge::RevokeCallback) -> Self {
+        *self.on_revoked.lock().unwrap() = Some(cb);
+        self
     }
 
     /// Offers `hub.config`'s services to paired devices and opens its forwards while the bridge is
@@ -265,6 +274,14 @@ impl PairingController {
                 services,
             )
             .await?;
+            let on_revoked = self.on_revoked.lock().unwrap().clone();
+            let changed = self.changed.clone();
+            bridge.set_on_revoked(Arc::new(move |peer| {
+                if let Some(ref cb) = on_revoked {
+                    cb(peer);
+                }
+                changed.send_modify(|v| *v += 1);
+            }));
             let forwards = match start_forwards(&bridge, &self.hub.config).await {
                 Ok(forwards) => forwards,
                 Err(e) => {

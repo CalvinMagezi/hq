@@ -16,6 +16,7 @@ use hq_db::{Database, bridge as peers};
 use std::{
     net::SocketAddr,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -290,18 +291,22 @@ fn loopback_gate(config: &HqConfig) -> Option<SocketAddr> {
 }
 
 /// What this machine brings to setup, from the config. Every path is the one HQ already uses.
+/// Where a hub keeps its gate keys, one per machine.
+fn gate_key_dir() -> PathBuf {
+    hq_tools::agent_host::gate_key_path(KEY_DIR_PROBE)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default()
+}
+
 fn setup_config(config: Option<&HqConfig>, role: Role) -> SetupConfig {
     let fallback = HqConfig::default();
     let config = config.unwrap_or(&fallback);
     let host = &config.agent_host;
-    let key_dir = hq_tools::agent_host::gate_key_path(KEY_DIR_PROBE)
-        .parent()
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_default();
     let mut cfg = SetupConfig::new(
         role,
         hq_tools::agent_host::gate_authorized_keys_path(host),
-        key_dir,
+        gate_key_dir(),
     );
     cfg.gate = role == Role::Machine && loopback_gate(config).is_some();
     cfg.web = role == Role::Hub && matches!(config.bridge.web_listen(), Ok(Some(_)));
@@ -354,6 +359,23 @@ async fn start_forwards(bridge: &Bridge, config: Option<&HqConfig>) -> Result<()
     Ok(())
 }
 
+/// Undoes what setup made outside the bridge for `peer`, while its setup row still says what:
+/// Claude's entries for a hub, the gate key for a machine. Returns what Claude's part did.
+fn cleanup_outside_bridge(db: &Database, peer: &str) -> Result<Option<hq_bridge::claude::Report>> {
+    hq_bridge::setup::remove_machine_gate_key(db, &gate_key_dir(), peer);
+    super::claude::remove_for_revoke(db, peer)
+}
+
+/// For a revoke the peer told us of. Standard output may be the phone app's channel, so the
+/// outcome goes to the log only.
+fn cleanup_learned_revoke(db: &Database, peer: &str) {
+    match cleanup_outside_bridge(db, peer) {
+        Ok(Some(report)) => report.lines().iter().for_each(|l| tracing::info!("{l}")),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("could not remove HQ from Claude: {e:#}"),
+    }
+}
+
 /// Starts this machine's bridge. With `setup`, it takes part in setup after pairing in that role.
 async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) -> Result<Bridge> {
     let bind: Vec<SocketAddr> = if net.bind.is_empty() {
@@ -370,7 +392,7 @@ async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) ->
         None
     };
     let setup = setup.map(|role| setup_config(config.as_ref(), role));
-    Bridge::start_with_setup(
+    let bridge = Bridge::start_with_setup(
         BridgeConfig {
             key: key_path(net)?,
             bind,
@@ -379,13 +401,17 @@ async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) ->
             with_addrs: !net.no_addrs,
             advertise: Vec::new(),
         },
-        db,
+        db.clone(),
         serve.then(echo_handler),
         door,
         services,
         setup,
     )
-    .await
+    .await?;
+    bridge.set_on_revoked(Arc::new(move |peer: &str| {
+        cleanup_learned_revoke(&db, peer)
+    }));
+    Ok(bridge)
 }
 
 pub async fn run(config: &HqConfig, action: BridgeAction) -> Result<()> {
@@ -695,6 +721,7 @@ async fn ping(net: &NetArgs, db: Database, peer: &str, count: usize) -> Result<(
 
 async fn ping_peer(bridge: &Bridge, peer: &str, count: usize) -> Result<()> {
     let started = Instant::now();
+    // A peer that revoked us is heard by the bridge, which revokes it here as well.
     let conn = bridge.connect(peer).await?;
     println!("Connected in {:?}.", started.elapsed());
     let mut times = Vec::new();
@@ -744,8 +771,14 @@ fn revoke(db: &Database, id: &str) -> Result<()> {
         .parse()
         .map_err(|_| anyhow!("{id} is not a machine id (see `hq bridge peers`)"))?;
     let id = id.to_string();
-    // Before the revoke deletes the setup that names the hub.
-    super::claude::remove_for_revoke(db, &id);
+    // Before the revoke deletes the setup that names the hub or machine.
+    match cleanup_outside_bridge(db, &id) {
+        Ok(Some(report)) => {
+            super::claude::print(&report);
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("warning: could not remove HQ from Claude: {e:#}"),
+    }
     if peers::revoke(db, &id)? {
         println!("Revoked {id}. A machine serving it stops at its next request.");
     } else {

@@ -23,8 +23,9 @@ pub mod ticket;
 pub mod wire;
 
 pub use bridge::{
-    Bridge, BridgeConfig, Dialer, ForgotEdge, PeerStream, SERVICE_ALPN, StreamHandler,
-    device_label, echo, echo_handler, path_kind,
+    Bridge, BridgeConfig, Dialer, ForgotEdge, PeerStream, RevokeCallback, SERVICE_ALPN,
+    StreamHandler, device_label, echo, echo_handler, error_close_reason, path_kind,
+    peer_revoked_us,
 };
 pub use door::{DEFAULT_MAX_STREAMS, DoorTarget, EDGE_ALPN, EdgeDoor, LABEL_BYTES};
 pub use from_config::{ForwardStatus, Forwards, services_from_config, start_forwards};

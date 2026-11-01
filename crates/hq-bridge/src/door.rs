@@ -31,7 +31,7 @@ use tokio::{
 /// How often an open connection checks that its peer is still the registered edge.
 pub(crate) const RECHECK: Duration = Duration::from_secs(1);
 
-use crate::bridge::{Live, LiveGuard, REJECT_REVOKED, still_edge};
+use crate::bridge::{Live, LiveGuard, REASON_NOT_EDGE, REJECT_REVOKED, still_edge};
 
 /// The protocol name the edge speaks to a device. It is `hq_edge::EDGE_ALPN`; a test in `hq-cli`,
 /// which sees both crates, fails if the two ever differ.
@@ -139,7 +139,7 @@ impl ProtocolHandler for EdgeService {
         let token = self.live.register(id, conn.weak_handle());
         let _guard = LiveGuard::new(self.live.clone(), id, token);
         if !still_edge(&self.db, id).await {
-            conn.close(REJECT_REVOKED.into(), b"not the edge");
+            conn.close(REJECT_REVOKED.into(), REASON_NOT_EDGE);
             return Ok(());
         }
         // The first look is the one above; the next is one period away, not at once.
@@ -152,7 +152,7 @@ impl ProtocolHandler for EdgeService {
                 stream = conn.accept_bi() => {
                     let Ok((send, recv)) = stream else { break };
                     if !still_edge(&self.db, id).await {
-                        conn.close(REJECT_REVOKED.into(), b"not the edge");
+                        conn.close(REJECT_REVOKED.into(), REASON_NOT_EDGE);
                         break;
                     }
                     let Ok(permit) = self.permits.clone().try_acquire_owned() else {
@@ -170,7 +170,7 @@ impl ProtocolHandler for EdgeService {
                 // A forget made in another process (the CLI) reaches an open connection here.
                 _ = check.tick() => {
                     if !still_edge(&self.db, id).await {
-                        conn.close(REJECT_REVOKED.into(), b"not the edge");
+                        conn.close(REJECT_REVOKED.into(), REASON_NOT_EDGE);
                         break;
                     }
                 }

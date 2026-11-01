@@ -11,10 +11,12 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 
 const HOST_LOG: &str = "host.log";
+/// Where a hub's gate keys live under `~/.hq`, as the CLI's setup writes them.
+const GATE_KEY_DIR: &str = "gate";
 /// The longest closing may take in all: the host's grace period, a kill and a little slack.
 const SHUTDOWN_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 /// How long closing the pairing endpoints may take before the app stops waiting for them.
@@ -98,6 +100,23 @@ fn relay_mode(text: &str) -> Result<RelayMode> {
     }
 }
 
+/// Cleans up anything setup made outside hq-bridge: Claude entries on a machine, gate key on a hub.
+pub fn cleanup_peer_outside_bridge(
+    db: &Database,
+    hq_program: &Path,
+    peer: &str,
+) -> Result<Option<hq_bridge::claude::Report>> {
+    hq_bridge::setup::remove_machine_gate_key(db, &HqConfig::hq_dir().join(GATE_KEY_DIR), peer);
+    let hq_bin = claude::hq_program(hq_program)?;
+    let runner = hq_bridge::claude::SystemRunner::new();
+    let targets = hq_bridge::claude::Targets {
+        runner: &runner,
+        desktop_config: hq_bridge::claude::desktop_config_path(),
+        hq_bin,
+    };
+    Ok(hq_bridge::claude::remove_for_peer(db, &targets, peer))
+}
+
 impl Desktop {
     pub fn open(init: DesktopInit) -> Result<Self> {
         create_private_dir(&init.dir)?;
@@ -126,6 +145,14 @@ impl Desktop {
             settings.device_name.clone()
         };
         let db_path = init.config.db_path();
+        let prog_for_cb = hq_program.clone();
+        let db_path_for_cb = db_path.clone();
+        // Only a revoke the peer told us of: [`Desktop::revoke`] cleans up itself, to say how it went.
+        let on_revoked: hq_bridge::RevokeCallback = Arc::new(move |peer: &str| {
+            if let Ok(db) = Database::open(&db_path_for_cb) {
+                let _ = cleanup_peer_outside_bridge(&db, &prog_for_cb, peer);
+            }
+        });
         let pairing = PairingController::new(
             PairingConfig {
                 key: init.bridge_key,
@@ -141,6 +168,7 @@ impl Desktop {
             move || Database::open(&db_path),
             None,
         )
+        .with_on_revoked(on_revoked)
         .with_services(HubServices {
             config: init.config.bridge.clone(),
             ws_port: init.config.ws_port,
@@ -180,15 +208,14 @@ impl Desktop {
     /// names them, and a key that no longer works should not stay in Claude's config.
     pub async fn revoke(&self, id: &str) -> Result<Revoked> {
         let peer = id.to_string();
-        let cleanup = match claude::hq_program(&self.hq_program) {
-            Ok(bin) => {
-                claude::blocking(self.config.db_path(), bin, move |db, t| {
-                    Ok(hq_bridge::claude::remove_for_peer(db, t, &peer))
-                })
-                .await
-            }
-            Err(e) => Err(e),
-        };
+        let db_path = self.config.db_path();
+        let bin = self.hq_program.clone();
+        let cleanup = tokio::task::spawn_blocking(move || {
+            let db = Database::open(&db_path)?;
+            cleanup_peer_outside_bridge(&db, &bin, &peer)
+        })
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("{e}")));
         // Claude being absent or its file being odd must not stop the revoke, only be said.
         let claude_warning = claude::revoke_warning(cleanup);
         let revoked = self.pairing.revoke(id).await?;
