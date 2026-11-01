@@ -24,7 +24,9 @@ coding sessions (`harness_session_*`, `host_*`, `spawn_subagents`).
   `vault_write_note`.
 - **GitHub.** `github_read` and `github_clone` read GitHub without a shell. HQ builds each `gh`
   command line from validated parts, so a read cannot become a write. Without `gh` installed it reads
-  public data over HTTPS. The tool is only as strong as its argument checks: give `GH_TOKEN` a
+  public data over HTTPS. With neither `gh` nor `git` (a phone), `github_clone` downloads the default
+  branch's tarball and unpacks only plain files and folders inside its top folder: links, devices and
+  `.git` entries are skipped, and any path that would leave the checkout refuses the whole archive. The tool is only as strong as its argument checks: give `GH_TOKEN` a
   read-only, fine-grained token.
 - **Out of lane.** Calling a removed tool returns a short message that says to start a coding
   session with `harness_session_spawn` (task id, goal, done criteria), and records one denial through
