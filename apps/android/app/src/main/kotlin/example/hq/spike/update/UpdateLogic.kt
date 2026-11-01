@@ -1,5 +1,6 @@
 package example.hq.spike.update
 
+import android.content.pm.PackageInstaller
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -47,6 +48,18 @@ object UpdateLogic {
 
     private const val SHA256_HEX_CHARS = 64
     private const val VERSION_MAX_CHARS = 64
+
+    const val STOPPED = "The install was stopped before it finished. Tap Check for updates, then Install update, and confirm each prompt Android shows, including Play Protect's \"Install anyway\"."
+    const val BLOCKED = "Android blocked the update. If Play Protect stopped it, tap Check for updates, then Install update, and choose \"Install anyway\"."
+    const val NOT_INSTALLED = "Android did not install the update."
+
+    /** What the screen says after Android's installer answers; a stopped install is never shown as if nothing happened. */
+    fun installOutcome(status: Int, message: String?): UpdateState = when (status) {
+        PackageInstaller.STATUS_SUCCESS -> UpdateState.UpToDate
+        PackageInstaller.STATUS_FAILURE_ABORTED -> UpdateState.Failed(STOPPED)
+        PackageInstaller.STATUS_FAILURE_BLOCKED -> UpdateState.Failed(BLOCKED)
+        else -> UpdateState.Failed(message?.takeIf { it.isNotBlank() } ?: NOT_INSTALLED)
+    }
 
     /** Stable is "the latest release", which the Promote workflow keeps pointing at `channel-stable`; main is its own prerelease. */
     fun manifestUrl(channel: UpdateChannel): String = when (channel) {

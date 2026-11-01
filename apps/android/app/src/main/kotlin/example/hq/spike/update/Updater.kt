@@ -108,11 +108,7 @@ object Updater {
 
     /** What Android's installer answered, from [InstallResultReceiver]. Success needs no state: the app is replaced. */
     internal fun finished(status: Int, message: String?) {
-        flow.value = when (status) {
-            PackageInstaller.STATUS_SUCCESS -> UpdateState.UpToDate
-            PackageInstaller.STATUS_FAILURE_ABORTED -> UpdateState.Idle
-            else -> UpdateState.Failed(message?.takeIf { it.isNotBlank() } ?: "Android did not install the update.")
-        }
+        flow.value = UpdateLogic.installOutcome(status, message)
     }
 
     private fun canInstall(context: Context): Boolean = context.packageManager.canRequestPackageInstalls()
