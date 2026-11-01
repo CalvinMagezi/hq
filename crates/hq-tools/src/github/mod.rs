@@ -16,7 +16,11 @@ use std::time::Duration;
 
 use crate::registry::HqTool;
 
+mod changes;
 mod tarball;
+mod write;
+
+pub use write::GithubWriteTool;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -253,8 +257,14 @@ async fn http_get_accepting(path: &str, accept: &str, max_chars: usize) -> Resul
     Ok(cap_to(body, max_chars))
 }
 
-pub fn create_github_tools() -> Vec<Box<dyn HqTool>> {
-    vec![Box::new(GithubReadTool), Box::new(GithubCloneTool)]
+/// The read tools, plus `github_write`, which refuses every call until the owner lists
+/// repositories in `github_write.repos`.
+pub fn create_github_tools(write_repos: &[String]) -> Vec<Box<dyn HqTool>> {
+    vec![
+        Box::new(GithubReadTool),
+        Box::new(GithubCloneTool),
+        Box::new(GithubWriteTool::new(write_repos.to_vec())),
+    ]
 }
 
 pub struct GithubReadTool;
@@ -402,7 +412,7 @@ impl InFlight {
         let mut set = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
         if !set.insert(dest.to_path_buf()) {
             bail!(
-                "{} is already being cloned; try again when that call finishes",
+                "{} is in use by another GitHub call; try again when that call finishes",
                 dest.display()
             );
         }
@@ -422,7 +432,7 @@ impl Drop for InFlight {
 /// The reply for a checkout already on disk, or `None` to clone. A tarball checkout is reused
 /// only with its base record; one with neither a record nor `.git` is a fetch that was cut
 /// short, and since the clone folder is this tool's scratch space it is removed and fetched again.
-fn cached_reply(dest: &Path, method: CloneMethod) -> Result<Option<Value>> {
+fn cached_reply(dest: &Path, records: &Path, method: CloneMethod) -> Result<Option<Value>> {
     if !dest.exists() {
         return Ok(None);
     }
@@ -430,7 +440,7 @@ fn cached_reply(dest: &Path, method: CloneMethod) -> Result<Option<Value>> {
     if method != CloneMethod::Tarball || dest.join(".git").exists() {
         return Ok(Some(json!({ "path": path, "cached": true })));
     }
-    if let Some(base) = tarball::load_base(dest) {
+    if let Some(base) = tarball::load_base(records) {
         let reply =
             json!({ "path": path, "cached": true, "via": "tarball", "commit": base.commit });
         return Ok(Some(reply));
@@ -451,10 +461,30 @@ fn tarball_reply(path: &str, fetched: &tarball::Fetched) -> Value {
         "via": "tarball",
         "commit": fetched.base.commit,
         "files": fetched.base.files.len(),
-        "base_record": tarball::base_record_path(Path::new(path)).display().to_string(),
         "skipped_count": fetched.skipped.len(),
         "skipped": shown,
     })
+}
+
+/// Where this tool keeps what it knows about each checkout (its base commit, the commits
+/// `github_write` pushed). File tools may not read or write here (`governance::secrets`), so a
+/// worker cannot rewrite the records its own pushes are checked against.
+pub fn records_root() -> PathBuf {
+    hq_core::config::HqConfig::hq_dir().join("github")
+}
+
+/// Creates the clone folder readable by this user only. In a shared temp directory another user
+/// could have made it first; setting its mode then fails, and nothing is cloned into it.
+fn make_private_root(root: &Path) -> Result<()> {
+    std::fs::create_dir_all(root)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        const OWNER_ONLY: u32 = 0o700;
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(OWNER_ONLY))
+            .with_context(|| format!("{} is not this user's to clone into", root.display()))?;
+    }
+    Ok(())
 }
 
 /// Shallow checkouts land here so a repo can be searched with grep and read_file.
@@ -490,19 +520,21 @@ impl HqTool for GithubCloneTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let repo = repo(&args)?;
         let dest = clone_root().join(&repo);
+        let records = records_root().join(&repo);
         let _claim = InFlight::claim(&dest)?;
         let method = clone_method(which::which("gh").is_ok(), which::which("git").is_ok());
-        if let Some(reply) = cached_reply(&dest, method)? {
+        if let Some(reply) = cached_reply(&dest, &records, method)? {
             return Ok(reply);
         }
+        make_private_root(&clone_root())?;
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
         let dest_arg = dest.display().to_string();
-        // A base record beside a git checkout would describe files git did not fetch.
-        let _ = std::fs::remove_file(tarball::base_record_path(&dest));
+        // A base record left for a git checkout would describe files git did not fetch.
+        let _ = std::fs::remove_file(tarball::base_record_path(&records));
         if method == CloneMethod::Tarball {
-            let fetched = tarball::fetch(API_HOST_URL, &repo, &dest).await?;
+            let fetched = tarball::fetch(API_HOST_URL, &repo, &dest, &records).await?;
             return Ok(tarball_reply(&dest_arg, &fetched));
         }
         if method == CloneMethod::Gh {
@@ -548,28 +580,44 @@ mod tests {
     fn a_tarball_checkout_is_reused_only_with_its_base_record() {
         let root = tempfile::tempdir().unwrap();
         let dest = root.path().join("o/r");
-        assert!(cached_reply(&dest, CloneMethod::Tarball).unwrap().is_none());
+        let records = root.path().join("records/o/r");
+        std::fs::create_dir_all(&records).unwrap();
+        assert!(
+            cached_reply(&dest, &records, CloneMethod::Tarball)
+                .unwrap()
+                .is_none()
+        );
 
         std::fs::create_dir_all(dest.join(".git")).unwrap();
-        let git = cached_reply(&dest, CloneMethod::Git).unwrap().unwrap();
+        let git = cached_reply(&dest, &records, CloneMethod::Git)
+            .unwrap()
+            .unwrap();
         assert_eq!(git["cached"], true);
         // A git checkout stays usable after git is gone from the machine.
-        let kept = cached_reply(&dest, CloneMethod::Tarball).unwrap().unwrap();
+        let kept = cached_reply(&dest, &records, CloneMethod::Tarball)
+            .unwrap()
+            .unwrap();
         assert_eq!(kept["cached"], true);
         std::fs::remove_dir(dest.join(".git")).unwrap();
 
         let base = tarball::Base {
             repo: "o/r".into(),
-            commit: "abc".into(),
+            commit: "a".repeat(40),
             files: Vec::new(),
         };
-        let record = tarball::base_record_path(&dest);
+        let record = tarball::base_record_path(&records);
         std::fs::write(&record, serde_json::to_vec(&base).unwrap()).unwrap();
-        let reply = cached_reply(&dest, CloneMethod::Tarball).unwrap().unwrap();
-        assert_eq!(reply["commit"], "abc");
+        let reply = cached_reply(&dest, &records, CloneMethod::Tarball)
+            .unwrap()
+            .unwrap();
+        assert_eq!(reply["commit"], "a".repeat(40));
 
         std::fs::write(&record, b"{ truncated").unwrap();
-        assert!(cached_reply(&dest, CloneMethod::Tarball).unwrap().is_none());
+        assert!(
+            cached_reply(&dest, &records, CloneMethod::Tarball)
+                .unwrap()
+                .is_none()
+        );
         assert!(
             !dest.exists(),
             "a checkout without a usable record is cleared to fetch again"

@@ -54,6 +54,8 @@ test-support = []
 
 [target.'cfg(unix)'.dependencies]
 hq-gate = { workspace = true }
+# O_NOFOLLOW for github_write's reads, so a link swapped in mid-read is refused.
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

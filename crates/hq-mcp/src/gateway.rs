@@ -520,6 +520,7 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "git_commit",
     "git_pr",
     "github_clone",
+    "github_write",
     "host_send",
     "host_read",
     "convert_to_markdown",
@@ -1040,6 +1041,10 @@ mod tests {
             &none
         ));
         assert!(!needs_owner_confirmation(&registry, "vault_search", &none));
+        assert!(
+            needs_owner_confirmation(&registry, "github_write", &none),
+            "a connector publishes to GitHub only with the owner's approval"
+        );
         assert!(
             !needs_owner_confirmation(&registry, "harness_session_spawn", &none),
             "coding sessions are deliberately not gated"

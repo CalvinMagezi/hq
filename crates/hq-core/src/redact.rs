@@ -36,8 +36,16 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"AKIA[0-9A-Z]{16}",
         r"(?i)(?:bearer|authorization:\s*bearer)\s+[A-Za-z0-9._~+/-]{16,}=*",
         r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        // GitHub fine-grained personal access tokens.
+        r"github_pat_[A-Za-z0-9_]{22,}",
         // HQ's own web device tokens (`hq_db::web_auth`). Kept last: the Bearer index above is fixed.
         r"hqw_[0-9a-f]{64}",
+        // Stripe secret keys, Google API keys, Slack tokens, and a private key header whose block
+        // was cut short (the full-block pattern above needs both ends).
+        r"\b[sr]k_live_[A-Za-z0-9]{16,}",
+        r"\bAIza[0-9A-Za-z_-]{35}",
+        r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
     ]
     .iter()
     .map(|p| Regex::new(p).expect("static secret pattern must compile"))
@@ -49,7 +57,7 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 /// so counters such as `max_tokens: 4096` are left alone.
 static SECRET_ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)\b([A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD))(\s*[:=]\s*)(["']?)([^\s"']{8,})"#,
+        r#"(?i)\b([A-Z0-9_]*(?:API_?KEY|TOKEN|SECRET|PASSWORD))(["']?\s*[:=]\s*)(["']?)([^\s"']{8,})"#,
     )
     .expect("static assignment pattern must compile")
 });
@@ -87,34 +95,41 @@ pub fn redact_secrets(text: &str) -> String {
 /// also rewrites `token: expired`-style prose; this one is for deciding whether
 /// to refuse sending text out, where a false positive blocks legitimate work.
 pub fn looks_like_credential(text: &str) -> bool {
+    !credential_spans(text).is_empty()
+}
+
+/// Every credential-shaped piece of `text` that [`looks_like_credential`] reacts to, so a caller
+/// can tell a credential that was already there (a test fixture) from one that was added.
+pub fn credential_spans(text: &str) -> Vec<String> {
     const CREDENTIAL_MIN_LEN: usize = 16;
     let credential_like = |value: &str| {
         value.len() >= CREDENTIAL_MIN_LEN
             && value.bytes().any(|b| b.is_ascii_digit())
             && value.bytes().any(|b| b.is_ascii_alphabetic())
     };
-    let prefixed = SECRET_PATTERNS
+    let tokenish = |s: &str| {
+        s.bytes().any(|b| b.is_ascii_digit()) && s.bytes().any(|b| b.is_ascii_uppercase())
+    };
+    let mut spans: Vec<String> = SECRET_PATTERNS
         .iter()
         .enumerate()
         // Index 4 is the Bearer pattern, which also matches ordinary words after "bearer".
         .filter(|(i, _)| *i != 4)
-        .any(|(_, p)| p.is_match(text));
-    if prefixed {
-        return true;
-    }
-    let bot_token = BOT_TOKEN_PATTERN.captures_iter(text).any(|c| {
-        let tokenish = |s: &str| {
-            s.bytes().any(|b| b.is_ascii_digit()) && s.bytes().any(|b| b.is_ascii_uppercase())
-        };
-        tokenish(&c[1]) && tokenish(&c[3])
-    });
-    bot_token
-        || SECRET_ASSIGNMENT
-            .captures_iter(text)
-            .any(|c| credential_like(&c[4]))
-        || BEARER_VALUE
-            .captures_iter(text)
-            .any(|c| credential_like(&c[1]))
+        .flat_map(|(_, p)| p.find_iter(text).map(|m| m.as_str().to_string()))
+        .collect();
+    let bot_tokens = BOT_TOKEN_PATTERN
+        .captures_iter(text)
+        .filter(|c| tokenish(&c[1]) && tokenish(&c[3]));
+    spans.extend(bot_tokens.map(|c| c[0].to_string()));
+    let assigned = SECRET_ASSIGNMENT
+        .captures_iter(text)
+        .filter(|c| credential_like(&c[4]));
+    spans.extend(assigned.map(|c| c[4].to_string()));
+    let bearers = BEARER_VALUE
+        .captures_iter(text)
+        .filter(|c| credential_like(&c[1]));
+    spans.extend(bearers.map(|c| c[1].to_string()));
+    spans
 }
 
 /// The value after `Bearer`, for [`looks_like_credential`].
@@ -201,6 +216,36 @@ pub fn fmt_redacted<T: serde::Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn other_common_key_shapes_are_credentials() {
+        let google = format!(
+            "AIza{}",
+            "A1b2C3d4E5".repeat(4).chars().take(35).collect::<String>()
+        );
+        for text in [
+            format!("sk_live_{}", "a1B2".repeat(6)),
+            google,
+            format!("xoxb-{}", "1234-abcd-".repeat(2)),
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk".to_string(),
+        ] {
+            assert!(looks_like_credential(&text), "{text}");
+        }
+        assert!(!looks_like_credential(
+            "let api_key = std::env::var(\"API_KEY\")?;"
+        ));
+        assert!(
+            looks_like_credential(&format!(r#"{{"api_key": "{}"}}"#, "a1b2c3d4e5".repeat(2))),
+            "the JSON form"
+        );
+    }
+
+    #[test]
+    fn a_fine_grained_github_token_is_a_credential() {
+        let token = format!("github_pat_{}", "11ABCDEFG0123456789_abcdefghijklmnop");
+        assert!(looks_like_credential(&format!("token = {token}")));
+        assert!(!redact_secrets(&token).contains("github_pat_11"));
+    }
 
     #[test]
     fn redacts_known_secret_shapes() {

@@ -422,11 +422,29 @@ fn a_file_and_a_folder_with_one_name_keep_the_first_and_report_the_rest() {
 }
 
 #[test]
-fn the_base_record_sits_beside_the_checkout() {
-    assert_eq!(
-        base_record_path(Path::new("/x/clones/o/r")),
-        PathBuf::from("/x/clones/o/r.hq-base.json")
-    );
+fn a_base_record_without_a_real_commit_id_is_ignored() {
+    let records = tempfile::tempdir().unwrap();
+    let write = |commit: &str| {
+        let base = Base {
+            repo: "o/r".into(),
+            commit: commit.into(),
+            files: Vec::new(),
+        };
+        fs::write(
+            base_record_path(records.path()),
+            serde_json::to_vec(&base).unwrap(),
+        )
+        .unwrap();
+    };
+    write("../../other/repo/git/commits/abc");
+    assert!(load_base(records.path()).is_none());
+    write(SHA);
+    assert_eq!(load_base(records.path()).unwrap().commit, SHA);
+}
+
+/// Where a test fetch keeps its records, apart from the checkout as in production.
+fn records(root: &tempfile::TempDir) -> PathBuf {
+    root.path().join("records/o/r")
 }
 
 fn gzip(bytes: &[u8]) -> Vec<u8> {
@@ -468,12 +486,12 @@ async fn fetch_resolves_the_commit_unpacks_and_records_the_base() {
     let root = tempfile::tempdir().unwrap();
     let dest = root.path().join("o/r");
 
-    let fetched = fetch(&format!("{}/", server.uri()), "o/r", &dest)
+    let fetched = fetch(&format!("{}/", server.uri()), "o/r", &dest, &records(&root))
         .await
         .unwrap();
     assert_eq!(fetched.base.commit, SHA);
     assert_eq!(fs::read(dest.join("README.md")).unwrap(), b"hello");
-    assert_eq!(load_base(&dest).unwrap(), fetched.base);
+    assert_eq!(load_base(&records(&root)).unwrap(), fetched.base);
     assert_eq!(hq_leftovers(&root.path().join("o")), 0);
 }
 
@@ -486,7 +504,7 @@ async fn fetch_leaves_nothing_when_the_archive_is_refused() {
     let dest = root.path().join("o/r");
 
     assert!(
-        fetch(&format!("{}/", server.uri()), "o/r", &dest)
+        fetch(&format!("{}/", server.uri()), "o/r", &dest, &records(&root))
             .await
             .is_err()
     );
@@ -501,17 +519,17 @@ async fn fetch_replaces_a_stale_record_left_beside_a_missing_checkout() {
     let server = serve(SHA, gzip(&finish(tar))).await;
     let root = tempfile::tempdir().unwrap();
     let dest = root.path().join("o/r");
-    fs::create_dir_all(root.path().join("o")).unwrap();
-    fs::write(
-        base_record_path(&dest),
-        br#"{"repo":"o/r","commit":"old","files":[]}"#,
-    )
-    .unwrap();
+    fs::create_dir_all(records(&root)).unwrap();
+    let stale = format!(
+        r#"{{"repo":"o/r","commit":"{}","files":[]}}"#,
+        "b".repeat(40)
+    );
+    fs::write(base_record_path(&records(&root)), stale).unwrap();
 
-    fetch(&format!("{}/", server.uri()), "o/r", &dest)
+    fetch(&format!("{}/", server.uri()), "o/r", &dest, &records(&root))
         .await
         .unwrap();
-    let base = load_base(&dest).unwrap();
+    let base = load_base(&records(&root)).unwrap();
     assert_eq!(base.commit, SHA);
     assert_eq!(base.files[0].path, "new.txt");
 }
@@ -535,7 +553,11 @@ async fn a_fetch_dropped_mid_download_leaves_nothing_behind() {
     let dest = root.path().join("o/r");
 
     let api = format!("{}/", server.uri());
-    let cut = tokio::time::timeout(Duration::from_millis(300), fetch(&api, "o/r", &dest)).await;
+    let cut = tokio::time::timeout(
+        Duration::from_millis(300),
+        fetch(&api, "o/r", &dest, &records(&root)),
+    )
+    .await;
     assert!(
         cut.is_err(),
         "the fetch should still be waiting on the slow tarball"
@@ -552,6 +574,7 @@ async fn fetch_refuses_an_answer_that_is_not_a_commit_id() {
         &format!("{}/", server.uri()),
         "o/r",
         &root.path().join("o/r"),
+        &records(&root),
     )
     .await
     .unwrap_err();
@@ -636,6 +659,7 @@ async fn fetch_a_real_public_repo() {
         "https://api.github.com/",
         "CalvinMagezi/Offline-Botanist",
         &dest,
+        &records(&root),
     )
     .await
     .unwrap();

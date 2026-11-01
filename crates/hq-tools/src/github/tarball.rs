@@ -34,6 +34,8 @@ const MAX_UNPACK_TIME: Duration = Duration::from_secs(300);
 const STALE_AFTER: Duration = Duration::from_secs(3600);
 const COMMIT_SHA_LEN: usize = 40;
 const COPY_BUF: usize = 64 * 1024;
+/// Files up to this size are scanned for credential shapes as they are written.
+const MAX_SCANNED_BYTES: u64 = 5 * MIB;
 const MODE_EXECUTABLE: &str = "100755";
 const MODE_REGULAR: &str = "100644";
 const PERM_EXECUTABLE: u32 = 0o755;
@@ -41,7 +43,7 @@ const PERM_REGULAR: u32 = 0o644;
 const EXEC_BITS: u32 = 0o111;
 /// How many skipped entries a reply names; the count it gives is always exact.
 pub(super) const SKIPPED_SHOWN: usize = 20;
-const BASE_RECORD_SUFFIX: &str = ".hq-base.json";
+const BASE_RECORD_FILE: &str = "base.json";
 const ARCHIVE_PREFIX: &str = ".hq-tarball-";
 const STAGING_PREFIX: &str = ".hq-unpack-";
 const RECORD_TMP_PREFIX: &str = ".hq-record-";
@@ -74,6 +76,11 @@ pub(crate) struct BaseFile {
     pub mode: String,
     pub sha256: String,
     pub size: u64,
+    /// SHA-256 of each credential-shaped string the file already held when fetched (a test fixture,
+    /// an example env file), so an edit that keeps them is not a new leak and one that adds any
+    /// other is.
+    #[serde(default)]
+    pub known_secrets: Vec<String>,
 }
 
 /// The commit a checkout came from and every file it holds, kept beside the checkout.
@@ -97,19 +104,18 @@ pub(crate) struct Fetched {
     pub skipped: Vec<String>,
 }
 
-/// Where the base record of the checkout at `dest` lives: beside it, so it is never committed.
-pub(crate) fn base_record_path(dest: &Path) -> PathBuf {
-    let name = dest
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    dest.with_file_name(format!("{name}{BASE_RECORD_SUFFIX}"))
+/// The base record in a repository's records folder, which file tools may not touch.
+pub(crate) fn base_record_path(records: &Path) -> PathBuf {
+    records.join(BASE_RECORD_FILE)
 }
 
-/// The base record of the checkout at `dest`, if one exists and parses.
-pub(crate) fn load_base(dest: &Path) -> Option<Base> {
-    let bytes = fs::read(base_record_path(dest)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+/// The base record in `records`, if one exists, parses and names a real commit id.
+pub(crate) fn load_base(records: &Path) -> Option<Base> {
+    let bytes = fs::read(base_record_path(records)).ok()?;
+    let base: Base = serde_json::from_slice(&bytes).ok()?;
+    let commit_ok =
+        base.commit.len() == COMMIT_SHA_LEN && base.commit.bytes().all(|b| b.is_ascii_hexdigit());
+    commit_ok.then_some(base)
 }
 
 /// Removes a path when dropped unless disarmed, so a cancelled fetch leaves nothing behind.
@@ -153,17 +159,24 @@ fn client() -> Result<reqwest::Client> {
 }
 
 /// Resolves the default branch's commit, downloads its tarball and unpacks it at `dest`, which
-/// must not exist yet. `dest` and its base record appear only when every entry passed.
-pub(crate) async fn fetch(api_base: &str, repo: &str, dest: &Path) -> Result<Fetched> {
+/// must not exist yet, recording the base in `records`. Both appear only when every entry passed.
+pub(crate) async fn fetch(
+    api_base: &str,
+    repo: &str,
+    dest: &Path,
+    records: &Path,
+) -> Result<Fetched> {
     let client = client()?;
     let commit = resolve_commit(&client, api_base, repo).await?;
     let parent = dest.parent().context("the clone folder has no parent")?;
     tokio::fs::create_dir_all(parent).await?;
     sweep_leftovers(parent);
+    tokio::fs::create_dir_all(records).await?;
+    sweep_leftovers(records);
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let archive = Leftover::new(parent.join(format!("{ARCHIVE_PREFIX}{nonce}.tar.gz")));
     let staging_path = parent.join(format!("{STAGING_PREFIX}{nonce}"));
-    let mut record_tmp = Leftover::new(parent.join(format!("{RECORD_TMP_PREFIX}{nonce}")));
+    let mut record_tmp = Leftover::new(records.join(format!("{RECORD_TMP_PREFIX}{nonce}")));
     let stop = StopOnDrop(Arc::new(AtomicBool::new(false)));
 
     let url = format!("{api_base}repos/{repo}/tarball/{commit}");
@@ -176,16 +189,17 @@ pub(crate) async fn fetch(api_base: &str, repo: &str, dest: &Path) -> Result<Fet
         files: unpacked.files,
     };
     fs::write(&record_tmp.path, serde_json::to_vec_pretty(&base)?)?;
-    fs::rename(&staging.path, dest)
-        .with_context(|| format!("could not move the checkout to {}", dest.display()))?;
-    staging.disarm();
-    // Only now is `dest` known to be this fetch's, so a record beside it may be replaced.
-    let record = base_record_path(dest);
-    if let Err(e) = fs::rename(&record_tmp.path, &record) {
-        let _ = fs::remove_dir_all(dest);
-        return Err(e).context("could not save the checkout's base record");
-    }
+    // The record goes first: a crash before the checkout lands leaves a record with no
+    // checkout, which is fetched again, never an old record beside a new checkout.
+    let record = base_record_path(records);
+    fs::rename(&record_tmp.path, &record).context("could not save the checkout's base record")?;
     record_tmp.disarm();
+    if let Err(e) = fs::rename(&staging.path, dest) {
+        let _ = fs::remove_file(&record);
+        return Err(e)
+            .with_context(|| format!("could not move the checkout to {}", dest.display()));
+    }
+    staging.disarm();
     Ok(Fetched {
         base,
         skipped: unpacked.skipped,
@@ -458,7 +472,7 @@ fn forbidden_in_a_name(c: char) -> bool {
 }
 
 /// Git's own folder under any spelling a file system treats as the same name.
-fn is_git_dir(part: &str) -> bool {
+pub(super) fn is_git_dir(part: &str) -> bool {
     let name = part.trim_end_matches(['.', ' ']).to_ascii_lowercase();
     name == ".git" || name == "git~1"
 }
@@ -527,12 +541,16 @@ fn write_file<R: Read>(
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; COPY_BUF];
     let mut size = 0u64;
+    let mut scanned = Vec::new();
     loop {
         let n = entry.read(&mut buf)?;
         if n == 0 {
             break;
         }
         size += n as u64;
+        if size <= MAX_SCANNED_BYTES {
+            scanned.extend_from_slice(&buf[..n]);
+        }
         *written = written.saturating_add(n as u64);
         if *written > limits.max_unpacked_bytes {
             bail!(
@@ -555,7 +573,20 @@ fn write_file<R: Read>(
         .to_string(),
         sha256: hex::encode(hasher.finalize()),
         size,
+        known_secrets: secret_hashes(&scanned),
     }))
+}
+
+/// Hashes of the credential-shaped strings in `content`, never the strings themselves.
+pub(super) fn secret_hashes(content: &[u8]) -> Vec<String> {
+    let mut hashes: Vec<String> =
+        hq_core::redact::credential_spans(&String::from_utf8_lossy(content))
+            .iter()
+            .map(|s| hex::encode(Sha256::digest(s.as_bytes())))
+            .collect();
+    hashes.sort();
+    hashes.dedup();
+    hashes
 }
 
 #[cfg(unix)]

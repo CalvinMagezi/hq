@@ -109,6 +109,8 @@ pub fn always_denied_roots() -> Vec<PathBuf> {
     roots.push(hq_core::config::HqConfig::config_read_path());
     roots.push(hq_core::config::HqConfig::config_file_path());
     roots.push(hq_core::approval_key::key_path());
+    // github_write checks its own pushes against these records; a worker must not rewrite them.
+    roots.push(hq_tools::github::records_root());
     roots
 }
 

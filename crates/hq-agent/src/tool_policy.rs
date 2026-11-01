@@ -136,6 +136,7 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
             ],
             deny_tools: vec![
                 "skill_manage".into(),
+                "github_write".into(),
                 "bash".into(),
                 "shell_exec".into(),
                 "write".into(),
@@ -339,10 +340,14 @@ mod tests {
     #[test]
     fn telegram_guest_profile_denies_bash() {
         let profile = default_profile_for_agent("telegram_guest").unwrap();
-        let t = tools(&["bash", "vault_search"]);
+        let t = tools(&["bash", "github_write", "vault_search"]);
         let filtered = filter(t, Preset::Named(profile));
         let names: Vec<_> = filtered.iter().map(|t| t.name().to_string()).collect();
         assert!(!names.contains(&"bash".into()));
+        assert!(
+            !names.contains(&"github_write".into()),
+            "a guest never publishes to GitHub"
+        );
         assert!(names.contains(&"vault_search".into()));
     }
 

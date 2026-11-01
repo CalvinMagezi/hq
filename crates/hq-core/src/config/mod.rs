@@ -9,6 +9,7 @@ pub mod company;
 mod copilot_usage;
 mod decisions;
 mod disk_watchdog;
+mod github_write;
 mod governance;
 mod harness;
 mod instance;
@@ -46,6 +47,7 @@ pub use decisions::{
     SITE_NOTIFY_GATE, SITE_TASK_PLACEMENT,
 };
 pub use disk_watchdog::DiskWatchdogConfig;
+pub use github_write::GithubWriteConfig;
 pub use governance::*;
 pub use harness::*;
 pub use instance::*;
@@ -336,6 +338,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub remote_mcp: Vec<RemoteMcpServer>,
 
+    /// Repositories the `github_write` tool may push `hq/` branches to (off when empty).
+    #[serde(default)]
+    pub github_write: GithubWriteConfig,
+
     /// Fast structured-decision model used to gate work before generative calls.
     #[serde(default)]
     pub decisions: DecisionsConfig,
@@ -514,6 +520,7 @@ impl Default for HqConfig {
             github_copilot: GitHubCopilotConfig::default(),
             governance: GovernanceConfig::default(),
             remote_mcp: Vec::new(),
+            github_write: GithubWriteConfig::default(),
             decisions: DecisionsConfig::default(),
             companies: Vec::new(),
             default_company: String::new(),

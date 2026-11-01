@@ -77,6 +77,7 @@ pub const ORCHESTRATOR_REMOVED_TOOLS: &[&str] = &[
     "rollback_file",
     "git_commit",
     "git_pr",
+    "github_write",
     "config_manage",
 ];
 
