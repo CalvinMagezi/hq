@@ -1324,7 +1324,10 @@ pub fn create_harness_session_tools(
         }),
         Box::new(HarnessSessionWaitTool { db: db.clone() }),
         Box::new(HarnessSessionPendingTool { db: db.clone() }),
-        Box::new(super::events::HarnessSessionEventsTool { db: db.clone() }),
+        Box::new(super::events::HarnessSessionEventsTool {
+            db: db.clone(),
+            feed: super::events::Feed::new(db.clone()),
+        }),
         Box::new(super::decisions::TaskDecisionsTool { db: db.clone() }),
         Box::new(super::stats::HarnessSessionStatsTool { db: db.clone() }),
         Box::new(HarnessSessionAnswerTool {

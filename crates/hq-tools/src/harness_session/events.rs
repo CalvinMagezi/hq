@@ -14,9 +14,73 @@ use hq_db::tasks as t;
 /// Events returned by one call unless the caller asks for fewer.
 const DEFAULT_LIMIT: usize = 50;
 const MAX_LIMIT: usize = 200;
-/// How often a waiting read looks for new events. The supervisor writes from the daemon,
-/// which may be another process, so a read polls the table rather than a channel.
+/// How often the feed looks for new events. The supervisor writes from the daemon, which may
+/// be another process, so the feed polls the table rather than a channel.
 const POLL_EVERY: Duration = Duration::from_millis(750);
+
+type Probe = Arc<dyn Fn() -> Result<i64> + Send + Sync>;
+
+/// The newest event id, shared by every waiting reader: one cheap query per tick however many
+/// wait, instead of each reader polling its own filtered query. The poller runs only while
+/// someone waits and stops when the last one leaves.
+pub struct Feed {
+    latest: tokio::sync::watch::Sender<i64>,
+    polling: std::sync::atomic::AtomicBool,
+    tick: Duration,
+    probe: Probe,
+}
+
+impl Feed {
+    pub fn new(db: Arc<Database>) -> Arc<Self> {
+        Self::with_probe(
+            POLL_EVERY,
+            Arc::new(move || db.with_conn(session_events::last_id)),
+        )
+    }
+
+    fn with_probe(tick: Duration, probe: Probe) -> Arc<Self> {
+        Arc::new(Feed {
+            latest: tokio::sync::watch::channel(0).0,
+            polling: std::sync::atomic::AtomicBool::new(false),
+            tick,
+            probe,
+        })
+    }
+
+    /// A receiver that changes when a new event lands; starts the poller if it is not running.
+    pub fn subscribe(self: &Arc<Self>) -> tokio::sync::watch::Receiver<i64> {
+        use std::sync::atomic::Ordering::SeqCst;
+        let rx = self.latest.subscribe();
+        if !self.polling.swap(true, SeqCst) {
+            tokio::spawn(self.clone().poll());
+        }
+        rx
+    }
+
+    async fn poll(self: Arc<Self>) {
+        use std::sync::atomic::Ordering::SeqCst;
+        loop {
+            tokio::time::sleep(self.tick).await;
+            if self.latest.receiver_count() == 0 {
+                self.polling.store(false, SeqCst);
+                // A reader that subscribed before the store saw the poller running and started
+                // none, so this one carries on for it.
+                if self.latest.receiver_count() == 0 || self.polling.swap(true, SeqCst) {
+                    return;
+                }
+            }
+            let probe = self.probe.clone();
+            match tokio::task::spawn_blocking(move || probe()).await {
+                Ok(Ok(id)) => {
+                    self.latest
+                        .send_if_modified(|v| std::mem::replace(v, id) != id);
+                }
+                Ok(Err(e)) => tracing::debug!(error = %e, "session event feed: read failed"),
+                Err(e) => tracing::debug!(error = %e, "session event feed: probe panicked"),
+            }
+        }
+    }
+}
 
 /// Which sessions a read covers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,32 +200,21 @@ fn view(e: &StreamEvent) -> Value {
     })
 }
 
-/// Reads events of `scope` after `after` (or the newest ones when `after` is `None`), waiting up
-/// to `wait` for the first one. Blocking.
+/// Reads events of `scope` after `after`, or the newest ones when `after` is `None`. Blocking.
 pub fn read(
     db: &Arc<Database>,
     scope: &Scope,
     reader: &Reader,
     after: Option<i64>,
     limit: usize,
-    wait: Duration,
 ) -> Result<Value> {
     let limit = limit.clamp(1, MAX_LIMIT);
     let sessions = sessions_in(db, scope, reader)?;
-    let deadline = std::time::Instant::now() + wait.min(MAX_WAIT);
-    let events = loop {
-        let ids = sessions.clone();
-        let events = db.with_conn(move |c| match after {
-            Some(after) => session_events::after(c, after, &ids, limit + 1),
-            None => session_events::newest(c, &ids, limit),
-        })?;
-        if !events.is_empty() || after.is_none() || std::time::Instant::now() >= deadline {
-            break events;
-        }
-        std::thread::sleep(
-            POLL_EVERY.min(deadline.saturating_duration_since(std::time::Instant::now())),
-        );
-    };
+    let ids = sessions.clone();
+    let events = db.with_conn(move |c| match after {
+        Some(after) => session_events::after(c, after, &ids, limit + 1),
+        None => session_events::newest(c, &ids, limit),
+    })?;
     let more = events.len() > limit;
     let events = &events[..events.len().min(limit)];
     let next = match events.last() {
@@ -179,8 +232,39 @@ pub fn read(
     }))
 }
 
+/// `read`, holding the call up to `wait` (at most `MAX_WAIT`) until an event after `after`
+/// arrives. Without a cursor there is nothing to wait for, so it answers at once.
+pub async fn wait_read(
+    db: &Arc<Database>,
+    feed: &Arc<Feed>,
+    scope: &Scope,
+    reader: &Reader,
+    after: Option<i64>,
+    limit: usize,
+    wait: Duration,
+) -> Result<Value> {
+    let deadline = tokio::time::Instant::now() + wait.min(MAX_WAIT);
+    let mut changed = feed.subscribe();
+    loop {
+        let (db, scope, reader) = (db.clone(), scope.clone(), reader.clone());
+        let got =
+            tokio::task::spawn_blocking(move || read(&db, &scope, &reader, after, limit)).await??;
+        let empty = got["events"].as_array().is_none_or(Vec::is_empty);
+        if !empty || after.is_none() {
+            return Ok(got);
+        }
+        if tokio::time::timeout_at(deadline, changed.changed())
+            .await
+            .is_err()
+        {
+            return Ok(got);
+        }
+    }
+}
+
 pub struct HarnessSessionEventsTool {
     pub(super) db: Arc<Database>,
+    pub(super) feed: Arc<Feed>,
 }
 
 #[async_trait]
@@ -219,7 +303,73 @@ impl HqTool for HarnessSessionEventsTool {
             .get("limit")
             .and_then(Value::as_u64)
             .map_or(DEFAULT_LIMIT, |l| l as usize);
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || read(&db, &scope, &reader, after, limit, wait)).await?
+        wait_read(&self.db, &self.feed, &scope, &reader, after, limit, wait).await
+    }
+}
+
+#[cfg(test)]
+mod feed_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering::SeqCst};
+
+    const TICK: Duration = Duration::from_millis(20);
+    const WAITERS: usize = 25;
+
+    #[tokio::test]
+    async fn many_waiters_share_one_query_per_tick_and_all_wake() {
+        let (calls, newest) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicI64::new(7)));
+        let (c, n) = (calls.clone(), newest.clone());
+        let feed = Feed::with_probe(
+            TICK,
+            Arc::new(move || {
+                c.fetch_add(1, SeqCst);
+                Ok(n.load(SeqCst))
+            }),
+        );
+        let mut waiters = Vec::new();
+        for _ in 0..WAITERS {
+            let mut rx = feed.subscribe();
+            waiters.push(tokio::spawn(async move {
+                while *rx.borrow_and_update() != 8 {
+                    rx.changed().await.unwrap();
+                }
+            }));
+        }
+        tokio::time::sleep(TICK * 10).await;
+        let quiet = calls.load(SeqCst);
+        assert!(
+            quiet <= 12,
+            "{quiet} probes in 10 ticks for {WAITERS} waiters"
+        );
+
+        newest.store(8, SeqCst);
+        for w in waiters {
+            tokio::time::timeout(TICK * 20, w).await.unwrap().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn the_poller_stops_when_nobody_waits_and_restarts_for_the_next() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let feed = Feed::with_probe(
+            TICK,
+            Arc::new(move || {
+                c.fetch_add(1, SeqCst);
+                Ok(1)
+            }),
+        );
+        drop(feed.subscribe());
+        tokio::time::sleep(TICK * 5).await;
+        let stopped = calls.load(SeqCst);
+        tokio::time::sleep(TICK * 5).await;
+        assert_eq!(calls.load(SeqCst), stopped, "no probes with nobody waiting");
+
+        let mut rx = feed.subscribe();
+        tokio::time::timeout(TICK * 20, rx.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*rx.borrow(), 1);
     }
 }
