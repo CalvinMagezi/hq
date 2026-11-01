@@ -12,7 +12,7 @@ pub mod tasks_slow;
 
 use anyhow::{Context, Result};
 use hq_agent::shutdown::ShutdownSignal;
-use hq_core::config::HqConfig;
+use hq_core::config::{EmbeddingProvider, HqConfig};
 use hq_daemon::instance_lock::DaemonLock;
 use hq_daemon::task_state::TaskState;
 use hq_db::Database;
@@ -267,7 +267,8 @@ const LITE_DAEMON_TASKS: &[&str] = &[
 const MOBILE_REMOVED_DAEMON_TASKS: &[&str] = &["disk-watchdog"];
 
 /// The tasks a mobile instance also skips while its data saver is on: the ones that call a model
-/// or a mail API on a timer, which a metered connection should only pay for when asked.
+/// or a mail API on a timer, which a metered connection should only pay for when asked. Inbox
+/// triage stays with the local embedder, which tags notes on the device without any network.
 const MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS: &[&str] = &[
     "memory-consolidation",
     "inbox-triage",
@@ -283,7 +284,11 @@ fn scheduled_tasks(config: &HqConfig) -> Vec<DaemonTask> {
     } else if config.profile.is_mobile() {
         tasks.retain(|t| !MOBILE_REMOVED_DAEMON_TASKS.contains(&t.name));
         if config.mobile.data_saver {
-            tasks.retain(|t| !MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS.contains(&t.name));
+            let local = config.daemon.embedding_provider == EmbeddingProvider::Local;
+            tasks.retain(|t| {
+                !MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS.contains(&t.name)
+                    || (local && t.name == "inbox-triage")
+            });
         }
     }
     tasks
@@ -304,6 +309,11 @@ fn accept_reload(
     }
     if old.profile.is_mobile() && new.mobile.data_saver != old.mobile.data_saver {
         return Err("mobile.data_saver changed; restart hq to apply it".into());
+    }
+    // The embedding worker keeps the provider it started with; a half-applied switch to local
+    // would go on sending note text to the remote one.
+    if new.daemon.embedding_provider != old.daemon.embedding_provider {
+        return Err("daemon.embedding_provider changed; restart hq to apply it".into());
     }
     hq_core::config::enforce_lite(&new, env).map_err(|e| e.to_string())?;
     Ok(new)
@@ -606,7 +616,7 @@ async fn dispatch_task(
         "embeddings" => tasks_periodic::run_embeddings(vault_path, db, config).await,
         "inbox-triage" => {
             if config.dream.enabled {
-                tasks_periodic::run_inbox_triage(vault_path, config).await
+                tasks_periodic::run_inbox_triage(vault_path, db, config).await
             } else {
                 Ok(())
             }
@@ -881,6 +891,24 @@ mod lite_tests {
         }
         // The keyword index is local and keeps following edits either way.
         assert!(saving.contains(&"embeddings"));
+    }
+
+    #[test]
+    fn with_the_local_embedder_triage_runs_under_the_data_saver() {
+        let mut config = mobile(true);
+        config.daemon.embedding_provider = EmbeddingProvider::Local;
+        let tasks = names(&config);
+        assert!(tasks.contains(&"inbox-triage"));
+        assert!(!tasks.contains(&"memory-consolidation"));
+    }
+
+    #[test]
+    fn a_reload_cannot_switch_the_embedding_provider() {
+        let running = HqConfig::default();
+        let mut local = HqConfig::default();
+        local.daemon.embedding_provider = EmbeddingProvider::Local;
+        let err = accept_reload(&running, local, &no_env).unwrap_err();
+        assert!(err.contains("embedding_provider"), "{err}");
     }
 
     /// The reload path itself, not just the rule it calls: a refused config leaves the running one.
