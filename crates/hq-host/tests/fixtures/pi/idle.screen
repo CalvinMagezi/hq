@@ -5,7 +5,7 @@
 
 
 
- $ cd /Users/calvinmagezi/Documents/GitHub/hq-oss-site && git status --short && rm -f .hq-brief.md && git add
+ $ cd ~/work/project && git status --short && rm -f .hq-brief.md && git add
  apps/site/src/pages/index.astro apps/site/src/pages/install.astro apps/site/public/llms.txt && git status --short &&
  git commit -q -m "feat(site): download the signed Android app" && git log --oneline -1 && git status --short
 

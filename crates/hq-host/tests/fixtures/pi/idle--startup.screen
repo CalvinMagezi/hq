@@ -1,0 +1,33 @@
+Model scope: claude-haiku-5-5 (Ctrl+P to cycle)
+
+ pi v0.83.0
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Skills]
+  android-cli, docx, drive-screen, find-skills, frontend-design, gdoc-insert-image, gsap-core, gsap-frameworks,
+gsap-performance, gsap-plugins, gsap-react, gsap-scrolltrigger, gsap-timeline, gsap-utils, herdr, here-now, pdf, pptx,
+remotion-best-practices, supabase-postgres-best-practices, vercel-react-native-skills, web-design-guidelines, xlsx
+
+[Extensions]
+  herdr-agent-state.ts
+
+[Skill conflicts]
+  "android-cli" collision:
+    ✓ auto (user) ~/.pi/agent/skills/android-cli/SKILL.md
+    ✗ ~/.agents/skills/android-cli/SKILL.md (skipped)
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available
+ New version 1.4.0 is available. Run pi update
+ Changelog: https://pi.dev/changelog
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/work/project
+0.0%/1.0M (auto)                                                                                  claude-haiku-5-5 • low

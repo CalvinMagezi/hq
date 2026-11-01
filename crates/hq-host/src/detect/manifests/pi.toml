@@ -27,8 +27,9 @@ state = "idle"
 priority = 900
 region = "bottom_non_empty_lines(1)"
 visible_idle = true
-# "↑44 ↓7.4k R495k ... claude-haiku-5-5 • low": tokens up and down, then the model.
-line_regex = ['^\s*↑\d', '•\s*(?:off|minimal|low|medium|high|xhigh)\s*$']
+# "↑44 ↓7.4k ... 7.3%/1.0M (auto) claude-haiku-5-5 • low", or at startup only
+# "0.0%/1.0M (auto) claude-haiku-5-5 • low": the context use is always there.
+line_regex = ['\d+(?:\.\d+)?%/[\d.]+[kKmM]\b']
 
 [[rules]]
 id = "unrecognised"
