@@ -110,6 +110,23 @@ pub async fn join(
     opts: &JoinOptions,
     show_sas: impl FnOnce(&str),
 ) -> Result<JoinResult> {
+    join_recording(endpoint, ticket, opts, show_sas, async |_: &Card| Ok(())).await
+}
+
+/// [`join`], with `record` run once the host accepted and its card checks out, and before this
+/// device sends its last message. The host has recorded this device by then and may dial it as
+/// soon as the pairing ends, so this side must already list the host: a host it once revoked
+/// would otherwise be refused as revoked, and drop the new pairing. A failed `record` ends the
+/// pairing with that error before the last message; the host's row then reads "not paired" here,
+/// which revokes nothing. A last message that cannot be sent leaves the record, as the pairing
+/// still stands: the host accepted, and it saw the address this device came from.
+pub async fn join_recording(
+    endpoint: &Endpoint,
+    ticket: &Ticket,
+    opts: &JoinOptions,
+    show_sas: impl FnOnce(&str),
+    record: impl AsyncFnOnce(&Card) -> Result<()>,
+) -> Result<JoinResult> {
     let me = endpoint.id();
     let pairing_endpoint = ticket.endpoint_id()?;
     let code = ticket.code_bytes()?;
@@ -206,6 +223,10 @@ pub async fn join(
             return Err(e);
         }
     };
+    if let Err(e) = record(&card).await {
+        conn.close(0u32.into(), b"done");
+        return Err(e);
+    }
     // The host is who it promised to be: now it may know how to dial this device back.
     let details = Details {
         relays: clean_relays(opts.relays.clone()),

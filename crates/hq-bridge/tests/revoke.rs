@@ -6,11 +6,13 @@
 //! (e) a hub that cannot read its list says "unavailable", and nothing is revoked;
 //! (f) a stranger cannot make us revoke a third peer;
 //! (g) the watcher on a dialed connection does not keep it open.
+//! (h) a re-pair after a revoke holds: the joiner lists the host before the host can dial it.
 #![cfg(unix)]
 
 use hq_bridge::{
-    Bridge, BridgeConfig, DoorTarget, EDGE_ALPN, EdgeDoor, JoinResult, Role, SVC_ALPN, Services,
-    SetupConfig, Ticket, Tuning, error_close_reason,
+    Bridge, BridgeConfig, DoorTarget, EDGE_ALPN, EdgeDoor, JoinOptions, JoinResult, Role, SVC_ALPN,
+    Services, SetupConfig, Ticket, Tuning, error_close_reason,
+    join::join_recording,
     setup::{SVC_GATE, SVC_WEB, gate_label},
 };
 use hq_db::{Database, bridge as peers, bridge_setup as rows};
@@ -486,4 +488,96 @@ async fn a_dialed_connection_closes_when_its_last_handle_drops() {
         matches!(reason, ConnectionError::ApplicationClosed(_)),
         "{reason:?}"
     );
+}
+
+/// Pairs with `host` showing the ticket and `joiner` joining. As the CLI does, the host starts
+/// setup with the joiner the moment its ticket ends.
+async fn pair_and_set_up_hosted_by(host: &Node, joiner: &Node) {
+    let mut open = host
+        .bridge
+        .open_ticket(Tuning {
+            ttl: Duration::from_secs(60),
+            ..Tuning::default()
+        })
+        .await
+        .unwrap();
+    let ticket = Ticket::parse(&open.ticket.link()).unwrap();
+    let answering = async {
+        if let Some(request) = open.requests.recv().await {
+            let _ = request.decide.send(true);
+        }
+        open.closed().await;
+        host.bridge.set_up(&joiner.id()).await
+    };
+    let tuning = Tuning::default();
+    let (setup, joined) = with_timeout(async {
+        tokio::join!(answering, joiner.bridge.join(&ticket, &tuning, |_| {}))
+    })
+    .await;
+    assert!(matches!(joined.unwrap(), JoinResult::Paired(_)));
+    assert!(setup.unwrap().sent, "setup ran at once");
+}
+
+#[tokio::test]
+async fn a_re_pair_after_a_revoke_holds_on_both_sides() {
+    let (hub, machine, mine) = paired_and_set_up().await;
+    // Open connections, so the machine hears of the revoke.
+    assert!(settles(mine.local_port, true).await);
+    assert!(hub.bridge.revoke(&machine.bridge.id()).await.unwrap());
+    let cleaned = wait_for(|| {
+        machine.row(&hub).as_ref().is_ok_and(|r| r.is_none())
+            && !peers::is_paired(&machine.db, &hub.id()).unwrap()
+    })
+    .await;
+    assert!(cleaned, "the machine learned of the revoke");
+    let (seen_hub, seen_machine) = (count_callbacks(&hub), count_callbacks(&machine));
+
+    // The machine hosts this time, and dials the hub, which once revoked it, as soon as it ends.
+    pair_and_set_up_hosted_by(&machine, &hub).await;
+
+    tokio::time::sleep(SETTLE).await;
+    assert!(peers::is_paired(&hub.db, &machine.id()).unwrap());
+    assert!(peers::is_paired(&machine.db, &hub.id()).unwrap());
+    assert!(hub.row(&machine).unwrap().is_some(), "hub set up");
+    assert!(machine.row(&hub).unwrap().is_some(), "machine set up");
+    assert!(seen_hub.lock().unwrap().is_empty(), "no revoke learned");
+    assert!(seen_machine.lock().unwrap().is_empty(), "no revoke learned");
+}
+
+/// How long the joiner's record takes in the test below: long enough that the host's ticket
+/// would end first if the record came after the joiner's last message.
+const SLOW_RECORD: Duration = Duration::from_millis(500);
+
+#[tokio::test]
+async fn the_joiner_records_the_host_before_the_hosts_ticket_ends() {
+    let (host, joiner) = (Node::machine().await, Node::hub().await);
+    let mut open = host
+        .bridge
+        .open_ticket(Tuning {
+            ttl: Duration::from_secs(60),
+            ..Tuning::default()
+        })
+        .await
+        .unwrap();
+    let ticket = Ticket::parse(&open.ticket.link()).unwrap();
+    let recorded = Arc::new(Mutex::new(None));
+    let answering = async {
+        if let Some(request) = open.requests.recv().await {
+            let _ = request.decide.send(true);
+        }
+        open.closed().await;
+        // Where the CLI starts setup and dials the joiner: it must already list the host.
+        recorded.lock().unwrap().clone()
+    };
+    let card = joiner.bridge.card();
+    let opts = JoinOptions::new("phone", card.relays, card.addrs);
+    let record = async |card: &hq_bridge::wire::Card| {
+        tokio::time::sleep(SLOW_RECORD).await;
+        *recorded.lock().unwrap() = Some(card.id.clone());
+        Ok(())
+    };
+    let join = join_recording(joiner.bridge.endpoint(), &ticket, &opts, |_| {}, record);
+    let (seen_at_close, joined) = with_timeout(async { tokio::join!(answering, join) }).await;
+    assert!(matches!(joined.unwrap(), JoinResult::Paired(_)));
+    assert_eq!(seen_at_close, Some(host.id()));
 }

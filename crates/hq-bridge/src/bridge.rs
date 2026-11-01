@@ -760,17 +760,16 @@ impl Bridge {
         let mut opts = JoinOptions::new(&self.name, card.relays, card.addrs);
         opts.hello_timeout = tuning.hello_timeout;
         opts.decision_timeout = tuning.decision_timeout;
-        let result = join::join(&self.endpoint, ticket, &opts, show_sas).await?;
-        if let JoinResult::Paired(joined) = &result {
-            let db = self.db.clone();
-            let card = joined.card.clone();
+        // Recorded before the last message: the host may dial this device the moment it ends.
+        let record = async |card: &Card| {
+            let (db, card) = (self.db.clone(), card.clone());
             tokio::task::spawn_blocking(move || {
                 peers::add_peer(&db, &card.id, &card.name, &card.relays, &card.addrs)
             })
             .await
-            .context("recording the host")??;
-        }
-        Ok(result)
+            .context("recording the host")?
+        };
+        join::join_recording(&self.endpoint, ticket, &opts, show_sas, record).await
     }
 
     /// Registers this device with the `hq edge` that shows `ticket` and records it as this
