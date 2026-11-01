@@ -90,6 +90,7 @@ pub mod self_apply {
 pub mod agent_skill;
 pub mod service;
 pub mod sessions;
+pub mod sessions_watch;
 pub mod shortcuts;
 pub mod skills;
 pub mod skills_evidence;

@@ -87,7 +87,7 @@ enum Commands {
     /// Manage long-lived agent sessions: coding agents (claude-code, cursor, opencode, antigravity, pi...)
     /// and general-purpose agents (hermes, openclaw), which never take code work
     Sessions {
-        /// Subcommand: list (default), spawn <harness>, status <id>, logs <id>, send <id>, stop <id>, resume <id>, stats [<root id>] [--task <id>]
+        /// Subcommand: list (default), spawn <harness>, status <id>, logs <id>, send <id>, stop <id>, resume <id>, stats [<root id>] [--task <id>], watch (one JSON line per event) or channel (a Claude Code channel server)
         #[arg(default_value = "list")]
         sub: String,
         /// Harness name (spawn), session id (status/logs/send/stop/resume) or team root (stats)
@@ -134,6 +134,8 @@ enum Commands {
         /// Log lines to tail (logs)
         #[arg(long, default_value_t = 40)]
         lines: usize,
+        #[command(flatten)]
+        watch: Box<commands::sessions_watch::WatchArgs>,
     },
 
     /// The Agentic Stack: general-purpose agents that run the tasks assigned to them (config `stack:`)
@@ -1069,7 +1071,11 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             owns,
             policy,
             lines,
+            watch,
         } => {
+            if matches!(sub.as_str(), "watch" | "channel") {
+                return commands::sessions_watch::run(config, &sub, task.as_deref(), *watch).await;
+            }
             commands::sessions::run(
                 config,
                 &sub,
