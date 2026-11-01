@@ -107,24 +107,6 @@ class SettingsWordsTest {
         assertEquals("Not answering", SettingsWords.messagingStatus(null))
     }
 
-    @Test fun theConnectorSaysHowLongItStaysOpenAndHowManyAreIn() {
-        val open = JSONObject(
-            """{"enabled":true,"armed_until":"2026-10-21T12:09:41Z","grants":[
-            {"id":"g1","label":"Claude","grant_scope":"read_only","created_at":"2026-10-20T10:00:00Z","expires_at":"2026-11-20T10:00:00Z"},
-            {"id":"g2","grant_scope":"full","created_at":"2026-10-01T10:00:00Z","revoked_at":"2026-10-02T10:00:00Z"},
-            {"id":"g3","grant_scope":"full","created_at":"2026-09-01T10:00:00Z","expires_at":"2026-10-01T10:00:00Z"}]}""",
-        )
-        assertEquals("Open for 9:41 · 1 connected", SettingsWords.connectorStatus(open, now))
-        assertEquals("Closed · none connected", SettingsWords.connectorStatus(JSONObject("""{"enabled":true,"grants":[]}"""), now))
-        assertEquals("Off", SettingsWords.connectorStatus(JSONObject("""{"enabled":false}"""), now))
-        assertEquals("Read only", SettingsWords.grants(open, now).single().scope)
-    }
-
-    @Test fun anExpiredWindowIsClosed() {
-        val c = JSONObject("""{"enabled":true,"armed_until":"2026-10-21T11:00:00Z","grants":[]}""")
-        assertEquals("Closed · none connected", SettingsWords.connectorStatus(c, now))
-    }
-
     @Test fun devicesAreCounted() {
         assertEquals("1 signed in", SettingsWords.devicesStatus(JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":"2026-10-20 10:00:00"}]}""")))
         assertEquals("None signed in", SettingsWords.devicesStatus(JSONObject("""{"devices":[]}""")))
@@ -233,36 +215,14 @@ class SettingsWordsTest {
     @Test fun homeHasTheBoardsGroupsInOrder() {
         val groups = SettingsWords.home(SettingsSnapshot(settings = settings), now)
         assertEquals(listOf("This phone", "Your accounts", "How HQ behaves", "Your data"), groups.map { it.title })
-        assertEquals(listOf("AI service and keys", "Messaging apps", "Connect Claude", "Other devices"), groups[1].rows.map { it.title })
+        assertEquals(listOf("AI service and keys", "Messaging apps", "Other devices"), groups[1].rows.map { it.title })
+        assertEquals(SettingsWords.CLAUDE_VIA_LAPTOP, groups[1].note)
         assertEquals("Read only", groups[2].rows.single().status)
         assertNull(groups[0].rows.firstOrNull())
     }
 
-    // The server sends every connector and device time as epoch seconds.
+    // The server sends every device time as epoch seconds.
     private val nowSec = now.epochSecond
-
-    private val realConnector = JSONObject(
-        """{"enabled":true,"url":"https://hq-connector.example.com/mcp","consent_origin":"https://hq.example.com","default_scope":"full","armed_until":${nowSec + 581},
-        "grants":[{"id":"g1","client_id":"c1","client_name":"Claude","label":null,"grant_scope":"full","created_at":${nowSec - 90_000},"expires_at":${nowSec + 86_400},"last_used_at":null,"revoked_at":null,"revoked_reason":null},
-        {"id":"g2","client_name":"Old","grant_scope":"read_only","created_at":${nowSec - 900_000},"expires_at":${nowSec - 60},"revoked_at":null},
-        {"id":"g3","client_name":"Gone","grant_scope":"full","created_at":${nowSec - 900_000},"expires_at":${nowSec + 500},"revoked_at":${nowSec - 5}}]}""",
-    )
-
-    @Test fun epochSecondsAreReadForTheConnectorWindowAndTheGrants() {
-        assertEquals("Open for 9:41 · 1 connected", SettingsWords.connectorStatus(realConnector, now))
-        val grants = SettingsWords.grants(realConnector, now, ZoneOffset.UTC)
-        assertEquals(1, grants.size)
-        assertEquals("Claude", grants.single().client)
-        assertEquals("Full", grants.single().scope)
-        assertEquals("Oct 20", grants.single().since)
-    }
-
-    @Test fun aWindowInThePastIsClosedAndAnExpiredOrRevokedGrantIsNotCounted() {
-        val c = JSONObject(realConnector.toString().replace("\"armed_until\":${nowSec + 581}", "\"armed_until\":${nowSec - 30}"))
-        assertEquals("Closed · 1 connected", SettingsWords.connectorStatus(c, now))
-        assertEquals(listOf("g1"), SettingsWords.liveGrants(c, now).map { it.optString("id") })
-        assertEquals("Closed · none connected", SettingsWords.connectorStatus(JSONObject("""{"enabled":true,"armed_until":null,"grants":[]}"""), now))
-    }
 
     @Test fun deviceTimesAreDatesAndHowLongAgoNeverRawNumbers() {
         val d = JSONObject("""{"devices":[{"id":"d1","label":"Signed in with a code","created_at":${nowSec - 170_000},"last_used_at":${nowSec - 10_800},"expires_at":null},{"id":"d2","label":"MacBook","created_at":${nowSec - 90_000},"last_used_at":null,"expires_at":null}]}""")

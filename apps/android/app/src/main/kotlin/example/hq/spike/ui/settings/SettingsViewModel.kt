@@ -83,9 +83,8 @@ data class SettingsUi(
     val backup: BackupFacts = BackupFacts(),
     /** The sheet that takes a key, while it is open. The key itself is never kept here. */
     val keySheet: KeySheet? = null,
-    /** What is being asked or done on the Connect Claude and Other devices pages. */
+    /** What is being asked or done on the Other devices page. */
     val busy: String? = null,
-    val askClaudeOff: Boolean = false,
     val askSignOutAll: Boolean = false,
     val deviceCode: DeviceCode? = null,
     val setup: SetupState? = null,
@@ -131,11 +130,6 @@ class SettingsActions(
     val onAskDisconnect: (String?) -> Unit = {},
     val onDisconnect: () -> Unit = {},
     val onAskReplace: (String?) -> Unit = {},
-    val onArm: () -> Unit = {},
-    val onDisarm: () -> Unit = {},
-    val onRevoke: (String) -> Unit = {},
-    val onClaudeOff: (Boolean) -> Unit = {},
-    val onClaudeOffConfirm: () -> Unit = {},
     val onNewCode: () -> Unit = {},
     val onSignOut: (String) -> Unit = {},
     val onSignOutAll: (Boolean) -> Unit = {},
@@ -184,11 +178,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onAskDisconnect = { p -> _state.update { if (it.restarting) it else it.copy(askDisconnect = p) } },
         onDisconnect = ::disconnectApp,
         onAskReplace = { p -> _state.update { it.copy(askReplace = p) } },
-        onArm = { act("arm", "Could not open the window. HQ is not answering.") { client.postJson("/api/oauth/connector/arm") } },
-        onDisarm = { act("disarm", "Could not close it. HQ is not answering.") { client.postJson("/api/oauth/connector/disarm") } },
-        onRevoke = { id -> act("revoke:$id", "Could not disconnect it. HQ is not answering.") { client.postJson("/api/oauth/grants/${java.net.URLEncoder.encode(id, "UTF-8")}/revoke") } },
-        onClaudeOff = { ask -> _state.update { it.copy(askClaudeOff = ask) } },
-        onClaudeOffConfirm = { _state.update { it.copy(askClaudeOff = false) }; act("off", "Could not disconnect Claude. HQ is not answering.") { client.postJson("/api/oauth/connector/off") } },
         onNewCode = ::newCode,
         onSignOut = { id -> act("out:$id", "Could not sign it out. HQ is not answering.") { client.deleteAt("/api/auth/devices/${java.net.URLEncoder.encode(id, "UTF-8")}") } },
         onSignOutAll = { ask -> _state.update { if (it.restarting) it else it.copy(askSignOutAll = ask) } },
@@ -218,7 +207,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Closes Settings and every page inside it. */
-    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null, askClaudeOff = false, askSignOutAll = false, deviceCode = null, setup = null, pair = null, askDisconnect = null, askReplace = null) }
+    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null, askSignOutAll = false, deviceCode = null, setup = null, pair = null, askDisconnect = null, askReplace = null) }
 
     fun freeze(fixed: SettingsUi) {
         frozen = true
@@ -236,7 +225,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun refreshNow() {
         if (frozen) return
-        val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "connector" to "/api/oauth/connector", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health", "vault" to "/api/vault-status")
+        val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health", "vault" to "/api/vault-status")
         val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage", "forecast" to "/api/usage/forecast")
         coroutineScope {
             val slow = remote.map { (key, path) -> async { key to get(path) } }
@@ -254,7 +243,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val got = fast + late
         fun body(key: String) = got[key]?.body
         val snap = SettingsSnapshot(
-            body("settings"), body("chatApps"), body("connector"), body("devices"), body("budgets"), body("health"),
+            body("settings"), body("chatApps"), body("devices"), body("budgets"), body("health"),
             unavailable = got.filterValues { it.body == null && it.answered }.keys,
             providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"), vault = body("vault"),
         )
