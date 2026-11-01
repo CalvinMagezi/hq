@@ -493,7 +493,14 @@ async fn after_pairing(bridge: &Bridge, peer: &str, role: Role) {
         };
     }
     match bridge.set_up(peer).await {
-        Ok(outcome) => report_setup(&outcome),
+        Ok(outcome) => {
+            report_setup(&outcome);
+            if !outcome.key_missing()
+                && let Ok(config) = HqConfig::load()
+            {
+                super::claude::offer(&config, &outcome.setup.peer_name).await;
+            }
+        }
         Err(e) => println!(
             "Paired, but not set up yet: {e:#}. `hq bridge serve` tries again when the other device is serving."
         ),
@@ -737,6 +744,8 @@ fn revoke(db: &Database, id: &str) -> Result<()> {
         .parse()
         .map_err(|_| anyhow!("{id} is not a machine id (see `hq bridge peers`)"))?;
     let id = id.to_string();
+    // Before the revoke deletes the setup that names the hub.
+    super::claude::remove_for_revoke(db, &id);
     if peers::revoke(db, &id)? {
         println!("Revoked {id}. A machine serving it stops at its next request.");
     } else {
