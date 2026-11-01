@@ -182,7 +182,9 @@ now writes what happens to an event log, and `harness_session_events` reads it a
   since, oldest first, at most `limit` (50 by default) with `more` when there is more. Without
   `after` the reply holds the newest events and a cursor.
 - **Waiting:** `wait_secs` (at most 45, under an MCP client's 60 second limit) holds the call
-  until the first new event, so a client loops on one call instead of polling screens.
+  until the first new event, so a client loops on one call instead of polling screens. Every
+  waiting call shares one feed that checks for a new event about once a second, so many
+  watchers cost no more than one, and nothing polls while nobody waits.
 - **Who sees what:** the owner sees every session, a claude.ai connection the teams it
   started, and an agent with its own session token its own team. Naming a session outside
   that is refused.
