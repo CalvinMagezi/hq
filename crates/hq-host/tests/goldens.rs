@@ -68,7 +68,7 @@ fn copilot_screens_from_real_sessions_are_detected_correctly() {
 
 #[test]
 fn antigravity_screens_from_real_sessions_are_detected_correctly() {
-    assert!(check_agent("antigravity") >= 2);
+    assert!(check_agent("antigravity") >= 3);
 }
 
 #[test]

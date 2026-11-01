@@ -135,6 +135,25 @@ fn copilot_ask_user() {
 }
 
 #[test]
+fn antigravity_ask_question() {
+    let d = read("antigravity", "blocked--ask-question");
+    assert_eq!(d.kind, DialogKind::Question);
+    assert_eq!(
+        d.question.as_deref(),
+        Some("Question 1/1: What should the second file be named?")
+    );
+    assert_eq!(
+        options(&d),
+        [
+            (1, "(Recommended) a.txt", true, false, false),
+            (2, "b.txt", false, false, false),
+            (3, "Write-in...", false, false, true),
+        ]
+    );
+    assert_eq!(d.decline, ["esc"]);
+}
+
+#[test]
 fn claude_create_file() {
     let d = read("claude", "blocked--permission");
     assert_eq!(d.kind, DialogKind::Edit);
@@ -240,7 +259,7 @@ fn codex_update_and_hooks_dialogs() {
 fn every_blocked_fixture_reads_as_a_dialog() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let mut seen = 0;
-    for agent in ["claude", "codex", "copilot"] {
+    for agent in ["claude", "codex", "copilot", "antigravity"] {
         for entry in std::fs::read_dir(root.join(agent)).unwrap() {
             let path = entry.unwrap().path();
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
@@ -251,5 +270,5 @@ fn every_blocked_fixture_reads_as_a_dialog() {
             }
         }
     }
-    assert!(seen >= 10, "{seen}");
+    assert!(seen >= 11, "{seen}");
 }

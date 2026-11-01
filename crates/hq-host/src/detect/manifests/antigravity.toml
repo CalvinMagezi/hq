@@ -7,13 +7,41 @@
 # when it waits for input, "esc to cancel" during a turn. Every rule reads only
 # the last non-empty line, so text quoted higher up in the conversation never
 # counts. Idle is claimed only when the idle footer is on screen; anything the
-# rules do not recognise (a dialog included, since none has been captured yet)
-# reads unknown, never idle.
+# rules do not recognise reads unknown, never idle.
+#
+# HQ starts agy with --dangerously-skip-permissions, so the one dialog an HQ
+# session meets is its ask_question form (captured with 1.4.12). That form keeps
+# the "esc to cancel" footer, so it has to outrank the working rule. The
+# approval prompts of an agy started by hand have not been captured.
 id = "antigravity"
-version = "2026.11.01.1"
+version = "2026.11.01.2"
 min_engine_version = 4
 updated_at = "2026-11-01T00:00:00Z"
 aliases = ["agy"]
+
+# The ask_question form: "Question 1/1: ...", numbered options with ">" on the
+# highlighted one, the last of them a "Write-in..." text field, then the
+# navigation line. esc skips the question and lets the turn go on.
+[dialogs.ask_question]
+kind = "question"
+top = '^─{10,}'
+footer = '(?i)navigate · enter select'
+question = '\?\s*$'
+option = '^\s*(?:>\s*)?(?P<num>\d+)\.\s+(?P<label>\S.*)$'
+selected = '^\s*>'
+typed = '(?i)^write-in'
+answer = "arrows"
+decline = ["esc"]
+
+[[rules]]
+id = "ask_question_form"
+state = "blocked"
+priority = 990
+region = "bottom_non_empty_lines(3)"
+visible_blocker = true
+# "  ↑/↓ Navigate · enter Select · esc Skip" just above the footer.
+contains = ["navigate · enter select · esc skip"]
+dialog = "ask_question"
 
 [[rules]]
 id = "working_footer"
