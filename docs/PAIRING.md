@@ -213,6 +213,40 @@ so the machine can reach it; a machine that could not reach the hub tries again 
 Anything configured by hand wins: a service, forward, host or remote MCP entry with the same name
 or port as one setup would make keeps the configured one, so a setup written by hand keeps working.
 
+### Using HQ in Claude
+
+The hub's `/mcp`, reached through the forward and opened with the machine's own key, is also what
+Claude Code and Claude Desktop on that computer can use. Nothing is written to them unless you say
+so:
+
+```bash
+hq claude add             # Claude Code (user scope) and Claude Desktop; name the hub if there are two
+hq claude status
+hq claude remove          # only what `hq claude add` wrote
+```
+
+After `hq bridge pair` or `hq bridge join` has set the machine up, the command asks once on a
+terminal (`[Y/n]`) and otherwise prints `hq claude add <hub>`. The desktop app has the same thing
+under Claude, "Use HQ in Claude", with an Add or Remove button per hub.
+
+- **Claude Code** gets `claude mcp add --scope user --transport http hq http://127.0.0.1:<port>/mcp
+  --header "x-api-key: <key>"`, so the key sits in Claude Code's own user config. The name is `hq`,
+  or `hq-<hub>` when `hq` is taken by something else. An entry counts as ours only when its URL
+  is the forward's address. Without `claude` on `PATH` this part is skipped.
+- **Claude Desktop** gets `mcpServers.hq` in `claude_desktop_config.json`, set to this computer's
+  absolute `hq` path with `mcp-serve --remote <hub>`. That entry holds no key: `hq` reads it from
+  its own database. The file gets a dated backup (`.bak-YYYY-MM-DD`, the first change of the day),
+  is replaced whole, and is left alone if it is not valid JSON. Without Claude Desktop's folder this
+  part is skipped.
+
+Revoking the hub (`hq bridge revoke`, or Revoke in the desktop app) removes these entries first. A
+revoke from the library alone, or from the phone's helper, does not know where Claude is and leaves
+them; `hq claude remove` takes them out while the setup row exists.
+
+The same hub rows also make the hub a remote MCP server for HQ itself (the tools `<hub>_discover`
+and `<hub>_call`, only on a live user turn). One resolver builds that list for every caller, and a
+`remote_mcp` entry in `config.yaml` with the same name wins.
+
 ## Services and forwards by hand
 
 Once two machines are paired, each can offer the other named services and reach the other's through

@@ -436,3 +436,23 @@ paired has the owner's tools until it is revoked. The hub's gate key for a revok
 `~/.hq/gate/`; the machine no longer authorizes it once it revokes too, and the hub never offers it
 anything else. A revoke reaches only the side that made it; the other side's forward stops working
 because the gate refuses the revoked key, and its row stays until it revokes as well.
+
+## 16. HQ in Claude Code and Claude Desktop (`hq claude`)
+
+`hq claude add` (also offered after setup, and the desktop app's Claude tab) writes the hub's `/mcp`
+into two files the owner keeps, using `crates/hq-bridge/src/claude.rs` (`docs/PAIRING.md`, "Using HQ
+in Claude"). The rules, and the tests that hold them:
+
+| # | Who | Tries | What happens | Test |
+|---|---|---|---|---|
+| C1 | Setup | Writes to Claude without being asked | Never. After pairing the CLI asks on a terminal and otherwise only prints the command; the desktop app acts on a button | `claude_commands_take_an_optional_hub_name_and_no_key` |
+| C2 | Anyone watching the machine | Reads the key off a command line or a log | The key is an argument to `claude mcp add` (Claude Code has no other way to take a header), so it is visible to the same user's `ps` for the moment the command runs, the same trust as U9. It is scrubbed from every error and report, and `Hub` has no `Debug` output for it | `claude_code_is_added_at_user_scope_with_the_key_in_a_header`, `the_key_is_never_in_a_message_or_in_debug_output`, `the_window_lists_a_hub_adds_it_and_removes_it_without_showing_the_key` |
+| C3 | The Claude Desktop entry | Holds a key | No. It starts `hq mcp-serve --remote <hub>`, which reads the key from the database, so the file never has one | `claude_desktop_gets_a_stdio_entry_and_keeps_everything_else` |
+| C4 | A name already in Claude | Is taken by another server, or by one with another URL | The entry is never overwritten: the next name (`hq-<hub>`) is used, and when both are taken the add fails. Remove touches only an entry whose URL (Code) or command and arguments (Desktop) match what was written | `a_taken_name_moves_to_the_hub_name_and_is_never_overwritten`, `adding_twice_changes_nothing_and_remove_deletes_only_ours` |
+| C5 | A damaged `claude_desktop_config.json` | Is edited | Invalid JSON is left untouched and reported. A valid file is backed up once a day, written to a temporary file in the same folder and renamed over it with its mode kept; a symlink is followed, not replaced | `a_name_taken_by_something_else_in_desktop_falls_back_and_bad_json_is_left_alone`, `the_config_keeps_its_mode`, `claude_desktop_gets_a_stdio_entry_and_keeps_everything_else` |
+| C6 | A revoked hub | Leaves its key in Claude's config | `hq bridge revoke` and the desktop app remove the entries before the revoke, while the setup row still names the hub. The key is dead after the revoke anyway; the removal only keeps Claude's config from listing a server that fails | `revoking_a_hub_removes_its_claude_entries_first` |
+| C7 | The desktop app | Starts a program of the page's choosing | No. The two commands take only a hub name from the list, a window can call them only through `capabilities/control.json`, and the program written into Claude Desktop's config is the located `hq`, refused when it is not an absolute path | `claude_desktop_needs_an_absolute_program_path`, `shell_config.rs` |
+
+Residual risk: the key now also lives in Claude Code's `~/.claude.json`, a file HQ does not own or
+protect. Anyone who can read it has the owner's `/mcp` through this machine until the device is
+revoked, which is the same reach as U6 and U9.
