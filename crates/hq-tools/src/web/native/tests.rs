@@ -1851,6 +1851,9 @@ async fn identical_concurrent_searches_share_one_run_of_the_pool() {
     assert!(!urls(&a).is_empty() && urls(&a) == urls(&b) && urls(&b) == urls(&c));
 }
 
+/// How long the slow engine takes, so the caller is still waiting when it gives up.
+const SLOW_ENGINE_DELAY: Duration = Duration::from_secs(2);
+
 /// How long an abandoned search may take to finish in the background and fill the cache.
 const ABANDONED_SEARCH_WAIT: Duration = Duration::from_secs(40);
 
@@ -1863,22 +1866,37 @@ async fn a_search_whose_caller_gave_up_still_warms_the_cache() {
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string(GOOGLE_RESULTS)
-                .set_delay(Duration::from_millis(300)),
+                .set_delay(SLOW_ENGINE_DELAY),
         )
         .with_priority(1)
         .mount(&server)
         .await;
     let opts = SearchOptions::default();
-    let gave_up = tokio::time::timeout(
-        Duration::from_millis(50),
-        run_with(&server, "abandoned query", &opts, &patient_budgets()),
-    )
-    .await;
-    assert!(
-        gave_up.is_err(),
-        "the caller was cancelled before the engines answered"
-    );
     let key = cache_key("abandoned query", &opts, Some(&server.uri()));
+    // The caller gives up once the search runs in its own task, not after a fixed time: on a
+    // loaded runner a fixed delay can end before the search was handed off at all.
+    let budgets = patient_budgets();
+    let gave_up = {
+        let search = run_with(&server, "abandoned query", &opts, &budgets);
+        tokio::pin!(search);
+        let handed_off = async {
+            while !INFLIGHT.lock().unwrap().contains_key(&key) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        tokio::time::timeout(ABANDONED_SEARCH_WAIT, async {
+            tokio::select! {
+                finished = &mut search => Some(finished),
+                () = handed_off => None,
+            }
+        })
+        .await
+        // The caller's future is dropped here, while the search goes on in its own task.
+    };
+    assert!(
+        matches!(gave_up, Ok(None)),
+        "the caller gave up while the search was running in the background"
+    );
     // Generous because the whole suite runs in parallel; a passing run stops at the first hit.
     let deadline = std::time::Instant::now() + ABANDONED_SEARCH_WAIT;
     while cached_page(&key).is_none() && std::time::Instant::now() < deadline {

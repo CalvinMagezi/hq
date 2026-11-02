@@ -12,6 +12,8 @@ ignore = [
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    # Same extraction path: aborts on a symlink entry with a large declared size. Checked 2026-11-02.
+    "RUSTSEC-2026-0429",
     # zstd and zstd-safe, pinned by zip 8.6.0. Unreachable; reasons in deny.toml.
     "RUSTSEC-2026-0391",
     "RUSTSEC-2026-0403",
