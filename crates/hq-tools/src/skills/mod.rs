@@ -1,5 +1,6 @@
 //! Skill loading — parse SKILL.md files, list/load skills as tools.
 
+pub mod builtin;
 mod evidence_proposal;
 mod fixtures;
 mod hints;

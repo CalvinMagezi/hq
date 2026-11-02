@@ -22,6 +22,7 @@ pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
     hq_agent::install_ledger(db.clone());
 
     info!(vault = %config.vault_path.display(), "HQ starting");
+    super::skills::sync_builtin_at_start(config);
     if matches!(component, "all" | "daemon") && config.profile.expects_shell_sandbox() {
         notify_if_bash_refused(config, &db);
     }

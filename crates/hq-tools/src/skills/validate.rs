@@ -129,7 +129,10 @@ fn skill_names(skills_dir: &Path) -> Option<Vec<String>> {
         .filter(|p| p.join("SKILL.md").exists() || !p.join("archive").is_dir())
         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
         .filter(|n| !n.starts_with('_') && n != "skill-bundles")
+        // An active built-in is checked once, from its embedded text, whatever is on disk.
+        .filter(|n| !super::builtin::is_active(n))
         .collect();
+    names.extend(super::builtin::active_builtins().map(|b| b.name.to_string()));
     names.sort();
     Some(names)
 }
@@ -200,7 +203,13 @@ fn check_skill(
     }
 
     // Regression fixtures beside the skill, if it has any: triggers, non-triggers, required steps.
-    for failure in super::fixtures::skill_failures(skills_dir, name) {
+    // An active built-in's files on disk are a mirror, never what runs, so they are not checked.
+    let fixtures = if super::builtin::is_active(name) {
+        Vec::new()
+    } else {
+        super::fixtures::skill_failures(skills_dir, name)
+    };
+    for failure in fixtures {
         issues.push(SkillIssue::error(name, format!("fixture: {failure}")));
     }
 

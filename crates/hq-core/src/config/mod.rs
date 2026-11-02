@@ -20,6 +20,7 @@ pub mod model_switch;
 mod profile;
 mod relay;
 mod self_update;
+mod skills;
 mod stack;
 mod tasks;
 mod usage_ledger;
@@ -64,6 +65,7 @@ pub use profile::{
 };
 pub use relay::*;
 pub use self_update::SelfUpdateConfig;
+pub use skills::{BuiltinSkillsConfig, SkillsConfig};
 pub use stack::{Specialist, StackConfig};
 pub use tasks::{
     ALL_TIERS, AutonomyGate, DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode,
@@ -342,6 +344,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub github_write: GithubWriteConfig,
 
+    /// The owner's choices about the skills HQ ships (`skills.builtin.off`).
+    #[serde(default)]
+    pub skills: SkillsConfig,
+
     /// Fast structured-decision model used to gate work before generative calls.
     #[serde(default)]
     pub decisions: DecisionsConfig,
@@ -521,6 +527,7 @@ impl Default for HqConfig {
             governance: GovernanceConfig::default(),
             remote_mcp: Vec::new(),
             github_write: GithubWriteConfig::default(),
+            skills: SkillsConfig::default(),
             decisions: DecisionsConfig::default(),
             companies: Vec::new(),
             default_company: String::new(),

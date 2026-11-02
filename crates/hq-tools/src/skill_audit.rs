@@ -16,6 +16,8 @@ const PROPOSED_DIR: &str = "_proposed";
 const SKILL_FILE: &str = "SKILL.md";
 const ARCHIVE_PREFIX: &str = "SKILL-v";
 const ARCHIVE_SUFFIX: &str = ".md";
+/// Tries for a free archive number when processes archive the same skill at once.
+const ARCHIVE_ATTEMPTS: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -26,6 +28,8 @@ pub enum Disposition {
     Rejected,
     Reverted,
     Deleted,
+    /// A built-in skill's vault copy was installed, brought back in step with HQ, or removed.
+    Synced,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +66,10 @@ impl AuditEntry {
 /// read against the audit trail. `None` for a skill with no `SKILL.md` (a bundle) or an unsafe name.
 pub fn live_hash(skills_dir: &Path, name: &str) -> Option<String> {
     validate_skill_name(name).ok()?;
+    // A session loads a built-in's embedded text, so that is what its records must name.
+    if crate::skills::builtin::is_active(name) {
+        return crate::skills::builtin::shipped_hash(name);
+    }
     let content = std::fs::read_to_string(skills_dir.join(name).join(SKILL_FILE)).ok()?;
     Some(hex::encode(Sha256::digest(content.as_bytes())))
 }
@@ -132,17 +140,43 @@ pub fn archived_versions(skills_dir: &Path, name: &str) -> Vec<(u32, PathBuf)> {
 pub fn archive_current(skills_dir: &Path, name: &str) -> Result<Option<PathBuf>> {
     validate_skill_name(name)?;
     let live = skills_dir.join(name).join(SKILL_FILE);
-    if !live.exists() {
+    // A link is never followed: copying through one could put a file the caller may not read
+    // into the vault.
+    if !std::fs::symlink_metadata(&live).is_ok_and(|m| m.is_file()) {
         return Ok(None);
     }
-    let next = archived_versions(skills_dir, name)
-        .last()
-        .map_or(1, |(n, _)| n + 1);
     let dir = skills_dir.join(name).join(ARCHIVE_DIR);
+    if std::fs::symlink_metadata(&dir).is_ok_and(|m| !m.is_dir()) {
+        bail!(
+            "{} is not a plain folder; nothing was archived",
+            dir.display()
+        );
+    }
     std::fs::create_dir_all(&dir)?;
-    let dest = dir.join(format!("{ARCHIVE_PREFIX}{next}{ARCHIVE_SUFFIX}"));
-    std::fs::copy(&live, &dest)?;
-    Ok(Some(dest))
+    // create_new refuses a file or link already at the name, so the copy cannot be redirected;
+    // when another process took the same number first, the next free one is tried.
+    for _ in 0..ARCHIVE_ATTEMPTS {
+        let next = archived_versions(skills_dir, name)
+            .last()
+            .map_or(1, |(n, _)| n + 1);
+        let dest = dir.join(format!("{ARCHIVE_PREFIX}{next}{ARCHIVE_SUFFIX}"));
+        let opened = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&dest);
+        let mut out = match opened {
+            Ok(out) => out,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        };
+        let copied = std::fs::File::open(&live).and_then(|mut f| std::io::copy(&mut f, &mut out));
+        if let Err(e) = copied {
+            let _ = std::fs::remove_file(&dest);
+            return Err(e.into());
+        }
+        return Ok(Some(dest));
+    }
+    bail!("could not find a free archive name for {name}")
 }
 
 /// Undo a live write: restore the archived copy, or drop a SKILL.md that did not exist before.

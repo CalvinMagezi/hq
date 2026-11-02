@@ -788,6 +788,11 @@ async fn async_main() -> Result<()> {
     if let Some(vault) = cli.vault {
         config.vault_path = vault.into();
     }
+    // Every command decides from this one config which built-in skills it offers.
+    let unknown = hq_tools::skills::builtin::configure(&config);
+    if !unknown.is_empty() {
+        tracing::warn!(names = ?unknown, "skills.builtin.off names skills HQ does not ship; check the spelling");
+    }
 
     let Some(command) = cli.command else {
         // Bare `hq` is chat, which Lite does not have.

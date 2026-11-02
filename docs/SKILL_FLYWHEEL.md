@@ -132,3 +132,52 @@ hq skills evidence purge --from 2026-01-01 --before 2026-02-01
 It prints what it would delete and changes nothing until `--yes` is added. A purge with no id,
 skill or date is refused. Roll-up months that lie entirely inside a date range go with it.
 Skills, their versions and `_audit.jsonl` are never touched.
+
+## Skills HQ ships
+
+Some skills come with HQ itself (`crates/hq-tools/assets/skills/`, listed in `BUILTIN_SKILLS` in
+`crates/hq-tools/src/skills/builtin.rs`). Each one declares when it applies. `edge-coding-worker`
+needs at least one repository in `github_write.repos`, so an install that cannot publish never
+sees it.
+
+**Active.** A built-in is active when it applies and you have not turned it off. `hq` decides this
+once per process, from the config it loaded.
+
+These guarantees hold for active built-ins only. Where a built-in does not apply or is off, its
+name is free, and any skill under it, yours or an agent's, is an ordinary skill. If the
+built-in becomes active later, HQ's text takes the name back, and the earlier text is archived.
+
+**Loading.** A session loading an active built-in always gets the text embedded in the binary,
+never the vault copy. An edit to the copy, or a bundle, `SUMMARY.md` or `_proposed/` entry under
+its name in any letter case, changes nothing a session sees.
+
+**Changing.** Nothing changes an active built-in in place. `skill_manage`, the post-session
+review, `hq skills create|edit|approve|delete|revert|adopt|unadopt` and proposal approval all
+refuse its name.
+
+**The vault copy.** Each `hq start` and `hq web`, which covers the phone too, and `hq skills sync`,
+write every active built-in into the vault's skills folder for people to read, and bring a
+differing copy back in step. The old copy goes to the skill's `archive/`, and the change is logged
+in `_audit.jsonl` as `synced`. A copy is a mirror only: a process that never syncs still offers the
+skill.
+
+**Turning one off.** List it under `skills.builtin.off` in `config.yaml`:
+
+```yaml
+skills:
+  builtin:
+    off: [edge-coding-worker]
+```
+
+The next sync removes HQ's copy (only files that are exactly a text HQ shipped) and keeps its
+archive. The name is then released: a skill of
+your own under that name loads and behaves like any other, and sync leaves it alone. The setting
+is yours alone: `config_manage` refuses the `skills` key, and agents cannot write the config file.
+A name in `off` that no built-in has is reported at start, because it is most likely a typo.
+
+**Shipping a new skill.** Add its folder under `assets/skills/` and an entry in `BUILTIN_SKILLS`,
+with an `applies` rule. A test fails if the two disagree. The text must pass `hq skills validate`
+and the security scan, carry `provenance: {mintedBy: hq}`, and name nothing specific to one
+installation. Text an agent writes into a mirror is still readable as a vault note (`vault_read`,
+search). It is never loaded as a skill, but treat it like any other note an agent could have
+written.

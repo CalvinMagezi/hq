@@ -164,8 +164,12 @@ pub fn enrich_system_prompt(
                         // vanish silently — it looked configured and never
                         // fired. `hq skills validate` now rejects that shape;
                         // this keeps existing skills working meanwhile.
-                        let summary_path = index.skills_dir.join(&entry.name).join("SUMMARY.md");
-                        std::fs::read_to_string(summary_path).ok().or_else(|| {
+                        super::builtin::read_skill_file(
+                            &index.skills_dir,
+                            &entry.name,
+                            "SUMMARY.md",
+                        )
+                        .or_else(|| {
                             tracing::warn!(
                                 skill = %entry.name,
                                 "autoLoad skill has no SUMMARY.md; falling back to a \
@@ -198,8 +202,7 @@ pub fn enrich_system_prompt(
 
         let final_content = if over_budget && entry.load_full {
             // Over budget: fall back to SUMMARY.md for this skill
-            let summary_path = index.skills_dir.join(&entry.name).join("SUMMARY.md");
-            std::fs::read_to_string(summary_path).ok()
+            super::builtin::read_skill_file(&index.skills_dir, &entry.name, "SUMMARY.md")
         } else if over_budget {
             // Non-loadFull skill over budget: skip entirely
             None

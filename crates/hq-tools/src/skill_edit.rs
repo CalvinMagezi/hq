@@ -8,6 +8,8 @@ use serde_yaml::{Mapping, Value};
 use crate::skill_audit::{archive_current, rollback};
 use crate::skills::{Severity, hint_problem, parse_skill, validate_skill, validate_skill_name};
 
+/// `provenance.mintedBy` on the skills HQ ships.
+pub const HQ_MINTER: &str = "hq";
 /// `provenance.mintedBy` on skills the post-session reviewer wrote.
 pub const REVIEWER: &str = "skill-review";
 /// Frontmatter flag that hands a skill the owner wrote to the reviewer.
@@ -51,6 +53,10 @@ fn read_live(skills_dir: &Path, name: &str) -> Result<String> {
 
 /// Whether the reviewer may edit this skill: it wrote it, or the owner adopted it.
 pub fn is_managed(skills_dir: &Path, name: &str) -> bool {
+    // A built-in is HQ's text whatever its vault copy says, so the review never owns one.
+    if crate::skills::builtin::is_active(name) {
+        return false;
+    }
     let Some(fm) = read_live(skills_dir, name)
         .ok()
         .and_then(|raw| split_frontmatter(&raw).ok().map(|(fm, _)| fm))

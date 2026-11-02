@@ -26,7 +26,7 @@ impl ContextPacketTool {
         let Some(skill) = args.get("skill").and_then(|v| v.as_str()) else {
             return Ok(need);
         };
-        let skills_dir = self.vault.vault_path().join("skills");
+        let skills_dir = hq_core::skills_dir(self.vault.vault_path());
         let Some(def) = crate::skills::parse_skill(&skills_dir, skill) else {
             bail!("skill {skill:?} not found");
         };
