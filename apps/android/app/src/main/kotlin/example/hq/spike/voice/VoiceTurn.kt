@@ -19,6 +19,8 @@ import kotlinx.coroutines.launch
 sealed interface TurnOutput {
     data class Thread(val id: String) : TurnOutput
     data class Say(val sentence: String) : TurnOutput
+    /** HQ is looking something up before it answers; worth a word so the owner is not left in silence. */
+    data object Working : TurnOutput
     data object Done : TurnOutput
     data class Failed(val reason: String) : TurnOutput
 }
@@ -46,6 +48,8 @@ class VoiceTurn(
         val reading = launch {
             val words = SpokenText()
             var thread: String? = null
+            // Said once, when HQ starts a tool before any of the answer: a lookup can take many seconds of silence.
+            var spoke = false
             events.onSubscription { listening.complete(Unit) }.transformWhile { event ->
                 val step = step(event, clientId, thread, words)
                 if (step.ours) lastHeard.set(System.currentTimeMillis())
@@ -55,12 +59,19 @@ class VoiceTurn(
                     emit(TurnOutput.Thread(step.thread))
                 }
                 if (step.ends && !ended.compareAndSet(false, true)) return@transformWhile false
-                step.out.forEach { emit(it) }
+                if (!spoke && event is ChatEvent.ToolStarted && step.ours) {
+                    spoke = true
+                    emit(TurnOutput.Working)
+                }
+                step.out.forEach {
+                    if (it is TurnOutput.Say) spoke = true
+                    emit(it)
+                }
                 !step.ends
             }.collect { send(it) }
         }
         listening.await()
-        if (!post(transcript, threadId, clientId)) {
+        if (!post(VOICE_CONTEXT + transcript, threadId, clientId)) {
             reading.cancel()
             send(TurnOutput.Failed(NOT_CONNECTED))
             return@channelFlow
@@ -120,6 +131,15 @@ class VoiceTurn(
 
     companion object {
         const val CLIENT_PREFIX = "voice-"
+
+        /**
+         * Sent ahead of every spoken question. HQ passes an <hq-context> block to the model and leaves it out of the
+         * saved chat, so the thread shows only what the owner said.
+         */
+        const val VOICE_CONTEXT = "<hq-context>The owner asked this by voice and will hear the answer read aloud. " +
+            "Answer in one to three short spoken sentences: no markdown, lists, tables, links or code. " +
+            "Use a tool only when the answer needs the owner's own data or an action. " +
+            "If more detail would help, offer it in one sentence instead of giving it.</hq-context>\n\n"
         /** HQ saves the question and says so within milliseconds; this long with no word means it never arrived. */
         const val START_WAIT_MS = 20_000L
         /** Tools can run for a while, but each step reports; this long with nothing at all is a stuck turn. */
