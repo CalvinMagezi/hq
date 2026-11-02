@@ -23,6 +23,8 @@ pub mod ingester;
 mod json_recovery;
 pub mod llm_bridge;
 pub mod local_embed;
+pub mod local_extract;
+pub mod neighbour_tags;
 pub mod ollama;
 pub mod openrouter_embed;
 pub mod querier;
@@ -39,6 +41,7 @@ pub use forgetter::{ForgetterResult, MemoryForgetter};
 pub use ingester::MemoryIngester;
 pub use llm_bridge::MemoryLlm;
 pub use local_embed::{LOCAL_EMBEDDING_MODEL, generate_embedding_local, local_model_dir};
+pub use neighbour_tags::neighbour_tags;
 pub use ollama::generate_embedding;
 pub use openrouter_embed::{
     generate_embedding as generate_embedding_openrouter, openrouter_embedding_model,

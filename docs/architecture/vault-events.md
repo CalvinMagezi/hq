@@ -127,6 +127,12 @@ daemon:
   is an LLM classification and needs `openrouter_api_key`.
 - The provider is fixed while `hq` runs: a config reload that changes it is refused, and a
   restart applies it.
+- `daemon.memory_extraction: local` (default `llm`) turns each qualifying chat turn into a
+  memory without a model: the summary is the question and the first sentence of the answer,
+  names are recurring capitalised phrases, topics are borrowed from the nearest tagged notes the
+  same way as triage (only once local vectors exist), and importance starts at 0.5 and rises
+  with the salience pattern. Memory consolidation still writes its insights with a model when
+  it runs; a phone with the data saver on does not run it.
 
 Each vector is stored with its model's label (`model2vec/potion-base-8M@<revision>` for local),
 and search compares a query only with vectors from the same model. Switching providers marks
