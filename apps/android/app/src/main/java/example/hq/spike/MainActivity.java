@@ -75,7 +75,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < REAUTH_POLLS; i++) {
             try {
                 String token = HubService.token(this);
-                HttpURLConnection c = (HttpURLConnection) new URL(BASE + "/api/notifications?limit=1").openConnection();
+                HttpURLConnection c = Loopback.open(new URL(BASE + "/api/notifications?limit=1"));
                 c.setConnectTimeout(500);
                 c.setReadTimeout(500);
                 c.setRequestProperty("Authorization", "Bearer " + token);
@@ -105,7 +105,7 @@ public class MainActivity extends Activity {
     private void waitHealthThenLoad() {
         for (int i = 0; i < HEALTH_POLLS; i++) {
             try {
-                HttpURLConnection c = (HttpURLConnection) new URL(BASE + "/health").openConnection();
+                HttpURLConnection c = Loopback.open(new URL(BASE + "/health"));
                 c.setConnectTimeout(500);
                 c.setReadTimeout(500);
                 if (c.getResponseCode() == 200) {
