@@ -35,6 +35,22 @@ pub struct DaemonConfig {
     /// Where note vectors come from. `local` needs no network once its model is on disk.
     #[serde(default)]
     pub embedding_provider: EmbeddingProvider,
+
+    /// How a chat turn becomes a memory: `llm` asks a model, `local` asks none.
+    #[serde(default)]
+    pub memory_extraction: MemoryExtraction,
+}
+
+/// How chat turns are turned into memories.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryExtraction {
+    /// One model call per turn writes the summary, names, topics and importance.
+    #[default]
+    Llm,
+    /// No model: an extractive summary, recurring names, tags borrowed from the nearest tagged
+    /// notes (with the local embedder), and a salience-based importance.
+    Local,
 }
 
 /// The source of note embeddings.
@@ -62,6 +78,7 @@ impl Default for DaemonConfig {
             embedding_batch_size: default_embed_batch(),
             embedding_interval_secs: default_embed_interval(),
             embedding_provider: EmbeddingProvider::default(),
+            memory_extraction: MemoryExtraction::default(),
         }
     }
 }

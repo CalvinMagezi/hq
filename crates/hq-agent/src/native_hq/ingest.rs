@@ -86,13 +86,17 @@ pub fn wire_post_turn_ingestion(
     let vault_path = vault_path.to_path_buf();
     let harness = harness.to_string();
     let session_id = session.session_id.clone();
-    // Built once per session; the router reads config from disk.
-    let router =
-        Arc::new(hq_llm::router::LlmRouter::from_env()) as Arc<dyn hq_llm::provider::LlmProvider>;
-    let llm = hq_memory::MemoryLlm::with_provider(
-        router,
-        hq_memory::ingester::INGEST_MODEL_ALIAS.to_string(),
-    );
+    // Built once per session; the router reads config from disk. `None` extracts without a model.
+    let local = hq_core::config::HqConfig::load()
+        .is_ok_and(|c| c.daemon.memory_extraction == hq_core::config::MemoryExtraction::Local);
+    let llm = (!local).then(|| {
+        let router = Arc::new(hq_llm::router::LlmRouter::from_env())
+            as Arc<dyn hq_llm::provider::LlmProvider>;
+        hq_memory::MemoryLlm::with_provider(
+            router,
+            hq_memory::ingester::INGEST_MODEL_ALIAS.to_string(),
+        )
+    });
     session.set_post_turn_callback(Arc::new(move |exchange| {
         let reply_chars: usize = exchange
             .iter()
@@ -115,7 +119,10 @@ pub fn wire_post_turn_ingestion(
             if !hq_memory::turn_gate::admit(decisions.as_ref(), &session_id, &text).await {
                 return;
             }
-            let mut ingester = hq_memory::MemoryIngester::new(db, vault_path, llm);
+            let mut ingester = match llm {
+                Some(llm) => hq_memory::MemoryIngester::new(db, vault_path, llm),
+                None => hq_memory::MemoryIngester::new_local(db, vault_path),
+            };
             if let Err(e) = ingester
                 .ingest(&text, "chat-turn", Some(&harness), None)
                 .await

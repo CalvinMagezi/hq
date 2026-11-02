@@ -1,7 +1,8 @@
 //! MemoryIngester — converts raw text into a structured memory entry.
 //!
-//! One LLM call extracts a summary, entities, topics and importance; the
-//! result is stored in `memories`, and each entity gets a concept page.
+//! One LLM call (or, with `daemon.memory_extraction: local`, no model at all; see
+//! `local_extract`) extracts a summary, entities, topics and importance; the result is stored in
+//! `memories`, and each entity gets a concept page.
 
 use anyhow::Result;
 use hq_db::Database;
@@ -64,7 +65,8 @@ fn apply_salience_boost(text: &str, importance: f64, topics: &mut Vec<String>) -
 pub struct MemoryIngester {
     db: Database,
     vault_path: PathBuf,
-    llm: MemoryLlm,
+    /// `None` extracts on the device without a model.
+    llm: Option<MemoryLlm>,
 }
 
 impl MemoryIngester {
@@ -74,7 +76,16 @@ impl MemoryIngester {
         Self {
             db,
             vault_path,
-            llm,
+            llm: Some(llm),
+        }
+    }
+
+    /// An ingester that asks no model (`daemon.memory_extraction: local`).
+    pub fn new_local(db: Database, vault_path: PathBuf) -> Self {
+        Self {
+            db,
+            vault_path,
+            llm: None,
         }
     }
 
@@ -104,16 +115,20 @@ impl MemoryIngester {
         let text = &hq_core::redact::redact_secrets(text);
 
         let truncated: String = text.chars().take(PROMPT_TEXT_CHARS).collect();
-        let user_msg = format!("Extract from this text:\n\n{truncated}");
-        let extracted = match self
-            .llm
-            .json::<ExtractedMemory>(METADATA_PROMPT, &user_msg)
-            .await
-        {
-            Ok(e) => e,
-            Err(e) => {
-                warn!(error = %e, "memory extraction failed");
-                return Ok(None);
+        let extracted = match &self.llm {
+            None => crate::local_extract::extract_local(&self.db, &truncated).await,
+            Some(llm) => {
+                let user_msg = format!("Extract from this text:\n\n{truncated}");
+                match llm
+                    .json::<ExtractedMemory>(METADATA_PROMPT, &user_msg)
+                    .await
+                {
+                    Ok(e) => e,
+                    Err(e) => {
+                        warn!(error = %e, "memory extraction failed");
+                        return Ok(None);
+                    }
+                }
             }
         };
         if extracted.summary.is_empty() {
@@ -189,6 +204,34 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_local_ingester_stores_a_memory_without_any_model() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let mut ingester = super::MemoryIngester::new_local(db.clone(), vault.path().to_path_buf());
+        let turn = "user: Did the Galaxy A32 install work?\n---\nassistant: Yes, the release installed on the Galaxy A32 and the decision was to keep the data saver on. Search now runs locally.";
+        let id = ingester
+            .ingest(turn, "chat-turn", Some("test"), None)
+            .await
+            .unwrap()
+            .expect("a memory");
+        let (summary, entities, importance): (String, String, f64) = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT summary, entities, importance FROM memories WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?)
+            })
+            .unwrap();
+        assert!(
+            summary.starts_with("Asked: Did the Galaxy A32 install work?"),
+            "{summary}"
+        );
+        assert!(entities.contains("Galaxy A32"), "{entities}");
+        assert!(importance > 0.5, "'decision' is salient: {importance}");
     }
 
     /// In-process fake `LlmProvider` returning a fixed extraction so tests

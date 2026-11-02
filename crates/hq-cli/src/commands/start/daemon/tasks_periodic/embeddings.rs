@@ -12,14 +12,6 @@ use super::super::helpers::*;
 const TRIAGE_SAMPLE_CHARS: usize = 500;
 /// Untagged notes looked at per run.
 const TRIAGE_BATCH: usize = 5;
-/// Neighbours consulted when tags are borrowed from similar notes.
-const TRIAGE_NEIGHBOURS: usize = 8;
-/// A neighbour below this cosine similarity is too far away to lend its tags. Tuned on
-/// potion-base-8M, where related notes score about 0.4 to 0.6 and unrelated ones under 0.25.
-const TRIAGE_MIN_SIMILARITY: f32 = 0.4;
-/// A tag is borrowed only when at least this many neighbours carry it.
-const TRIAGE_MIN_VOTES: usize = 2;
-const TRIAGE_MAX_TAGS: usize = 3;
 
 /// Bring the keyword index in step with the notes on disk.
 /// Uses incremental hash-based diffing: skips unchanged files, handles deletions.
@@ -117,69 +109,23 @@ async fn triage_by_neighbours(vault_path: &Path, db: &Database, notes: &[PathBuf
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        let embedding = match hq_memory::generate_embedding_local(strip_frontmatter(&content)).await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                debug!(error = %e, "inbox-triage: local embedding failed");
-                return triaged;
-            }
-        };
         let own = path
             .strip_prefix(vault_path)
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let neighbours = db.with_conn(|conn| {
-            hq_db::search::semantic_search(
-                conn,
-                &embedding,
-                hq_memory::LOCAL_EMBEDDING_MODEL,
-                TRIAGE_NEIGHBOURS + 1,
-            )
-        });
-        let Ok(neighbours) = neighbours else {
-            continue;
-        };
-        let votes: Vec<(f32, Vec<String>)> = neighbours
-            .into_iter()
-            .filter(|n| n.note_path != own)
-            .take(TRIAGE_NEIGHBOURS)
-            .map(|n| (n.relevance as f32, n.tags))
-            .collect();
-        let tags = vote_tags(&votes);
+        let tags =
+            match hq_memory::neighbour_tags(db, strip_frontmatter(&content), Some(&own)).await {
+                Ok(tags) => tags,
+                Err(e) => {
+                    debug!(error = %e, "inbox-triage: neighbour tags failed");
+                    return triaged;
+                }
+            };
         if !tags.is_empty() && update_note_metadata(path, None, &tags).is_ok() {
             triaged += 1;
         }
     }
     triaged
-}
-
-/// The tags at least `TRIAGE_MIN_VOTES` close neighbours share, strongest support first.
-// ponytail: similarity-weighted vote with fixed thresholds; calibrate against reviewed tags once
-// the owner's corrections are recorded.
-fn vote_tags(neighbours: &[(f32, Vec<String>)]) -> Vec<String> {
-    let mut support: Vec<(String, usize, f32)> = Vec::new();
-    for (similarity, tags) in neighbours {
-        if *similarity < TRIAGE_MIN_SIMILARITY {
-            continue;
-        }
-        for tag in tags {
-            match support.iter_mut().find(|(t, _, _)| t == tag) {
-                Some(entry) => {
-                    entry.1 += 1;
-                    entry.2 += similarity;
-                }
-                None => support.push((tag.clone(), 1, *similarity)),
-            }
-        }
-    }
-    support.retain(|(_, votes, _)| *votes >= TRIAGE_MIN_VOTES);
-    support.sort_by(|a, b| b.2.total_cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
-    support
-        .into_iter()
-        .take(TRIAGE_MAX_TAGS)
-        .map(|(tag, _, _)| tag)
-        .collect()
 }
 
 fn write_triage_report(vault_path: &Path, triaged: u32) {
@@ -337,30 +283,7 @@ fn update_note_metadata(path: &Path, category: Option<&str>, tags: &[String]) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{update_note_metadata, vote_tags};
-
-    fn n(similarity: f32, tags: &[&str]) -> (f32, Vec<String>) {
-        (similarity, tags.iter().map(|t| t.to_string()).collect())
-    }
-
-    #[test]
-    fn tags_come_from_close_neighbours_that_agree() {
-        let tags = vote_tags(&[
-            n(0.7, &["android", "edge-ai"]),
-            n(0.6, &["edge-ai", "research"]),
-            n(0.5, &["android", "edge-ai"]),
-            n(0.3, &["research", "research-noise"]),
-            n(0.2, &["research"]),
-        ]);
-        // research has one close vote; the far neighbours do not count.
-        assert_eq!(tags, ["edge-ai", "android"]);
-    }
-
-    #[test]
-    fn no_agreement_means_no_tags() {
-        assert!(vote_tags(&[n(0.9, &["a"]), n(0.8, &["b"])]).is_empty());
-        assert!(vote_tags(&[]).is_empty());
-    }
+    use super::update_note_metadata;
 
     #[test]
     fn a_local_triage_writes_tags_without_a_category() {
