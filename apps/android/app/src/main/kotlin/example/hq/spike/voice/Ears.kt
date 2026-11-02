@@ -125,7 +125,7 @@ class Ears(app: Context) {
                 ),
                 tokens = File(dir, VoiceModels.STT_TOKENS).path,
                 numThreads = THREADS,
-                modelType = "zipformer",
+                modelType = "zipformer2",
             ),
             endpointConfig = EndpointConfig(
                 rule1 = EndpointRule(false, NOTHING_SAID_S, 0f),
@@ -136,10 +136,11 @@ class Ears(app: Context) {
             decodingMethod = "greedy_search",
         )
 
-        /** The model writes capitals with no punctuation; this reads like a typed question. */
+        /** Text from a model that writes all capitals is lowered; a model that writes proper case keeps its names. */
         fun readable(text: String): String {
-            val lower = text.trim().lowercase()
-            return lower.replaceFirstChar { it.titlecase() }
+            val trimmed = text.trim()
+            val cased = if (trimmed.any { it.isLowerCase() }) trimmed else trimmed.lowercase()
+            return cased.replaceFirstChar { it.titlecase() }
         }
     }
 }

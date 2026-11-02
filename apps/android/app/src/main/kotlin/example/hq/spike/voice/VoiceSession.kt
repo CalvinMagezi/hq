@@ -141,8 +141,9 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
         ).trim()
         voiceReady.await()
         if (words.isEmpty()) return refuse(NOTHING_HEARD)
-        _state.update { it.copy(phase = VoicePhase.Thinking, heard = words, reply = "") }
-        turn.ask(words, threadId).collect(::onOutput)
+        val question = Invocation.strip(words)
+        _state.update { it.copy(phase = VoicePhase.Thinking, heard = question, reply = "") }
+        turn.ask(question, threadId).collect(::onOutput)
         mouth.drain()
         _state.update { it.copy(phase = VoicePhase.Idle) }
     }

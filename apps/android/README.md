@@ -107,7 +107,9 @@ reads the reply aloud a sentence at a time. Tap the button to stop listening ear
 or to ask a follow-up in the same chat. On a Galaxy A32 the side key opens only the power menu, so hold
 Home there.
 
-What stays on the phone: the audio and its recognition (sherpa-onnx streaming Zipformer), the spoken reply
+What stays on the phone: the audio and its recognition (sherpa-onnx with the Kroko English streaming model,
+CC-BY-SA 4.0, chosen after a real-voice test where the smaller LibriSpeech model lost first words and
+technical terms), the spoken reply
 (sherpa-onnx with the LJ Speech Piper voice), and the screen. For HQ the microphone is open only while the
 sheet is showing (another app's dictation, below, opens it for that app); audio is read in 100 ms pieces,
 decoded and dropped, never written. The assistant turns off
@@ -120,7 +122,10 @@ on-device model, not a stub: any app that reaches it gets working dictation that
 lets in only apps that hold the microphone permission. Before the models are downloaded it answers
 "language unavailable".
 
-The speech models (about 128 MB) are downloaded once, after the owner taps Get under a notice, from the
+People open with "Hey HQ" out of habit; the recogniser has never learned "HQ" and writes it as "Ue",
+"Ahq" and so on, so `voice/Invocation.kt` takes that greeting off the start before the question is sent.
+
+The speech models (about 80 MB) are downloaded once, after the owner taps Get under a notice, from the
 sherpa-onnx releases on GitHub. Each archive has a pinned SHA-256 in `voice/VoiceModels.kt`, and only the
 named files are unpacked into `no_backup/voice/`. The download sends nothing about the owner. Logcat gets
 the sheet's phase changes with a clock (`adb logcat -s HqVoice`), never the words.

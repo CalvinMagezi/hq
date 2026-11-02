@@ -116,27 +116,31 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
         private const val BUFFER = 64 * 1024
         private const val MARK_CHARS = 12
         private const val RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
-        private const val STT_DIR = "sherpa-onnx-streaming-zipformer-en-20M-2023-02-17-mobile"
+        private const val STT_DIR = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
         private const val TTS_DIR = "vits-piper-en_US-ljspeech-medium-int8"
 
-        const val STT_ENCODER = "encoder.int8.onnx"
+        const val STT_ENCODER = "encoder.onnx"
         const val STT_DECODER = "decoder.onnx"
-        const val STT_JOINER = "joiner.int8.onnx"
+        const val STT_JOINER = "joiner.onnx"
         const val STT_TOKENS = "tokens.txt"
         const val TTS_MODEL = "voice.onnx"
         const val TTS_TOKENS = "tokens.txt"
         const val TTS_LEXICON = "lexicon-en-us.txt"
 
-        /** Streaming English recognition (Apache-2.0) and the LJ Speech voice (public-domain recordings). */
+        /**
+         * Streaming English recognition: Kroko (CC-BY-SA 4.0, trained on everyday speech; the LibriSpeech model
+         * before it lost first words and technical terms with a real voice). The LJ Speech voice is from
+         * public-domain recordings.
+         */
         val SOURCES: List<Pair<String, ModelSource>> = listOf(
             "stt" to ModelSource(
                 "$RELEASES/asr-models/$STT_DIR.tar.bz2",
-                "753a5362538539212442efbfb8dd5748db82e35e7deaec5330f49c56e81e40fd",
-                107_569_151,
+                "c8676e5ff9ac2a85296e53ee0fd4d5fb1db6770e7a7647166eeafe349ade6834",
+                57_267_600,
                 mapOf(
-                    "$STT_DIR/encoder-epoch-99-avg-1.int8.onnx" to STT_ENCODER,
-                    "$STT_DIR/decoder-epoch-99-avg-1.onnx" to STT_DECODER,
-                    "$STT_DIR/joiner-epoch-99-avg-1.int8.onnx" to STT_JOINER,
+                    "$STT_DIR/encoder.onnx" to STT_ENCODER,
+                    "$STT_DIR/decoder.onnx" to STT_DECODER,
+                    "$STT_DIR/joiner.onnx" to STT_JOINER,
                     "$STT_DIR/tokens.txt" to STT_TOKENS,
                 ),
             ),
