@@ -105,9 +105,9 @@ pub struct RelayConfig {
     #[serde(default)]
     pub background_progress_secs: Option<u64>,
 
-    /// Run a harness session's final pane output through the LLM before
-    /// delivering it, so the operator gets a readable outcome instead of a
-    /// terminal dump. Default true. Any failure falls back to the raw excerpt.
+    /// Run a harness session's final pane output through an LLM before it goes to the inbox,
+    /// instead of the exit code, goal and the tail of the output. Default false: the
+    /// deterministic report needs no model. Any failure falls back to the raw excerpt.
     #[serde(default = "default_summarize_session_exits")]
     pub summarize_session_exits: bool,
 
@@ -170,7 +170,7 @@ fn default_background_turn_max_days() -> u64 {
 }
 
 fn default_summarize_session_exits() -> bool {
-    true
+    false
 }
 
 fn default_session_exit_summary_timeout_secs() -> u64 {
@@ -242,18 +242,18 @@ mod tests {
     }
 
     #[test]
-    fn relay_config_session_exit_summary_defaults_to_enabled() {
+    fn relay_config_session_exit_summary_defaults_to_disabled() {
         let yaml = "discord_enabled: false\ntelegram_enabled: true\n";
         let config: RelayConfig = serde_yaml::from_str(yaml).unwrap();
-        assert!(config.summarize_session_exits);
+        assert!(!config.summarize_session_exits);
         assert_eq!(config.session_exit_summary_timeout_secs, 90);
     }
 
     #[test]
-    fn relay_config_session_exit_summary_can_be_disabled() {
-        let yaml = "discord_enabled: false\ntelegram_enabled: true\nsummarize_session_exits: false\nsession_exit_summary_timeout_secs: 30\n";
+    fn relay_config_session_exit_summary_can_be_enabled() {
+        let yaml = "discord_enabled: false\ntelegram_enabled: true\nsummarize_session_exits: true\nsession_exit_summary_timeout_secs: 30\n";
         let config: RelayConfig = serde_yaml::from_str(yaml).unwrap();
-        assert!(!config.summarize_session_exits);
+        assert!(config.summarize_session_exits);
         assert_eq!(config.session_exit_summary_timeout_secs, 30);
     }
 
