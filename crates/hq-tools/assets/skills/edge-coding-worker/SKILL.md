@@ -1,7 +1,7 @@
 ---
 name: edge-coding-worker
-description: Do a small coding task on a GitHub repository without git, from a phone or any machine. Fetch the repository, have a coding sub-agent edit it, publish the change as an hq/ branch and a pull request, read CI, and fix until CI passes. Use when asked to work a coding task on a repository listed in github_write.repos, or an HQ task tagged edge-worker.
-hints: [edge-worker, github_write, github_clone]
+description: Do a small coding task on a GitHub repository without git, from a phone or any machine. Fetch the repository, have a coding sub-agent edit it, publish the change as an hq/ branch and a pull request, read CI, and fix until CI passes. Use when asked to work a coding task on a repository listed in github_write.repos, or an HQ task tagged edge-task.
+hints: [edge-task, edge-worker, github_write, github_clone]
 provenance:
   mintedBy: hq
 ---

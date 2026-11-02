@@ -66,7 +66,7 @@ fn add(db: &Database, id: &str, tags: &[&str], assignees: &[&str], priority: Opt
             "in-1",
             &t::NewTask {
                 title: id,
-                description: "",
+                description: "Work in O/R, please.",
                 tags: &tags,
                 assignees: &assignees,
                 priority,
@@ -89,7 +89,9 @@ fn set_status(db: &Database, id: &str, status: &str) {
 }
 
 fn next(db: &Database) -> Option<String> {
-    db.with_conn(next_task).unwrap().map(|t| t.id)
+    db.with_conn(|c| next_task(c, &["o/r".to_string()]))
+        .unwrap()
+        .map(|t| t.id)
 }
 
 fn on() -> HqConfig {
@@ -121,6 +123,17 @@ fn the_most_urgent_free_worker_task_is_taken() {
     assert_eq!(next(&db).as_deref(), Some("tk-high"));
     set_status(&db, "tk-high", t::STATUS_READY_FOR_REVIEW);
     assert_eq!(next(&db).as_deref(), Some("tk-low"));
+}
+
+#[test]
+fn a_task_that_names_no_allowed_repository_is_not_taken() {
+    let db = db();
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    let elsewhere = db
+        .with_conn(|c| next_task(c, &["someone/else".to_string()]))
+        .unwrap();
+    assert!(elsewhere.is_none());
+    assert!(next(&db).is_some(), "the repository match ignores case");
 }
 
 #[test]

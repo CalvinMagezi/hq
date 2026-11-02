@@ -1,6 +1,6 @@
 //! `edge-worker-dispatch`: with `github_write.dispatch_tasks` on, the daemon picks up open tasks
-//! tagged `edge-worker` and has HQ work each one with the `edge-coding-worker` skill, one at a
-//! time, so a task filed from anywhere becomes a pull request with no other machine involved.
+//! tagged `edge-task` that name a repository in `github_write.repos`, and has HQ work each one
+//! with the `edge-coding-worker` skill, one at a time.
 
 use std::sync::Arc;
 
@@ -10,8 +10,9 @@ use hq_db::Database;
 use hq_db::tasks as t;
 use serde_json::json;
 
-/// Tasks carrying this tag are the worker's queue.
-pub const DISPATCH_TAG: &str = "edge-worker";
+/// Tasks carrying this tag are the worker's queue. Its own tag, so tasks that are merely about
+/// the worker are never taken for work by it.
+pub const DISPATCH_TAG: &str = "edge-task";
 /// The built-in skill the work follows; dispatch is off while it is not active.
 const WORKER_SKILL: &str = "edge-coding-worker";
 /// An assignee that marks a task as HQ's own, beside the unassigned ones.
@@ -51,7 +52,8 @@ pub async fn dispatch(
     if let Some(busy) = db.with_conn(running_task)? {
         return Ok(Outcome::Busy(busy));
     }
-    let Some(task) = db.with_conn(next_task)? else {
+    let repos = config.github_write.repos.clone();
+    let Some(task) = db.with_conn(move |c| next_task(c, &repos))? else {
         return Ok(Outcome::Idle);
     };
     let (ask_id, repeated) = ask_to_work(db, runner, &task).await?;
@@ -79,14 +81,20 @@ fn running_task(conn: &rusqlite::Connection) -> Result<Option<String>> {
     Ok(running.into_iter().next().map(|task| task.display_id))
 }
 
-/// The most urgent open worker task that nothing blocks and no one else holds.
-fn next_task(conn: &rusqlite::Connection) -> Result<Option<t::Task>> {
+/// The most urgent open worker task that nothing blocks, no one else holds, and that names one
+/// of the repositories the worker may push to.
+fn next_task(conn: &rusqlite::Connection, repos: &[String]) -> Result<Option<t::Task>> {
     Ok(worker_tasks(conn, t::STATUS_TO_DO)?
         .into_iter()
         .find(|task| {
             let free = task.assignees.is_empty() || task.assignees.iter().any(|a| a == HQ_ASSIGNEE);
-            free && task.blocked_by.is_empty()
+            free && task.blocked_by.is_empty() && names_a_repo(task, repos)
         }))
+}
+
+fn names_a_repo(task: &t::Task, repos: &[String]) -> bool {
+    let text = format!("{}\n{}", task.title, task.description).to_ascii_lowercase();
+    repos.iter().any(|r| text.contains(&r.to_ascii_lowercase()))
 }
 
 /// Asks HQ, through the same path as `hq_ask`, to work the task. The key names the task and its
