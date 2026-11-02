@@ -9,4 +9,8 @@ pub struct GithubWriteConfig {
     /// Repositories as `owner/name`.
     #[serde(default)]
     pub repos: Vec<String>,
+    /// Let the daemon pick up open tasks tagged `edge-worker` by itself and work them with the
+    /// `edge-coding-worker` skill (`edge-worker-dispatch`). Off unless set.
+    #[serde(default)]
+    pub dispatch_tasks: bool,
 }

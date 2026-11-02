@@ -439,6 +439,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         // Detaches its pass, so the one-minute timeout only covers starting it.
         DaemonTask::with_default_timeout("verify-dispatch", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("copilot-usage", Duration::from_secs(60)),
+        // Starts a reply and returns; the work runs in its chat thread.
+        DaemonTask::with_default_timeout("edge-worker-dispatch", Duration::from_secs(120)),
         DaemonTask::with_default_timeout("subagent-supervisor", Duration::from_secs(60)),
         // Every 5 minutes (periodic tier — 2min timeout)
         DaemonTask::with_default_timeout("heartbeat", Duration::from_secs(300)),
@@ -605,6 +607,7 @@ async fn dispatch_task(
             tasks_periodic::session_supervisor::run_session_supervisor(vault_path, db, config).await
         }
         "stack-dispatch" => tasks_periodic::run_stack_dispatch(vault_path, db, config).await,
+        "edge-worker-dispatch" => tasks_periodic::run_edge_worker_dispatch(db, config).await,
         "verify-dispatch" => tasks_periodic::run_verify_dispatch(vault_path, db, config).await,
         "verify-audit" => tasks_periodic::run_verify_audit(vault_path, db, config).await,
         "verify-briefing" => tasks_periodic::run_verify_briefing(vault_path, db, config).await,

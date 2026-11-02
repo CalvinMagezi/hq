@@ -90,3 +90,24 @@ shell does not have.
   must tolerate a vanished checkout by fetching again.
 - With a `backends:` chain configured, provider keys saved in Settings reach a model only through
   a backend entry that declares them.
+
+## Working tasks without being asked
+
+With `github_write.dispatch_tasks: true`, the daemon task `edge-worker-dispatch` (every two
+minutes, in every edition with a daemon) picks up open tasks tagged `edge-worker` by itself, so a
+task filed from the phone, the web app or a chat becomes a pull request with no other machine
+involved.
+
+- **Which task.** The most urgent open one that nothing blocks and that is unassigned or
+  assigned to `hq`. The task names its repository and, if it wants, its worker models, in the
+  order to escalate through.
+- **One at a time.** Nothing new starts while an `edge-worker` task is in progress.
+- **How.** It asks HQ, through the same path as `hq_ask`, to work the task. The reply runs in a
+  chat thread the owner can open and follow. The ask's key names the task and its last change,
+  so a tick that comes round before HQ has claimed the task reuses the same ask.
+- **Off unless switched on.** The switch is under `github_write`, which `config_manage`
+  refuses, and it does nothing unless the `edge-coding-worker` built-in is active.
+
+Anyone who can create a task can queue work for the worker, agents included. That is acceptable
+for the same reasons the worker is: the repositories are the owner's allowlist, every result is a
+pull request a person merges, and nothing reaches the default branch on its own.
