@@ -10,6 +10,7 @@ on:
       - "apps/desktop/**"
       - "crates/hq-desktop/**"
       - "crates/hq-bridge/**"
+      - "scripts/desktop/**"
       - ".github/workflows/desktop.yml"
   push:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - "apps/desktop/**"
       - "crates/hq-desktop/**"
       - "crates/hq-bridge/**"
+      - "scripts/desktop/**"
       - ".github/workflows/desktop.yml"
 
 permissions:
@@ -76,3 +78,8 @@ jobs:
           app="src-tauri/target/release/bundle/macos/HQ.app"
           test -x "$app/Contents/MacOS/hq-desktop"
           plutil -extract NSLocalNetworkUsageDescription raw "$app/Contents/Info.plist"
+
+      - name: Sign ad hoc and make the DMG (the release script, no secrets)
+        run: |
+          bash ../../scripts/desktop/sign-macos.sh src-tauri/target/release/bundle/macos/HQ.app "$RUNNER_TEMP/HQ.dmg"
+          hdiutil verify "$RUNNER_TEMP/HQ.dmg"
