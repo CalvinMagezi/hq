@@ -473,6 +473,19 @@ pub fn records_root() -> PathBuf {
     hq_core::config::HqConfig::hq_dir().join("github")
 }
 
+/// Removes a checkout and its base record so the next fetch starts from the default branch. The
+/// record of pushed commits stays: a later push still knows which `hq/` branches are its own.
+fn discard_checkout(dest: &Path, records: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(dest) {
+        Ok(meta) if meta.is_dir() => std::fs::remove_dir_all(dest)?,
+        Ok(_) => std::fs::remove_file(dest)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e).with_context(|| format!("cannot read {}", dest.display())),
+    }
+    let _ = std::fs::remove_file(tarball::base_record_path(records));
+    Ok(())
+}
+
 /// Creates the clone folder readable by this user only. In a shared temp directory another user
 /// could have made it first; setting its mode then fails, and nothing is cloned into it.
 fn make_private_root(root: &Path) -> Result<()> {
@@ -501,8 +514,9 @@ impl HqTool for GithubCloneTool {
     fn description(&self) -> &str {
         "Shallow-clone a GitHub repo (owner/name) into a scratch folder and return its path, so it can be \
          searched with grep and read_file. Without git or gh installed it downloads the default branch's tarball \
-         instead (no history, links and .git entries left out). Read-only use: the checkout is for reading, not for \
-         committing or pushing."
+         instead (no history, links and .git entries left out); github_write can publish changes made in such a \
+         checkout. An existing checkout is reused as it is, edits included; pass refresh: true to discard it and \
+         fetch the default branch again, as at the start of a new task."
     }
 
     fn category(&self) -> &str {
@@ -512,7 +526,10 @@ impl HqTool for GithubCloneTool {
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {"repo": {"type": "string", "description": "owner/name"}},
+            "properties": {
+                "repo": {"type": "string", "description": "owner/name"},
+                "refresh": {"type": "boolean", "description": "Discard the existing checkout, edits included, and fetch again (default false)"}
+            },
             "required": ["repo"]
         })
     }
@@ -522,6 +539,13 @@ impl HqTool for GithubCloneTool {
         let dest = clone_root().join(&repo);
         let records = records_root().join(&repo);
         let _claim = InFlight::claim(&dest)?;
+        if args
+            .get("refresh")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            discard_checkout(&dest, &records)?;
+        }
         let method = clone_method(which::which("gh").is_ok(), which::which("git").is_ok());
         if let Some(reply) = cached_reply(&dest, &records, method)? {
             return Ok(reply);
@@ -622,6 +646,24 @@ mod tests {
             !dest.exists(),
             "a checkout without a usable record is cleared to fetch again"
         );
+    }
+
+    #[test]
+    fn a_refresh_drops_the_checkout_and_its_base_but_keeps_the_pushed_record() {
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("clones/o/r");
+        let records = root.path().join("records/o/r");
+        std::fs::create_dir_all(dest.join("src")).unwrap();
+        std::fs::write(dest.join("src/edited.rs"), b"work in progress").unwrap();
+        std::fs::create_dir_all(&records).unwrap();
+        std::fs::write(tarball::base_record_path(&records), b"{}").unwrap();
+        std::fs::write(records.join("pushed.json"), b"{}").unwrap();
+
+        discard_checkout(&dest, &records).unwrap();
+        assert!(!dest.exists());
+        assert!(!tarball::base_record_path(&records).exists());
+        assert!(records.join("pushed.json").exists());
+        discard_checkout(&dest, &records).unwrap();
     }
 
     #[test]
