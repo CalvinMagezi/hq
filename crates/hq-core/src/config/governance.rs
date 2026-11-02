@@ -4,11 +4,13 @@ use super::default_true;
 
 /// Governance configuration: agent self-review, skill-write approval, and
 /// the bash tool's execution boundary.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GovernanceConfig {
-    /// Run the post-session background review hook to propose memories/skills.
-    #[serde(default = "default_true")]
-    pub background_review: bool,
+    /// Run the post-session background review hook to propose memories/skills (one model call
+    /// per review). Unset means on, except on a phone with its data saver on; see
+    /// `HqConfig::reviews_skills_in_background`.
+    #[serde(default)]
+    pub background_review: Option<bool>,
     /// Require human approval before skill writes take effect.
     /// When true, skill_manage writes staged to `<skills_dir>/_proposed/`.
     #[serde(default)]
@@ -20,17 +22,6 @@ pub struct GovernanceConfig {
     /// editing files or running state-changing commands itself.
     #[serde(default)]
     pub orchestrator_role: bool,
-}
-
-impl Default for GovernanceConfig {
-    fn default() -> Self {
-        Self {
-            background_review: true,
-            skills_write_approval: false,
-            bash: BashConfig::default(),
-            orchestrator_role: false,
-        }
-    }
 }
 
 /// How the `bash` tool isolates the commands it runs.

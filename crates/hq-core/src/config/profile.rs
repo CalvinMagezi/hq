@@ -93,6 +93,15 @@ impl Default for MobileConfig {
 }
 
 impl HqConfig {
+    /// Whether finished sessions get a background skill review, which costs a model call. An
+    /// explicit `governance.background_review` always wins; unset, a mobile instance with its
+    /// data saver on skips it, like the other timed model calls.
+    pub fn reviews_skills_in_background(&self) -> bool {
+        self.governance
+            .background_review
+            .unwrap_or(!(self.profile == Profile::Mobile && self.mobile.data_saver))
+    }
+
     /// Whether this instance embeds notes. Lite never does. A mobile instance with its data
     /// saver on does only with the local embedder, which keeps note text on the device and uses
     /// no data after its one model download.
@@ -844,6 +853,27 @@ mod tests {
             saving.mobile.data_saver,
             "the data saver is on unless the owner turns it off"
         );
+    }
+
+    #[test]
+    fn skill_review_follows_the_data_saver_unless_set() {
+        let with = |profile: Profile, data_saver: bool, set: Option<bool>| {
+            let mut c = HqConfig {
+                profile,
+                mobile: MobileConfig { data_saver },
+                ..HqConfig::default()
+            };
+            c.governance.background_review = set;
+            c.reviews_skills_in_background()
+        };
+        assert!(with(Profile::Full, true, None));
+        assert!(with(Profile::Mobile, false, None));
+        assert!(!with(Profile::Mobile, true, None));
+        assert!(
+            with(Profile::Mobile, true, Some(true)),
+            "an explicit value wins"
+        );
+        assert!(!with(Profile::Full, false, Some(false)));
     }
 
     #[test]
