@@ -76,6 +76,32 @@ class VoiceTurnTest {
     }
 
     @Test
+    fun aLookupBeforeTheAnswerIsAnnouncedOnce() = runBlocking {
+        val events = bus()
+        val step = example.hq.spike.data.ToolStep("c1", "task_list", null, null, null)
+        val out = turn(events, mutableListOf()) { id ->
+            listOf(
+                ChatEvent.TurnStart("t6", id, null),
+                ChatEvent.ToolStarted("t6", step),
+                ChatEvent.ToolStarted("t6", step.copy(id = "c2")),
+                ChatEvent.Text("t6", "Two tasks. "),
+                ChatEvent.TurnEnd("t6", "m6", false),
+            )
+        }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
+        assertEquals(listOf(TurnOutput.Thread("t6"), TurnOutput.Working, TurnOutput.Say("Two tasks."), TurnOutput.Done), out)
+    }
+
+    @Test
+    fun aToolAfterSpeechStartedIsNotAnnounced() = runBlocking {
+        val events = bus()
+        val step = example.hq.spike.data.ToolStep("c1", "task_list", null, null, null)
+        val out = turn(events, mutableListOf()) { id ->
+            listOf(ChatEvent.TurnStart("t7", id, null), ChatEvent.Text("t7", "Sure. "), ChatEvent.ToolStarted("t7", step), ChatEvent.TurnEnd("t7", "m7", false))
+        }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
+        assertEquals(listOf(TurnOutput.Thread("t7"), TurnOutput.Say("Sure."), TurnOutput.Done), out)
+    }
+
+    @Test
     fun aSocketStillOpeningIsNotADrop() = runBlocking {
         val events = bus()
         val connected = MutableStateFlow(false)
@@ -113,7 +139,8 @@ class VoiceTurnTest {
                 ChatEvent.TurnEnd("t9", "m1", false),
             )
         }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
-        assertEquals(listOf("hi"), sent)
+        // The voice note rides ahead of the words; HQ strips it from the saved chat.
+        assertEquals(listOf(VoiceTurn.VOICE_CONTEXT + "hi"), sent)
         assertEquals(
             listOf(TurnOutput.Thread("t9"), TurnOutput.Say("Hello there."), TurnOutput.Say("How are you"), TurnOutput.Done),
             out,

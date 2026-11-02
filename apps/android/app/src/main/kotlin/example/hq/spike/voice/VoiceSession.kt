@@ -160,6 +160,8 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
                 _state.update { it.copy(phase = VoicePhase.Speaking, problem = out.reason) }
                 mouth.say(out.reason)
             }
+            // Spoken, not added to the reply text: it is a placeholder, not part of HQ's answer.
+            TurnOutput.Working -> mouth.say(LOOKING)
             TurnOutput.Done -> Unit
         }
     }
@@ -174,6 +176,7 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
     private companion object {
         const val TAG = "HqVoice"
         const val NOTHING_HEARD = "I did not catch that. Tap and try again."
+        const val LOOKING = "Let me check."
         const val ENGINE_FAILED = "Voice could not start on this phone. The details are in the app log."
         const val DOWNLOAD_FAILED = "The download did not finish or did not match. Check the connection and tap Get again."
         val DOWNLOAD_NOTICE = "Hearing and speaking happen on this phone, so it needs about ${VoiceModels.DOWNLOAD_MB} MB of speech " +
