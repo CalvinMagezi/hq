@@ -281,6 +281,7 @@ async fn a_reply_that_ended_without_the_task_parks_it_and_the_queue_moves_on() {
     assert_eq!(recorder.questions.lock().unwrap().len(), 2);
     let parked = task(&db, "tk-a");
     assert_eq!(parked.status, t::STATUS_BLOCKED);
+    assert!(parked.tags.iter().any(|g| g == PARKED_TAG));
     assert!(
         parked
             .blocked_reason
@@ -371,6 +372,64 @@ fn scoped_connections_cannot_queue_work_or_rewrite_queued_tasks() {
     assert!(refuse_queue_write(true, Some(&other), &other, true).is_ok());
     assert!(
         refuse_queue_write(false, Some(&queue), &[], true).is_ok(),
+        "the owner may"
+    );
+}
+
+#[tokio::test]
+async fn a_parked_task_set_back_to_do_is_skipped_until_the_tag_is_removed() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    settle_all(&db, "provider error");
+    assert_eq!(
+        dispatch(db.clone(), &on(), cell.clone()).await.unwrap(),
+        Outcome::Idle
+    );
+    set_status(&db, "tk-a", t::STATUS_TO_DO);
+    assert_eq!(
+        dispatch(db.clone(), &on(), cell.clone()).await.unwrap(),
+        Outcome::Idle
+    );
+    assert_eq!(
+        recorder.questions.lock().unwrap().len(),
+        1,
+        "the same text is not run again"
+    );
+    let unparked = t::TaskPatch {
+        tags: Some(vec![DISPATCH_TAG.into()]),
+        ..Default::default()
+    };
+    db.with_conn(|c| t::update_task(c, "tk-a", &unparked, None))
+        .unwrap();
+    // The owner unparks later than the park; timestamps have one-second resolution.
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE tasks SET updated_at = datetime('now', '+1 minute') WHERE id = 'tk-a'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let again = dispatch(db, &on(), cell).await.unwrap();
+    assert!(matches!(again, Outcome::Started { .. }), "{again:?}");
+}
+
+#[test]
+fn a_restricted_caller_cannot_change_a_queued_tasks_tags() {
+    let parked = vec![DISPATCH_TAG.to_string(), PARKED_TAG.to_string()];
+    let queue = vec![DISPATCH_TAG.to_string()];
+    assert!(
+        refuse_queue_write(true, Some(&queue), &parked, false).is_err(),
+        "unparking"
+    );
+    assert!(refuse_queue_write(true, Some(&[]), &queue, false).is_err());
+    let reordered = vec![PARKED_TAG.to_uppercase(), DISPATCH_TAG.to_string()];
+    assert!(refuse_queue_write(true, Some(&reordered), &parked, false).is_ok());
+    assert!(
+        refuse_queue_write(false, Some(&queue), &parked, false).is_ok(),
         "the owner may"
     );
 }

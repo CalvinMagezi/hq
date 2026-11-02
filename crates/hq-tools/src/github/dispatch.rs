@@ -16,6 +16,9 @@ use serde_json::json;
 /// the worker are never taken for work by it. Scoped connections may not set it
 /// ([`refuse_queue_write`]).
 pub const DISPATCH_TAG: &str = "edge-task";
+/// Marks a queue task the worker dropped. The worker skips it until the owner removes the tag,
+/// which no restricted caller can do, so no other key can make it run the same text again.
+pub const PARKED_TAG: &str = "edge-task-parked";
 /// The built-in skill the work follows; dispatch is off while it is not active.
 const WORKER_SKILL: &str = "edge-coding-worker";
 /// An assignee that marks a task as HQ's own, beside the unassigned ones.
@@ -141,9 +144,17 @@ fn candidates(conn: &rusqlite::Connection, repos: &[String]) -> Result<Vec<t::Ta
         .into_iter()
         .filter(|task| {
             let free = task.assignees.iter().all(|a| a == HQ_ASSIGNEE);
-            free && task.blocked_by.is_empty() && names_a_repo(task, repos)
+            free && task.blocked_by.is_empty() && !parked(task) && names_a_repo(task, repos)
         })
         .collect())
+}
+
+fn parked(task: &t::Task) -> bool {
+    has_tag(&task.tags, PARKED_TAG)
+}
+
+fn has_tag(tags: &[String], tag: &str) -> bool {
+    tags.iter().any(|g| g.eq_ignore_ascii_case(tag))
 }
 
 /// Whether the task's title or description names an allowed repository as a whole word, so
@@ -216,9 +227,14 @@ fn park(db: &Database, task: &t::Task, reason: &str) -> Result<()> {
 
 /// Moves a task the worker dropped to blocked, with the reason as a comment.
 fn park_in(conn: &rusqlite::Connection, task: &t::Task, reason: &str) -> Result<()> {
+    let mut tags = task.tags.clone();
+    if !parked(task) {
+        tags.push(PARKED_TAG.into());
+    }
     let patch = t::TaskPatch {
         status: Some(t::STATUS_BLOCKED.into()),
         blocked_reason: Some(Some(reason.into())),
+        tags: Some(tags),
         ..Default::default()
     };
     t::update_task(conn, &task.id, &patch, Some(&task.status))?;
@@ -233,7 +249,7 @@ fn notify(db: &Database, task: &t::Task, reason: &str) {
         ValueKind::ActionNeeded,
         format!("Edge worker parked {}", task.display_id),
         format!(
-            "{}: {reason}. It is blocked until you look at it.",
+            "{}: {reason}. The worker skips it until you remove the {PARKED_TAG} tag and set it to do.",
             task.title
         ),
     )
@@ -252,7 +268,8 @@ pub fn restricted_caller(args: &serde_json::Value) -> bool {
 }
 
 /// Refuses a restricted caller ([`restricted_caller`]) that would put a task on the worker's
-/// queue or rewrite one already there: the worker runs a full HQ turn on that text.
+/// queue, change a queued task's tags (which would unpark it), or rewrite its text: the worker
+/// runs a full HQ turn on that text.
 pub fn refuse_queue_write(
     scoped: bool,
     new_tags: Option<&[String]>,
@@ -262,9 +279,12 @@ pub fn refuse_queue_write(
     if !scoped {
         return Ok(());
     }
-    let is_queue = |tags: &[String]| tags.iter().any(|g| g.eq_ignore_ascii_case(DISPATCH_TAG));
+    let is_queue = |tags: &[String]| has_tag(tags, DISPATCH_TAG);
     if new_tags.is_some_and(is_queue) && !is_queue(current_tags) {
         anyhow::bail!("this connection cannot add the {DISPATCH_TAG} tag; ask the owner to");
+    }
+    if is_queue(current_tags) && new_tags.is_some_and(|new| !same_tags(new, current_tags)) {
+        anyhow::bail!("this connection cannot change the tags of an {DISPATCH_TAG} task");
     }
     if edits_text && is_queue(current_tags) {
         anyhow::bail!(
@@ -272,6 +292,10 @@ pub fn refuse_queue_write(
         );
     }
     Ok(())
+}
+
+fn same_tags(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len() && a.iter().all(|g| has_tag(b, g))
 }
 
 #[cfg(test)]

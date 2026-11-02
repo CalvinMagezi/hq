@@ -111,7 +111,9 @@ or a chat becomes a pull request with no other machine involved.
   edit) is asked about afresh.
 - **Nothing holds the queue.** A task whose reply ended without taking it (a provider error, a
   restart), or that the worker left in progress with no reply and no live lease, is moved to `blocked`
-  with the reason as a comment and a note in the owner's inbox, and the next task is taken. A
+  with the reason as a comment, the tag `edge-task-parked` and a note in the owner's inbox, and
+  the next task is taken. The worker skips a parked task, whatever its status, until the owner
+  removes that tag. A
   queue task someone else moved to in progress (the owner working it by hand) is left alone,
   and the queue waits for it.
 - **Off unless switched on.** The switch is under `github_write`, which `config_manage`
@@ -121,7 +123,8 @@ or a chat becomes a pull request with no other machine involved.
 The worker runs a full HQ turn on the task's text, so who can queue work matters. The handoff
 and tasks keys and claude.ai connector grants cannot add the `edge-task` tag (directly or
 through a promoted note's tags) or edit the title or description of a task that has it
-(`refuse_queue_write`); the owner in the app, the owner's own MCP clients and HQ's chat can. Comments
+(`refuse_queue_write`); they cannot change a queued task's tags either, so none of them can
+unpark one. The owner in the app, the owner's own MCP clients and HQ's chat can. Comments
 stay open to every key, so the worker's ask is marked `untrusted`: its turn starts under the
 stricter policy for untrusted content (no secret reads, no network from bash) before it reads
 the task. What the worker can push is still bounded by the owner's allowlist, and every result is a pull request a person merges.
