@@ -2052,3 +2052,62 @@ async fn an_auto_loaded_skill_is_logged_with_its_version_the_task_and_a_purpose(
     assert_eq!(used.as_deref(), Some("loaded"));
     assert_eq!(trigger, "auto_load");
 }
+
+#[tokio::test]
+async fn a_deferred_tool_is_found_declared_and_called() {
+    let provider = Arc::new(MockProvider::new(
+        vec![
+            BufferedReply::ToolCall {
+                id: "call-search".to_string(),
+                name: "tool_search".to_string(),
+                arguments: serde_json::json!({"query": "contract"}),
+            },
+            BufferedReply::ToolCall {
+                id: "call-tool".to_string(),
+                name: "contract_tool".to_string(),
+                arguments: serde_json::json!({"input": "value"}),
+            },
+            BufferedReply::Complete("done".to_string()),
+        ],
+        vec![],
+    ));
+    let allowed_path = std::env::current_dir().unwrap();
+    let mut registry = crate::governance::ToolGuardian::with_default_mode(
+        vec![allowed_path],
+        SecurityProfile::Guarded,
+    )
+    .build_registry(
+        vec![Box::new(ContractTool { cancel: None })],
+        crate::governance::LiveUserTurn::unattended(),
+    );
+    registry.keep_eager_only(Vec::new());
+    let config = SessionConfig {
+        max_retries: 0,
+        max_duration_secs: None,
+        ..SessionConfig::default()
+    };
+    let mut agent = AgentSession::new(provider.clone(), registry, config);
+
+    let result = agent.prompt("use the contract tool").await.unwrap();
+
+    assert_eq!(result.text(), "done");
+    let requests = provider.requests.lock().unwrap();
+    let declared =
+        |i: usize| -> Vec<String> { requests[i].tools.iter().map(|t| t.name.clone()).collect() };
+    assert!(
+        !declared(0).contains(&"contract_tool".to_string()),
+        "deferred at first"
+    );
+    assert!(declared(0).contains(&"tool_search".to_string()));
+    assert!(
+        declared(1).contains(&"contract_tool".to_string()),
+        "declared once found"
+    );
+    assert!(
+        requests[2]
+            .messages
+            .iter()
+            .any(|m| m.role == MessageRole::Tool && m.content == "tool output"),
+        "and it ran"
+    );
+}

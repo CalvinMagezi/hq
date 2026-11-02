@@ -698,3 +698,82 @@ async fn a_background_run_gets_the_owners_per_run_ceiling_unless_it_has_a_lower_
     let kept = super::provider::resolve_session_config(&config, Some(live)).await;
     assert_eq!(kept.max_budget_usd, Some(5.0));
 }
+
+/// Prints what a turn's fixed prompt is made of: tool schemas (largest first) and the system
+/// prompt by section. The vault is empty, so SOUL, USER, MEMORY and pinned notes (instance
+/// content) are not counted; this is the part every instance pays. Run with
+/// `cargo test -p hq-agent --lib prompt_breakdown -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore = "a measurement, not a regression gate"]
+async fn prompt_breakdown() {
+    for (label, profile, mobile) in [
+        ("standard/full", SessionProfile::Standard, false),
+        ("standard/mobile", SessionProfile::Standard, true),
+        ("weak/mobile", SessionProfile::Weak, true),
+    ] {
+        let session = build_measurement_session_with(profile, |c| {
+            if mobile {
+                c.profile = hq_core::config::Profile::Mobile;
+            }
+        })
+        .await;
+        let (request_tools, request_system) = session.first_request_bytes().await;
+        println!(
+            "\n## {label}: the request carries {request_tools} tool-schema bytes and {request_system} system bytes"
+        );
+        let tools = session.tool_schema_sizes().await;
+        let tool_bytes: usize = tools.iter().map(|(_, b)| b).sum();
+        let prompt = session.system_prompt().unwrap_or_default();
+        println!(
+            "\n== {label}: {} tools, {tool_bytes} schema bytes (~{} tokens); system prompt {} bytes (~{} tokens)",
+            tools.len(),
+            tool_bytes / 4,
+            prompt.len(),
+            prompt.len() / 4
+        );
+        for (name, bytes) in &tools {
+            println!("   tool {bytes:>6}  {name}");
+        }
+        let mut section = "(preamble)".to_string();
+        let mut size = 0usize;
+        for line in prompt.lines() {
+            if line.starts_with("## ") || line.starts_with("# ") {
+                println!("   prompt {size:>6}  {section}");
+                section = line.to_string();
+                size = 0;
+            }
+            size += line.len() + 1;
+        }
+        println!("   prompt {size:>6}  {section}");
+    }
+}
+
+/// Every tool schema rides in every request, so the fixed prompt is mostly tools. On a phone
+/// only the daily tools send schemas; this keeps that set (and the catalog that names the rest)
+/// from growing back unnoticed. Measured at 41.6 KB (25.3 KB schemas) against 121.6 KB for the
+/// full catalog, on 2026-11-02.
+#[tokio::test]
+async fn a_mobile_turn_sends_a_small_fixed_prompt() {
+    const MOBILE_REQUEST_BUDGET_BYTES: usize = 45_000;
+    let session = build_measurement_session_with(SessionProfile::Standard, |c| {
+        c.profile = hq_core::config::Profile::Mobile;
+    })
+    .await;
+    let (tools, system) = session.first_request_bytes().await;
+    assert!(
+        tools + system <= MOBILE_REQUEST_BUDGET_BYTES,
+        "mobile request is {tools} schema + {system} system bytes"
+    );
+    let deferred: Vec<String> = session
+        .deferred_tool_catalog()
+        .await
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    assert!(deferred.contains(&"harness_session_spawn".to_string()));
+    assert!(
+        deferred.contains(&"bash".to_string()),
+        "the shell is refused by default there, so it is loaded only when asked for"
+    );
+    assert!(!deferred.contains(&"vault_search".to_string()));
+}

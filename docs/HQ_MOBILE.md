@@ -62,6 +62,14 @@ starts HQ.
   the agent's shell is refused (`governance.bash.sandbox` stays at its default, `required`) and
   nobody needs telling at every start.
 
+- Most tool schemas from each chat request. Every tool's full schema rides in every request, which
+  on Full is about 114 KB. On Mobile only the daily tools send schemas (notes, tasks, the web,
+  session status and messages, skills, `notify_owner`; `MOBILE_EAGER_TOOLS` in
+  `crates/hq-agent/src/builder/tools.rs`). The rest are listed by name with a short hint, and the
+  agent loads one with `tool_search` when it needs it; from then on it is declared like the
+  others. A Mobile request is about 42 KB instead of 122 KB
+  (`a_mobile_turn_sends_a_small_fixed_prompt` keeps it there).
+
 The coding-agent tools, the session supervisor and the host event loops stay: they are how a phone
 instance runs sessions on a host somewhere else. A built-in host on the phone itself is not
 something to run; point `agent_host.default_host` at a configured remote host.
