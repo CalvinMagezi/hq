@@ -83,6 +83,18 @@ impl std::ops::Deref for GovernedRegistry {
     }
 }
 
+impl GovernedRegistry {
+    /// See [`ToolRegistry::keep_eager_only`].
+    pub fn keep_eager_only<I: IntoIterator<Item = String>>(&mut self, names: I) {
+        self.inner.keep_eager_only(names);
+    }
+
+    /// See [`ToolRegistry::activate`].
+    pub fn activate(&mut self, name: &str) {
+        self.inner.activate(name);
+    }
+}
+
 /// Attests whether the tools passed to `build_registry` belong to a session
 /// a live user turn is directly driving. A typed newtype rather than a bare
 /// `bool` so a call site has to name what it's asserting —

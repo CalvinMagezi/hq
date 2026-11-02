@@ -240,7 +240,7 @@ impl AgentSession {
             .and_then(|v| v.as_u64())
             .unwrap_or(5) as usize;
 
-        let tools = self.tools.lock().await;
+        let mut tools = self.tools.lock().await;
         let catalog = tools.deferred_catalog();
 
         let query_lower = query.to_lowercase();
@@ -273,7 +273,12 @@ impl AgentSession {
         }
 
         let mut output = String::new();
-        for (name, _) in &matches {
+        let found: Vec<String> = matches.iter().map(|(name, _)| name.clone()).collect();
+        for name in &found {
+            // Declared from the next request on, so the model can call it like any other tool.
+            tools.activate(name);
+        }
+        for name in &found {
             if let Some(def) = tools.definition_for(name) {
                 output.push_str(&format!(
                     "## {}\n{}\n\nParameters:\n```json\n{}\n```\n\n",

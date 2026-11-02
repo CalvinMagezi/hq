@@ -508,6 +508,7 @@ impl SessionBuilder {
             })
             .collect::<Vec<_>>();
         let tools = self.apply_role(tools);
+        let mobile = self.config.profile.is_mobile();
         if tools.is_empty() {
             tracing::warn!(
                 profile = ?self.session_profile,
@@ -538,13 +539,47 @@ impl SessionBuilder {
         };
         let tools = crate::tool_policy::filter(tools, preset.clone());
 
-        let governed_registry = guardian.build_registry(
+        let mut governed_registry = guardian.build_registry(
             tools,
             crate::governance::LiveUserTurn::from_session_config(session_config),
         );
+        if mobile {
+            governed_registry.keep_eager_only(MOBILE_EAGER_TOOLS.iter().map(|n| n.to_string()));
+        }
         (governed_registry, preset)
     }
 }
+
+/// On a phone, the tools whose schemas go out with every turn: the daily work of reading and
+/// writing notes, tasks, the web and running sessions. Every other tool is listed by name and
+/// loaded with `tool_search` when needed, which keeps the fixed prompt small for a phone's
+/// connection and, later, for a model on the phone itself.
+const MOBILE_EAGER_TOOLS: &[&str] = &[
+    "vault_search",
+    "vault_read",
+    "vault_write_note",
+    "vault_append_note",
+    "vault_patch_section",
+    "vault_list",
+    "vault_find",
+    "task_list",
+    "task_get",
+    "task_create",
+    "task_update",
+    "task_comment_add",
+    "task_next",
+    "web_search",
+    "web_fetch",
+    "harness_session_list",
+    "harness_session_status",
+    "harness_session_send",
+    "harness_session_logs",
+    "load_skill",
+    "notify_owner",
+    "report_progress",
+    "background_turn_status",
+    "hq",
+];
 
 /// The chat a harness tool call comes from. A session it starts drives by default only when
 /// the user typed the turn in a chat no `hq_ask` started; a lookup that fails counts as an

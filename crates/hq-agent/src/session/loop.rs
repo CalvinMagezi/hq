@@ -523,7 +523,7 @@ impl AgentSession {
             (Some(sys), false) => {
                 let catalog_lines: Vec<String> = deferred_catalog
                     .iter()
-                    .map(|(name, hint)| format!("- {name}: {hint}"))
+                    .map(|(name, hint)| format!("- {name}: {}", catalog_hint(hint)))
                     .collect();
                 Some(format!(
                     "{sys}\n\n## Deferred Tools\nUse tool_search to load full schemas:\n{}",
@@ -728,3 +728,36 @@ fn sanitize_tool_messages(messages: &mut Vec<ChatMessage>) {
 #[cfg(test)]
 #[path = "loop_tests.rs"]
 mod loop_tests;
+
+/// Longest hint a deferred tool gets in the catalog. Many tools fall back to their whole
+/// description, and the catalog rides in every request; `tool_search` still matches the full text.
+const CATALOG_HINT_CHARS: usize = 80;
+
+/// The first sentence of `hint`, cut to `CATALOG_HINT_CHARS`.
+fn catalog_hint(hint: &str) -> String {
+    let first = hint.split_inclusive(". ").next().unwrap_or(hint).trim_end();
+    match first.char_indices().nth(CATALOG_HINT_CHARS) {
+        Some((i, _)) => format!("{}...", first[..i].trim_end()),
+        None => first.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod catalog_hint_tests {
+    use super::catalog_hint;
+
+    #[test]
+    fn a_hint_is_its_first_sentence_capped() {
+        assert_eq!(
+            catalog_hint("Spawn a session. It runs long."),
+            "Spawn a session."
+        );
+        let long = "a".repeat(200);
+        let hint = catalog_hint(&long);
+        assert!(
+            hint.ends_with("...") && hint.chars().count() == 83,
+            "{hint}"
+        );
+        assert_eq!(catalog_hint("short"), "short");
+    }
+}

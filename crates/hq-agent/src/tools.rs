@@ -113,13 +113,35 @@ pub trait AgentTool: Send + Sync {
 /// counters, denial tracking) stays shared through the same `Arc`.
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn AgentTool>>,
+    /// When set, only these tools send their schema every turn; the rest are deferred and
+    /// listed by name in the catalog until `tool_search` activates them.
+    eager: Option<std::collections::HashSet<String>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
+            eager: None,
         }
+    }
+
+    /// Send full schemas only for `names` (and for tools activated later); defer every other
+    /// tool. A tool that defers itself stays deferred.
+    pub fn keep_eager_only<I: IntoIterator<Item = String>>(&mut self, names: I) {
+        self.eager = Some(names.into_iter().collect());
+    }
+
+    /// Send `name`'s full schema from now on, once `tool_search` has found it, so a provider
+    /// that only accepts calls to declared functions can call it.
+    pub fn activate(&mut self, name: &str) {
+        if let Some(eager) = self.eager.as_mut() {
+            eager.insert(name.to_string());
+        }
+    }
+
+    fn is_deferred(&self, name: &str, tool: &Arc<dyn AgentTool>) -> bool {
+        tool.should_defer() || self.eager.as_ref().is_some_and(|e| !e.contains(name))
     }
 
     /// Register a tool. Overwrites any existing tool with the same name.
@@ -178,9 +200,9 @@ impl ToolRegistry {
     pub fn deferred_catalog(&self) -> Vec<(String, String)> {
         let mut out: Vec<(String, String)> = self
             .tools
-            .values()
-            .filter(|t| t.should_defer())
-            .map(|t| (t.name().to_string(), t.search_hint().to_string()))
+            .iter()
+            .filter(|(name, t)| self.is_deferred(name, t))
+            .map(|(_, t)| (t.name().to_string(), t.search_hint().to_string()))
             .collect();
         out.sort_by(|a, b| a.0.cmp(&b.0));
         out
@@ -198,9 +220,9 @@ impl ToolRegistry {
     pub fn active_definitions(&self) -> Vec<ToolDefinition> {
         let mut out: Vec<ToolDefinition> = self
             .tools
-            .values()
-            .filter(|t| !t.should_defer())
-            .map(definition_of)
+            .iter()
+            .filter(|(name, t)| !self.is_deferred(name, t))
+            .map(|(_, t)| definition_of(t))
             .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
         out

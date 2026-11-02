@@ -383,6 +383,39 @@ impl AgentSession {
         names
     }
 
+    /// Each tool schema sent on a turn and its serialized size in bytes, largest first.
+    #[cfg(test)]
+    pub async fn tool_schema_sizes(&self) -> Vec<(String, usize)> {
+        let registry = self.tools.lock().await;
+        let mut sizes: Vec<(String, usize)> = registry
+            .active_definitions()
+            .iter()
+            .map(|d| {
+                (
+                    d.name.clone(),
+                    serde_json::to_string(d).map_or(0, |s| s.len()),
+                )
+            })
+            .collect();
+        sizes.sort_by_key(|(_, bytes)| std::cmp::Reverse(*bytes));
+        sizes
+    }
+
+    /// Bytes of the first turn's request as the model receives it: serialized tool schemas, and
+    /// the system message (which carries the deferred-tool catalog).
+    #[cfg(test)]
+    pub async fn first_request_bytes(&self) -> (usize, usize) {
+        let request = self.build_turn_request(true).await;
+        let tools = serde_json::to_string(&request.tools).map_or(0, |s| s.len());
+        let system = request
+            .messages
+            .iter()
+            .filter(|m| m.role == hq_core::types::MessageRole::System)
+            .map(|m| m.content.len())
+            .sum();
+        (tools, system)
+    }
+
     /// Deferred tools as `(name, hint)`, i.e. those whose schemas are loaded
     /// on demand via `tool_search` instead of shipping every turn.
     #[cfg(test)]
