@@ -3890,7 +3890,18 @@ fn a_general_purpose_queue_leaves_out_code_shaped_tasks() {
         .map(|_| ())
     })
     .unwrap();
-    // Equal age, so the id decides: without the clause a code-shaped task comes first.
+    // Equal age, so the id decides: without the clause a code-shaped task comes first. Creation
+    // can cross a second boundary on a busy machine, so the ages are made equal on purpose.
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE tasks SET created_at = (SELECT MIN(created_at) FROM tasks) \
+             WHERE id IN ('tagged', 'linked', 'plain')",
+            [],
+        )
+        .map(|_| ())
+        .map_err(Into::into)
+    })
+    .unwrap();
     assert_eq!(
         db.with_conn(|c| next_task(c, &want("hermes", false)))
             .unwrap()
