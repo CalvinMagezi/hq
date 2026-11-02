@@ -59,6 +59,7 @@ ignore = [
     { id = "RUSTSEC-2026-0367", reason = "zip 8.6.0 keeps SUID/SGID bits when extracting an archive to disk. Nothing calls ZipArchive::extract or ZipStreamReader::extract; see the comment above. Expires 2026-11-30." },
     { id = "RUSTSEC-2026-0368", reason = "zip 8.6.0 ZipArchive::extract creates symlinks whose targets can leave the destination directory. Nothing calls the extraction code; see the comment above. Expires 2026-11-30." },
     { id = "RUSTSEC-2026-0369", reason = "zip 8.6.0 ZipArchive::extract and ZipStreamReader::extract apply Unix permissions through symlinks. Nothing calls the extraction code; see the comment above. Expires 2026-11-30." },
+    { id = "RUSTSEC-2026-0429", reason = "zip 8.6.0 ZipArchive::extract aborts the process on a symlink entry with a large declared size. Nothing calls the extraction code (docx-rs, umya-spreadsheet, rust_xlsxwriter, transmutation and hq-export checked 2026-11-02; HQ's own readers use zip 9). Expires 2026-11-30." },
     # zstd 0.13.3 and zstd-safe 7.x, pinned by zip 8.6.0 (via docx-rs, rust_xlsxwriter,
     # umya-spreadsheet and transmutation). The fixes need zstd 0.14.3 and zstd-safe 8.2,
     # which zip 8 cannot take. Review with the zip ids above.
