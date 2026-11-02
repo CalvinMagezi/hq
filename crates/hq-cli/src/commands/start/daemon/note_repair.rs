@@ -8,8 +8,9 @@ use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
 use tracing::{info, warn};
 
-/// Present once the repair has run, so a later start never touches the notes again.
-const NESTED_FRONTMATTER_MARKER: &str = "_system/.repairs/nested-frontmatter-v1";
+/// Present once the repair has run, so a later start never touches the notes again. v2 also
+/// takes notes whose outer frontmatter gained keys (a pin, a frontmatter update) after writing.
+const NESTED_FRONTMATTER_MARKER: &str = "_system/.repairs/nested-frontmatter-v2";
 const SOURCE: &str = "note-repair";
 const EXAMPLES_SHOWN: usize = 10;
 
@@ -50,7 +51,7 @@ pub fn repair_nested_frontmatter_once(vault_path: &Path, db: &Database) {
         format!("Repaired tags on {} notes", report.nested.len()),
         summary(&report, &backup, vault_path),
     )
-    .with_dedup_key("note-repair-nested-frontmatter-v1".to_string());
+    .with_dedup_key("note-repair-nested-frontmatter-v2".to_string());
     if let Err(e) = hq_db::value_items::emit(db, &item) {
         warn!(error = %e, "note-repair: could not post the report");
     }

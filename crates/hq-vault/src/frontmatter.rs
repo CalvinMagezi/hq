@@ -89,7 +89,7 @@ pub fn merge_leading_frontmatter(title: String, content: &str, tags: Vec<String>
 }
 
 /// Tags from a frontmatter value: a list, or one comma-separated string.
-fn yaml_tags(value: Option<&serde_yaml::Value>) -> Vec<String> {
+pub fn yaml_tags(value: Option<&serde_yaml::Value>) -> Vec<String> {
     match value {
         Some(serde_yaml::Value::Sequence(items)) => items
             .iter()
