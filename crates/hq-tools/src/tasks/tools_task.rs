@@ -125,6 +125,12 @@ impl HqTool for TaskCreateTool {
         } else {
             tags_from_args(&args, "assignees")
         };
+        crate::github::dispatch::refuse_queue_write(
+            crate::github::dispatch::restricted_caller(&args),
+            Some(&tags),
+            &[],
+            false,
+        )?;
         let hints = ActorHints::from_args(&args, "created_by");
         let settings = self.settings.clone();
         let initiative_id = args
@@ -828,6 +834,12 @@ impl HqTool for TaskUpdateTool {
                 if queued {
                     patch.status = Some(t::STATUS_READY_FOR_REVIEW.to_string());
                 }
+                crate::github::dispatch::refuse_queue_write(
+                    crate::github::dispatch::restricted_caller(&scope_args),
+                    patch.tags.as_deref(),
+                    &previous.tags,
+                    edits_text,
+                )?;
                 if scoped
                     && edits_text
                     && !crate::harness_session::is_own_scope_actor(&scope_args, &previous.created_by)

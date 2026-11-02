@@ -325,7 +325,11 @@ impl HqTool for TaskCreateFromNoteTool {
         let title: String = note.title.chars().take(200).collect();
         let excerpt: String = note.content.chars().take(NOTE_EXCERPT_CHARS).collect();
         let description = format!("{excerpt}\n\n---\nSource: vault note `{note_path}`");
-        let tags = note.tags.clone();
+        let mut tags = note.tags.clone();
+        if crate::github::dispatch::restricted_caller(&args) {
+            // A note's tags must not put work on the edge worker's queue for a scoped caller.
+            tags.retain(|g| !g.eq_ignore_ascii_case(crate::github::dispatch::DISPATCH_TAG));
+        }
 
         let (space_id, folder_name, initiative_name, initiative_id, created_new_destination) =
             match explicit_space {

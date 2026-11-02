@@ -36,16 +36,25 @@ pub(super) fn policy(mode: AskMode) -> (Option<PermissionPreset>, bool) {
 }
 
 /// Marks a [`ChatTurn`] as the answer to an ask.
+/// What a tainted ask's denials name as the untrusted source.
+pub(super) const UNTRUSTED_ASK_SOURCE: &str = "hq_ask (untrusted)";
+
 #[derive(Clone)]
 pub(super) struct AskTurn {
     pub(super) ask_id: String,
     pub(super) mode: AskMode,
     pub(super) scope: AskScope,
+    pub(super) untrusted: bool,
 }
 
 impl AskTurn {
     pub(super) fn permission_preset(&self) -> Option<PermissionPreset> {
         policy(self.mode).0
+    }
+
+    /// The source a tainted ask starts with, so it works under the untrusted-content policy.
+    pub(super) fn untrusted_source(&self) -> Option<String> {
+        self.untrusted.then(|| UNTRUSTED_ASK_SOURCE.to_string())
     }
 
     pub(super) fn is_live_user_turn(&self) -> bool {
@@ -153,6 +162,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
             ask_id: req.ask_id.to_string(),
             mode: req.mode,
             scope: req.scope,
+            untrusted: req.untrusted,
         }),
     };
     let abort = spawn_supervised(turn, config, req.question.to_string(), history, Vec::new());
@@ -308,6 +318,7 @@ mod tests {
                 ask_id: ask.ask_id.clone(),
                 mode,
                 scope: AskScope::Full,
+                untrusted: false,
             }),
         }
     }
@@ -325,6 +336,21 @@ mod tests {
     }
 
     #[test]
+    fn an_untrusted_ask_starts_tainted_and_a_plain_one_does_not() {
+        let turn = |untrusted| AskTurn {
+            ask_id: "a".into(),
+            mode: AskMode::Full,
+            scope: AskScope::Full,
+            untrusted,
+        };
+        assert_eq!(
+            turn(true).untrusted_source().as_deref(),
+            Some(UNTRUSTED_ASK_SOURCE)
+        );
+        assert_eq!(turn(false).untrusted_source(), None);
+    }
+
+    #[test]
     fn read_only_asks_get_the_read_only_preset_and_no_live_turn_while_full_asks_match_the_web() {
         assert_eq!(
             policy(AskMode::ReadOnly),
@@ -335,6 +361,7 @@ mod tests {
             ask_id: "a".into(),
             mode: AskMode::ReadOnly,
             scope: AskScope::Full,
+            untrusted: false,
         };
         assert_eq!(
             read_only.permission_preset(),
@@ -489,6 +516,7 @@ mod tests {
                 question: "What is on my plate?",
                 mode: AskMode::ReadOnly,
                 scope: AskScope::Full,
+                untrusted: false,
                 caller: "claude-code",
             })
             .await
@@ -558,6 +586,7 @@ mod tests {
                 question: "q",
                 mode: AskMode::ReadOnly,
                 scope: AskScope::Full,
+                untrusted: false,
                 caller: "c",
             })
             .await

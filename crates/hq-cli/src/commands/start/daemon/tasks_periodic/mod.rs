@@ -6,6 +6,7 @@
 pub mod backup;
 pub mod copilot_usage;
 pub mod disk_watchdog;
+pub mod edge_worker_dispatch;
 pub mod email_ingest;
 pub mod embeddings;
 pub mod harness_usage;
@@ -25,6 +26,7 @@ pub mod verify_dispatch;
 pub use backup::run_backup;
 pub use copilot_usage::run_copilot_usage;
 pub use disk_watchdog::run_disk_watchdog;
+pub use edge_worker_dispatch::run_edge_worker_dispatch;
 pub use email_ingest::run_email_poll;
 pub use embeddings::{run_embeddings, run_fts_sync, run_inbox_triage};
 pub use harness_usage::run_harness_usage;

@@ -262,6 +262,8 @@ pub struct SessionBuilder {
     session_profile: SessionProfile,
     /// Tools whose name starts with one of these are left out of the session.
     tool_deny_prefixes: Vec<String>,
+    /// Why the session counts as having read untrusted text before its first tool call.
+    untrusted_input: Option<String>,
     /// Whether this session works or orchestrates; see [`SessionRole`].
     role: SessionRole,
     /// Originating chat turn id (e.g. a `background_turns` row) copied into the
@@ -298,6 +300,7 @@ impl SessionBuilder {
             exclude_own_interface_thread: false,
             session_profile: SessionProfile::Standard,
             tool_deny_prefixes: Vec::new(),
+            untrusted_input: None,
             role: SessionRole::default(),
             child_parent_turn_id: None,
             child_completion_sink: None,
@@ -479,6 +482,13 @@ impl SessionBuilder {
         self
     }
 
+    /// Start the session tainted, as if `source` had already returned untrusted text: for a turn
+    /// whose prompt points at text an outsider may have written.
+    pub fn untrusted_input(mut self, source: impl Into<String>) -> Self {
+        self.untrusted_input = Some(source.into());
+        self
+    }
+
     pub fn session_profile(mut self, profile: SessionProfile) -> Self {
         self.session_profile = profile;
         self
@@ -516,6 +526,9 @@ impl SessionBuilder {
         let mut tools = self.native_tools(&vault_path, shared_db.clone());
         // One taint flag for this session and every sub-agent it spawns.
         let taint = crate::governance::TaintTracker::new();
+        if let Some(source) = &self.untrusted_input {
+            taint.mark(source);
+        }
         tools.extend(self.subagent_tools(
             &backends.provider,
             &vault_path,
