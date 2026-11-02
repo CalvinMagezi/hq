@@ -341,6 +341,7 @@ impl Review<'_> {
         reason: String,
     ) -> Result<Applied> {
         check_name(name)?;
+        hq_tools::skills::builtin::refuse_builtin(name, "created by the review")?;
         if description.trim().is_empty() || description.len() > MAX_DESCRIPTION_CHARS {
             bail!("skill description missing or over {MAX_DESCRIPTION_CHARS} chars");
         }

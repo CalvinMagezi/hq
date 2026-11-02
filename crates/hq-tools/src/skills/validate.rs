@@ -129,7 +129,10 @@ fn skill_names(skills_dir: &Path) -> Option<Vec<String>> {
         .filter(|p| p.join("SKILL.md").exists() || !p.join("archive").is_dir())
         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
         .filter(|n| !n.starts_with('_') && n != "skill-bundles")
+        // An active built-in is checked once, from its embedded text, whatever is on disk.
+        .filter(|n| !super::builtin::is_active(n))
         .collect();
+    names.extend(super::builtin::active_builtins().map(|b| b.name.to_string()));
     names.sort();
     Some(names)
 }

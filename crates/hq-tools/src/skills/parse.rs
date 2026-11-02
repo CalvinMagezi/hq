@@ -100,7 +100,8 @@ fn load_bundle_skill(skills_dir: &Path, name: &str) -> Option<SkillDefinition> {
     }
 
     for member in &bundle.skills {
-        if is_bundle_skill(skills_dir, member) {
+        // A bundle file named like a built-in cannot stand in for it as a member either.
+        if !super::builtin::is_active(member) && is_bundle_skill(skills_dir, member) {
             // Do not recurse into nested bundles.
             continue;
         }
@@ -140,15 +141,37 @@ pub fn parse_skill(skills_dir: &Path, name: &str) -> Option<SkillDefinition> {
         return None;
     }
 
+    // Checked before bundles too, so nothing written into the vault can stand in for a built-in.
+    if super::builtin::is_active(name) {
+        return parse_builtin(name);
+    }
+
     if let Some(bundle) = load_bundle_skill(skills_dir, name) {
         return Some(bundle);
     }
 
     let skill_path = skills_dir.join(name).join("SKILL.md");
     let raw = std::fs::read_to_string(&skill_path).ok()?;
+    parse_skill_text(name, &raw)
+}
 
+/// A built-in is always HQ's own embedded text, under its own spelling; the vault copy is never
+/// read, and the owner's `skills.builtin.off` alone decides whether it is there.
+fn parse_builtin(name: &str) -> Option<SkillDefinition> {
+    if !super::builtin::is_active(name) {
+        return None;
+    }
+    let canonical = super::builtin::canonical_name(name)?;
+    parse_skill_text(
+        canonical,
+        super::builtin::shipped_file(canonical, "SKILL.md")?,
+    )
+}
+
+/// Parse the text of a SKILL.md for the skill `name`.
+pub(crate) fn parse_skill_text(name: &str, raw: &str) -> Option<SkillDefinition> {
     let matter = gray_matter::Matter::<gray_matter::engine::YAML>::new();
-    let result = matter.parse(&raw);
+    let result = matter.parse(raw);
 
     let description = result
         .data
@@ -279,7 +302,7 @@ pub fn parse_skill(skills_dir: &Path, name: &str) -> Option<SkillDefinition> {
         next_skills,
         bundle_only,
         requires_bins: result.data.as_ref().map(required_bins).unwrap_or_default(),
-        context_need: parse_context_need(&raw),
+        context_need: parse_context_need(raw),
         provenance,
         content: result.content,
     })
@@ -327,11 +350,20 @@ fn required_bins(data: &gray_matter::Pod) -> Vec<String> {
 
 /// List all skills in the skills directory.
 pub fn list_skills(skills_dir: &Path) -> Vec<SkillMeta> {
-    let Ok(entries) = std::fs::read_dir(skills_dir) else {
-        return Vec::new();
-    };
-
-    let mut out = Vec::new();
+    // Built-ins come from the binary; a vault folder or bundle claiming one's name is skipped.
+    let mut out: Vec<SkillMeta> = super::builtin::active_builtins()
+        .filter_map(|b| parse_skill(skills_dir, b.name))
+        .map(|skill| SkillMeta {
+            name: skill.name,
+            description: skill.description,
+            auto_load: skill.auto_load,
+            load_full: skill.load_full,
+            hints: skill.hints,
+            next_skills: skill.next_skills,
+            bundle_only: false,
+        })
+        .collect();
+    let entries = std::fs::read_dir(skills_dir).into_iter().flatten();
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -342,7 +374,7 @@ pub fn list_skills(skills_dir: &Path) -> Vec<SkillMeta> {
                 .to_string();
             // Proposed (auto-minted, pending user approval) skills are hidden from
             // the active catalog — user must move them out of _proposed/ to apply.
-            if name.starts_with('_') {
+            if name.starts_with('_') || super::builtin::is_active(&name) {
                 continue;
             }
             if let Some(skill) = parse_skill(skills_dir, &name) {
@@ -366,6 +398,9 @@ pub fn list_skills(skills_dir: &Path) -> Vec<SkillMeta> {
 
     let bundles_dir = bundles_dir(skills_dir);
     for bundle in load_skill_bundles(&bundles_dir) {
+        if super::builtin::is_active(&bundle.name) {
+            continue;
+        }
         out.push(SkillMeta {
             name: bundle.name,
             description: bundle.description,

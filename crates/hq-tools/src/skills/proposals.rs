@@ -72,6 +72,7 @@ pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
 /// move a proposal the exact same way.
 pub fn approve_proposed_skill(skills_dir: &Path, name: &str) -> Result<PathBuf> {
     validate_skill_name(name)?;
+    super::builtin::refuse_builtin(name, "replaced by a proposal")?;
 
     let proposed_dir = skills_dir.join("_proposed").join(name);
     let proposed_file = proposed_dir.join("SKILL.md");

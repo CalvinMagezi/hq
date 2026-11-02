@@ -260,6 +260,7 @@ impl HqTool for SkillManageTool {
             .and_then(|v| v.as_str())
             .unwrap_or("SKILL.md");
 
+        crate::skills::builtin::refuse_builtin(name, "changed by skill_manage")?;
         match action {
             "create" => self.create(name, content).await,
             "write_file" => self.write_file(name, file, content).await,

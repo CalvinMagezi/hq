@@ -40,6 +40,8 @@ pub enum SkillsAction {
     Unadopt { name: String },
     /// How skills have done, from the invocation records; `purge` deletes them
     Evidence(super::skills_evidence::EvidenceArgs),
+    /// Bring the skills HQ ships into the vault now (also done when HQ starts)
+    Sync,
 }
 
 pub async fn run(config: &HqConfig, action: SkillsAction) -> Result<()> {
@@ -52,7 +54,7 @@ async fn run_with_output(
     output: &mut dyn Write,
 ) -> Result<()> {
     let skills_dir = hq_core::skills_dir(&config.vault_path);
-
+    refuse_builtin_change(&action)?;
     match action {
         SkillsAction::Create {
             name,
@@ -77,6 +79,11 @@ async fn run_with_output(
         SkillsAction::Adopt { name } => set_managed(&skills_dir, &name, true, output),
         SkillsAction::Unadopt { name } => set_managed(&skills_dir, &name, false, output),
         SkillsAction::Evidence(args) => super::skills_evidence::run(config, args, output),
+        SkillsAction::Sync => {
+            let report = sync_builtin(config)?;
+            writeln!(output, "{}", serde_json::to_string_pretty(&report)?)?;
+            Ok(())
+        }
     }
 }
 
@@ -238,11 +245,54 @@ async fn create_skill(
     Ok(())
 }
 
+/// The actions that would change a skill on disk, refused for a built-in with what to do instead.
+fn refuse_builtin_change(action: &SkillsAction) -> Result<()> {
+    let (name, verb) = match action {
+        SkillsAction::Create { name, .. } => (name, "created"),
+        SkillsAction::Approve { name } => (name, "replaced by a proposal"),
+        SkillsAction::Delete { name } => (name, "deleted"),
+        SkillsAction::Revert { name } => (name, "reverted"),
+        SkillsAction::Adopt { name } => (name, "adopted"),
+        SkillsAction::Unadopt { name } => (name, "unadopted"),
+        SkillsAction::Edit { name } => (name, "edited in place"),
+        _ => return Ok(()),
+    };
+    hq_tools::skills::builtin::refuse_builtin(name, verb)
+}
+
+/// Brings the shipped skills into the vault, honouring the owner's `skills.builtin.off`.
+pub fn sync_builtin(config: &HqConfig) -> Result<hq_tools::skills::builtin::SyncReport> {
+    let skills_dir = hq_core::skills_dir(&config.vault_path);
+    let active = hq_tools::skills::builtin::active_for(config);
+    hq_tools::skills::builtin::sync_builtin_skills(&skills_dir, &active)
+}
+
+/// Runs [`sync_builtin`] at server start, logging instead of failing: a vault that cannot be
+/// written must not keep HQ from starting.
+pub fn sync_builtin_at_start(config: &HqConfig) {
+    match sync_builtin(config) {
+        Ok(report) if !report.replaced.is_empty() => tracing::warn!(
+            replaced = ?report.replaced,
+            "built-in skills differed from this HQ and were replaced; the old copies are archived"
+        ),
+
+        Ok(report) => {
+            tracing::info!(installed = ?report.installed, removed = ?report.removed, "built-in skills in step")
+        }
+        Err(e) => tracing::error!("could not sync the built-in skills: {e:#}"),
+    }
+}
+
 async fn list_skills(skills_dir: &Path, output: &mut dyn Write) -> Result<()> {
     // The canonical catalog, so this matches exactly what agents see: bundles
     // appear as single entries and their `bundleOnly` members do not.
     for skill in hq_tools::skills::list_skills(skills_dir) {
-        writeln!(output, "{}  {}", skill.name, skill.description)?;
+        let tag = if hq_tools::skills::builtin::is_active(&skill.name) {
+            " [built-in]"
+        } else {
+            ""
+        };
+        writeln!(output, "{}  {}{tag}", skill.name, skill.description)?;
     }
 
     let proposed_dir = skills_dir.join("_proposed");
@@ -276,6 +326,11 @@ async fn list_skills(skills_dir: &Path, output: &mut dyn Write) -> Result<()> {
 
 async fn show_skill(skills_dir: &Path, name: &str) -> Result<()> {
     validate_name(name)?;
+    // What a session loads, not the vault copy, which may have been edited since the last sync.
+    if let Some(text) = hq_tools::skills::builtin::shipped_file(name, "SKILL.md") {
+        print!("{text}");
+        return Ok(());
+    }
 
     let live = skill_path(skills_dir, name);
     let proposed = proposed_skill_path(skills_dir, name);

@@ -194,6 +194,10 @@ pub fn write_evidence_proposal(
     current_hash: Option<&str>,
 ) -> Result<Option<PathBuf>> {
     validate_skill_name(&evidence.skill)?;
+    // A built-in changes only with HQ itself, so a proposal for one could never be applied.
+    if super::builtin::is_active(&evidence.skill) {
+        return Ok(None);
+    }
     let Some(text) = render_proposal(skills_dir, evidence, current_hash) else {
         return Ok(None);
     };
