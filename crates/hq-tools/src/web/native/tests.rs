@@ -292,14 +292,34 @@ fn env(base: &str) -> NativeEnv<'_> {
 }
 
 async fn run(server: &MockServer, query: &str, opts: &SearchOptions) -> Result<WebSearchResults> {
-    let base = server.uri();
     let budgets = Budgets {
         total: Duration::from_secs(5),
         searxng: Duration::from_millis(400),
         native_engine: Duration::from_secs(2),
         brave: Duration::from_millis(400),
     };
-    search_chain(query, opts, None, None, Some(&env(&base)), &budgets).await
+    run_with(server, query, opts, &budgets).await
+}
+
+async fn run_with(
+    server: &MockServer,
+    query: &str,
+    opts: &SearchOptions,
+    budgets: &Budgets,
+) -> Result<WebSearchResults> {
+    let base = server.uri();
+    search_chain(query, opts, None, None, Some(&env(&base)), budgets).await
+}
+
+/// Budgets a loaded CI runner cannot miss: an engine that overruns makes the answer degraded,
+/// and a degraded answer is never cached, which a cache test would read as a failure.
+fn patient_budgets() -> Budgets {
+    Budgets {
+        total: Duration::from_secs(30),
+        searxng: Duration::from_millis(400),
+        native_engine: Duration::from_secs(20),
+        brave: Duration::from_millis(400),
+    }
 }
 
 #[tokio::test]
@@ -1832,7 +1852,7 @@ async fn identical_concurrent_searches_share_one_run_of_the_pool() {
 }
 
 /// How long an abandoned search may take to finish in the background and fill the cache.
-const ABANDONED_SEARCH_WAIT: Duration = Duration::from_secs(15);
+const ABANDONED_SEARCH_WAIT: Duration = Duration::from_secs(40);
 
 #[tokio::test]
 async fn a_search_whose_caller_gave_up_still_warms_the_cache() {
@@ -1851,7 +1871,7 @@ async fn a_search_whose_caller_gave_up_still_warms_the_cache() {
     let opts = SearchOptions::default();
     let gave_up = tokio::time::timeout(
         Duration::from_millis(50),
-        run(&server, "abandoned query", &opts),
+        run_with(&server, "abandoned query", &opts, &patient_budgets()),
     )
     .await;
     assert!(
