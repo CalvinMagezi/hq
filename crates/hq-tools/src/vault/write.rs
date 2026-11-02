@@ -88,12 +88,12 @@ impl HqTool for VaultWriteNoteTool {
 
         validate_write_path(self.vault.vault_path(), &path)?;
 
-        let NoteParts {
+        let hq_vault::frontmatter::MergedNote {
             frontmatter,
             title,
             content,
             tags,
-        } = note_parts(title, &content, tags);
+        } = hq_vault::frontmatter::merge_leading_frontmatter(title, &content, tags);
 
         let note = hq_core::types::Note {
             title: title.clone(),
@@ -125,78 +125,6 @@ impl HqTool for VaultWriteNoteTool {
 
         let abs_path = self.vault.vault_path().join(&path_ret);
         Ok(json!({ "ok": true, "path": path_ret, "abs_path": abs_path.to_string_lossy() }))
-    }
-}
-
-/// What a written note is made of once frontmatter the caller put inside `content` is merged into
-/// the note's own. Without the merge that block landed in the body as a second frontmatter, its
-/// tags were never real tags, and search indexed the YAML as text.
-struct NoteParts {
-    frontmatter: std::collections::HashMap<String, serde_yaml::Value>,
-    title: String,
-    content: String,
-    tags: Vec<String>,
-}
-
-fn note_parts(title: String, content: &str, tags: Vec<String>) -> NoteParts {
-    let (mut frontmatter, body) =
-        match hq_core::frontmatter_utils::split_frontmatter(content.trim_start()) {
-            (Some(yaml), body) => match serde_yaml::from_str::<
-                std::collections::HashMap<String, serde_yaml::Value>,
-            >(yaml)
-            {
-                Ok(map) => (map, body.trim_start_matches(['\r', '\n']).to_string()),
-                Err(_) => (std::collections::HashMap::new(), content.to_string()),
-            },
-            (None, _) => (std::collections::HashMap::new(), content.to_string()),
-        };
-    let title = if title.is_empty() {
-        frontmatter
-            .get("title")
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .unwrap_or_default()
-    } else {
-        title
-    };
-    frontmatter.insert("title".into(), serde_yaml::Value::String(title.clone()));
-
-    let mut all_tags = yaml_tags(frontmatter.get("tags"));
-    for tag in tags {
-        if !all_tags.contains(&tag) {
-            all_tags.push(tag);
-        }
-    }
-    if !all_tags.is_empty() {
-        let list = all_tags
-            .iter()
-            .cloned()
-            .map(serde_yaml::Value::String)
-            .collect();
-        frontmatter.insert("tags".into(), serde_yaml::Value::Sequence(list));
-    }
-    NoteParts {
-        frontmatter,
-        title,
-        content: body,
-        tags: all_tags,
-    }
-}
-
-/// Tags from a frontmatter value: a list, or one comma-separated string.
-fn yaml_tags(value: Option<&serde_yaml::Value>) -> Vec<String> {
-    match value {
-        Some(serde_yaml::Value::Sequence(items)) => items
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(str::to_string)
-            .collect(),
-        Some(serde_yaml::Value::String(s)) => s
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect(),
-        _ => Vec::new(),
     }
 }
 
@@ -403,7 +331,11 @@ mod note_parts_tests {
 
     #[test]
     fn tags_given_as_an_argument_are_written_to_the_file() {
-        let parts = note_parts("T".into(), "plain body", vec!["a".into()]);
+        let parts = hq_vault::frontmatter::merge_leading_frontmatter(
+            "T".into(),
+            "plain body",
+            vec!["a".into()],
+        );
         assert_eq!(parts.tags, ["a"]);
         assert!(parts.frontmatter.contains_key("tags"));
         assert_eq!(parts.content, "plain body");
@@ -412,7 +344,8 @@ mod note_parts_tests {
     #[test]
     fn content_whose_frontmatter_does_not_parse_is_kept_as_written() {
         let content = "---\n: : not yaml [\n---\nbody";
-        let parts = note_parts("T".into(), content, Vec::new());
+        let parts =
+            hq_vault::frontmatter::merge_leading_frontmatter("T".into(), content, Vec::new());
         assert_eq!(parts.content, content);
     }
 }

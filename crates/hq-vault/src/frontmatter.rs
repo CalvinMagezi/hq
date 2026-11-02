@@ -33,6 +33,78 @@ pub(crate) fn serialize(
     Ok(format!("---\n{}---\n\n{}", yaml, content))
 }
 
+/// A note once a frontmatter block at the start of its content is merged into its own. A block
+/// left in the body is a second frontmatter whose tags are never real tags. `title` wins over the
+/// block's title when it is not empty; `tags` are added to the block's.
+pub struct MergedNote {
+    pub frontmatter: std::collections::HashMap<String, serde_yaml::Value>,
+    pub title: String,
+    pub content: String,
+    pub tags: Vec<String>,
+}
+
+pub fn merge_leading_frontmatter(title: String, content: &str, tags: Vec<String>) -> MergedNote {
+    let (mut frontmatter, body) =
+        match hq_core::frontmatter_utils::split_frontmatter(content.trim_start()) {
+            (Some(yaml), body) => match serde_yaml::from_str::<
+                std::collections::HashMap<String, serde_yaml::Value>,
+            >(yaml)
+            {
+                Ok(map) => (map, body.trim_start_matches(['\r', '\n']).to_string()),
+                Err(_) => (std::collections::HashMap::new(), content.to_string()),
+            },
+            (None, _) => (std::collections::HashMap::new(), content.to_string()),
+        };
+    let title = if title.is_empty() {
+        frontmatter
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_default()
+    } else {
+        title
+    };
+    frontmatter.insert("title".into(), serde_yaml::Value::String(title.clone()));
+
+    let mut all_tags = yaml_tags(frontmatter.get("tags"));
+    for tag in tags {
+        if !all_tags.contains(&tag) {
+            all_tags.push(tag);
+        }
+    }
+    if !all_tags.is_empty() {
+        let list = all_tags
+            .iter()
+            .cloned()
+            .map(serde_yaml::Value::String)
+            .collect();
+        frontmatter.insert("tags".into(), serde_yaml::Value::Sequence(list));
+    }
+    MergedNote {
+        frontmatter,
+        title,
+        content: body,
+        tags: all_tags,
+    }
+}
+
+/// Tags from a frontmatter value: a list, or one comma-separated string.
+fn yaml_tags(value: Option<&serde_yaml::Value>) -> Vec<String> {
+    match value {
+        Some(serde_yaml::Value::Sequence(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::to_string)
+            .collect(),
+        Some(serde_yaml::Value::String(s)) => s
+            .split(',')
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 pub fn pod_to_yaml_value(pod: &gray_matter::Pod) -> serde_yaml::Value {
     match pod {
         gray_matter::Pod::String(s) => serde_yaml::Value::String(s.clone()),

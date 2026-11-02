@@ -275,6 +275,25 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             let report =
                 db.with_conn(move |conn| hq_db::search::repair_orphans(conn, &vault_path, apply))?;
             print!("{}", repair_summary(&report, apply));
+            let backup = config
+                .vault_path
+                .join("_trash")
+                .join(chrono::Utc::now().format("%Y-%m-%d").to_string())
+                .join("nested-frontmatter");
+            let nested = hq_vault::remediation::repair_nested_frontmatter(
+                &config.vault_path,
+                &backup,
+                apply,
+            )?;
+            let mode = if apply { "" } else { " (dry run)" };
+            println!(
+                "Notes with frontmatter inside the body{mode}: {} of {}",
+                nested.nested.len(),
+                nested.scanned
+            );
+            for path in nested.nested.iter().take(5) {
+                println!("  {path}");
+            }
         }
         _ => {
             println!("Usage: hq vault <subcommand>");
@@ -297,7 +316,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 "  import <file|folder> Convert them to Markdown notes (a folder is a dry run until --apply; --archive, --destination, --on-conflict)"
             );
             println!(
-                "  repair [--apply]     Find (and with --apply remove) search rows left behind by deleted notes"
+                "  repair [--apply]     Find (and with --apply remove) search rows left behind by deleted notes, and merge frontmatter left inside note bodies"
             );
             println!("  stats                Show vault statistics");
             println!("  context              Show system context");
