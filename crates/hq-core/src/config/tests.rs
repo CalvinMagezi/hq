@@ -274,7 +274,7 @@ mod bash_config_tests {
             "governance:\n  skills_write_approval: true\n  bash:\n    env_passthrough: [GH_TOKEN, GITHUB_TOKEN]\n",
         );
         assert!(config.governance.skills_write_approval);
-        assert!(config.governance.background_review);
+        assert!(config.reviews_skills_in_background());
         assert_eq!(
             config.governance.bash.env_passthrough,
             vec!["GH_TOKEN".to_string(), "GITHUB_TOKEN".to_string()]

@@ -306,7 +306,7 @@ pub(super) fn session_config_from_hq_config(config: &HqConfig) -> SessionConfig 
     SessionConfig {
         model: hq_core::config::resolve_session_model(config),
         max_budget_usd: Some(config.budget.session_cap_usd),
-        background_review: config.governance.background_review,
+        background_review: config.reviews_skills_in_background(),
         ..SessionConfig::default()
     }
 }
