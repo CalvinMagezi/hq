@@ -275,7 +275,6 @@ const MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS: &[&str] = &[
     "inbox-triage",
     "email-poll",
     "verify-dispatch",
-    "edge-worker-dispatch",
 ];
 
 /// The tasks the scheduler runs for `config`.
@@ -898,6 +897,13 @@ mod lite_tests {
         }
         // The keyword index is local and keeps following edits either way.
         assert!(saving.contains(&"embeddings"));
+    }
+
+    #[test]
+    fn the_edge_worker_runs_under_the_data_saver_because_its_switch_is_the_owners() {
+        // The data saver is on by default on a phone, the edge worker's home.
+        assert!(MobileConfig::default().data_saver);
+        assert!(names(&mobile(true)).contains(&"edge-worker-dispatch"));
     }
 
     #[test]
