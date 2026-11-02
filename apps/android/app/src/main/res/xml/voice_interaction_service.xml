@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- supportsAssist is what lets holding Home open AgentHQ. It does not open over the lock screen: the owner unlocks first. -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="example.hq.spike.voice.AssistantSessionService"
+    android:recognitionService="example.hq.spike.voice.OnDeviceRecognitionService"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false"/>

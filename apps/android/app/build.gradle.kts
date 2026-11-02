@@ -152,6 +152,8 @@ android {
             // and left alone by the strip step.
             useLegacyPackaging = true
             keepDebugSymbols += listOf("**/libhq.so", "**/libcaddy.so")
+            // sherpa-onnx's JNI library needs only libonnxruntime; its C and C++ API libraries are for other callers.
+            excludes += listOf("**/libsherpa-onnx-c-api.so", "**/libsherpa-onnx-cxx-api.so")
         }
     }
 }
@@ -176,6 +178,11 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.4.2")
     implementation("androidx.camera:camera-view:1.4.2")
     implementation("com.google.zxing:core:3.5.3")
+    // Hearing and speaking on the phone (Apache-2.0): speech to text and text to speech run in this process, so
+    // no audio reaches Google or anyone else. Its models are fetched once with pinned checksums (voice/VoiceModels.kt).
+    implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1")
+    // Unpacks the models' .tar.bz2 releases (Apache-2.0).
+    implementation("org.apache.commons:commons-compress:1.27.1")
 
     testImplementation("junit:junit:4.13.2")
     // The platform's org.json is a stub in JVM unit tests.
