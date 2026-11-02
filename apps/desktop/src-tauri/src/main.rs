@@ -55,10 +55,19 @@ fn open_desktop() -> (Arc<Desktop>, Startup) {
         Ok(init) => init,
         Err(e) => fatal(&format!("{e:#}")),
     };
-    match Desktop::open(init) {
-        Ok(desktop) => (Arc::new(desktop), Startup { warning }),
+    let desktop = match Desktop::open(init) {
+        Ok(desktop) => desktop,
         Err(e) => fatal(&format!("{e:#}")),
-    }
+    };
+    let warning = [warning.as_deref(), desktop.hq_problem()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let startup = Startup {
+        warning: (!warning.is_empty()).then_some(warning),
+    };
+    (Arc::new(desktop), startup)
 }
 
 fn main() {

@@ -20,6 +20,12 @@ const STOP_POLL: Duration = Duration::from_millis(100);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
 const PROBE_READ_MAX: usize = 64;
 const HQ_BINARY: &str = "hq";
+/// What `hq --version` starts with, the same check the updater makes.
+const VERSION_PREFIX: &str = "hq ";
+const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+/// A slow shell profile (version managers, plugin loaders) can take seconds.
+const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
+const PATH_MARKER: &str = "__HQ_DESKTOP_PATH__";
 
 /// How the app tells that a host is up, which depends on what it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -378,16 +384,16 @@ pub fn search_path(
     tried.extend(home.map(|h| h.join("bin").join(HQ_BINARY)));
     tried.push(Path::new("/usr/local/bin").join(HQ_BINARY));
     if let Some(var) = path_var {
-        tried.extend(std::env::split_paths(var).map(|d| d.join(HQ_BINARY)));
+        tried.extend(on_path(var));
     }
     tried
 }
 
-/// The first runnable candidate. A configured path that is wrong is an error, not a reason to
-/// quietly run some other `hq`.
+/// The first candidate that is HQ's own program. A configured path that is wrong is an error, not
+/// a reason to quietly run some other `hq`.
 pub fn locate_hq(configured: Option<&Path>, candidates: &[PathBuf]) -> Result<PathBuf, HostError> {
     if let Some(path) = configured {
-        return if is_runnable(path) {
+        return if is_hq(path) {
             Ok(path.to_path_buf())
         } else {
             Err(HostError::ProgramNotFound(vec![path.to_path_buf()]))
@@ -395,9 +401,75 @@ pub fn locate_hq(configured: Option<&Path>, candidates: &[PathBuf]) -> Result<Pa
     }
     candidates
         .iter()
-        .find(|p| is_runnable(p))
+        .find(|p| is_hq(p))
         .cloned()
         .ok_or_else(|| HostError::ProgramNotFound(candidates.to_vec()))
+}
+
+/// Each directory on `path_var` with `hq` in it, for a search list.
+pub fn on_path(path_var: &std::ffi::OsStr) -> impl Iterator<Item = PathBuf> + '_ {
+    std::env::split_paths(path_var).map(|d| d.join(HQ_BINARY))
+}
+
+/// The PATH the person's login shell sets up, or None when it does not answer in time. An app
+/// opened from the Dock gets only the system's short PATH, so an `hq` installed by a shell profile
+/// is invisible to it otherwise.
+pub fn login_shell_path(shell: &Path) -> Option<std::ffi::OsString> {
+    let mut cmd = Command::new(shell);
+    // Interactive too: most people extend PATH in the rc file, not the login profile.
+    cmd.args([
+        "-ilc",
+        &format!("printf '%s\\n%s\\n%s\\n' {PATH_MARKER} \"$PATH\" {PATH_MARKER}"),
+    ]);
+    let out = output_within(cmd, LOGIN_SHELL_TIMEOUT)?;
+    between_markers(&String::from_utf8_lossy(&out)).map(Into::into)
+}
+
+/// The text between the first two marker lines, so a profile that prints is ignored.
+fn between_markers(out: &str) -> Option<String> {
+    let mut lines = out.lines().skip_while(|l| *l != PATH_MARKER).skip(1);
+    let path = lines.next()?;
+    (lines.next()? == PATH_MARKER && !path.is_empty()).then(|| path.to_string())
+}
+
+/// Some systems ship an unrelated program called `hq`; only one whose `--version` says `hq <version>`
+/// counts.
+fn is_hq(path: &Path) -> bool {
+    if !is_runnable(path) {
+        return false;
+    }
+    let mut cmd = Command::new(path);
+    cmd.arg("--version");
+    output_within(cmd, VERSION_TIMEOUT)
+        .is_some_and(|out| String::from_utf8_lossy(&out).starts_with(VERSION_PREFIX))
+}
+
+/// What a short command printed, or None if it failed or ran past `limit`. On a timeout its whole
+/// process group is killed, so a shell's children go too.
+fn output_within(mut cmd: Command, limit: Duration) -> Option<Vec<u8>> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let child = cmd.spawn().ok()?;
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(limit) {
+        Ok(Ok(out)) if out.status.success() => Some(out.stdout),
+        Ok(_) => None,
+        Err(_) => {
+            // The waiting thread has not reaped the child, so the group id is still ours.
+            signal_group(pid, Signal::Kill);
+            None
+        }
+    }
 }
 
 fn is_runnable(path: &Path) -> bool {
@@ -801,16 +873,66 @@ mod tests {
         );
     }
 
+    fn script(path: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path.to_path_buf()
+    }
+
+    #[test]
+    fn only_a_program_that_says_it_is_hq_counts() {
+        let root = tempfile::tempdir().unwrap();
+        let other = script(&root.path().join("a/hq"), "echo 'hq: a window manager'");
+        let failing = script(&root.path().join("b/hq"), "exit 1");
+        let real = script(
+            &root.path().join("c/hq"),
+            "echo 'hq 0.9.1 (abcdef0 2026-11-02)'",
+        );
+        let candidates = vec![other.clone(), failing, real.clone()];
+        assert_eq!(locate_hq(None, &candidates).unwrap(), real);
+        assert!(locate_hq(Some(&other), &candidates).is_err());
+    }
+
+    #[test]
+    fn a_program_that_hangs_is_passed_over_in_time() {
+        let root = tempfile::tempdir().unwrap();
+        let slow = script(&root.path().join("hq"), "sleep 30");
+        let started = std::time::Instant::now();
+        assert!(!is_hq(&slow));
+        assert!(started.elapsed() < VERSION_TIMEOUT + Duration::from_secs(2));
+    }
+
+    #[test]
+    fn the_login_shell_path_is_read_between_markers() {
+        let root = tempfile::tempdir().unwrap();
+        // A profile that prints before and after the PATH must not leak into it.
+        let shell = script(
+            &root.path().join("shell"),
+            "echo 'Welcome back'\neval \"$2\"\necho 'bye'",
+        );
+        let path = login_shell_path(&shell).unwrap();
+        assert!(!path.to_string_lossy().contains("Welcome"));
+        assert_eq!(
+            path,
+            std::ffi::OsString::from(std::env::var("PATH").unwrap())
+        );
+
+        assert_eq!(between_markers("noise\n"), None);
+        let m = PATH_MARKER;
+        assert_eq!(between_markers(&format!("{m}\n\n{m}\n")), None);
+        assert_eq!(
+            between_markers(&format!("x\n{m}\n/a:/b\n{m}\ny\n")).as_deref(),
+            Some("/a:/b")
+        );
+        let broken = script(&root.path().join("broken"), "exit 3");
+        assert_eq!(login_shell_path(&broken), None);
+    }
+
     #[test]
     fn hq_is_found_in_order_and_a_wrong_configured_path_is_not_replaced() {
-        use std::os::unix::fs::PermissionsExt;
-        let make = |dir: &Path| {
-            std::fs::create_dir_all(dir).unwrap();
-            let p = dir.join("hq");
-            std::fs::write(&p, "#!/bin/sh\n").unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-            p
-        };
+        let make = |dir: &Path| script(&dir.join("hq"), "echo 'hq 0.9.1 (abcdef0)'");
         let root = tempfile::tempdir().unwrap();
         let app = make(&root.path().join("app"));
         let on_path = make(&root.path().join("onpath"));

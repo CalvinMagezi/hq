@@ -102,7 +102,7 @@ Claude") and **Remove** takes out only those. The tab reads Claude when it opens
 change, not on the three-second refresh, because reading Claude Code runs its program.
 
 Claude Desktop is told to start `hq`, so the app needs that program's absolute path: the one the
-Host button uses (next to the app, in `~/bin`, or on `PATH`, or the path set in Settings). When it
+Host button uses (see "Finding `hq`" below). When it
 cannot find one, Add says so instead of writing a bare `hq`. **Revoke** on a device removes its
 entries in Claude before it revokes.
 
@@ -118,10 +118,24 @@ refused.
 | `bridge_port` | `47475` | UDP port of the pairing endpoint. Fixed, because a paired device stores the address it paired at |
 | `relay` | `none` | `none`, `default` or an `https://` relay URL |
 | `device_name` | the host name | What this Mac is called to the devices it pairs with |
-| `hq_path` | unset | The `hq` program to run. Unset: next to the app, `~/bin`, `/usr/local/bin`, then `PATH` |
+| `hq_path` | unset | The `hq` program to run. Unset: see "Finding `hq`" |
 
 Port, relay, name and `hq_path` changes apply the next time the app opens. The host's own output goes to
 `~/.hq/desktop/host.log` (owner-only). The app reads the same `~/.hq/config.yaml` as `hq`.
+
+## Finding `hq`
+
+The app runs HQ's own `hq` program and looks for it when it opens, in this order:
+
+1. The path in Settings (`hq_path`). If that is wrong, the app says so and does not look elsewhere.
+2. Next to the app, `~/bin`, `/usr/local/bin`, then each directory on the app's `PATH`.
+3. Only when none of those has it: the `PATH` your login shell sets up (`$SHELL -ilc`, given five
+   seconds). An app opened from the Dock gets only the system's short `PATH`, so an `hq` that a
+   shell profile puts on your `PATH` is otherwise invisible to it.
+
+A candidate counts only when `hq --version` answers `hq <version>` within five seconds: some systems
+have an unrelated program called `hq`. When nothing is found, the Host screen says so as soon as
+the app opens and lists where it looked.
 
 ## Building it
 

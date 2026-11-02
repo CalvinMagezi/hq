@@ -22,6 +22,7 @@ const SHUTDOWN_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 /// How long closing the pairing endpoints may take before the app stops waiting for them.
 const SHUTDOWN_STEP: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_DEVICE_NAME: &str = "hq-desktop";
+const DEFAULT_MACOS_SHELL: &str = "/bin/zsh";
 
 pub struct DesktopInit {
     /// The app's own folder (`~/.hq/desktop`): settings and the host's log.
@@ -33,6 +34,8 @@ pub struct DesktopInit {
     pub app_dir: Option<PathBuf>,
     pub home: Option<PathBuf>,
     pub path_var: Option<std::ffi::OsString>,
+    /// The person's login shell, asked for its PATH when the quick places have no `hq`.
+    pub login_shell: Option<PathBuf>,
 }
 
 impl DesktopInit {
@@ -47,9 +50,40 @@ impl DesktopInit {
                 .and_then(|p| p.parent().map(Path::to_path_buf)),
             home: Some(home),
             path_var: std::env::var_os("PATH"),
+            login_shell: login_shell(),
             config,
         })
     }
+}
+
+/// `$SHELL` when it is an absolute path, else the system's default shell.
+fn login_shell() -> Option<PathBuf> {
+    std::env::var_os("SHELL")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| cfg!(target_os = "macos").then(|| PathBuf::from(DEFAULT_MACOS_SHELL)))
+}
+
+/// The quick places first; the login shell, which can take seconds, only when they have no `hq`.
+/// A configured path is never second-guessed.
+fn find_hq(init: &DesktopInit, configured: Option<&Path>) -> Result<PathBuf, host::HostError> {
+    let candidates = host::search_path(
+        init.app_dir.as_deref(),
+        init.home.as_deref(),
+        init.path_var.as_deref(),
+    );
+    let quick = host::locate_hq(configured, &candidates);
+    if quick.is_ok() || configured.is_some() {
+        return quick;
+    }
+    let Some(login_path) = init.login_shell.as_deref().and_then(host::login_shell_path) else {
+        return quick;
+    };
+    let mut all = candidates;
+    all.extend(host::on_path(&login_path));
+    let mut seen = std::collections::HashSet::new();
+    all.retain(|p| seen.insert(p.clone()));
+    host::locate_hq(None, &all)
 }
 
 /// What a revoke did, for the window.
@@ -68,6 +102,8 @@ pub struct Desktop {
     pub pairing: PairingController,
     /// The `hq` program the host runs, and the one Claude Desktop is told to start.
     hq_program: PathBuf,
+    /// Why no `hq` was found when the app opened, for the window.
+    hq_problem: Option<String>,
     proxy: AsyncMutex<Option<ProxyHandle>>,
     upstream: SocketAddr,
 }
@@ -122,14 +158,16 @@ impl Desktop {
         create_private_dir(&init.dir)?;
         let settings = Settings::load(&init.dir)?;
         let upstream = upstream_addr(&init.config)?;
-        let candidates = host::search_path(
-            init.app_dir.as_deref(),
-            init.home.as_deref(),
-            init.path_var.as_deref(),
-        );
-        // A missing program is reported when the host is started, not when the app opens.
-        let program = host::locate_hq(settings.hq_path.as_deref(), &candidates)
-            .unwrap_or_else(|_| PathBuf::from("hq"));
+        // A missing program is reported when the app opens and again by whatever needs it.
+        let (program, hq_problem) = match find_hq(&init, settings.hq_path.as_deref()) {
+            Ok(program) => (program, None),
+            Err(e) => (
+                PathBuf::from("hq"),
+                Some(format!(
+                    "{e}. Install HQ, or set the path to its hq program in Settings."
+                )),
+            ),
+        };
         let hq_program = program.clone();
         let host = HostController::new(HostSpec::for_config(
             program,
@@ -180,6 +218,7 @@ impl Desktop {
             host,
             pairing,
             hq_program,
+            hq_problem,
             proxy: AsyncMutex::new(None),
             upstream,
         })
@@ -223,6 +262,11 @@ impl Desktop {
             revoked,
             claude_warning,
         })
+    }
+
+    /// Set when the app opened without finding HQ's program.
+    pub fn hq_problem(&self) -> Option<&str> {
+        self.hq_problem.as_deref()
     }
 
     pub fn settings(&self) -> Settings {
@@ -399,6 +443,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_missing_hq_is_reported_when_the_app_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let app_dir = dir.path().join("desktop");
+        let missing = dir.path().join("nowhere").join("hq");
+        Settings {
+            hq_path: Some(missing.clone()),
+            ..Settings::default()
+        }
+        .save(&app_dir)
+        .unwrap();
+        let desktop = Desktop::open(DesktopInit {
+            dir: app_dir,
+            bridge_key: dir.path().join("bridge").join("bridge.key"),
+            config: HqConfig {
+                ws_port: crate::host::tests_support_unused_port(),
+                ..HqConfig::default()
+            },
+            app_dir: None,
+            home: None,
+            path_var: None,
+            login_shell: None,
+        })
+        .unwrap();
+        let problem = desktop.hq_problem().expect("a missing hq is reported");
+        assert!(problem.contains(&missing.display().to_string()));
+        assert!(problem.contains("Settings"));
+    }
+
+    #[tokio::test]
     async fn opening_the_app_starts_nothing_and_saves_nothing_it_was_not_told_to() {
         let dir = tempfile::tempdir().unwrap();
         let desktop = Desktop::open(DesktopInit {
@@ -411,6 +484,7 @@ mod tests {
             app_dir: None,
             home: None,
             path_var: None,
+            login_shell: None,
         })
         .unwrap();
         assert!(!desktop.settings().start_host_on_launch);
