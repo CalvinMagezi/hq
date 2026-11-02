@@ -4,7 +4,7 @@ Status: proposal, waiting for the owner's yes. Nothing here is implemented.
 
 ## Goal
 
-The macOS desktop app updates itself the way herdr-app does: check in the background, download a
+The macOS desktop app updates itself the way many native apps do: check in the background, download a
 new build beside the running one, and switch to it when the person quits or presses Restart. It
 must not open a second, weaker path to running code on the machine. HQ already has one trusted
 path, the signed release channel behind `hq update` (`docs/UPDATE_SYSTEM.md`), and the app reuses
@@ -66,7 +66,7 @@ snapshots and health checks, none of which the app has.
 Settings gains Updates: off, check only, or download and switch on quit (the default once
 releases are notarized). The window shows "Version X is ready, restart to use it". Nothing
 updates in the background while the host is starting or stopping. A build from source never
-updates (the check is compiled in only for release builds, as herdr does with a build-time flag).
+updates (the check is compiled in only for release builds, through a build-time flag).
 
 ## Not in this design
 
