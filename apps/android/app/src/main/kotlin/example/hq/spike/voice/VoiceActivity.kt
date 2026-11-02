@@ -44,7 +44,7 @@ import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
 /**
- * The sheet "Hey HQ" and holding Home open. It hears one request, shows and speaks the reply, and listens again
+ * The sheet holding Home opens. It hears one request, shows the reply as it arrives, and listens again
  * on a tap. Audio is recognised on the phone by [VoiceSession]; only the final words go to HQ's chat.
  */
 class VoiceActivity : ComponentActivity() {
@@ -89,7 +89,7 @@ class VoiceActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Nothing listens or speaks once the sheet is gone: the microphone is only ever open in front of the owner.
+        // Nothing listens once the sheet is gone: the microphone is only ever open in front of the owner.
         session.quiet()
         if (!isChangingConfigurations && !dismissing) finish()
     }

@@ -102,15 +102,15 @@ higher or lower than the board.
 
 AgentHQ can take Google's place as the phone's assistant: Settings, Apps, Choose default apps, Digital
 assistant app, AgentHQ. Holding Home (or the assist gesture) then opens a voice sheet over whatever is on
-screen. It does not open over the lock screen (unlock first). It listens, shows what it heard, sends those words to HQ's chat and
-reads the reply aloud a sentence at a time. Tap the button to stop listening early, to interrupt the reply,
-or to ask a follow-up in the same chat. On a Galaxy A32 the side key opens only the power menu, so hold
-Home there.
+screen. It does not open over the lock screen (unlock first). It listens, shows what it heard, sends those
+words to HQ's chat with a note asking for a short plain-text answer, and shows the reply as it streams
+("Looking it up" while HQ runs a tool first). Answers are text only: the on-device voice was tried and
+retired. Tap the button to stop listening early, to interrupt the reply, or to ask a follow-up in the same
+chat. On a Galaxy A32 the side key opens only the power menu, so hold Home there.
 
 What stays on the phone: the audio and its recognition (sherpa-onnx with the Kroko English streaming model,
 CC-BY-SA 4.0, chosen after a real-voice test where the smaller LibriSpeech model lost first words and
-technical terms), the spoken reply
-(sherpa-onnx with the LJ Speech Piper voice), and the screen. For HQ the microphone is open only while the
+technical terms), and the screen. For HQ the microphone is open only while the
 sheet is showing (another app's dictation, below, opens it for that app); audio is read in 100 ms pieces,
 decoded and dropped, never written. The assistant turns off
 Android's assist data and screenshot, so the screen's text is never copied into the app. What leaves the
@@ -125,7 +125,7 @@ lets in only apps that hold the microphone permission. Before the models are dow
 People open with "Hey HQ" out of habit; the recogniser has never learned "HQ" and writes it as "Ue",
 "Ahq" and so on, so `voice/Invocation.kt` takes that greeting off the start before the question is sent.
 
-The speech models (about 80 MB) are downloaded once, after the owner taps Get under a notice, from the
+The speech model (about 55 MB) is downloaded once, after the owner taps Get under a notice, from the
 sherpa-onnx releases on GitHub. Each archive has a pinned SHA-256 in `voice/VoiceModels.kt`, and only the
 named files are unpacked into `no_backup/voice/`. The download sends nothing about the owner. Logcat gets
 the sheet's phase changes with a clock (`adb logcat -s HqVoice`), never the words.
@@ -133,7 +133,7 @@ the sheet's phase changes with a clock (`adb logcat -s HqVoice`), never the word
 Test it beside the real app without touching it: `./gradlew :app:assembleDebug -Phq.appId=online.agenthq.voicetest`,
 install with `adb install -r -g`, then `adb shell cmd role add-role-holder android.app.role.ASSISTANT
 online.agenthq.voicetest 0` and `adb shell input keyevent 219`. That copy has no hq, so a request ends with
-"HQ is not answering", spoken. Note the assistant settings first (`settings get secure assistant`,
+"HQ is not answering". Note the assistant settings first (`settings get secure assistant`,
 `voice_interaction_service`, `voice_recognition_service`): uninstalling an assistant does not fall back to
 Google, so put the old holder back with the same `add-role-holder` command.
 

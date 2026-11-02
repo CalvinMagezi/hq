@@ -28,7 +28,11 @@ data class ModelSource(val url: String, val sha256: String, val bytes: Long, val
 class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClient()) {
     private val root = File(context.noBackupFilesDir, "voice")
     val stt = File(root, "stt")
-    val tts = File(root, "tts")
+
+    /** Frees the 25 MB the retired spoken voice left behind; nothing reads it any more. */
+    fun dropRetired() {
+        File(root, RETIRED_TTS_DIR).deleteRecursively()
+    }
 
     fun ready(): Boolean = SOURCES.all { (dir, source) -> doneMark(dir, source).isFile }
 
@@ -117,20 +121,15 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
         private const val MARK_CHARS = 12
         private const val RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
         private const val STT_DIR = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
-        private const val TTS_DIR = "vits-piper-en_US-ljspeech-medium-int8"
 
         const val STT_ENCODER = "encoder.onnx"
         const val STT_DECODER = "decoder.onnx"
         const val STT_JOINER = "joiner.onnx"
         const val STT_TOKENS = "tokens.txt"
-        const val TTS_MODEL = "voice.onnx"
-        const val TTS_TOKENS = "tokens.txt"
-        const val TTS_LEXICON = "lexicon-en-us.txt"
 
         /**
          * Streaming English recognition: Kroko (CC-BY-SA 4.0, trained on everyday speech; the LibriSpeech model
-         * before it lost first words and technical terms with a real voice). The LJ Speech voice is from
-         * public-domain recordings.
+         * before it lost first words and technical terms with a real voice). Answers are shown, not spoken.
          */
         val SOURCES: List<Pair<String, ModelSource>> = listOf(
             "stt" to ModelSource(
@@ -144,19 +143,10 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
                     "$STT_DIR/tokens.txt" to STT_TOKENS,
                 ),
             ),
-            "tts" to ModelSource(
-                "$RELEASES/tts-models/$TTS_DIR.tar.bz2",
-                "24dc3bd77dd48c291e52c297878d3437c9492f245d823d7f6a06c4bbb67f4b6b",
-                21_090_429,
-                mapOf("$TTS_DIR/en_US-ljspeech-medium.onnx" to TTS_MODEL, "$TTS_DIR/tokens.txt" to TTS_TOKENS),
-            ),
-            "tts" to ModelSource(
-                "$RELEASES/tts-models/lexicon-en-us.txt",
-                "8b67ae549a465eee78f92ecb74644ad90c3c58ce65f19c68baf85878a10ef73a",
-                6_305_773,
-                mapOf(TTS_LEXICON to TTS_LEXICON),
-            ),
         )
+
+        /** Where the spoken voice's models lived before answers became text only; removed from phones that have it. */
+        const val RETIRED_TTS_DIR = "tts"
 
         /** What the owner is told before the one download. */
         val DOWNLOAD_MB = SOURCES.sumOf { it.second.bytes } / (1024 * 1024)

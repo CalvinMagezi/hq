@@ -10,14 +10,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * One recogniser, one voice and at most one model download per process. Loading both engines takes about ten
- * seconds on a budget phone, so they are kept once loaded; the download outlives the sheet that started it.
+ * One recogniser and at most one model download per process. Loading the recogniser takes seconds on a budget phone,
+ * so it is kept once loaded; the download outlives the sheet that started it.
  */
-// ponytail: engines held until the process ends (about 60 MB); release on onTrimMemory if memory pressure shows up.
+// ponytail: the recogniser is held until the process ends (about 70 MB); release on onTrimMemory if memory pressure shows up.
 object VoiceEngines {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var ears: Ears? = null
-    @Volatile private var mouth: Mouth? = null
     private var download: Deferred<Unit>? = null
     private val _progress = MutableStateFlow<Float?>(null)
     /** 0 to 1 while the models download, null otherwise. */
@@ -25,10 +24,6 @@ object VoiceEngines {
 
     fun ears(context: Context): Ears = ears ?: synchronized(this) {
         ears ?: Ears(context.applicationContext).also { ears = it }
-    }
-
-    fun mouth(context: Context): Mouth = mouth ?: synchronized(this) {
-        mouth ?: Mouth(context.applicationContext, scope).also { mouth = it }
     }
 
     /** The download in progress, if any, so a sheet opened mid-download follows it instead of offering Get again. */

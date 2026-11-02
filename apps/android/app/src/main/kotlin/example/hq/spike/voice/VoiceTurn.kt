@@ -15,18 +15,18 @@ import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 
-/** What one spoken request produces, in order: the thread it landed in, sentences to say, then one ending. */
+/** What one spoken request produces, in order: the thread it landed in, the reply as it streams, then one ending. */
 sealed interface TurnOutput {
     data class Thread(val id: String) : TurnOutput
-    data class Say(val sentence: String) : TurnOutput
-    /** HQ is looking something up before it answers; worth a word so the owner is not left in silence. */
+    data class Text(val chunk: String) : TurnOutput
+    /** HQ is looking something up before it answers; shown so the owner knows why nothing has appeared yet. */
     data object Working : TurnOutput
     data object Done : TurnOutput
     data class Failed(val reason: String) : TurnOutput
 }
 
 /**
- * Sends one transcript to HQ's chat and turns the streamed reply into sentences. The socket carries every chat's
+ * Sends one transcript to HQ's chat and passes on its streamed reply. The socket carries every chat's
  * events, so this turn knows its own by the client id it sent and then by the thread HQ put it in. Every path ends:
  * a reply, an error, a refusal, the socket dropping, missed events, or too long a silence.
  */
@@ -46,12 +46,11 @@ class VoiceTurn(
         // Whoever ends the turn first (the reply itself or a watcher) is the only ending sent.
         val ended = AtomicBoolean(false)
         val reading = launch {
-            val words = SpokenText()
             var thread: String? = null
-            // Said once, when HQ starts a tool before any of the answer: a lookup can take many seconds of silence.
-            var spoke = false
+            // Signalled once, when HQ starts a tool before any of the answer: a lookup can take many seconds.
+            var answered = false
             events.onSubscription { listening.complete(Unit) }.transformWhile { event ->
-                val step = step(event, clientId, thread, words)
+                val step = step(event, clientId, thread)
                 if (step.ours) lastHeard.set(System.currentTimeMillis())
                 if (thread == null && step.thread != null) {
                     thread = step.thread
@@ -59,12 +58,12 @@ class VoiceTurn(
                     emit(TurnOutput.Thread(step.thread))
                 }
                 if (step.ends && !ended.compareAndSet(false, true)) return@transformWhile false
-                if (!spoke && event is ChatEvent.ToolStarted && step.ours) {
-                    spoke = true
+                if (!answered && event is ChatEvent.ToolStarted && step.ours) {
+                    answered = true
                     emit(TurnOutput.Working)
                 }
                 step.out.forEach {
-                    if (it is TurnOutput.Say) spoke = true
+                    if (it is TurnOutput.Text) answered = true
                     emit(it)
                 }
                 !step.ends
@@ -100,7 +99,7 @@ class VoiceTurn(
 
     private class Step(val out: List<TurnOutput> = emptyList(), val thread: String? = null, val ends: Boolean = false, val ours: Boolean = false)
 
-    private fun step(event: ChatEvent, clientId: String, thread: String?, words: SpokenText): Step {
+    private fun step(event: ChatEvent, clientId: String, thread: String?): Step {
         if (event is ChatEvent.TurnStart) return if (event.clientId == clientId) Step(thread = event.threadId, ours = true) else Step()
         if (event is ChatEvent.Rejected) {
             return if (event.clientId == clientId) Step(listOf(TurnOutput.Failed(rejected(event))), ends = true) else Step()
@@ -109,9 +108,9 @@ class VoiceTurn(
         if (event is ChatEvent.Lagged) return Step(listOf(TurnOutput.Failed(MISSED)), ends = true)
         if (thread == null || threadOf(event) != thread) return Step()
         return when (event) {
-            is ChatEvent.Text -> Step(words.add(event.text).map(TurnOutput::Say), ours = true)
+            is ChatEvent.Text -> Step(listOf(TurnOutput.Text(event.text)), ours = true)
             is ChatEvent.Failed -> Step(listOf(TurnOutput.Failed(event.message)), ends = true)
-            is ChatEvent.TurnEnd -> Step(words.finish().map(TurnOutput::Say) + TurnOutput.Done, ends = true)
+            is ChatEvent.TurnEnd -> Step(listOf(TurnOutput.Done), ends = true)
             else -> Step(ours = true)
         }
     }
@@ -136,8 +135,9 @@ class VoiceTurn(
          * Sent ahead of every spoken question. HQ passes an <hq-context> block to the model and leaves it out of the
          * saved chat, so the thread shows only what the owner said.
          */
-        const val VOICE_CONTEXT = "<hq-context>The owner asked this by voice and will hear the answer read aloud. " +
-            "Answer in one to three short spoken sentences: no markdown, lists, tables, links or code. " +
+        const val VOICE_CONTEXT = "<hq-context>The owner asked this by voice and reads the answer on a small sheet " +
+            "over whatever they were doing. Answer in one to three short sentences of plain text: no markdown, lists, " +
+            "tables or code. " +
             "Use a tool only when the answer needs the owner's own data or an action. " +
             "If more detail would help, offer it in one sentence instead of giving it.</hq-context>\n\n"
         /** HQ saves the question and says so within milliseconds; this long with no word means it never arrived. */
