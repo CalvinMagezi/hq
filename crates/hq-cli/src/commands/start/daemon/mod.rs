@@ -6,6 +6,7 @@
 //! - Task timeouts: hung tasks get killed, tick continues
 
 pub mod helpers;
+mod note_repair;
 pub mod tasks_fast;
 pub mod tasks_periodic;
 pub mod tasks_slow;
@@ -378,6 +379,8 @@ fn file_mtime(path: &Path) -> Option<std::time::SystemTime> {
 /// One-shot startup work and the loops that run beside the scheduler.
 fn run_startup_hooks(config: &HqConfig, vault_path: &Path, db: &Database) {
     ensure_dir(&vault_path.join("_system"));
+
+    note_repair::repair_nested_frontmatter_once(vault_path, db);
 
     // Merge-safe: never clobbers higher-confidence user or learner values.
     if let Err(e) = hq_daemon::notif_gate::seed_default_notif_traits(vault_path) {

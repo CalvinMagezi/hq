@@ -129,3 +129,162 @@ mod tests {
         assert!(repoint_content("[[Other]]", "old", "New").is_none());
     }
 }
+
+/// What [`repair_nested_frontmatter`] found and, when applied, changed.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct NestedFrontmatterReport {
+    pub scanned: u32,
+    /// Vault-relative paths of the notes with a nested block (repaired when applied).
+    pub nested: Vec<String>,
+}
+
+/// Merge the frontmatter block an older `vault_write_note` left at the start of a note's body
+/// into the note's real frontmatter. Only that exact shape is touched: an outer frontmatter
+/// holding `title` and nothing else, followed by a body that opens with a YAML map. When `apply`
+/// is set each original is copied under `backup_dir` (same relative path) before it is rewritten.
+pub fn repair_nested_frontmatter(
+    vault: &Path,
+    backup_dir: &Path,
+    apply: bool,
+) -> anyhow::Result<NestedFrontmatterReport> {
+    let mut files = Vec::new();
+    md_files(&vault.join("Notebooks"), &mut files);
+    let mut report = NestedFrontmatterReport::default();
+    for path in files {
+        report.scanned += 1;
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Some(repaired) = unnest(&raw) else {
+            continue;
+        };
+        let rel = path
+            .strip_prefix(vault)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        if apply {
+            let backup = backup_dir.join(&rel);
+            if let Some(parent) = backup.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&backup, &raw)?;
+            write_atomic(&path, repaired.as_bytes())?;
+        }
+        report.nested.push(rel);
+    }
+    Ok(report)
+}
+
+/// The note rewritten with one frontmatter, or `None` when it is not the nested shape.
+fn unnest(raw: &str) -> Option<String> {
+    let (Some(outer), body) = hq_core::frontmatter_utils::split_frontmatter(raw) else {
+        return None;
+    };
+    let outer: std::collections::HashMap<String, serde_yaml::Value> =
+        serde_yaml::from_str(outer).ok()?;
+    if outer.len() != 1 {
+        return None;
+    }
+    let title = outer.get("title")?.as_str()?.to_string();
+    let inner = body.trim_start();
+    let (Some(block), _) = hq_core::frontmatter_utils::split_frontmatter(inner) else {
+        return None;
+    };
+    let parsed: std::collections::HashMap<String, serde_yaml::Value> =
+        serde_yaml::from_str(block).ok()?;
+    if parsed.is_empty() {
+        return None;
+    }
+    let merged = crate::frontmatter::merge_leading_frontmatter(title, inner, Vec::new());
+    crate::frontmatter::serialize(&merged.frontmatter, &merged.content).ok()
+}
+
+#[cfg(test)]
+mod nested_frontmatter_tests {
+    use super::*;
+
+    const NESTED: &str = "---\ntitle: Edge notes\n---\n\n---\ntitle: \"Agent-HQ on the Edge\"\nstatus: exploratory\ntags:\n  - edge-ai\n  - android\n---\n\n# Body\n\ntext\n";
+
+    fn vault_with(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel, body) in files {
+            let path = dir.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_nested_block_becomes_the_notes_frontmatter_and_the_original_is_kept() {
+        let vault = vault_with(&[("Notebooks/a.md", NESTED)]);
+        let backup = vault.path().join("_trash/x");
+        let report = repair_nested_frontmatter(vault.path(), &backup, true).unwrap();
+        assert_eq!(report.nested, ["Notebooks/a.md"]);
+
+        let fixed = std::fs::read_to_string(vault.path().join("Notebooks/a.md")).unwrap();
+        assert_eq!(fixed.matches("---").count(), 2, "{fixed}");
+        let tags = hq_core::frontmatter_utils::extract_tags_from_frontmatter(&fixed);
+        assert_eq!(tags, ["edge-ai", "android"]);
+        assert!(
+            fixed.contains("title: Edge notes"),
+            "the outer title wins: {fixed}"
+        );
+        assert!(fixed.contains("status: exploratory"));
+        assert!(fixed.trim_end().ends_with("# Body\n\ntext"));
+        assert_eq!(
+            std::fs::read_to_string(backup.join("Notebooks/a.md")).unwrap(),
+            NESTED
+        );
+
+        let again = repair_nested_frontmatter(vault.path(), &backup, true).unwrap();
+        assert!(again.nested.is_empty(), "a repaired note is left alone");
+    }
+
+    #[test]
+    fn other_shapes_are_never_touched() {
+        let notes = [
+            // An outer frontmatter with more than a title was not written by the old tool.
+            (
+                "Notebooks/rich.md",
+                "---\ntitle: T\ntags:\n  - a\n---\n\n---\nx: 1\n---\nbody\n",
+            ),
+            // A horizontal rule after a normal frontmatter.
+            (
+                "Notebooks/rule.md",
+                "---\ntitle: T\n---\n\ntext\n\n---\n\nmore\n",
+            ),
+            // A block that is not YAML.
+            (
+                "Notebooks/bad.md",
+                "---\ntitle: T\n---\n\n---\n: : [\n---\nbody\n",
+            ),
+            ("Notebooks/plain.md", "no frontmatter at all\n"),
+        ];
+        let vault = vault_with(&notes);
+        let report =
+            repair_nested_frontmatter(vault.path(), &vault.path().join("_trash/x"), true).unwrap();
+        assert_eq!(report.scanned, 4);
+        assert!(report.nested.is_empty(), "{:?}", report.nested);
+        for (rel, body) in notes {
+            assert_eq!(
+                std::fs::read_to_string(vault.path().join(rel)).unwrap(),
+                body
+            );
+        }
+    }
+
+    #[test]
+    fn a_dry_run_reports_without_writing() {
+        let vault = vault_with(&[("Notebooks/a.md", NESTED)]);
+        let report =
+            repair_nested_frontmatter(vault.path(), &vault.path().join("_trash/x"), false).unwrap();
+        assert_eq!(report.nested.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(vault.path().join("Notebooks/a.md")).unwrap(),
+            NESTED
+        );
+        assert!(!vault.path().join("_trash").exists());
+    }
+}
