@@ -139,9 +139,11 @@ pub struct NestedFrontmatterReport {
 }
 
 /// Merge the frontmatter block an older `vault_write_note` left at the start of a note's body
-/// into the note's real frontmatter. Only that exact shape is touched: an outer frontmatter
-/// holding `title` and nothing else, followed by a body that opens with a YAML map. When `apply`
-/// is set each original is copied under `backup_dir` (same relative path) before it is rewritten.
+/// into the note's real frontmatter: a body that opens with a YAML map right after the note's
+/// own frontmatter. The outer keys win, because tools such as `vault_pin` and
+/// `vault_frontmatter_update` set them after the note was written; tags from both are kept.
+/// When `apply` is set each original is copied under `backup_dir` (same relative path) before
+/// it is rewritten.
 pub fn repair_nested_frontmatter(
     vault: &Path,
     backup_dir: &Path,
@@ -183,10 +185,11 @@ fn unnest(raw: &str) -> Option<String> {
     };
     let outer: std::collections::HashMap<String, serde_yaml::Value> =
         serde_yaml::from_str(outer).ok()?;
-    if outer.len() != 1 {
-        return None;
-    }
-    let title = outer.get("title")?.as_str()?.to_string();
+    let title = outer
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
     let inner = body.trim_start();
     let (Some(block), _) = hq_core::frontmatter_utils::split_frontmatter(inner) else {
         return None;
@@ -196,7 +199,13 @@ fn unnest(raw: &str) -> Option<String> {
     if parsed.is_empty() {
         return None;
     }
-    let merged = crate::frontmatter::merge_leading_frontmatter(title, inner, Vec::new());
+    let outer_tags = crate::frontmatter::yaml_tags(outer.get("tags"));
+    let mut merged = crate::frontmatter::merge_leading_frontmatter(title, inner, outer_tags);
+    for (key, value) in outer {
+        if key != "title" && key != "tags" {
+            merged.frontmatter.insert(key, value);
+        }
+    }
     crate::frontmatter::serialize(&merged.frontmatter, &merged.content).ok()
 }
 
@@ -245,11 +254,6 @@ mod nested_frontmatter_tests {
     #[test]
     fn other_shapes_are_never_touched() {
         let notes = [
-            // An outer frontmatter with more than a title was not written by the old tool.
-            (
-                "Notebooks/rich.md",
-                "---\ntitle: T\ntags:\n  - a\n---\n\n---\nx: 1\n---\nbody\n",
-            ),
             // A horizontal rule after a normal frontmatter.
             (
                 "Notebooks/rule.md",
@@ -265,7 +269,7 @@ mod nested_frontmatter_tests {
         let vault = vault_with(&notes);
         let report =
             repair_nested_frontmatter(vault.path(), &vault.path().join("_trash/x"), true).unwrap();
-        assert_eq!(report.scanned, 4);
+        assert_eq!(report.scanned, 3);
         assert!(report.nested.is_empty(), "{:?}", report.nested);
         for (rel, body) in notes {
             assert_eq!(
@@ -273,6 +277,27 @@ mod nested_frontmatter_tests {
                 body
             );
         }
+    }
+
+    #[test]
+    fn keys_set_on_the_outer_frontmatter_later_win_and_tags_are_combined() {
+        let pinned = "---\npinned: true\ntags:\n  - later\ntitle: 'Edge: notes'\n---\n\n---\ntitle: \"Edge: notes\"\npinned: false\nstatus: exploratory\ntags:\n  - edge-ai\n---\n\n# Body\n";
+        let vault = vault_with(&[("Notebooks/p.md", pinned)]);
+        let report =
+            repair_nested_frontmatter(vault.path(), &vault.path().join("_trash/x"), true).unwrap();
+        assert_eq!(report.nested, ["Notebooks/p.md"]);
+        let fixed = std::fs::read_to_string(vault.path().join("Notebooks/p.md")).unwrap();
+        let (fm, body) = crate::frontmatter::parse(&fixed).unwrap();
+        assert_eq!(fm.get("pinned"), Some(&serde_yaml::Value::Bool(true)));
+        assert_eq!(
+            fm.get("status").and_then(|v| v.as_str()),
+            Some("exploratory")
+        );
+        assert_eq!(
+            hq_core::frontmatter_utils::extract_tags_from_frontmatter(&fixed),
+            ["edge-ai", "later"]
+        );
+        assert!(body.trim_start().starts_with("# Body"), "{body}");
     }
 
     #[test]
