@@ -10,6 +10,9 @@
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
   <!-- Lets the in-app updater hand a verified APK to Android's installer; the owner still confirms each install. -->
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+  <!-- The voice screen hears the owner while it is open, and apps that hold this permission themselves may ask the on-device recogniser for dictation. Audio is recognised on the phone and never stored or sent. -->
+  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <uses-feature android:name="android.hardware.microphone" android:required="false"/>
   <application android:label="AgentHQ" android:icon="@mipmap/ic_launcher" android:allowBackup="false"
                android:networkSecurityConfig="@xml/network_security_config">
     <activity android:name=".MainActivity" android:exported="true" android:permission="android.permission.DUMP" android:launchMode="singleTop" android:configChanges="orientation|screenSize|keyboardHidden"/>
@@ -65,6 +68,16 @@
                 android:value="Local-first notes and tasks hub, and the connection to devices its owner paired by QR code"/>
     </service>
     <receiver android:name=".AnswerReceiver" android:exported="false"/>
+    <!-- The phone's assistant slot. Only the system can bind the first two (BIND_VOICE_INTERACTION). -->
+    <service android:name=".voice.AssistantService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION">
+      <meta-data android:name="android.voice_interaction" android:resource="@xml/voice_interaction_service"/>
+      <intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter>
+    </service>
+    <service android:name=".voice.AssistantSessionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION"/>
+    <service android:name=".voice.OnDeviceRecognitionService" android:exported="true">
+      <intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter>
+    </service>
+    <activity android:name=".voice.VoiceActivity" android:exported="false" android:theme="@style/Theme.AgentHQ.Capture" android:excludeFromRecents="true" android:taskAffinity="" android:launchMode="singleTask" android:label="Hey HQ"/>
     <receiver android:name=".BootReceiver" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.BOOT_COMPLETED"/>
