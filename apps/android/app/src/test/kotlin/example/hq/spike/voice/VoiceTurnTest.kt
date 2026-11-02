@@ -11,39 +11,6 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class SpokenTextTest {
-    @Test
-    fun sentencesComeOutAsSoonAsTheyEnd() {
-        val words = SpokenText()
-        assertEquals(emptyList<String>(), words.add("It is 21"))
-        assertEquals(listOf("It is 21 degrees."), words.add(" degrees. And"))
-        assertEquals(emptyList<String>(), words.add(" sunny"))
-        assertEquals(listOf("And sunny"), words.finish())
-    }
-
-    @Test
-    fun markdownIsReadAsWords() {
-        val words = SpokenText()
-        val said = words.add("## Today\n- **Call** the [bank](https://bank.example.com)\n| a | b |\n|---|---|\nSee https://x.example.com now.\n")
-        assertEquals(listOf("Today", "Call the bank", "a , b", "See a link now."), said)
-    }
-
-    @Test
-    fun codeBlocksAreNamedNotRead() {
-        val words = SpokenText()
-        val said = words.add("Run this:\n```bash\nrm -rf build. now\n```\nDone.\n")
-        assertEquals(listOf("Run this:", "There is code in the reply; it is on the screen.", "Done."), said)
-    }
-
-    @Test
-    fun aLongRunWithNoEndIsSpokenAtASpace() {
-        val words = SpokenText(longestWait = 20)
-        val said = words.add("one two three four five six seven")
-        assertEquals(listOf("one two three four"), said)
-        assertEquals(listOf("five six seven"), words.finish())
-    }
-}
-
 class VoiceTurnTest {
     private fun turn(
         events: MutableSharedFlow<ChatEvent>,
@@ -88,17 +55,17 @@ class VoiceTurnTest {
                 ChatEvent.TurnEnd("t6", "m6", false),
             )
         }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
-        assertEquals(listOf(TurnOutput.Thread("t6"), TurnOutput.Working, TurnOutput.Say("Two tasks."), TurnOutput.Done), out)
+        assertEquals(listOf(TurnOutput.Thread("t6"), TurnOutput.Working, TurnOutput.Text("Two tasks. "), TurnOutput.Done), out)
     }
 
     @Test
-    fun aToolAfterSpeechStartedIsNotAnnounced() = runBlocking {
+    fun aToolAfterTheAnswerStartedIsNotAnnounced() = runBlocking {
         val events = bus()
         val step = example.hq.spike.data.ToolStep("c1", "task_list", null, null, null)
         val out = turn(events, mutableListOf()) { id ->
             listOf(ChatEvent.TurnStart("t7", id, null), ChatEvent.Text("t7", "Sure. "), ChatEvent.ToolStarted("t7", step), ChatEvent.TurnEnd("t7", "m7", false))
         }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
-        assertEquals(listOf(TurnOutput.Thread("t7"), TurnOutput.Say("Sure."), TurnOutput.Done), out)
+        assertEquals(listOf(TurnOutput.Thread("t7"), TurnOutput.Text("Sure. "), TurnOutput.Done), out)
     }
 
     @Test
@@ -108,7 +75,7 @@ class VoiceTurnTest {
         val out = turn(events, mutableListOf(), connected = connected) { id ->
             listOf(ChatEvent.TurnStart("t5", id, null), ChatEvent.Text("t5", "Fine. "), ChatEvent.TurnEnd("t5", "m5", false))
         }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
-        assertEquals(listOf(TurnOutput.Thread("t5"), TurnOutput.Say("Fine."), TurnOutput.Done), out)
+        assertEquals(listOf(TurnOutput.Thread("t5"), TurnOutput.Text("Fine. "), TurnOutput.Done), out)
     }
 
     @Test
@@ -126,7 +93,7 @@ class VoiceTurnTest {
     }
 
     @Test
-    fun aReplyBecomesSentencesThenDone() = runBlocking {
+    fun aReplyStreamsThenEnds() = runBlocking {
         val events = bus()
         val sent = mutableListOf<String>()
         val out = turn(events, sent) { id ->
@@ -142,7 +109,7 @@ class VoiceTurnTest {
         // The voice note rides ahead of the words; HQ strips it from the saved chat.
         assertEquals(listOf(VoiceTurn.VOICE_CONTEXT + "hi"), sent)
         assertEquals(
-            listOf(TurnOutput.Thread("t9"), TurnOutput.Say("Hello there."), TurnOutput.Say("How are you"), TurnOutput.Done),
+            listOf(TurnOutput.Thread("t9"), TurnOutput.Text("Hello there. How "), TurnOutput.Text("are you"), TurnOutput.Done),
             out,
         )
     }
