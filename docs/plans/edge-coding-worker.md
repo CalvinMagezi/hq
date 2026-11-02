@@ -94,8 +94,9 @@ shell does not have.
 ## Working tasks without being asked
 
 With `github_write.dispatch_tasks: true`, the daemon task `edge-worker-dispatch` (every two
-minutes, in the Full and Mobile editions; Lite does not run it, and a phone's data saver pauses
-it) picks up open tasks tagged `edge-task` by itself, so a task filed from the phone, the web app
+minutes, in the Full and Mobile editions; Lite does not run it. A phone's data saver, on by
+default, leaves it running: an idle tick is a database query, and `dispatch_tasks` is already
+the owner's choice to spend on queued work) picks up open tasks tagged `edge-task` by itself, so a task filed from the phone, the web app
 or a chat becomes a pull request with no other machine involved.
 
 - **Which task.** The most urgent open one that nothing blocks, that is unassigned or assigned
