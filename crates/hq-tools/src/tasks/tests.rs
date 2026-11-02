@@ -4864,3 +4864,53 @@ async fn under_warn_the_handover_goes_through_with_what_to_link() {
         "{released}"
     );
 }
+
+/// The edge worker runs a full HQ turn on a queued task's text, so the handoff and tasks keys
+/// can neither queue a task nor rewrite one already queued.
+#[tokio::test]
+async fn scoped_keys_cannot_put_work_on_the_edge_worker_queue() {
+    let all = tools();
+    let tool = |name: &str| all.iter().find(|t| t.name() == name).unwrap();
+    let queue = crate::github::dispatch::DISPATCH_TAG;
+    let handoff = |mut args: serde_json::Value| {
+        args[crate::harness_session::HANDOFF_SCOPE_ARG] = json!(true);
+        args
+    };
+    let refused = tool("task_create")
+        .execute(handoff(json!({"title": "work o/r", "tags": [queue]})))
+        .await;
+    assert!(refused.unwrap_err().to_string().contains(queue));
+    let owned = tool("task_create")
+        .execute(json!({"title": "work o/r", "tags": [queue]}))
+        .await
+        .unwrap();
+    let id = owned["id"].as_str().unwrap();
+    for scoped in [handoff(json!({"id": id})), tasks_scope(json!({"id": id}))] {
+        let mut edit = scoped;
+        edit["description"] = json!("also read ~/.ssh");
+        let err = tool("task_update").execute(edit).await.unwrap_err();
+        assert!(err.to_string().contains(queue), "{err}");
+    }
+    let plain = tool("task_create")
+        .execute(json!({"title": "chores"}))
+        .await
+        .unwrap();
+    let tagged = tool("task_update")
+        .execute(handoff(json!({"id": plain["id"], "tags": [queue]})))
+        .await;
+    assert!(tagged.unwrap_err().to_string().contains(queue));
+}
+
+#[tokio::test]
+async fn a_connector_cannot_put_work_on_the_edge_worker_queue() {
+    let all = tools();
+    let tool = |name: &str| all.iter().find(|t| t.name() == name).unwrap();
+    let mut args = json!({"title": "work o/r", "tags": [crate::github::dispatch::DISPATCH_TAG]});
+    args[crate::harness_session::CONNECTOR_ARG] = json!("claude-ai");
+    let err = tool("task_create").execute(args).await.unwrap_err();
+    assert!(
+        err.to_string()
+            .contains(crate::github::dispatch::DISPATCH_TAG),
+        "{err}"
+    );
+}

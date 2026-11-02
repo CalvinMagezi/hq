@@ -275,6 +275,7 @@ const MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS: &[&str] = &[
     "inbox-triage",
     "email-poll",
     "verify-dispatch",
+    "edge-worker-dispatch",
 ];
 
 /// The tasks the scheduler runs for `config`.

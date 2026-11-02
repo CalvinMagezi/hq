@@ -116,6 +116,42 @@ pub fn get_by_external(
     .map_err(Into::into)
 }
 
+/// The oldest ask of `scope` still waiting whose `external_id` starts with `prefix`.
+pub fn pending_by_external_prefix(
+    conn: &Connection,
+    scope: &str,
+    prefix: &str,
+) -> Result<Option<AskRow>> {
+    conn.query_row(
+        &format!(
+            "SELECT {COLUMNS} FROM hq_asks WHERE scope = ?1 AND status = 'pending' \
+             AND substr(external_id, 1, length(?2)) = ?2 ORDER BY created_at LIMIT 1"
+        ),
+        params![scope, prefix],
+        from_row,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+/// The newest ask of `scope`, in any state, whose `external_id` starts with `prefix`.
+pub fn latest_by_external_prefix(
+    conn: &Connection,
+    scope: &str,
+    prefix: &str,
+) -> Result<Option<AskRow>> {
+    conn.query_row(
+        &format!(
+            "SELECT {COLUMNS} FROM hq_asks WHERE scope = ?1 \
+             AND substr(external_id, 1, length(?2)) = ?2 ORDER BY created_at DESC LIMIT 1"
+        ),
+        params![scope, prefix],
+        from_row,
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 /// Finds the ask for `external_id` or files a new pending one, and makes its
 /// thread when asked to, all under one write lock: two calls with the same key
 /// end with one ask, one thread and one question.

@@ -105,6 +105,9 @@ pub struct AskStart<'a> {
     pub scope: AskScope,
     /// Display label of the calling client, already sanitized.
     pub caller: &'a str,
+    /// The question points at text an outsider may have written, so the reply starts under the
+    /// stricter policy for untrusted content.
+    pub untrusted: bool,
 }
 
 /// Implemented by hq-web, which owns the chat turns.
@@ -274,6 +277,7 @@ struct AskArgs {
     caller: String,
     scope: AskScope,
     wait: Duration,
+    untrusted: bool,
 }
 
 impl AskArgs {
@@ -319,6 +323,7 @@ impl AskArgs {
             caller: clean_caller(&arg_str(args, "caller")),
             scope,
             wait: clamp_wait(args),
+            untrusted: args.get("untrusted").and_then(Value::as_bool) == Some(true),
         })
     }
 }
@@ -428,6 +433,7 @@ impl HqTool for HqAskTool {
                 "thread_id": { "type": "string", "description": "Continue an existing HQ chat thread instead of opening a new one. It must exist, be active and have no reply running. The handoff key may continue only threads its own asks started and that hold nothing the owner typed." },
                 "external_id": { "type": "string", "description": "Idempotency key chosen by the caller, unique per API key (two callers on one key share the namespace, so make ids unique). A repeat call with the same key returns the same ask; reusing it for a different question is an error." },
                 "wait_secs": { "type": "integer", "description": format!("How long to wait for the answer, default {DEFAULT_WAIT_SECS}, at most {MAX_WAIT_SECS}. 0 returns at once.") },
+                "untrusted": { "type": "boolean", "description": "Set when the question points at text someone else wrote (a task, a document): the reply then works under the stricter policy for untrusted content from its first step." },
                 "mode": { "type": "string", "enum": ["read_only", "full"], "description": "read_only (default): HQ may only read. full: HQ may use every tool a web chat turn can; full-scope key only." },
                 "title": { "type": "string", "description": "Title for a new thread. Defaults to the first line of the question." },
                 "caller": { "type": "string", "description": "Name shown as 'via MCP: <caller>' on the question, e.g. claude-code. A label, not an identity." }
@@ -554,6 +560,7 @@ impl HqAskTool {
                 mode: req.mode,
                 scope: req.scope,
                 caller: &req.caller,
+                untrusted: req.untrusted,
             })
             .await;
         match started {

@@ -1,4 +1,4 @@
-//! `edge-worker-dispatch`: every two minutes, start HQ on the next open `edge-worker` task when
+//! `edge-worker-dispatch`: every two minutes, start HQ on the next open `edge-task` task when
 //! `github_write.dispatch_tasks` is on (`hq_tools::github::dispatch`, docs/plans/edge-coding-worker.md).
 
 use anyhow::Result;
@@ -18,11 +18,8 @@ pub async fn run_edge_worker_dispatch(db: &Database, config: &HqConfig) -> Resul
         Outcome::Started { task, ask_id } => {
             tracing::info!(%task, %ask_id, "edge-worker-dispatch: HQ is working the task");
         }
-        Outcome::AlreadyAsked { task, ask_id } => {
-            tracing::debug!(%task, %ask_id, "edge-worker-dispatch: already asked, waiting for HQ to claim it");
-        }
         Outcome::Busy(task) => {
-            tracing::debug!(%task, "edge-worker-dispatch: a task is in progress")
+            tracing::debug!(%task, "edge-worker-dispatch: the worker is busy")
         }
         Outcome::Off | Outcome::Idle => {}
     }

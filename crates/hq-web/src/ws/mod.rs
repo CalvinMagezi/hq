@@ -595,6 +595,7 @@ impl ChatTurn {
                 .chain(driver_turn.then(|| CONFIG_TOOL.to_string()))
                 .collect(),
             permission_preset: self.ask.as_ref().and_then(ask::AskTurn::permission_preset),
+            untrusted_input: self.ask.as_ref().and_then(ask::AskTurn::untrusted_source),
             role: hooks_role,
             identity: Some(match self.tid.as_deref() {
                 Some(t) => hq_core::identity::RequestIdentity::from_web_thread(

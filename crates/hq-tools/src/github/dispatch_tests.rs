@@ -6,6 +6,7 @@ use std::sync::{Mutex, OnceLock};
 struct Recorder {
     db: Arc<Database>,
     questions: Mutex<Vec<String>>,
+    untrusted: Mutex<Vec<bool>>,
 }
 
 #[async_trait::async_trait]
@@ -20,6 +21,7 @@ impl AskRunner for Recorder {
             .lock()
             .unwrap()
             .push(req.question.to_string());
+        self.untrusted.lock().unwrap().push(req.untrusted);
         Ok(format!("turn-{}", req.ask_id))
     }
 
@@ -32,6 +34,7 @@ fn chat(db: &Arc<Database>) -> (RunnerCell, Arc<Recorder>) {
     let recorder = Arc::new(Recorder {
         db: db.clone(),
         questions: Mutex::new(Vec::new()),
+        untrusted: Mutex::new(Vec::new()),
     });
     let cell: RunnerCell = Arc::new(OnceLock::new());
     let as_dyn: Arc<dyn AskRunner> = recorder.clone();
@@ -57,6 +60,17 @@ fn db() -> Database {
 }
 
 fn add(db: &Database, id: &str, tags: &[&str], assignees: &[&str], priority: Option<&str>) {
+    add_about(db, id, tags, assignees, priority, "Work in O/R, please.");
+}
+
+fn add_about(
+    db: &Database,
+    id: &str,
+    tags: &[&str],
+    assignees: &[&str],
+    priority: Option<&str>,
+    description: &str,
+) {
     let tags: Vec<String> = tags.iter().map(|s| s.to_string()).collect();
     let assignees: Vec<String> = assignees.iter().map(|s| s.to_string()).collect();
     db.with_conn(|c| {
@@ -66,7 +80,7 @@ fn add(db: &Database, id: &str, tags: &[&str], assignees: &[&str], priority: Opt
             "in-1",
             &t::NewTask {
                 title: id,
-                description: "Work in O/R, please.",
+                description,
                 tags: &tags,
                 assignees: &assignees,
                 priority,
@@ -88,9 +102,15 @@ fn set_status(db: &Database, id: &str, status: &str) {
         .unwrap();
 }
 
+fn task(db: &Database, id: &str) -> t::Task {
+    db.with_conn(|c| t::get_task(c, id)).unwrap().unwrap()
+}
+
 fn next(db: &Database) -> Option<String> {
-    db.with_conn(|c| next_task(c, &["o/r".to_string()]))
+    db.with_conn(|c| candidates(c, &["o/r".to_string()]))
         .unwrap()
+        .into_iter()
+        .next()
         .map(|t| t.id)
 }
 
@@ -99,6 +119,27 @@ fn on() -> HqConfig {
     config.github_write.repos = vec!["o/r".into()];
     config.github_write.dispatch_tasks = true;
     config
+}
+
+fn worker_on() -> crate::skills::builtin::ActiveGuard {
+    crate::skills::builtin::set_active_for_this_thread(Some(&[WORKER_SKILL]))
+}
+
+fn claim(db: &Database, id: &str) {
+    db.with_conn(|c| {
+        let who = t::LeaseIdentity {
+            actor: "hq",
+            harness: "native",
+            external_session_ref: "hq",
+            ..Default::default()
+        };
+        t::claim(c, id, &who, 900, false).map(|_| ())
+    })
+    .unwrap();
+}
+
+fn settle_all(db: &Database, error: &str) {
+    db.with_conn(|c| asks::fail_all_pending(c, error)).unwrap();
 }
 
 #[test]
@@ -110,6 +151,13 @@ fn the_most_urgent_free_worker_task_is_taken() {
         "tk-theirs",
         &[DISPATCH_TAG],
         &["someone"],
+        Some("urgent"),
+    );
+    add(
+        &db,
+        "tk-shared",
+        &[DISPATCH_TAG],
+        &["someone", HQ_ASSIGNEE],
         Some("urgent"),
     );
     add(&db, "tk-low", &[DISPATCH_TAG], &[], Some("low"));
@@ -126,23 +174,42 @@ fn the_most_urgent_free_worker_task_is_taken() {
 }
 
 #[test]
-fn a_task_that_names_no_allowed_repository_is_not_taken() {
+fn a_blocked_task_is_not_taken() {
     let db = db();
+    add(&db, "tk-first", &["chores"], &[], None);
     add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
-    let elsewhere = db
-        .with_conn(|c| next_task(c, &["someone/else".to_string()]))
+    db.with_conn(|c| t::add_dependency(c, "tk-a", "tk-first", "test"))
         .unwrap();
-    assert!(elsewhere.is_none());
-    assert!(next(&db).is_some(), "the repository match ignores case");
+    assert!(next(&db).is_none());
 }
 
 #[test]
-fn a_worker_task_in_progress_makes_the_queue_wait() {
+fn the_repository_must_be_named_as_a_whole_word() {
     let db = db();
     add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
-    assert!(db.with_conn(running_task).unwrap().is_none());
-    set_status(&db, "tk-a", t::STATUS_IN_PROGRESS);
-    assert!(db.with_conn(running_task).unwrap().is_some());
+    let elsewhere = db
+        .with_conn(|c| candidates(c, &["someone/else".to_string()]))
+        .unwrap();
+    assert!(elsewhere.is_empty());
+    assert!(
+        next(&db).is_some(),
+        "the repository match ignores case and a full stop"
+    );
+    for near_miss in ["Fix o/r2 please", "See xo/r", "In o/r-other", "o/rbar"] {
+        let db = self::db();
+        add_about(&db, "tk-b", &[DISPATCH_TAG], &[], None, near_miss);
+        assert!(next(&db).is_none(), "{near_miss}");
+    }
+    let db = self::db();
+    add_about(
+        &db,
+        "tk-c",
+        &[DISPATCH_TAG],
+        &[],
+        None,
+        "repo: https://github.com/x (o/r)",
+    );
+    assert!(next(&db).is_some());
 }
 
 #[tokio::test]
@@ -152,63 +219,158 @@ async fn dispatch_stays_off_without_the_switch_an_active_worker_skill_or_a_chat(
     let (cell, _) = chat(&db);
     let mut no_switch = on();
     no_switch.github_write.dispatch_tasks = false;
+    let active = worker_on();
     assert_eq!(
         dispatch(db.clone(), &no_switch, cell.clone())
             .await
             .unwrap(),
         Outcome::Off
     );
-    let mut no_repos = on();
-    no_repos.github_write.repos.clear();
     assert_eq!(
-        dispatch(db.clone(), &no_repos, cell.clone()).await.unwrap(),
-        Outcome::Off
-    );
-    let mut skill_off = on();
-    skill_off.skills.builtin.off = vec![WORKER_SKILL.into()];
-    assert_eq!(
-        dispatch(db.clone(), &skill_off, cell).await.unwrap(),
-        Outcome::Off
-    );
-    assert_eq!(
-        dispatch(db, &on(), no_chat()).await.unwrap(),
+        dispatch(db.clone(), &on(), no_chat()).await.unwrap(),
         Outcome::Off,
         "no chat to work in"
     );
+    drop(active);
+    let _inactive = crate::skills::builtin::set_active_for_this_thread(Some(&[]));
+    assert_eq!(dispatch(db, &on(), cell).await.unwrap(), Outcome::Off);
 }
 
 #[tokio::test]
-async fn dispatch_waits_while_busy_and_idles_on_an_empty_queue() {
+async fn a_task_is_asked_about_once_and_the_worker_waits_for_the_reply() {
+    let _active = worker_on();
     let db = Arc::new(db());
-    let (cell, _) = chat(&db);
+    let (cell, recorder) = chat(&db);
     assert_eq!(
         dispatch(db.clone(), &on(), cell.clone()).await.unwrap(),
         Outcome::Idle
     );
     add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
-    set_status(&db, "tk-a", t::STATUS_IN_PROGRESS);
-    assert!(matches!(
-        dispatch(db, &on(), cell).await.unwrap(),
-        Outcome::Busy(_)
-    ));
-}
-
-#[tokio::test]
-async fn a_task_is_asked_about_once_until_it_changes() {
-    let db = Arc::new(db());
-    let (cell, recorder) = chat(&db);
-    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    add(&db, "tk-b", &[DISPATCH_TAG], &[], None);
     let first = dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
     let Outcome::Started { task, .. } = first else {
         panic!("expected a start, got {first:?}");
     };
     let question = recorder.questions.lock().unwrap()[0].clone();
     assert_eq!(question, format!("Work HQ task {task} end to end."));
-    let again = dispatch(db, &on(), cell).await.unwrap();
-    assert!(matches!(again, Outcome::AlreadyAsked { .. }), "{again:?}");
     assert_eq!(
-        recorder.questions.lock().unwrap().len(),
-        1,
-        "no second reply was started"
+        *recorder.untrusted.lock().unwrap(),
+        [true],
+        "the reply starts under the untrusted-content policy"
+    );
+    // An edit before the reply claims the task does not start a second one.
+    db.with_conn(|c| t::add_comment(c, "tk-a", "owner", "also this", None))
+        .unwrap();
+    set_status(&db, "tk-a", t::STATUS_TO_DO);
+    let again = dispatch(db, &on(), cell).await.unwrap();
+    assert!(matches!(again, Outcome::Busy(_)), "{again:?}");
+    assert_eq!(recorder.questions.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn a_reply_that_ended_without_the_task_parks_it_and_the_queue_moves_on() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], Some("high"));
+    add(&db, "tk-b", &[DISPATCH_TAG], &[], Some("low"));
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    settle_all(&db, "provider error");
+    let next = dispatch(db.clone(), &on(), cell).await.unwrap();
+    assert!(matches!(next, Outcome::Started { .. }), "{next:?}");
+    assert_eq!(recorder.questions.lock().unwrap().len(), 2);
+    let parked = task(&db, "tk-a");
+    assert_eq!(parked.status, t::STATUS_BLOCKED);
+    assert!(
+        parked
+            .blocked_reason
+            .unwrap_or_default()
+            .contains("provider error")
+    );
+}
+
+#[tokio::test]
+async fn a_task_the_worker_left_in_progress_is_parked_once_its_lease_is_gone() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, _) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    claim(&db, "tk-a");
+    settle_all(&db, "the reply ended");
+    let held = dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    assert_eq!(held, Outcome::Busy(task(&db, "tk-a").display_id));
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_work_sessions SET last_heartbeat_at = datetime('now', '-1 day')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        dispatch(db.clone(), &on(), cell).await.unwrap(),
+        Outcome::Idle
+    );
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_BLOCKED);
+    let notes = hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending)
+        .unwrap_or_default();
+    assert!(
+        notes.iter().any(|n| n.source_task == INBOX_SOURCE),
+        "the owner is told"
+    );
+}
+
+#[tokio::test]
+async fn a_task_the_owner_moved_to_in_progress_is_left_alone() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, _) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    set_status(&db, "tk-a", t::STATUS_IN_PROGRESS);
+    for _ in 0..2 {
+        let tick = dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+        assert!(matches!(tick, Outcome::Busy(_)), "{tick:?}");
+    }
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_IN_PROGRESS);
+}
+
+#[test]
+fn a_github_url_names_its_repository() {
+    for text in [
+        "https://github.com/O/R",
+        "see https://github.com/o/r/issues/3.",
+        "clone github.com/o/r.git",
+    ] {
+        let db = self::db();
+        add_about(&db, "tk-u", &[DISPATCH_TAG], &[], None, text);
+        assert!(next(&db).is_some(), "{text}");
+    }
+    let db = self::db();
+    add_about(
+        &db,
+        "tk-v",
+        &[DISPATCH_TAG],
+        &[],
+        None,
+        "https://github.com/o/r2",
+    );
+    assert!(next(&db).is_none());
+}
+
+#[test]
+fn scoped_connections_cannot_queue_work_or_rewrite_queued_tasks() {
+    let queue = vec![DISPATCH_TAG.to_uppercase()];
+    let other = vec!["chores".to_string()];
+    assert!(refuse_queue_write(true, Some(&queue), &[], false).is_err());
+    assert!(refuse_queue_write(true, None, &queue, true).is_err());
+    assert!(
+        refuse_queue_write(true, Some(&queue), &queue, false).is_ok(),
+        "already queued"
+    );
+    assert!(refuse_queue_write(true, Some(&other), &other, true).is_ok());
+    assert!(
+        refuse_queue_write(false, Some(&queue), &[], true).is_ok(),
+        "the owner may"
     );
 }

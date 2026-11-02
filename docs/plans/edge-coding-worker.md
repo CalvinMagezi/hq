@@ -94,21 +94,34 @@ shell does not have.
 ## Working tasks without being asked
 
 With `github_write.dispatch_tasks: true`, the daemon task `edge-worker-dispatch` (every two
-minutes, in every edition with a daemon) picks up open tasks tagged `edge-task` by itself, so a
-task filed from the phone, the web app or a chat becomes a pull request with no other machine
-involved.
+minutes, in the Full and Mobile editions; Lite does not run it, and a phone's data saver pauses
+it) picks up open tasks tagged `edge-task` by itself, so a task filed from the phone, the web app
+or a chat becomes a pull request with no other machine involved.
 
 - **Which task.** The most urgent open one that nothing blocks, that is unassigned or assigned
-  to `hq`, and whose title or description names a repository in `github_write.repos`. The tag is
-  the worker's own, so a task that is only about the worker (tagged `edge-worker`, say) is never
-  taken for work. The task can also name its worker models, in the order to escalate through.
-- **One at a time.** Nothing new starts while an `edge-task` task is in progress.
+  only to `hq`, and whose title or description names a repository in `github_write.repos` as a
+  whole word or as a GitHub URL (`o/r` is not found in `o/r2`). The tag is the worker's own, so a task that is only
+  about the worker (tagged `edge-worker`, say) is never taken for work. The task can also name
+  its worker models, in the order to escalate through.
+- **One at a time.** Nothing new starts while the worker's reply is still running, or while an
+  `edge-task` task is in progress under a live lease.
 - **How.** It asks HQ, through the same path as `hq_ask`, to work the task. The reply runs in a
   chat thread the owner can open and follow. The ask's key names the task and its last change,
-  so a tick that comes round before HQ has claimed the task reuses the same ask.
+  so the same version of a task is never asked about twice, and a task that changes (rework, an
+  edit) is asked about afresh.
+- **Nothing holds the queue.** A task whose reply ended without taking it (a provider error, a
+  restart), or that the worker left in progress with no reply and no live lease, is moved to `blocked`
+  with the reason as a comment and a note in the owner's inbox, and the next task is taken. A
+  queue task someone else moved to in progress (the owner working it by hand) is left alone,
+  and the queue waits for it.
 - **Off unless switched on.** The switch is under `github_write`, which `config_manage`
-  refuses, and it does nothing unless the `edge-coding-worker` built-in is active.
+  refuses, and it does nothing unless the `edge-coding-worker` built-in is active in the running
+  process.
 
-Anyone who can create a task can queue work for the worker, agents included. That is acceptable
-for the same reasons the worker is: the repositories are the owner's allowlist, every result is a
-pull request a person merges, and nothing reaches the default branch on its own.
+The worker runs a full HQ turn on the task's text, so who can queue work matters. The handoff
+and tasks keys and claude.ai connector grants cannot add the `edge-task` tag (directly or
+through a promoted note's tags) or edit the title or description of a task that has it
+(`refuse_queue_write`); the owner in the app, the owner's own MCP clients and HQ's chat can. Comments
+stay open to every key, so the worker's ask is marked `untrusted`: its turn starts under the
+stricter policy for untrusted content (no secret reads, no network from bash) before it reads
+the task. What the worker can push is still bounded by the owner's allowlist, and every result is a pull request a person merges.

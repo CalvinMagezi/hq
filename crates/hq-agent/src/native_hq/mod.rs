@@ -103,6 +103,8 @@ pub struct NativeHqHooks {
     pub skip_memory_ingestion: bool,
     /// Name prefixes of tools this turn must not see at all.
     pub deny_tool_prefixes: Vec<String>,
+    /// Start the turn tainted, naming why (see `SessionBuilder::untrusted_input`).
+    pub untrusted_input: Option<String>,
     /// Orchestrator sessions plan and delegate; the default keeps today's behavior.
     pub role: crate::builder::SessionRole,
 }
@@ -217,6 +219,9 @@ fn native_builder(
     }
     if !hooks.deny_tool_prefixes.is_empty() {
         base_builder = base_builder.deny_tool_prefixes(hooks.deny_tool_prefixes.clone());
+    }
+    if let Some(source) = &hooks.untrusted_input {
+        base_builder = base_builder.untrusted_input(source.clone());
     }
     base_builder = base_builder.role(hooks.role);
     if let Some(preset) = hooks.permission_preset {
