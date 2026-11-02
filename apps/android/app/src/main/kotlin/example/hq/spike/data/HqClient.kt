@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import example.hq.spike.Loopback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -41,6 +42,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         .readTimeout(READ_SECONDS, TimeUnit.SECONDS)
         .pingInterval(PING_SECONDS, TimeUnit.SECONDS)
         .apply { if (callSeconds > 0) callTimeout(callSeconds, TimeUnit.SECONDS) }
+        // A carrier APN proxy cannot reach this phone's loopback (see Loopback).
+        .apply { Loopback.proxyFor(java.net.URL(base))?.let { proxy(it) } }
         .build()
 
     suspend fun healthy(): Boolean = withContext(Dispatchers.IO) {

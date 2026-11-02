@@ -147,7 +147,7 @@ final class Alerts {
 
     /** Unread items, newest first, keyed by id. */
     private static Map<String, JSONObject> fetch(Context c) throws IOException, JSONException {
-        HttpURLConnection h = (HttpURLConnection) new URL("http://127.0.0.1:" + HubService.PORT + "/api/notifications?state=pending&limit=30").openConnection();
+        HttpURLConnection h = Loopback.open(new URL("http://127.0.0.1:" + HubService.PORT + "/api/notifications?state=pending&limit=30"));
         h.setConnectTimeout(TIMEOUT_MS);
         h.setReadTimeout(TIMEOUT_MS);
         h.setRequestProperty("Authorization", "Bearer " + HubService.token(c));

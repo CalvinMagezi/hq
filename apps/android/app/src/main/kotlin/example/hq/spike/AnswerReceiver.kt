@@ -13,7 +13,6 @@ import example.hq.spike.ui.helpers.AnswerCheck
 import example.hq.spike.ui.helpers.AnswerWords
 import example.hq.spike.ui.helpers.HelperWords
 import example.hq.spike.ui.inbox.InboxCard
-import java.net.HttpURLConnection
 import java.net.URL
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -126,7 +125,7 @@ class AnswerReceiver : BroadcastReceiver() {
     }
 
     private fun get(path: String, target: Hq, deadline: Long): String {
-        val h = URL(target.base + path).openConnection() as HttpURLConnection
+        val h = Loopback.open(URL(target.base + path))
         try {
             h.connectTimeout = minOf(CONNECT_MS, left(deadline))
             h.readTimeout = left(deadline)
@@ -141,7 +140,7 @@ class AnswerReceiver : BroadcastReceiver() {
     }
 
     private fun post(path: String, body: JSONObject, target: Hq, deadline: Long, afterWrite: () -> Unit = {}) {
-        val h = URL(target.base + path).openConnection() as HttpURLConnection
+        val h = Loopback.open(URL(target.base + path))
         try {
             h.requestMethod = "POST"
             h.connectTimeout = minOf(CONNECT_MS, left(deadline))
@@ -161,7 +160,7 @@ class AnswerReceiver : BroadcastReceiver() {
 
     /** A POST whose status is the answer: 409 means the dialog was answered elsewhere or moved on, not a failure. */
     private fun postStatus(path: String, body: JSONObject, target: Hq, deadline: Long): Int {
-        val h = URL(target.base + path).openConnection() as HttpURLConnection
+        val h = Loopback.open(URL(target.base + path))
         try {
             h.requestMethod = "POST"
             h.connectTimeout = minOf(CONNECT_MS, left(deadline))
