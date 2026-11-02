@@ -203,7 +203,13 @@ fn check_skill(
     }
 
     // Regression fixtures beside the skill, if it has any: triggers, non-triggers, required steps.
-    for failure in super::fixtures::skill_failures(skills_dir, name) {
+    // An active built-in's files on disk are a mirror, never what runs, so they are not checked.
+    let fixtures = if super::builtin::is_active(name) {
+        Vec::new()
+    } else {
+        super::fixtures::skill_failures(skills_dir, name)
+    };
+    for failure in fixtures {
         issues.push(SkillIssue::error(name, format!("fixture: {failure}")));
     }
 

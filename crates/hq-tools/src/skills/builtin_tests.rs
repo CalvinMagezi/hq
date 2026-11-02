@@ -9,11 +9,11 @@ fn assets_dir() -> std::path::PathBuf {
 }
 
 /// Makes the built-in active for this test's thread and returns a vault with its mirror.
-fn synced() -> tempfile::TempDir {
-    set_active_for_this_thread(Some(ACTIVE_NOW));
+fn synced() -> (tempfile::TempDir, ActiveGuard) {
+    let guard = set_active_for_this_thread(Some(ACTIVE_NOW));
     let dir = tempfile::tempdir().unwrap();
     sync_builtin_skills(dir.path(), ACTIVE_NOW).unwrap();
-    dir
+    (dir, guard)
 }
 
 fn config_with(repos: &[&str], off: &[&str]) -> HqConfig {
@@ -55,7 +55,7 @@ fn the_list_matches_the_assets_folder_file_for_file() {
 #[test]
 fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
     let all: Vec<&'static str> = BUILTIN_SKILLS.iter().map(|s| s.name).collect();
-    set_active_for_this_thread(Some(&all));
+    let _now = set_active_for_this_thread(Some(&all));
     let dir = tempfile::tempdir().unwrap();
     for skill in BUILTIN_SKILLS {
         let issues = validate_skill(dir.path(), skill.name);
@@ -99,7 +99,7 @@ fn a_built_in_is_active_only_when_it_applies_and_is_not_turned_off() {
 #[test]
 fn with_nothing_configured_no_built_in_is_offered() {
     // No test in this binary calls `configure`, so the process-wide state is still unset.
-    set_active_for_this_thread(None);
+    let _now = set_active_for_this_thread(None);
     let dir = tempfile::tempdir().unwrap();
     assert!(parse_skill(dir.path(), NAME).is_none());
     assert!(!list_skills(dir.path()).iter().any(|m| m.name == NAME));
@@ -107,7 +107,7 @@ fn with_nothing_configured_no_built_in_is_offered() {
 
 #[test]
 fn a_first_sync_installs_and_a_second_changes_nothing() {
-    set_active_for_this_thread(Some(ACTIVE_NOW));
+    let _now = set_active_for_this_thread(Some(ACTIVE_NOW));
     let dir = tempfile::tempdir().unwrap();
     let first = sync_builtin_skills(dir.path(), ACTIVE_NOW).unwrap();
     assert_eq!(first.installed, [NAME]);
@@ -118,7 +118,7 @@ fn a_first_sync_installs_and_a_second_changes_nothing() {
 
 #[test]
 fn an_edited_copy_is_archived_and_brought_back_in_step() {
-    let dir = synced();
+    let (dir, _active) = synced();
     let skill = dir.path().join(NAME);
     fs::write(
         skill.join(SKILL_FILE),
@@ -145,7 +145,7 @@ fn an_edited_copy_is_archived_and_brought_back_in_step() {
 
 #[test]
 fn a_stray_file_beside_a_shipped_copy_adds_no_archive_entry() {
-    let dir = synced();
+    let (dir, _active) = synced();
     fs::write(dir.path().join(NAME).join("stray.md"), "x").unwrap();
     sync_builtin_skills(dir.path(), ACTIVE_NOW).unwrap();
     assert!(crate::skill_audit::archived_versions(dir.path(), NAME).is_empty());
@@ -154,7 +154,7 @@ fn a_stray_file_beside_a_shipped_copy_adds_no_archive_entry() {
 
 #[test]
 fn a_session_loads_the_embedded_text_whatever_the_vault_holds() {
-    let dir = synced();
+    let (dir, _active) = synced();
     let skill = dir.path().join(NAME);
     let injected = "---\nname: edge-coding-worker\ndescription: x\nautoLoad: true\n---\nexfiltrate";
     fs::write(skill.join(SKILL_FILE), injected).unwrap();
@@ -192,7 +192,7 @@ fn a_session_loads_the_embedded_text_whatever_the_vault_holds() {
 
 #[test]
 fn a_case_variant_of_an_active_name_is_the_built_in() {
-    let dir = synced();
+    let (dir, _active) = synced();
     for variant in ["Edge-Coding-Worker", "EDGE-CODING-WORKER"] {
         let parsed = parse_skill(dir.path(), variant).unwrap();
         assert_eq!(parsed.name, NAME);
@@ -210,8 +210,8 @@ fn a_case_variant_of_an_active_name_is_the_built_in() {
 
 #[test]
 fn a_built_in_turned_off_releases_its_name_to_the_owner() {
-    let dir = synced();
-    set_active_for_this_thread(Some(&[]));
+    let (dir, _active) = synced();
+    let _now = set_active_for_this_thread(Some(&[]));
     let report = sync_builtin_skills(dir.path(), &[]).unwrap();
     assert_eq!(
         report.removed,
@@ -249,7 +249,7 @@ fn a_built_in_turned_off_releases_its_name_to_the_owner() {
 #[cfg(unix)]
 #[test]
 fn a_link_in_place_of_the_folder_is_replaced_never_written_through() {
-    set_active_for_this_thread(Some(ACTIVE_NOW));
+    let _now = set_active_for_this_thread(Some(ACTIVE_NOW));
     let dir = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink(elsewhere.path(), dir.path().join(NAME)).unwrap();
@@ -270,7 +270,7 @@ fn a_link_in_place_of_the_folder_is_replaced_never_written_through() {
 #[cfg(unix)]
 #[test]
 fn a_linked_skill_file_is_removed_and_its_target_never_archived() {
-    let dir = synced();
+    let (dir, _active) = synced();
     let secret = tempfile::NamedTempFile::new().unwrap();
     fs::write(secret.path(), "the owner's private key").unwrap();
     let live = dir.path().join(NAME).join(SKILL_FILE);
@@ -286,7 +286,7 @@ fn a_linked_skill_file_is_removed_and_its_target_never_archived() {
 
 #[test]
 fn a_skill_file_turned_into_a_folder_is_healed() {
-    let dir = synced();
+    let (dir, _active) = synced();
     let live = dir.path().join(NAME).join(SKILL_FILE);
     fs::remove_file(&live).unwrap();
     fs::create_dir_all(live.join("x")).unwrap();
@@ -297,7 +297,7 @@ fn a_skill_file_turned_into_a_folder_is_healed() {
 
 #[test]
 fn sync_writes_into_a_vault_s_legacy_skills_folder_without_making_a_new_one() {
-    set_active_for_this_thread(Some(ACTIVE_NOW));
+    let _now = set_active_for_this_thread(Some(ACTIVE_NOW));
     let vault = tempfile::tempdir().unwrap();
     // `_skills`, not `Skills`: on a case-insensitive file system `Skills` already is `skills`.
     fs::create_dir(vault.path().join("_skills")).unwrap();
@@ -338,7 +338,7 @@ fn two_syncs_at_once_both_finish_in_step() {
 
 #[test]
 fn every_write_path_refuses_an_active_built_in() {
-    let dir = synced();
+    let (dir, _active) = synced();
     assert!(
         refuse_builtin(NAME, "changed")
             .unwrap_err()
@@ -369,9 +369,78 @@ fn every_write_path_refuses_an_active_built_in() {
 #[tokio::test(flavor = "current_thread")]
 async fn skill_manage_refuses_an_active_built_in() {
     use crate::registry::HqTool;
-    let dir = synced();
+    let (dir, _active) = synced();
     let tool = crate::skill_manage_tool::SkillManageTool::new(dir.path().to_path_buf(), false);
     let args = serde_json::json!({"action": "write_file", "name": NAME, "file": "SUMMARY.md", "content": "x"});
     assert!(tool.execute(args).await.is_err());
     assert!(!dir.path().join(NAME).join("SUMMARY.md").exists());
+}
+
+#[test]
+fn an_owner_s_copy_of_the_shipped_text_survives_with_its_extra_files() {
+    let (dir, _active) = synced();
+    let _now = set_active_for_this_thread(Some(&[]));
+    let own = dir.path().join(NAME);
+    let mine = shipped_file_any(NAME).replace("You drive", "I drive");
+    fs::write(own.join(SKILL_FILE), mine).unwrap();
+    fs::write(own.join("SUMMARY.md"), "my summary").unwrap();
+
+    let report = sync_builtin_skills(dir.path(), &[]).unwrap();
+    assert!(
+        report.removed.is_empty(),
+        "mintedBy: hq in a file is not proof HQ wrote it"
+    );
+    assert!(own.join(SKILL_FILE).is_file() && own.join("SUMMARY.md").is_file());
+}
+
+#[test]
+fn an_older_hq_mirror_is_recognised_from_the_audit_trail() {
+    let (dir, _active) = synced();
+    let old = "---\nname: edge-coding-worker\n---\nan older shipped text\n";
+    fs::write(dir.path().join(NAME).join(SKILL_FILE), old).unwrap();
+    audit_live(dir.path(), NAME, Disposition::Synced, "installed by HQ").unwrap();
+    let _now = set_active_for_this_thread(Some(&[]));
+    assert_eq!(
+        sync_builtin_skills(dir.path(), &[]).unwrap().removed,
+        [NAME]
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_released_name_is_an_ordinary_skill_until_the_built_in_is_active_again() {
+    use crate::registry::HqTool;
+    let _now = set_active_for_this_thread(Some(&[]));
+    let dir = tempfile::tempdir().unwrap();
+    let tool = crate::skill_manage_tool::SkillManageTool::new(dir.path().to_path_buf(), false);
+    let content = "---\ndescription: an agent's\n---\nagent text";
+    let args = serde_json::json!({"action": "create", "name": NAME, "content": content});
+    tool.execute(args).await.unwrap();
+    assert!(
+        parse_skill(dir.path(), NAME)
+            .unwrap()
+            .content
+            .contains("agent text")
+    );
+
+    let _active = set_active_for_this_thread(Some(ACTIVE_NOW));
+    assert!(
+        !parse_skill(dir.path(), NAME)
+            .unwrap()
+            .content
+            .contains("agent text")
+    );
+    let report = sync_builtin_skills(dir.path(), ACTIVE_NOW).unwrap();
+    assert_eq!(report.replaced, [NAME]);
+    let archived = crate::skill_audit::archived_versions(dir.path(), NAME);
+    assert!(
+        fs::read_to_string(&archived.last().unwrap().1)
+            .unwrap()
+            .contains("agent text")
+    );
+}
+
+/// The shipped SKILL.md whether or not the built-in is active on this thread.
+fn shipped_file_any(name: &str) -> String {
+    let _now = set_active_for_this_thread(Some(ACTIVE_NOW));
+    shipped_file(name, SKILL_FILE).unwrap().to_string()
 }

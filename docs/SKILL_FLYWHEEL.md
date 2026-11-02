@@ -143,6 +143,10 @@ sees it.
 **Active.** A built-in is active when it applies and you have not turned it off. `hq` decides this
 once per process, from the config it loaded.
 
+These guarantees hold for active built-ins only. Where a built-in does not apply or is off, its
+name is free, and any skill under it, yours or an agent's, is an ordinary skill. If the
+built-in becomes active later, HQ's text takes the name back, and the earlier text is archived.
+
 **Loading.** A session loading an active built-in always gets the text embedded in the binary,
 never the vault copy. An edit to the copy, or a bundle, `SUMMARY.md` or `_proposed/` entry under
 its name in any letter case, changes nothing a session sees.
@@ -165,7 +169,8 @@ skills:
     off: [edge-coding-worker]
 ```
 
-The next sync removes HQ's copy and keeps its archive. The name is then released: a skill of
+The next sync removes HQ's copy (only files that are exactly a text HQ shipped) and keeps its
+archive. The name is then released: a skill of
 your own under that name loads and behaves like any other, and sync leaves it alone. The setting
 is yours alone: `config_manage` refuses the `skills` key, and agents cannot write the config file.
 A name in `off` that no built-in has is reported at start, because it is most likely a typo.

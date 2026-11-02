@@ -169,7 +169,11 @@ pub fn archive_current(skills_dir: &Path, name: &str) -> Result<Option<PathBuf>>
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         };
-        std::io::copy(&mut std::fs::File::open(&live)?, &mut out)?;
+        let copied = std::fs::File::open(&live).and_then(|mut f| std::io::copy(&mut f, &mut out));
+        if let Err(e) = copied {
+            let _ = std::fs::remove_file(&dest);
+            return Err(e.into());
+        }
         return Ok(Some(dest));
     }
     bail!("could not find a free archive name for {name}")

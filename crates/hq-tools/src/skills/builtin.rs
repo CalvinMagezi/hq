@@ -4,7 +4,6 @@
 //! runs; the vault copy is a mirror for people to read. An inactive one releases its name, which
 //! then behaves like any skill the owner writes.
 
-use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
 use std::sync::RwLock;
@@ -22,6 +21,8 @@ const ARCHIVE_DIR: &str = "archive";
 /// Sync's own temporary files; another process's are left alone mid-write.
 const TMP_PREFIX: &str = ".builtin-";
 const TMP_SUFFIX: &str = ".tmp";
+/// The audit reason for a mirror removed because its built-in stopped being active.
+const NO_LONGER_ACTIVE: &str = "no longer active";
 
 /// One shipped skill: its name, every file it is made of, and when it applies.
 pub struct Shipped {
@@ -49,9 +50,11 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[Shipped {
 /// [`configure`] runs: nothing is active, so a library user or a test sees no built-in by default.
 static ACTIVE: RwLock<Option<Vec<&'static str>>> = RwLock::new(None);
 
+#[cfg(test)]
 thread_local! {
     /// Per-thread override for tests, so each test decides what is active without a global.
-    static TEST_ACTIVE: RefCell<Option<Vec<&'static str>>> = const { RefCell::new(None) };
+    static TEST_ACTIVE: std::cell::RefCell<Option<Vec<&'static str>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// Decides which built-ins this process offers, from the config it loaded. Returns the names in
@@ -80,13 +83,27 @@ fn unknown_off(config: &HqConfig) -> Vec<String> {
         .collect()
 }
 
-/// Sets what is active for the calling thread only. For tests.
-#[doc(hidden)]
-pub fn set_active_for_this_thread(names: Option<&[&'static str]>) {
-    TEST_ACTIVE.with(|t| *t.borrow_mut() = names.map(<[&str]>::to_vec));
+/// Sets what is active for the calling thread until the returned guard is dropped. For tests.
+#[cfg(test)]
+pub(crate) fn set_active_for_this_thread(names: Option<&[&'static str]>) -> ActiveGuard {
+    let previous = TEST_ACTIVE.with(|t| t.replace(names.map(<[&str]>::to_vec)));
+    ActiveGuard(previous)
+}
+
+/// Restores the calling thread's previous override when dropped.
+#[cfg(test)]
+pub(crate) struct ActiveGuard(Option<Vec<&'static str>>);
+
+#[cfg(test)]
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        TEST_ACTIVE.with(|t| *t.borrow_mut() = previous);
+    }
 }
 
 fn active_names() -> Vec<&'static str> {
+    #[cfg(test)]
     if let Some(names) = TEST_ACTIVE.with(|t| t.borrow().clone()) {
         return names;
     }
@@ -180,14 +197,7 @@ pub fn sync_builtin_skills(skills_dir: &Path, active: &[&str]) -> Result<SyncRep
         let name = skill.name.to_string();
         let dir = skills_dir.join(skill.name);
         if !active.contains(&skill.name) {
-            if is_hq_mirror(&dir) {
-                clear_copy(skills_dir, skill, &[])?;
-                audit_live(
-                    skills_dir,
-                    skill.name,
-                    Disposition::Synced,
-                    "no longer active",
-                )?;
+            if remove_mirror(skills_dir, skill)? {
                 report.removed.push(name);
             }
             continue;
@@ -212,14 +222,52 @@ pub fn sync_builtin_skills(skills_dir: &Path, active: &[&str]) -> Result<SyncRep
     Ok(report)
 }
 
-/// Whether the folder holds HQ's mirror (its SKILL.md says HQ minted it), not the owner's own.
-fn is_hq_mirror(dir: &Path) -> bool {
-    let text = fs::symlink_metadata(dir.join(SKILL_FILE))
+/// Removes, from a built-in that is no longer active, only the files that are exactly a text HQ
+/// shipped: this binary's, or one an earlier sync recorded. Anything else in the folder, such
+/// as an owner's own skill under the released name, is left as it is. Returns whether a mirror
+/// was removed.
+fn remove_mirror(skills_dir: &Path, skill: &Shipped) -> Result<bool> {
+    let dir = skills_dir.join(skill.name);
+    let live = dir.join(SKILL_FILE);
+    let Some(bytes) = fs::symlink_metadata(&live)
         .ok()
         .filter(|m| m.is_file())
-        .and_then(|_| fs::read_to_string(dir.join(SKILL_FILE)).ok());
-    text.and_then(|t| super::parse_skill_text("", &t))
-        .is_some_and(|s| s.provenance.minted_by == crate::skill_edit::HQ_MINTER)
+        .and_then(|_| fs::read(&live).ok())
+    else {
+        return Ok(false);
+    };
+    let hash = hex::encode(Sha256::digest(&bytes));
+    if !shipped_hashes(skills_dir, skill).contains(&hash) {
+        return Ok(false);
+    }
+    audit_live(
+        skills_dir,
+        skill.name,
+        Disposition::Synced,
+        NO_LONGER_ACTIVE,
+    )?;
+    for (file, _) in skill.files {
+        let _ = fs::remove_file(dir.join(file));
+    }
+    // Only succeeds when nothing else is left; an archive or the owner's files keep the folder.
+    let _ = fs::remove_dir(&dir);
+    Ok(true)
+}
+
+/// The SKILL.md hashes HQ is known to have written for `skill`: this binary's and every earlier
+/// sync's from the audit trail.
+fn shipped_hashes(skills_dir: &Path, skill: &Shipped) -> Vec<String> {
+    let current = skill.files.iter().find(|(f, _)| *f == SKILL_FILE);
+    let mut hashes: Vec<String> = current
+        .map(|(_, text)| hex::encode(Sha256::digest(text.as_bytes())))
+        .into_iter()
+        .collect();
+    let synced = crate::skill_audit::audit_history(skills_dir, skill.name)
+        .into_iter()
+        .filter(|e| e.disposition == Disposition::Synced && e.reason != NO_LONGER_ACTIVE)
+        .map(|e| e.sha256);
+    hashes.extend(synced);
+    hashes
 }
 
 fn write_copy(skills_dir: &Path, skill: &Shipped) -> Result<()> {
