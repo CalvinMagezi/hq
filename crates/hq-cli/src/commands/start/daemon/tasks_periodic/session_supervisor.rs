@@ -195,6 +195,32 @@ fn close_exited_pane(
     }
 }
 
+/// What the registry knows about how a session ended, before its output: the exit code when
+/// the host reported one, and the goal and done criteria it was started with.
+fn exit_header(row: &registry::HarnessSessionRow, exit_code: Option<u32>) -> String {
+    let mut lines = Vec::new();
+    match exit_code {
+        Some(0) => lines.push("Exit code 0 (the process ended normally).".to_string()),
+        Some(code) => lines.push(format!("Exit code {code} (the process failed).")),
+        None => {}
+    }
+    if let Some(goal) = row.goal.as_deref().filter(|g| !g.trim().is_empty()) {
+        lines.push(format!("Goal: {goal}"));
+    }
+    if let Some(done) = row
+        .done_criteria
+        .as_deref()
+        .filter(|d| !d.trim().is_empty())
+    {
+        lines.push(format!("Done when: {done}"));
+    }
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n\n", lines.join("\n"))
+    }
+}
+
 /// Cleaned final output for a session: the newest stored snapshot.
 fn final_output(db: &Arc<Database>, session_id: &str) -> Option<String> {
     let id = session_id.to_string();
@@ -627,23 +653,6 @@ async fn supervise(
         let task_line = task_line(link.as_ref());
 
         let label = session_label(&row);
-        let item = ValueItem::new(
-            "session-supervisor",
-            ValueKind::Fyi,
-            format!("Harness session '{label}' ended"),
-            format!(
-                "Session {} exited.{} `harness_session_logs` shows its last screen; `harness_session_resume` continues it.",
-                row.id,
-                if token.is_some() {
-                    " Resume token saved."
-                } else {
-                    ""
-                }
-            ),
-        )
-        .with_dedup_key(format!("session-exit-{}", row.id));
-        let _ = hq_db::value_items::emit(db, &item);
-
         let output = final_output(&db_arc, &row.id);
         // Two limits, different jobs: the summarizer caps a single call at the
         // configured timeout, and what is left of the sweep budget caps how
@@ -676,8 +685,10 @@ async fn supervise(
         };
 
         let subject = format!("Harness session '{label}' finished");
+        let exit_code = exited.as_ref().and_then(|a| a.exit_code);
         let body = format!(
-            "{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}{worktree_line}",
+            "{}{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}{worktree_line}",
+            exit_header(&row, exit_code),
             row.id,
             row.harness,
             if token.is_some() {
@@ -687,6 +698,15 @@ async fn supervise(
             },
             row.id
         );
+        // The inbox is where the owner reads it; chat relays drop notices.
+        let item = ValueItem::new(
+            "session-supervisor",
+            ValueKind::Fyi,
+            format!("Harness session '{label}' ended"),
+            body.clone(),
+        )
+        .with_dedup_key(format!("session-exit-{}", row.id));
+        let _ = hq_db::value_items::emit(db, &item);
         post_relay_nudge(
             vault_path,
             &row.id,

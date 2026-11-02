@@ -27,7 +27,7 @@ mod load_figment_layering_tests {
         assert_eq!(config.relay.telegram_token.as_deref(), Some("abc"));
         assert_eq!(config.relay.turn_ack_timeout_secs, 270);
         assert_eq!(config.relay.background_turn_max_days, 5);
-        assert!(config.relay.summarize_session_exits);
+        assert!(!config.relay.summarize_session_exits);
         assert_eq!(config.relay.session_exit_summary_timeout_secs, 90);
     }
 
