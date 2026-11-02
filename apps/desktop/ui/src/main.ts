@@ -65,6 +65,19 @@ interface ClaudeHub {
   added: boolean
   failed: boolean
 }
+type Need = 'blocked' | 'done' | 'working' | 'idle' | 'unknown' | 'exited'
+interface Agent {
+  name: string
+  agent: string | null
+  need: Need
+  title: string
+  cwd: string
+  quiet_secs: number
+}
+interface Agents {
+  reachable: boolean
+  agents: Agent[]
+}
 type Submitted =
   | { result: 'accepted' | 'declined' | 'too_late' | 'not_digits' | 'unknown' }
   | { result: 'wrong_digits'; tries_left: number }
@@ -163,6 +176,41 @@ async function refreshHost() {
   $<HTMLButtonElement>('open-hq').disabled = !answering
   const settings = await invoke<Settings>('settings_get')
   $<HTMLInputElement>('set-start-on-launch').checked = settings.start_host_on_launch
+}
+
+const NEED_LABEL: Record<Need, string> = {
+  blocked: 'Needs you',
+  done: 'Finished',
+  working: 'Working',
+  idle: 'Idle',
+  unknown: 'Running',
+  exited: 'Ended',
+}
+const SECS_PER_MIN = 60
+
+function quiet(seconds: number): string {
+  return seconds < SECS_PER_MIN ? '' : `quiet ${Math.floor(seconds / SECS_PER_MIN)} min`
+}
+
+async function refreshAgents() {
+  const view = await invoke<Agents>('host_agents')
+  const list = $('agents')
+  list.replaceChildren(
+    ...view.agents.map((a) => {
+      const li = el('li')
+      const who = el('span')
+      who.append(el('strong', a.name), el('span', ` ${a.agent ?? ''} ${a.title || a.cwd}`, 'muted'))
+      const state = el('span', '', 'row')
+      state.append(el('span', quiet(a.quiet_secs), 'muted'), el('span', NEED_LABEL[a.need], a.need === 'blocked' ? 'badge error' : 'badge'))
+      li.append(who, state)
+      return li
+    }),
+  )
+  $('agents-empty').textContent = !view.reachable
+    ? 'No host answers on this Mac.'
+    : view.agents.length === 0
+      ? 'No agents running.'
+      : ''
 }
 
 $('host-start').addEventListener('click', () =>
@@ -380,7 +428,11 @@ async function refreshClaude() {
 // Refresh
 async function refresh() {
   const visible = TABS.find((t) => !$(`tab-${t}`).hidden)
-  const work = { host: refreshHost, devices: refreshDevices, claude: async () => {} }[visible ?? 'host']
+  const host = async () => {
+    await refreshHost()
+    await refreshAgents()
+  }
+  const work = { host, devices: refreshDevices, claude: async () => {} }[visible ?? 'host']
   try {
     await work()
   } catch (e) {

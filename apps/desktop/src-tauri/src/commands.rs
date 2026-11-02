@@ -5,6 +5,7 @@
 use crate::Startup;
 use hq_desktop::{
     Desktop, Revoked,
+    agents::AgentsView,
     claude::HubView,
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
@@ -26,6 +27,7 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         host_status,
         host_start,
         host_stop,
+        host_agents,
         settings_get,
         settings_save,
         open_main_window,
@@ -61,6 +63,11 @@ async fn host_start(app: App<'_>) -> Reply<HostStatus> {
 #[tauri::command]
 async fn host_stop(app: App<'_>) -> Reply<HostStatus> {
     app.host.stop().await.map_err(shown)
+}
+
+#[tauri::command]
+async fn host_agents(app: App<'_>) -> Reply<AgentsView> {
+    Ok(app.agents().await)
 }
 
 #[tauri::command]

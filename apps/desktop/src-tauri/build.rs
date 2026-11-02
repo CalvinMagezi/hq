@@ -6,6 +6,7 @@ const COMMANDS: &[&str] = &[
     "host_status",
     "host_start",
     "host_stop",
+    "host_agents",
     "settings_get",
     "settings_save",
     "open_main_window",

@@ -9,6 +9,7 @@
     "allow-host-status",
     "allow-host-start",
     "allow-host-stop",
+    "allow-host-agents",
     "allow-settings-get",
     "allow-settings-save",
     "allow-open-main-window",

@@ -108,6 +108,12 @@ any more; the proxy's routes and checks are unchanged.
 - **The control window never receives the web token, the bridge key or the expected pairing
   digits**; they stay in Rust. It does show the pairing link, which is meant to be shown and is
   single use.
+- **The agents list only reads.** To show the host's coding agents, Rust connects to the host's
+  control socket with the operator token, through `hq_host::Client`, which refuses a host
+  directory or token file that others can read or write. The one method the app calls is
+  `agent.list`, with a two-second limit. The window gets names, kinds, states, titles and folders,
+  never the token. It cannot answer an agent or send it input, and it sends no notice: alerts stay
+  in the owner's inbox.
 - **Settings are owner-only, unknown keys are refused, and a corrupt file is an error**, not a
   silent reset.
 

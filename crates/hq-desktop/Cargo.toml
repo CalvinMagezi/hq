@@ -9,6 +9,7 @@ description = "Logic behind the desktop app: host lifecycle, device pairing and 
 hq-core = { workspace = true }
 hq-db = { workspace = true }
 hq-bridge = { workspace = true }
+hq-host = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 reqwest = { workspace = true }
@@ -26,7 +27,6 @@ subtle = "2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
-hq-host = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
