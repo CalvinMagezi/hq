@@ -672,7 +672,29 @@ fn disabled_summary_config_means_no_summarizer() {
         ..Default::default()
     };
     assert!(summarizer_for(&off).is_none());
-    assert!(summarizer_for(&HqConfig::default()).is_some());
+    assert!(
+        summarizer_for(&HqConfig::default()).is_none(),
+        "no model by default"
+    );
+}
+
+#[tokio::test]
+async fn an_exit_lands_in_the_inbox_with_its_outcome_and_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    seed(&db, "hs-inbox");
+    store_snapshot(&db, "hs-inbox", "RAW PANE TEXT\nFINAL ANSWER: 42");
+
+    sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+
+    let items =
+        hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
+    let exit = items
+        .iter()
+        .find(|i| i.source_task == "session-supervisor")
+        .expect("an exit item");
+    assert!(exit.body.contains("FINAL ANSWER: 42"), "{}", exit.body);
+    assert!(exit.body.contains("harness_session_resume"));
 }
 
 #[test]

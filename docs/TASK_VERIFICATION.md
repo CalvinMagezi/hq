@@ -188,6 +188,16 @@ tasks:
 | `autonomy_max_disagreement` | `0.10` | Upper bound on audits you disagreed with |
 | `autonomy_min_catch_rate` | `0.90` | Share of planted defects the reviewer must catch |
 
+## Without a model
+
+Leave `reviewer_monthly_ceiling_usd` unset and verification calls no model at all. The evidence
+gates still run: a red required check, a PR closed without merging, a missing note or a failing
+probe fails the task and sends it back (or escalates after `max_attempts`), and a task with no
+artifacts or no criteria waits for its worker. What the gates never do is pass a task on their own:
+with no reviewer, every pass is yours. This is deliberate. Passing needs a semantic check that the
+work matches the criteria, and nothing deterministic gives that. A phone running HQ (`profile:
+mobile`, data saver on) also skips the `verify-dispatch` task entirely.
+
 ## Can you trust it
 
 HQ measures itself three ways.
