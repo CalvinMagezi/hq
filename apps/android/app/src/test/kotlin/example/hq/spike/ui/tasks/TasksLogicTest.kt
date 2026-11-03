@@ -121,4 +121,10 @@ class TasksLogicTest {
         val words = TasksLogic.meta(task("a", priority = "high", start = "2026-10-21", due = "2026-12-06"), today).joinToString("") { it.text }
         assertEquals("High · due Dec 6 · starts today", words)
     }
+
+    @Test fun aTaskForTheEdgeWorkerNamesItsRepositoryFirst() {
+        assertEquals("Repository: o/r\n\nShow the count.", TasksLogic.edgeDescription("o/r", "  Show the count. "))
+        assertEquals("Repository: o/r", TasksLogic.edgeDescription("o/r", " "))
+        assertEquals("Just notes", TasksLogic.edgeDescription(null, "Just notes "))
+    }
 }

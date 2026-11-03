@@ -29,6 +29,13 @@ data class TaskGroup(val key: String, val title: String, val tasks: List<TaskIte
 data class Run(val text: String, val bold: Boolean = false, val amber: Boolean = false)
 
 object TasksLogic {
+    /** A task for the edge worker names its repository first, the way the worker looks for it; the owner's notes follow. */
+    fun edgeDescription(repo: String?, notes: String): String {
+        val text = notes.trim()
+        if (repo == null) return text
+        return if (text.isEmpty()) "Repository: $repo" else "Repository: $repo\n\n$text"
+    }
+
     private const val SOON_DAYS = 7L
     const val WAITING_PREVIEW = 5
     /** A no-break space keeps "10 d ago" together when a row wraps. */

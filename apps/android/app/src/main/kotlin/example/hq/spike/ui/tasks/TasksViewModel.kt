@@ -56,6 +56,8 @@ data class QuickState(
     val notes: String = "",
     val priority: String? = null,
     val due: LocalDate? = null,
+    /** The repository the edge worker is to change; set, the task is queued for the worker. */
+    val repo: String? = null,
     val saving: Boolean = false,
     val error: String? = null,
     /** Goes with the new task, so sending it again after a lost answer cannot add it twice. */
@@ -91,6 +93,8 @@ data class TasksUi(
     val filterOpen: Boolean = false,
     /** The briefing page for an initiative, while it is open. */
     val briefing: BriefingUi? = null,
+    /** The edge worker, read when the new-task sheet opens; null until then or when HQ did not say. */
+    val edge: HqClient.EdgeWorker? = null,
 ) {
     /** Whether a task is inside what the All tab is narrowed to. */
     val keep: (TaskItem) -> Boolean get() = TaskFilters.keeps(tree, scope)
@@ -163,7 +167,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onDraft = { d -> detail { it.copy(drafts = it.drafts + ((it.prompt ?: COMMENT_DRAFT) to d)) } }, onSendBack = ::sendBack,
         onStatus = { s -> patchDetail(JSONObject().put("status", s)) }, onPriority = { p -> patchDetail(JSONObject().put("priority", p ?: JSONObject.NULL)) },
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
-        onQuick = { q -> _state.update { it.copy(quick = q) } }, onQuickSave = ::saveQuick,
+        onQuick = ::quick, onQuickSave = ::saveQuick,
         onChip = ::chooseChip, onRestore = ::restore, onFilter = ::openFilter, onScope = ::chooseScope, onBriefing = ::openBriefing,
         onSelect = { id -> _state.update { if (it.bulking) it else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id) } },
         onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
@@ -535,6 +539,17 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Opening the sheet also asks HQ whether its edge worker takes tasks, so the sheet can offer it. */
+    private fun quick(q: QuickState?) {
+        val opening = _state.value.quick == null && q != null
+        _state.update { it.copy(quick = q) }
+        if (!opening) return
+        viewModelScope.launch {
+            val edge = try { client.edgeWorker() } catch (e: HqUnavailable) { null }
+            _state.update { it.copy(edge = edge ?: it.edge) }
+        }
+    }
+
     private fun saveQuick() {
         val q = _state.value.quick ?: return
         val parsed = QuickAdd.parse(q.text, LocalDate.now())
@@ -542,15 +557,25 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(quick = q.copy(saving = true, error = null)) }
         viewModelScope.launch {
             try {
-                val body = JSONObject().put("title", parsed.title).put("created_by", "operator").put("external_id", "${q.key}-${listOf(q.text, q.notes, q.priority, q.due).hashCode()}")
+                val body = JSONObject().put("title", parsed.title).put("created_by", "operator").put("external_id", "${q.key}-${listOf(q.text, q.notes, q.priority, q.due, q.repo).hashCode()}")
                 (q.priority ?: parsed.priority)?.let { body.put("priority", it) }
                 parsed.startDate?.let { body.put("start_date", it.toString()) }
                 q.due?.let { body.put("due_date", it.toString()) }
-                if (q.notes.isNotBlank()) body.put("description", q.notes.trim())
+                val edge = _state.value.edge
+                val repo = q.repo?.takeIf { edge != null && it in edge.repos }
+                val description = TasksLogic.edgeDescription(repo, q.notes)
+                if (description.isNotBlank()) body.put("description", description)
+                if (repo != null && edge != null) body.put("tags", org.json.JSONArray(listOf(edge.tag)))
                 parsed.initiative?.let { body.put("initiative", it.replaceFirstChar { c -> c.uppercase() }) }
                 client.createTask(body)
                 _state.update { it.copy(quick = null) }
-                say("Task added")
+                say(
+                    when {
+                        repo != null -> "Task added for the edge worker"
+                        q.repo != null -> "Task added, but not for the worker: ${q.repo} is no longer allowed"
+                        else -> "Task added"
+                    },
+                )
                 refresh()
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(quick = it.quick?.copy(saving = false, error = why(e, "Could not add it. HQ is not answering."))) }

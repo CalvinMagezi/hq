@@ -500,3 +500,22 @@ async fn an_undeclared_dispatch_model_stops_dispatch_without_parking_anything() 
         assert!(model_is_declared(&config, declared));
     }
 }
+
+#[tokio::test]
+async fn recent_runs_name_the_task_each_ask_worked_newest_first() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, _) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], Some("high"));
+    add(&db, "tk-b", &[DISPATCH_TAG], &[], Some("low"));
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    settle_all(&db, "provider error");
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    let runs = db.with_conn(|c| recent_runs(c, 10)).unwrap();
+    let ids: Vec<&str> = runs.iter().map(|r| r.task_id.as_str()).collect();
+    assert_eq!(ids, ["tk-b", "tk-a"]);
+    assert_eq!(runs[0].status, "pending");
+    assert_eq!(runs[1].status, "failed");
+    assert_eq!(runs[1].task.as_ref().unwrap().status, t::STATUS_BLOCKED);
+    assert!(db.with_conn(|c| recent_runs(c, 1)).unwrap().len() == 1);
+}

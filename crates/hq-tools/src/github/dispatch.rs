@@ -53,12 +53,9 @@ pub async fn dispatch(
     config: &HqConfig,
     runner: crate::ask::RunnerCell,
 ) -> Result<Outcome> {
-    // The same set the chat loads skills from, so a reloaded config cannot start a turn that
-    // lacks the skill.
-    let worker_active = crate::skills::builtin::is_active(WORKER_SKILL);
     // Without a web server in this process there is no chat to run the work in.
     let can_ask = runner.get().is_some();
-    if !config.github_write.dispatch_tasks || !worker_active || !can_ask {
+    if !enabled(config) || !can_ask {
         return Ok(Outcome::Off);
     }
     if let Some(model) = config.github_write.dispatch_model.as_deref()
@@ -232,6 +229,65 @@ async fn ask_to_work(
         .and_then(|v| v.as_str())
         .context("hq_ask returned no ask id")?;
     Ok(ask_id.to_string())
+}
+
+/// Whether dispatch would take a task now: switched on and the worker skill active here. The skill
+/// is checked against the set the chat loads from, so a reloaded config cannot start a turn that
+/// lacks it.
+pub fn enabled(config: &HqConfig) -> bool {
+    config.github_write.dispatch_tasks && crate::skills::builtin::is_active(WORKER_SKILL)
+}
+
+/// One run of the worker: the ask that worked a task, and that task as it is now.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Run {
+    pub ask_id: String,
+    pub thread_id: String,
+    /// `pending` while the reply runs, then `answered` or `failed`.
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub task_id: String,
+    /// Absent when the task has since been deleted.
+    pub task: Option<RunTask>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RunTask {
+    pub display_id: String,
+    pub title: String,
+    pub status: String,
+}
+
+/// The worker's newest runs, newest first.
+pub fn recent_runs(conn: &rusqlite::Connection, limit: usize) -> Result<Vec<Run>> {
+    let prefix = format!("{CALLER}:");
+    let asks = asks::recent_by_external_prefix(conn, ASK_SCOPE, &prefix, limit)?;
+    let mut runs = Vec::with_capacity(asks.len());
+    for ask in asks {
+        // The key is `edge-worker:<task id>:<updated_at>`; a task id holds no colon.
+        let key = ask.external_id.unwrap_or_default();
+        let task_id = key
+            .strip_prefix(&prefix)
+            .and_then(|rest| rest.split(':').next())
+            .unwrap_or_default()
+            .to_string();
+        let task = t::get_task(conn, &task_id)?.map(|t| RunTask {
+            display_id: t.display_id,
+            title: t.title,
+            status: t.status,
+        });
+        runs.push(Run {
+            ask_id: ask.ask_id,
+            thread_id: ask.thread_id,
+            status: ask.status,
+            started_at: ask.created_at,
+            finished_at: ask.answered_at,
+            task_id,
+            task,
+        });
+    }
+    Ok(runs)
 }
 
 /// Whether `model` names an enabled backend, or the model one declares, so a typo stops dispatch

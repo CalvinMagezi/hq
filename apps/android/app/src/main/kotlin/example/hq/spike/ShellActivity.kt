@@ -411,7 +411,7 @@ class ShellActivity : ComponentActivity() {
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
-        tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasks.actions) }
+        tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasksState.edge, tasks.actions) }
         if (tasksState.filterOpen) TaskFilterSheet(tasksState, tasks.actions)
         tasksState.briefing?.let { b ->
             BriefingPage(b, onClose = { tasks.actions.onBriefing(false) }, onRetry = { tasks.actions.onBriefing(true) }, onTask = { t -> tasks.actions.onBriefing(false); tasks.openById(t.id) { } }, onNote = { path -> tasks.actions.onBriefing(false); notes.openNote(path) })

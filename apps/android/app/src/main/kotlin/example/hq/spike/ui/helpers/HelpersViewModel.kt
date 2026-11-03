@@ -3,6 +3,7 @@ package example.hq.spike.ui.helpers
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.HelperHost
 import example.hq.spike.data.HqClient.HelperRow
 import example.hq.spike.data.HqServices
@@ -57,6 +58,8 @@ data class HelpersUi(
     val loaded: Boolean = false,
     val offline: Boolean = false,
     val rows: List<HelperRow> = emptyList(),
+    /** HQ's own edge worker on this phone: its newest runs, shown with the helpers. */
+    val edgeRuns: List<HqClient.EdgeRun> = emptyList(),
     /** What each blocked helper is asking, read from its screen. */
     val asks: Map<String, BlockedPrompt> = emptyMap(),
     /** The last words on each working helper's screen, for the line under its title. */
@@ -68,7 +71,8 @@ data class HelpersUi(
     val line: HelperLine? = null,
     val now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC),
 ) {
-    val cards: List<HelperCard> get() = rows.filter { !it.archived }.map { HelperWords.card(it, asks[it.id], now, lastWords[it.id]) }.sortedWith(HelperWords.order)
+    val cards: List<HelperCard> get() = (rows.filter { !it.archived }.map { HelperWords.card(it, asks[it.id], now, lastWords[it.id]) } + edgeRuns.map { HelperWords.edgeCard(it, now) })
+        .sortedWith(HelperWords.order)
     fun count(filter: HelperFilter) = cards.count { matches(it, filter) }
     val openCard: HelperCard? get() = open?.let { o -> cards.firstOrNull { it.id == o.id } }
 }
@@ -181,6 +185,8 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refresh() = refreshLock.withLock {
         val started = generation
         val rows = try { client.helpers() } catch (e: HqUnavailable) { null }
+        // The worker's runs are extra: when HQ does not say, the list keeps the last ones it had.
+        val edge = if (rows != null) try { client.edgeWorker().runs } catch (e: HqUnavailable) { null } else null
         if (frozen) return@withLock
         if (rows == null) {
             _state.update { it.copy(loaded = true, offline = true) }
@@ -195,7 +201,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         val read = screens.mapNotNull { (id, lines) -> rows.first { it.id == id }.takeIf { it.agentStatus == "blocked" }?.let { HelperWords.blocked(lines)?.let { a -> id to a } } }.toMap()
         val asks = HelperWords.visibleAsks(read, answered, System.currentTimeMillis())
         val words = screens.mapNotNull { (id, lines) -> HelperWords.lastWords(lines)?.let { id to it } }.toMap()
-        _state.update { it.copy(loaded = true, offline = false, rows = rows, asks = asks, lastWords = words, now = LocalDateTime.now(ZoneOffset.UTC)) }
+        _state.update { it.copy(loaded = true, offline = false, rows = rows, edgeRuns = edge ?: it.edgeRuns, asks = asks, lastWords = words, now = LocalDateTime.now(ZoneOffset.UTC)) }
         val open = _state.value.open
         if (open != null && rows.none { it.id == open.id && !it.archived }) close()
     }
@@ -209,6 +215,12 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun open(id: String) {
+        // A run of the edge worker has no terminal to show: its work is a chat, so that chat opens.
+        if (id.startsWith(HelperWords.EDGE_PREFIX)) {
+            val thread = _state.value.edgeRuns.firstOrNull { HelperWords.EDGE_PREFIX + it.askId == id }?.threadId
+            if (thread.isNullOrBlank()) say(HelperWords.followFailed(null)) else _state.update { it.copy(followed = thread) }
+            return
+        }
         val card = _state.value.cards.firstOrNull { it.id == id } ?: return
         val page = if (card.state == HelperState.NeedsOk && card.ask != null) HelperPage.Ask else HelperPage.Detail
         _state.update { it.copy(open = HelperOpen(id, page)) }

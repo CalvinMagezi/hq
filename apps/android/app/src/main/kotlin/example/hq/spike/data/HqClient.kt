@@ -364,6 +364,35 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     data class HelperHost(val name: String, val reachable: Boolean, val error: String?)
 
+    /** One run of HQ's own edge worker: the chat that worked a task, and the task as it is now. */
+    data class EdgeRun(
+        val askId: String,
+        val threadId: String,
+        /** `pending` while it works, then `answered` or `failed`. */
+        val status: String,
+        val startedAt: String,
+        val finishedAt: String?,
+        val taskId: String,
+        val displayId: String?,
+        val title: String?,
+        val taskStatus: String?,
+    )
+
+    /** Whether the edge worker takes tasks, the tag that queues one, the repositories it may change, and its newest runs. */
+    data class EdgeWorker(val enabled: Boolean, val tag: String, val repos: List<String>, val runs: List<EdgeRun>)
+
+    suspend fun edgeWorker(): EdgeWorker = send(authed("/api/edge-worker").build()) { text ->
+        val o = JSONObject(text)
+        val runs = o.optJSONArray("runs").objects().map { r ->
+            val t = r.optJSONObject("task")
+            EdgeRun(
+                r.optString("ask_id"), r.optString("thread_id"), r.optString("status"), r.optString("started_at"), r.optStringOrNull("finished_at"),
+                r.optString("task_id"), t?.optStringOrNull("display_id"), t?.optStringOrNull("title"), t?.optStringOrNull("status"),
+            )
+        }
+        EdgeWorker(o.optBoolean("enabled"), o.optString("tag", "edge-task"), o.optJSONArray("repos").strings(), runs)
+    }
+
     /** Every helper, newest first, including stopped ones. */
     suspend fun helpers(): List<HelperRow> = send(authed("/api/harness-sessions").build()) { helperRows(it) }
 
