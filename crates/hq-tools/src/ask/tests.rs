@@ -787,3 +787,21 @@ fn a_session_hq_spawned_may_ask_read_only_but_not_in_full_mode() {
     assert_eq!(err, crate::harness_session::SPAWNED_REFUSAL);
     assert_eq!(ask("full", false).unwrap().mode, AskMode::Full);
 }
+
+#[tokio::test]
+async fn only_the_full_key_may_choose_the_model() {
+    let r = rig(Plan::AnswerSoon("ok"));
+    let err = r
+        .ask
+        .execute(handoff(
+            json!({"question": "q", "model": "anthropic-haiku"}),
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("cannot choose the model"), "{err}");
+    assert!(
+        r.runner.starts.lock().unwrap().is_empty(),
+        "nothing started"
+    );
+}

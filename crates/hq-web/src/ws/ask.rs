@@ -45,6 +45,7 @@ pub(super) struct AskTurn {
     pub(super) mode: AskMode,
     pub(super) scope: AskScope,
     pub(super) untrusted: bool,
+    pub(super) model: Option<String>,
 }
 
 impl AskTurn {
@@ -163,6 +164,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
             mode: req.mode,
             scope: req.scope,
             untrusted: req.untrusted,
+            model: req.model.map(str::to_string),
         }),
     };
     let abort = spawn_supervised(turn, config, req.question.to_string(), history, Vec::new());
@@ -319,6 +321,7 @@ mod tests {
                 mode,
                 scope: AskScope::Full,
                 untrusted: false,
+                model: None,
             }),
         }
     }
@@ -342,6 +345,7 @@ mod tests {
             mode: AskMode::Full,
             scope: AskScope::Full,
             untrusted,
+            model: None,
         };
         assert_eq!(
             turn(true).untrusted_source().as_deref(),
@@ -362,6 +366,7 @@ mod tests {
             mode: AskMode::ReadOnly,
             scope: AskScope::Full,
             untrusted: false,
+            model: None,
         };
         assert_eq!(
             read_only.permission_preset(),
@@ -517,6 +522,7 @@ mod tests {
                 mode: AskMode::ReadOnly,
                 scope: AskScope::Full,
                 untrusted: false,
+                model: None,
                 caller: "claude-code",
             })
             .await
@@ -587,6 +593,7 @@ mod tests {
                 mode: AskMode::ReadOnly,
                 scope: AskScope::Full,
                 untrusted: false,
+                model: None,
                 caller: "c",
             })
             .await

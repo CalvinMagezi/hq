@@ -264,6 +264,11 @@ pub struct SessionBuilder {
     tool_deny_prefixes: Vec<String>,
     /// Why the session counts as having read untrusted text before its first tool call.
     untrusted_input: Option<String>,
+    /// A declared backend (or its model) the session's own turns run on, instead of the chain.
+    pinned_model: Option<String>,
+    /// Set once the session is pinned: its children then run on its provider, never on the
+    /// chain's primary.
+    pinned: bool,
     /// Whether this session works or orchestrates; see [`SessionRole`].
     role: SessionRole,
     /// Originating chat turn id (e.g. a `background_turns` row) copied into the
@@ -301,6 +306,8 @@ impl SessionBuilder {
             session_profile: SessionProfile::Standard,
             tool_deny_prefixes: Vec::new(),
             untrusted_input: None,
+            pinned_model: None,
+            pinned: false,
             role: SessionRole::default(),
             child_parent_turn_id: None,
             child_completion_sink: None,
@@ -482,6 +489,13 @@ impl SessionBuilder {
         self
     }
 
+    /// Run the session's own turns on one declared backend, named by the backend or the model it
+    /// serves, as a sub-agent's `model` override does. An unknown name fails the build.
+    pub fn pinned_model(mut self, model: impl Into<String>) -> Self {
+        self.pinned_model = Some(model.into());
+        self
+    }
+
     /// Start the session tainted, as if `source` had already returned untrusted text: for a turn
     /// whose prompt points at text an outsider may have written.
     pub fn untrusted_input(mut self, source: impl Into<String>) -> Self {
@@ -502,8 +516,58 @@ impl SessionBuilder {
         self
     }
 
+    /// Points the provider and the session's model at the backend that serves `model`. Without a
+    /// `backends:` chain the legacy router resolves the name itself, so only the model is set.
+    fn pin_to(&mut self, model: &str) -> Result<()> {
+        let registry = crate::backend::registry::BackendRegistry::from_config(&self.config);
+        self.pin_with(model, registry)
+    }
+
+    fn pin_with(
+        &mut self,
+        model: &str,
+        registry: std::result::Result<
+            crate::backend::registry::BackendRegistry,
+            crate::backend::registry::BackendRegistryError,
+        >,
+    ) -> Result<()> {
+        use crate::backend::registry::BackendRegistryError;
+        let registry = match registry {
+            Ok(registry) => registry,
+            Err(BackendRegistryError::NotConfigured) => {
+                self.session_config_override
+                    .get_or_insert_with(|| provider::session_config_from_hq_config(&self.config))
+                    .model = model.to_string();
+                return Ok(());
+            }
+            Err(e) => anyhow::bail!("cannot run on '{model}': {e}"),
+        };
+        let Some((name, backend)) = registry.resolve_model(model) else {
+            anyhow::bail!(
+                "model '{model}' is not served by any configured backend. Available: {}",
+                registry.model_listing()
+            );
+        };
+        if !backend.capabilities().tools {
+            anyhow::bail!("backend '{name}' cannot drive a tool loop");
+        }
+        let (Some(provider), Some(pinned)) = (backend.utility_provider(), backend.pinned_model())
+        else {
+            anyhow::bail!("backend '{name}' cannot serve a session of its own");
+        };
+        self.provider_override = Some(provider);
+        self.pinned = true;
+        self.session_config_override
+            .get_or_insert_with(|| provider::session_config_from_hq_config(&self.config))
+            .model = pinned;
+        Ok(())
+    }
+
     /// Build the `AgentSession`.
     pub async fn build(mut self) -> Result<AgentSession> {
+        if let Some(model) = self.pinned_model.take() {
+            self.pin_to(&model)?;
+        }
         // Opened first so the outcome sink is attached before any LLM call.
         // A missing DB is non-fatal: the session runs without telemetry.
         let vault_path = self.config.vault_path.clone();

@@ -105,6 +105,8 @@ pub struct NativeHqHooks {
     pub deny_tool_prefixes: Vec<String>,
     /// Start the turn tainted, naming why (see `SessionBuilder::untrusted_input`).
     pub untrusted_input: Option<String>,
+    /// Run the turn on this declared backend or model (see `SessionBuilder::pinned_model`).
+    pub pinned_model: Option<String>,
     /// Orchestrator sessions plan and delegate; the default keeps today's behavior.
     pub role: crate::builder::SessionRole,
 }
@@ -222,6 +224,9 @@ fn native_builder(
     }
     if let Some(source) = &hooks.untrusted_input {
         base_builder = base_builder.untrusted_input(source.clone());
+    }
+    if let Some(model) = &hooks.pinned_model {
+        base_builder = base_builder.pinned_model(model.clone());
     }
     base_builder = base_builder.role(hooks.role);
     if let Some(preset) = hooks.permission_preset {

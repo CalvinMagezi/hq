@@ -7,6 +7,7 @@ struct Recorder {
     db: Arc<Database>,
     questions: Mutex<Vec<String>>,
     untrusted: Mutex<Vec<bool>>,
+    models: Mutex<Vec<Option<String>>>,
 }
 
 #[async_trait::async_trait]
@@ -22,6 +23,10 @@ impl AskRunner for Recorder {
             .unwrap()
             .push(req.question.to_string());
         self.untrusted.lock().unwrap().push(req.untrusted);
+        self.models
+            .lock()
+            .unwrap()
+            .push(req.model.map(str::to_string));
         Ok(format!("turn-{}", req.ask_id))
     }
 
@@ -35,6 +40,7 @@ fn chat(db: &Arc<Database>) -> (RunnerCell, Arc<Recorder>) {
         db: db.clone(),
         questions: Mutex::new(Vec::new()),
         untrusted: Mutex::new(Vec::new()),
+        models: Mutex::new(Vec::new()),
     });
     let cell: RunnerCell = Arc::new(OnceLock::new());
     let as_dyn: Arc<dyn AskRunner> = recorder.clone();
@@ -252,7 +258,13 @@ async fn a_task_is_asked_about_once_and_the_worker_waits_for_the_reply() {
         panic!("expected a start, got {first:?}");
     };
     let question = recorder.questions.lock().unwrap()[0].clone();
-    assert_eq!(question, format!("Work HQ task {task} end to end."));
+    assert_eq!(
+        question,
+        format!(
+            "Load the {WORKER_SKILL} skill with load_skill and follow it to work HQ task {task} end to end."
+        )
+    );
+    assert_eq!(*recorder.models.lock().unwrap(), [None], "the chat's chain");
     assert_eq!(
         *recorder.untrusted.lock().unwrap(),
         [true],
@@ -432,4 +444,59 @@ fn a_restricted_caller_cannot_change_a_queued_tasks_tags() {
         refuse_queue_write(false, Some(&queue), &parked, false).is_ok(),
         "the owner may"
     );
+}
+
+#[tokio::test]
+async fn the_driver_runs_on_the_configured_dispatch_model() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    let mut config = on();
+    config.github_write.dispatch_model = Some("anthropic-haiku".into());
+    dispatch(db, &config, cell).await.unwrap();
+    assert_eq!(
+        *recorder.models.lock().unwrap(),
+        [Some("anthropic-haiku".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn an_undeclared_dispatch_model_stops_dispatch_without_parking_anything() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    let mut config = on();
+    config.backends = hq_core::config::BackendsConfig {
+        primary: "luna".into(),
+        backends: vec![hq_core::config::BackendEntry {
+            name: "luna".into(),
+            kind: hq_core::config::BackendKind::GithubCopilotCli,
+            endpoint: None,
+            credential_env: None,
+            model: Some("gpt-luna".into()),
+            effort: None,
+            wire: Default::default(),
+            enabled: true,
+        }],
+        ..Default::default()
+    };
+    config.github_write.dispatch_model = Some("anthropic-haiku-typo".into());
+    let err = dispatch(db.clone(), &config, cell.clone())
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("names no enabled backend"),
+        "{err}"
+    );
+    assert!(
+        recorder.questions.lock().unwrap().is_empty(),
+        "nothing started"
+    );
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_TO_DO, "nothing parked");
+    for declared in ["luna", "gpt-luna"] {
+        config.github_write.dispatch_model = Some(declared.into());
+        assert!(model_is_declared(&config, declared));
+    }
 }

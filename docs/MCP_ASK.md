@@ -19,6 +19,7 @@ agent running somewhere, use `harness_session_handoff` instead (see `docs/AGENT_
 | `mode` | `read_only` (default) or `full`. |
 | `title` | Title for a new thread. Defaults to the first line of the question. |
 | `caller` | Name shown as "via MCP: claude-code" on the question. A label, not an identity. |
+| `model` | Run the reply on one configured backend, named by the backend or the model it serves (`backends:`), instead of HQ's usual chain. An unknown name fails the reply rather than falling back. Refused on the handoff key. |
 | `untrusted` | `true` when the question points at text someone else wrote (a task, a document). The reply then starts under the policy for untrusted content (no secret reads, no network from bash), as if it had already read that text. It can only make a reply stricter. |
 
 It posts the question as a user turn, runs HQ's chat agent exactly as a typed web message would

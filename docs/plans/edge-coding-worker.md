@@ -106,7 +106,10 @@ or a chat becomes a pull request with no other machine involved.
   its worker models, in the order to escalate through.
 - **One at a time.** Nothing new starts while the worker's reply is still running, or while an
   `edge-task` task is in progress under a live lease.
-- **How.** It asks HQ, through the same path as `hq_ask`, to work the task. The reply runs in a
+- **How.** It asks HQ, through the same path as `hq_ask`, to load the `edge-coding-worker` skill
+  and work the task. The skill is named in the question because a one-line question carries
+  none of its hints. `github_write.dispatch_model` (owner-only, like the rest of the section)
+  names the backend that drives it, for example `anthropic-haiku`; unset, the chat's chain does. The reply runs in a
   chat thread the owner can open and follow. The ask's key names the task and its last change,
   so the same version of a task is never asked about twice, and a task that changes (rework, an
   edit) is asked about afresh.
