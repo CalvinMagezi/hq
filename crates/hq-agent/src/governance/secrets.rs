@@ -450,9 +450,21 @@ mod tests {
         );
     }
 
+    /// A temporary directory whose random name holds no secret-name hint: an over-budget glob
+    /// under `.tmpKeY3a1` is denied by design, which would make a harmless-glob test flaky.
+    fn hint_free_tempdir() -> tempfile::TempDir {
+        loop {
+            let dir = tempfile::tempdir().unwrap();
+            let lowered = dir.path().to_string_lossy().to_lowercase();
+            if !SECRET_NAME_HINTS.iter().any(|hint| lowered.contains(hint)) {
+                return dir;
+            }
+        }
+    }
+
     #[test]
     fn a_large_harmless_glob_is_not_denied() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = hint_free_tempdir();
         for i in 0..(GLOB_MAX_MATCHES + 10) {
             std::fs::write(dir.path().join(format!("f{i:03}.txt")), "x").unwrap();
         }
