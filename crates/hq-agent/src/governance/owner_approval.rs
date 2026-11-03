@@ -10,8 +10,8 @@ use hq_db::value_items::{self, ApprovalGate, RequestState};
 use serde_json::Value;
 
 /// Tools that change things the owner cannot simply undo from their notes and tasks: files and
-/// commands on the machine, git and GitHub, HQ's config and updates, other machines and agents,
-/// and the owner's other accounts. Narrower than the connector's list (`CONNECTOR_CONFIRM_TOOLS`
+/// commands on the machine, git and GitHub, HQ's config and updates, other machines and agents
+/// (starting a coding agent is as strong as `bash`), and the owner's other accounts. Narrower than the connector's list (`CONNECTOR_CONFIRM_TOOLS`
 /// in hq-mcp), which also guards reads from a remote caller; here the caller is the owner's own
 /// chat, so reading is never asked about.
 const OWNER_CONFIRM_TOOLS: &[&str] = &[
@@ -32,7 +32,14 @@ const OWNER_CONFIRM_TOOLS: &[&str] = &[
     "google_workspace",
     "skill_manage",
     "slash_command_manage",
+    "harness_session_spawn",
+    "harness_session_handoff",
+    "agent_delegate",
 ];
+
+/// Exports write a file anywhere the HQ user can when they are given an `output` path.
+const EXPORT_TOOLS: &[&str] = &["convert_from_markdown", "vault_export", "vault_export_pdf"];
+const EXPORT_PATH_ARG: &str = "output";
 
 /// `config_manage` changes HQ only when it sets something.
 const CONFIG_TOOL: &str = "config_manage";
@@ -62,6 +69,12 @@ const KEY_PREFIX: &str = "owner-approval";
 pub fn needs_owner(tool: &str, category: &str, args: &Value) -> bool {
     if tool == CONFIG_TOOL {
         return args.get("action").and_then(Value::as_str) != Some(CONFIG_READ_ACTION);
+    }
+    if EXPORT_TOOLS.contains(&tool) {
+        return args
+            .get(EXPORT_PATH_ARG)
+            .and_then(Value::as_str)
+            .is_some_and(|o| !o.trim().is_empty());
     }
     OWNER_CONFIRM_TOOLS.contains(&tool) || category == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY
 }

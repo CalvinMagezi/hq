@@ -13,8 +13,8 @@ tool with exactly those arguments in their inbox (web app, web push, phone app).
 | Sub-agents a chat starts (`spawn_subagents`), at any depth | Yes, under the chat's approvals |
 | `hq_ask` from an MCP client | No. The connector gate already asks for the calls it guards |
 | `hq chat` in a terminal | Not yet (see below) |
-| Daemon tasks, watches, background follow-ups that run outside a chat turn, task verification | No |
-| Coding agents in the host (`harness_session_*`) | No. Their own dialogs reach the owner instead (`docs/AGENT_SESSIONS.md`) |
+| Daemon tasks, `/watch` firings, web chat Drive and follow-up turns, task verification | No |
+| Coding agents already running in the host | No. Starting one asks (below); after that its dialogs follow its command policy (`docs/AGENT_SESSIONS.md`) |
 
 Only `PermissionMode::Default` asks. `accept-edits` (the `workspace-write` preset), `read-only`,
 `plan` and `bypass` behave as before. In Telegram and Discord, `/permission workspace-write` pins a
@@ -28,7 +28,8 @@ off everywhere.
 - files and commands on the machine: `bash`, `write_file`, `edit_file`, `rollback_file`, `file_edit_batch`
 - git and GitHub: `git_commit`, `git_pr`, `github_write`
 - HQ itself: `config_manage` (except `get`), `self_update_install`, `self_update_rollback`, `skill_manage`, `slash_command_manage`, `task_delete`
-- other machines and agents: `host_add`, `host_send`, `agent_send_message`
+- other machines and agents: `host_add`, `host_send`, `agent_send_message`, and starting a coding agent (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`), which is as strong as `bash`. Steering an agent already started (`harness_session_send`, `harness_session_answer`) does not ask
+- exports to a path: `convert_from_markdown`, `vault_export` and `vault_export_pdf` when given `output`
 - the owner's other accounts: `google_workspace` and every remote MCP server (`remote_mcp:`)
 
 Reads never ask, and neither do notes and tasks, which the owner can undo from the vault and the
@@ -47,7 +48,8 @@ task history. This list is narrower than the claude.ai connector's (`CONNECTOR_C
   reported to the model, which is told not to retry the same call.
 - The call waits up to 60 seconds in the turn. If the owner has not answered by then, the model is
   told the call is waiting and to make exactly the same call again once the owner approves it.
-- One chat may have at most 5 requests waiting. Arguments too long to review in a message are refused.
+- One chat may have at most 5 requests waiting. A web chat that has no thread yet shares the scope
+  `web:new` with other new chats until its first turn creates one. Arguments too long to review in a message are refused.
 - A store that cannot be read stops the call.
 
 ## Not covered yet

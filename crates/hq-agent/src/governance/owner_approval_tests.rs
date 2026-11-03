@@ -103,5 +103,16 @@ fn reads_and_notes_never_need_the_owner() {
         &json!({})
     ));
     assert!(!needs_owner("vault_write_note", "vault", &json!({})));
+    assert!(needs_owner(
+        "vault_export",
+        "convert",
+        &json!({"path": "a.md", "output": "/home/u/.zshrc"})
+    ));
+    assert!(!needs_owner(
+        "vault_export",
+        "convert",
+        &json!({"path": "a.md"})
+    ));
+    assert!(needs_owner("harness_session_spawn", "harness", &json!({})));
     assert!(!needs_owner("read_file", "coding", &json!({})));
 }
