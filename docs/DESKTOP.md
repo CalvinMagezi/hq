@@ -175,24 +175,51 @@ cargo build -p hq-cli
 HQ_BRIDGE_BIN=target/debug/hq cargo test -p hq-desktop --test cli_join -- --ignored
 ```
 
-## What a release needs
+## Signing and the DMG
 
-This build is unsigned and has no updater. Gatekeeper refuses an unsigned app downloaded from the
-internet; on the machine that built it, it opens. A release needs:
+The **Desktop release** workflow (`.github/workflows/desktop-release.yml`, run by hand or by a
+`desktop-v*` tag) makes `HQ.dmg` in two jobs, split the way `release.yml` splits its own:
 
-1. A bundle identifier on a domain the project owns (it is `dev.hq-oss.desktop` now), and a real
-   icon (`src-tauri/icons` holds a placeholder).
+1. **Build** compiles `HQ.app` unsigned. It runs the repository's build code (and every
+   dependency's build script), so it has no environment and no secret.
+2. **Sign** downloads that bundle and runs only `scripts/desktop/sign-macos.sh` on it, in the
+   `desktop-release` environment that holds the Apple secrets. The certificate and the notary key
+   never share a job with build code. For the same reason the app is not signed by `tauri build`,
+   which would need the certificate in the build job.
+
+What the script does depends on which secrets the environment has:
+
+| Secrets | Result |
+|---|---|
+| None | Signed ad hoc. Opens on the machine that has it; Gatekeeper refuses it once downloaded. For testing only |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD` (and optionally `APPLE_SIGNING_IDENTITY`) | Developer ID signature with the hardened runtime and a secure timestamp, on the app and on the DMG. Not notarized |
+| The above plus `APPLE_API_ISSUER`, `APPLE_API_KEY` (key id) and `APPLE_API_KEY_P8` (the key's contents) | The app is notarized and stapled, then the DMG is signed, notarized and stapled, and `spctl` checks both |
+
+`APPLE_CERTIFICATE` is the base64 of a Developer ID Application `.p12`. The script imports it into
+a throwaway keychain that it deletes on exit, and restores the keychain search list. It needs no
+entitlements: the app is not sandboxed and uses none of the JIT or library-validation exceptions.
+If the sandbox is ever turned on, it needs only `com.apple.security.network.client` and `.server`.
+
+To try the script locally on a built app: `bash scripts/desktop/sign-macos.sh
+<target>/release/bundle/macos/HQ.app /tmp/HQ.dmg` (ad hoc unless the variables above are set).
+
+The bundle identifier is `online.agenthq.desktop`. WebKit keeps the HQ window's sign-in per
+identifier, so a build with the earlier placeholder (`dev.hq-oss.desktop`) asks you to sign in
+once more.
+
+## What a release still needs
+
+1. A real icon (`src-tauri/icons` holds a placeholder).
 2. The `hq` program inside the app (`bundle.externalBin`, one per target triple), so the app works
-   with nothing installed. Today it finds an installed `hq`. Sign it with the app.
-3. A Developer ID Application certificate, the hardened runtime, and entitlements for what the
-   app does: it needs no sandbox exemption beyond the network client/server entitlements
-   (`com.apple.security.network.client` and `.server`) if the sandbox is ever turned on, and
-   none of the JIT or library-validation exceptions.
-4. Notarization with `notarytool` and stapling the ticket, in CI with the credentials as secrets
-   (release workflows run on the dedicated runner, not the hosted one).
+   with nothing installed. Today it finds an installed `hq`. The sign script already signs every
+   extra program in `Contents/MacOS` before the bundle.
+3. The Apple secrets in the `desktop-release` environment. Until they exist, notarization has not
+   been run end to end.
+4. Where the DMG is published. The workflow keeps it as a run artifact for now.
 5. A decision on updates. The host updates itself from signed releases (`UPDATE_SYSTEM.md`); the
    app does not, and a Tauri updater would be a second update path to secure. Until then a new
    version is a new download.
-6. Universal binary (`--target universal-apple-darwin`) if Intel Macs matter.
+6. Universal binary (`--target universal-apple-darwin`) if Intel Macs matter. The workflow builds
+   for Apple silicon only.
 7. The relay decision from the sprint plan: n0's public relays are for development and testing,
    so the default relay must be replaced before anyone outside the household installs it.
