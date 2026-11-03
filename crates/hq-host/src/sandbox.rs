@@ -638,6 +638,9 @@ fn strict_policy(
             .chain(spec.readable.iter().cloned())
             .chain(agent_readable)
             .chain(std::env::current_exe())
+            // The relay starts inside the sandbox, so it must be readable there too. It is this
+            // binary unless the host was given another one (a test, an embedding).
+            .chain(bridge.map(|b| b.program.clone()))
             .chain(std::iter::once(project.clone()))
             .chain(writable.iter().cloned()),
     );
@@ -1316,6 +1319,38 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("egress listener"), "{err}");
+    }
+
+    #[test]
+    fn the_relay_program_is_readable_inside_a_strict_sandbox() {
+        let f = fixture();
+        let claude = f.claude();
+        let helper = f.home.join("checkout/target/debug/hq");
+        std::fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        std::fs::write(&helper, b"").unwrap();
+        let bridge = Bridge {
+            program: helper.clone(),
+            socket: f.home.join("run/eg-test.sock"),
+        };
+        let s = policy(
+            &spec_with(Profile::Strict),
+            &f.target(&claude, true),
+            Some(18080),
+            Some(&bridge),
+        )
+        .unwrap();
+        let home = s
+            .read_restrictions
+            .iter()
+            .find(|r| r.root == f.home)
+            .expect("the home directory is read-restricted");
+        let helper = helper.canonicalize().unwrap();
+        assert!(
+            home.allow.iter().any(|a| helper.starts_with(a)),
+            "{} is not readable: {:?}",
+            helper.display(),
+            home.allow
+        );
     }
 
     #[test]
