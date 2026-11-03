@@ -80,6 +80,35 @@ Notes:
   parses untrusted input) get extra scrutiny. Describe the threat you considered.
 - Keep commits readable. Squash noise before review if asked.
 
+## A private copy of HQ
+
+A GitHub fork of a public repository is always public. To keep your own changes private, make a
+private copy instead; the MIT license allows it.
+
+**From the template.** On the repository page choose **Use this template**, then **Create a new
+repository**, and set it to **Private**. The copy starts from a single commit, without this
+repository's history, and is not linked to it the way a fork is.
+
+**With the full history.** Create an empty private repository (for example
+`<your-owner>/hq-private`), then:
+
+```bash
+git clone --bare https://github.com/CalvinMagezi/hq.git
+cd hq.git
+git push --mirror https://github.com/<your-owner>/hq-private.git
+cd .. && rm -rf hq.git
+```
+
+**Taking later updates** works the same for either copy:
+
+```bash
+git remote add upstream https://github.com/CalvinMagezi/hq.git
+git fetch upstream
+git merge upstream/main   # a template copy needs --allow-unrelated-histories the first time
+```
+
+Signed updates for a server run from your copy follow the "Your own fork" notes in the README.
+
 ## Optional integrations
 
 HQ works without Discord, Telegram, Google Workspace, the host, Ollama or SearxNG
