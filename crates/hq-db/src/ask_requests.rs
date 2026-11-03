@@ -152,6 +152,23 @@ pub fn latest_by_external_prefix(
     .map_err(Into::into)
 }
 
+/// The newest asks of `scope` whose `external_id` starts with `prefix`, at most `limit`.
+pub fn recent_by_external_prefix(
+    conn: &Connection,
+    scope: &str,
+    prefix: &str,
+    limit: usize,
+) -> Result<Vec<AskRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM hq_asks WHERE scope = ?1 \
+         AND substr(external_id, 1, length(?2)) = ?2 ORDER BY created_at DESC LIMIT ?3"
+    ))?;
+    let rows = stmt
+        .query_map(params![scope, prefix, limit as i64], from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Finds the ask for `external_id` or files a new pending one, and makes its
 /// thread when asked to, all under one write lock: two calls with the same key
 /// end with one ask, one thread and one question.

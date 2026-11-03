@@ -1,5 +1,6 @@
 package example.hq.spike.ui.helpers
 
+import example.hq.spike.data.HqClient.EdgeRun
 import example.hq.spike.data.HqClient.HelperRow
 import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
@@ -439,5 +440,27 @@ class HelperWordsTest {
         assertEquals("HQ is not answering.", HelperWords.followFailed(503))
         assertEquals("Could not open the chat.", HelperWords.followFailed(500))
         assertEquals("Could not open the chat.", HelperWords.followFailed(null))
+    }
+
+    private fun run(status: String, started: String = "2026-10-21T11:50:00+00:00", finished: String? = null, taskStatus: String? = null) =
+        EdgeRun("ask-1", "thread-1", status, started, finished, "tk-1", "PERSONAL-INBOX-163", "Show the plant count", taskStatus)
+
+    @Test fun aRunningEdgeWorkerIsAWorkingHelperOnThisPhone() {
+        val c = HelperWords.edgeCard(run("pending"), now)
+        assertEquals(HelperState.Working, c.state)
+        assertEquals("Show the plant count", c.title)
+        assertEquals("HQ edge worker", c.agent)
+        assertEquals("this phone", c.where)
+        assertEquals("Working on PERSONAL-INBOX-163", c.line)
+        assertEquals("10 min", c.time)
+        assertTrue(c.id.startsWith(HelperWords.EDGE_PREFIX))
+    }
+
+    @Test fun aFinishedRunSaysWhereItsTaskStands() {
+        val done = HelperWords.edgeCard(run("answered", finished = "2026-10-21T10:00:00Z", taskStatus = "ready_for_review"), now)
+        assertEquals(HelperState.Finished, done.state)
+        assertEquals("PERSONAL-INBOX-163 · ready for your review", done.line)
+        assertEquals("2 h ago", done.time)
+        assertEquals(HelperState.Stopped, HelperWords.edgeCard(run("failed"), now).state)
     }
 }

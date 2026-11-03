@@ -48,6 +48,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.TaskItem
 import example.hq.spike.ui.chat.ActionRow
 import example.hq.spike.ui.chat.SheetFrame
@@ -77,7 +78,7 @@ private class Understood(private val today: LocalDate) : VisualTransformation {
 /** A new task in one line: the words HQ understood become chips, and Add task saves at once. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun QuickAddSheet(q: QuickState, today: LocalDate, actions: TasksActions) {
+fun QuickAddSheet(q: QuickState, today: LocalDate, edge: HqClient.EdgeWorker?, actions: TasksActions) {
     val parsed = QuickAdd.parse(q.text, today)
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
@@ -106,7 +107,7 @@ fun QuickAddSheet(q: QuickState, today: LocalDate, actions: TasksActions) {
                 }
                 Text("Words HQ understood are chips. Tap one to remove it.", style = SmallText, color = Mts.InkMuted)
             }
-            if (q.more) MoreFields(q, today, actions) else QuickPills(q, actions)
+            if (q.more) MoreFields(q, today, edge, actions) else QuickPills(q, edge, actions)
             q.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
             Box(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).alpha(if (parsed.title.isBlank() || q.saving) 0.5f else 1f)
@@ -123,17 +124,33 @@ internal fun without(text: String, range: IntRange): String =
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun QuickPills(q: QuickState, actions: TasksActions) {
+private fun QuickPills(q: QuickState, edge: HqClient.EdgeWorker?, actions: TasksActions) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Pill("Today", false) { actions.onQuick(q.copy(text = (q.text.trim() + " today").trim())) }
         Pill("Next week", false) { actions.onQuick(q.copy(text = (q.text.trim() + " next week").trim())) }
         Pill("Add details", false) { actions.onQuick(q.copy(more = true)) }
+        if (edge.takesTasks()) Pill("For the edge worker", false) { actions.onQuick(q.copy(more = true, repo = edge?.repos?.singleOrNull())) }
     }
+}
+
+/** The worker is on and has a repository it may change. */
+private fun HqClient.EdgeWorker?.takesTasks() = this != null && enabled && repos.isNotEmpty()
+
+/** Which repository the edge worker should change, or none, which leaves the task for you. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EdgeFields(q: QuickState, edge: HqClient.EdgeWorker, actions: TasksActions) {
+    Text("Edge worker", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Pill("Not for the worker", q.repo == null) { actions.onQuick(q.copy(repo = null)) }
+        edge.repos.forEach { repo -> Pill(repo.substringAfter('/'), q.repo == repo) { actions.onQuick(q.copy(repo = repo)) } }
+    }
+    if (q.repo != null) Text("HQ works it on this phone within a few minutes and opens a pull request in ${q.repo}. Say in the notes what to change and how you will know it is done.", style = SmallText, color = Mts.InkMuted)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MoreFields(q: QuickState, today: LocalDate, actions: TasksActions) {
+private fun MoreFields(q: QuickState, today: LocalDate, edge: HqClient.EdgeWorker?, actions: TasksActions) {
     val shape = RoundedCornerShape(12.dp)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Line, shape).background(Mts.Surface100).padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -151,6 +168,7 @@ private fun MoreFields(q: QuickState, today: LocalDate, actions: TasksActions) {
             Pill("Tomorrow", q.due == today.plusDays(1)) { actions.onQuick(q.copy(due = today.plusDays(1))) }
             Pill("Next week", q.due == TasksLogic.nextMonday(today)) { actions.onQuick(q.copy(due = TasksLogic.nextMonday(today))) }
         }
+        if (edge.takesTasks() && edge != null) EdgeFields(q, edge, actions)
         Text("It goes to your Inbox list.", style = SmallText, color = Mts.InkMuted)
     }
 }

@@ -11,6 +11,7 @@ mod copilot_usage_api;
 mod device_auth;
 mod devices_door;
 mod dialog_answer;
+mod edge_worker_api;
 mod error;
 pub mod gmail_ingest;
 mod mcp_http;
@@ -536,6 +537,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/work-sessions",
             get(tasks_api::recent_work_sessions_handler),
+        )
+        .route(
+            "/api/edge-worker",
+            get(edge_worker_api::edge_worker_handler),
         )
         .route(
             "/api/threads/{thread_id}/sessions",

@@ -109,7 +109,10 @@ object HelperWords {
         HelperState.Stopped -> "Stopped"
     }
 
-    private fun parse(time: String): LocalDateTime? = try { LocalDateTime.parse(time.replace(' ', 'T')) } catch (e: DateTimeParseException) { null }
+    /** A UTC time as HQ writes it: SQLite's "2026-11-03 07:43:52", or RFC 3339 with an offset (the edge worker's runs). */
+    private fun parse(time: String): LocalDateTime? = try { LocalDateTime.parse(time.replace(' ', 'T')) } catch (e: DateTimeParseException) {
+        try { java.time.OffsetDateTime.parse(time).atZoneSameInstant(java.time.ZoneOffset.UTC).toLocalDateTime() } catch (e: DateTimeParseException) { null }
+    }
 
     /** "12 min", "2 h", "3 d": how long ago, with no "ago", for the line under a title. */
     fun span(from: String, now: LocalDateTime): String? {
@@ -336,6 +339,35 @@ object HelperWords {
         val time = if (state == HelperState.Working || state == HelperState.NeedsOk) span(row.createdAt, now).orEmpty() else ago(lastSeen(row), now)
         return HelperCard(row.id, title(row), agent, where, state, line, time, ask.takeIf { state == HelperState.NeedsOk }, row.id, isGeneric(row), folderOf(row.cwd))
     }
+
+    /** A run of HQ's own edge worker on this phone, as a card beside the other helpers. Its id starts with [EDGE_PREFIX]. */
+    fun edgeCard(run: HqClient.EdgeRun, now: LocalDateTime): HelperCard {
+        val state = when (run.status) {
+            "pending" -> HelperState.Working
+            "answered" -> HelperState.Finished
+            else -> HelperState.Stopped
+        }
+        val task = run.displayId ?: "a task"
+        val line = when (state) {
+            HelperState.Working -> "Working on $task"
+            HelperState.Finished -> listOfNotNull(task, run.taskStatus?.let(::taskStatusWords)).joinToString(" · ")
+            else -> "Stopped before finishing $task"
+        }
+        val time = if (state == HelperState.Working) span(run.startedAt, now).orEmpty() else ago(run.finishedAt ?: run.startedAt, now)
+        return HelperCard(EDGE_PREFIX + run.askId, run.title ?: task, EDGE_AGENT, EDGE_PLACE, state, line, time, null, "")
+    }
+
+    private fun taskStatusWords(status: String) = when (status) {
+        "ready_for_review" -> "ready for your review"
+        "blocked" -> "blocked"
+        "complete" -> "done"
+        "in_progress" -> "in progress"
+        else -> "to do"
+    }
+
+    const val EDGE_PREFIX = "edge:"
+    private const val EDGE_AGENT = "HQ edge worker"
+    private const val EDGE_PLACE = "this phone"
 
     /** The order on the list: waiting for the owner first, then working, then the rest, newest first within each. */
     val order: Comparator<HelperCard> = compareBy<HelperCard> {
