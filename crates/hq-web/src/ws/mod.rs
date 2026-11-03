@@ -596,6 +596,7 @@ impl ChatTurn {
                 .collect(),
             permission_preset: self.ask.as_ref().and_then(ask::AskTurn::permission_preset),
             untrusted_input: self.ask.as_ref().and_then(ask::AskTurn::untrusted_source),
+            pinned_model: self.ask.as_ref().and_then(|a| a.model.clone()),
             role: hooks_role,
             identity: Some(match self.tid.as_deref() {
                 Some(t) => hq_core::identity::RequestIdentity::from_web_thread(

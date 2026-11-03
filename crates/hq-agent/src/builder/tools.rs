@@ -400,8 +400,10 @@ impl SessionBuilder {
 
             // The unified child-execution runtime, backed by the configured
             // external backends (when any) for backend-selection policy.
-            let service_registry = crate::backend::BackendRegistry::from_config(&self.config)
-                .ok()
+            // A pinned session's children stay on its backend instead of the chain's primary.
+            let service_registry = (!self.pinned)
+                .then(|| crate::backend::BackendRegistry::from_config(&self.config).ok())
+                .flatten()
                 .map(Arc::new);
             let agent_service = Arc::new(
                 crate::agents::AgentService::new(

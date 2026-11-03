@@ -61,6 +61,14 @@ pub async fn dispatch(
     if !config.github_write.dispatch_tasks || !worker_active || !can_ask {
         return Ok(Outcome::Off);
     }
+    if let Some(model) = config.github_write.dispatch_model.as_deref()
+        && !model_is_declared(config, model)
+    {
+        warn_misconfigured(&db, model);
+        anyhow::bail!(
+            "github_write.dispatch_model '{model}' names no enabled backend in backends:; nothing was dispatched"
+        );
+    }
     let ttl = i64::try_from(config.tasks.lease_ttl()).unwrap_or(i64::MAX);
     match db.with_conn(move |c| busy_with(c, ttl))? {
         Busy::On(what) => return Ok(Outcome::Busy(what)),
@@ -91,7 +99,8 @@ pub async fn dispatch(
             )?;
             continue;
         }
-        let ask_id = ask_to_work(db.clone(), runner, &task).await?;
+        let model = config.github_write.dispatch_model.as_deref();
+        let ask_id = ask_to_work(db.clone(), runner, &task, model).await?;
         return Ok(Outcome::Started {
             task: task.display_id,
             ask_id,
@@ -195,6 +204,7 @@ async fn ask_to_work(
     db: Arc<Database>,
     runner: crate::ask::RunnerCell,
     task: &t::Task,
+    model: Option<&str>,
 ) -> Result<String> {
     let tools = crate::ask::create_ask_tools_with(db, runner, None);
     let ask = tools
@@ -202,7 +212,11 @@ async fn ask_to_work(
         .find(|tool| tool.name() == ASK_TOOL)
         .context("the hq_ask tool is missing")?;
     let args = json!({
-        "question": format!("Work HQ task {} end to end.", task.display_id),
+        // The skill is named outright: its hints need not appear in a one-line question.
+        "question": format!(
+            "Load the {WORKER_SKILL} skill with load_skill and follow it to work HQ task {} end to end.",
+            task.display_id
+        ),
         "title": format!("Edge worker: {}", task.display_id),
         "mode": ASK_MODE,
         "caller": CALLER,
@@ -210,6 +224,7 @@ async fn ask_to_work(
         "wait_secs": 0,
         // Anyone the owner lets file tasks may have written the task and its comments.
         "untrusted": true,
+        "model": model,
     });
     let reply = ask.execute(args).await?;
     let ask_id = reply
@@ -217,6 +232,36 @@ async fn ask_to_work(
         .and_then(|v| v.as_str())
         .context("hq_ask returned no ask id")?;
     Ok(ask_id.to_string())
+}
+
+/// Whether `model` names an enabled backend, or the model one declares, so a typo stops dispatch
+/// instead of failing every task it starts. Without a `backends:` chain the router resolves it.
+fn model_is_declared(config: &HqConfig, model: &str) -> bool {
+    let backends = &config.backends;
+    if !backends.is_configured() {
+        return true;
+    }
+    backends
+        .backends
+        .iter()
+        .filter(|b| b.enabled)
+        .any(|b| b.name == model || b.model.as_deref() == Some(model))
+}
+
+fn warn_misconfigured(db: &Database, model: &str) {
+    let item = ValueItem::new(
+        INBOX_SOURCE,
+        ValueKind::ActionNeeded,
+        "Edge worker paused: unknown dispatch model",
+        format!(
+            "github_write.dispatch_model is '{model}', which no enabled backend serves. \
+             Queued edge-task tasks wait until it names a backend or is removed."
+        ),
+    )
+    .with_dedup_key(format!("{INBOX_SOURCE}-model-{model}"));
+    if let Err(e) = hq_db::value_items::emit(db, &item) {
+        tracing::warn!(error = %e, "edge-worker-dispatch: inbox item failed");
+    }
 }
 
 fn park(db: &Database, task: &t::Task, reason: &str) -> Result<()> {

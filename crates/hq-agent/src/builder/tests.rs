@@ -777,3 +777,69 @@ async fn a_mobile_turn_sends_a_small_fixed_prompt() {
     );
     assert!(!deferred.contains(&"vault_search".to_string()));
 }
+
+mod pinned_model {
+    use super::*;
+    use crate::backend::registry::{BackendRegistry, BackendRegistryError};
+    use crate::backend::{ApiBackend, SessionBackend};
+    use hq_core::config::HqConfig;
+
+    fn registry() -> BackendRegistry {
+        let provider = hq_llm::backend_chain::openai_compat_provider(
+            "https://example.test/v1",
+            "test-key",
+            None,
+            Default::default(),
+        );
+        let api = |name: &str, model: &str| {
+            Arc::new(ApiBackend::new(name, provider.clone()).with_model(Some(model.into())))
+                as Arc<dyn SessionBackend>
+        };
+        BackendRegistry::from_backends(
+            vec![
+                ("luna".into(), api("luna", "gpt-luna")),
+                ("cheap".into(), api("cheap", "small-model")),
+            ],
+            "luna",
+        )
+    }
+
+    fn model_of(b: &SessionBuilder) -> String {
+        b.session_config_override.as_ref().unwrap().model.clone()
+    }
+
+    #[test]
+    fn a_backend_is_found_by_its_name_or_its_model_and_its_provider_is_used() {
+        for name in ["cheap", "small-model"] {
+            let mut b = SessionBuilder::from_config(&HqConfig::default());
+            b.pin_with(name, Ok(registry())).unwrap();
+            assert_eq!(model_of(&b), "small-model");
+            assert!(b.provider_override.is_some());
+            assert!(
+                b.pinned,
+                "children then get no registry to reach the primary"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_model_fails_instead_of_running_on_the_chain() {
+        let mut b = SessionBuilder::from_config(&HqConfig::default());
+        let err = b.pin_with("ghost", Ok(registry())).unwrap_err().to_string();
+        assert!(
+            err.contains("not served by any configured backend"),
+            "{err}"
+        );
+        assert!(b.provider_override.is_none());
+    }
+
+    #[test]
+    fn without_a_backends_chain_only_the_model_is_set() {
+        let mut b = SessionBuilder::from_config(&HqConfig::default());
+        b.pin_with("some/model", Err(BackendRegistryError::NotConfigured))
+            .unwrap();
+        assert_eq!(model_of(&b), "some/model");
+        assert!(b.provider_override.is_none());
+        assert!(!b.pinned);
+    }
+}

@@ -25,6 +25,8 @@ pub const DEFAULT_WAIT_SECS: u64 = 45;
 pub const MAX_WAIT_SECS: u64 = 55;
 pub const MAX_QUESTION_CHARS: usize = 20_000;
 const MAX_EXTERNAL_ID_CHARS: usize = 128;
+/// Longest backend or model name an ask may name.
+const MAX_MODEL_CHARS: usize = 128;
 const MAX_TITLE_CHARS: usize = 120;
 const DERIVED_TITLE_CHARS: usize = 60;
 const MAX_CALLER_CHARS: usize = 40;
@@ -108,6 +110,8 @@ pub struct AskStart<'a> {
     /// The question points at text an outsider may have written, so the reply starts under the
     /// stricter policy for untrusted content.
     pub untrusted: bool,
+    /// A declared backend, or the model one serves, for the reply instead of the chat's chain.
+    pub model: Option<&'a str>,
 }
 
 /// Implemented by hq-web, which owns the chat turns.
@@ -278,6 +282,7 @@ struct AskArgs {
     scope: AskScope,
     wait: Duration,
     untrusted: bool,
+    model: Option<String>,
 }
 
 impl AskArgs {
@@ -311,6 +316,19 @@ impl AskArgs {
         {
             bail!("external_id is longer than {MAX_EXTERNAL_ID_CHARS} characters");
         }
+        let model = non_blank("model");
+        let restricted = scope == AskScope::Handoff
+            || crate::harness_session::connector_label(args).is_some()
+            || crate::harness_session::is_tasks_scope(args);
+        if model.is_some() && restricted {
+            bail!("this connection cannot choose the model; leave `model` out");
+        }
+        if model
+            .as_deref()
+            .is_some_and(|m| m.chars().count() > MAX_MODEL_CHARS)
+        {
+            bail!("model is longer than {MAX_MODEL_CHARS} characters");
+        }
         let title = non_blank("title")
             .map(|t| t.chars().take(MAX_TITLE_CHARS).collect::<String>())
             .unwrap_or_else(|| first_line_title(&question));
@@ -324,6 +342,7 @@ impl AskArgs {
             scope,
             wait: clamp_wait(args),
             untrusted: args.get("untrusted").and_then(Value::as_bool) == Some(true),
+            model,
         })
     }
 }
@@ -434,6 +453,7 @@ impl HqTool for HqAskTool {
                 "external_id": { "type": "string", "description": "Idempotency key chosen by the caller, unique per API key (two callers on one key share the namespace, so make ids unique). A repeat call with the same key returns the same ask; reusing it for a different question is an error." },
                 "wait_secs": { "type": "integer", "description": format!("How long to wait for the answer, default {DEFAULT_WAIT_SECS}, at most {MAX_WAIT_SECS}. 0 returns at once.") },
                 "untrusted": { "type": "boolean", "description": "Set when the question points at text someone else wrote (a task, a document): the reply then works under the stricter policy for untrusted content from its first step." },
+                "model": { "type": "string", "description": "Run the reply on one configured backend, by its name or the model it serves (for example a cheaper model for routine work). Left out, the reply uses HQ's usual chain. Only on the owner's own key: refused on the handoff and tasks keys and on connector grants." },
                 "mode": { "type": "string", "enum": ["read_only", "full"], "description": "read_only (default): HQ may only read. full: HQ may use every tool a web chat turn can; full-scope key only." },
                 "title": { "type": "string", "description": "Title for a new thread. Defaults to the first line of the question." },
                 "caller": { "type": "string", "description": "Name shown as 'via MCP: <caller>' on the question, e.g. claude-code. A label, not an identity." }
@@ -561,6 +581,7 @@ impl HqAskTool {
                 scope: req.scope,
                 caller: &req.caller,
                 untrusted: req.untrusted,
+                model: req.model.as_deref(),
             })
             .await;
         match started {
