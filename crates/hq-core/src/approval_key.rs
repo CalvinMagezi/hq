@@ -75,9 +75,12 @@ pub fn verify_hex(key: &[u8], message: &str, mac: &str) -> bool {
     crate::pairing::constant_time_eq(hmac_hex(key, message).as_bytes(), mac.as_bytes())
 }
 
-/// Signs `engaged` approval of one value item.
-pub fn value_approval_message(item_id: &str) -> String {
-    format!("value-approval|{item_id}")
+/// Signs `engaged` approval of one value item under its dedup key, so an approval cannot be
+/// moved to another key (a gated call's tool and arguments) by rewriting the row. The id is
+/// length-prefixed so no id and key pair can collide with another.
+pub fn value_approval_message(item_id: &str, dedup_key: Option<&str>) -> String {
+    let dedup_key = dedup_key.unwrap_or_default();
+    format!("value-approval|{}:{item_id}|{dedup_key}", item_id.len())
 }
 
 /// Signs one answer (`approve` or `decline`) to the dialog behind one inbox item, valid until

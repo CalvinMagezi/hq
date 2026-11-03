@@ -198,9 +198,16 @@ fn sign_approvals(c: &rusqlite::Connection, ids: &[String]) {
         return;
     };
     for id in ids {
+        let Ok(dedup_key) = c.query_row(
+            "SELECT dedup_key FROM value_items WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, Option<String>>(0),
+        ) else {
+            continue;
+        };
         let mac = hq_core::approval_key::hmac_hex(
             &key,
-            &hq_core::approval_key::value_approval_message(id),
+            &hq_core::approval_key::value_approval_message(id, dedup_key.as_deref()),
         );
         let _ = c.execute(
             "UPDATE value_items SET engagement_mac = ?2 WHERE id = ?1",
@@ -226,7 +233,7 @@ pub fn is_signed_approval(db: &Database, dedup_key: &str) -> Result<bool> {
         Ok(match row {
             Some((id, state, Some(mac))) if state == "engaged" => hq_core::approval_key::verify_hex(
                 &key,
-                &hq_core::approval_key::value_approval_message(&id),
+                &hq_core::approval_key::value_approval_message(&id, Some(dedup_key)),
                 &mac,
             ),
             _ => false,
@@ -653,6 +660,29 @@ mod tests {
             !is_signed_approval(&db, "sg").unwrap(),
             "a wrong signature is refused"
         );
+    }
+
+    #[test]
+    fn a_signed_approval_cannot_be_moved_to_another_dedup_key() {
+        let db = open_db();
+        let item =
+            ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("call:aaa");
+        emit(&db, &item).unwrap();
+        assert!(approve_by_id(&db, &item.id).unwrap());
+        assert!(is_signed_approval(&db, "call:aaa").unwrap());
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE value_items SET dedup_key='call:bbb' WHERE id=?1",
+                params![item.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            !is_signed_approval(&db, "call:bbb").unwrap(),
+            "the signature covers the key it was given for"
+        );
+        assert!(!consume_approval(&db, "call:bbb").unwrap());
     }
 
     #[test]
