@@ -14,7 +14,7 @@ Pairing itself: [PAIRING.md](PAIRING.md).
 
 | Screen | What you can do |
 |---|---|
-| Host | Start and stop the host and see its state. What it starts depends on the config (see "The phone as the hub"). Open HQ, which shows the web app in a second window. An optional setting starts the host when the app opens. |
+| Host | Start and stop the host and see its state. What it starts depends on the config (see "The phone as the hub"). Open HQ, which shows the web app in a second window. An optional setting starts the host when the app opens. Below that, the coding agents on this Mac's host, the ones waiting for you first (needs you, finished, working, idle, ended). The list only shows them: answer an agent in HQ. |
 | Devices | Switch the app on for paired devices, show a pairing code (QR and the `hqpair://` link), type the six digits the other device shows, list paired devices, revoke one. While the app is on it also lists what it shares with paired devices and the forwards it opened, with "running elsewhere" for a forward whose port another process already holds. |
 | Claude | A short note that Claude Code and Claude Desktop on this laptop reach HQ through the app. It has no buttons yet. The Connect Claude screen is gone: the public claude.ai connector is retired (see the [sprint plan](plans/native-bridge-sprint.md)). |
 

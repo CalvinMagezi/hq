@@ -1,5 +1,6 @@
 //! The app as a whole: settings, the host, pairing and the proxy, wired from the HQ config. The Tauri shell holds one of these and calls into it.
 
+use crate::agents;
 use crate::claude;
 use crate::host::{self, HostController, HostSpec};
 use crate::pairing::{HubServices, PairingConfig, PairingController};
@@ -222,6 +223,17 @@ impl Desktop {
             proxy: AsyncMutex::new(None),
             upstream,
         })
+    }
+
+    /// The coding agents on this machine's host, those that need the person first.
+    pub async fn agents(&self) -> agents::AgentsView {
+        let dir = hq_core::config::native_host_dir();
+        tokio::task::spawn_blocking(move || agents::read(&dir))
+            .await
+            .unwrap_or(agents::AgentsView {
+                reachable: false,
+                agents: Vec::new(),
+            })
     }
 
     /// Every paired hub and what Claude Code and Claude Desktop hold for it.
