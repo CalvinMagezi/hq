@@ -420,6 +420,7 @@ impl SessionBuilder {
                 .with_db(shared_db.clone())
                 .with_bash_settings(self.bash_settings(vault_path))
                 .with_permission_mode(self.permission_mode.clone())
+                .with_owner_approval(self.owner_approval.clone())
                 .with_role(self.role)
                 .with_taint(taint.clone()),
             );
@@ -490,6 +491,7 @@ impl SessionBuilder {
             self.permission_mode.clone(),
         );
         guardian.set_denial_notifier(mailbox_denial_notifier(vault_path.to_path_buf()));
+        guardian.set_owner_approval(self.owner_approval.clone());
         guardian.set_taint(taint);
 
         // Apply session profile: drop tools whose policy exceeds the profile tier.

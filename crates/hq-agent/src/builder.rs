@@ -242,6 +242,8 @@ pub struct SessionBuilder {
     /// hardcoded `ToolGuardian::with_default_mode` behavior — set via
     /// `.permission_mode()` or the `.permission_preset()` convenience.
     permission_mode: PermissionMode,
+    /// Where `PermissionMode::Default` asks the owner; set only for a chat the owner drives.
+    owner_approval: Option<std::sync::Arc<crate::governance::OwnerApproval>>,
     /// If set, limits sub-agent spawning depth.
     subagent_depth: u32,
     /// Deprecated: skip context assembly. All callers should use unified context.
@@ -298,6 +300,7 @@ impl SessionBuilder {
             extra_tools: Vec::new(),
             security_profile: SecurityProfile::Guarded,
             permission_mode: PermissionMode::Default,
+            owner_approval: None,
             subagent_depth: 0,
             enable_thread_continuity: true,
             skip_context: false,
@@ -424,6 +427,16 @@ impl SessionBuilder {
     /// `security_profile`). See `PermissionMode`.
     pub fn permission_mode(mut self, mode: PermissionMode) -> Self {
         self.permission_mode = mode;
+        self
+    }
+
+    /// Ask the owner through their inbox before a call that needs them (see
+    /// `governance::needs_owner`), while the session is in `PermissionMode::Default`.
+    pub fn owner_approval(
+        mut self,
+        approval: Option<std::sync::Arc<crate::governance::OwnerApproval>>,
+    ) -> Self {
+        self.owner_approval = approval;
         self
     }
 

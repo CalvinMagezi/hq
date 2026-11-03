@@ -9,7 +9,6 @@ use hq_core::types::{ValueItem, ValueKind};
 use hq_db::mcp_connector::{self as store, GrantAccess};
 use hq_db::value_items;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::time::Duration;
 
 /// Calls one grant may make in a minute.
@@ -37,7 +36,7 @@ pub(crate) const MAX_WAITING_APPROVALS: i64 = 5;
 /// How long an approval request, and a decline, lasts.
 const APPROVAL_TTL_HOURS: i64 = 24;
 /// Gateway markers start with this; a caller's copy never counts toward the arguments' hash.
-const MARKER_PREFIX: &str = "_hq_";
+const MARKER_PREFIX: &str = hq_core::approval_key::RUNTIME_ARG_PREFIX;
 
 /// One `tools/call` from a connector grant.
 pub(crate) async fn connector_call(
@@ -100,7 +99,7 @@ impl Call {
             (outer.to_string(), params["arguments"].clone())
         };
         let args = without_markers(&args);
-        let digest = sha256_hex(&canonical(&args));
+        let digest = hq_core::approval_key::args_digest(&args);
         Self {
             tool,
             args,
@@ -120,33 +119,6 @@ fn without_markers(args: &Value) -> Value {
         ),
         other => other.clone(),
     }
-}
-
-/// JSON with every object's keys sorted, so the same arguments always hash the same.
-fn canonical(v: &Value) -> String {
-    match v {
-        Value::Object(map) => {
-            let mut keys: Vec<_> = map.keys().collect();
-            keys.sort();
-            let parts: Vec<String> = keys
-                .into_iter()
-                .map(|k| format!("{}:{}", json!(k), canonical(&map[k])))
-                .collect();
-            format!("{{{}}}", parts.join(","))
-        }
-        Value::Array(items) => {
-            let parts: Vec<String> = items.iter().map(canonical).collect();
-            format!("[{}]", parts.join(","))
-        }
-        other => other.to_string(),
-    }
-}
-
-fn sha256_hex(s: &str) -> String {
-    Sha256::digest(s.as_bytes())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
 }
 
 /// Why a call did not run.
@@ -191,11 +163,10 @@ async fn confirmation(
 /// Where the approval for one exact call stands, spending it when it is there to spend.
 /// `None` when the store cannot be read.
 fn gate(db: &hq_db::Database, key: &str) -> Option<Gate> {
-    let latest = value_items::latest_engagement_by_dedup(db, key).ok()?;
-    if value_items::consume_approval(db, key).ok()? {
-        return Some(Gate::Run);
-    }
-    Some(Gate::from_latest(latest, chrono::Utc::now()))
+    Some(match value_items::approval_gate(db, key).ok()? {
+        value_items::ApprovalGate::Run => Gate::Run,
+        value_items::ApprovalGate::Pending(state) => Gate::from_state(state),
+    })
 }
 
 async fn wait_for_owner(db: &hq_db::Database, key: &str, tool: &str) -> Option<Stop> {
@@ -231,11 +202,16 @@ enum Gate {
 }
 
 impl Gate {
+    #[cfg(test)]
     fn from_latest(
         latest: Option<value_items::LatestEngagement>,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Self {
-        match value_items::RequestState::from_latest(latest, now) {
+        Self::from_state(value_items::RequestState::from_latest(latest, now))
+    }
+
+    fn from_state(state: value_items::RequestState) -> Self {
+        match state {
             value_items::RequestState::Ask => Self::Ask,
             value_items::RequestState::Wait => Self::Wait,
             value_items::RequestState::Declined => Self::Declined,

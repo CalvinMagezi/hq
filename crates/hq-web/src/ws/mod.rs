@@ -598,6 +598,7 @@ impl ChatTurn {
             untrusted_input: self.ask.as_ref().and_then(ask::AskTurn::untrusted_source),
             pinned_model: self.ask.as_ref().and_then(|a| a.model.clone()),
             role: hooks_role,
+            owner_approval: self.owner_approval(&config),
             identity: Some(match self.tid.as_deref() {
                 Some(t) => hq_core::identity::RequestIdentity::from_web_thread(
                     t,
@@ -645,6 +646,22 @@ impl ChatTurn {
             failure.as_deref(),
         )
         .await;
+    }
+
+    /// Owner turns ask before calls that need the owner; an `hq_ask` turn is someone else's
+    /// question, already approved or limited by the connector.
+    fn owner_approval(
+        &self,
+        config: &hq_core::config::HqConfig,
+    ) -> Option<Arc<hq_agent::governance::OwnerApproval>> {
+        if self.ask.is_some() || !config.governance.asks_owner() {
+            return None;
+        }
+        let scope = format!("web:{}", self.tid.as_deref().unwrap_or("new"));
+        Some(hq_agent::governance::OwnerApproval::new(
+            Arc::new(self.db.clone()),
+            scope,
+        ))
     }
 
     fn session_config(

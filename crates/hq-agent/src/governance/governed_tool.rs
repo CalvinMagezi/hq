@@ -1,8 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use hq_core::types::{
-    PermissionMode, SecurityProfile, ToolResult, ToolResultContent, ValidationResult,
-};
+use hq_core::types::{PermissionMode, ToolResult, ToolResultContent, ValidationResult};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -21,11 +19,11 @@ pub(super) struct GovernedTool {
     pub(super) inner: Box<dyn AgentTool>,
     pub(super) allowed_paths: Vec<PathBuf>,
     pub(super) denied_paths: Vec<PathBuf>,
-    pub(super) profile: SecurityProfile,
     pub(super) permission_mode: PermissionMode,
     pub(super) denial_tracker: DenialTracker,
     pub(super) repeat_call_tracker: RepeatCallTracker,
     pub(super) denial_notifier: Option<DenialNotifier>,
+    pub(super) owner_approval: Option<Arc<super::OwnerApproval>>,
     pub(super) notified_denials: Arc<Mutex<HashSet<String>>>,
     /// When in Plan mode, the only writable path (the active plan file).
     /// All other writes are denied. Set via `ToolGuardian::set_plan_file`.
@@ -303,6 +301,20 @@ impl GovernedTool {
         None
     }
 
+    /// In `PermissionMode::Default`, a call that needs the owner runs only once they approve
+    /// exactly it. `Some` carries what the model gets instead.
+    async fn owner_decision(&self, args: &Value) -> Option<String> {
+        let approval = self.owner_approval.as_ref()?;
+        let tool_name = self.inner.name();
+        let asks = matches!(self.permission_mode, PermissionMode::Default)
+            && !self.inner.is_read_only()
+            && super::needs_owner(tool_name, self.inner.category(), args);
+        if !asks {
+            return None;
+        }
+        approval.check(tool_name, args).await
+    }
+
     /// The full governance waterfall (call limits, permission-mode
     /// checks, path restrictions, validation) around a single tool call.
     /// Split out of `execute` so the trait method can wrap this with
@@ -310,14 +322,6 @@ impl GovernedTool {
     /// without duplicating the waterfall itself.
     async fn execute_governed(&self, id: &str, args: Value) -> Result<ToolResult> {
         let tool_name = self.inner.name();
-
-        // Log destructive tool usage in Guarded mode (preparation for future interactive approval)
-        if self.inner.is_destructive() && matches!(self.profile, SecurityProfile::Guarded) {
-            debug!(
-                tool = tool_name,
-                "destructive tool invoked under Guarded security profile"
-            );
-        }
 
         if matches!(self.permission_mode, PermissionMode::BypassPermissions) {
             return self.execute_bypassed(id, args).await;
@@ -366,6 +370,11 @@ impl GovernedTool {
             return Ok(text_result(format!(
                 "Validation error (code {error_code}): {message}"
             )));
+        }
+
+        // Asked last, so a call the checks above would refuse never reaches the owner.
+        if let Some(waiting) = self.owner_decision(&args).await {
+            return Ok(text_result(waiting));
         }
 
         self.run_tracked(id, args).await

@@ -140,11 +140,11 @@ fn test_empty_paths_denies_everything() {
         inner: Box::new(DummyTool),
         allowed_paths: vec![],
         denied_paths: vec![],
-        profile: SecurityProfile::Guarded,
         permission_mode: PermissionMode::Default,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
         denial_notifier: None,
+        owner_approval: None,
         notified_denials: Arc::new(Mutex::new(HashSet::new())),
         plan_file_path: None,
         files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -161,11 +161,11 @@ async fn test_bypass_permissions_skips_path_check() {
         inner: Box::new(DummyTool),
         allowed_paths: vec![],
         denied_paths: vec![],
-        profile: SecurityProfile::Guarded,
         permission_mode: PermissionMode::BypassPermissions,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
         denial_notifier: None,
+        owner_approval: None,
         notified_denials: Arc::new(Mutex::new(HashSet::new())),
         plan_file_path: None,
         files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -187,11 +187,11 @@ async fn test_dont_ask_denies_non_readonly_tool() {
         inner: Box::new(DummyTool), // is_read_only() returns false
         allowed_paths: vec![PathBuf::from("/tmp")],
         denied_paths: vec![],
-        profile: SecurityProfile::Guarded,
         permission_mode: PermissionMode::DontAsk,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
         denial_notifier: None,
+        owner_approval: None,
         notified_denials: Arc::new(Mutex::new(HashSet::new())),
         plan_file_path: None,
         files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -248,11 +248,11 @@ fn test_symlinked_allowed_path_resolves_existing_files() {
         inner: Box::new(DummyTool),
         allowed_paths: expand_with_canonical_forms(vec![link.clone()]),
         denied_paths: vec![],
-        profile: SecurityProfile::Guarded,
         permission_mode: PermissionMode::Default,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
         denial_notifier: None,
+        owner_approval: None,
         notified_denials: Arc::new(Mutex::new(HashSet::new())),
         plan_file_path: None,
         files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -285,11 +285,11 @@ fn test_denied_path_wins_over_broader_allowed_root() {
         inner: Box::new(DummyTool),
         allowed_paths: expand_with_canonical_forms(vec![tmp.clone()]),
         denied_paths: expand_with_canonical_forms(vec![ssh_dir]),
-        profile: SecurityProfile::Guarded,
         permission_mode: PermissionMode::Default,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
         denial_notifier: None,
+        owner_approval: None,
         notified_denials: Arc::new(Mutex::new(HashSet::new())),
         plan_file_path: None,
         files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -318,11 +318,11 @@ async fn test_denial_notifier_fires_once_per_distinct_reason() {
         inner: Box::new(DummyTool), // is_read_only() returns false
         allowed_paths: vec![PathBuf::from("/tmp")],
         denied_paths: vec![],
-        profile: SecurityProfile::Guarded,
         permission_mode: PermissionMode::DontAsk,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
         denial_notifier: Some(notifier),
+        owner_approval: None,
         notified_denials: Arc::new(Mutex::new(HashSet::new())),
         plan_file_path: None,
         files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -405,11 +405,11 @@ fn governed_slow_tool(sleep_ms: u64, declared_timeout_ms: Option<u64>) -> Govern
         }),
         allowed_paths: vec![PathBuf::from("/tmp")],
         denied_paths: vec![],
-        profile: SecurityProfile::Guarded,
         permission_mode: PermissionMode::BypassPermissions,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
         denial_notifier: None,
+        owner_approval: None,
         notified_denials: Arc::new(Mutex::new(HashSet::new())),
         plan_file_path: None,
         files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -537,4 +537,48 @@ async fn test_repeat_guard_sets_context_modifier_via_execute() {
         "expected repeat-call advisory, got: {:?}",
         r3.context_modifier
     );
+}
+
+struct BashStub;
+
+#[async_trait]
+impl AgentTool for BashStub {
+    fn name(&self) -> &str {
+        "bash"
+    }
+    fn description(&self) -> &str {
+        "stub"
+    }
+    fn parameters(&self) -> Value {
+        Value::Object(Default::default())
+    }
+    async fn execute(&self, _id: &str, _args: Value) -> Result<ToolResult> {
+        Ok(crate::coding::text_result("ran"))
+    }
+}
+
+async fn run_bash(mode: PermissionMode, asks: bool) -> String {
+    let mut guardian =
+        ToolGuardian::new(vec![std::env::temp_dir()], SecurityProfile::Guarded, mode);
+    if asks {
+        let db = Arc::new(hq_db::Database::open_memory().unwrap());
+        guardian.set_owner_approval(Some(OwnerApproval::new(db, "web:t1")));
+    }
+    let tool = guardian.govern(Box::new(BashStub));
+    let result = tool
+        .execute("1", serde_json::json!({"command": "make"}))
+        .await
+        .unwrap();
+    result.content[0].text.clone()
+}
+
+#[tokio::test]
+async fn default_mode_waits_for_the_owner_only_where_a_chat_can_ask() {
+    assert!(
+        run_bash(PermissionMode::Default, true)
+            .await
+            .contains("Waiting for the owner")
+    );
+    assert_eq!(run_bash(PermissionMode::Default, false).await, "ran");
+    assert_eq!(run_bash(PermissionMode::AcceptEdits, true).await, "ran");
 }

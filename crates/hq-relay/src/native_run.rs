@@ -101,6 +101,8 @@ pub(crate) struct TurnRow {
     pub db: Option<Arc<Database>>,
     pub id: String,
     tracked: Option<String>,
+    /// The chat this turn answers, which owner approvals are kept under.
+    chat: String,
 }
 
 impl TurnRow {
@@ -121,7 +123,12 @@ impl TurnRow {
             identity,
             prompt,
         );
-        Self { db, id, tracked }
+        Self {
+            db,
+            id,
+            tracked,
+            chat: format!("{platform}:{chat_id}"),
+        }
     }
 
     /// Hooks every relay turn sets: ack timeout, identity, registry id and progress.
@@ -150,8 +157,27 @@ impl TurnRow {
                     .background_progress_secs
                     .unwrap_or(DEFAULT_PROGRESS_SECS),
             ),
+            owner_approval: self.owner_approval(config),
             ..Default::default()
         }
+    }
+
+    /// A chat turn asks the owner before calls that need them, through the inbox in vault.db.
+    fn owner_approval(
+        &self,
+        config: &HqConfig,
+    ) -> Option<Arc<hq_agent::governance::OwnerApproval>> {
+        if !config.governance.asks_owner() {
+            return None;
+        }
+        let Some(db) = self.db.clone() else {
+            tracing::warn!("vault.db unavailable: this relay turn cannot ask the owner");
+            return None;
+        };
+        Some(hq_agent::governance::OwnerApproval::new(
+            db,
+            format!("relay:{}", self.chat),
+        ))
     }
 
     /// Attach each finished sub-agent to this row and post its outcome.
