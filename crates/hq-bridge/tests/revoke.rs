@@ -46,6 +46,8 @@ async fn with_timeout<T>(f: impl std::future::Future<Output = T>) -> T {
 
 struct Node {
     bridge: Bridge,
+    /// Every peer the revoke callback ran for, counted from before the node's forwards dial.
+    revoked: Arc<Mutex<Vec<String>>>,
     db: Database,
     dir: Arc<tempfile::TempDir>,
     role: Role,
@@ -97,9 +99,17 @@ impl Node {
         )
         .await
         .unwrap();
+        // Counted before the forwards start: a restarted node's own forward can hear a refusal
+        // and run the callback before the test gets to look.
+        let revoked = Arc::new(Mutex::new(Vec::new()));
+        let record = revoked.clone();
+        bridge.set_on_revoked(Arc::new(move |peer: &str| {
+            record.lock().unwrap().push(peer.to_string());
+        }));
         bridge.keep_setup().unwrap();
         Self {
             bridge,
+            revoked,
             db,
             dir,
             role,
@@ -111,6 +121,7 @@ impl Node {
     async fn stop(self) -> (iroh::EndpointId, Kept, Role, &'static str) {
         let Node {
             bridge,
+            revoked: _,
             db,
             dir,
             role,
@@ -237,13 +248,10 @@ async fn paired_and_set_up() -> (Node, Node, rows::Setup) {
 }
 
 /// Records the peers the revoke callback ran for.
+/// The callbacks from now on: what ran before is dropped.
 fn count_callbacks(node: &Node) -> Arc<Mutex<Vec<String>>> {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let record = seen.clone();
-    node.bridge.set_on_revoked(Arc::new(move |peer: &str| {
-        record.lock().unwrap().push(peer.to_string());
-    }));
-    seen
+    node.revoked.lock().unwrap().clear();
+    node.revoked.clone()
 }
 
 /// After the wait that saw the callback run: a late duplicate in the settle period still fails.
@@ -352,7 +360,8 @@ async fn offline_revoke_cleans_up_on_first_dial() {
     let machine = Node::start(role, name, true, Some(kept)).await;
     assert_eq!(machine_id, machine.bridge.id());
     assert!(machine.row(&hub).unwrap().is_some(), "row before the dial");
-    let seen = count_callbacks(&machine);
+    // Counted since the restart, not from here: its own forwards may hear the refusal first.
+    let seen = machine.revoked.clone();
     let refused = machine.bridge.connect_service(&hub.id()).await;
     // The restarted machine's forwards dial too. When theirs hears the refusal first, the
     // cleanup closes this dial on our side before the hub's close arrives.

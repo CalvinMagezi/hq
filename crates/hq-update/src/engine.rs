@@ -99,12 +99,6 @@ struct Resolved {
     warnings: Vec<String>,
 }
 
-/// Size and modification time: enough to tell that a signer replaced the file.
-fn file_stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
-    let meta = std::fs::metadata(path).ok()?;
-    Some((meta.len(), meta.modified().ok()?))
-}
-
 fn sha256_file(path: &Path) -> Result<String> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
@@ -720,19 +714,16 @@ impl Engine<'_> {
 
     /// Lets the platform sign the staged binary, then proves it still runs and is still the
     /// release. A signing problem is a warning, because the old signature state is what
-    /// every update had before; a signed binary that no longer runs stops the update.
+    /// every update had before; a signed binary that no longer runs stops the update. The
+    /// check always runs: a rewrite of the same size within one timestamp tick looks unchanged.
     async fn sign_staged(&self, m: &Manifest, warnings: &mut Vec<String>) -> Result<()> {
         let staged = self.layout.staged_binary();
-        let before = file_stamp(&staged);
         if let Err(e) = self.host.prepare_staged(&staged).await {
             let warning = format!(
                 "the new binary was not given a stable code signature, so macOS may ask for folder access again: {e}"
             );
             tracing::warn!("{warning}");
             warnings.push(warning);
-        }
-        if file_stamp(&staged) == before {
-            return Ok(());
         }
         self.check_staged(m, &staged).await
     }
