@@ -22,6 +22,18 @@ pub struct GovernanceConfig {
     /// editing files or running state-changing commands itself.
     #[serde(default)]
     pub orchestrator_role: bool,
+    /// In a chat the owner drives (web chat, Telegram, Discord) in the default permission mode,
+    /// wait for the owner's approval in their inbox before a call that changes things outside
+    /// the vault and tasks (`hq_agent::governance::needs_owner`). Unset means on.
+    #[serde(default)]
+    pub ask_owner: Option<bool>,
+}
+
+impl GovernanceConfig {
+    /// Whether owner chats ask before such calls; see `ask_owner`.
+    pub fn asks_owner(&self) -> bool {
+        self.ask_owner.unwrap_or(true)
+    }
 }
 
 /// How the `bash` tool isolates the commands it runs.

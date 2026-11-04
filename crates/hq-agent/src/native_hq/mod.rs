@@ -109,6 +109,9 @@ pub struct NativeHqHooks {
     pub pinned_model: Option<String>,
     /// Orchestrator sessions plan and delegate; the default keeps today's behavior.
     pub role: crate::builder::SessionRole,
+    /// Where `PermissionMode::Default` asks the owner before a call that needs them. Set by a
+    /// surface the owner drives (web chat, a relay chat); `None` never asks.
+    pub owner_approval: Option<Arc<crate::governance::OwnerApproval>>,
 }
 
 /// Outcome of a native-hq run, carrying the explicit success + quality signal so
@@ -228,7 +231,9 @@ fn native_builder(
     if let Some(model) = &hooks.pinned_model {
         base_builder = base_builder.pinned_model(model.clone());
     }
-    base_builder = base_builder.role(hooks.role);
+    base_builder = base_builder
+        .role(hooks.role)
+        .owner_approval(hooks.owner_approval.clone());
     if let Some(preset) = hooks.permission_preset {
         base_builder = base_builder.permission_preset(preset);
     }

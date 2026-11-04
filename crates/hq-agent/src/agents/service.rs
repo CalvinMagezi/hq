@@ -55,6 +55,9 @@ pub struct AgentService {
     /// Permission mode applied to every child, so a parent that may only read
     /// (DontAsk) cannot hand its work to a child that may write.
     permission_mode: PermissionMode,
+    /// The parent's owner approval, so a child cannot run a call the parent would have to ask
+    /// the owner about.
+    owner_approval: Option<Arc<crate::governance::OwnerApproval>>,
     /// This service's recursion depth. Children run at `depth + 1`.
     depth: u32,
     /// Maximum recursion depth. Spawning is allowed only while `depth < max_depth`.
@@ -142,6 +145,7 @@ impl AgentService {
             session_config,
             security_profile,
             permission_mode: PermissionMode::Default,
+            owner_approval: None,
             depth,
             max_depth,
             default_timeout,
@@ -167,6 +171,15 @@ impl AgentService {
     /// Run every child under the parent session's permission mode.
     pub fn with_permission_mode(mut self, mode: PermissionMode) -> Self {
         self.permission_mode = mode;
+        self
+    }
+
+    /// Hold every child to the parent session's owner approval.
+    pub fn with_owner_approval(
+        mut self,
+        approval: Option<Arc<crate::governance::OwnerApproval>>,
+    ) -> Self {
+        self.owner_approval = approval;
         self
     }
 
@@ -200,11 +213,13 @@ impl AgentService {
 
     /// The guardian for one child: the service's profile and permission mode over the child's paths.
     fn child_guardian(&self, allowed_paths: Vec<PathBuf>) -> ToolGuardian {
-        ToolGuardian::new(
+        let mut guardian = ToolGuardian::new(
             allowed_paths,
             self.security_profile.clone(),
             self.permission_mode.clone(),
-        )
+        );
+        guardian.set_owner_approval(self.owner_approval.clone());
+        guardian
     }
 
     /// A child-level service at `depth + 1`, used to give in-process children a

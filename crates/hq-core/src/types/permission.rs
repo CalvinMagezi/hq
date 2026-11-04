@@ -68,16 +68,17 @@ impl ValidationResult {
     }
 }
 
-/// What the tool executor should do when validation fails.
+/// What a validation failure asks of the model. Either way the tool does not run and the error
+/// is returned to the model.
 ///
-/// `Block` means the tool must not run and the error is returned to the LLM.
-/// `Ask` means the executor may prompt the user for permission before retrying.
+/// `Block` means the call cannot work as written. `Ask` means the call is ambiguous and the model
+/// should clarify it (with the user if needed) before retrying; the owner is never asked here.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ValidationBehavior {
     /// Abort execution and surface the error message to the LLM.
     Block,
-    /// Pause and ask the user before proceeding (permission escalation).
+    /// Ambiguous: the model should clarify before retrying.
     Ask,
 }
 
@@ -91,7 +92,9 @@ pub enum ValidationBehavior {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionMode {
-    /// Prompt the user for each tool call that isn't explicitly allowed. (default)
+    /// In a chat the owner drives, wait for the owner's approval in their inbox before a call
+    /// that changes things outside the vault and tasks; elsewhere, run what passes the path,
+    /// call-limit and validation checks. (default) See `docs/security/OWNER_APPROVAL.md`.
     #[default]
     Default,
     /// Show a plan first; require explicit approval before any tool runs.

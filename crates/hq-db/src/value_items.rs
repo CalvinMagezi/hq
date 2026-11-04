@@ -305,6 +305,28 @@ impl RequestState {
     }
 }
 
+/// Where the owner's approval for one dedup key stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalGate {
+    /// A signed approval was there and this call spent it.
+    Run,
+    /// Nothing to spend: ask, keep waiting, or report the decline.
+    Pending(RequestState),
+}
+
+/// Reads where the approval for `dedup_key` stands, spending a signed approval when one is
+/// there, so each approval lets exactly one call through.
+pub fn approval_gate(db: &Database, dedup_key: &str) -> Result<ApprovalGate> {
+    let latest = latest_engagement_by_dedup(db, dedup_key)?;
+    if consume_approval(db, dedup_key)? {
+        return Ok(ApprovalGate::Run);
+    }
+    Ok(ApprovalGate::Pending(RequestState::from_latest(
+        latest,
+        Utc::now(),
+    )))
+}
+
 /// Items still waiting on the owner whose dedup key starts with `prefix` and that have not
 /// expired, for a producer that caps how many it has open at once.
 pub fn count_waiting_with_prefix(db: &Database, prefix: &str) -> Result<i64> {

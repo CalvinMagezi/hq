@@ -99,6 +99,51 @@ pub fn self_update_message(run_id: i64, tree: &str, binary_sha256: &str) -> Stri
     format!("self-update|{run_id}|{tree}|{binary_sha256}")
 }
 
+/// Keys the runtime adds to a call's arguments start with this; they never count toward the
+/// arguments' digest, so a caller's copy cannot change which approval a call matches.
+pub const RUNTIME_ARG_PREFIX: &str = "_hq_";
+
+/// SHA-256 of a call's arguments with their keys sorted and the runtime's `_hq_*` keys left
+/// out, so the same call always matches the same approval and any change needs a new one.
+pub fn args_digest(args: &serde_json::Value) -> String {
+    let args = match args {
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.iter()
+                .filter(|(k, _)| !k.starts_with(RUNTIME_ARG_PREFIX))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        ),
+        other => other.clone(),
+    };
+    hex::encode(Sha256::digest(canonical_json(&args).as_bytes()))
+}
+
+/// JSON with every object's keys sorted, so equal arguments always serialize the same.
+pub fn canonical_json(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Object(map) => {
+            let mut keys: Vec<_> = map.keys().collect();
+            keys.sort();
+            let parts: Vec<String> = keys
+                .into_iter()
+                .map(|k| {
+                    format!(
+                        "{}:{}",
+                        serde_json::Value::from(k.as_str()),
+                        canonical_json(&map[k])
+                    )
+                })
+                .collect();
+            format!("{{{}}}", parts.join(","))
+        }
+        serde_json::Value::Array(items) => {
+            let parts: Vec<String> = items.iter().map(canonical_json).collect();
+            format!("[{}]", parts.join(","))
+        }
+        other => other.to_string(),
+    }
+}
+
 /// SHA-256 of a file as lowercase hex.
 pub fn file_sha256(path: &std::path::Path) -> Result<String> {
     let mut hasher = Sha256::new();
@@ -110,6 +155,15 @@ pub fn file_sha256(path: &std::path::Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn args_digest_ignores_key_order_and_runtime_keys_but_not_values() {
+        let a = serde_json::json!({"x": {"b": 1, "a": [{"d": 1, "c": 2}]}, "_hq_caller": "s1"});
+        let b = serde_json::json!({"x": {"a": [{"c": 2, "d": 1}], "b": 1}, "_hq_caller": "s2"});
+        assert_eq!(args_digest(&a), args_digest(&b));
+        let changed = serde_json::json!({"x": {"a": [{"c": 2, "d": 1}], "b": 2}});
+        assert_ne!(args_digest(&a), args_digest(&changed));
+    }
 
     #[test]
     fn hmac_matches_rfc4231_case_2() {

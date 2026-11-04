@@ -309,3 +309,16 @@ fn orchestrator_children_cannot_use_a_file_editing_external_backend() {
         "auto policy stays in-process"
     );
 }
+
+/// A child of a chat that asks the owner asks too, so delegation cannot skip the owner.
+#[test]
+fn children_ask_the_owner_when_the_parent_does_and_nested_ones_too() {
+    let paths = vec![PathBuf::from("/tmp")];
+    let service = service_with_fleet();
+    assert!(!service.child_guardian(paths.clone()).asks_owner());
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    let asking =
+        service.with_owner_approval(Some(crate::governance::OwnerApproval::new(db, "web:t1")));
+    assert!(asking.child_guardian(paths.clone()).asks_owner());
+    assert!(asking.child_service().child_guardian(paths).asks_owner());
+}

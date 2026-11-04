@@ -15,8 +15,10 @@ fn the_digest_ignores_key_order_and_caller_markers() {
         a.digest, c.digest,
         "different arguments need a different approval"
     );
-    let nested_a = canonical(&json!({"x": {"b": 1, "a": [ {"d": 1, "c": 2} ]}}));
-    let nested_b = canonical(&json!({"x": {"a": [ {"c": 2, "d": 1} ], "b": 1}}));
+    let nested_a =
+        hq_core::approval_key::canonical_json(&json!({"x": {"b": 1, "a": [ {"d": 1, "c": 2} ]}}));
+    let nested_b =
+        hq_core::approval_key::canonical_json(&json!({"x": {"a": [ {"c": 2, "d": 1} ], "b": 1}}));
     assert_eq!(nested_a, nested_b);
 }
 

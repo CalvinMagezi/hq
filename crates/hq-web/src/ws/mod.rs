@@ -572,6 +572,7 @@ impl ChatTurn {
         } else {
             hq_agent::builder::SessionRole::Implementor
         };
+        let automated = driver_turn || session_driver || followup_turn_id.is_some();
         let hooks = hq_agent::native_hq::NativeHqHooks {
             history,
             turn_id: followup_turn_id,
@@ -598,6 +599,7 @@ impl ChatTurn {
             untrusted_input: self.ask.as_ref().and_then(ask::AskTurn::untrusted_source),
             pinned_model: self.ask.as_ref().and_then(|a| a.model.clone()),
             role: hooks_role,
+            owner_approval: (!automated).then(|| self.owner_approval(&config)).flatten(),
             identity: Some(match self.tid.as_deref() {
                 Some(t) => hq_core::identity::RequestIdentity::from_web_thread(
                     t,
@@ -645,6 +647,23 @@ impl ChatTurn {
             failure.as_deref(),
         )
         .await;
+    }
+
+    /// Owner turns ask before calls that need the owner; an `hq_ask` turn is someone else's
+    /// question, already approved or limited by the connector. Driver and follow-up turns are
+    /// HQ's own and never ask (the caller leaves them out).
+    fn owner_approval(
+        &self,
+        config: &hq_core::config::HqConfig,
+    ) -> Option<Arc<hq_agent::governance::OwnerApproval>> {
+        if self.ask.is_some() || !config.governance.asks_owner() {
+            return None;
+        }
+        let scope = format!("web:{}", self.tid.as_deref().unwrap_or("new"));
+        Some(hq_agent::governance::OwnerApproval::new(
+            Arc::new(self.db.clone()),
+            scope,
+        ))
     }
 
     fn session_config(

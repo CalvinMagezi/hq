@@ -33,12 +33,14 @@ mod bypass_corpus_tests;
 mod egress;
 mod governed_tool;
 mod injection;
+mod owner_approval;
 mod paths;
 mod secrets;
 mod taint;
 mod trackers;
 
 use governed_tool::GovernedTool;
+pub use owner_approval::{OwnerApproval, needs_owner};
 pub use paths::system_temp_paths;
 use paths::{expand_with_canonical_forms, sensitive_denied_paths};
 pub use secrets::{SecretTier, always_denied_roots, classify_path};
@@ -148,6 +150,9 @@ pub struct ToolGuardian {
     /// blocks, see `RepeatCallTracker`.
     repeat_call_tracker: RepeatCallTracker,
     denial_notifier: Option<DenialNotifier>,
+    /// Where `PermissionMode::Default` asks the owner before a call that needs them
+    /// (`needs_owner`). `None` for every session no owner drives from a chat.
+    owner_approval: Option<Arc<OwnerApproval>>,
     /// Denial reasons already surfaced via `denial_notifier` this session,
     /// keyed by `"{tool_name}:{reason}"`. Keeps a wedged agent retrying the
     /// same denied call from paging the operator on every retry.
@@ -222,6 +227,7 @@ impl ToolGuardian {
             denial_tracker: DenialTracker::new(),
             repeat_call_tracker: RepeatCallTracker::new(),
             denial_notifier: None,
+            owner_approval: None,
             notified_denials: Arc::new(Mutex::new(HashSet::new())),
             plan_file_path: None,
             files_read: Arc::new(Mutex::new(HashSet::new())),
@@ -247,6 +253,12 @@ impl ToolGuardian {
     /// the sending itself.
     pub fn set_denial_notifier(&mut self, notifier: DenialNotifier) {
         self.denial_notifier = Some(notifier);
+    }
+
+    /// Ask the owner, through their inbox, before a call that needs them while the session is
+    /// in `PermissionMode::Default`.
+    pub fn set_owner_approval(&mut self, approval: Option<Arc<OwnerApproval>>) {
+        self.owner_approval = approval;
     }
 
     /// Create a guardian with `PermissionMode::Default` (convenience).
@@ -278,11 +290,11 @@ impl ToolGuardian {
             inner: tool,
             allowed_paths: self.allowed_paths.clone(),
             denied_paths: self.denied_paths.clone(),
-            profile: self.profile.clone(),
             permission_mode: self.permission_mode.clone(),
             denial_tracker: self.denial_tracker.clone(),
             repeat_call_tracker: self.repeat_call_tracker.clone(),
             denial_notifier: self.denial_notifier.clone(),
+            owner_approval: self.owner_approval.clone(),
             notified_denials: self.notified_denials.clone(),
             plan_file_path: self.plan_file_path.clone(),
             files_read: self.files_read.clone(),
@@ -326,6 +338,10 @@ impl ToolGuardian {
     }
 
     /// Get the permission mode.
+    pub fn asks_owner(&self) -> bool {
+        self.owner_approval.is_some()
+    }
+
     pub fn permission_mode(&self) -> &PermissionMode {
         &self.permission_mode
     }

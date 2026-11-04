@@ -304,6 +304,8 @@ async fn run_watch_firing<K: ChatKey>(
         hq_agent::native_hq::NativeHqHooks {
             on_detached: Some(on_detached),
             permission_preset,
+            // Nobody is in the chat to approve a firing, and its approvals must not be the chat's.
+            owner_approval: None,
             ..turn.hooks(
                 &config,
                 (surface.identity)(key),
