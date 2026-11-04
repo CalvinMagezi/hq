@@ -4914,3 +4914,55 @@ async fn a_connector_cannot_put_work_on_the_edge_worker_queue() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn every_task_tool_takes_the_task_under_either_id_spelling() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.path().to_path_buf();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let tools = create_task_tools(vault_path, vault, db);
+    let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
+    let created = tool("task_create")
+        .execute(json!({ "title": "Both spellings", "priority": "medium" }))
+        .await
+        .unwrap();
+    assert_eq!(created["priority"], "normal");
+    let id = created["id"].as_str().unwrap().to_string();
+    let link = json!("https://example.com/both");
+    let calls = [
+        ("task_get", json!({ "task_id": id })),
+        ("task_update", json!({ "task_id": id, "title": "Renamed" })),
+        ("task_comment_add", json!({ "id": id, "body": "hello" })),
+        ("task_comment_list", json!({ "id": id })),
+        ("task_related", json!({ "task_id": id })),
+        (
+            "task_link_add",
+            json!({ "id": id, "kind": "url", "ref": link }),
+        ),
+        ("task_link_list", json!({ "id": id })),
+        (
+            "task_link_remove",
+            json!({ "id": id, "kind": "url", "ref": link }),
+        ),
+        ("task_delete", json!({ "task_id": id })),
+        ("task_restore", json!({ "task_id": id })),
+        ("task_claim", json!({ "id": id, "actor": "tester" })),
+    ];
+    for (name, args) in calls {
+        let result = tool(name).execute(args).await;
+        assert!(result.is_ok(), "{name}: {:?}", result.err());
+    }
+    let clash = tool("task_get")
+        .execute(json!({ "id": id, "task_id": "tk-someone-else" }))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(clash.contains("different tasks"), "{clash}");
+    let missing = tool("task_comment_list")
+        .execute(json!({}))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(missing.contains("id or task_id"), "{missing}");
+}

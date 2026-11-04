@@ -386,7 +386,7 @@ impl HqTool for TaskClaimTool {
         json!({
             "type": "object",
             "properties": {
-                "task_id": { "type": "string", "description": "Internal id or display id" },
+                "task_id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" },
                 "actor": { "type": "string", "description": "Your name, for example your agent name. Shown on the task." },
                 "harness": { "type": "string", "description": "The tool you run in, for example claude-code, codex or cursor" },
                 "session_ref": { "type": "string", "description": "Your own session id, if you have one. Claiming again with the same actor and session_ref replaces your lease." },
@@ -405,10 +405,7 @@ impl HqTool for TaskClaimTool {
         Some("claim a task, start work, take a lease, lock a task for this session")
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let task_id = arg_str(&args, "task_id");
-        if task_id.is_empty() {
-            bail!("task_id is required");
-        }
+        let task_id = task_ref(&args)?;
         let actor = lease_actor(&args, &arg_str(&args, "actor"))?;
         let (harness, session_ref) = (arg_str(&args, "harness"), arg_str(&args, "session_ref"));
         let (host, cwd, branch) = (

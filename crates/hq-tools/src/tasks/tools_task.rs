@@ -564,7 +564,7 @@ impl HqTool for TaskGetTool {
         json!({
             "type": "object",
             "properties": {
-                "id": { "type": "string", "description": "Internal id or display id" }
+                "id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" }
             },
             "required": ["id"]
         })
@@ -576,10 +576,7 @@ impl HqTool for TaskGetTool {
         true
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let id = arg_str(&args, "id");
-        if id.is_empty() {
-            bail!("id is required");
-        }
+        let id = task_ref(&args)?;
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
@@ -708,7 +705,7 @@ impl HqTool for TaskUpdateTool {
         json!({
             "type": "object",
             "properties": {
-                "id": { "type": "string", "description": "Internal id or display id" },
+                "id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" },
                 "title": { "type": "string" },
                 "description": { "type": "string" },
                 "status": { "type": "string", "enum": ["to_do", "in_progress", "blocked", "ready_for_review", "complete"] },
@@ -738,10 +735,7 @@ impl HqTool for TaskUpdateTool {
         Some("update task status/fields, optionally claim-safe")
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let id = arg_str(&args, "id");
-        if id.is_empty() {
-            bail!("id is required");
-        }
+        let id = task_ref(&args)?;
         let scoped = crate::harness_session::is_tasks_scope(&args);
         if scoped {
             check_scoped_text(&args)?;
@@ -938,7 +932,7 @@ impl HqTool for TaskDeleteTool {
         json!({
             "type": "object",
             "properties": {
-                "id": { "type": "string", "description": "Internal id or display id" },
+                "id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" },
                 "cascade": { "type": "boolean", "description": "Also archive the task's sub-tasks", "default": false },
                 "purge": { "type": "boolean", "description": "Permanently delete a task that is already archived", "default": false },
                 "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this to you" },
@@ -954,10 +948,7 @@ impl HqTool for TaskDeleteTool {
         true
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let id = arg_str(&args, "id");
-        if id.is_empty() {
-            bail!("id is required");
-        }
+        let id = task_ref(&args)?;
         let cascade = args
             .get("cascade")
             .and_then(|v| v.as_bool())
@@ -998,7 +989,7 @@ impl HqTool for TaskRestoreTool {
         json!({
             "type": "object",
             "properties": {
-                "id": { "type": "string", "description": "Internal id or display id of the archived task" },
+                "id": { "type": "string", "description": "Internal id or display id of the archived task (id and task_id both work)" },
                 "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this to you" },
                 "actor": { "type": "string", "description": "Your name, used only when you have no lease" }
             },
@@ -1009,10 +1000,7 @@ impl HqTool for TaskRestoreTool {
         "tasks"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let id = arg_str(&args, "id");
-        if id.is_empty() {
-            bail!("id is required");
-        }
+        let id = task_ref(&args)?;
         let hints = ActorHints::from_args(&args, "actor");
         let settings = self.settings.clone();
         let task = self.db.with_conn(move |c| {
@@ -1042,7 +1030,7 @@ impl HqTool for TaskCommentAddTool {
         json!({
             "type": "object",
             "properties": {
-                "task_id": { "type": "string", "description": "Internal id or display id" },
+                "task_id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" },
                 "body": { "type": "string" },
                 "author": { "type": "string", "default": "unknown", "description": "Your name. Ignored when a valid `lease` is given." },
                 "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this comment to you" }
@@ -1054,10 +1042,10 @@ impl HqTool for TaskCommentAddTool {
         "tasks"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let task_id = arg_str(&args, "task_id");
+        let task_id = task_ref(&args)?;
         let body = arg_str(&args, "body");
-        if task_id.is_empty() || body.is_empty() {
-            bail!("task_id and body are required");
+        if body.is_empty() {
+            bail!("body is required");
         }
         if crate::harness_session::is_tasks_scope(&args) {
             check_scoped_text(&args)?;
@@ -1101,7 +1089,7 @@ impl HqTool for TaskCommentListTool {
         json!({
             "type": "object",
             "properties": {
-                "task_id": { "type": "string", "description": "Internal id or display id" }
+                "task_id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" }
             },
             "required": ["task_id"]
         })
@@ -1113,10 +1101,7 @@ impl HqTool for TaskCommentListTool {
         true
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let task_id = arg_str(&args, "task_id");
-        if task_id.is_empty() {
-            bail!("task_id is required");
-        }
+        let task_id = task_ref(&args)?;
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let comments = self.db.with_conn(move |c| {
             let task = t::get_task(c, &task_id)?
