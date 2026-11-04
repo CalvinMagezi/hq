@@ -24,7 +24,7 @@ tempfile = "3"
 # zip 9 is the first release that is not yanked; transmutation still pulls zip 8.
 zip = { version = "9", default-features = false, features = ["deflate"] }
 roxmltree = "0.21"
-calamine = { version = "0.37", features = ["chrono"] }
+calamine = { version = "0.38", features = ["chrono"] }
 scraper = { workspace = true }
 encoding_rs = "0.8"
 sha2 = { workspace = true }
