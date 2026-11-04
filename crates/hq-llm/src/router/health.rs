@@ -50,15 +50,56 @@ pub(super) fn classify_anyhow_error(error: &anyhow::Error) -> LlmError {
 /// Short label for telemetry's `error_class` column. Mirrors the `LlmError`
 /// variants but flattened to a stable string the leaderboard queries can group.
 pub(crate) fn classify_error_for_telemetry(error: &anyhow::Error) -> String {
+    telemetry_label(error).to_string()
+}
+
+/// The label alone. A plain-text error (a broken stream's message) is classified by its words.
+pub(crate) fn telemetry_label(error: &anyhow::Error) -> &'static str {
     match classify_anyhow_error(error) {
-        LlmError::RateLimit { .. } => "rate_limit".into(),
-        LlmError::Overloaded => "overloaded".into(),
-        LlmError::Auth { .. } => "auth".into(),
-        LlmError::ServerError { .. } => "server_error".into(),
-        LlmError::ContextOverflow { .. } => "context_overflow".into(),
-        LlmError::Network(_) => "network".into(),
-        LlmError::Other(_) => "other".into(),
+        LlmError::RateLimit { .. } => "rate_limit",
+        LlmError::Overloaded => "overloaded",
+        LlmError::Auth { .. } => "auth",
+        LlmError::ServerError { .. } => "server_error",
+        LlmError::ContextOverflow { .. } => "context_overflow",
+        LlmError::Network(msg) if label_unclassified(&msg.to_lowercase()) == "timeout" => "timeout",
+        LlmError::Network(_) => "network",
+        LlmError::Other(e) => label_unclassified(&format!("{e:#}").to_lowercase()),
     }
+}
+
+/// Telemetry-only refinement of what routing calls `Other`; routing itself is unchanged.
+fn label_unclassified(lower: &str) -> &'static str {
+    const RULES: &[(&str, &[&str])] = &[
+        ("timeout", &["timed out", "timeout", "deadline"]),
+        (
+            "quota",
+            &[
+                "402",
+                "quota",
+                "credit",
+                "insufficient",
+                "budget",
+                "billing",
+            ],
+        ),
+        (
+            "not_found",
+            &["404", "not found", "no such model", "unknown model"],
+        ),
+        ("bad_request", &["400", "422", "bad request", "invalid"]),
+        (
+            "bad_response",
+            &["decod", "deserializ", "parse", "unexpected eof", "json"],
+        ),
+        (
+            "network",
+            &["dns", "tls", "reset by peer", "broken pipe", "unreachable"],
+        ),
+    ];
+    RULES
+        .iter()
+        .find(|(_, words)| words.iter().any(|w| lower.contains(w)))
+        .map_or("other", |(label, _)| label)
 }
 
 /// Tracks the health and performance of a single provider.
@@ -272,5 +313,34 @@ impl LlmRouter {
                 )
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod telemetry_label_tests {
+    use super::*;
+
+    fn label(message: &str) -> &'static str {
+        telemetry_label(&anyhow::anyhow!("{message}"))
+    }
+
+    #[test]
+    fn typed_errors_keep_their_labels() {
+        let typed = anyhow::Error::new(LlmError::Overloaded);
+        assert_eq!(telemetry_label(&typed), "overloaded");
+        let net = anyhow::Error::new(LlmError::Network("request timed out after 60s".into()));
+        assert_eq!(telemetry_label(&net), "timeout");
+    }
+
+    #[test]
+    fn plain_messages_get_a_specific_label_before_other() {
+        assert_eq!(label("HTTP 429 Too Many Requests"), "rate_limit");
+        assert_eq!(label("connection refused"), "network");
+        assert_eq!(label("operation timed out"), "timeout");
+        assert_eq!(label("HTTP 402: insufficient credits"), "quota");
+        assert_eq!(label("model foo/bar not found"), "not_found");
+        assert_eq!(label("HTTP 400: invalid tool schema"), "bad_request");
+        assert_eq!(label("error decoding response body"), "bad_response");
+        assert_eq!(label("something odd"), "other");
     }
 }

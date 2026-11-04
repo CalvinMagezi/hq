@@ -13,7 +13,7 @@ mod tests;
 
 pub use builder::{ANTHROPIC_API_PROVIDER, exported_from_config};
 pub use health::ProviderHealth;
-pub(crate) use health::classify_error_for_telemetry;
+pub(crate) use health::{classify_error_for_telemetry, telemetry_label};
 pub use types::{CostTier, RouteEntry, TaskHint};
 
 use std::sync::atomic::AtomicUsize;
