@@ -162,6 +162,27 @@ pub(super) fn opt_str(args: &Value, key: &str) -> Option<String> {
         .map(String::from)
 }
 
+/// Both spellings of a task identifier. Tools grew up using one or the other, and agents mix them.
+const TASK_ID_KEYS: [&str; 2] = ["id", "task_id"];
+
+/// The task a call names, under `id` or `task_id`, or `None` when neither is given.
+pub(super) fn task_ref_opt(args: &Value) -> Result<Option<String>> {
+    let mut found: Vec<String> = TASK_ID_KEYS
+        .iter()
+        .filter_map(|key| opt_str(args, key))
+        .collect();
+    found.dedup();
+    if found.len() > 1 {
+        anyhow::bail!("id and task_id name different tasks; pass one");
+    }
+    Ok(found.pop())
+}
+
+/// The task a call names, under `id` or `task_id`.
+pub(super) fn task_ref(args: &Value) -> Result<String> {
+    task_ref_opt(args)?.ok_or_else(|| anyhow::anyhow!("a task id is required (id or task_id)"))
+}
+
 pub(super) fn tags_from_args(args: &Value, key: &str) -> Vec<String> {
     args.get(key)
         .and_then(|v| v.as_array())

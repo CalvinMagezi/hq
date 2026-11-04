@@ -7,9 +7,7 @@ pub fn create_task(
     new: &NewTask,
 ) -> Result<Task> {
     validate_schedule(new.start_date, new.due_date)?;
-    if let Some(priority) = new.priority {
-        validate_priority(priority)?;
-    }
+    let priority = new.priority.map(canonical_priority).transpose()?;
     if let Some(minutes) = new.estimate_minutes {
         validate_estimate(minutes)?;
     }
@@ -30,7 +28,7 @@ pub fn create_task(
             display_id,
             new.title,
             new.description,
-            new.priority,
+            priority,
             new.due_date,
             new.created_by,
             parent_id,
@@ -207,8 +205,9 @@ fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
         vals.push(Box::new(status.clone()));
     }
     if let Some(priority) = &filter.priority {
+        let wanted = canonical_priority(priority).map_or_else(|_| priority.clone(), str::to_string);
         conditions.push("t.priority = ?");
-        vals.push(Box::new(priority.clone()));
+        vals.push(Box::new(wanted));
     }
     match &filter.parent_task_id {
         Some(Some(parent)) => {
@@ -386,8 +385,9 @@ fn apply_update(
         vals.push(Box::new(status.clone()));
     }
     if let Some(priority) = &patch.priority {
+        let stored = priority.as_deref().map(canonical_priority).transpose()?;
         sets.push("priority = ?");
-        vals.push(Box::new(priority.clone()));
+        vals.push(Box::new(stored));
     }
     if let Some(due_date) = &patch.due_date {
         sets.push("due_date = ?");

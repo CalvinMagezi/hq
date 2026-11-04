@@ -91,7 +91,7 @@ impl HqTool for TaskLinkAddTool {
         json!({
             "type": "object",
             "properties": {
-                "task_id": { "type": "string", "description": "Internal id or display id" },
+                "task_id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" },
                 "kind": { "type": "string", "enum": ["vault_note", "chat_thread", "session", "commit", "pr", "url", "task"] },
                 "ref": { "type": "string", "description": "What to link to, in the shape its kind needs" },
                 "label": { "type": "string", "description": "Short note on why, optional" },
@@ -106,13 +106,10 @@ impl HqTool for TaskLinkAddTool {
         "tasks"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let (task_id, kind, reference) = (
-            arg_str(&args, "task_id"),
-            arg_str(&args, "kind"),
-            arg_str(&args, "ref"),
-        );
-        if task_id.is_empty() || kind.is_empty() || reference.is_empty() {
-            bail!("task_id, kind and ref are required ({KIND_LIST})");
+        let task_id = task_ref(&args)?;
+        let (kind, reference) = (arg_str(&args, "kind"), arg_str(&args, "ref"));
+        if kind.is_empty() || reference.is_empty() {
+            bail!("kind and ref are required ({KIND_LIST})");
         }
         let label = arg_str(&args, "label");
         let direction = agent_direction(&kind, opt_str(&args, "direction").as_deref());
@@ -150,7 +147,7 @@ impl HqTool for TaskLinkRemoveTool {
         json!({
             "type": "object",
             "properties": {
-                "task_id": { "type": "string", "description": "Internal id or display id" },
+                "task_id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" },
                 "kind": { "type": "string", "enum": ["vault_note", "chat_thread", "session", "commit", "pr", "url", "task"] },
                 "ref": { "type": "string" }
             },
@@ -161,13 +158,10 @@ impl HqTool for TaskLinkRemoveTool {
         "tasks"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let (task_id, kind, reference) = (
-            arg_str(&args, "task_id"),
-            arg_str(&args, "kind"),
-            arg_str(&args, "ref"),
-        );
-        if task_id.is_empty() || kind.is_empty() || reference.is_empty() {
-            bail!("task_id, kind and ref are required");
+        let task_id = task_ref(&args)?;
+        let (kind, reference) = (arg_str(&args, "kind"), arg_str(&args, "ref"));
+        if kind.is_empty() || reference.is_empty() {
+            bail!("kind and ref are required");
         }
         let removed = self
             .db
@@ -194,7 +188,7 @@ impl HqTool for TaskLinkListTool {
         json!({
             "type": "object",
             "properties": {
-                "task_id": { "type": "string", "description": "List this task's links" },
+                "task_id": { "type": "string", "description": "List this task's links (id and task_id both work)" },
                 "kind": { "type": "string", "enum": ["vault_note", "chat_thread", "session", "commit", "pr", "url", "task"], "description": "With ref, find the tasks linked to it" },
                 "ref": { "type": "string" }
             }
@@ -207,7 +201,7 @@ impl HqTool for TaskLinkListTool {
         true
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let task_id = opt_str(&args, "task_id");
+        let task_id = task_ref_opt(&args)?;
         let (kind, reference) = (opt_str(&args, "kind"), opt_str(&args, "ref"));
         // The tasks scope never learns the path of a note in the owner's vault, nor which tasks
         // started from one.

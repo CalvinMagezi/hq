@@ -33,6 +33,7 @@ pub const PRIORITY_URGENT: &str = "urgent";
 pub const PRIORITY_HIGH: &str = "high";
 pub const PRIORITY_NORMAL: &str = "normal";
 pub const PRIORITY_LOW: &str = "low";
+const PRIORITY_MEDIUM_ALIAS: &str = "medium";
 
 pub const PRIORITIES: [&str; 4] = [
     PRIORITY_URGENT,
@@ -120,8 +121,17 @@ pub fn validate_estimate(minutes: i64) -> Result<()> {
 }
 
 pub fn validate_priority(priority: &str) -> Result<()> {
-    if PRIORITIES.contains(&priority) {
-        return Ok(());
+    canonical_priority(priority).map(|_| ())
+}
+
+/// The stored spelling of a priority. Agents often say "medium", so it is taken as `normal`.
+pub fn canonical_priority(priority: &str) -> Result<&'static str> {
+    let wanted = priority.trim().to_ascii_lowercase();
+    if wanted == PRIORITY_MEDIUM_ALIAS {
+        return Ok(PRIORITY_NORMAL);
+    }
+    if let Some(known) = PRIORITIES.iter().find(|p| **p == wanted) {
+        return Ok(known);
     }
     anyhow::bail!(
         "unknown priority '{priority}', expected one of {}",

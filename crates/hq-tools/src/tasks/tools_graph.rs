@@ -7,8 +7,8 @@ use hq_db::task_graph as g;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+use super::json::task_ref;
 use crate::registry::HqTool;
-use crate::util::arg_str;
 
 const DEFAULT_LIMIT: usize = 10;
 const INFERRED_NOTE: &str =
@@ -35,7 +35,7 @@ impl HqTool for TaskRelatedTool {
         json!({
             "type": "object",
             "properties": {
-                "id": { "type": "string", "description": "Internal id or display id" },
+                "id": { "type": "string", "description": "Internal id or display id (id and task_id both work)" },
                 "limit": { "type": "integer", "description": "Max inferred links (default 10, max 25)" },
                 "rebuild": { "type": "boolean", "description": "Rebuild the derived index first", "default": false }
             },
@@ -50,10 +50,7 @@ impl HqTool for TaskRelatedTool {
         true
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let id = arg_str(&args, "id");
-        if id.is_empty() {
-            bail!("id is required");
-        }
+        let id = task_ref(&args)?;
         let limit = args
             .get("limit")
             .and_then(Value::as_u64)

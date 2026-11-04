@@ -729,6 +729,49 @@ fn an_unknown_status_or_priority_is_refused_with_the_allowed_values() {
 }
 
 #[test]
+fn medium_is_stored_as_normal_and_priorities_ignore_case() {
+    let (db, initiative) = setup();
+    let created = db
+        .with_conn(|c| {
+            create_task(
+                c,
+                "tk-1",
+                &initiative,
+                &NewTask {
+                    title: "t",
+                    priority: Some("Medium"),
+                    created_by: "test",
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap();
+    assert_eq!(created.priority.as_deref(), Some(PRIORITY_NORMAL));
+    let patch = TaskPatch {
+        priority: Some(Some(" HIGH ".into())),
+        ..Default::default()
+    };
+    db.with_conn(|c| update_task(c, "tk-1", &patch, None))
+        .unwrap();
+    assert_eq!(
+        get_one(&db, "tk-1").priority.as_deref(),
+        Some(PRIORITY_HIGH)
+    );
+    let patch = TaskPatch {
+        priority: Some(Some("medium".into())),
+        ..Default::default()
+    };
+    db.with_conn(|c| update_task(c, "tk-1", &patch, None))
+        .unwrap();
+    let filter = TaskFilter {
+        priority: Some("medium".into()),
+        ..Default::default()
+    };
+    let found = db.with_conn(|c| list_tasks(c, &filter)).unwrap();
+    assert_eq!(found.len(), 1, "a medium filter finds normal tasks");
+}
+
+#[test]
 fn a_legacy_status_does_not_block_an_unrelated_edit() {
     let (db, initiative) = setup();
     make(&db, "tk-1", &initiative, None).unwrap();
