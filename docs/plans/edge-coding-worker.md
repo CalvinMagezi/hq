@@ -112,7 +112,9 @@ or a chat becomes a pull request with no other machine involved.
   about the worker (tagged `edge-worker`, say) is never taken for work. The task can also name
   its worker models, in the order to escalate through.
 - **One at a time.** Nothing new starts while the worker's reply is still running, or while an
-  `edge-task` task is in progress under a live lease.
+  `edge-task` task is in progress under a live lease. A task waiting on CI holds only its own
+  repository: a task on another repository may start meanwhile
+  (`docs/plans/edge-worker-ci-loop.md`).
 - **How.** It asks HQ, through the same path as `hq_ask`, to load the `edge-coding-worker` skill
   and work the task. The skill is named in the question because a one-line question carries
   none of its hints. `github_write.dispatch_model` (owner-only, like the rest of the section)

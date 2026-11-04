@@ -385,6 +385,36 @@ pub(crate) async fn pr_diff_text(repo: &str, number: u64) -> Result<(String, boo
     Ok((text, truncated))
 }
 
+/// How much of a job log is read. A failure is usually near the end, so the tail is kept.
+const MAX_LOG_READ_CHARS: usize = 2_000_000;
+const MAX_LOG_KEPT_CHARS: usize = 400_000;
+
+/// The plain-text log of one GitHub Actions job, its last part only. `gh` when installed,
+/// otherwise HTTPS with the read-only token.
+pub(crate) async fn job_log_text(repo: &str, job_id: u64) -> Result<String> {
+    if !is_valid_repo(repo) {
+        bail!("repository must look like owner/name");
+    }
+    let path = format!("repos/{repo}/actions/jobs/{job_id}/logs");
+    let text = if which::which("gh").is_ok() {
+        let argv = ["api", "--method", "GET", path.as_str()].map(String::from);
+        run_capped("gh", &argv, COMMAND_TIMEOUT, MAX_LOG_READ_CHARS).await?
+    } else {
+        http_get_accepting(&path, "application/vnd.github+json", MAX_LOG_READ_CHARS).await?
+    };
+    Ok(tail_chars(&text, MAX_LOG_KEPT_CHARS).to_string())
+}
+
+/// The last `max` characters of `text`.
+fn tail_chars(text: &str, max: usize) -> &str {
+    let count = text.chars().count();
+    if count <= max {
+        return text;
+    }
+    let start = text.char_indices().nth(count - max).map_or(0, |(i, _)| i);
+    &text[start..]
+}
+
 pub struct GithubCloneTool;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -502,6 +532,16 @@ fn make_private_root(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The `ref` argument: an `hq/` branch, given with or without the prefix.
+fn hq_branch(args: &Value) -> Result<Option<String>> {
+    let Some(name) = text(args, "ref") else {
+        return Ok(None);
+    };
+    let name = name.strip_prefix(write::BRANCH_PREFIX).unwrap_or(name);
+    write::check_branch(name).context("`ref` must be an hq/ branch github_write pushed to")?;
+    Ok(Some(format!("{}{name}", write::BRANCH_PREFIX)))
+}
+
 /// Shallow checkouts land here so a repo can be searched with grep and read_file.
 fn clone_root() -> PathBuf {
     std::env::temp_dir().join("hq-github-clones")
@@ -518,7 +558,9 @@ impl HqTool for GithubCloneTool {
          searched with grep and read_file. Without git or gh installed it downloads the default branch's tarball \
          instead (no history, links and .git entries left out); github_write can publish changes made in such a \
          checkout. An existing checkout is reused as it is, edits included; pass refresh: true to discard it and \
-         fetch the default branch again, as at the start of a new task."
+         fetch the default branch again, as at the start of a new task. To carry on work already pushed with \
+         github_write after the checkout was cleared, pass ref: the hq/ branch, and a missing checkout is fetched \
+         at that branch instead."
     }
 
     fn category(&self) -> &str {
@@ -530,7 +572,8 @@ impl HqTool for GithubCloneTool {
             "type": "object",
             "properties": {
                 "repo": {"type": "string", "description": "owner/name"},
-                "refresh": {"type": "boolean", "description": "Discard the existing checkout, edits included, and fetch again (default false)"}
+                "refresh": {"type": "boolean", "description": "Discard the existing checkout, edits included, and fetch again (default false)"},
+                "ref": {"type": "string", "description": "An hq/ branch github_write pushed to. A checkout that is not on disk is fetched at that branch, not the default one"}
             },
             "required": ["repo"]
         })
@@ -540,6 +583,22 @@ impl HqTool for GithubCloneTool {
         let repo = repo(&args)?;
         let dest = clone_root().join(&repo);
         let records = records_root().join(&repo);
+        let branch = hq_branch(&args)?;
+        // Only a branch this machine's github_write pushed to, at a commit it pushed.
+        let ours = match &branch {
+            Some(branch) => {
+                let ours = write::pushed_to(&records, branch);
+                if ours.is_empty() {
+                    bail!("github_write has pushed nothing to {branch} in {repo}");
+                }
+                ours
+            }
+            None => Vec::new(),
+        };
+        let at = branch.as_deref().map(|branch| tarball::At {
+            branch,
+            ours: &ours,
+        });
         let _claim = InFlight::claim(&dest)?;
         if args
             .get("refresh")
@@ -560,11 +619,20 @@ impl HqTool for GithubCloneTool {
         // A base record left for a git checkout would describe files git did not fetch.
         let _ = std::fs::remove_file(tarball::base_record_path(&records));
         if method == CloneMethod::Tarball {
-            let fetched = tarball::fetch(API_HOST_URL, &repo, &dest, &records).await?;
-            return Ok(tarball_reply(&dest_arg, &fetched));
+            let fetched = tarball::fetch_at(API_HOST_URL, &repo, &dest, &records, at).await?;
+            let mut reply = tarball_reply(&dest_arg, &fetched);
+            if let Some(branch) = &branch {
+                reply["ref"] = json!(branch);
+            }
+            return Ok(reply);
         }
+        // git and gh fetch the branch itself; what github_write accepts is still checked there.
+        let branch_args: Vec<String> = match &branch {
+            Some(b) => vec!["--branch".into(), b.clone()],
+            None => Vec::new(),
+        };
         if method == CloneMethod::Gh {
-            let argv = [
+            let mut argv = [
                 "repo",
                 "clone",
                 repo.as_str(),
@@ -574,20 +642,17 @@ impl HqTool for GithubCloneTool {
                 "1",
                 "--no-tags",
             ]
-            .map(String::from);
+            .map(String::from)
+            .to_vec();
+            argv.extend(branch_args);
             run("gh", &argv, CLONE_TIMEOUT).await?;
         } else {
             let url = format!("https://github.com/{repo}.git");
-            let argv = [
-                "clone",
-                "--depth",
-                "1",
-                "--no-tags",
-                "--",
-                url.as_str(),
-                dest_arg.as_str(),
-            ]
-            .map(String::from);
+            let mut argv = ["clone", "--depth", "1", "--no-tags"]
+                .map(String::from)
+                .to_vec();
+            argv.extend(branch_args);
+            argv.extend([String::from("--"), url, dest_arg.clone()]);
             run("git", &argv, CLONE_TIMEOUT).await?;
         }
         Ok(json!({ "path": dest_arg, "cached": false }))
@@ -705,6 +770,17 @@ mod tests {
                 .unwrap(),
             GhCall::ApiGet("repos/o/r/contents/src/lib.rs?ref=v1.0".into())
         );
+    }
+
+    #[test]
+    fn a_ref_is_only_ever_an_hq_branch() {
+        let of = |r: Value| hq_branch(&json!({ "repo": "o/r", "ref": r }));
+        assert_eq!(of(json!("w-1")).unwrap().as_deref(), Some("hq/w-1"));
+        assert_eq!(of(json!("hq/w-1")).unwrap().as_deref(), Some("hq/w-1"));
+        assert_eq!(hq_branch(&json!({ "repo": "o/r" })).unwrap(), None);
+        for bad in ["../main", "-x", "a..b", "refs/heads/x.lock", "x y"] {
+            assert!(of(json!(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]

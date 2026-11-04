@@ -461,9 +461,12 @@ fn read_pushed(records: &Path) -> PushedRecord {
 /// The newest commit this tool pushed to `branch`, from the record in `records` that file tools
 /// cannot touch.
 pub(crate) fn newest_pushed(records: &Path, branch: &str) -> Option<String> {
-    read_pushed(records)
-        .get(branch)
-        .and_then(|shas| shas.last().cloned())
+    pushed_to(records, branch).pop()
+}
+
+/// Every commit this tool remembers pushing to `branch`, oldest first.
+pub(crate) fn pushed_to(records: &Path, branch: &str) -> Vec<String> {
+    read_pushed(records).remove(branch).unwrap_or_default()
 }
 
 fn remember_pushed(records: &Path, branch: &str, commit: &str) -> Result<()> {

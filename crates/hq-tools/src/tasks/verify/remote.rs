@@ -19,6 +19,11 @@ pub trait GitHubRead: Send + Sync {
     async fn api_json(&self, path: &str) -> Result<Value>;
     /// The unified diff of a pull request.
     async fn pr_diff(&self, repo: &str, number: u64) -> Result<Diff>;
+    /// The plain-text log of one GitHub Actions job. Readers that cannot fetch logs say so.
+    async fn job_log(&self, repo: &str, job_id: u64) -> Result<String> {
+        let _ = (repo, job_id);
+        anyhow::bail!("job logs cannot be read here")
+    }
 }
 
 /// The real client: the `gh` CLI when installed, otherwise public data over HTTPS. The token's
@@ -40,6 +45,10 @@ impl GitHubRead for GhCli {
         let (text, truncated) = crate::github::pr_diff_text(repo, number).await?;
         Ok(Diff { text, truncated })
     }
+
+    async fn job_log(&self, repo: &str, job_id: u64) -> Result<String> {
+        crate::github::job_log_text(repo, job_id).await
+    }
 }
 
 /// A client with no answers, for tests in other modules that only need discovery not to reach out.
@@ -59,12 +68,18 @@ pub(crate) mod fake {
     pub struct FakeGitHub {
         pub json: HashMap<String, Value>,
         pub diffs: HashMap<(String, u64), Diff>,
+        /// Job logs by job id.
+        pub logs: HashMap<u64, String>,
         pub asked: Mutex<Vec<String>>,
     }
 
     impl FakeGitHub {
         pub fn with(mut self, path: &str, value: Value) -> Self {
             self.json.insert(path.to_string(), value);
+            self
+        }
+        pub fn with_log(mut self, job_id: u64, text: &str) -> Self {
+            self.logs.insert(job_id, text.to_string());
             self
         }
         pub fn with_diff(mut self, repo: &str, number: u64, text: &str, truncated: bool) -> Self {
@@ -97,6 +112,16 @@ pub(crate) mod fake {
                 .get(&(repo.to_string(), number))
                 .cloned()
                 .with_context(|| format!("no diff for {repo}#{number}"))
+        }
+        async fn job_log(&self, repo: &str, job_id: u64) -> Result<String> {
+            self.asked
+                .lock()
+                .unwrap()
+                .push(format!("log {repo} {job_id}"));
+            self.logs
+                .get(&job_id)
+                .cloned()
+                .with_context(|| format!("no log for job {job_id}"))
         }
     }
 }

@@ -666,3 +666,68 @@ async fn fetch_a_real_public_repo() {
     assert!(fetched.base.files.iter().any(|f| f.path == "README.md"));
     assert!(dest.join("packages/botany_core/pubspec.yaml").is_file());
 }
+
+async fn serve_branch(branch: &str, at: &str, tarball: Vec<u8>) -> wiremock::MockServer {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, ResponseTemplate};
+    let server = wiremock::MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/o/r/commits/{branch}")))
+        .respond_with(ResponseTemplate::new(200).set_body_string(at))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/o/r/tarball/{at}")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(tarball))
+        .mount(&server)
+        .await;
+    server
+}
+
+#[tokio::test]
+async fn an_hq_branch_is_fetched_only_at_a_commit_github_write_pushed() {
+    let mut tar = Vec::new();
+    file(&mut tar, &format!("{TOP}/fixed.txt"), b"round one");
+    let tarball = gzip(&finish(tar));
+    let server = serve_branch("hq/w-1", SHA, tarball.clone()).await;
+    let root = tempfile::tempdir().unwrap();
+    let dest = root.path().join("o/r");
+    let ours = vec!["0".repeat(40), SHA.to_string()];
+    let at = At {
+        branch: "hq/w-1",
+        ours: &ours,
+    };
+    let fetched = fetch_at(
+        &format!("{}/", server.uri()),
+        "o/r",
+        &dest,
+        &records(&root),
+        Some(at),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fetched.base.commit, SHA, "the branch head is the new base");
+    assert_eq!(fs::read(dest.join("fixed.txt")).unwrap(), b"round one");
+
+    // Someone else moved the branch: nothing is fetched.
+    let root = tempfile::tempdir().unwrap();
+    let dest = root.path().join("o/r");
+    let theirs = vec!["1".repeat(40)];
+    let at = At {
+        branch: "hq/w-1",
+        ours: &theirs,
+    };
+    let err = fetch_at(
+        &format!("{}/", server.uri()),
+        "o/r",
+        &dest,
+        &records(&root),
+        Some(at),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("did not push"), "{err}");
+    assert!(!dest.exists());
+    assert!(load_base(&records(&root)).is_none());
+}

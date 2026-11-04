@@ -160,14 +160,44 @@ fn client() -> Result<reqwest::Client> {
 
 /// Resolves the default branch's commit, downloads its tarball and unpacks it at `dest`, which
 /// must not exist yet, recording the base in `records`. Both appear only when every entry passed.
+#[cfg(test)]
 pub(crate) async fn fetch(
     api_base: &str,
     repo: &str,
     dest: &Path,
     records: &Path,
 ) -> Result<Fetched> {
+    fetch_at(api_base, repo, dest, records, None).await
+}
+
+/// A branch to fetch instead of the default one, and the commits it may be at: an `hq/` branch
+/// is fetched only while its head is a commit `github_write` pushed there, so a branch someone
+/// else moved never becomes the base the next push builds on.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct At<'a> {
+    pub branch: &'a str,
+    pub ours: &'a [String],
+}
+
+/// [`fetch`], at `at`'s branch when given.
+pub(crate) async fn fetch_at(
+    api_base: &str,
+    repo: &str,
+    dest: &Path,
+    records: &Path,
+    at: Option<At<'_>>,
+) -> Result<Fetched> {
     let client = client()?;
-    let commit = resolve_commit(&client, api_base, repo).await?;
+    let git_ref = at.map_or("HEAD", |a| a.branch);
+    let commit = resolve_commit(&client, api_base, repo, git_ref).await?;
+    if let Some(at) = at
+        && !at.ours.iter().any(|c| c.eq_ignore_ascii_case(&commit))
+    {
+        bail!(
+            "{} is at {commit}, a commit github_write did not push; fetch without ref",
+            at.branch
+        );
+    }
     let parent = dest.parent().context("the clone folder has no parent")?;
     tokio::fs::create_dir_all(parent).await?;
     sweep_leftovers(parent);
@@ -223,8 +253,13 @@ fn sweep_leftovers(parent: &Path) {
     }
 }
 
-async fn resolve_commit(client: &reqwest::Client, api_base: &str, repo: &str) -> Result<String> {
-    let url = format!("{api_base}repos/{repo}/commits/HEAD");
+async fn resolve_commit(
+    client: &reqwest::Client,
+    api_base: &str,
+    repo: &str,
+    git_ref: &str,
+) -> Result<String> {
+    let url = format!("{api_base}repos/{repo}/commits/{git_ref}");
     let resp = read_request(client, &url, ACCEPT_SHA).send().await?;
     let status = resp.status();
     let body = resp.text().await?;

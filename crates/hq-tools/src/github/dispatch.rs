@@ -131,13 +131,12 @@ fn busy_with(conn: &rusqlite::Connection, ttl: i64) -> Result<Busy> {
     if let Some(ask) = asks::pending_by_external_prefix(conn, ASK_SCOPE, &prefix)? {
         return Ok(Busy::On(ask.external_id.unwrap_or(ask.ask_id)));
     }
-    // A task waiting on CI is not abandoned, and its checkout still holds its edits.
-    if let Some(wait) = hq_db::edge_ci_waits::open_waits(conn)?.into_iter().next() {
-        let shown = t::get_task(conn, &wait.task_id)?.map_or(wait.task_id, |t| t.display_id);
-        return Ok(Busy::On(format!("{shown} waiting on CI")));
-    }
     let mut dropped = Vec::new();
     for task in queue(conn, t::STATUS_IN_PROGRESS)? {
+        // Waiting on CI is not abandoned, and it holds nothing up: the daemon reads its checks.
+        if hq_db::edge_ci_waits::open_for_task(conn, &task.id)?.is_some() {
+            continue;
+        }
         let worked_by_hq =
             asks::latest_by_external_prefix(conn, ASK_SCOPE, &format!("{CALLER}:{}:", task.id))?
                 .is_some();
@@ -161,13 +160,22 @@ fn queue(conn: &rusqlite::Connection, status: &str) -> Result<Vec<t::Task>> {
 }
 
 /// Open queue tasks, most urgent first, that nothing blocks, no one else holds, and that name
-/// one of the repositories the worker may push to.
+/// one of the repositories the worker may push to and none that has a task waiting on CI: two
+/// tasks on one repository would share its checkout, which still holds the waiting task's edits.
 fn candidates(conn: &rusqlite::Connection, repos: &[String]) -> Result<Vec<t::Task>> {
+    let waiting: Vec<String> = hq_db::edge_ci_waits::open_waits(conn)?
+        .into_iter()
+        .map(|w| w.repo.to_ascii_lowercase())
+        .collect();
     Ok(queue(conn, t::STATUS_TO_DO)?
         .into_iter()
         .filter(|task| {
             let free = task.assignees.iter().all(|a| a == HQ_ASSIGNEE);
-            free && task.blocked_by.is_empty() && !parked(task) && names_a_repo(task, repos)
+            let named = named_repos(task, repos);
+            free && task.blocked_by.is_empty()
+                && !parked(task)
+                && !named.is_empty()
+                && !named.iter().any(|r| waiting.contains(r))
         })
         .collect())
 }
@@ -180,9 +188,9 @@ fn has_tag(tags: &[String], tag: &str) -> bool {
     tags.iter().any(|g| g.eq_ignore_ascii_case(tag))
 }
 
-/// Whether the task's title or description names an allowed repository as a whole word, so
-/// `o/r` is not found inside `o/r2` or `xo/r`.
-fn names_a_repo(task: &t::Task, repos: &[String]) -> bool {
+/// The allowed repositories the task's title or description names as a whole word, lower case,
+/// so `o/r` is not found inside `o/r2` or `xo/r`.
+fn named_repos(task: &t::Task, repos: &[String]) -> Vec<String> {
     let text = format!("{}\n{}", task.title, task.description).to_ascii_lowercase();
     let words: Vec<&str> = text
         .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':')))
@@ -190,7 +198,9 @@ fn names_a_repo(task: &t::Task, repos: &[String]) -> bool {
         .collect();
     repos
         .iter()
-        .any(|r| words.contains(&r.to_ascii_lowercase().as_str()))
+        .map(|r| r.to_ascii_lowercase())
+        .filter(|r| words.contains(&r.as_str()))
+        .collect()
 }
 
 /// The `owner/name` a word stands for: itself, or the repository part of a GitHub URL

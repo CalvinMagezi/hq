@@ -39,10 +39,10 @@ open while waiting:
 
 | Step | What | Status |
 |------|------|--------|
-| 1 | `edge_ci_wait`, the `edge_ci_waits` table, and the dispatcher's resolver: hands over on green, resumes the thread on red, caps rounds and wait time; skill updated | this change |
-| 2 | The daemon fetches the failing job's log and passes a bounded excerpt, marked untrusted, into the resumed turn, saving the worker two or three tool calls per round | next |
-| 3 | Resume from the `hq/` branch: `github_clone` takes a ref, so a checkout Android cleared between rounds is fetched at the branch and not the default branch. Until then the skill stops a fix round whose `github_clone` reply says `cached: false`, because a push from a fresh copy would drop the earlier rounds' edits | next |
-| 4 | Keep the queue moving while CI runs: start a task on another repository while one waits, at most one per repository (two tasks on one repository share a checkout) | later |
+| 1 | `edge_ci_wait`, the `edge_ci_waits` table, and the dispatcher's resolver: hands over on green, resumes the thread on red, caps rounds and wait time; skill updated | done |
+| 2 | The daemon fetches the failing job's log and passes a bounded excerpt, marked untrusted, into the resumed turn, saving the worker two or three tool calls per round | done |
+| 3 | Resume from the `hq/` branch: `github_clone` takes `ref`, so a checkout Android cleared between rounds is fetched at the branch, not the default branch, which would drop the earlier rounds' edits from the next push | done |
+| 4 | Keep the queue moving while CI runs: start a task on another repository while one waits, at most one per repository (two tasks on one repository share a checkout) | done |
 | 5 | Wake on a webhook (`check_suite`) instead of polling, only if the measured cost of polling turns out to matter | only if measured |
 
 ## Step 1 in detail
@@ -68,7 +68,7 @@ CI finished). The round is the number of earlier waits for the task plus one.
 
 ### The resolver
 
-On each tick, before anything else, and only while no worker reply is running:
+On each tick, before anything else. A wait whose own task still has a reply running is skipped (that reply may still be pushing). Everything that needs no model is settled even while another task's reply runs; a failure resumes its worker only when no worker reply runs, so there is still at most one at a time.
 
 | What the checks say | What happens |
 |---|---|
@@ -85,9 +85,27 @@ answered twice, and it is marked `untrusted` like every worker ask. The text HQ 
 fixed, apart from the check names, which come from the repository's own CI definitions, are
 capped in length and number, and are quoted.
 
-While a wait is open, the dispatcher counts the worker as busy, so the waiting task is not
-treated as abandoned, and no other task's `github_clone` replaces the checkout that still holds
-this task's edits.
+### Log excerpts (step 2)
+
+When a check fails, the resolver reads the failing GitHub Actions jobs' logs (at most two; other
+CI apps have no log endpoint) and puts an excerpt of each into the resumed turn: colour codes and
+timestamps dropped, the lines around the first recognisable failure (15 before, 45 after), at most
+4,000 characters, fenced, with any fence inside the log broken so it cannot close HQ's. The
+question says the excerpts are the repository's and are data, not instructions. A log that cannot
+be read is left out, and the question tells the worker to fetch it.
+
+### Resuming from the branch (step 3)
+
+`github_clone` takes `ref`, an `hq/` branch. A checkout on disk is reused as before; a missing one
+is fetched at the branch, and only while the branch's head is a commit `github_write` recorded
+pushing there, so a branch someone else moved never becomes the base of the next push. The base
+record then names the branch head, and `github_write` builds the next commit on it.
+
+### The queue while CI runs (step 4)
+
+A task waiting on CI is neither busy nor abandoned. The dispatcher may start another task, unless
+it names a repository that has a task waiting on CI: two tasks on one repository would share the
+checkout that still holds the waiting task's edits.
 
 ### What it costs on a phone
 
