@@ -37,9 +37,13 @@ Right after the spawn, read `harness_session_logs` to confirm the agent started.
 
 ## Waiting
 
-Use `harness_session_wait` to block until the session is idle, done or blocked. Do not poll the logs in a loop. If it returns `settled: false`, the timeout passed and the agent is still working. Keep `timeout_secs` well under your MCP client's own request timeout (60 is safe) and call it again rather than asking for one long wait.
+Do not spend turns waiting. A wait that loops costs one model call every 40 seconds for as long as the other agent works. Hear about the session the way your client can:
 
-HQ reads the working, idle and blocked states only for agents it has state rules for (Claude Code and Codex). Other agents show as unknown, so a wait on them ends at the timeout and a send can come back as stalled. For those, read `harness_session_logs` to see whether the turn finished.
+- **With a background shell** (Claude Code's Bash in the background or Monitor, Codex, a script): run `hq sessions watch --session <id> --until finished --until blocked --until exited` and end your turn. It prints one JSON line and exits at the first of those events, which brings you back. Add `--remote <name>` when HQ runs on another machine.
+- **Inside an HQ session** (`HQ_SESSION_ID` is set and your session is on a task): call `harness_session_subscribe` with the session id and end your turn. HQ types the event in at your next idle.
+- **Otherwise**, use `harness_session_wait`, with `timeout_secs` well under your MCP client's own request timeout (60 is safe). If it returns `settled: false`, read its `instead`: it names the no-wait route that fits who you are. Call it again only when `instead` says to.
+
+HQ reads the working, idle and blocked states only for agents it has state rules for. Other agents show as unknown (the wait reply then has `state_readable: false`), so a wait on them always runs to its timeout and a send can come back as stalled. For those, read `harness_session_logs` to see whether the turn finished; their exit is still reported.
 
 ## Profiles
 

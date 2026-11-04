@@ -4861,3 +4861,107 @@ fn a_session_id_always_gets_the_same_port_in_range() {
     }
     assert_ne!(launch::session_port(a), launch::session_port(b));
 }
+
+#[test]
+fn a_wait_that_times_out_names_the_way_each_caller_hears_without_waiting_again() {
+    let id = "hs-claude-1";
+    let reply = |w: Waiter| not_settled(id, &w, true);
+
+    let watched = reply(Waiter::Chat { watching: true });
+    assert_eq!(watched["settled"], false);
+    assert_eq!(watched["instead"]["end_turn"], true);
+
+    let chat = reply(Waiter::Chat { watching: false });
+    assert_eq!(chat["instead"]["tool"], "harness_session_watch");
+    assert_eq!(chat["instead"]["args"]["session_id"], id);
+    assert_eq!(
+        chat["instead"]["args"]["drive"], false,
+        "a wait never turns Drive on"
+    );
+
+    let session = reply(Waiter::Session { has_task: true });
+    assert_eq!(session["instead"]["tool"], "harness_session_subscribe");
+    assert_eq!(session["instead"]["args"]["session_ids"], json!([id]));
+    assert!(session["note"].as_str().unwrap().contains("end your turn"));
+
+    let no_task = reply(Waiter::Session { has_task: false });
+    assert_eq!(no_task["instead"]["tool"], "harness_session_wait");
+    assert!(
+        no_task["note"]
+            .as_str()
+            .unwrap()
+            .contains("needs your session to be on a task")
+    );
+
+    assert_eq!(
+        reply(Waiter::Native)["instead"]["tool"],
+        "harness_session_wait"
+    );
+
+    let client = reply(Waiter::Client);
+    let command = client["instead"]["command"].as_str().unwrap();
+    assert_eq!(
+        command,
+        "hq sessions watch --session hs-claude-1 --until finished --until blocked --until exited"
+    );
+    assert_eq!(client["instead"]["or_tool"]["tool"], "harness_session_wait");
+
+    let unreadable = not_settled(id, &Waiter::Client, false);
+    assert_eq!(unreadable["state_readable"], false);
+    assert!(
+        unreadable["note"]
+            .as_str()
+            .unwrap()
+            .contains("a wait never ends early for it")
+    );
+}
+
+#[test]
+fn who_is_waiting_comes_from_the_runtime_not_the_model() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_watched(&db, "hs-watched", None);
+    db.with_conn(|c| {
+        for (id, task) in [("hs-lead", Some("task-1")), ("hs-loose", None)] {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id,
+                    harness: "claude-code",
+                    label: "",
+                    cwd: "/t",
+                    mission_id: task,
+                    placement: Placement {
+                        host: "local",
+                        agent_name: id,
+                        workspace_id: "w2",
+                        pane_id: "w2:p1",
+                    },
+                    purpose: None,
+                },
+            )?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let who = |chat: Option<&str>, caller: Option<&str>, native: bool| {
+        tools::waiter(&db, "hs-watched", chat, caller, native).unwrap()
+    };
+    assert_eq!(
+        who(Some("th-1"), None, true),
+        Waiter::Chat { watching: true }
+    );
+    assert_eq!(
+        who(Some("th-2"), None, true),
+        Waiter::Chat { watching: false }
+    );
+    assert_eq!(
+        who(None, Some("hs-lead"), false),
+        Waiter::Session { has_task: true }
+    );
+    assert_eq!(
+        who(None, Some("hs-loose"), false),
+        Waiter::Session { has_task: false }
+    );
+    assert_eq!(who(None, None, true), Waiter::Native);
+    assert_eq!(who(None, None, false), Waiter::Client);
+}

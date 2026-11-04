@@ -32,7 +32,7 @@ a model instead of starting on its default, and so does an id that could read as
 | `harness_session_send` | Submit a prompt, or press `keys` (`down`, `enter`, `esc`, `ctrl+c`) for a dialog HQ cannot read. |
 | `harness_session_pending` | The dialog a blocked session waits at, as data: its number (`seq`), kind, question, command or path, folder and options. |
 | `harness_session_answer` | Answer that dialog by option (`seq` and `option`), or `decline` it, optionally with a `message` sent as the next prompt. |
-| `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. |
+| `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`, for at most 45 seconds. A wait that times out returns `instead`: the way this caller hears about the session without waiting again (watch from a web chat, subscribe from a session, `hq sessions watch` from a shell). |
 | `harness_session_events` | What happened to sessions, a task or a team, as compact events after a cursor, waiting up to 45 s for the next one. See "Following sessions by events". |
 | `harness_session_logs` / `_status` / `_list` | Read output and live state. `logs` with `since` returns only what is new. |
 | `harness_session_stop` / `_resume` | Close the workspace, or continue a stopped session. |
@@ -220,6 +220,12 @@ Each kind of agent hears about other sessions in the way it can take it:
 | Claude Code in a terminal, outside HQ | `hq sessions channel` as a channel: an idle session wakes on each event | Claude Code's channels are a research preview, terminal only |
 | Claude Code's Monitor tool, Codex, scripts, any background shell | `hq sessions watch`: one JSON line per event | A Monitor watch lasts at most 30 minutes: use `--until` and start it again |
 | Claude Desktop and other MCP chats | Loop on `harness_session_events` with `wait_secs` | One model turn per wait; no way to push into the chat |
+| HQ's own web chat | `harness_session_watch` (Drive off to only watch): the event is posted into the chat | Watching posts the event; only Drive starts a model turn on it |
+
+`harness_session_wait` points each caller at its row here: a wait that times out says which
+route fits (`instead` in the reply), so an agent that would otherwise call it again every 40
+seconds ends its turn instead. Who is calling comes from the runtime (the web chat, the
+`_hq_caller_session` a session sends, an HQ session's own marker), never from the model.
 
 `hq sessions watch` follows this machine's HQ, or a paired one with `--remote <name>` (the
 `remote_mcp` name, such as the hub a bridge pairing added). It starts from now (or `--after

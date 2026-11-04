@@ -875,15 +875,39 @@ pub fn send_keys(
     Ok(json!({ "session_id": session_id, "keys": keys }))
 }
 
-/// Block until the session settles (`idle`, `done` or `blocked` by default).
+/// Who is waiting on a session, for the way it can hear about it without waiting again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Waiter {
+    /// A web chat thread; `watching` when it already watches the session.
+    Chat { watching: bool },
+    /// A session HQ runs (it named its `HQ_SESSION_ID`); `has_task` because subscribing needs one.
+    Session { has_task: bool },
+    /// One of HQ's own sessions with no chat thread (a relay chat, a sub-agent): nothing can wake it.
+    Native,
+    /// An MCP client outside HQ.
+    Client,
+}
+
+/// Block until the session settles (`idle`, `done` or `blocked` by default). When the timeout
+/// passes first, the reply says how this `waiter` can hear about the session without spending
+/// another turn on waiting.
 pub fn wait(
     db: &Arc<Database>,
     session_id: &str,
     until: &[AgentStatus],
     timeout: Duration,
+    waiter: &Waiter,
 ) -> Result<Value> {
     let row = get_row(db, session_id)?;
-    let host = require_alive(&row)?;
+    let (host, agent) = locate(&row)?;
+    let Some(agent) = agent else {
+        bail!(
+            "session {} is not running (no agent '{}' on host '{}')",
+            row.id,
+            row.agent_name,
+            row.host
+        );
+    };
     let until = if until.is_empty() {
         &[AgentStatus::Idle, AgentStatus::Done, AgentStatus::Blocked][..]
     } else {
@@ -896,11 +920,58 @@ pub fn wait(
             with_pending(&mut report, &agent);
             Ok(report)
         }
-        Err(AgentHostError::Api { code, .. }) if code == "timeout" => Ok(
-            json!({ "session_id": session_id, "settled": false, "note": "still working; call again or read the output" }),
-        ),
+        Err(AgentHostError::Api { code, .. }) if code == "timeout" => {
+            let readable = agent.status != AgentStatus::Unknown || agent.launch_pending;
+            Ok(not_settled(session_id, waiter, readable))
+        }
         Err(e) => Err(e.into()),
     }
+}
+
+/// The reply to a wait that timed out: still `settled: false`, plus `instead`, the way this
+/// waiter hears about the session without waiting again, and a note saying why.
+pub(super) fn not_settled(session_id: &str, waiter: &Waiter, state_readable: bool) -> Value {
+    let events = ["finished", "blocked", "exited"];
+    let (instead, note) = match waiter {
+        Waiter::Chat { watching: true } => (
+            json!({ "end_turn": true }),
+            "This chat already watches the session: its finished turn, block or exit will be posted here. End your turn instead of waiting again.".to_string(),
+        ),
+        Waiter::Chat { watching: false } => (
+            json!({ "tool": "harness_session_watch", "args": { "session_id": session_id, "drive": false } }),
+            "Instead of waiting again, watch the session from this chat: its finished turn, block or exit is posted here. Then end your turn and tell the user.".to_string(),
+        ),
+        Waiter::Session { has_task: true } => (
+            json!({ "tool": "harness_session_subscribe", "args": { "session_ids": [session_id], "kinds": events } }),
+            "Instead of waiting again, subscribe to the session and end your turn: when it finishes a turn, blocks or exits, HQ types that into your session at your next idle.".to_string(),
+        ),
+        Waiter::Session { has_task: false } => (
+            json!({ "tool": "harness_session_wait", "args": { "session_id": session_id } }),
+            "Still working. Subscribing (harness_session_subscribe) would let you end your turn instead of waiting, but it needs your session to be on a task; until then, call again.".to_string(),
+        ),
+        Waiter::Native => (
+            json!({ "tool": "harness_session_wait", "args": { "session_id": session_id } }),
+            "Still working. Nothing can wake this session when the other one settles, so call again, or read harness_session_logs.".to_string(),
+        ),
+        Waiter::Client => (
+            json!({
+                "command": format!("hq sessions watch --session {session_id} --until finished --until blocked --until exited"),
+                "or_tool": { "tool": "harness_session_wait", "args": { "session_id": session_id } },
+            }),
+            "Still working. If you can run a background shell (Claude Code's Bash in the background or Monitor, Codex, a script), run `command` there and end your turn: it prints one line and exits at the first of those events (add --remote <name> when HQ runs on another machine). Otherwise call harness_session_wait again.".to_string(),
+        ),
+    };
+    let mut note = note;
+    if !state_readable {
+        note.push_str(" HQ cannot read this agent's working and idle states, so a wait never ends early for it: read harness_session_logs to see whether its turn finished. Its exit is still reported.");
+    }
+    json!({
+        "session_id": session_id,
+        "settled": false,
+        "state_readable": state_readable,
+        "instead": instead,
+        "note": note,
+    })
 }
 
 pub fn stop(db: &Arc<Database>, session_id: &str) -> Result<Value> {

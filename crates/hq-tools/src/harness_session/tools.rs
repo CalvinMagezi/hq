@@ -803,6 +803,7 @@ impl HqTool for HarnessSessionResumeTool {
 
 pub struct HarnessSessionWaitTool {
     db: Arc<Database>,
+    chat: Option<WatchingChat>,
 }
 
 #[async_trait]
@@ -811,7 +812,7 @@ impl HqTool for HarnessSessionWaitTool {
         "harness_session_wait"
     }
     fn description(&self) -> &str {
-        "Block until a harness session settles: idle or done (ready for input, usually finished a turn) or blocked (waiting on a dialog). Returns settled=false if the timeout passes first. Use after harness_session_send instead of polling logs."
+        "Block until a harness session settles: idle or done (ready for input, usually finished a turn) or blocked (waiting on a dialog). For a short wait after harness_session_send, instead of polling logs. If the timeout passes first it returns settled=false and `instead`: the way you can hear about the session without waiting again (watch it from a web chat, subscribe from a session, or a background `hq sessions watch`). Prefer that to calling again."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -849,12 +850,45 @@ impl HqTool for HarnessSessionWaitTool {
         let id = arg_str(&args, "session_id");
         let timeout = std::time::Duration::from_secs(secs.clamp(3, super::MAX_WAIT.as_secs()));
         let caller = super::caller_session(&args).map(str::to_string);
+        let chat_thread = self.chat.as_ref().map(|c| c.thread.clone());
+        let native = args
+            .get(crate::provenance::NATIVE_SESSION_ARG)
+            .is_some_and(|v| !v.is_null());
         tokio::task::spawn_blocking(move || {
             db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
-            super::wait(&db, &id, &until, timeout)
+            let waiter = waiter(&db, &id, chat_thread.as_deref(), caller.as_deref(), native)?;
+            super::wait(&db, &id, &until, timeout, &waiter)
         })
         .await?
     }
+}
+
+/// Who is calling `harness_session_wait`, from what the runtime set, never from the model.
+pub(super) fn waiter(
+    db: &Arc<Database>,
+    session_id: &str,
+    chat_thread: Option<&str>,
+    caller: Option<&str>,
+    native: bool,
+) -> Result<super::control::Waiter> {
+    use super::control::Waiter;
+    if let Some(thread) = chat_thread {
+        let id = session_id.to_string();
+        let row = db.with_conn(move |c| hq_db::harness_sessions_registry::get(c, &id))?;
+        let watching = row.is_some_and(|r| r.owner_thread.as_deref() == Some(thread));
+        return Ok(Waiter::Chat { watching });
+    }
+    if let Some(caller) = caller {
+        let caller = caller.to_string();
+        let row = db.with_conn(move |c| hq_db::harness_sessions_registry::get(c, &caller))?;
+        let has_task = row.is_some_and(|r| r.mission_id.is_some());
+        return Ok(Waiter::Session { has_task });
+    }
+    Ok(if native {
+        Waiter::Native
+    } else {
+        Waiter::Client
+    })
 }
 
 pub struct HarnessSessionLinkTool {
@@ -1322,7 +1356,10 @@ pub fn create_harness_session_tools(
             db: db.clone(),
             chat: chat.clone(),
         }),
-        Box::new(HarnessSessionWaitTool { db: db.clone() }),
+        Box::new(HarnessSessionWaitTool {
+            db: db.clone(),
+            chat: chat.clone(),
+        }),
         Box::new(HarnessSessionPendingTool { db: db.clone() }),
         Box::new(super::events::HarnessSessionEventsTool {
             db: db.clone(),
