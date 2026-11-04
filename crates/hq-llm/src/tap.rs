@@ -13,7 +13,7 @@ use crate::outcome_sink::{SessionContext, SharedSink};
 use crate::provider::StreamChunk;
 
 use crate::instrument::{OutcomeInput, emit_outcome};
-use crate::router::TaskHint;
+use crate::router::{TaskHint, telemetry_label};
 
 pub(crate) type ChunkStream = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>;
 
@@ -29,6 +29,14 @@ struct Pending {
     usage: Option<Usage>,
     resolved_model: Option<String>,
     failure: Option<String>,
+}
+
+/// What broke a stream, from the error it yielded; `stream_error` when nothing more is known.
+fn stream_failure_label(failure: Option<&str>) -> &'static str {
+    match failure.map(|f| telemetry_label(&anyhow::anyhow!("{f}"))) {
+        Some(label) if label != "other" => label,
+        _ => "stream_error",
+    }
 }
 
 impl Pending {
@@ -67,7 +75,7 @@ impl Pending {
 
     fn finish(self, end: End) {
         let error = match end {
-            End::Errored => Some("stream_error"),
+            End::Errored => Some(stream_failure_label(self.failure.as_deref())),
             End::EndedWithoutDone => Some("truncated"),
             End::Done | End::Dropped => None,
         };
@@ -172,5 +180,24 @@ impl Drop for OutcomeTap {
         if let Some(p) = self.pending.take() {
             p.finish(End::Dropped);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stream_failure_label;
+
+    #[test]
+    fn a_broken_stream_is_labelled_from_its_error() {
+        assert_eq!(
+            stream_failure_label(Some("connection reset by peer")),
+            "network"
+        );
+        assert_eq!(
+            stream_failure_label(Some("HTTP 429 rate limit")),
+            "rate_limit"
+        );
+        assert_eq!(stream_failure_label(Some("odd")), "stream_error");
+        assert_eq!(stream_failure_label(None), "stream_error");
     }
 }
