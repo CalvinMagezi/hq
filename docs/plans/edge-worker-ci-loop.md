@@ -113,6 +113,11 @@ A waiting task costs two small GETs per tick (check runs and commit status), eve
 and no model calls. Private repositories need a read token (`GITHUB_TOKEN` or `GH_TOKEN`), as
 `github_read` already does.
 
+## Phone tests and what comes next
+
+The tests that need a phone, and the brief for durable waits (item 3), are in
+`docs/plans/edge-worker-handover.md`. Record phone results in a `## Results` section below.
+
 ## How we will know it works
 
 - Model calls and tokens per task, before and after (the `task_outcomes` ledger).
