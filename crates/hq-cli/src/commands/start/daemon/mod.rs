@@ -259,6 +259,7 @@ const LITE_DAEMON_TASKS: &[&str] = &[
     "thread-log-rotation",
     "vault-cleanup",
     "db-vacuum",
+    "tool-failure-digest",
     "vault-cap-enforcer",
 ];
 
@@ -487,6 +488,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("turn-reconcile", Duration::from_secs(21600)), // every 6h
         // In-progress tasks nobody holds or has touched; a once-a-day digest, never a status change.
         DaemonTask::with_default_timeout("task-stale-digest", Duration::from_secs(21600)),
+        // Recurring tool failures from local telemetry, once a week; `daemon.tool_failure_digest`.
+        DaemonTask::with_default_timeout("tool-failure-digest", Duration::from_secs(604800)),
         DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("verify-briefing", Duration::from_secs(3600)),
     ]
@@ -643,6 +646,7 @@ async fn dispatch_task(
         "vault-cap-enforcer" => tasks_slow::run_vault_cap_enforcer(vault_path, db).await,
         "turn-reconcile" => tasks_periodic::run_turn_reconcile(vault_path, db, config).await,
         "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
+        "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
 
         unknown => {
             warn!(task = unknown, "daemon: unknown task");

@@ -1,3 +1,4 @@
+use super::default_true;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +40,10 @@ pub struct DaemonConfig {
     /// How a chat turn becomes a memory: `llm` asks a model, `local` asks none.
     #[serde(default)]
     pub memory_extraction: MemoryExtraction,
+
+    /// A weekly inbox digest of recurring tool failures. Reads local telemetry only.
+    #[serde(default = "default_true")]
+    pub tool_failure_digest: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -79,6 +84,7 @@ impl Default for DaemonConfig {
             embedding_interval_secs: default_embed_interval(),
             embedding_provider: EmbeddingProvider::default(),
             memory_extraction: MemoryExtraction::default(),
+            tool_failure_digest: true,
         }
     }
 }
