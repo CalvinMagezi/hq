@@ -118,6 +118,10 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   that checks overall disk usage, the bun install cache, and `node_modules` and
   `target` bloat under configurable roots, putting a report in the owner's inbox on
   breach. Config: `disk_watchdog:` in `~/.hq/config.yaml`.
+- **Tool failure digest**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/tool_failure_digest.rs`
+  is a weekly daemon task that groups the week's failed tool calls (`tool_usage`) by a
+  normalized error signature (`hq_db::tool_failures`), compares them with the week before
+  and puts one item in the owner's inbox. No model is involved. Off with `daemon.tool_failure_digest: false`.
 
 ## Entry Points
 
