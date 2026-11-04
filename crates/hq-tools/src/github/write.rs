@@ -19,7 +19,7 @@ use crate::registry::HqTool;
 
 /// The token's own variable, never the read-only `GH_TOKEN` or `GITHUB_TOKEN`.
 pub(crate) const TOKEN_ENV: &str = "HQ_GITHUB_WRITE_TOKEN";
-const BRANCH_PREFIX: &str = "hq/";
+pub(crate) const BRANCH_PREFIX: &str = "hq/";
 const MAX_BRANCH_CHARS: usize = 100;
 const MAX_MESSAGE_CHARS: usize = 10_000;
 /// GitHub's own limits, checked before anything is pushed so a refusal never comes halfway.
@@ -225,7 +225,7 @@ fn env_secrets() -> Vec<String> {
 }
 
 /// Plain names joined by `/`, each one a name git accepts for a branch component.
-fn check_branch(name: &str) -> Result<()> {
+pub(crate) fn check_branch(name: &str) -> Result<()> {
     let parts_ok = name
         .split('/')
         .all(|part| !part.ends_with(".lock") && !part.ends_with('.'));
@@ -456,6 +456,14 @@ fn read_pushed(records: &Path) -> PushedRecord {
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default()
+}
+
+/// The newest commit this tool pushed to `branch`, from the record in `records` that file tools
+/// cannot touch.
+pub(crate) fn newest_pushed(records: &Path, branch: &str) -> Option<String> {
+    read_pushed(records)
+        .get(branch)
+        .and_then(|shas| shas.last().cloned())
 }
 
 fn remember_pushed(records: &Path, branch: &str, commit: &str) -> Result<()> {

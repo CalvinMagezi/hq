@@ -402,6 +402,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "108_session_subscriptions",
         include_str!("../sql/108_session_subscriptions.sql"),
     ),
+    (
+        "109_edge_ci_waits",
+        include_str!("../sql/109_edge_ci_waits.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

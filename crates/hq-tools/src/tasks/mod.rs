@@ -185,6 +185,11 @@ pub(crate) fn build_task_tools(
             settings: settings.clone(),
             db: db.clone(),
         }),
+        // The edge worker's handover to CI: needs the task store and the lease rules.
+        Box::new(crate::github::ci_wait::EdgeCiWaitTool::new(
+            db.clone(),
+            settings.clone(),
+        )),
         Box::new(TaskReleaseTool {
             settings: settings.clone(),
             vault_path: vault_path.clone(),

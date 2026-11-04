@@ -17,6 +17,7 @@ use std::time::Duration;
 use crate::registry::HqTool;
 
 mod changes;
+pub mod ci_wait;
 pub mod dispatch;
 mod tarball;
 mod write;

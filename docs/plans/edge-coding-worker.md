@@ -91,6 +91,13 @@ shell does not have.
 - With a `backends:` chain configured, provider keys saved in Settings reach a model only through
   a backend entry that declares them.
 
+## Waiting on CI
+
+The worker does not wait for CI inside its turn. After it pushes, `edge_ci_wait` records the
+commit and the worker ends its turn; the dispatcher reads the checks on each tick, hands the task
+over when they pass and resumes the worker's own chat when they fail. See
+`docs/plans/edge-worker-ci-loop.md`.
+
 ## Working tasks without being asked
 
 With `github_write.dispatch_tasks: true`, the daemon task `edge-worker-dispatch` (every two

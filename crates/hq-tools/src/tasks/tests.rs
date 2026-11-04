@@ -22,8 +22,8 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_thirty_one_tools() {
-    assert_eq!(tools().len(), 31);
+fn factory_returns_thirty_two_tools() {
+    assert_eq!(tools().len(), 32);
 }
 
 #[test]

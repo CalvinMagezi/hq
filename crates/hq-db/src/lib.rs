@@ -7,6 +7,7 @@ pub mod bridge_setup;
 pub mod chat;
 pub mod copilot_usage_samples;
 pub mod dialog_alerts;
+pub mod edge_ci_waits;
 pub mod folder_grants;
 pub mod harness_drive_gate;
 pub mod harness_sessions_registry;

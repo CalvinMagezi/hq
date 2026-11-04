@@ -20,13 +20,13 @@ pub const DISPATCH_TAG: &str = "edge-task";
 /// which no restricted caller can do, so no other key can make it run the same text again.
 pub const PARKED_TAG: &str = "edge-task-parked";
 /// The built-in skill the work follows; dispatch is off while it is not active.
-const WORKER_SKILL: &str = "edge-coding-worker";
+pub(super) const WORKER_SKILL: &str = "edge-coding-worker";
 /// An assignee that marks a task as HQ's own, beside the unassigned ones.
 const HQ_ASSIGNEE: &str = "hq";
-const CALLER: &str = "edge-worker";
+pub(super) const CALLER: &str = "edge-worker";
 const ASK_TOOL: &str = "hq_ask";
 /// The ask scope and mode the worker's asks run under.
-const ASK_SCOPE: &str = "full";
+pub(super) const ASK_SCOPE: &str = "full";
 const ASK_MODE: &str = "full";
 // ponytail: a bounded scan instead of a filtered query; enough for a personal queue.
 const QUEUE_DEPTH: usize = 100;
@@ -45,13 +45,24 @@ pub enum Outcome {
     Started { task: String, ask_id: String },
 }
 
-/// One tick: start work on the next task when nothing else is running. Tasks the worker
-/// dropped are parked as blocked, with a note in the owner's inbox, so none holds the queue.
-/// `runner` is where the reply runs, the web server's chat ([`crate::ask::shared_runner_cell`]).
+/// One tick: settle the CI waits, then start work on the next task when nothing else is running.
+/// Tasks the worker dropped are parked as blocked, with a note in the owner's inbox, so none holds
+/// the queue. `runner` is where the reply runs, the web server's chat
+/// ([`crate::ask::shared_runner_cell`]).
 pub async fn dispatch(
     db: Arc<Database>,
     config: &HqConfig,
     runner: crate::ask::RunnerCell,
+) -> Result<Outcome> {
+    dispatch_with(db, config, runner, &crate::tasks::verify::GhCli).await
+}
+
+/// [`dispatch`], reading CI through `gh`.
+pub async fn dispatch_with(
+    db: Arc<Database>,
+    config: &HqConfig,
+    runner: crate::ask::RunnerCell,
+    gh: &dyn crate::tasks::verify::GitHubRead,
 ) -> Result<Outcome> {
     // Without a web server in this process there is no chat to run the work in.
     let can_ask = runner.get().is_some();
@@ -66,6 +77,7 @@ pub async fn dispatch(
             "github_write.dispatch_model '{model}' names no enabled backend in backends:; nothing was dispatched"
         );
     }
+    super::ci_wait::resolve(&db, config, &runner, gh).await?;
     let ttl = i64::try_from(config.tasks.lease_ttl()).unwrap_or(i64::MAX);
     match db.with_conn(move |c| busy_with(c, ttl))? {
         Busy::On(what) => return Ok(Outcome::Busy(what)),
@@ -118,6 +130,11 @@ fn busy_with(conn: &rusqlite::Connection, ttl: i64) -> Result<Busy> {
     let prefix = format!("{CALLER}:");
     if let Some(ask) = asks::pending_by_external_prefix(conn, ASK_SCOPE, &prefix)? {
         return Ok(Busy::On(ask.external_id.unwrap_or(ask.ask_id)));
+    }
+    // A task waiting on CI is not abandoned, and its checkout still holds its edits.
+    if let Some(wait) = hq_db::edge_ci_waits::open_waits(conn)?.into_iter().next() {
+        let shown = t::get_task(conn, &wait.task_id)?.map_or(wait.task_id, |t| t.display_id);
+        return Ok(Busy::On(format!("{shown} waiting on CI")));
     }
     let mut dropped = Vec::new();
     for task in queue(conn, t::STATUS_IN_PROGRESS)? {
@@ -203,25 +220,52 @@ async fn ask_to_work(
     task: &t::Task,
     model: Option<&str>,
 ) -> Result<String> {
+    let work = Ask {
+        // The skill is named outright: its hints need not appear in a one-line question.
+        question: format!(
+            "Load the {WORKER_SKILL} skill with load_skill and follow it to work HQ task {} end to end.",
+            task.display_id
+        ),
+        title: format!("Edge worker: {}", task.display_id),
+        key: ask_key(task),
+        thread: None,
+        model: model.map(str::to_string),
+    };
+    ask(db, runner, work).await
+}
+
+/// One question to HQ's chat for the worker: a new thread, or the worker's own to continue it.
+pub(super) struct Ask {
+    pub question: String,
+    pub title: String,
+    /// The ask's `external_id`, under the `edge-worker:<task id>:` prefix.
+    pub key: String,
+    pub thread: Option<String>,
+    pub model: Option<String>,
+}
+
+/// Files the ask and starts its reply without waiting for it. Returns the ask id.
+pub(super) async fn ask(
+    db: Arc<Database>,
+    runner: crate::ask::RunnerCell,
+    work: Ask,
+) -> Result<String> {
     let tools = crate::ask::create_ask_tools_with(db, runner, None);
     let ask = tools
         .iter()
         .find(|tool| tool.name() == ASK_TOOL)
         .context("the hq_ask tool is missing")?;
     let args = json!({
-        // The skill is named outright: its hints need not appear in a one-line question.
-        "question": format!(
-            "Load the {WORKER_SKILL} skill with load_skill and follow it to work HQ task {} end to end.",
-            task.display_id
-        ),
-        "title": format!("Edge worker: {}", task.display_id),
+        "question": work.question,
+        "title": work.title,
+        "thread_id": work.thread,
         "mode": ASK_MODE,
         "caller": CALLER,
-        "external_id": ask_key(task),
+        "external_id": work.key,
         "wait_secs": 0,
         // Anyone the owner lets file tasks may have written the task and its comments.
         "untrusted": true,
-        "model": model,
+        "model": work.model,
     });
     let reply = ask.execute(args).await?;
     let ask_id = reply
@@ -320,7 +364,7 @@ fn warn_misconfigured(db: &Database, model: &str) {
     }
 }
 
-fn park(db: &Database, task: &t::Task, reason: &str) -> Result<()> {
+pub(super) fn park(db: &Database, task: &t::Task, reason: &str) -> Result<()> {
     db.with_conn(|c| park_in(c, task, reason))?;
     notify(db, task, reason);
     Ok(())
