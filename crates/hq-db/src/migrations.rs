@@ -470,6 +470,16 @@ fn apply(conn: &Connection, migrations: &[(&str, &str)]) -> Result<()> {
     Ok(())
 }
 
+/// Migrations that were renumbered after some databases had already run them under the old
+/// name (the UX run's migrations moved up one when main took 110). A database that recorded the
+/// old name has the change already, so it is recorded under the new name and not run again.
+const RENAMED: &[(&str, &str)] = &[
+    ("111_push_kinds", "110_push_kinds"),
+    ("112_client_ids", "111_client_ids"),
+    ("113_owner_approvals", "112_owner_approvals"),
+    ("114_device_names", "113_device_names"),
+];
+
 /// One migration and its `schema_version` row commit together, under the write
 /// lock, with the version re-checked inside it. Two processes opening the same
 /// database cannot both run an `ALTER TABLE ... ADD COLUMN`, and a crash between
@@ -484,6 +494,22 @@ fn apply_one(conn: &Connection, version: &str, sql: &str) -> Result<()> {
     )?;
     if already_applied {
         return Ok(());
+    }
+    if let Some((_, old)) = RENAMED.iter().find(|(new, _)| *new == version) {
+        let ran_as_old: bool = tx.query_row(
+            "SELECT COUNT(*) > 0 FROM schema_version WHERE version = ?1",
+            [old],
+            |row| row.get(0),
+        )?;
+        if ran_as_old {
+            tx.execute(
+                "INSERT INTO schema_version (version) VALUES (?1)",
+                [version],
+            )?;
+            tx.commit()?;
+            info!(version = %version, renamed_from = %old, "migration already applied under its old name");
+            return Ok(());
+        }
     }
     if version == MEMORY_SCHEMA_MIGRATION {
         add_missing_memory_columns(&tx)?;
@@ -568,6 +594,31 @@ mod tests {
         for (table, col, def) in super::MEMORY_COLUMNS {
             assert!(ident(table) && ident(col), "{table}.{col}");
             assert!(typedef(def), "{table}.{col}: {def}");
+        }
+    }
+
+    #[test]
+    fn a_database_that_ran_a_migration_under_its_old_name_opens() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        // As a database left by a build from before the renumbering: the columns exist, recorded
+        // under the old names.
+        for (new, old) in super::RENAMED {
+            conn.execute("DELETE FROM schema_version WHERE version = ?1", [new])
+                .unwrap();
+            conn.execute("INSERT INTO schema_version (version) VALUES (?1)", [old])
+                .unwrap();
+        }
+        super::run(&conn).expect("no renamed migration runs twice");
+        for (new, _) in super::RENAMED {
+            let recorded: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM schema_version WHERE version = ?1",
+                    [new],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(recorded, "{new}");
         }
     }
 
