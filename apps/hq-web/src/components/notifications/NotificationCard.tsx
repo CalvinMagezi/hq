@@ -142,7 +142,7 @@ export function NotificationCard({
       <div className="mb-3.5">
         <h3 className="text-sm font-semibold text-white break-words group-hover:text-emerald-300 transition-colors">
           <Link to="/inbox/$id" params={{ id: notification.id }} className="text-left" aria-label={t('inbox_open_title', { title: notification.title })}>
-            {notification.title}
+            {signInId ? t('new_signin_title') : notification.title}
           </Link>
         </h3>
         {signInId ? (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useInHub } from '~/lib/hubWindow'
-import { fetchHello, type Hello, helloUpstreamGone, startingSeconds } from '~/lib/hello'
+import { fetchHello, type Hello, helloUpstreamGone, helloYouStopped, startingSeconds } from '~/lib/hello'
 import { UNREACHABLE_GRACE_MS, useDeviceOnline } from '~/lib/reachability'
 import { hqJson, needsSignIn, onSignInChange } from '~/lib/hqAuth'
 import { useHQStore } from '~/store/hqStore'
@@ -26,6 +26,8 @@ export interface ConnectionInputs {
   socketOpen: boolean
   aiDown: boolean
   proxyUpstreamGone: boolean
+  /** HQ Hub says the person stopped HQ on purpose. */
+  youStopped?: boolean
   lite: boolean
   inHub: boolean
 }
@@ -114,7 +116,7 @@ export function connectionState(
       state: 'unreachable',
       words: t('state_unreachable'),
       dot: 'warn',
-      actionsOff: inputs.inHub && inputs.proxyUpstreamGone ? t('off_hub_stopped') : t('off_until_reached'),
+      actionsOff: inputs.inHub && inputs.proxyUpstreamGone ? t(inputs.youStopped ? 'off_hub_you_stopped' : 'off_hub_stopped') : t('off_until_reached'),
     }
   }
 
@@ -223,6 +225,7 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
     socketOpen,
     aiDown,
     proxyUpstreamGone,
+    youStopped: helloYouStopped(),
     lite,
     inHub,
   }

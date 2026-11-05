@@ -10,7 +10,7 @@ use hq_core::config::{HOST_SOCKET_FILE, HqConfig};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -182,6 +182,8 @@ pub struct HostController {
     gate: tokio::sync::Mutex<()>,
     /// Set by the final stop, under the gate, so nothing starts a host while the app is closing.
     closed: std::sync::atomic::AtomicBool,
+    /// Set while the person's own Stop is the last thing that happened to the host.
+    you_stopped: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// How a start is going, for the window.
@@ -318,6 +320,7 @@ impl HostController {
             inner: Mutex::new(Inner::default()),
             gate: tokio::sync::Mutex::new(()),
             closed: std::sync::atomic::AtomicBool::new(false),
+            you_stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -334,6 +337,11 @@ impl HostController {
                 None => HostStatus::Stopped,
             },
         }
+    }
+
+    /// True from the person's Stop until the next start, for the proxy to tell the window.
+    pub fn you_stopped_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.you_stopped.clone()
     }
 
     /// Where the host's output goes.
@@ -425,6 +433,8 @@ impl HostController {
             inner.last_exit = None;
             inner.exited_at = None;
             inner.you_stopped_at = None;
+            self.you_stopped
+                .store(false, std::sync::atomic::Ordering::SeqCst);
             let now = Instant::now();
             inner.start = Some(StartProgress {
                 at: now,
@@ -492,6 +502,8 @@ impl HostController {
             inner.last_exit = None;
             inner.exited_at = None;
             inner.you_stopped_at = Some(unix_now());
+            self.you_stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             if let Some(start) = inner.start.take() {
                 inner.last_run = Some(LastRun {
                     started_at: start.unix,
@@ -1300,6 +1312,10 @@ mod tests {
         host.stop().await.unwrap();
         let after = host.facts(None).await;
         assert!(after.start.is_none() && after.you_stopped_at.is_some());
+        assert!(
+            host.you_stopped_flag()
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
     }
 
     #[tokio::test]

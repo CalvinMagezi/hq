@@ -66,6 +66,11 @@ export function SignInAnother() {
   const [now, setNow] = useState(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const copyCode = async (code: string) => {
+    await navigator.clipboard?.writeText(code)
+    setCopied(true)
+  }
   const left = issued ? secondsLeft(issued.deadlineMs, now) : 0
   const ticking = left > 0
 
@@ -76,6 +81,7 @@ export function SignInAnother() {
   }, [ticking])
 
   const start = async () => {
+    setCopied(false)
     setBusy(true)
     setError(null)
     try {
@@ -119,8 +125,8 @@ export function SignInAnother() {
           {showing || issued !== null ? t('code_new') : t('code_title')}
         </button>
         {showing && (
-          <button type="button" onClick={() => void navigator.clipboard?.writeText(issued.code)} className="hq-btn-ghost">
-            {t('code_copy')}
+          <button type="button" onClick={() => void copyCode(issued.code)} className="hq-btn-ghost">
+            {copied ? t('code_copied') : t('code_copy')}
           </button>
         )}
       </div>

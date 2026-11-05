@@ -186,6 +186,12 @@ describe('connectionState', () => {
     expect(view.actionsOff).toBe('These wait until your HQ can be reached.')
   })
 
+  test('in HQ Hub, a stop the person asked for says to start HQ', () => {
+    const gone = { ...baseInputs, proxyUpstreamGone: true, inHub: true }
+    expect(connectionState(gone, NOW).actionsOff).toBe('HQ has stopped. Start HQ to try again.')
+    expect(connectionState({ ...gone, youStopped: true }, NOW).actionsOff).toBe('Start HQ to use this.')
+  })
+
   test('a page that has not asked HQ yet is not called unreachable', () => {
     const view = connectionState(
       { status401: false, online: true, helloAnsweredAt: null, lastHelloMs: null, hello: null, socketOpen: false, aiDown: false, proxyUpstreamGone: false, lite: false, inHub: false },

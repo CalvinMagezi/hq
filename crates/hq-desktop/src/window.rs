@@ -74,11 +74,11 @@ pub const CONTROL_TITLE: &str = "HQ Hub";
 
 /// The title of the window that shows HQ's web app: plain "HQ", or with a note that it is the
 /// HQ on the person's phone when a paired hub replaces the one on this computer.
-pub fn main_title(hub_web: bool) -> &'static str {
+pub fn main_title(hub_web: bool) -> String {
     if hub_web {
-        "HQ · HQ on your phone"
+        crate::words::word("hub_window_phone")
     } else {
-        "HQ"
+        "HQ".to_string()
     }
 }
 

@@ -358,6 +358,38 @@ async fn an_unreachable_hq_is_a_bad_gateway() {
 }
 
 #[tokio::test]
+async fn a_gone_hq_the_person_stopped_is_marked_stopped() {
+    let dead = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let proxy = proxy::start_marked(
+        ProxyConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            upstream: dead,
+        },
+        None,
+        Some(flag.clone()),
+    )
+    .await
+    .unwrap();
+    let url = format!("http://127.0.0.1:{}/", proxy.addr.port());
+    let res = client().get(&url).send().await.unwrap();
+    assert_eq!(
+        res.headers()[proxy::UPSTREAM_GONE_HEADER],
+        proxy::UPSTREAM_GONE_VALUE
+    );
+    flag.store(true, Ordering::SeqCst);
+    let res = client().get(&url).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        res.headers()[proxy::UPSTREAM_GONE_HEADER],
+        proxy::STOPPED_VALUE
+    );
+}
+
+#[tokio::test]
 async fn the_chat_socket_passes_through_and_other_upgrades_do_not() {
     use futures::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::{Message as M, client::IntoClientRequest};

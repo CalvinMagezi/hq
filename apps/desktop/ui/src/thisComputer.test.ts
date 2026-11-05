@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { describe as view, kindOf, lockdownWho, stopIsRisky, type Report } from './thisComputer'
+import { agoText, describe as view, kindOf, lockdownWho, stopIsRisky, type Report } from './thisComputer'
 
 const base: Report = {
   state: 'stopped',
@@ -69,5 +69,22 @@ describe('This computer tab', () => {
     const v = view({ ...base, state: 'exited', code: 1, exited_at: 1000, last_run: { started_at: 0, ended_at: 1000 } }, false, null)
     expect(v.kind).toBe('stopped')
     expect(v.lines[1]).toContain('Exit code 1')
+  })
+})
+
+describe('words that were written but not shown', () => {
+  test('a stalled start says where it stopped', () => {
+    const lines = view(starting({ stalled: true }), false, null).lines
+    expect(lines.at(-1)).toBe('Stopped at: ' + lines[0].split(' · ').at(-1))
+  })
+  test('the off card has its subtitle', () => {
+    expect(view(base, false, null).lines[1]).toBe('HQ on this computer')
+  })
+  test('ago uses the shared relative-time words', () => {
+    expect(agoText(20)).toBe('now')
+    expect(agoText(5 * 60)).toBe('5 min ago')
+    expect(agoText(3 * 3600)).toBe('3 h ago')
+    expect(agoText(86400)).toBe('yesterday')
+    expect(agoText(3 * 86400)).toBe('3 days ago')
   })
 })

@@ -751,12 +751,13 @@ impl Desktop {
             let port = self.settings().proxy_port;
             let gate = hub.map(|listen| self.pairing.forward_gate(listen));
             *slot = Some(
-                proxy::start_gated(
+                proxy::start_marked(
                     ProxyConfig {
                         listen: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
                         upstream: self.upstream,
                     },
                     gate,
+                    Some(self.host.you_stopped_flag()),
                 )
                 .await?,
             );

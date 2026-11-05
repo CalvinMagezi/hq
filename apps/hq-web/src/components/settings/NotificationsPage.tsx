@@ -169,7 +169,7 @@ export function NotificationsPage() {
     setBusy(true)
     try {
       const error = await sendTestPush()
-      setTestLine(error ? t('notif_test_failed') : t('notif_test_sent', { time: readClock(new Date(), zone).time }))
+      setTestLine(error === 'not_subscribed' ? t('push_not_subscribed') : error ? t('notif_test_failed') : t('notif_test_sent', { time: readClock(new Date(), zone).time }))
     } catch {
       setTestLine(t('notif_test_failed'))
     } finally {

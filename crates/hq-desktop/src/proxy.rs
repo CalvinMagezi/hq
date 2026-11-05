@@ -16,7 +16,10 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
@@ -191,6 +194,17 @@ struct ProxyState {
     port: u16,
     csp: HeaderValue,
     gate: Option<UpstreamGate>,
+    you_stopped: Option<Arc<AtomicBool>>,
+}
+
+impl ProxyState {
+    fn gone(&self) -> Response {
+        let stopped = self
+            .you_stopped
+            .as_ref()
+            .is_some_and(|f| f.load(Ordering::SeqCst));
+        upstream_gone(stopped)
+    }
 }
 
 /// Asked before every request: `None` while the upstream is one this app trusts with a sign-in,
@@ -232,6 +246,16 @@ pub async fn start(config: ProxyConfig) -> Result<ProxyHandle> {
 
 /// [`start`] with a gate asked before every request; while it is shut, nothing is forwarded.
 pub async fn start_gated(config: ProxyConfig, gate: Option<UpstreamGate>) -> Result<ProxyHandle> {
+    start_marked(config, gate, None).await
+}
+
+/// [`start_gated`] that also marks its 502 `x-hq-proxy: stopped` while `you_stopped` is set, so
+/// the window can say the person stopped HQ rather than that it went away.
+pub async fn start_marked(
+    config: ProxyConfig,
+    gate: Option<UpstreamGate>,
+    you_stopped: Option<Arc<AtomicBool>>,
+) -> Result<ProxyHandle> {
     config.validate()?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
@@ -256,6 +280,7 @@ pub async fn start_gated(config: ProxyConfig, gate: Option<UpstreamGate>) -> Res
         port: addr.port(),
         csp: HeaderValue::from_str(&extra_csp(addr.port()))?,
         gate,
+        you_stopped,
     });
     let app = Router::new().fallback(handle).with_state(state);
     let (stop, stopped) = oneshot::channel::<()>();
@@ -324,7 +349,7 @@ async fn forward(state: &ProxyState, req: Request) -> Response {
         Ok(r) => r,
         Err(e) => {
             tracing::debug!("proxy: upstream unreachable: {e}");
-            return upstream_gone();
+            return state.gone();
         }
     };
     let mut response = Response::builder().status(upstream.status());
@@ -368,13 +393,16 @@ pub const HUB_WINDOW_VALUE: &str = "hub";
 /// Marks the proxy's own 502, so the window can tell "HQ can't be reached" from an error HQ sent.
 pub const UPSTREAM_GONE_HEADER: &str = "x-hq-proxy";
 pub const UPSTREAM_GONE_VALUE: &str = "upstream-gone";
+/// The same 502 when the person stopped the host from HQ Hub on purpose.
+pub const STOPPED_VALUE: &str = "stopped";
 
-fn upstream_gone() -> Response {
-    (
-        StatusCode::BAD_GATEWAY,
-        [(UPSTREAM_GONE_HEADER, UPSTREAM_GONE_VALUE)],
-    )
-        .into_response()
+fn upstream_gone(you_stopped: bool) -> Response {
+    let value = if you_stopped {
+        STOPPED_VALUE
+    } else {
+        UPSTREAM_GONE_VALUE
+    };
+    (StatusCode::BAD_GATEWAY, [(UPSTREAM_GONE_HEADER, value)]).into_response()
 }
 
 /// Headers the chat socket's own handshake needs upstream.
@@ -410,7 +438,7 @@ async fn websocket(state: &ProxyState, req: Request) -> Response {
     let connected =
         tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(request)).await;
     let Ok(Ok((upstream, _))) = connected else {
-        return upstream_gone();
+        return state.gone();
     };
     upgrade.on_upgrade(move |client| pump(client, upstream))
 }
