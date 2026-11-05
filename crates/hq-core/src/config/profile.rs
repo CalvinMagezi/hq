@@ -353,11 +353,8 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
     }
 
     let relay = &cfg.relay;
-    // A token is enough: the disk watchdog and restart notices post with it whether or not
-    // the relay itself is enabled.
-    if present(&relay.telegram_token, env, &["TELEGRAM_BOT_TOKEN"])
-        || present(&relay.notifications_token, env, &[])
-    {
+    // A token is enough, whether or not the relay itself is enabled.
+    if present(&relay.telegram_token, env, &["TELEGRAM_BOT_TOKEN"]) {
         let mut e = item(
             "telegram",
             "Telegram relay",

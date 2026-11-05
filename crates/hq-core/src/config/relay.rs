@@ -63,9 +63,6 @@ fn default_discord_family_allowed_harnesses() -> Vec<String> {
 pub struct RelayConfig {
     pub discord_token: Option<String>,
     pub telegram_token: Option<String>,
-    /// Separate bot token for outbound notifications (proactive alerts, outreach).
-    /// Falls back to `telegram_token` if not set.
-    pub notifications_token: Option<String>,
     pub discord_enabled: bool,
     pub telegram_enabled: bool,
     /// Override the LLM model used by the interactive relay.
@@ -151,14 +148,6 @@ pub struct RelayConfig {
     /// set `[]` to let guests use any harness.
     #[serde(default = "default_discord_family_allowed_harnesses")]
     pub discord_family_allowed_harnesses: Vec<String>,
-
-    /// Extra Discord channel-category names to resolve and persist alongside
-    /// the built-in notification categories (task-completions, etc.) — for
-    /// an operator's own personal/project channels routed via
-    /// `_system/DISCORD-ROUTING.md`. Empty by default; these are inherently
-    /// per-operator, not something a fresh install can guess.
-    #[serde(default)]
-    pub discord_notification_categories: Vec<String>,
 }
 
 fn default_turn_ack_timeout_secs() -> u64 {
@@ -188,7 +177,6 @@ impl Default for RelayConfig {
         Self {
             discord_token: None,
             telegram_token: None,
-            notifications_token: None,
             discord_enabled: false,
             telegram_enabled: false,
             model: None,
@@ -205,7 +193,6 @@ impl Default for RelayConfig {
             discord_family_channel_id: None,
             discord_family_users: Vec::new(),
             discord_family_allowed_harnesses: default_discord_family_allowed_harnesses(),
-            discord_notification_categories: Vec::new(),
         }
     }
 }
