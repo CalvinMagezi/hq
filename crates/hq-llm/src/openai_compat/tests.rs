@@ -830,3 +830,35 @@ async fn a_completion_remembers_the_quota_headers_it_came_with() {
         (Some(41), Some(50), Some(9000))
     );
 }
+
+/// A failed stream's body is quoted in the error, cut on a character boundary. Providers answer in
+/// the user's language, and a byte cut inside a multi-byte character used to panic here.
+#[tokio::test]
+async fn a_non_ascii_error_body_from_a_failed_stream_is_cut_without_panicking() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let route = "/proxy/openrouter.ai/api/v1/chat/completions";
+    // One ASCII byte, then 3-byte characters: byte 300 falls inside one of them.
+    let body = format!("x{}", "错".repeat(200));
+    assert!(!body.is_char_boundary(300));
+    Mock::given(method("POST"))
+        .and(path(route))
+        .respond_with(ResponseTemplate::new(400).set_body_string(body))
+        .mount(&server)
+        .await;
+    let base = format!("{}/proxy/openrouter.ai/api/v1", server.uri());
+    let provider = OpenRouterProvider::new_with_base("k", &base);
+    let request = ChatRequest {
+        model: "anthropic/claude-haiku-5.5".into(),
+        ..Default::default()
+    };
+
+    let err = match provider.chat_stream(&request).await {
+        Ok(_) => panic!("a 400 must fail the stream"),
+        Err(e) => e.to_string(),
+    };
+    assert!(err.contains("streaming request failed: x错"), "{err}");
+    assert!(err.len() < 400, "the body is cut: {err}");
+}
