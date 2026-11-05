@@ -319,6 +319,7 @@ pub(crate) async fn save_handler(
         .map_err(ApiError::internal)?
         .map_err(|e| ApiError::internal(format!("could not save the config: {e}")))?;
     records::store_identity(&state.vault_path, platform, &token, &v);
+    state.announce_change(crate::CHANGE_SETTINGS);
     let mut reply = verified_json(&v);
     reply["can_restart"] = json!(restart_json(&state).0);
     Ok(Json(reply))
@@ -337,6 +338,7 @@ pub(crate) async fn delete_handler(
         .map_err(ApiError::internal)?
         .map_err(|e| ApiError::internal(format!("could not save the config: {e}")))?;
     records::forget(&state.vault_path, platform);
+    state.announce_change(crate::CHANGE_SETTINGS);
     Ok(Json(
         json!({ "ok": true, "can_restart": restart_json(&state).0 }),
     ))

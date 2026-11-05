@@ -82,6 +82,7 @@ fn announce(state: &WsState, session_id: &str) {
 
 pub(crate) fn broadcast_sync(state: &WsState, thread_id: &str) {
     state.broadcast(&json!({"type": "sessions:sync", "thread_id": thread_id}).to_string());
+    state.announce_change(crate::CHANGE_HELPERS);
 }
 
 fn agent_host_config(state: &WsState) -> hq_core::config::AgentHostConfig {

@@ -221,6 +221,12 @@ impl WsState {
         Ok(())
     }
 
+    /// Tells open pages that `place` changed (`inbox:change`, `notes:change` and the like), so they
+    /// refetch it instead of polling (web wave 2, rule 5).
+    pub(crate) fn announce_change(&self, place: &str) {
+        self.broadcast(&serde_json::json!({ "type": format!("{place}:change") }).to_string());
+    }
+
     pub(crate) fn broadcast(&self, msg: &str) {
         let _ = self.tx.send(msg.to_string());
     }
@@ -244,6 +250,13 @@ pub fn install_ask_runner(state: &Arc<WsState>) {
 
 /// Events buffered per client before a slow one starts missing them; every streamed token is one.
 const BROADCAST_CAPACITY: usize = 4096;
+
+/// The places a page listens to on the socket instead of polling (`<place>:change`).
+pub(crate) const CHANGE_INBOX: &str = "inbox";
+pub(crate) const CHANGE_NOTES: &str = "notes";
+pub(crate) const CHANGE_HELPERS: &str = "helpers";
+pub(crate) const CHANGE_BUDGET: &str = "budget";
+pub(crate) const CHANGE_SETTINGS: &str = "settings";
 
 /// Create the web router — vault-focused endpoints only.
 pub fn create_router(state: Arc<WsState>) -> Router {

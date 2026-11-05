@@ -33,17 +33,37 @@ pub(crate) fn take_notifications_snapshot(db: &hq_db::Database) -> Notifications
 }
 
 /// Spawn the notifications watcher loop on the Tokio runtime.
+/// What the notes index last saw: how many notes, and the newest sync. A change means a note was
+/// written, moved or deleted, by the owner or an agent.
+pub(crate) fn notes_fingerprint(db: &hq_db::Database) -> Option<(i64, i64)> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*), COALESCE(MAX(synced_at), 0) FROM sync_state",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?)
+    })
+    .ok()
+}
+
 pub(crate) fn spawn_notifications_watcher(state: Arc<WsState>) {
     tokio::spawn(async move {
         let mut last = take_notifications_snapshot(&state.db);
+        let mut notes = notes_fingerprint(&state.db);
         let mut tick = tokio::time::interval(NOTIFICATION_POLL_INTERVAL);
         loop {
             tick.tick().await;
+            let now_notes = notes_fingerprint(&state.db);
+            if now_notes != notes {
+                notes = now_notes;
+                state.announce_change(crate::CHANGE_NOTES);
+            }
             let current = take_notifications_snapshot(&state.db);
             if current == last {
                 continue;
             }
             last = current;
+            state.announce_change(crate::CHANGE_INBOX);
 
             // Fetch fresh aggregated counts
             if let Ok(res) = crate::notifications_api::aggregate_notifications(
@@ -68,6 +88,30 @@ pub(crate) fn spawn_notifications_watcher(state: Arc<WsState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_written_note_changes_the_notes_fingerprint() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let before = notes_fingerprint(&db);
+        db.with_conn(|c| {
+            Ok(c.execute(
+                "INSERT INTO sync_state (path, content_hash, modified_at, synced_at) VALUES ('a.md', 'h', 1, 2)",
+                [],
+            )?)
+        })
+        .unwrap();
+        assert_ne!(notes_fingerprint(&db), before);
+    }
+
+    #[tokio::test]
+    async fn a_change_is_announced_by_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = WsState::new(dir.path().to_path_buf(), None);
+        let mut rx = state.tx.subscribe();
+        state.announce_change(crate::CHANGE_BUDGET);
+        let msg: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(msg["type"], "budget:change");
+    }
 
     #[test]
     fn test_notifications_snapshot_is_stable_when_nothing_changes() {
