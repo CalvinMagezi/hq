@@ -23,7 +23,7 @@ class FirstRunLogicTest {
 
     @Test fun aKillResumesTheSavedStepEvenThoughKeyAndFirstAnswerNowExist() {
         // The key is sealed at step 1 and hq answers /health during the flow: neither may end it early.
-        for (step in listOf(Step.Welcome, Step.Model, Step.Chat, Step.Start, Step.Restore)) {
+        for (step in listOf(Step.Welcome, Step.Moved, Step.Model, Step.Chat, Step.Start, Step.Restore)) {
             assertEquals(step, FirstRunLogic.decide(done = false, saved = step, hasModelKey = true, heardHqBefore = true))
         }
     }

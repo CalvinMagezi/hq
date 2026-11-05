@@ -5,7 +5,6 @@ object FirstRunWords {
     const val WELCOME_TITLE = "Welcome to HQ"
     const val WELCOME_BODY = "HQ is your own AI assistant that lives on this phone and keeps its notes, tasks and memory here."
     const val SET_UP_NEW = "Set up a new HQ"
-    const val RESTORE = "Restore from a backup"
 
     const val MODEL_TITLE = "Your AI model"
     const val MODEL_BODY = "HQ needs a key from an AI service to think. It is kept sealed on this phone and is never written to a file."
@@ -37,8 +36,6 @@ object FirstRunWords {
     const val START = "Start HQ"
     const val STARTING = "Starting..."
 
-    const val RESTORE_TITLE = "Restore a backup"
-    const val RESTORE_BODY = "Pick the backup file (it ends in .hqbak), then its passphrase or its key file. Your notes and tasks come back as they were."
     const val PICK_BACKUP = "Choose backup file"
     const val PICK_KEY_FILE = "Choose key file"
     const val USE_PASSPHRASE = "Use a passphrase"

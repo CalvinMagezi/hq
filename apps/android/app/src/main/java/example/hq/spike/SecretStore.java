@@ -100,11 +100,17 @@ final class SecretStore {
         }
     }
 
-    /** The stored names a credential may have, sorted; never a value. */
+    /** The stored names a credential may have and whose value opens on this phone, sorted; never a value. A copied key that cannot open is not listed. */
     static synchronized List<String> names(Context c) {
         List<String> out = new ArrayList<>();
-        for (String name : c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll().keySet()) {
-            if (HubConfig.isCredentialName(name)) out.add(name);
+        for (Map.Entry<String, ?> e : c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll().entrySet()) {
+            if (!HubConfig.isCredentialName(e.getKey()) || !(e.getValue() instanceof String)) continue;
+            try {
+                open(e.getKey(), (String) e.getValue());
+                out.add(e.getKey());
+            } catch (Exception dead) {
+                Log.w(HubService.TAG, "secret " + e.getKey() + " cannot be opened, not listed: " + dead.getClass().getSimpleName());
+            }
         }
         java.util.Collections.sort(out);
         return out;

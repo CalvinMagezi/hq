@@ -38,7 +38,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 - [x] Server for phone wave 0: `hq vault moved` (forgets a moved phone's device sign-ins, pairings, edge, claude.ai grants and push subscriptions; notes stay) and `GET /api/status/busy` (a chat reply or a scheduled backup running), for the update idle gate.
 - [ ] mobile/wave-0/01-lock-screen.md
 - [ ] mobile/wave-0/02-safe-mode.md
-- [ ] mobile/wave-0/03-data-transfer.md
+- [x] mobile/wave-0/03-data-transfer.md: data-extraction rules (only the vault moves to a new phone, cloud backup takes nothing), an install marker, the Moved first-run step (keys added again, Start fresh, notes only when the database copied badly) that runs `hq vault moved`, dead keys hidden, the old-phone card. First draft by Copilot (Sonnet 5.5), reviewed. Open: the .zip restore path comes with safe mode. Try: on a test install, copy `files/hqhome/.vault` from another install with adb and open the app: it says "Your notes came with you" with the counts and asks for keys again.
 - [ ] mobile/wave-0/04-measure.md
 
 ## Wave 1 to wave 4

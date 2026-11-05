@@ -1,5 +1,6 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.R
 import example.hq.spike.ui.firstrun.FirstRunWords
 import example.hq.spike.ui.firstrun.StoredKeysPage
 import androidx.activity.compose.BackHandler
@@ -51,6 +52,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
@@ -975,6 +977,7 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
 private fun About(ui: SettingsUi, actions: SettingsActions) {
     Page {
         BackupCard(BackupWords.card(ui.backup, Instant.now()))
+        MovingCard()
         Label("About")
         Facts(
             listOf(
@@ -1048,6 +1051,25 @@ private fun BackupCard(card: BackupWords.Card) {
                 Text("Needs a decision", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
             }
         }
+    }
+}
+
+/** What the old phone should know before a move: only notes travel, and the copy button waits for the safe-mode .zip. */
+@Composable
+private fun MovingCard() {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(stringResource(R.string.old_phone_title), style = HqType.BodyBold, color = Mts.Ink)
+        Text(stringResource(R.string.old_phone_body), style = HqType.BodySm, color = Mts.Ink)
+        Text(stringResource(R.string.old_phone_older), style = HqType.BodySm, color = Mts.Ink)
+        Row(
+            Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).padding(horizontal = 24.dp).semantics { disabled() },
+            verticalAlignment = Alignment.CenterVertically,
+        ) { Text(stringResource(R.string.old_phone_save_copy), style = HqType.BodySmBold, color = Mts.InkMuted) }
+        Text(stringResource(R.string.old_phone_note), style = HqType.BodySm, color = Mts.InkMuted)
     }
 }
 
