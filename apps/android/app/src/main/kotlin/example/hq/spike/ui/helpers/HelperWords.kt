@@ -366,7 +366,7 @@ object HelperWords {
     }
 
     const val EDGE_PREFIX = "edge:"
-    private const val EDGE_AGENT = "HQ edge worker"
+    private const val EDGE_AGENT = "HQ"
     private const val EDGE_PLACE = "this phone"
 
     /** The order on the list: waiting for the owner first, then working, then the rest, newest first within each. */

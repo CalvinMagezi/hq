@@ -132,7 +132,7 @@ private fun QuickPills(q: QuickState, edge: HqClient.EdgeWorker?, actions: Tasks
         Pill("Today", false) { actions.onQuick(q.copy(text = (q.text.trim() + " today").trim())) }
         Pill("Next week", false) { actions.onQuick(q.copy(text = (q.text.trim() + " next week").trim())) }
         Pill("Add details", false) { actions.onQuick(q.copy(more = true)) }
-        if (edge.takesTasks()) Pill("For the edge worker", false) { actions.onQuick(q.copy(more = true, repo = edge?.repos?.singleOrNull())) }
+        if (edge.takesTasks()) Pill("Let HQ code it", false) { actions.onQuick(q.copy(more = true, repo = edge?.repos?.singleOrNull())) }
     }
 }
 
@@ -145,10 +145,10 @@ private fun HqClient.EdgeWorker?.takesTasks() = this != null && enabled && repos
 private fun EdgeFields(q: QuickState, edge: HqClient.EdgeWorker, actions: TasksActions) {
     Text(stringResource(R.string.tasks_edge_worker), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Pill("Not for the worker", q.repo == null) { actions.onQuick(q.copy(repo = null)) }
+        Pill("Not for HQ", q.repo == null) { actions.onQuick(q.copy(repo = null)) }
         edge.repos.forEach { repo -> Pill(repo.substringAfter('/'), q.repo == repo) { actions.onQuick(q.copy(repo = repo)) } }
     }
-    if (q.repo != null) Text("HQ works it on this phone within a few minutes and opens a pull request in ${q.repo}. Say in the notes what to change and how you will know it is done.", style = SmallText, color = Mts.InkMuted)
+    if (q.repo != null) Text("HQ starts work on it here in a few minutes. It sends the change to ${q.repo} on GitHub for you to check. Say in the notes what to change.", style = SmallText, color = Mts.InkMuted)
 }
 
 @OptIn(ExperimentalLayoutApi::class)

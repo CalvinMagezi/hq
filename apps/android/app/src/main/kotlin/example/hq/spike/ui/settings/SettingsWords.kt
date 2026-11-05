@@ -1,5 +1,6 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.R
 import example.hq.spike.ui.shell.Words
 import java.time.Duration
 import java.time.Instant
@@ -134,7 +135,7 @@ object SettingsWords {
         return "${money(head.optDouble("spent_usd"))} of ${money(head.optDouble("limit_usd"))} $period".trim()
     }
 
-    fun home(w: Words, snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true, backup: BackupFacts = BackupFacts(), strip: String? = null): List<HomeGroup> = withChecking(loaded, listOf(
+    fun home(w: Words, snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true, backup: BackupFacts = BackupFacts(), strip: String? = null): List<HomeGroup> = withChecking(w, loaded, listOf(
         HomeGroup("This phone", phone),
         HomeGroup(
             "Your accounts", listOf(
@@ -155,8 +156,8 @@ object SettingsWords {
     ))
 
     /** Until the first read has finished, the rows that come from HQ say so, rather than "Not answering". */
-    private fun withChecking(loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
-        if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { if (it.page == SettingsPage.About) it else it.copy(status = "Checking…") }) }
+    private fun withChecking(w: Words, loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
+        if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { if (it.page == SettingsPage.About) it else it.copy(status = w.s(R.string.settings_checking)) }) }
 
     fun aboutStatus(h: JSONObject?): String = h?.text("version")?.let { "HQ $it" } ?: if (h == null) NOT_ANSWERED else "HQ is running"
 

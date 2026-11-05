@@ -279,7 +279,7 @@ private fun Show(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
                 Spacer(Modifier.height(12.dp))
                 PillButton("Copy the link", primary = false, tag = "copy-link") { copy(context, ticket.link) }
                 Spacer(Modifier.height(12.dp))
-                PillButton("Cancel", primary = false, tag = "cancel-code") { vm.home() }
+                PillButton("Stop pairing", primary = false, tag = "cancel-code") { vm.home() }
             }
             end != null -> {
                 Body(PairingWords.ended(end), Modifier.testTag("ended"))

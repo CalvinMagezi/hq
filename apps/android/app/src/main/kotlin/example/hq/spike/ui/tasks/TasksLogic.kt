@@ -9,6 +9,8 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import example.hq.spike.R
 import java.time.format.DateTimeParseException
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
@@ -116,7 +118,7 @@ object TasksLogic {
     }
 
     /** The sub-tasks line: "None yet" with no sub-tasks, else "1 of 3 done". */
-    fun subtaskLabel(w: Words, done: Int, total: Int): String = if (total == 0) "None yet" else Counts.progress(w, done, total, subTasks = false)
+    fun subtaskLabel(w: Words, done: Int, total: Int): String = if (total == 0) w.s(R.string.tasks_none_yet) else Counts.progress(w, done, total, subTasks = false)
 
     /** "2d", or "5h" within a day, from the server's `YYYY-MM-DD HH:MM:SS` UTC time. */
     fun stuckFor(since: String?, now: LocalDateTime): String? {
@@ -144,7 +146,7 @@ object TasksLogic {
     }
 
     private fun dayLabel(d: LocalDate, today: LocalDate): String {
-        val long = d.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
+        val long = d.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
         return if (d == today.plusDays(1)) "Tomorrow · $long" else long
     }
 
@@ -154,9 +156,9 @@ object TasksLogic {
         return when {
             d == today -> "due today"
             d == today.plusDays(1) -> "due tomorrow"
-            d.isBefore(today) -> "overdue since " + d.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))
+            d.isBefore(today) -> "overdue since " + d.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
             !d.isAfter(today.plusDays(SOON_DAYS - 1)) -> "due " + d.format(DateTimeFormatter.ofPattern("EEEE", Locale.getDefault()))
-            else -> "due " + d.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))
+            else -> "due " + d.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
         }
     }
 
@@ -168,7 +170,7 @@ object TasksLogic {
         if (t.status != "to_do" || (due != null && !due.isAfter(today))) return null
         return when {
             start == today -> "starts today"
-            start.isBefore(today) -> "started " + start.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))
+            start.isBefore(today) -> "started " + start.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
             else -> null
         }
     }
