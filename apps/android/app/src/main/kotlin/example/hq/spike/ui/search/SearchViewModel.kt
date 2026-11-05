@@ -54,6 +54,11 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         onPicked = { q -> remember(q) },
     )
 
+    /** Opens the page already on one scope, as a link does; the lists to match come from the last open. */
+    fun openAt(scope: SearchScope) {
+        _state.update { SearchUi(open = true, scope = scope, recent = recent()) }
+    }
+
     private fun open(tasks: List<TaskItem>, chats: List<ChatRow>) {
         allTasks = tasks
         allChats = chats

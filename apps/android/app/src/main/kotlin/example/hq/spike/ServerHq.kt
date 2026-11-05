@@ -1,6 +1,7 @@
 package example.hq.spike
 
 import android.content.Context
+import example.hq.spike.data.SavedCopy
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
@@ -52,10 +53,12 @@ object ServerHq {
     fun markSignedOut(c: Context) {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(SIGNED_OUT, true).apply()
         SecretStore.forgetServerToken(c)
+        SavedCopy.of(c).clearServer()
     }
 
     fun disconnect(c: Context) {
         SecretStore.forgetServerToken(c)
+        SavedCopy.of(c).clearServer()
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         Alerts.resetServer(c, false)
     }

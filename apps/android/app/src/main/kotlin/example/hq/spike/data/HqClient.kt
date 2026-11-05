@@ -524,6 +524,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             }
         }
 
+    /** What HQ checked and finished in the last [hours] hours, as the web's While you were away reads it; null when this HQ has no verification (404). */
+    suspend fun verificationBriefing(hours: Int = 24): JSONObject? = try {
+        send(authed("/api/verification/briefing?hours=$hours").build()) { JSONObject(it) }
+    } catch (e: HqUnavailable) {
+        if (e.status == HTTP_NOT_FOUND) null else throw e
+    }
+
     /** Makes a new note and returns its vault path; the title only names the file. */
     suspend fun createNote(folder: String, title: String, content: String): String =
         send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).toString().toRequestBody("application/json".toMediaType())).build()) {

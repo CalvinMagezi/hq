@@ -19,6 +19,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -97,6 +98,8 @@ data class TasksUi(
     val briefing: BriefingUi? = null,
     /** The edge worker, read when the new-task sheet opens; null until then or when HQ did not say. */
     val edge: HqClient.EdgeWorker? = null,
+    /** While you were away: what HQ's checks did in the last 24 hours, on this phone and on a server HQ. */
+    val away: AwayUi = AwayUi(),
 ) {
     /** Whether a task is inside what the All tab is narrowed to. */
     val keep: (TaskItem) -> Boolean get() = TaskFilters.keeps(tree, scope)
@@ -112,6 +115,19 @@ data class TasksUi(
         TaskTab.Upcoming -> TasksLogic.upcoming(shown, today)
         TaskTab.All -> TasksLogic.allList(shown.filter(keep), chip, archived.filter(keep))
     }
+}
+
+/** The briefing read from this phone's HQ and a server HQ, each with when the phone last read it. A server part read from the saved copy is [serverStale]. */
+data class AwayUi(
+    val phone: Away? = null,
+    val phoneAtMs: Long? = null,
+    val server: Away? = null,
+    val serverHost: String? = null,
+    val serverAtMs: Long? = null,
+    val serverStale: Boolean = false,
+    val open: Boolean = false,
+) {
+    val hasNews: Boolean get() = phone?.hasNews == true || server?.hasNews == true
 }
 
 class TasksActions(
@@ -147,6 +163,9 @@ class TasksActions(
     val onBulkPrompt: (String?) -> Unit = {},
     val onBulk: (Bulk) -> Unit = {},
     val onBulkAsk: (Bulk?) -> Unit = {},
+    val onAway: (Boolean) -> Unit = {},
+    val onAwayInitiative: (String) -> Unit = {},
+    val onAwayToday: () -> Unit = {},
 )
 
 class TasksViewModel(app: Application) : AndroidViewModel(app) {
@@ -175,14 +194,94 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
         onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
         onBulkPrompt = { p -> _state.update { it.copy(bulkPrompt = p) } }, onBulk = ::askBulk, onBulkAsk = { c -> if (c == null) _state.update { it.copy(bulkAsk = null) } else runBulk(c) },
+        onAway = ::openAway,
+        onAwayInitiative = { id -> _state.update { it.copy(tab = TaskTab.All, chip = AllChip.Done, scope = TaskScope.Initiative(id), selected = emptySet(), away = it.away.copy(open = false)) } },
+        onAwayToday = { _state.update { it.copy(tab = TaskTab.Today, away = it.away.copy(open = false)) } },
     )
 
+    private val saved = example.hq.spike.data.SavedCopy.of(app)
+    private var awayReadAt = 0L
+
     init {
+        loadSavedAway()
         viewModelScope.launch {
             while (true) {
                 if (!frozen) refresh()
+                if (!frozen && _state.value.tab == TaskTab.Today) readAway()
                 delay(POLL_MS)
             }
+        }
+        // Every time HQ turns Connected the briefing is read again, whatever the clock says.
+        viewModelScope.launch {
+            var was = false
+            HqServices.get(app).status.collect { st ->
+                val live = st == example.hq.spike.data.HqStatus.Live
+                if (live && !was && !frozen) readAway(force = true)
+                was = live
+            }
+        }
+    }
+
+    private fun openAway(open: Boolean) {
+        _state.update { it.copy(away = it.away.copy(open = open)) }
+        if (open) viewModelScope.launch { readAway() }
+    }
+
+    /** What was saved on the phone is shown at once, so the card is there before HQ answers and when it cannot. */
+    private fun loadSavedAway() {
+        val phone = saved.read(AWAY_PHONE)
+        val server = saved.read(AWAY_SERVER)
+        if (phone == null && server == null) return
+        _state.update {
+            it.copy(away = it.away.copy(
+                phone = phone?.let { s -> Away.parse(s.body) }, phoneAtMs = phone?.atMs,
+                server = server?.let { s -> Away.parse(s.body) }, serverAtMs = server?.atMs, serverHost = server?.body?.optString("host")?.takeIf { h -> h.isNotEmpty() }, serverStale = server != null,
+            ))
+        }
+    }
+
+    /** Reads the briefing from this phone's HQ and from a server HQ, at most every two minutes unless [force]. A failed read keeps the saved copy. */
+    private suspend fun readAway(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - awayReadAt < AWAY_EVERY_MS) return
+        awayReadAt = now
+        val app = getApplication<Application>()
+        try {
+            val body = client.verificationBriefing(AWAY_HOURS)
+            if (body == null) {
+                saved.forget(AWAY_PHONE)
+                _state.update { it.copy(away = it.away.copy(phone = null, phoneAtMs = null)) }
+            } else {
+                saved.write(AWAY_PHONE, example.hq.spike.data.SavedCopy.Source.Phone, body, now)
+                _state.update { it.copy(away = it.away.copy(phone = Away.parse(body), phoneAtMs = now)) }
+            }
+        } catch (e: HqUnavailable) {
+            // Kept: what is on screen is what was last read, with its time.
+        }
+        val server = withContext(kotlinx.coroutines.Dispatchers.IO) { example.hq.spike.ServerHq.current(app) }
+        if (server == null) {
+            _state.update { it.copy(away = it.away.copy(server = null, serverAtMs = null, serverHost = null, serverStale = false)) }
+            return
+        }
+        val host = java.net.URI(server.address).host
+        val reply = try {
+            withContext(kotlinx.coroutines.Dispatchers.IO) { example.hq.spike.ServerHq.call(server.address, "/api/verification/briefing?hours=$AWAY_HOURS", server.token, null, null) }
+        } catch (e: java.io.IOException) { null }
+        when {
+            reply != null && reply.status == HTTP_OK -> {
+                val body = JSONObject(reply.body).put("host", host)
+                saved.write(AWAY_SERVER, example.hq.spike.data.SavedCopy.Source.Server, body, now)
+                _state.update { it.copy(away = it.away.copy(server = Away.parse(body), serverAtMs = now, serverHost = host, serverStale = false)) }
+            }
+            reply != null && reply.status == HTTP_NOT_FOUND -> {
+                saved.forget(AWAY_SERVER)
+                _state.update { it.copy(away = it.away.copy(server = null, serverAtMs = null, serverHost = null, serverStale = false)) }
+            }
+            reply != null && reply.status == HTTP_UNAUTHORIZED -> {
+                example.hq.spike.ServerHq.markSignedOut(app)
+                _state.update { it.copy(away = it.away.copy(server = null, serverAtMs = null, serverHost = null, serverStale = false)) }
+            }
+            else -> _state.update { it.copy(away = it.away.copy(serverStale = it.away.server != null || it.away.serverAtMs != null)) }
         }
     }
 
@@ -259,6 +358,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { if (it.bulking) it else it.copy(tab = tab, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
         // Coming to All reads the helpers working now, which are not read while another tab shows.
         if (tab == TaskTab.All) viewModelScope.launch { refresh() }
+        if (tab == TaskTab.Today) viewModelScope.launch { readAway() }
     }
 
     /** The sheet opens at once with the last tree it read; the tree is read again each time, since a space or an initiative can appear with any new task. */
@@ -594,6 +694,12 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val POLL_MS = 30_000L
+        const val AWAY_EVERY_MS = 120_000L
+        const val AWAY_HOURS = 24
+        const val AWAY_PHONE = "away_phone"
+        const val AWAY_SERVER = "away_server"
+        const val HTTP_OK = 200
+        const val HTTP_UNAUTHORIZED = 401
         const val LINE_MS = 5_000L
         const val TITLE_IN_LINE = 40
         const val HTTP_BAD_REQUEST = 400

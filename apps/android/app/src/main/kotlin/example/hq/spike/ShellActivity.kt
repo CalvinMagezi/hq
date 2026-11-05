@@ -232,8 +232,8 @@ class ShellActivity : ComponentActivity() {
         when (t.place) {
             Place.Chat -> { t.id?.let(chat::openLinked); if (t.compose) chat.focusComposer() }
             Place.Inbox -> t.id?.let(inbox::openItem)
-            Place.Tasks -> t.id?.let { tasks.openById(it) { } }
-            Place.Notes -> { t.path?.let(notes::openNote); if (t.search) notes.actions.onOpenSearch() }
+            Place.Tasks -> if (t.away) tasks.actions.onAway(true) else t.id?.let { tasks.openById(it) { } }
+            Place.Notes -> { t.path?.let(notes::openNote); t.search?.let { search.openAt(it) } }
             Place.Helpers -> t.id?.let(helpers::openSession)
         }
         t.web?.let { WebPage.fromSlug(it) }?.let { web = it }
@@ -414,7 +414,7 @@ class ShellActivity : ComponentActivity() {
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
@@ -458,6 +458,11 @@ class ShellActivity : ComponentActivity() {
     }
 
     /** Search sits over everything but a chosen result: the screen closes first, then the note, task or chat opens in its own place. */
+    @androidx.compose.runtime.Composable
+    private fun AwayHost(tasksState: TasksUi) {
+        example.hq.spike.ui.tasks.AwayPage(tasksState.away, tasksState.tasks, tasks.actions, onTask = { id -> tasks.actions.onAway(false); requested = Place.Tasks; tasks.openById(id) { } })
+    }
+
     @androidx.compose.runtime.Composable
     private fun SearchHost(searchState: SearchUi) {
         if (!searchState.open) return

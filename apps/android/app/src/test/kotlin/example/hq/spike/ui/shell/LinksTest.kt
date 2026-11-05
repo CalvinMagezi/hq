@@ -1,5 +1,6 @@
 package example.hq.spike.ui.shell
 
+import example.hq.spike.ui.search.SearchScope
 import example.hq.spike.ui.settings.SettingsPage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -65,8 +66,19 @@ class LinksTest {
         assertEquals(SettingsPage.entries.filter { it != SettingsPage.SetupApp && it != SettingsPage.PairApp && it != SettingsPage.Technical && it != SettingsPage.Noticed }.map { it.name.lowercase() }.toSet(), Links.SETTINGS_SCREENS)
     }
 
-    @Test fun searchOpensTheSearch() {
-        assertTrue(parse("hq://search").search)
+    @Test fun searchOpensTheSearchOnItsScope() {
+        assertEquals(SearchScope.All, parse("hq://search").search)
+        assertEquals(SearchScope.Notes, parse("hq://search/notes").search)
+        assertEquals(SearchScope.Tasks, parse("hq://search/Tasks").search)
+        assertEquals(SearchScope.All, parse("hq://search/nonsense").search)
+        assertEquals(SearchScope.All, parse("hq://search?q=x").search)
+    }
+
+    @Test fun theAwayPageAndANoteByIdHaveLinks() {
+        assertEquals(LinkTarget(Place.Tasks, away = true), parse("hq://tasks/away"))
+        assertEquals(LinkTarget(Place.Notes, noteId = "abc123"), parse("hq://notes/n/abc123"))
+        assertNull(Links.parse("hq://notes/n/a b")?.noteId)
+        assertNull(Links.parse("hq://notes/n/..")?.noteId)
     }
 
     @Test fun anIdThatIsNotAnIdIsDropped() {
@@ -88,10 +100,14 @@ class LinksTest {
         assertNotNull(Links.parse("hq://chat?x=1"))
     }
 
-    @Test fun aWebLinkNamesOnlyOneOfTheFourPagesTheHostShows() {
+    @Test fun theRetiredHomeOpensNotesWithNoWebPage() {
+        for (link in listOf("hq://web/home", "hq://web/vault", "hq://web/Home")) {
+            assertEquals(link, LinkTarget(Place.Notes), Links.parse(link))
+        }
+    }
+
+    @Test fun aWebLinkNamesOnlyOneOfTheThreePagesTheHostShows() {
         assertEquals("usage", Links.parse("hq://web/usage")?.web)
-        assertEquals("home", Links.parse("hq://web/vault")?.web)
-        assertEquals("home", Links.parse("hq://web/Home")?.web)
         assertEquals("board", Links.parse("hq://web/tasks?view=board")?.web)
         assertEquals("timeline", Links.parse("hq://web/timeline")?.web)
         assertEquals("timeline", Links.parse("hq://web/tasks?view=timeline")?.web)
