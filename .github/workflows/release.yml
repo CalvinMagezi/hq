@@ -456,7 +456,8 @@ jobs:
             -Phq.bin="$GITHUB_WORKSPACE/android-in/hq/hq-android-arm64" \
             -Phq.caddy="$GITHUB_WORKSPACE/android-in/caddy/caddy" \
             -Phq.web="$GITHUB_WORKSPACE/android-in/web" \
-            -Phq.versionCode="$RUN_NUMBER" -Phq.versionName="$VERSION"
+            -Phq.versionCode="$RUN_NUMBER" -Phq.versionName="$VERSION" \
+            -Phq.releasesRepo="${{ github.repository }}"
 
       - name: Check the APK is signed by the release key
         run: |

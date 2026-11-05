@@ -83,8 +83,11 @@ sealed interface UpdateState {
 /** The rules for the in-app updater that need no Android: reading the manifest, comparing builds, and when to ask. */
 object UpdateLogic {
     /** The only place an APK may come from; a manifest that points anywhere else is refused even though its signature is good. */
-    private const val RELEASES_URL = "https://github.com/CalvinMagezi/hq/releases/"
-    const val APK_URL_PREFIX = RELEASES_URL + "download/"
+    /** The release repo (`owner/repo`) comes from the build (`-Phq.releasesRepo`); empty means this build has no update source. */
+    @Volatile var repo: String = example.hq.spike.BuildConfig.RELEASES_REPO
+    fun enabled(): Boolean = Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+").matches(repo)
+    private val RELEASES_URL get() = "https://github.com/$repo/releases/"
+    val APK_URL_PREFIX get() = RELEASES_URL + "download/"
     const val CHANNEL_FILE = "android-channel.json"
     const val CHECK_EVERY_MS = 24L * 60 * 60 * 1000
 
@@ -99,8 +102,8 @@ object UpdateLogic {
     const val BUSY_PATH = "/api/status/busy"
     const val BUSY_POLL_MS = 10_000L
 
-    const val STOPPED = "The install was stopped before it finished. Tap Check for updates, then Install update, and confirm each prompt Android shows, including Play Protect's \"Install anyway\"."
-    const val BLOCKED = "Android blocked the update. If Play Protect stopped it, tap Check for updates, then Install update, and choose \"Install anyway\"."
+    const val STOPPED = "The install was stopped. Tap to try again."
+    const val BLOCKED = "Android blocked the update. Tap to try again, then choose Install anyway if Play Protect asks."
     const val NOT_INSTALLED = "Android did not install the update."
 
     /** What the screen says after Android's installer answers; a stopped install is never shown as if nothing happened. */
@@ -172,7 +175,7 @@ object UpdateLogic {
     /** True unless this manifest's seq is older than the highest one seen: a replayed old manifest must not undo a newer one. */
     fun seqOk(m: ChannelManifest, highestSeen: Long): Boolean = m.seq >= highestSeen
 
-    private fun valid(m: ChannelManifest): Boolean =
+    private fun valid(m: ChannelManifest): Boolean = enabled() &&
         m.rollout in 0..100 && m.version.isNotBlank() && m.version.length <= VERSION_MAX_CHARS && m.version.none(Char::isWhitespace) &&
             m.versionCode > 0 && m.minSdk > 0 &&
             m.sha256.length == SHA256_HEX_CHARS && m.sha256.all { it in '0'..'9' || it in 'a'..'f' } &&
