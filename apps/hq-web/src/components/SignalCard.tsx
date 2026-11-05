@@ -4,10 +4,10 @@ import { relTime } from '~/lib/time'
 
 function badgeColor(kind: string) {
   switch (kind) {
-    case 'review': return 'var(--accent-violet)'
-    case 'work': return 'var(--accent-green)'
+    case 'review': return 'var(--warn)'
+    case 'work': return 'var(--brand-blue)'
     case 'activity': return 'var(--text-dim)'
-    default: return 'var(--accent-blue)'
+    default: return 'var(--ink-muted)'
   }
 }
 
@@ -31,17 +31,17 @@ export function SignalCard({ note, lane = 'note' }: { note: RecentFile; lane?: '
           <div className="text-[12px] font-mono font-bold truncate" style={{ color: 'var(--text-primary)' }}>
             {note.title}
           </div>
-          <div className="text-[9px] font-mono mt-1 truncate" style={{ color: 'var(--text-dim)', opacity: 0.55 }}>
+          <div className="text-xs font-mono mt-1 truncate" style={{ color: 'var(--text-dim)' }}>
             {folder}
           </div>
         </div>
-        <span className="text-[9px] font-mono flex-shrink-0 mt-0.5" style={{ color: 'var(--text-dim)' }}>
+        <span className="text-xs font-mono flex-shrink-0 mt-0.5" style={{ color: 'var(--text-dim)' }}>
           {relTime(note.mtime)}
         </span>
       </div>
 
       {note.preview && (
-        <p className="text-[11px] font-mono line-clamp-2 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+        <p className="text-xs font-mono line-clamp-2 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
           {note.preview}
         </p>
       )}
@@ -51,14 +51,14 @@ export function SignalCard({ note, lane = 'note' }: { note: RecentFile; lane?: '
           {badges.slice(0, 4).map((badge) => (
             <span
               key={badge}
-              className="text-[8px] px-1.5 py-0.5 rounded-md font-mono glass-tag"
+              className="text-xs px-1.5 py-0.5 rounded-md font-mono glass-tag"
               style={{ color: badgeColor(lane) }}
             >
               {badge}
             </span>
           ))}
           {note.tags.slice(0, Math.max(0, 4 - badges.length)).map((tag) => (
-            <span key={tag} className="text-[8px] px-1.5 py-0.5 rounded-md font-mono glass-tag" style={{ color: 'var(--text-dim)' }}>
+            <span key={tag} className="text-xs px-1.5 py-0.5 rounded-md font-mono glass-tag" style={{ color: 'var(--text-dim)' }}>
               #{tag}
             </span>
           ))}

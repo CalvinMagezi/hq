@@ -7,7 +7,7 @@ export function RolloutPanel({ rollout }: { rollout: Rollout }) {
   const v = rolloutView(rollout)
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">Turning it on</p>
+      <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Turning it on</p>
       <p className="text-neutral-200">{v.stage}</p>
       {v.warnings.map((w) => (
         <p key={w} className="flex items-start gap-1.5 text-amber-300">

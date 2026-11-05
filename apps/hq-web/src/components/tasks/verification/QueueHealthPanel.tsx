@@ -32,7 +32,7 @@ export function QueueHealthPanel({ health, rollout }: { health: QueueHealth; rol
       </ul>
       {health.deferrals.length > 0 && (
         <div>
-          <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">Waiting, and why</p>
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">Waiting, and why</p>
           <ul className="space-y-1">
             {health.deferrals.map((d) => (
               <li key={`${d.waiting_for}-${d.reason}`} className="text-neutral-400">

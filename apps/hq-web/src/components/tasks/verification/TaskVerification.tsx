@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Check, ChevronDown, Hourglass, MinusCircle, Undo2, X } from 'lucide-react'
+import { t } from '~/strings'
+import { Check, ChevronDown, Hourglass, MinusCircle, TriangleAlert, Undo2 } from 'lucide-react'
 import {
   fetchTaskVerification,
   requestSecondOpinion,
@@ -17,21 +18,21 @@ const POLL_MS = 60_000
 const OLDER_SHOWN = 4
 
 const VERDICT_STYLE: Record<TaskVerdict['verdict'], string> = {
-  pass: 'bg-emerald-400/15 text-emerald-300',
-  fail: 'bg-rose-400/15 text-rose-300',
-  inconclusive: 'bg-amber-400/15 text-amber-300',
+  pass: 'border hq-tone-ink',
+  fail: 'border hq-tone-warn',
+  inconclusive: 'border hq-tone-grey',
 }
 
 function VerdictBlock({ v, open }: { v: TaskVerdict; open: boolean }) {
   return (
     <details open={open} className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2">
       <summary className="flex items-center gap-2 cursor-pointer list-none min-h-8">
-        <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-md ${VERDICT_STYLE[v.verdict]}`}>{v.verdict}</span>
+        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-md ${VERDICT_STYLE[v.verdict]}`}>{v.verdict}</span>
         <span className="text-xs text-neutral-300 min-w-0 flex-1 truncate">
           tier {v.tier}, {levelLabel(v.level)}
           {v.applied ? '' : ', not applied'}
         </span>
-        <span className="text-[11px] text-neutral-500 shrink-0">{v.created_at.slice(0, 16)}</span>
+        <span className="text-xs text-neutral-500 shrink-0">{v.created_at.slice(0, 16)}</span>
         <ChevronDown className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
       </summary>
       <div className="mt-2 space-y-2.5">
@@ -40,14 +41,14 @@ function VerdictBlock({ v, open }: { v: TaskVerdict; open: boolean }) {
         </p>
         {v.reasons && <p className="text-xs text-neutral-300 whitespace-pre-wrap break-words">{v.reasons}</p>}
         <div>
-          <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">{criteriaSummary(v.criteria)}</p>
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{criteriaSummary(v.criteria)}</p>
           <ul className="space-y-1">
             {v.criteria.map((c) => (
               <li key={c.text} className="flex items-start gap-1.5 text-xs text-neutral-200">
                 {c.result === 'pass' ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" aria-label="met" />
+                  <Check className="w-3.5 h-3.5 text-white shrink-0 mt-0.5" aria-label={t('verify_met')} />
                 ) : c.result === 'fail' ? (
-                  <X className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" aria-label="not met" />
+                  <TriangleAlert className="w-3.5 h-3.5 text-[var(--warn)] shrink-0 mt-0.5" aria-label={t('verify_not_met')} />
                 ) : (
                   <MinusCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" aria-label="not decided" />
                 )}
@@ -60,9 +61,9 @@ function VerdictBlock({ v, open }: { v: TaskVerdict; open: boolean }) {
           {v.observations.map((o) => (
             <li key={o.id} className="flex items-start gap-1.5 text-xs text-neutral-400">
               {o.ok === true ? (
-                <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <Check className="w-3.5 h-3.5 text-white shrink-0 mt-0.5" />
               ) : o.ok === false ? (
-                <X className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                <TriangleAlert className="w-3.5 h-3.5 text-[var(--warn)] shrink-0 mt-0.5" />
               ) : (
                 <MinusCircle className="w-3.5 h-3.5 text-neutral-600 shrink-0 mt-0.5" />
               )}
@@ -98,15 +99,15 @@ export function TaskVerificationView({ data, taskStatus, nowMs, busy, confirming
   return (
     <div className="space-y-3">
       {data.waiting_for && (
-        <p className={`text-xs ${data.waiting_for.who === 'owner' ? 'text-amber-300' : 'text-neutral-400'}`}>
+        <p className={`text-xs ${data.waiting_for.who === 'owner' ? 'text-[var(--warn)]' : 'text-neutral-400'}`}>
           <span className="font-semibold">{WAITING_LABEL[data.waiting_for.who]}.</span> {data.waiting_for.reason}
         </p>
       )}
 
       {data.hold && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-400/30 bg-amber-400/10">
-          <Hourglass className="w-4 h-4 text-amber-300 shrink-0" />
-          <span className="text-xs text-amber-100 flex-1">Tier 2: it completes in {countdown(data.hold.release_at, nowMs)} unless you veto it.</span>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/20 bg-white/5">
+          <Hourglass className="w-4 h-4 text-[var(--warn)] shrink-0" />
+          <span className="text-xs text-neutral-100 flex-1">Tier 2: it completes in {countdown(data.hold.release_at, nowMs)} unless you veto it.</span>
           <button type="button" disabled={busy} onClick={onVeto} className="hq-btn-ghost !h-9 !px-3 !text-xs disabled:opacity-40">
             <Undo2 className="w-3.5 h-3.5" />
             Veto

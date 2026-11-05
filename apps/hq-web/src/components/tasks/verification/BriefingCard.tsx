@@ -24,7 +24,7 @@ interface ViewProps {
 }
 
 function Heading({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">{children}</h3>
+  return <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">{children}</h3>
 }
 
 /**
@@ -42,7 +42,7 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
         <h2 className="text-sm font-semibold text-white" style={{ fontFamily: 'var(--font-heading)' }}>
           While you were away
         </h2>
-        <span className="text-[11px] text-neutral-500">last {BRIEFING_HOURS} hours</span>
+        <span className="text-xs text-neutral-500">last {BRIEFING_HOURS} hours</span>
       </div>
 
       {b.mode === 'shadow' && (
@@ -63,7 +63,7 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
               Plan a sweep
             </button>
           ) : (
-            <p className="text-[11px] text-amber-200/80">
+            <p className="text-xs text-amber-200/80">
               Open <Link to="/tasks" className="underline">Tasks</Link> to plan it, or run <code>{b.bulk_offer.command}</code>.
             </p>
           )}
@@ -82,7 +82,7 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
                   <span className="block text-xs text-neutral-100 truncate">
                     <span className="font-semibold">{i.display_id}</span> {i.title}
                   </span>
-                  <span className="block text-[11px] text-neutral-400 truncate">{i.reason}</span>
+                  <span className="block text-xs text-neutral-400 truncate">{i.reason}</span>
                 </button>
               </li>
             ))}
@@ -101,7 +101,7 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
                   <span className="block text-xs text-neutral-200 truncate">
                     <span className="font-semibold">{w.display_id}</span> {w.title}
                   </span>
-                  <span className="block text-[11px] text-amber-200/80">completes in {countdown(w.release_at, nowMs)}</span>
+                  <span className="block text-xs text-amber-200/80">completes in {countdown(w.release_at, nowMs)}</span>
                 </span>
                 {onVeto && (
                   <button
@@ -148,7 +148,7 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
                 {r.last_finding ? <span className="text-neutral-500"> · {r.last_finding}</span> : null}
               </li>
             ))}
-            {b.reworked_total > REWORKED_SHOWN && <li className="text-[11px] text-neutral-500">and {b.reworked_total - REWORKED_SHOWN} more</li>}
+            {b.reworked_total > REWORKED_SHOWN && <li className="text-xs text-neutral-500">and {b.reworked_total - REWORKED_SHOWN} more</li>}
           </ul>
         </div>
       )}

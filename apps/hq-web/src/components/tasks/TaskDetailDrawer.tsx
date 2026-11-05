@@ -31,7 +31,7 @@ interface Props {
 }
 
 const DATE_INPUT_CLASS =
-  'px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
+  'px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white'
 
 export function TaskDetailDrawer({
   task,
@@ -124,20 +124,20 @@ export function TaskDetailDrawer({
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-neutral-500">{task.display_id}</span>
+              <span className="text-xs font-bold text-neutral-500">{task.display_id}</span>
               {task.priority && (
-                <span className="text-[11px] font-semibold uppercase text-amber-400">
+                <span className="text-xs font-semibold uppercase text-[var(--warn)]">
                   {task.priority}
                 </span>
               )}
-              {task.long_horizon && <span className="text-[11px] text-neutral-400">long running</span>}
-              {stale && <span className="text-[11px] text-neutral-400" title="Nobody holds it and nothing has changed for a while">stale</span>}
+              {task.long_horizon && <span className="text-xs text-neutral-400">long running</span>}
+              {stale && <span className="text-xs text-neutral-400" title="Nobody holds it and nothing has changed for a while">stale</span>}
             </div>
             {editing ? (
               <input
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
-                className="text-base font-semibold text-white bg-transparent border-b border-white/20 focus:outline-none focus:border-emerald-400 mt-1 w-full"
+                className="text-base font-semibold text-white bg-transparent border-b border-white/20 focus:outline-none focus:border-white mt-1 w-full"
               />
             ) : (
               <h2 className="text-base font-semibold text-white mt-1 break-words">{task.title}</h2>
@@ -150,7 +150,7 @@ export function TaskDetailDrawer({
                   type="button"
                   onClick={handleSaveEdit}
                   disabled={busy || isInvalidEstimate(draftEstimate)}
-                  className="p-1.5 rounded-lg text-emerald-400 hover:bg-white/10 transition-colors disabled:opacity-50"
+                  className="p-1.5 rounded-lg text-white hover:bg-white/10 transition-colors disabled:opacity-50"
                   title="Save"
                 >
                   <Check className="w-4 h-4" />
@@ -178,7 +178,7 @@ export function TaskDetailDrawer({
               type="button"
               onClick={handleDeleteClick}
               disabled={busy}
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-white/10 transition-colors disabled:opacity-50"
+              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
               title="Delete"
             >
               <Trash2 className="w-4 h-4" />
@@ -194,8 +194,8 @@ export function TaskDetailDrawer({
         </div>
 
         {confirmingDelete && (
-          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-rose-500/20 bg-rose-500/10">
-            <span className="text-xs text-rose-300">
+          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b hq-tone-warn bg-white/5">
+            <span className="text-xs hq-tone-warn border-0">
               Delete {task.display_id} and its {task.subtask_count} sub-task{task.subtask_count === 1 ? '' : 's'}?
             </span>
             <div className="flex items-center gap-2 shrink-0">
@@ -203,7 +203,7 @@ export function TaskDetailDrawer({
                 type="button"
                 onClick={() => onDelete(task.id, true)}
                 disabled={busy}
-                className="px-3 py-1 rounded-lg text-xs font-semibold text-rose-300 border border-rose-500/40 hover:bg-rose-500/20 disabled:opacity-50"
+                className="px-3 py-1 rounded-lg text-xs font-semibold border hq-tone-warn hover:bg-white/10 disabled:opacity-50"
               >
                 Delete all
               </button>
@@ -240,7 +240,7 @@ export function TaskDetailDrawer({
           <button
             type="button"
             onClick={() => onSelectTask(parent.id)}
-            className="flex items-center gap-1.5 px-6 py-2 border-b border-white/10 text-left text-[11px] text-neutral-400 hover:text-white"
+            className="flex items-center gap-1.5 px-6 py-2 border-b border-white/10 text-left text-xs text-neutral-400 hover:text-white"
           >
             <CornerLeftUp className="w-3 h-3 shrink-0" />
             Sub-task of <span className="text-neutral-500">{parent.display_id}</span>
@@ -258,7 +258,7 @@ export function TaskDetailDrawer({
               onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:cursor-default ${
                 status === task.status
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                  ? 'bg-transparent border hq-tone-ink'
                   : 'bg-white/5 text-neutral-400 border border-white/10 hover:text-white hover:border-white/20'
               }`}
             >
@@ -276,7 +276,7 @@ export function TaskDetailDrawer({
                 value={draftDescription}
                 onChange={(e) => setDraftDescription(e.target.value)}
                 rows={5}
-                className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-200 border bg-black/30 focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"
+                className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-200 border bg-black/30 focus:outline-none focus:ring-1 focus:ring-white resize-none"
                 style={{ borderColor: 'rgba(255,255,255,0.1)' }}
               />
             ) : task.description ? (
@@ -297,9 +297,9 @@ export function TaskDetailDrawer({
                   type="button"
                   disabled={busy}
                   onClick={() => onUpdate(task.id, { priority: p === task.priority ? null : p })}
-                  className={`px-3 py-1 rounded-lg text-[11px] font-semibold uppercase transition-all ${
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold uppercase transition-all ${
                     p === task.priority
-                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                      ? 'bg-transparent border hq-tone-warn'
                       : 'bg-white/5 text-neutral-500 border border-white/10 hover:text-neutral-300'
                   }`}
                 >
@@ -336,7 +336,7 @@ export function TaskDetailDrawer({
                       onChange={(e) => setDraftReason(e.target.value)}
                       maxLength={500}
                       placeholder="what is in the way"
-                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                       style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                     />
                   </div>
@@ -347,7 +347,7 @@ export function TaskDetailDrawer({
                       onChange={(e) => setDraftWaiting(e.target.value)}
                       maxLength={500}
                       placeholder="a person, a task, an outside thing"
-                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                       style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                     />
                   </div>
@@ -363,7 +363,7 @@ export function TaskDetailDrawer({
                   value={draftAssignees}
                   onChange={(e) => setDraftAssignees(e.target.value)}
                   placeholder="hq, reviewer"
-                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                   style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                 />
               </div>
@@ -373,7 +373,7 @@ export function TaskDetailDrawer({
                   value={draftTags}
                   onChange={(e) => setDraftTags(e.target.value)}
                   placeholder="hq, backend, infra"
-                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                   style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                 />
               </div>
@@ -381,10 +381,10 @@ export function TaskDetailDrawer({
           )}
 
           {!editing && task.status === 'blocked' && (task.blocked_reason || task.waiting_on) && (
-            <div className="px-3 py-2 rounded-xl border border-rose-500/20 bg-rose-500/5 text-xs text-neutral-200 space-y-0.5">
+            <div className="px-3 py-2 rounded-xl border hq-tone-warn bg-white/5 text-xs text-neutral-200 space-y-0.5">
               {task.blocked_reason && <p className="break-words">Blocked: {task.blocked_reason}</p>}
               {task.waiting_on && <p className="break-words text-neutral-400">Waiting on {task.waiting_on}</p>}
-              {task.blocked_since && <p className="text-[11px] text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
+              {task.blocked_since && <p className="text-xs text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
             </div>
           )}
 

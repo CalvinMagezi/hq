@@ -58,28 +58,28 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
     <section
       aria-label="This agent is waiting for you"
       className="sticky bottom-0 shrink-0 hq-composer border-t px-3 py-3 space-y-2"
-      style={{ borderColor: 'var(--accent-amber)' }}
+      style={{ borderColor: 'var(--warn)' }}
     >
-      <h3 className="text-sm font-semibold" style={{ color: 'var(--accent-amber)' }}>
+      <h3 className="text-sm font-semibold" style={{ color: 'var(--warn)' }}>
         This agent is waiting for you
       </h3>
       {read ? (
         <DialogAnswer sessionId={session.id} dialog={read.dialog} seq={read.seq} onSent={onSent} />
       ) : (
         <>
-          <p className="text-[11px] text-neutral-400">{EXPLAIN[kind]}</p>
+          <p className="text-xs text-neutral-400">{EXPLAIN[kind]}</p>
           {tail && (
-            <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">
+            <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-xs leading-snug text-neutral-200 whitespace-pre-wrap break-words">
               {tail}
             </pre>
           )}
           {kind === 'approval' && (
             <div className="flex items-center gap-2">
-              <button type="button" disabled={held} onClick={() => answer('enter')} className={BIG_BUTTON_CLASS} style={{ color: 'var(--accent-green)' }}>
+              <button type="button" disabled={held} onClick={() => answer('enter')} className={BIG_BUTTON_CLASS} >
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />}
                 Approve
               </button>
-              <button type="button" disabled={held} onClick={() => answer('esc')} className={BIG_BUTTON_CLASS} style={{ color: 'var(--accent-red)' }}>
+              <button type="button" disabled={held} onClick={() => answer('esc')} className={BIG_BUTTON_CLASS} >
                 Decline
               </button>
             </div>
@@ -117,14 +117,14 @@ function DialogAnswer({ sessionId, dialog, seq, onSent }: { sessionId: string; d
   const { answer, busy, error } = useAnswer(sessionId, onSent)
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-neutral-400">{ASKS[dialog.kind]}</p>
+      <p className="text-xs text-neutral-400">{ASKS[dialog.kind]}</p>
       {dialog.question && <p className="text-sm text-neutral-100 break-words">{dialog.question}</p>}
       {dialog.command && (
-        <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">
+        <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-xs leading-snug text-neutral-200 whitespace-pre-wrap break-words">
           {dialog.command}
         </pre>
       )}
-      {dialog.truncated && <p className="text-[11px] text-neutral-500">Shortened here. The whole text is on the agent's screen.</p>}
+      {dialog.truncated && <p className="text-xs text-neutral-500">Shortened here. The whole text is on the agent's screen.</p>}
       <div className="flex flex-col gap-2">
         {tappableOptions(dialog).map((o) => (
           <button
@@ -133,13 +133,13 @@ function DialogAnswer({ sessionId, dialog, seq, onSent }: { sessionId: string; d
             disabled={busy}
             onClick={() => void answer({ seq, option: o.id })}
             className={OPTION_CLASS}
-            style={o.remember ? { color: 'var(--accent-amber)' } : undefined}
+            style={o.remember ? { color: 'var(--warn)' } : undefined}
           >
             <span className="flex items-center gap-2">
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               {o.label}
             </span>
-            {o.remember && <span className="text-[10px] font-normal text-neutral-400">It will not ask about this again</span>}
+            {o.remember && <span className="text-xs font-normal text-neutral-400">It will not ask about this again</span>}
           </button>
         ))}
         <button
@@ -147,7 +147,7 @@ function DialogAnswer({ sessionId, dialog, seq, onSent }: { sessionId: string; d
           disabled={busy}
           onClick={() => void answer({ seq, decline: true })}
           className={OPTION_CLASS}
-          style={{ color: 'var(--accent-red)' }}
+          
         >
           Decline
         </button>

@@ -28,7 +28,7 @@ export function VerificationBarView({ status, healthOpen, onToggleHealth, onVeri
           <ShieldCheck className={`w-4 h-4 shrink-0 ${watching ? 'text-amber-300' : 'text-emerald-400'}`} />
           <span className="text-xs font-semibold text-white">Verification</span>
           {watching && (
-            <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-amber-400/15 text-amber-300" title="Verdicts are recorded and nothing is moved">
+            <span className="text-xs px-1.5 py-0.5 rounded-md bg-amber-400/15 text-amber-300" title="Verdicts are recorded and nothing is moved">
               watching only
             </span>
           )}

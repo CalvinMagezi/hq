@@ -3,15 +3,9 @@ import { EyeOff, Loader2, Terminal } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { STATUS_LABELS, parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
-import type { AgentStatus, WatchedSession } from '~/lib/sessionsApi'
+import type { WatchedSession } from '~/lib/sessionsApi'
 import { STATUS_BADGE_CLASS } from '../tasks/TaskCard'
-
-export const AGENT_STATUS_CLASS: Record<AgentStatus, string> = {
-  idle: 'text-neutral-400',
-  working: 'text-blue-400',
-  blocked: 'text-rose-400',
-  done: 'text-emerald-400',
-}
+import { HelperPill } from '../sessions/SessionRow'
 
 const DRIVE_HINT = "HQ answers the agent and approves its prompts toward the task's goal"
 
@@ -28,7 +22,7 @@ interface Props {
 export function SessionsPanel({ sessions, busy, onDrive, onUnwatch }: Props) {
   return (
     <div className="border-b border-white/10 bg-neutral-900/60 shrink-0 max-h-[50dvh] overflow-y-auto overscroll-contain">
-      <p className="sm:hidden px-3 pt-2 text-[11px] text-neutral-500">Drive: {DRIVE_HINT}.</p>
+      <p className="sm:hidden px-3 pt-2 text-xs text-neutral-500">Drive: {DRIVE_HINT}.</p>
       <ul className="max-w-4xl mx-auto" aria-label="Watched coding-agent sessions">
         {sessions.map((s) => (
           <SessionRow
@@ -79,12 +73,12 @@ function SessionRow({ session: s, busy, onDrive, onUnwatch }: RowProps) {
       <StatusLine session={s} />
       <DriveSwitch drive={s.drive} busy={busy} onChange={onDrive} />
       {!s.drive && s.drive_off_reason && (
-        <p className="mt-1 text-[11px]" style={{ color: 'var(--accent-amber)' }}>
+        <p className="mt-1 text-xs" style={{ color: 'var(--warn)' }}>
           Drive switched off: {s.drive_off_reason}
         </p>
       )}
       {!s.drive && s.drive_blocked_by.length > 0 && (
-        <p className="mt-1 text-[11px]" style={{ color: 'var(--accent-amber)' }}>
+        <p className="mt-1 text-xs" style={{ color: 'var(--warn)' }}>
           HQ only observes until: {s.drive_blocked_by.join('; ')}.
         </p>
       )}
@@ -107,7 +101,7 @@ function TaskLine({ task }: { task: NonNullable<WatchedSession['task']> }) {
     >
       <span className="text-neutral-500 shrink-0">{task.display_id}</span>
       <span className="min-w-0 line-clamp-2 sm:line-clamp-1">{task.title}</span>
-      <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
+      <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
         {STATUS_LABELS[task.status]}
       </span>
     </Link>
@@ -140,8 +134,7 @@ function StatusLine({ session: s }: { session: WatchedSession }) {
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-neutral-500">
       <span className="sm:hidden">{s.host}</span>
-      {s.status !== 'running' && <span style={{ color: 'var(--accent-amber)' }}>{s.status}</span>}
-      {s.agent_status && <span className={AGENT_STATUS_CLASS[s.agent_status]}>{s.agent_status}</span>}
+      <HelperPill session={s} />
       {seen && <span>seen {seen}</span>}
       {s.pending_wake && <span>wake pending: {s.pending_wake}</span>}
       {driven && <span>driven {driven}</span>}
@@ -159,14 +152,14 @@ function DriveSwitch({ drive, busy, onChange }: { drive: boolean; busy: boolean;
         onClick={() => onChange(!drive)}
         disabled={busy}
         className={`flex items-center gap-1.5 h-11 sm:h-8 px-3 sm:px-2 rounded border shrink-0 disabled:opacity-50 ${
-          drive ? 'border-emerald-400/60 text-emerald-400 bg-white/5' : 'border-white/10 text-neutral-400 hover:text-white hover:bg-white/5'
+          drive ? 'hq-chip-on' : 'border-white/10 text-neutral-400 hover:text-white hover:bg-white/5'
         }`}
         title={DRIVE_HINT}
       >
-        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span className={`w-2 h-2 rounded-full ${drive ? 'bg-emerald-400' : 'bg-neutral-500'}`} />}
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span className={`w-2 h-2 rounded-full ${drive ? 'bg-white' : 'bg-neutral-500'}`} />}
         Drive {drive ? 'on' : 'off'}
       </button>
-      <span className="hidden sm:inline text-[11px] text-neutral-500">{DRIVE_HINT}</span>
+      <span className="hidden sm:inline text-xs text-neutral-500">{DRIVE_HINT}</span>
     </div>
   )
 }

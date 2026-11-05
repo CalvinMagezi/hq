@@ -11,7 +11,7 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { CACHE_BUSTER, CACHE_MAX_AGE_MS, queryClient, queryPersister } from '~/lib/offlineCache'
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { MessageSquare, Search, Settings } from 'lucide-react'
+import { MessageSquare, MoreHorizontal, Search, Settings } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
 import { SearchOverlay } from '~/components/SearchOverlay'
@@ -20,15 +20,16 @@ import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { InstallPrompt } from '~/components/InstallPrompt'
 import { SignedOutView, SignInPrompt } from '~/components/SignInPrompt'
-import { StatusLine } from '~/components/StatusLine'
+import { BalanceChip, HeaderTitle, placeFact, placeTitle } from '~/components/StatusLine'
+import { SavedStrip } from '~/components/SavedStrip'
 import { ConnectionSheet } from '~/components/ConnectionSheet'
-import { useConnection } from '~/lib/connection'
+import { useConnection, type ConnectionState } from '~/lib/connection'
 import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
-import { HeaderClock } from '~/components/HeaderClock'
 import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
 import alignedCss from '~/styles/aligned-ui.css?url'
 import appCss from '../../app.css?url'
+import { t } from '~/strings'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
@@ -116,7 +117,8 @@ function SetupRedirect() {
   return null
 }
 
-function CopilotChip() {
+/** The balance or limit chip's words and its tone, or null when there is nothing to say. */
+function useChip() {
   // A plain effect, not useQuery: a query hook in the root shell kept the build's prerender from
   // exiting, and effects never run there.
   const [data, setData] = useState<CopilotUsage | undefined>(undefined)
@@ -147,15 +149,41 @@ function CopilotChip() {
   const budgetLabel = budgetChipLabel(budgets)
   const label = budgetLabel ?? copilotLabel ?? openrouterChipLabel(openrouter)
   const title = budgetLabel ? budgetChipTitle(budgets) : copilotLabel ? chipTitle(data) : openrouterChipTitle(openrouter)
-  if (!label) return null
+  return { label, title, limit: Boolean(budgetLabel), to: budgetLabel ? ('/usage' as const) : ('/settings' as const) }
+}
+
+function CopilotChip({ state, chip }: { state: ConnectionState; chip: ReturnType<typeof useChip> }) {
   return (
-    <Link
-      to={budgetLabel ? '/usage' : '/settings'}
-      title={title}
-      className="hidden min-[400px]:inline px-2 py-0.5 rounded-md border border-white/10 text-[10px] font-mono text-neutral-400 hover:text-neutral-100 hover:bg-white/5 whitespace-nowrap"
-    >
-      {label}
+    <Link to={chip.to} className="hq-chip-link">
+      <BalanceChip state={state} label={chip.label} title={chip.title} limit={chip.limit} />
     </Link>
+  )
+}
+
+/** Search, the balance and Settings in one menu on the narrowest phones. */
+function MoreMenu({ state, chip }: { state: ConnectionState; chip: ReturnType<typeof useChip> }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="hq-more">
+      <button type="button" className="a-ib" aria-label={t('more_menu')} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {open && (
+        <div className="a-menu hq-more-menu" role="menu">
+          <button type="button" role="menuitem" className="a-menu-item" onClick={() => { setOpen(false); window.dispatchEvent(new Event('hq:open-search')) }}>
+            {t('more_search')}
+          </button>
+          {state === 'connected' && chip.label && (
+            <Link to={chip.to} role="menuitem" className="a-menu-item" onClick={() => setOpen(false)}>
+              {t('more_spending', { balance: chip.label })}
+            </Link>
+          )}
+          <Link to="/settings" role="menuitem" className="a-menu-item" onClick={() => setOpen(false)}>
+            {t('place_settings')}
+          </Link>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -170,6 +198,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   const setSystemNotice = useHQStore((s) => s.setSystemNotice)
   const [sheetOpen, setSheetOpen] = useState(false)
   const connection = useConnection()
+  const chip = useChip()
+  const activeTasks = useHQStore((s) => s.tasks.filter((x) => x.status === 'in_progress').length)
   const statusLineRef = useRef<HTMLButtonElement>(null)
   const [swUpdateAvailable, setSwUpdateAvailable] = useState(false)
 
@@ -271,19 +301,10 @@ function VaultShell({ embedded }: { embedded: boolean }) {
       )}
 
       {!embedded && systemNotice && (
-        <div
-          className="flex items-center justify-between gap-3 px-4 py-2 text-sm relative z-10"
-          style={{ background: 'rgba(255,176,0,0.08)', borderBottom: '1px solid rgba(255,176,0,0.2)' }}
-        >
-          <span className="text-xs font-mono whitespace-pre-line" style={{ color: 'var(--accent-amber)' }}>
-            {systemNotice}
-          </span>
-          <button
-            onClick={() => setSystemNotice(null)}
-            className="px-2 py-1 rounded-lg text-xs font-mono flex-shrink-0"
-            style={{ color: 'var(--text-dim)' }}
-          >
-            Dismiss
+        <div className="a-toast hq-toast" role="status">
+          <span className="whitespace-pre-line">{systemNotice}</span>
+          <button type="button" onClick={() => setSystemNotice(null)} className="hq-toast-action">
+            {t('toast_dismiss')}
           </button>
         </div>
       )}
@@ -308,7 +329,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
 
       {!embedded && <header
         className="flex-shrink-0 flex items-center gap-2 px-3 sticky top-0 z-30 hq-header"
-        style={{ height: '48px' }}
+        style={{ minHeight: '48px' }}
       >
         <Link
           to="/vault"
@@ -316,19 +337,23 @@ function VaultShell({ embedded }: { embedded: boolean }) {
         >
           <img src="/icons/hq-mark-96.png" alt="Agent HQ" width="28" height="28" className="flex-shrink-0 object-contain" />
           {/* Gives way on the narrowest phones so the clock always fits. */}
-          <span className="hidden min-[380px]:inline text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>
+          <span className="hidden min-[380px]:inline text-xs font-mono font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>
             HQ Vault
           </span>
         </Link>
 
-        <HeaderClock />
-
-        <div className="flex-1" />
+        <HeaderTitle
+          title={placeTitle(pathname)}
+          connection={connection}
+          fact={placeFact(pathname, { activeTasks, workingHelpers: 0 })}
+          onClick={() => setSheetOpen(true)}
+          buttonRef={statusLineRef}
+        />
 
         <button
           type="button"
           onClick={() => window.dispatchEvent(new Event('hq:open-search'))}
-          className="p-1.5 rounded-lg text-neutral-400 hover:bg-white/5 transition-all"
+          className="hq-header-search p-1.5 rounded-lg text-neutral-400 hover:bg-white/5 transition-all"
           title="Search vault (Cmd+/)"
           aria-label="Search vault"
         >
@@ -338,23 +363,23 @@ function VaultShell({ embedded }: { embedded: boolean }) {
         <button
           type="button"
           onClick={() => setGlobalChatOpen(true)}
-          className="relative p-1.5 rounded-lg text-neutral-400 hover:text-emerald-400 hover:bg-white/5 transition-all flex items-center gap-1.5 font-mono text-xs"
+          className="relative p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-all flex items-center gap-1.5 text-xs"
           title="Open chat (Cmd+K)"
         >
-          <MessageSquare className="w-4 h-4 text-emerald-400" />
-          <span className="hidden sm:inline text-[10px]">Overlay</span>
+          <MessageSquare className="w-4 h-4" />
+          <span className="hidden sm:inline">{t('place_chat')}</span>
           {chatUnreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-400 text-black font-bold text-[9px] flex items-center justify-center animate-bounce">
+            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full text-black font-bold text-xs flex items-center justify-center" style={{ background: 'var(--warn)' }}>
               {chatUnreadCount}
             </span>
           )}
         </button>
 
-        <CopilotChip />
+        <CopilotChip state={connection.state} chip={chip} />
 
         <Link
           to="/settings"
-          className="md:hidden p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-all"
+          className="hq-header-gear md:hidden p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-all"
           title="Settings"
           aria-label="Settings"
           activeProps={{ className: 'text-neutral-100 bg-white/5' }}
@@ -362,8 +387,10 @@ function VaultShell({ embedded }: { embedded: boolean }) {
           <Settings className="w-4 h-4" />
         </Link>
 
-        <StatusLine connection={connection} onClick={() => setSheetOpen(true)} buttonRef={statusLineRef} />
+        <MoreMenu state={connection.state} chip={chip} />
       </header>}
+
+      {!embedded && <SavedStrip state={connection.state} pathname={pathname} />}
 
       <main className="flex-1 min-h-0 overflow-hidden relative main-content md:mx-3 md:mb-3 md:rounded-2xl hq-glass-pane">
         {signInNeeded ? <SignedOutView pathname={pathname} embedded={embedded} /> : <Outlet />}
