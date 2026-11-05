@@ -68,13 +68,19 @@ pub fn openrouter_primary(config: &HqConfig) -> Option<&BackendEntry> {
     (primary.enabled && on_openrouter).then_some(primary)
 }
 
-/// API key for the OpenRouter primary backend: its `credential_env`, else the flat config key.
+/// API key for the OpenRouter primary backend: its `credential_env`, else the flat config key
+/// when the backend does not name a variable of its own.
 pub fn openrouter_key(config: &HqConfig, backend: &BackendEntry) -> Option<String> {
     backend
         .credential_env
         .as_deref()
         .and_then(|name| std::env::var(name).ok())
-        .or_else(|| config.openrouter_api_key.clone())
+        .or_else(|| {
+            backend
+                .may_use_config_key()
+                .then(|| config.openrouter_api_key.clone())
+                .flatten()
+        })
         .map(|k| k.trim().to_string())
         .filter(|k| !k.is_empty())
 }
@@ -119,5 +125,23 @@ mod tests {
         );
         assert!(openrouter_primary(&cfg(fallback)).is_none());
         assert!(openrouter_primary(&HqConfig::default()).is_none());
+    }
+
+    #[test]
+    fn a_named_openrouter_variable_that_is_unset_does_not_borrow_the_config_key() {
+        let with = |env: &str| {
+            let mut config = cfg(&format!(
+                "primary: a\nbackends:\n  - name: a\n    kind: openrouter\n{env}"
+            ));
+            config.openrouter_api_key = Some("config-key".into());
+            let backend = config.backends.backend("a").unwrap().clone();
+            openrouter_key(&config, &backend)
+        };
+        assert_eq!(with("").as_deref(), Some("config-key"));
+        assert_eq!(
+            with("    credential_env: OPENROUTER_API_KEY\n").as_deref(),
+            Some("config-key")
+        );
+        assert_eq!(with("    credential_env: HQ_TEST_UNSET_KEY_7B3E\n"), None);
     }
 }

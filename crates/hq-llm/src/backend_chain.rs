@@ -52,7 +52,8 @@ fn is_local_endpoint(endpoint: &str) -> bool {
 }
 
 /// Resolve an entry's credential: the named environment variable wins when
-/// set; otherwise the matching `HqConfig` key for the kind. Local
+/// set; otherwise the matching `HqConfig` key for the kind, unless the entry
+/// names a variable of its own ([`BackendEntry::may_use_config_key`]). Local
 /// OpenAI-compatible endpoints (Ollama and friends) accept any token, so they
 /// get a placeholder. Never writes to the environment.
 pub fn resolve_credential(entry: &BackendEntry, creds: &ConfigCredentials) -> Option<String> {
@@ -67,6 +68,7 @@ pub fn resolve_credential(entry: &BackendEntry, creds: &ConfigCredentials) -> Op
         return from_env;
     }
     let fallback = match entry.kind {
+        _ if !entry.may_use_config_key() => None,
         BackendKind::KimiCode => creds.kimi_code.clone(),
         BackendKind::Openrouter => creds.openrouter.clone(),
         BackendKind::AnthropicCompatible => creds.anthropic.clone(),
@@ -576,6 +578,72 @@ mod tests {
             message: "too long".into(),
         };
         assert!(!should_fail_over(&overflow.into()));
+    }
+
+    #[test]
+    fn a_backend_that_names_its_own_key_never_gets_the_generic_one() {
+        let creds = ConfigCredentials {
+            openai: Some("generic-openai-key".into()),
+            openrouter: Some("generic-openrouter-key".into()),
+            ..Default::default()
+        };
+        let entry = |kind, endpoint: &str, env: Option<&str>| BackendEntry {
+            name: "b".into(),
+            kind,
+            endpoint: Some(endpoint.into()),
+            credential_env: env.map(str::to_string),
+            model: Some("m".into()),
+            effort: None,
+            wire: WireApi::default(),
+            enabled: true,
+            unix_socket: None,
+        };
+        let unset = Some("HQ_TEST_UNSET_KEY_9C1D");
+        let remote = "https://api.example.test/v1";
+        let cases = [
+            (BackendKind::OpenaiCompatible, remote, unset, None),
+            (
+                BackendKind::OpenaiCompatible,
+                "http://127.0.0.1:47600/v1",
+                unset,
+                Some("local"),
+            ),
+            (
+                BackendKind::OpenaiCompatible,
+                "http://localhost/v1",
+                unset,
+                Some("local"),
+            ),
+            (BackendKind::Openrouter, remote, unset, None),
+            (
+                BackendKind::OpenaiCompatible,
+                remote,
+                None,
+                Some("generic-openai-key"),
+            ),
+            (
+                BackendKind::OpenaiCompatible,
+                remote,
+                Some("OPENAI_API_KEY"),
+                Some("generic-openai-key"),
+            ),
+            (
+                BackendKind::Openrouter,
+                remote,
+                Some("OPENROUTER_API_KEY"),
+                Some("generic-openrouter-key"),
+            ),
+            (
+                BackendKind::OpenaiCompatible,
+                remote,
+                Some(" "),
+                Some("generic-openai-key"),
+            ),
+        ];
+        for (kind, endpoint, env, want) in cases {
+            let got = resolve_credential(&entry(kind, endpoint, env), &creds);
+            assert_eq!(got.as_deref(), want, "{kind:?} {endpoint} {env:?}");
+        }
     }
 
     #[test]
