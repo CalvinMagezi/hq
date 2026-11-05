@@ -1,3 +1,4 @@
+import { Dialog } from '~/components/ui/Dialog'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { availableTimeZones, deviceTimeZone, readClock, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
@@ -100,21 +101,17 @@ export function DataUsedPage() {
 /** The stacked dialog behind Sign out this browser: it keeps nothing of HQ. */
 export function SignOutDialog({ onClose }: { onClose: () => void }) {
   return (
-    <div className="a-scrim" role="presentation">
-      <div className="a-dlg" role="alertdialog" aria-modal="true" aria-labelledby="signout-title">
-        <h2 id="signout-title" className="a-h2">
-          {t('signout_browser_title')}
-        </h2>
-        <p className="a-body">{t('signout_browser_body')}</p>
-        <div className="a-dlg-actions">
-          <button type="button" className="a-btn secondary" onClick={onClose} autoFocus>
-            {t('sign_out_device_keep')}
-          </button>
-          <button type="button" className="a-btn danger" onClick={() => { onClose(); refuseSignIn() }}>
-            {t('row_sign_out_browser')}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Dialog
+      kind="red"
+      title={t('signout_browser_title')}
+      body={t('signout_browser_body')}
+      keepLabel={t('sign_out_device_keep')}
+      actLabel={t('row_sign_out_browser')}
+      onKeep={onClose}
+      onAct={() => {
+        onClose()
+        refuseSignIn()
+      }}
+    />
   )
 }

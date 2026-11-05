@@ -21,6 +21,9 @@ import {
   type TaskUpdateResult,
   type UpdateTaskInput,
 } from '~/lib/tasksApi'
+import { toastUndo, toastAlert } from '~/lib/toast'
+import { Dialog } from '~/components/ui/Dialog'
+import { t, tn } from '~/strings'
 import { TaskListView, type ListSections } from '~/components/tasks/TaskListView'
 import { BulkActionBar } from '~/components/tasks/BulkActionBar'
 import { bulkMessage, failureNotice, runBulk, splitUnchanged, uniqueWarnings } from '~/components/tasks/bulk'
@@ -268,6 +271,8 @@ function TasksPage() {
     await loadTaxonomy()
   }
 
+  const [bulkDonePending, setBulkDonePending] = useState<TaskItem[] | null>(null)
+
   const withBusy = async (fn: () => Promise<void>, fallback: string) => {
     setBusy(true)
     try {
@@ -282,9 +287,18 @@ function TasksPage() {
 
   const handleUpdate = (id: string, patch: Record<string, unknown>) =>
     withBusy(async () => {
+      const previous = taskById.get(id)
       const task = await updateTaskClient(id, patch)
       upsertTask(task)
       showWarnings(task)
+      if (patch.status === 'complete' && previous && previous.status !== 'complete') {
+        toastUndo(
+          t('undo_done_task', { title: task.title }),
+          async () => upsertTask(await updateTaskClient(id, { status: previous.status, expected_status: 'complete' })),
+          t('restored_task'),
+          'undo.task_done',
+        )
+      }
     }, 'Update failed')
 
   // Optimistic writes for drag-and-drop: show the change at once, revert if the server refuses it.
@@ -321,12 +335,25 @@ function TasksPage() {
     }
   }
 
-  const handleDelete = (id: string, cascade: boolean) =>
+  const handleDelete = (id: string, cascade: boolean, purge = false) =>
     withBusy(async () => {
-      const res = await deleteTaskClient(id, cascade)
+      const res = await deleteTaskClient(id, cascade, purge)
       for (const deletedId of res.deleted_ids ?? [id]) removeTask(deletedId)
       setSelectedTaskId(null)
-    }, 'Delete failed')
+      if (purge) {
+        await archived.refresh()
+        return
+      }
+      toastUndo(
+        t('undo_task_archived'),
+        async () => {
+          upsertTask(await restoreTaskClient(id))
+          await archived.refresh()
+        },
+        t('restored_task'),
+        'undo.task_archived',
+      )
+    }, t('fail_archive_task_no_reply'))
 
   const handleRestore = (id: string) =>
     withBusy(async () => {
@@ -341,11 +368,11 @@ function TasksPage() {
     unchanged: number,
     patchFor: (task: TaskItem) => UpdateTaskInput,
     phrase: string
-  ) => {
+  ): Promise<TaskItem[]> => {
     setNotice(null)
     if (targets.length === 0) {
       setBulkResult(bulkMessage(0, 0, unchanged, phrase))
-      return
+      return []
     }
     setBulkResult(null)
     setBulkProgress({ settled: 0, total: targets.length })
@@ -365,10 +392,47 @@ function TasksPage() {
     const problems = [failureNotice(outcome.failed), ...uniqueWarnings(outcome.done.map((d) => d.value.warnings))]
     if (problems.some(Boolean)) setNotice(problems.filter(Boolean).join(' '))
     if (outcome.failed.some((f) => f.error instanceof HqHttpError && f.error.status === HTTP_CONFLICT)) loadTasks()
+    return outcome.done.map((d) => d.task)
+  }
+
+  // Marking many tasks done asks first (others may wait on them), then offers Undo for all of them.
+  const confirmBulkDone = async () => {
+    const targets = bulkDonePending ?? []
+    setBulkDonePending(null)
+    const before = new Map(targets.map((task) => [task.id, task.status]))
+    const done = await runBulkUpdate(
+      targets,
+      0,
+      (task) => ({ status: 'complete', expected_status: task.status }),
+      `moved to ${STATUS_LABELS.complete}`
+    )
+    if (done.length === 0) return
+    toastUndo(
+      t('bulk_done_line', { n: done.length }),
+      async () => {
+        const failed: TaskItem[] = []
+        for (const task of done) {
+          try {
+            upsertTask(await updateTaskClient(task.id, { status: before.get(task.id) ?? 'to_do', expected_status: 'complete' }))
+          } catch {
+            failed.push(task)
+          }
+        }
+        if (failed.length > 0) {
+          throw new Error(t('fail_change_some_tasks', { done: done.length - failed.length, task: failed[0].title }))
+        }
+      },
+      t('restored_task'),
+      'undo.task_done',
+    )
   }
 
   const handleBulkStatus = (status: TaskStatus) => {
     const { toChange, unchanged } = splitUnchanged(picking.selected, (t) => t.status === status)
+    if (status === 'complete' && toChange.length > 0) {
+      setBulkDonePending(toChange)
+      return Promise.resolve()
+    }
     return runBulkUpdate(
       toChange,
       unchanged,
@@ -517,6 +581,18 @@ function TasksPage() {
                   }
                 : undefined
             }
+          />
+        )}
+
+        {bulkDonePending && (
+          <Dialog
+            kind="ask"
+            title={t('bulk_done_title', { n: bulkDonePending.length })}
+            body={t('bulk_done_body_undo', { n: bulkDonePending.length })}
+            keepLabel={t('bulk_done_keep')}
+            actLabel={t('bulk_done_act', { n: bulkDonePending.length })}
+            onKeep={() => setBulkDonePending(null)}
+            onAct={() => void confirmBulkDone()}
           />
         )}
 

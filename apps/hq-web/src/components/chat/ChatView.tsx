@@ -4,6 +4,8 @@ import { Paperclip, PencilLine, X } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { useThreadStore, useLiveTurn, type ThreadMessage } from '~/store/threadStore'
 import { useWS } from '~/context/WebSocketContext'
+import { toastUndo, toastAlert } from '~/lib/toast'
+import { t } from '~/strings'
 import { threadApi, refreshThreads, loadMessages, newThread } from '~/lib/threadApi'
 import { rejectSend } from '~/lib/chatEvents'
 import { MAX_ATTACHMENTS, type ChatAttachment } from '~/lib/chatUploads'
@@ -150,8 +152,18 @@ export function ChatView({ active, onClose }: Props) {
       const next = useThreadStore.getState().threads.filter((t) => t.threadId !== id)
       useThreadStore.getState().setThreads(next)
       if (useThreadStore.getState().activeThreadId === id) setActiveThread(next[0]?.threadId ?? null)
+      toastUndo(
+        t('undo_chat_archived'),
+        async () => {
+          await threadApi.unarchiveThread(id)
+          await refreshThreads()
+        },
+        t('restored_chat'),
+        'undo.chat_archived',
+      )
     } catch (err) {
       console.error('ChatView: failed to archive chat', err)
+      toastAlert(t('fail_archive_chat_no_reply'))
     }
   }, [setActiveThread])
 

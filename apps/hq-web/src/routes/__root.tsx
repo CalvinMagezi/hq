@@ -24,6 +24,7 @@ import { BalanceChip, HeaderTitle, placeFact, placeTitle } from '~/components/St
 import { SavedStrip } from '~/components/SavedStrip'
 import { ConnectionSheet } from '~/components/ConnectionSheet'
 import { useConnection, type ConnectionState } from '~/lib/connection'
+import { ToastHost } from '~/components/ui/Toast'
 import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
 import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
@@ -40,7 +41,6 @@ import { syncPushSubscription } from '~/lib/webPush'
 import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
 import { EMBED_HEAD_SCRIPT, readEmbedFlag } from '~/lib/embedHost'
 
-const SYSTEM_NOTICE_DISMISS_MS = 6_000
 
 export const Route = createRootRoute({
   head: () => ({
@@ -192,10 +192,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   const setGlobalChatOpen = useHQStore((s) => s.setGlobalChatOpen)
   const chatUnreadCount = useHQStore((s) => s.chatUnreadCount)
   useNeedsYouCount()
-  const systemNotice = useHQStore((s) => s.systemNotice)
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const pathname = useRouterState({ select: (r) => r.location.pathname })
-  const setSystemNotice = useHQStore((s) => s.setSystemNotice)
   const [sheetOpen, setSheetOpen] = useState(false)
   const connection = useConnection()
   const chip = useChip()
@@ -267,12 +265,6 @@ function VaultShell({ embedded }: { embedded: boolean }) {
     }
   }, [])
 
-  useEffect(() => {
-    if (!systemNotice) return
-    const timer = window.setTimeout(() => setSystemNotice(null), SYSTEM_NOTICE_DISMISS_MS)
-    return () => window.clearTimeout(timer)
-  }, [systemNotice, setSystemNotice])
-
   const handleSwUpdate = async () => {
     const reg = await navigator.serviceWorker.ready
     reg.waiting?.postMessage({ type: 'SKIP_WAITING' })
@@ -300,14 +292,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
         </>
       )}
 
-      {!embedded && systemNotice && (
-        <div className="a-toast hq-toast" role="status">
-          <span className="whitespace-pre-line">{systemNotice}</span>
-          <button type="button" onClick={() => setSystemNotice(null)} className="hq-toast-action">
-            {t('toast_dismiss')}
-          </button>
-        </div>
-      )}
+      {!embedded && <ToastHost />}
 
       {!embedded && swUpdateAvailable && (
         <div

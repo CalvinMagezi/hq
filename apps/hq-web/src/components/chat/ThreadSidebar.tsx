@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, MessageSquare, Trash2, Search, X, Loader2 } from 'lucide-react'
+import { Plus, MessageSquare, Archive, Search, X, Loader2 } from 'lucide-react'
 import { useThreadStore } from '~/store/threadStore'
 import { relTime } from '~/lib/time'
 
@@ -108,7 +108,7 @@ export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen
                   className="opacity-0 group-hover:opacity-100 p-1 text-neutral-500 hover:text-red-400 transition-all"
                   title="Archive chat"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Archive className="w-3.5 h-3.5" />
                 </button>
               </div>
             )

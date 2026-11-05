@@ -1,3 +1,5 @@
+import { ApprovalCard } from '~/components/ui/ApprovalCard'
+import { t } from '~/strings'
 import { useRouter } from '@tanstack/react-router'
 import { X, CheckCircle2, XCircle, FileCode, Check, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import type { NotificationItem } from '~/lib/notificationsApi'
@@ -162,52 +164,17 @@ export function NotificationDetailDrawer({
             {dialog ? (
               <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
             ) : notification.kind === 'action_needed' ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleDismiss}
-                  disabled={loadingAction !== null}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-all disabled:opacity-50"
-                >
-                  {loadingAction === 'dismiss' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Dismiss'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleReject}
-                  disabled={loadingAction !== null}
-                  className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all disabled:opacity-50"
-                >
-                  {loadingAction === 'reject' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <XCircle className="w-4 h-4" />
-                      Reject
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleApprove}
-                  disabled={loadingAction !== null}
-                  className="px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
-                  style={{
-                    background: 'var(--accent-green, #00ffa3)',
-                    color: '#000',
-                  }}
-                >
-                  {loadingAction === 'approve' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      Approve & Promote
-                    </>
-                  )}
-                </button>
-              </>
+              <ApprovalCard
+                quoteTitle={t('approval_quote_inbox')}
+                tool={notification.metadata.approval?.tool}
+                args={notification.metadata.approval?.args}
+                inWords={notification.description}
+                loses={notification.metadata.approval?.loses}
+                verb={notification.metadata.approval?.verb}
+                busy={loadingAction !== null}
+                onDecline={handleReject}
+                onAllow={handleApprove}
+              />
             ) : (
               <button
                 type="button"

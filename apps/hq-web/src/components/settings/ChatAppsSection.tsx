@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Loader2 } from 'lucide-react'
+import { Dialog } from '~/components/ui/Dialog'
+import { t } from '~/strings'
 import { relTime } from '~/lib/time'
 import {
   CHAT_APPS_QUERY_KEY,
@@ -310,12 +312,14 @@ function ChatAppCard({ platform, data, restarter }: CardProps) {
   const applyChange = async (canRestart: boolean) => {
     if (canRestart) await restarter.run()
   }
+  const [asking, setAsking] = useState<'disconnect' | 'unlink' | null>(null)
+  const appName = COPY[platform].title
   const disconnect = () => {
-    if (!window.confirm(`Disconnect the ${COPY[platform].title} bot from HQ?`)) return
+    setAsking(null)
     run(async () => applyChange((await disconnectChatApp(platform)).can_restart))
   }
   const startPairing = (replace: boolean) => {
-    if (replace && !window.confirm('The current owner loses access until the new account pairs. Continue?')) return
+    setAsking(null)
     run(async () => setPair(await pairChatApp(platform, replace)))
   }
   const recheck = () =>
@@ -342,15 +346,41 @@ function ChatAppCard({ platform, data, restarter }: CardProps) {
         </Line>
       )}
       {connected && platform === 'discord' && <DiscordInvite app={app} />}
-      {connected && data.writable && !pair && <OwnerLine platform={platform} app={app} busy={busy} onPair={startPairing} />}
+      {connected && data.writable && !pair && <OwnerLine platform={platform} app={app} busy={busy} onPair={(replace) => (replace ? setAsking('unlink') : startPairing(false))} />}
       {pair && <PairPanel platform={platform} pair={pair} onCancel={() => setPair(null)} />}
       {app.needs_restart && data.writable && <RestartLine data={data} restarter={restarter} />}
       {connected && editable && (
         <Line label="Disconnect">
-          <button type="button" className="hq-btn-ghost" disabled={busy} onClick={disconnect}>Disconnect</button>
+          <button type="button" className="hq-btn-ghost" disabled={busy} onClick={() => setAsking('disconnect')}>Disconnect</button>
         </Line>
       )}
       {error && <p role="alert" className="py-3 text-sm text-neutral-100 break-words border-t border-white/10">{error}</p>}
+      {asking === 'disconnect' && (
+        <Dialog
+          kind="red"
+          title={t('disconnect_app_title', { app: appName })}
+          body={t('disconnect_app_body', { app: appName })}
+          keepLabel={t('disconnect_app_keep', { app: appName })}
+          actLabel={t('disconnect_app_act', { app: appName })}
+          busyLabel={t('confirm_busy_disconnecting')}
+          busy={busy}
+          onKeep={() => setAsking(null)}
+          onAct={disconnect}
+        />
+      )}
+      {asking === 'unlink' && (
+        <Dialog
+          kind="red"
+          title={t('unlink_account_title', { app: appName })}
+          body={t('unlink_account_body', { app: appName })}
+          keepLabel={t('unlink_account_keep')}
+          actLabel={t('unlink_account_act')}
+          busyLabel={t('confirm_busy_unlinking')}
+          busy={busy}
+          onKeep={() => setAsking(null)}
+          onAct={() => startPairing(true)}
+        />
+      )}
     </div>
   )
 }

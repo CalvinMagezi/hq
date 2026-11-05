@@ -144,6 +144,10 @@ export const threadApi = {
 
   archiveThread: (threadId: string): Promise<void> =>
     hqJson(`/api/threads/${encodeURIComponent(threadId)}/archive`, 'POST'),
+
+  /** Puts an archived chat back (Undo). HQ answers 409 when it changed since. */
+  unarchiveThread: (threadId: string): Promise<void> =>
+    hqJson(`/api/threads/${encodeURIComponent(threadId)}/unarchive`, 'POST'),
 }
 
 /** Reload the chat list, and mark chats whose reply is still running on the server. */

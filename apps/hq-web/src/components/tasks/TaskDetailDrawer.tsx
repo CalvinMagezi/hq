@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Trash2, Pencil, Check, X as XIcon, CornerLeftUp } from 'lucide-react'
+import { X, Archive, Pencil, Check, X as XIcon, CornerLeftUp } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '~/lib/tasksApi'
 import { STATUS_LABELS, STATUS_ORDER } from '~/lib/tasksApi'
 import { TaskRelations } from './TaskRelations'
@@ -15,6 +15,8 @@ import { TaskVerification } from './verification/TaskVerification'
 import { useIsStale } from './staleContext'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
 import { formatLocalTime } from './timeFormat'
+import { Dialog } from '../ui/Dialog'
+import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
 interface Props {
@@ -24,7 +26,8 @@ interface Props {
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
   /** Brings an archived task back. */
   onRestore?: (id: string) => Promise<void>
-  onDelete: (id: string, cascade: boolean) => Promise<void>
+  /** Archives the task; `purge` deletes an archived one for good. */
+  onDelete: (id: string, cascade: boolean, purge?: boolean) => Promise<void>
   onSelectTask: (id: string) => void
   onCreateSubtask: (parent: TaskItem, title: string) => Promise<void>
   busy: boolean
@@ -106,8 +109,7 @@ export function TaskDetailDrawer({
   const parent = task.parent_task_id ? allTasks.find((t) => t.id === task.parent_task_id) : undefined
 
   const handleDeleteClick = () => {
-    if (task.subtask_count > 0) setConfirmingDelete(true)
-    else onDelete(task.id, false)
+    void onDelete(task.id, task.subtask_count > 0)
   }
 
   const content = (
@@ -179,9 +181,9 @@ export function TaskDetailDrawer({
               onClick={handleDeleteClick}
               disabled={busy}
               className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
-              title="Delete"
+              title={t('chat_archive')}
             >
-              <Trash2 className="w-4 h-4" />
+              <Archive className="w-4 h-4" />
             </button>}
             <button
               type="button"
@@ -194,28 +196,17 @@ export function TaskDetailDrawer({
         </div>
 
         {confirmingDelete && (
-          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b hq-tone-warn bg-white/5">
-            <span className="text-xs hq-tone-warn border-0">
-              Delete {task.display_id} and its {task.subtask_count} sub-task{task.subtask_count === 1 ? '' : 's'}?
-            </span>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => onDelete(task.id, true)}
-                disabled={busy}
-                className="px-3 py-1 rounded-lg text-xs font-semibold border hq-tone-warn hover:bg-white/10 disabled:opacity-50"
-              >
-                Delete all
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(false)}
-                className="px-3 py-1 rounded-lg text-xs text-neutral-400 hover:text-neutral-200"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <Dialog
+            kind="red"
+            title={t('delete_task_title')}
+            body={t('delete_task_body', { title: task.title })}
+            keepLabel={t('delete_task_keep')}
+            actLabel={t('delete_task_act')}
+            busyLabel={t('confirm_busy_deleting')}
+            busy={busy}
+            onKeep={() => setConfirmingDelete(false)}
+            onAct={() => void onDelete(task.id, true, true)}
+          />
         )}
 
         {archived && (
@@ -233,6 +224,15 @@ export function TaskDetailDrawer({
                 Restore
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={busy}
+              className="px-3 py-1 rounded-lg text-xs font-semibold border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
+              style={{ color: 'var(--accent-red)' }}
+            >
+              {t('delete_task_act')}
+            </button>
           </div>
         )}
 

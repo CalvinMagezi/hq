@@ -239,9 +239,11 @@ export async function updateTaskClient(id: string, input: UpdateTaskInput): Prom
 
 export async function deleteTaskClient(
   id: string,
-  cascade = false
+  cascade = false,
+  purge = false
 ): Promise<{ deleted: boolean; id: string; deleted_ids: string[] }> {
-  const qs = cascade ? '?cascade=true' : ''
+  const flags = [cascade && 'cascade=true', purge && 'purge=true'].filter(Boolean)
+  const qs = flags.length ? `?${flags.join('&')}` : ''
   return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(id)}${qs}`, { method: 'DELETE' }))
 }
 

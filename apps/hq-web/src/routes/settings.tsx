@@ -8,6 +8,7 @@ import { t, type StringKey } from '~/strings'
 import { CardSlot, useBackupStatus, useNotificationsOff } from '~/components/settings/CardSlot'
 import { NotificationsPage } from '~/components/settings/NotificationsPage'
 import { SettingsHome } from '~/components/settings/SettingsHome'
+import { Dialog } from '~/components/ui/Dialog'
 import { SignOutDialog } from '~/components/settings/BrowserSections'
 import { deviceTimeZone, useClockZone, zoneCity } from '~/lib/clock'
 import { readDataUsed, startDataCounter } from '~/lib/dataUsed'
@@ -33,7 +34,6 @@ import {
   SESSION_FOLDERS_QUERY_KEY,
   formatApprovedText,
   listSessionFolders,
-  revokeConfirmMessage,
   revokeSessionFolder,
   type FolderGrant,
 } from '~/lib/sessionFoldersApi'
@@ -249,11 +249,8 @@ export function SessionFoldersSection() {
   if (!data) return null
 
   const busy = act.isPending
-  const onRevoke = (grant: FolderGrant) => {
-    if (window.confirm(revokeConfirmMessage(grant.path, grant.host))) {
-      act.mutate(grant.id)
-    }
-  }
+  const [asking, setAsking] = useState<FolderGrant | null>(null)
+  const onRevoke = (grant: FolderGrant) => setAsking(grant)
 
   return (
     <Section id="session-folders" title={t('row_folders')}>
@@ -277,6 +274,21 @@ export function SessionFoldersSection() {
           </Row>
         ))
       )}
+      {asking && (
+        <Dialog
+          kind="red"
+          title={t('revoke_folder_title', { folder: folderName(asking.path) })}
+          body={t('revoke_folder_body', { host: asking.host, path: asking.path })}
+          keepLabel={t('revoke_folder_keep')}
+          actLabel={t('revoke_folder_act')}
+          busyLabel={t('confirm_busy_revoking')}
+          busy={busy}
+          onKeep={() => setAsking(null)}
+          onAct={() => {
+            act.mutate(asking.id, { onSettled: () => setAsking(null) })
+          }}
+        />
+      )}
       {act.error && (
         <Row label="Error" block>
           {act.error instanceof Error ? act.error.message : 'Could not revoke session folder.'}
@@ -288,6 +300,11 @@ export function SessionFoldersSection() {
 
 
 /** The settings HQ reports, for the pages that show them; an unreachable HQ shows the line and the saved values. */
+/** The last part of a folder path, the way the dialog names it. */
+function folderName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path
+}
+
 function useSettingsData() {
   return useQuery({ queryKey: ['settings'], queryFn: fetchSettings })
 }

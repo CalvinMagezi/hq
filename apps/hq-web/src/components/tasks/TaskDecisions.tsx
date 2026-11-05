@@ -1,3 +1,5 @@
+import { ApprovalCard } from '../ui/ApprovalCard'
+import { t } from '~/strings'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { answerDecision, fetchTaskDecisions, type TaskDecision } from '~/lib/taskDecisionsApi'
@@ -57,45 +59,22 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
         {ASKS[d.kind] ?? 'needs an answer'}
         {d.question ? `: ${d.question}` : ''}
       </p>
-      {d.command && (
-        <pre className="max-h-28 overflow-auto rounded bg-black/40 px-2 py-1 text-[11px] text-neutral-200 whitespace-pre-wrap break-words">
-          {d.command}
-        </pre>
-      )}
-      <div className="flex flex-wrap gap-2">
-        {d.approve && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void answer('approve')}
-            className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-xs font-semibold hover:bg-white/10 disabled:opacity-50"
-            style={{ color: 'var(--accent-green)' }}
-          >
-            Allow once
-          </button>
-        )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void answer('decline')}
-          className="h-8 px-3 rounded-lg border border-white/10 bg-white/5 text-xs font-semibold hover:bg-white/10 disabled:opacity-50"
-          style={{ color: 'var(--accent-red)' }}
-        >
-          Decline
-        </button>
-        <Link
-          to="/sessions"
-          search={{ id: d.session_id }}
-          className="h-8 px-3 inline-flex items-center rounded-lg border border-white/10 text-xs text-neutral-300 hover:bg-white/5"
-        >
-          Other answers
-        </Link>
-      </div>
-      {error && (
-        <p role="alert" className="text-[11px] text-rose-400">
-          {error}
-        </p>
-      )}
+      <ApprovalCard
+        quoteTitle={t('approval_quote_task', { helper: d.session_id })}
+        command={d.command}
+        loses={d.loses}
+        verb={d.verb}
+        canAllow={!!d.approve}
+        busy={busy}
+        error={error}
+        onDecline={() => void answer('decline')}
+        onAllow={() => void answer('approve')}
+        more={
+          <Link to="/sessions" search={{ id: d.session_id }} className="a-btn secondary">
+            {t('approval_other_answers')}
+          </Link>
+        }
+      />
     </li>
   )
 }
