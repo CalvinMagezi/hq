@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { fetchHello, type Hello, helloUpstreamGone, startingSeconds } from '~/lib/hello'
 import { UNREACHABLE_GRACE_MS, useDeviceOnline } from '~/lib/reachability'
-import { needsSignIn, onSignInChange } from '~/lib/hqAuth'
+import { hqJson, needsSignIn, onSignInChange } from '~/lib/hqAuth'
 import { useHQStore } from '~/store/hqStore'
 import { t } from '~/strings'
 
@@ -46,6 +46,9 @@ export interface UseConnectionResult extends ConnectionView {
 
 export const RETRY_SCHEDULE_SEC = [5, 10, 20] as const
 export const CONNECTED_POLL_MS = 20_000
+/** How often a signed-in page asks whether HQ's AI services answer (`/api/status/ai`). */
+export const AI_STATUS_POLL_MS = 60_000
+const AI_STATUS_URL = '/api/status/ai'
 
 // Gives the retry delay in seconds for unreachable backoff.
 export function retryDelaySec(attemptIndex: number): number {
@@ -160,6 +163,31 @@ export interface UseConnectionOptions {
   inHub?: boolean
 }
 
+/** Whether HQ says its AI services are not answering; asked only while `enabled` and the tab shows. */
+function useAiDown(enabled: boolean): boolean {
+  const [down, setDown] = useState(false)
+  useEffect(() => {
+    if (!enabled) {
+      setDown(false)
+      return undefined
+    }
+    let alive = true
+    const ask = () => {
+      if (typeof document !== 'undefined' && document.hidden) return
+      hqJson<{ answering: boolean }>(AI_STATUS_URL)
+        .then((r) => alive && setDown(!r.answering))
+        .catch(() => undefined)
+    }
+    ask()
+    const id = window.setInterval(ask, AI_STATUS_POLL_MS)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [enabled])
+  return down
+}
+
 export function useConnection(options?: UseConnectionOptions): UseConnectionResult {
   const online = useDeviceOnline()
   const socketOpen = useHQStore((s) => s.wsConnected)
@@ -179,7 +207,8 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const lite = hello?.edition === 'lite'
-  const aiDown = options?.aiDown ?? false
+  const polledAiDown = useAiDown(!status401 && hello !== null && hello.edition !== 'lite')
+  const aiDown = options?.aiDown ?? polledAiDown
   const proxyUpstreamGone = options?.proxyUpstreamGone ?? helloUpstreamGone()
   const inHub = options?.inHub ?? false
 

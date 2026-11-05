@@ -166,9 +166,89 @@ pub fn recent_seed_rows(conn: &Connection, window_secs: i64) -> Result<Vec<Outco
     Ok(rows)
 }
 
+/// How one AI service has answered HQ lately: its last good and last failed call, and the failure
+/// kind (a fixed class such as `rate_limit` or `auth`, never a prompt or an answer).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ServiceStatus {
+    pub provider: String,
+    pub last_ok_at: Option<i64>,
+    pub last_failed_at: Option<i64>,
+    pub failure: Option<String>,
+}
+
+impl ServiceStatus {
+    /// Its newest call within the window failed.
+    pub fn failing(&self) -> bool {
+        self.last_failed_at > self.last_ok_at
+    }
+}
+
+/// Every AI service HQ called in the last `window_secs`, newest first. A coding agent's own usage
+/// (`external_id`) and a call the person stopped are not HQ's AI service answering.
+pub fn service_status(conn: &Connection, window_secs: i64) -> Result<Vec<ServiceStatus>> {
+    let cutoff = current_epoch() - window_secs;
+    let mut stmt = conn.prepare(
+        "SELECT provider,
+                MAX(CASE WHEN success = 1 THEN recorded_at END),
+                MAX(CASE WHEN success = 0 THEN recorded_at END),
+                (SELECT f.error_class FROM task_outcomes f
+                   WHERE f.provider = o.provider AND f.success = 0 AND f.recorded_at >= ?1
+                     AND f.external_id IS NULL AND COALESCE(f.error_class, '') != 'cancelled'
+                   ORDER BY f.recorded_at DESC, f.id DESC LIMIT 1)
+         FROM task_outcomes o
+         WHERE recorded_at >= ?1 AND external_id IS NULL
+           AND COALESCE(error_class, '') != 'cancelled'
+         GROUP BY provider
+         ORDER BY MAX(recorded_at) DESC",
+    )?;
+    let rows = stmt
+        .query_map(params![cutoff], |r| {
+            Ok(ServiceStatus {
+                provider: r.get(0)?,
+                last_ok_at: r.get(1)?,
+                last_failed_at: r.get(2)?,
+                failure: r.get(3)?,
+            })
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+    Ok(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn service_status_names_the_last_good_and_failed_call_and_its_kind() {
+        let conn = setup();
+        let at = |provider: &str, ok: bool, class: Option<&str>, when: i64| {
+            let mut o = TaskOutcome::now("s", 0, "m", provider, "chat");
+            o.success = ok;
+            o.error_class = class.map(str::to_string);
+            o.recorded_at = when;
+            insert(&conn, &o).unwrap();
+        };
+        let now = current_epoch();
+        at("openrouter", true, None, now - 100);
+        at("openrouter", false, Some("rate_limit"), now - 10);
+        at("ollama", false, Some("network"), now - 50);
+        at("ollama", true, None, now - 5);
+        at("ollama", false, Some("cancelled"), now - 1);
+        let mut harness = TaskOutcome::now("s", 0, "m", "claude-code", "chat");
+        harness.success = false;
+        harness.external_id = Some("run-1".into());
+        insert(&conn, &harness).unwrap();
+
+        let status = service_status(&conn, 3600).unwrap();
+        let by = |p: &str| status.iter().find(|s| s.provider == p).cloned().unwrap();
+        assert!(by("openrouter").failing());
+        assert_eq!(by("openrouter").failure.as_deref(), Some("rate_limit"));
+        assert!(!by("ollama").failing(), "a stopped call is not a failure");
+        assert!(
+            status.iter().all(|s| s.provider != "claude-code"),
+            "a coding agent's own usage"
+        );
+    }
 
     fn setup() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
