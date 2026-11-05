@@ -25,7 +25,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import example.hq.spike.R
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
+import example.hq.spike.data.ConnectionWords
 import example.hq.spike.ui.firstrun.GreenPill
 import example.hq.spike.ui.firstrun.OutlinePill
 import example.hq.spike.ui.shell.HqIcons
@@ -54,19 +55,26 @@ data class ConnectionFacts(
 
 /** The Connection sheet (wave-2/04-startup.md frames 3 to 7): the state in words, the four steps while HQ starts, and the way out when it has stopped. */
 @Composable
-fun ConnectionSheet(status: HqStatus, facts: ConnectionFacts, actions: ConnectionActions, onClose: () -> Unit) {
+fun ConnectionSheet(status: Connection, facts: ConnectionFacts, actions: ConnectionActions, onClose: () -> Unit) {
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             Modifier.padding(16.dp).heightIn(max = 640.dp).clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             when (status) {
-                is HqStatus.Stopped -> StoppedBody(facts, actions)
-                is HqStatus.Starting -> StartingBody(status.step, status.seconds, status.usualSeconds, facts, actions, onClose)
-                is HqStatus.Restarting -> StartingBody(2, status.seconds, null, facts, actions, onClose)
-                else -> {
+                is Connection.Stopped -> StoppedBody(facts, actions)
+                is Connection.Starting -> StartingBody(status.step + 1, status.seconds, status.usualSeconds, facts, actions, onClose)
+                is Connection.Restarting -> StartingBody(2, status.seconds, null, facts, actions, onClose)
+                Connection.Connected -> {
                     Text(stringResource(R.string.state_connected), style = HqType.H2, color = Mts.Ink)
                     Text(stringResource(R.string.sheet_connected_body), style = HqType.BodySm, color = Mts.InkMuted)
+                    facts.savedAt?.let { Fact(R.string.conn_fact_saved, it) }
+                }
+                else -> {
+                    val words = ConnectionWords.of(status)
+                    Text(stringResource(words.res, *words.args.toTypedArray()), style = HqType.H2, color = Mts.Ink)
+                    ConnectionWords.reason(status)?.let { Text(stringResource(it), style = HqType.BodySm, color = Mts.InkMuted) }
+                    ConnectionWords.outcome(status, true)?.let { Text(stringResource(it), style = HqType.BodySm, color = Mts.InkMuted) }
                     facts.savedAt?.let { Fact(R.string.conn_fact_saved, it) }
                 }
             }

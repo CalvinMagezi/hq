@@ -10,7 +10,7 @@ import example.hq.spike.R
 import example.hq.spike.data.ChatConnection
 import example.hq.spike.data.StoredMessage
 import example.hq.spike.data.HqServices
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import example.hq.spike.download.DlState
@@ -57,7 +57,7 @@ class VoiceSession(
     private val app: Context,
     private val scope: CoroutineScope,
     private val connection: ChatConnection,
-    private val status: StateFlow<HqStatus> = HqServices.get(app).status,
+    private val status: StateFlow<Connection> = HqServices.get(app).status,
     private val handoff: VoiceHandoff = VoiceHandoff.get(app),
 ) {
     private val models = VoiceModels(app)
@@ -220,7 +220,7 @@ class VoiceSession(
     private suspend fun ask(question: String) {
         _state.update { it.copy(heard = question, reply = "", problem = null, needsOk = false) }
         if (!connection.connected.value) {
-            if (status.value is HqStatus.Stopped) return refuse(words.s(R.string.voice_fail_hq_stopped))
+            if (status.value is Connection.Stopped) return refuse(words.s(R.string.voice_fail_hq_stopped))
             _state.update { it.copy(phase = VoicePhase.WaitingForHq) }
             withTimeoutOrNull(WAIT_FOR_HQ_MS) { connection.connected.first { it } } ?: return refuse(words.s(R.string.voice_fail_no_reply))
         }

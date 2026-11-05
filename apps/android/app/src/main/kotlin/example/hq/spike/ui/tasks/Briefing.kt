@@ -45,7 +45,7 @@ data class BriefingUi(val initiativeId: String, val name: String, val phase: Bri
 /** The words of the briefing, kept as the web app says them so the two agree. */
 object BriefingWords {
     const val TITLE = "Briefing"
-    const val FAILED = "Could not load the briefing. HQ is not answering."
+    const val FAILED = "Couldn\'t load the briefing. HQ didn\'t answer in time. Try again."
     const val MISSING = "This edition of HQ has no briefings."
     const val NO_AUTHOR = "No one is on record as having written to these tasks."
     const val FOOTER = "Generated now. Status and ownership come from the task system only; a note edit is not progress."

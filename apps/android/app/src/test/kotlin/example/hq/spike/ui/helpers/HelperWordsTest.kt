@@ -436,8 +436,8 @@ class HelperWordsTest {
 
     @Test fun followInChatSaysWhyItFailed() {
         assertEquals("That helper is gone.", HelperWords.followFailed(404))
-        assertEquals("HQ is not answering.", HelperWords.followFailed(0))
-        assertEquals("HQ is not answering.", HelperWords.followFailed(503))
+        assertEquals("HQ didn't answer in time.", HelperWords.followFailed(0))
+        assertEquals("HQ didn't answer in time.", HelperWords.followFailed(503))
         assertEquals("Could not open the chat.", HelperWords.followFailed(500))
         assertEquals("Could not open the chat.", HelperWords.followFailed(null))
     }

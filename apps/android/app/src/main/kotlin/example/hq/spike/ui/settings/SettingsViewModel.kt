@@ -658,7 +658,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun newCode() = act("code", "Could not get a code. HQ is not answering.") {
+    private fun newCode() = act("code", "Couldn\'t get a code. HQ didn\'t answer in time. Try again.") {
         val o = client.postJson("/api/auth/device-code")
         val code = o.optString("code")
         if (code.isNotBlank()) _state.update { it.copy(deviceCode = DeviceCode(code, o.optLong("expires_at"))) }

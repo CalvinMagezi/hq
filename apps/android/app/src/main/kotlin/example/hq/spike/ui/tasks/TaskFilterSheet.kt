@@ -89,7 +89,7 @@ private fun FilterRows(ui: TasksUi, tree: TaskTree, actions: TasksActions) {
 
 object TaskFilterWords {
     const val READING = "Reading your spaces"
-    const val FAILED = "Could not read your spaces. HQ is not answering."
+    const val FAILED = "Couldn\'t read your spaces. HQ didn\'t answer in time. Try again."
 
     /** The bar's line on the All tab: how many open tasks the list shows. That it is filtered, and by what, is on the chip under the tabs and the green filter icon, so the line keeps room for Live. */
     fun bar(open: Int): String = "$open active"

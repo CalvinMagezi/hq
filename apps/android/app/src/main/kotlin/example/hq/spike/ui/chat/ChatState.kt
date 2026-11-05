@@ -142,6 +142,8 @@ data class NoteSheet(
     val truncated: Boolean,
     val savedAge: String?,
     val pinned: Boolean = false,
+    /** The note's hash when it was read, sent back with a save so HQ can tell it changed meanwhile. */
+    val hash: String? = null,
 )
 
 enum class ExportGroup(val label: String) { Document("Document"), Picture("Picture"), Tables("Tables in this note") }

@@ -37,26 +37,16 @@ fun notesFixture(name: String?): NotesUi? {
     """.trimIndent()
     val sheet = NoteSheet("Notebooks/Projects/Agent-HQ/Mobile-First-Roadmap.md", "Mobile-First-Roadmap", "Projects › Agent-HQ", body, false, null, pinned = true)
     val reader = ReaderPhase.Ready(sheet, "edited 1d ago")
-    val hits = listOf(
-        SearchHit("Notebooks/Projects/Agent-HQ/Mobile-First-Roadmap.md", "Mobile-First-Roadmap", "Projects", "…where AgentHQ goes from here. Workstream C: a native view… roadmap for the phone"),
-        SearchHit("Notebooks/Projects/Agent-HQ/Native-Bridge-Plan.md", "Native-Bridge-Plan", "Projects", "The bridge between the roadmap and the app."),
-        SearchHit("Notebooks/Inbox/Quick idea widget copy.md", "Quick idea: widget copy", "Inbox", "A roadmap item for later."),
-    )
     val longSheet = NoteSheet("Notebooks/Projects/Agent-HQ/Build-Plan-And-Cutover.md", "Build-Plan-And-Cutover", "Projects › Agent-HQ", longNote(), false, null)
     val longReader = ReaderPhase.Ready(longSheet, "edited 33m ago")
-    val realHits = (1..13).map { i ->
-        SearchHit("Notebooks/Projects/Agent-HQ/Design-Note-$i.md", "Design-Note-$i", "Projects", if (i == 1) "…reuse what is already built\nThe tunnel hub (hq0, hq net, the root applier, ufw) stays on the current droplet and carries the traffic until the cutover…" else if (i % 2 == 0) "…1. **What it is.** A userspace tunnel that runs inside the app, configured by `hq net`, with [[Private-Network-Plan]] as the source…" else "…a plan for the tunnel, see [the design](Design.md) and the **first test round** results…")
-    }
     return when (name) {
         "n-real-reader" -> home.copy(stack = listOf(NotesRoute.Reader(longSheet.path)), reader = longReader)
-        "n-real-search" -> home.copy(stack = listOf(NotesRoute.Search), search = SearchState("tunnel", realHits))
         "n-home" -> home
         "n-empty" -> NotesUi(loaded = true)
         "n-offline" -> NotesUi(loaded = true, offline = true)
         "n-reader" -> home.copy(stack = listOf(NotesRoute.Reader(sheet.path)), reader = reader)
         "n-menu" -> home.copy(stack = listOf(NotesRoute.Reader(sheet.path)), reader = reader, menu = true)
         "n-gone" -> home.copy(stack = listOf(NotesRoute.Reader("Notebooks/Projects/Old-plan.md")), reader = ReaderPhase.Gone)
-        "n-search" -> home.copy(stack = listOf(NotesRoute.Search), search = SearchState("roadmap", hits))
         "n-folder" -> home.copy(
             stack = listOf(NotesRoute.Folder("Notebooks/Projects/Agent-HQ")),
             folder = FolderView(

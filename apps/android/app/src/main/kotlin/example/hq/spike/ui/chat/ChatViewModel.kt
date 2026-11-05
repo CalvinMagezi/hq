@@ -16,7 +16,7 @@ import example.hq.spike.data.HqServices
 import example.hq.spike.ui.shell.ClientRestore
 import example.hq.spike.ui.shell.Undo
 import example.hq.spike.ui.shell.UndoKind
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.data.NoteNotFound
 import example.hq.spike.data.StoredMessage
@@ -135,7 +135,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         // hq may still be starting when the app opens; open the latest chat the first time it answers.
-        viewModelScope.launch { services.status.collect { if (it == HqStatus.Live && !frozen) openLatest() } }
+        viewModelScope.launch { services.status.collect { if (it == Connection.Connected && !frozen) openLatest() } }
     }
 
     /** Draws a fixed state and stops listening to hq, for checking the screen against the design on a phone with no hq. */
@@ -231,7 +231,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 old?.let(::archive)
                 refreshChats()
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Could not start the new chat. HQ is not answering.")) }
+                _state.update { it.copy(notice = Notice("Couldn\'t start the new chat. HQ didn\'t answer in time. Try again.")) }
             }
         }
     }
@@ -361,7 +361,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: NoteNotFound) {
                 _state.update { it.copy(openingNote = null, missingNotes = it.missingNotes + path, notice = Notice(NOTE_GONE)) }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(openingNote = null, notice = Notice("Could not open the note. HQ is not answering.")) }
+                _state.update { it.copy(openingNote = null, notice = Notice("Couldn\'t open the note. HQ didn\'t answer in time. Try again.")) }
             }
         }
     }
@@ -375,7 +375,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 client.setPinned(sheet.path, pin)
                 _state.update { s -> s.copy(note = s.note?.takeIf { it.path == sheet.path }?.copy(pinned = pin) ?: s.note, notice = Notice(if (pin) "Pinned to the top of Notes" else "Unpinned")) }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Could not change the pin. HQ is not answering.")) }
+                _state.update { it.copy(notice = Notice("Couldn\'t change the pin. HQ didn\'t answer in time. Try again.")) }
             }
         }
     }
@@ -398,7 +398,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                 app.startActivity(view)
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Could not fetch the file. HQ is not answering.")) }
+                _state.update { it.copy(notice = Notice("Couldn\'t fetch the file. HQ didn\'t answer in time. Try again.")) }
             } catch (e: ActivityNotFoundException) {
                 _state.update { it.copy(notice = Notice("No app on this phone can open that file.")) }
             }

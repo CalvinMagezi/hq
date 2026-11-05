@@ -45,7 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.stringResource
 import example.hq.spike.R
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import example.hq.spike.ui.shell.NothingYet
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -229,7 +229,7 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit, onStartHq: () -> Unit = {}
     val hq by remember { HqServices.get(context.applicationContext).status }.collectAsState()
     LaunchedEffect(page) { start(patient = true) }
     // A page that could not load comes by itself once HQ answers.
-    LaunchedEffect(hq) { if (hq == HqStatus.Live && failed && !renderGone) start(patient = true) }
+    LaunchedEffect(hq) { if (hq == Connection.Connected && failed && !renderGone) start(patient = true) }
     DisposableEffect(web) {
         // A new token (after "Sign out everywhere" or a recovery) is loaded in at once, so the page is not left signed out.
         val onNewToken = Runnable { web.post { start(patient = true, newToken = true) } }
@@ -266,8 +266,8 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit, onStartHq: () -> Unit = {}
             val pageName = stringResource(page.title)
             when {
                 renderGone && failed -> NothingYet(stringResource(R.string.web_render_gone), "", stringResource(R.string.web_try_again)) { start() }
-                hq is HqStatus.Stopped -> NothingYet(stringResource(R.string.web_opens_when_up, pageName), stringResource(R.string.web_wait_stopped), stringResource(R.string.web_start_hq), onStartHq)
-                hq is HqStatus.Starting || hq is HqStatus.Restarting -> NothingYet(stringResource(R.string.web_opens_when_up, pageName), stringResource(R.string.web_wait_starting))
+                hq is Connection.Stopped -> NothingYet(stringResource(R.string.web_opens_when_up, pageName), stringResource(R.string.web_wait_stopped), stringResource(R.string.web_start_hq), onStartHq)
+                hq is Connection.Starting || hq is Connection.Restarting -> NothingYet(stringResource(R.string.web_opens_when_up, pageName), stringResource(R.string.web_wait_starting))
                 failed -> NothingYet(stringResource(R.string.web_load_no_reply, pageName), "", stringResource(R.string.web_try_again)) { start() }
             }
         }

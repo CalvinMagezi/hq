@@ -29,6 +29,9 @@ data class ExportedFile(val file: java.io.File, val name: String, val mime: Stri
 /** hq answered, and the note is not there (or the path is not one it will serve). */
 class NoteNotFound(path: String) : IOException("No note at $path")
 
+/** HQ refused a save because the note changed after it was opened; [theirsHash] is what it is now. */
+class NoteChanged(val theirsHash: String?, val by: String?, val at: String?) : IOException("The note changed somewhere else")
+
 /** The same REST and web socket API the web app uses, over loopback. Auth is the sealed web token. */
 class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ, private val onSignedOut: () -> Unit = {}, private val callSeconds: Long = 0) {
     /** The sealed token is decrypted once, off the main thread, and forgotten when hq refuses it. */
@@ -52,6 +55,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         } catch (e: IOException) {
             false
         }
+    }
+
+    /** The AI service state from HQ's signed-in route, never `/health`; null when HQ does not answer it (an older HQ, or down). */
+    suspend fun aiStatus(): AiStatus? = try {
+        send(authed("/api/status/ai").build()) { AiStatus.parse(it) }
+    } catch (e: HqUnavailable) {
+        null
     }
 
     /** HQ's own time zone, from the open /api/hello route; null when HQ does not answer or names no zone. */
@@ -95,7 +105,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                 if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note", status = r.code)
                 val o = JSONObject(r.body.string())
                 if (o.optBoolean("isDir", false)) throw NoteNotFound(path)
-                NoteBody(o.optString("path", path), o.optString("content", ""), o.optBoolean("truncated", false))
+                NoteBody(o.optString("path", path), o.optString("content", ""), o.optBoolean("truncated", false), o.optString("hash", "").ifBlank { null })
             }
         } catch (e: IOException) {
             throw if (e is HqUnavailable || e is NoteNotFound) e else HqUnavailable("hq is not reachable", e)
@@ -517,8 +527,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** Full-text matches with a snippet of the text around the match. */
     data class NoteHit(val path: String, val title: String, val notebook: String, val snippet: String)
 
-    suspend fun searchNoteHits(query: String, limit: Int = 30): List<NoteHit> =
-        send(authed("/api/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=$limit").build()) { text ->
+    /** [folder] narrows the search to that notes folder and the ones inside it; HQ filters before it cuts to [limit]. */
+    suspend fun searchNoteHits(query: String, limit: Int = 30, folder: String? = null): List<NoteHit> =
+        send(authed("/api/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=$limit" + (folder?.let { "&folder=" + java.net.URLEncoder.encode(it, "UTF-8") } ?: "")).build()) { text ->
             JSONObject(text).optJSONArray("results").objects().map {
                 NoteHit(it.getString("note_path"), it.optString("title", ""), it.optString("notebook", ""), it.optString("snippet", ""))
             }
@@ -532,8 +543,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** Makes a new note and returns its vault path; the title only names the file. */
-    suspend fun createNote(folder: String, title: String, content: String): String =
-        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).toString().toRequestBody("application/json".toMediaType())).build()) {
+    suspend fun createNote(folder: String, title: String, content: String, clientId: String? = null): String =
+        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).apply { clientId?.let { put("client_id", it) } }.toString().toRequestBody("application/json".toMediaType())).build()) {
             JSONObject(it).getString("path")
         }
 
@@ -548,8 +559,23 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** Replaces a note's text (body only: the server keeps the front matter). Last write wins; there is no version check yet. */
-    suspend fun saveNote(path: String, content: String) {
-        send(authed("/api/note").put(JSONObject().put("path", path).put("content", content).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    suspend fun saveNote(path: String, content: String, base: String? = null) {
+        val body = JSONObject().put("path", path).put("content", content).apply { base?.let { put("base", it) } }
+        val request = authed("/api/note").put(body.toString().toRequestBody("application/json".toMediaType())).build()
+        withContext(Dispatchers.IO) {
+            try {
+                http.newCall(request).execute().use { r ->
+                    if (r.code == HTTP_UNAUTHORIZED) refused()
+                    if (r.code == HTTP_CONFLICT) {
+                        val o = runCatching { JSONObject(r.body.string()) }.getOrDefault(JSONObject())
+                        throw NoteChanged(o.optString("theirs_hash", "").ifBlank { null }, o.optString("by", "").ifBlank { null }, o.optString("at", "").ifBlank { null })
+                    }
+                    if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note", status = r.code)
+                }
+            } catch (e: IOException) {
+                throw if (e is HqUnavailable || e is NoteChanged) e else HqUnavailable("hq is not reachable", e)
+            }
+        }
     }
 
     /** The vault paths of the pinned notes. */
@@ -662,6 +688,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     companion object {
         val LOCAL_HQ = "http://127.0.0.1:${example.hq.spike.BuildConfig.HQ_PORT}"
         private const val HTTP_NOT_FOUND = 404
+        private const val HTTP_CONFLICT = 409
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_UNAUTHORIZED = 401
         private const val CONNECT_SECONDS = 3L

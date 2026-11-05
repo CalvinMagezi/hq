@@ -95,8 +95,9 @@ private fun Feed(ui: HelpersUi, actions: HelpersActions) {
     val shown = ui.cards.filter { matches(it, ui.filter) }
     val live = shown.filter { it.state != HelperState.Finished && it.state != HelperState.Stopped }
     val past = shown.filter { it.state == HelperState.Finished || it.state == HelperState.Stopped }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (ui.offline) item { Text(stringResource(R.string.helpers_hq_is_not_running), style = HqType.BodySm, color = Mts.Amber) }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Helpers, list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (shown.isEmpty() && ui.loaded && !ui.offline) item { Text(emptyWords(ui.filter), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(vertical = 8.dp)) }
         val own = live.filter { it.own }
         val others = live.filter { !it.own }

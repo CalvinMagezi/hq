@@ -65,13 +65,6 @@ class NotesTextTest {
         assertEquals(6, t.selection.min)
     }
 
-    @Test fun theAskPillSaysWhenItTakesOnlyTheFirstTen() {
-        assertEquals("Ask HQ about this note", askWords(1))
-        assertEquals("Ask HQ about these 7 notes", askWords(7))
-        assertEquals("Ask HQ about these 10 notes", askWords(10))
-        assertEquals("Ask HQ about the first 10 notes", askWords(13))
-    }
-
     @Test fun makeATaskPointsAtTheNoteAndRepeatsAsTheSameTask() {
         val b = noteTaskBody("Notebooks/Projects/Mobile-First-Roadmap.md", "Mobile-First-Roadmap")
         assertEquals("Mobile-First-Roadmap", b.getString("title"))

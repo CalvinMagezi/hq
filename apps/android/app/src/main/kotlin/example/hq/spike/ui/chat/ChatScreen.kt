@@ -61,10 +61,10 @@ import kotlinx.coroutines.delay
 
 /** The Chat v2 board of the design: chat name row, the conversation or the empty start, and the composer. */
 @Composable
-fun ChatScreen(state: ChatUiState, actions: ChatActions, starting: Boolean = false) {
+fun ChatScreen(state: ChatUiState, actions: ChatActions, status: example.hq.spike.data.Connection = example.hq.spike.data.Connection.Connected, onStartHq: () -> Unit = {}, onAiKeys: () -> Unit = {}) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            if (starting) StartingBanner() else if (!state.connected) ReconnectBanner()
+            example.hq.spike.ui.connection.ChatBanner(status, onStartHq, onAiKeys)
             NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.shown(state.suggestions), actions.onDraft) else Conversation(state, actions)
@@ -128,31 +128,6 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (Strin
     }
 }
 
-/** While HQ is starting: the draft is kept and Send waits. */
-@Composable
-private fun StartingBanner() {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text(androidx.compose.ui.res.stringResource(example.hq.spike.R.string.start_chat_banner), style = HqType.BodySm, color = Mts.Ink)
-    }
-}
-
-@Composable
-private fun ReconnectBanner() {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(HqIcons.WifiOff, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text(stringResource(R.string.chat_reconnecting_your_draft_is), style = HqType.BodySm, color = Mts.Ink)
-    }
-}
-
 @Composable
 private fun NameRow(title: String, spoken: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(24.dp)
@@ -173,6 +148,7 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
     val newestFirst = state.messages.asReversed()
     val blocks = rememberBlockActions(state, actions)
     val list = rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(Place.Chat, list, readsAgain = false)
     val away by remember { derivedStateOf { list.firstVisibleItemIndex > LATEST_AFTER } }
     val scope = rememberCoroutineScope()
     LaunchedEffect(list, state.hasOlder, state.threadId) {

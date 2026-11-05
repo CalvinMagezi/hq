@@ -12,6 +12,7 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -24,7 +25,7 @@ import androidx.compose.runtime.produceState
 import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import example.hq.spike.data.HqServices
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import example.hq.spike.ui.chat.ChatOverlays
 import example.hq.spike.ui.chat.ChatScreen
 import example.hq.spike.ui.shell.LocalGoTo
@@ -50,6 +51,7 @@ import example.hq.spike.ui.inbox.InboxUi
 import example.hq.spike.ui.inbox.InboxViewModel
 import example.hq.spike.ui.inbox.inboxFixture
 import example.hq.spike.ui.notes.NotesHome
+import example.hq.spike.ui.search.SearchGoes
 import example.hq.spike.ui.search.SearchScreen
 import example.hq.spike.ui.webhost.LocalOpenWeb
 import example.hq.spike.ui.webhost.WebHostScreen
@@ -77,7 +79,6 @@ import example.hq.spike.ui.tasks.tasksFixture
 import example.hq.spike.ui.notes.notesFixture
 import example.hq.spike.ui.chat.ContextRef
 import example.hq.spike.ui.chat.ChatUiState
-import example.hq.spike.ui.chat.ChatTime
 import example.hq.spike.ui.chat.ChatViewModel
 import example.hq.spike.ui.chat.chatFixture
 import example.hq.spike.ui.shell.HqShell
@@ -120,6 +121,17 @@ class ShellActivity : ComponentActivity() {
     private val settings: SettingsViewModel by viewModels()
     private val usage: UsageViewModel by viewModels()
     private val search: SearchViewModel by viewModels()
+
+    /** The lists a search matches, read when it opens; set from the composition that owns the states. */
+    private var searchSources: () -> example.hq.spike.ui.search.SearchSources = { example.hq.spike.ui.search.SearchSources() }
+
+    /** A result is open and Back should bring the search back, once. */
+    private var resumeSearch by mutableStateOf(false)
+
+    private fun openSearch(start: example.hq.spike.ui.search.SearchStart) {
+        resumeSearch = false
+        search.actions.onOpen(searchSources(), start)
+    }
 
     /** Which first-run screen opens, decided in onCreate before hq starts (its first answer would mark the app as used). */
     private var firstRunStep: Step? = null
@@ -233,7 +245,7 @@ class ShellActivity : ComponentActivity() {
             Place.Chat -> { t.id?.let(chat::openLinked); if (t.compose) chat.focusComposer() }
             Place.Inbox -> t.id?.let(inbox::openItem)
             Place.Tasks -> if (t.away) tasks.actions.onAway(true) else t.id?.let { tasks.openById(it) { } }
-            Place.Notes -> { t.path?.let(notes::openNote); t.search?.let { search.openAt(it) } }
+            Place.Notes -> { t.path?.let(notes::openNote); t.search?.let { openSearch(example.hq.spike.ui.search.SearchStart(it)) } }
             Place.Helpers -> t.id?.let(helpers::openSession)
         }
         t.web?.let { WebPage.fromSlug(it) }?.let { web = it }
@@ -376,48 +388,58 @@ class ShellActivity : ComponentActivity() {
             val settingsState by settings.state.collectAsStateWithLifecycle()
             val searchState by search.state.collectAsStateWithLifecycle()
             val balance by usage.chip.collectAsStateWithLifecycle()
-            val offlineSince = chatState.offlineSince
-            val now by produceState(System.currentTimeMillis(), offlineSince) {
-                value = System.currentTimeMillis()
-                while (offlineSince != null) { delay(STATUS_TICK_MS); value = System.currentTimeMillis() }
-            }
-            // A socket that has only just dropped (or not yet opened) is not worth a "Saved" line.
-            val shown = when {
-                (status is HqStatus.Starting || status is HqStatus.Restarting || status is HqStatus.Stopped) && fixture == null -> status
-                offlineSince != null && now - offlineSince >= OFFLINE_GRACE_MS -> HqStatus.Saved(ChatTime.short(offlineSince, now))
-                else -> HqStatus.Live
-            }
+            val shown: Connection = if (fixture == null) status else Connection.Connected
+            searchSources = { example.hq.spike.ui.search.SearchSources(tasksState.tasks, chatState.chats, helpersState.cards, shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut) }
             val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; else -> null }
             val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
             val firstRunUi by firstRun.ui.collectAsStateWithLifecycle()
             val coverRemoval = remember { example.hq.spike.update.Updater.startCoverRemoval(this@ShellActivity) }
             val startup = startupFixture ?: if (fixture == null) StartRules.decide(status, firstDone, coverRemoval) else Startup.None
             val freeBytes by services.freeBytes.collectAsStateWithLifecycle()
-            val stopped = shown as? HqStatus.Stopped
+            val stopped = shown as? Connection.Stopped
             LaunchedEffect(stopped != null) {
                 val now = System.currentTimeMillis()
                 if (stopped != null && StartRules.autoOpenOk(StartRules.lastAutoOpen(this@ShellActivity), now)) { StartRules.markAutoOpen(this@ShellActivity, now); connectionOpen = true }
             }
+            LaunchedEffect(chatState.failed, connectionOpen) { if (chatState.failed || connectionOpen) services.refreshAi() }
+            val savedAt = remember(status) { StartRules.lastAnswer(this@ShellActivity).takeIf { it > 0 } }
+            val uiScope = androidx.compose.runtime.rememberCoroutineScope()
+            val atTop: (Place) -> Unit = { place ->
+                if (shown !is Connection.Connected) connectionOpen = true
+                else uiScope.launch {
+                    when (place) {
+                        Place.Notes -> notes.actions.onRefresh()
+                        Place.Tasks -> tasks.refresh()
+                        Place.Helpers -> helpers.refresh()
+                        Place.Inbox -> inbox.refresh()
+                        else -> Unit
+                    }
+                }
+            }
             val notifUi = notifFacts?.let { NotifUi(it, ::turnOnNotifications) }
-            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi) {
+            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi, example.hq.spike.ui.shell.LocalReselectAtTop provides atTop) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
-                else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.step ?: 1, (status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
+                else if (startup == Startup.Starting) StartingScreen(((status as? Connection.Starting)?.step ?: 0) + 1, (status as? Connection.Starting)?.seconds ?: 12) { openCapture() }
                 else HqShell(
                     onStatus = { connectionOpen = true },
+                    strip = { place ->
+                        val server = shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut
+                        if (place != Place.Chat && (!server || place == Place.Inbox)) example.hq.spike.ui.connection.OfflineStrip(shown, savedAt, { connectionOpen = true }, ::tryStartAgain)
+                    },
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
-                    onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
+                    onSearch = { openSearch(example.hq.spike.ui.search.SearchStart()) }, onOpenSearch = ::openSearch, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
                     subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
                     topActions = { place ->
                         if (place == Place.Tasks && tasksState.tab == TaskTab.All) IconButton({ tasks.actions.onFilter(true) }, Modifier.size(48.dp)) { Icon(HqIcons.Filter, "Filter", Modifier.size(24.dp), tint = if (tasksState.scope == TaskScope.Everything) Mts.Ink else Mts.BrandGreen) }
                     },
-                    balance = if (shown is HqStatus.Starting || shown is HqStatus.Restarting) null else balance,
+                    balance = if (shown !is Connection.Connected) null else balance,
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } },
                 ) { place ->
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
+                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) })
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)
@@ -430,14 +452,14 @@ class ShellActivity : ComponentActivity() {
     }
 
     @androidx.compose.runtime.Composable
-    private fun ConnectionHost(status: HqStatus, freeBytes: Long?) {
+    private fun ConnectionHost(status: Connection, freeBytes: Long?) {
         val w = example.hq.spike.ui.shell.Words.of(this)
         val saved = StartRules.lastAnswer(this).takeIf { it > 0 }
         val facts = example.hq.spike.ui.connection.ConnectionFacts(
             freeBytes = freeBytes,
             savedAt = saved?.let { w.clock(java.time.Instant.ofEpochMilli(it)) },
-            stoppedAtStep = (status as? HqStatus.Stopped)?.step,
-            details = StartupWords.failedLines(w, HubService.lastStart(this), HubService.lastExit(this), (status as? HqStatus.Stopped)?.let { (System.currentTimeMillis() - it.sinceMs) / 1000 } ?: StartRules.STILL_OPENING_S),
+            stoppedAtStep = (status as? Connection.Stopped)?.step?.plus(1),
+            details = StartupWords.failedLines(w, HubService.lastStart(this), HubService.lastExit(this), (status as? Connection.Stopped)?.let { (System.currentTimeMillis() - it.sinceMs) / 1000 } ?: StartRules.STILL_OPENING_S),
         )
         example.hq.spike.ui.connection.ConnectionSheet(
             status, facts,
@@ -464,14 +486,31 @@ class ShellActivity : ComponentActivity() {
     }
 
     @androidx.compose.runtime.Composable
-    private fun SearchHost(searchState: SearchUi) {
-        if (!searchState.open) return
+    private fun SearchHost(searchState: SearchUi, shown: Connection) {
         val go = LocalGoTo.current
+        // A result hides the search but keeps it; Back from that page brings it back once.
+        fun shownResult(open: () -> Unit) { search.actions.onHide(); resumeSearch = true; open() }
+        androidx.activity.compose.BackHandler(enabled = resumeSearch && !searchState.open && search.canResume) {
+            resumeSearch = false
+            notes.closeAll(); tasks.actions.onClose(); chat.actions.onCloseNote(); chat.actions.onClosePage(); helpers.actions.onClose()
+            search.resume()
+        }
+        if (!searchState.open) return
         SearchScreen(
             searchState, search.actions,
-            onNote = { path -> search.actions.onClose(); notes.openNote(path) },
-            onTask = { t -> search.actions.onClose(); go(Place.Tasks); tasks.openById(t.id) { } },
-            onChat = { c -> search.actions.onClose(); go(Place.Chat); chat.actions.onOpenChat(c.id) },
+            SearchGoes(
+                onNote = { path -> shownResult { notes.openNote(path) } },
+                onTask = { t -> shownResult { go(Place.Tasks); tasks.openById(t.id) { } } },
+                onChat = { c -> shownResult { go(Place.Chat); chat.actions.onOpenChat(c.id) } },
+                onHelper = { h -> shownResult { go(Place.Helpers); helpers.openSession(h.id) } },
+                onAsk = { hits ->
+                    search.actions.onHide(); resumeSearch = false
+                    chat.startChatWith(hits.map { ContextRef(ContextRef.Kind.Note, it.path, it.title) })
+                    go(Place.Chat)
+                },
+                onStartHq = { search.actions.onClose(); tryStartAgain() },
+            ),
+            stopped = shown is Connection.Stopped,
         )
     }
 
@@ -546,8 +585,6 @@ class ShellActivity : ComponentActivity() {
         /** The running notice sets this to "connection" so a tap on a stopped HQ opens the sheet. */
         const val EXTRA_SHEET = "sheet"
         const val STATE_WEB = "web"
-        const val STATUS_TICK_MS = 5_000L
-        const val OFFLINE_GRACE_MS = 5_000L
         const val MODE_FILE_MAX = 64L
         const val TAIL_BYTES = 16_384L
         const val UNSAVED_WORK = "Finish or discard what you are writing first"

@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import example.hq.spike.ui.theme.HqTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -25,7 +25,7 @@ import org.robolectric.annotation.GraphicsMode
 class ConnectionSheetTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
-    private fun show(status: HqStatus, facts: ConnectionFacts = ConnectionFacts(), actions: ConnectionActions = ConnectionActions(), onClose: () -> Unit = {}) {
+    private fun show(status: Connection, facts: ConnectionFacts = ConnectionFacts(), actions: ConnectionActions = ConnectionActions(), onClose: () -> Unit = {}) {
         // The step pulse never settles, so time is advanced by hand.
         rule.mainClock.autoAdvance = false
         rule.setContent { HqTheme { ConnectionSheet(status, facts, actions, onClose) } }
@@ -33,7 +33,7 @@ class ConnectionSheetTest {
     }
 
     @Test fun aStartShowsTheStepsTheSecondsAndWhatIsUsual() {
-        show(HqStatus.Starting(19, 3, 25), ConnectionFacts(savedAt = "2:32 PM"))
+        show(Connection.Starting(2, 19, 25L), ConnectionFacts(savedAt = "2:32 PM"))
         rule.onNodeWithText("HQ is starting").assertIsDisplayed()
         rule.onNodeWithText("Step 3 of 4 \u00b7 19 s", substring = true).assertExists()
         rule.onNodeWithContentDescription("Step 3 of 4, Opening your notes and tasks").assertExists()
@@ -43,12 +43,12 @@ class ConnectionSheetTest {
     }
 
     @Test fun theFirstStartHasNoUsualTime() {
-        show(HqStatus.Starting(19, 3, null))
+        show(Connection.Starting(2, 19, null))
         rule.onAllNodesWithText("Usually about", substring = true).assertCountEquals(0)
     }
 
     @Test fun aSlowButMovingStartSaysSoWithoutNewButtons() {
-        show(HqStatus.Starting(40, 3, 15))
+        show(Connection.Starting(2, 40, 15L))
         rule.onNodeWithText("Taking longer than usual. HQ is still starting.").assertExists()
         rule.onAllNodesWithText("Restart").assertCountEquals(0)
     }
@@ -56,7 +56,7 @@ class ConnectionSheetTest {
     @Test fun pastAMinuteInStepThreeKeepWaitingClosesAndRestartIsSecond() {
         var closed = 0
         var restarted = 0
-        show(HqStatus.Starting(72, 3, 40), actions = ConnectionActions(onRestart = { restarted++ }), onClose = { closed++ })
+        show(Connection.Starting(2, 72, 40L), actions = ConnectionActions(onRestart = { restarted++ }), onClose = { closed++ })
         rule.onNodeWithText("HQ is still opening your notes. Restarting starts over.").assertExists()
         rule.onNodeWithText("Keep waiting").performScrollTo().performClick()
         assertEquals(1, closed)
@@ -66,7 +66,7 @@ class ConnectionSheetTest {
 
     @Test fun underTwoHundredMegabytesTheSheetSaysTheStorageIsAlmostFull() {
         var settings = 0
-        show(HqStatus.Starting(10, 2, null), ConnectionFacts(freeBytes = 80_000_000L), ConnectionActions(onAndroidSettings = { settings++ }))
+        show(Connection.Starting(1, 10, null), ConnectionFacts(freeBytes = 80_000_000L), ConnectionActions(onAndroidSettings = { settings++ }))
         rule.onNodeWithText("The phone is almost full. Free up 120 MB and try again.").assertExists()
         rule.onNodeWithText("Android shows what you can remove.").assertExists()
         rule.onNodeWithText("Open Android settings").performScrollTo().performClick()
@@ -77,7 +77,7 @@ class ConnectionSheetTest {
         val seen = mutableListOf<String>()
         val facts = ConnectionFacts(savedAt = "2:32 PM", stoppedAtStep = 3, details = listOf("Health check timed out after 60 s.", "Last start 9:14 AM \u00b7 exit code none"))
         show(
-            HqStatus.Stopped(0, 3), facts,
+            Connection.Stopped(0, 2), facts,
             ConnectionActions(onStartHq = { seen += "start" }, onSaveCopy = { seen += "copy" }, onCopyDetails = { seen += "details" }),
         )
         rule.onNodeWithText("HQ has stopped").assertIsDisplayed()
@@ -91,7 +91,7 @@ class ConnectionSheetTest {
     }
 
     @Test fun aServerOwnerSeesTheServerRowFirst() {
-        show(HqStatus.Starting(5, 2, null), ConnectionFacts(serverAddress = "hq.example.ts.net"))
+        show(Connection.Starting(1, 5, null), ConnectionFacts(serverAddress = "hq.example.ts.net"))
         rule.onNodeWithText("hq.example.ts.net \u00b7 Connected").assertExists()
     }
 }

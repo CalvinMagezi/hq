@@ -117,8 +117,9 @@ private fun Tabs(tab: TaskTab, onTab: (TaskTab) -> Unit) {
 private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
     val groups = ui.groups
     val onAll = ui.tab == TaskTab.All
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-        if (ui.offline) item { Text(stringResource(R.string.tasks_hq_is_not_running), style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Tasks, list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 96.dp)) {
         if (onAll) item(key = "chips") { AllChips(ui, actions.onChip) }
         if (onAll) item(key = "seeas") { SeeAsRow() }
         if (ui.tab == TaskTab.Today && ui.loaded) item(key = "away") { AwayCard(ui.away, ui.tasks) { actions.onAway(true) } }

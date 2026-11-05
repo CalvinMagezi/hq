@@ -40,7 +40,7 @@ data class FactRow(val title: String, val value: String, val text: String? = nul
 
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
-    private const val NOT_ANSWERED = "Not answering"
+    private const val NOT_ANSWERED = "No answer yet"
     private const val PERCENT = 100.0
     private const val SECONDS_PER_HOUR = 3_600.0
     private const val HOURS_PER_DAY = 24.0
@@ -153,7 +153,7 @@ object SettingsWords {
         ),
     ))
 
-    /** Until the first read has finished, the rows that come from HQ say so, rather than "Not answering". */
+    /** Until the first read has finished, the rows that come from HQ say so, rather than "No answer yet". */
     private fun withChecking(w: Words, loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
         if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { if (it.page == SettingsPage.About) it else it.copy(status = w.s(R.string.settings_checking)) }) }
 

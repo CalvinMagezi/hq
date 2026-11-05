@@ -13,7 +13,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One thing saved on the phone and not yet sent: a note or a task, with what it was made from. */
+/** One thing saved on the phone and not yet sent: a note or a task, with what it was made from. Its [id] is made once, when it is saved, and goes to HQ as `client_id` on every try so HQ drops a repeat. */
 data class Queued(val id: String, val kind: String, val title: String, val payload: JSONObject, val createdAt: Long, val failure: String? = null) {
     val isNote: Boolean get() = kind == KIND_NOTE
 
@@ -103,8 +103,8 @@ object OutboxSender {
 
     /** The send for an item already claimed with [hold]; the claim ends with it. */
     suspend fun sendHeld(client: HqClient, q: Queued): Sent = try {
-        if (q.isNote) Sent.Done(client.createNote(q.payload.getString("folder"), q.payload.getString("title"), q.payload.optString("content")))
-        else { client.createTask(q.payload); Sent.Done(null) }
+        if (q.isNote) Sent.Done(client.createNote(q.payload.getString("folder"), q.payload.getString("title"), q.payload.optString("content"), clientId = q.id))
+        else { client.createTask(JSONObject(q.payload.toString()).put("client_id", q.id)); Sent.Done(null) }
     } catch (e: HqUnavailable) {
         when {
             e.status == 0 || e.status >= HTTP_SERVER || e.status in RETRY_LATER -> Sent.Down

@@ -101,7 +101,6 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
             when (top) {
                 is NotesRoute.Reader -> ReaderPage(ui, actions, onAskHq)
                 is NotesRoute.Folder -> FolderPage(ui, actions)
-                is NotesRoute.Search -> SearchPage(ui, actions, onAskHq)
                 is NotesRoute.Write -> ui.write?.let { WritePage(it, ui.folders, actions) }
             }
         }
@@ -229,6 +228,7 @@ private fun NoteBody(path: String, blocks: List<Block>, handlers: BlockActions, 
 @Composable
 private fun GonePage(ui: NotesUi, actions: NotesActions) {
     val path = (ui.top as? NotesRoute.Reader)?.path.orEmpty()
+    val openSearch = example.hq.spike.ui.shell.LocalOpenSearch.current
     Column(Modifier.fillMaxSize()) {
         TopBar("Note", null, actions.onBack)
         Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -237,7 +237,7 @@ private fun GonePage(ui: NotesUi, actions: NotesActions) {
             Text("It may have been moved or deleted. ${path.removePrefix("Notebooks/")}", style = HqType.BodySm, color = Mts.InkMuted)
             Box(Modifier.padding(top = 8.dp)) {
                 Row(
-                    Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onBack(); actions.onOpenSearch() }.padding(horizontal = 24.dp),
+                    Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onBack(); openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, null, example.hq.spike.ui.chat.blocks.NoteRefs.title(path))) }.padding(horizontal = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
                 ) { Icon(HqIcons.Search, null, Modifier.size(20.dp), tint = Mts.OnGreen); Text(stringResource(R.string.notes_search_for_it), style = HqType.BodySmBold, color = Mts.OnGreen) }
             }
@@ -251,13 +251,13 @@ private fun GonePage(ui: NotesUi, actions: NotesActions) {
 @Composable
 private fun FolderPage(ui: NotesUi, actions: NotesActions) {
     val view = ui.folder ?: return
+    val openSearch = example.hq.spike.ui.shell.LocalOpenSearch.current
     val name = view.path.substringAfterLast('/')
     Column(Modifier.fillMaxSize()) {
         val parents = view.path.removePrefix("Notebooks/").substringBeforeLast('/', "")
         TopBar(name, if (parents.isEmpty()) "Notes" else "Notes › " + parents.replace("/", " › "), actions.onBack) {
-            IconAction(HqIcons.Search, "Search notes", iconSize = 24.dp, onClick = actions.onOpenSearch)
+            IconAction(HqIcons.Search, stringResource(R.string.search_field_notes), iconSize = 24.dp, onClick = { openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, view.path.removePrefix("Notebooks/"))) })
         }
-        if (ui.offline) OfflineBanner()
         Box(Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
                 if (view.folders.isNotEmpty()) { item { SectionLabel("Folders", view.folders.size) }; item { SubFolders(view.folders, actions.onOpenFolder) } }
@@ -291,106 +291,6 @@ private fun SubFolders(folders: List<Pair<String, Int>>, onOpen: (String) -> Uni
     }
 }
 
-// ---------------------------------------------------------------- search
-
-@Composable
-private fun SearchPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String, String>>) -> Unit) {
-    val s = ui.search
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    val hits = remember(s.hits, s.filter) { s.hits.filter { s.filter == null || folderOf(it.path) == s.filter } }
-    Column(Modifier.fillMaxSize().imePadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-            val shape = RoundedCornerShape(24.dp)
-            Row(Modifier.weight(1f).heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                BasicTextField(
-                    value = s.query, onValueChange = actions.onQuery, singleLine = true, textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
-                    modifier = Modifier.weight(1f).focusRequester(focus),
-                    decorationBox = { inner -> Box { if (s.query.isEmpty()) Text(stringResource(R.string.notes_search_your_notes), style = HqType.Body, color = Mts.InkMuted); inner() } },
-                )
-                if (s.query.isNotEmpty()) Box(Modifier.size(32.dp).clickable(role = Role.Button, onClickLabel = "Clear") { actions.onQuery("") }.semantics { contentDescription = "Clear" }, contentAlignment = Alignment.Center) { Icon(HqIcons.Close, null, Modifier.size(20.dp), tint = Mts.InkMuted) }
-            }
-        }
-        if (s.hits.isNotEmpty()) FilterChips(s.hits, s.filter, actions.onFilter)
-        Box(Modifier.weight(1f)) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
-                items(hits, key = { it.path }) { hit -> HitRow(hit, s.query) { actions.onOpenNote(hit.path) } }
-                if (s.query.isNotBlank() && !s.loading && hits.isEmpty()) item { Text(stringResource(R.string.notes_nothing_matches_that), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
-                if (s.loading) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Spinner(28) } }
-            }
-            if (hits.isNotEmpty()) {
-                val n = hits.take(ASK_MAX).size
-                Row(
-                    Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 12.dp).fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface000).border(1.dp, Mts.Line, CircleShape)
-                        .clickable(role = Role.Button) { onAskHq(hits.take(ASK_MAX).map { it.path to it.title }) },
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(HqIcons.Spark, null, Modifier.size(20.dp), tint = Mts.Ink)
-                    Text(askWords(hits.size), style = HqType.BodySmBold, color = Mts.Ink)
-                }
-            }
-        }
-    }
-}
-
-private const val ASK_MAX = 10
-
-/** The label on the Ask HQ pill: HQ is given at most ten notes, and the label says so when there are more hits than that. */
-internal fun askWords(found: Int): String {
-    val n = found.coerceAtMost(ASK_MAX)
-    return "Ask HQ about " + when { n == 1 -> "this note"; found > n -> "the first $n notes"; else -> "these $n notes" }
-}
-
-private fun folderOf(path: String) = path.removePrefix("Notebooks/").substringBefore('/', "")
-
-@Composable
-private fun FilterChips(hits: List<SearchHit>, selected: String?, onFilter: (String?) -> Unit) {
-    val groups = hits.groupingBy { folderOf(it.path) }.eachCount().filterKeys { it.isNotBlank() }
-    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Filter("All ${hits.size}", selected == null) { onFilter(null) }
-        groups.forEach { (name, n) -> Filter("$name $n", selected == name) { onFilter(name) } }
-    }
-}
-
-@Composable
-private fun Filter(label: String, on: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.heightIn(min = 36.dp).clip(CircleShape).then(if (on) Modifier.background(Mts.BrandGreen) else Modifier.border(1.dp, Mts.Line, CircleShape)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) { Text(label, style = HqType.BodySmBold, color = if (on) Mts.OnGreen else Mts.Ink, maxLines = 1) }
-}
-
-@Composable
-private fun HitRow(hit: SearchHit, query: String, onClick: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(hit.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            val folder = folderOf(hit.path).ifBlank { hit.notebook }
-            if (folder.isNotBlank()) Text(folder, style = HqType.Caption.copy(lineHeight = 24.sp), color = Mts.InkMuted, modifier = Modifier.padding(start = 12.dp))
-        }
-        val trail = NoteRefs.folderTrail(hit.path)
-        if (trail.isNotBlank()) Text(trail, style = SmallText, color = Mts.BrandBlue, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (hit.snippet.isNotBlank()) Text(marked(Plain.oneLine(hit.snippet), query), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-    }
-}
-
-/** The snippet with each word of the search picked out: on a green wash, in white. */
-internal fun marked(snippet: String, query: String): AnnotatedString = buildAnnotatedString {
-    val words = query.split(' ').map { it.trim() }.filter { it.length >= 2 }.map { Regex(Regex.escape(it), RegexOption.IGNORE_CASE) }
-    val spans = words.flatMap { it.findAll(snippet).map { m -> m.range } }.sortedBy { it.first }
-    var at = 0
-    for (r in spans) {
-        if (r.first < at) continue
-        append(snippet.substring(at, r.first))
-        withStyle(SpanStyle(color = Mts.Ink, background = Color(0x3822FF37))) { append(snippet.substring(r.first, r.last + 1)) }
-        at = r.last + 1
-    }
-    append(snippet.substring(at))
-}
-
 // ---------------------------------------------------------------- writing
 
 @Composable
@@ -403,6 +303,7 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
             GreenPill("Save", Modifier.padding(end = 8.dp), enabled = w.status != SaveStatus.Saving, onClick = actions.onSave)
         }
         if (!w.isNew) StatusLine(w.status)
+        w.conflict?.let { ChangedCard(it, actions) }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp)) {
             if (w.isNew) {
                 BasicTextField(
@@ -434,6 +335,23 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
     }
     if (w.chooser) FolderChooser(w, folders, actions)
     if (w.leaving) LeaveDialog(w.leaveName, actions)
+}
+
+/** The save HQ refused: the note changed elsewhere, so the owner picks what happens to their text. */
+@Composable
+private fun ChangedCard(c: Conflict, actions: NotesActions) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, Mts.Amber, RoundedCornerShape(12.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
+            Text(stringResource(R.string.notes_changed_elsewhere), style = HqType.BodyBold, color = Mts.Ink)
+        }
+        c.by?.let { Text(stringResource(R.string.notes_changed_by, it), style = HqType.BodySm, color = Mts.InkMuted) }
+        c.theirs?.let { Text(it.ifBlank { stringResource(R.string.notes_their_version_empty) }, style = HqType.BodySm, color = Mts.Ink, maxLines = 12, overflow = TextOverflow.Ellipsis) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(enabled = !c.busy, role = Role.Button, onClick = actions.onSeeTheirs).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_see_theirs), style = HqType.BodySmBold, color = Mts.Ink) }
+            Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Ink).clickable(enabled = !c.busy, role = Role.Button, onClick = actions.onKeepBoth).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_keep_both), style = HqType.BodySmBold, color = Mts.Surface000) }
+        }
+    }
 }
 
 @Composable

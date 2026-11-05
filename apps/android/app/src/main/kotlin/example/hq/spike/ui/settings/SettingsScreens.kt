@@ -308,7 +308,7 @@ private fun Unanswered(ui: SettingsUi, route: String, have: Boolean): Boolean {
 }
 
 @Composable
-private fun NoAnswer(text: String = "HQ is not running, so there is nothing to show yet. Try again when it is back.") =
+private fun NoAnswer(text: String = "HQ has stopped, so there is nothing to show yet. Try again when it is back.") =
     Notice(text, HqIcons.WifiOff, warn = true)
 
 // ---------------------------------------------------------------- home
@@ -1096,7 +1096,7 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
             listOf(
                 FactRow("AgentHQ", stringResource(R.string.about_build, ui.build.substringAfterLast(' '))),
                 FactRow(stringResource(R.string.about_background), stringResource(if (ui.mode == "active") R.string.about_background_on else R.string.about_background_off)),
-                FactRow(stringResource(R.string.about_hq_version), ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: "Not answering"),
+                FactRow(stringResource(R.string.about_hq_version), ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: "No answer yet"),
             ) + listOfNotNull(SettingsWords.notesCount(ui.snap)?.let { FactRow("Notes", it) }),
         )
         Label(stringResource(R.string.settings_app_updates))
