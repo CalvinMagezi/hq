@@ -31,13 +31,10 @@ pub const MAX_LIVE_CHILDREN: usize = hq_core::config::TEAM_MAX_LIVE_CHILDREN_CEI
 /// The most output quoted to a parent when a child reports in.
 const REPORT_TAIL_CHARS: usize = 1500;
 
-pub fn create_a2a_tools(vault_path: std::path::PathBuf, db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
+pub fn create_a2a_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(AgentMessageSendTool { db: db.clone() }),
-        Box::new(AgentDelegateTool {
-            vault_path,
-            db: db.clone(),
-        }),
+        Box::new(AgentDelegateTool { db: db.clone() }),
         Box::new(TeamRosterTool { db }),
     ]
 }
@@ -475,7 +472,6 @@ impl HqTool for AgentMessageSendTool {
 }
 
 pub struct AgentDelegateTool {
-    vault_path: std::path::PathBuf,
     db: Arc<Database>,
 }
 
@@ -515,8 +511,8 @@ impl HqTool for AgentDelegateTool {
         let request = Delegation::from_args(&args)?;
         // The work runs on its own task, so a caller that disconnects mid-launch
         // cannot leave a started agent that no limit or stop can see.
-        let (vault, db, caller) = (self.vault_path.clone(), self.db.clone(), caller.to_string());
-        tokio::spawn(async move { run_delegation(vault, db, caller, request).await })
+        let (db, caller) = (self.db.clone(), caller.to_string());
+        tokio::spawn(async move { run_delegation(db, caller, request).await })
             .await
             .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))?
     }
@@ -690,7 +686,6 @@ impl Delegation {
 /// belongs to. Delegations are taken one at a time, so two calls cannot both
 /// pass the limits before either child exists.
 pub async fn run_delegation(
-    vault_path: std::path::PathBuf,
     db: Arc<Database>,
     caller: String,
     request: Delegation,
@@ -714,7 +709,6 @@ pub async fn run_delegation(
     };
     let prompt = delegation_prompt(&slot.parent.id, &sub.display_id, title, description, &place);
     let spawned = crate::harness_session::spawn_with(
-        &vault_path,
         &db,
         crate::harness_session::SpawnRequest {
             host: Some(&slot.parent.host),
@@ -764,17 +758,11 @@ const TEAM_OWNED_SPAWN_ARGS: &[&str] = &["cwd", "host", "task_id", "observe"];
 
 /// `harness_session_spawn` called from inside a launched session: the same
 /// delegation `agent_delegate` makes, built from the spawn's own arguments.
-pub async fn delegate_from_spawn(
-    vault_path: std::path::PathBuf,
-    db: Arc<Database>,
-    from: String,
-    args: &Value,
-) -> Result<Value> {
+pub async fn delegate_from_spawn(db: Arc<Database>, from: String, args: &Value) -> Result<Value> {
     let (request, ignored) = spawn_as_delegation(args)?;
-    let mut report =
-        tokio::spawn(async move { run_delegation(vault_path, db, from, request).await })
-            .await
-            .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))??;
+    let mut report = tokio::spawn(async move { run_delegation(db, from, request).await })
+        .await
+        .map_err(|e| anyhow::anyhow!("the delegation task failed: {e}"))??;
     if !ignored.is_empty() {
         report["note"] = json!(format!(
             "started as your worker on a new sub-task in your folder and host ({} ignored); its result comes back to you as a message when it finishes",

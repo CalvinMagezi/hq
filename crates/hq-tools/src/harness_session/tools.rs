@@ -4,7 +4,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use hq_db::Database;
 use serde_json::{Value, json};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::WatchingChat;
@@ -179,7 +178,6 @@ async fn host_hq_folder(host: &crate::agent_host::Host) -> Option<String> {
 }
 
 pub struct HarnessSessionSpawnTool {
-    vault_path: PathBuf,
     db: Arc<Database>,
     chat: Option<WatchingChat>,
     pub(crate) family_guest: Option<crate::family_guest::FamilyGuestContext>,
@@ -332,13 +330,7 @@ impl HqTool for HarnessSessionSpawnTool {
             };
         }
         let mut note = start.note;
-        let mut report = super::spawn_on(
-            &self.vault_path,
-            &self.db,
-            host_handle.clone(),
-            launch!(&start.path),
-        )
-        .await;
+        let mut report = super::spawn_on(&self.db, host_handle.clone(), launch!(&start.path)).await;
         // A remote host cannot be asked whether a folder exists; its launch error says so, and
         // nothing was started, so the one retry is in the machine's own HQ folder.
         if let (Err(e), Some(asked), None) = (&report, requested, &note)
@@ -359,13 +351,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 host_handle.name(),
                 fallback.path.display()
             ));
-            report = super::spawn_on(
-                &self.vault_path,
-                &self.db,
-                host_handle.clone(),
-                launch!(&fallback.path),
-            )
-            .await;
+            report = super::spawn_on(&self.db, host_handle.clone(), launch!(&fallback.path)).await;
         }
         let mut report = report?;
         if let Some(note) = note {
@@ -419,9 +405,7 @@ impl HarnessSessionSpawnTool {
                 delegator.cwd
             );
         }
-        let report =
-            crate::a2a::delegate_from_spawn(self.vault_path.clone(), self.db.clone(), from, args)
-                .await?;
+        let report = crate::a2a::delegate_from_spawn(self.db.clone(), from, args).await?;
         super::tag_origin(&self.db, &report, origin);
         let brief = super::connector_brief(args, &["prompt", "goal", "done_criteria"]);
         super::notify_connector_start(&self.db, args, &report, &brief, &delegator.cwd);
@@ -749,7 +733,6 @@ impl HqTool for HarnessSessionStopTool {
 }
 
 pub struct HarnessSessionResumeTool {
-    vault_path: PathBuf,
     db: Arc<Database>,
     chat: Option<WatchingChat>,
 }
@@ -783,7 +766,6 @@ impl HqTool for HarnessSessionResumeTool {
         let reserved =
             super::reserve_send(&self.db, &id, self.chat.as_ref(), super::SendKind::Text)?;
         let result = super::resume(
-            &self.vault_path,
             &self.db,
             &id,
             Some(prompt.as_str()).filter(|p| !p.is_empty()),
@@ -1118,7 +1100,6 @@ impl HqTool for HarnessSessionAttachTool {
 }
 
 pub struct HarnessSessionHandoffTool {
-    vault_path: PathBuf,
     db: Arc<Database>,
     chat: Option<WatchingChat>,
     family_guest: Option<crate::family_guest::FamilyGuestContext>,
@@ -1213,7 +1194,6 @@ impl HqTool for HarnessSessionHandoffTool {
             .find(|a| !a.trim().is_empty())
             .unwrap_or_default();
         let report = super::handoff::handoff(
-            &self.vault_path,
             &self.db,
             host,
             super::handoff::HandoffRequest {
@@ -1295,7 +1275,6 @@ pub(super) fn handoff_drives_new(
 
 /// `chat` is the web chat of the calling session, if any.
 pub fn create_harness_session_tools(
-    vault_path: PathBuf,
     db: Arc<Database>,
     chat: Option<WatchingChat>,
     family_guest: Option<crate::family_guest::FamilyGuestContext>,
@@ -1304,13 +1283,11 @@ pub fn create_harness_session_tools(
     let family_guest_for_handoff = family_guest.clone();
     vec![
         Box::new(HarnessSessionHandoffTool {
-            vault_path: vault_path.clone(),
             db: db.clone(),
             chat: chat.clone(),
             family_guest: family_guest_for_handoff,
         }),
         Box::new(HarnessSessionSpawnTool {
-            vault_path: vault_path.clone(),
             db: db.clone(),
             chat: chat.clone(),
             family_guest,
@@ -1358,11 +1335,7 @@ pub fn create_harness_session_tools(
             chat: chat.clone(),
             family_guest: family_guest_for_attach,
         }),
-        Box::new(HarnessSessionResumeTool {
-            vault_path,
-            db,
-            chat,
-        }),
+        Box::new(HarnessSessionResumeTool { db, chat }),
     ]
 }
 
@@ -1375,7 +1348,6 @@ mod tests {
     async fn family_guest_rejects_non_agy_harness() {
         let db = Arc::new(Database::open_memory().unwrap());
         let tool = HarnessSessionSpawnTool {
-            vault_path: PathBuf::from("/tmp"),
             db,
             chat: None,
             family_guest: Some(FamilyGuestContext {
@@ -1411,7 +1383,6 @@ mod tests {
     async fn non_family_guest_allows_any_harness() {
         let db = Arc::new(Database::open_memory().unwrap());
         let tool = HarnessSessionSpawnTool {
-            vault_path: PathBuf::from("/tmp"),
             db,
             chat: None,
             family_guest: None,

@@ -37,7 +37,6 @@ pub fn create_default_registry(
         tools.extend(self_update::create_self_update_tools(cfg, db.clone()));
     }
     tools.extend(harness_session::tools::create_harness_session_tools(
-        vault_path.clone(),
         db.clone(),
         None,
         None,
@@ -79,7 +78,7 @@ pub fn create_default_registry(
         openrouter_key,
     )));
     tools.extend(agent_comm::create_agent_comm_tools(vault_path.clone()));
-    tools.extend(a2a::create_a2a_tools(vault_path.clone(), db.clone()));
+    tools.extend(a2a::create_a2a_tools(db.clone()));
     tools.extend(ask::create_ask_tools(db.clone(), None));
 
     // web_search: SearxNG when configured, then the built-in keyless engines, then Brave.

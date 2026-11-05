@@ -273,7 +273,6 @@ impl SessionBuilder {
         // Harness session manager — spawn/monitor/steer/resume fleet CLIs in the host
         tools.extend(
             hq_tools::harness_session::tools::create_harness_session_tools(
-                vault_path.to_path_buf(),
                 db.clone(),
                 self.identity
                     .as_ref()

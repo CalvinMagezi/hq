@@ -288,13 +288,12 @@ async fn a_wrapper_profile_launches_through_the_shell_and_types_the_prompt() {
         ("agent prompt", OK.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let h = profile_harness(
         "  claude-alt:\n    base: claude-code\n    command: alt-wrapper\n    env:\n      ACCOUNT: work\n",
         "claude-alt",
     );
 
-    let report = launch_session(vault.path(), &db, &h, launch(host, "hs-t4", Some("go")))
+    let report = launch_session(&db, &h, launch(host, "hs-t4", Some("go")))
         .await
         .unwrap();
 
@@ -376,17 +375,11 @@ async fn launch_records_the_session_and_types_the_prompt() {
         ("agent prompt", OK.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let spec = harness("claude-code");
 
-    let report = launch_session(
-        vault.path(),
-        &db,
-        &spec,
-        launch(host, "hs-t1", Some("fix the bug")),
-    )
-    .await
-    .unwrap();
+    let report = launch_session(&db, &spec, launch(host, "hs-t1", Some("fix the bug")))
+        .await
+        .unwrap();
 
     assert_eq!(report["status"], "running");
     assert_eq!(report["agent_status"], "idle");
@@ -408,10 +401,8 @@ async fn copilot_gets_its_first_prompt_at_start_and_nothing_is_typed() {
         ("agent get", agent_json("hs-c1", "idle"), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
     let report = launch_session(
-        vault.path(),
         &db,
         &harness("github-copilot"),
         launch(host, "hs-c1", Some("-v fix the bug")),
@@ -435,11 +426,10 @@ async fn a_resumed_copilot_session_has_its_prompt_typed_not_passed_at_start() {
         ("agent prompt", OK.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let mut l = launch(host, "hs-c2", Some("carry on"));
     l.resuming = true;
 
-    launch_session(vault.path(), &db, &harness("github-copilot"), l)
+    launch_session(&db, &harness("github-copilot"), l)
         .await
         .unwrap();
 
@@ -457,10 +447,9 @@ async fn a_delegated_session_has_its_parent_from_the_moment_it_exists() {
         ("agent prompt", OK.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let mut l = launch(host, "hs-kid", Some("work"));
     l.parent = Some(("hs-parent", 1));
-    launch_session(vault.path(), &db, &harness("claude-code"), l)
+    launch_session(&db, &harness("claude-code"), l)
         .await
         .unwrap();
 
@@ -496,13 +485,12 @@ async fn a_launch_for_a_task_links_the_session_and_starts_the_task() {
             Ok(hq_db::tasks::create_task(c, "tk-1", "in-1", &new)?.id)
         })
         .unwrap();
-    let vault = tempfile::tempdir().unwrap();
     let l = Launch {
         mission_id: Some(&task),
         ..launch(host, "hs-t2", None)
     };
 
-    let report = launch_session(vault.path(), &db, &harness("claude-code"), l)
+    let report = launch_session(&db, &harness("claude-code"), l)
         .await
         .unwrap();
 
@@ -528,10 +516,9 @@ async fn a_blocked_launch_reports_the_screen_and_types_nothing() {
         ("agent read", dangerous_default.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let spec = harness("claude-code");
 
-    let report = launch_session(vault.path(), &db, &spec, launch(host, "hs-t2", Some("go")))
+    let report = launch_session(&db, &spec, launch(host, "hs-t2", Some("go")))
         .await
         .unwrap();
 
@@ -573,10 +560,8 @@ async fn a_dialog_that_appears_after_ready_is_a_blocked_launch_not_an_error() {
         ),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
     let report = launch_session(
-        vault.path(),
         &db,
         &harness("claude-code"),
         launch(host, "hs-t4", Some("go")),
@@ -606,10 +591,9 @@ async fn an_agent_still_loading_is_not_reported_as_blocked() {
         ("agent get", agent_json("hs-t2", "working"), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let spec = harness("claude-code");
 
-    let report = launch_session(vault.path(), &db, &spec, launch(host, "hs-t2", Some("go")))
+    let report = launch_session(&db, &spec, launch(host, "hs-t2", Some("go")))
         .await
         .unwrap();
 
@@ -645,17 +629,11 @@ async fn a_vouched_trust_dialog_is_accepted_then_the_prompt_is_typed() {
         ("agent prompt", OK.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let spec = harness("antigravity");
 
-    let report = launch_session(
-        vault.path(),
-        &db,
-        &spec,
-        launch(host, "hs-t3", Some("hello")),
-    )
-    .await
-    .unwrap();
+    let report = launch_session(&db, &spec, launch(host, "hs-t3", Some("hello")))
+        .await
+        .unwrap();
 
     assert_eq!(report["agent_status"], "idle");
     let log = calls(&dir);
@@ -751,7 +729,6 @@ async fn a_session_launched_from_a_chat_is_watched_and_driven_by_default() {
         ("agent get", agent_json("hs-t3", "idle"), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let web = chat(true);
     let l = Launch {
         watch: Some(web.new_watch(&json!({}))),
@@ -759,7 +736,7 @@ async fn a_session_launched_from_a_chat_is_watched_and_driven_by_default() {
         ..launch(host, "hs-t3", None)
     };
 
-    launch_session(vault.path(), &db, &harness("claude-code"), l)
+    launch_session(&db, &harness("claude-code"), l)
         .await
         .unwrap();
 
@@ -779,7 +756,6 @@ async fn a_session_launched_without_a_usable_goal_is_watched_but_not_driven() {
         ("agent get", agent_json("hs-t5", "idle"), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let web = chat(true);
     let vague = GoalText {
         goal: Some(GOAL),
@@ -791,7 +767,7 @@ async fn a_session_launched_without_a_usable_goal_is_watched_but_not_driven() {
         ..launch(host, "hs-t5", None)
     };
 
-    launch_session(vault.path(), &db, &harness("claude-code"), l)
+    launch_session(&db, &harness("claude-code"), l)
         .await
         .unwrap();
 
@@ -1188,12 +1164,7 @@ async fn the_watch_tool_defaults_drive_on_and_never_turns_it_back_on() {
         Ok(())
     })
     .unwrap();
-    let tools = tools::create_harness_session_tools(
-        std::path::PathBuf::from("/tmp"),
-        db.clone(),
-        Some(chat(true)),
-        None,
-    );
+    let tools = tools::create_harness_session_tools(db.clone(), Some(chat(true)), None);
     let watch_tool = tools
         .iter()
         .find(|t| t.name() == "harness_session_watch")
@@ -1508,9 +1479,7 @@ fn spawn_req<'a>(
 async fn a_general_purpose_agent_is_never_started_for_code_work() {
     let (dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let err = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("hermes", Some(Purpose::Code), None, &[]),
@@ -1534,15 +1503,9 @@ async fn a_general_purpose_agent_is_never_started_for_code_work() {
 async fn a_general_purpose_agent_defaults_to_general_and_a_coding_agent_to_code() {
     let (dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
-    let report = spawn_on(
-        vault.path(),
-        &db,
-        Arc::new(host),
-        spawn_req("hermes", None, None, &[]),
-    )
-    .await
-    .unwrap();
+    let report = spawn_on(&db, Arc::new(host), spawn_req("hermes", None, None, &[]))
+        .await
+        .unwrap();
     assert_eq!(report["category"], "general_purpose");
     assert_eq!(report["purpose"], "general");
     let id = report["session_id"].as_str().unwrap();
@@ -1556,7 +1519,6 @@ async fn a_general_purpose_agent_defaults_to_general_and_a_coding_agent_to_code(
 
     let (_dir, host) = startable_host();
     let report = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("claude-code", None, None, &[]),
@@ -1570,13 +1532,11 @@ async fn a_general_purpose_agent_defaults_to_general_and_a_coding_agent_to_code(
 #[tokio::test]
 async fn a_session_given_sessions_to_observe_needs_a_task_and_a_limit() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let task = a_task(&db);
     let watched = vec!["hs-coder".to_string()];
 
     let (dir, host) = startable_host();
     let err = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("hermes", Some(Purpose::Monitor), None, &watched),
@@ -1590,7 +1550,6 @@ async fn a_session_given_sessions_to_observe_needs_a_task_and_a_limit() {
     let too_many: Vec<String> = (0..11).map(|i| format!("hs-{i}")).collect();
     let (_dir, host) = startable_host();
     let err = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &too_many),
@@ -1603,7 +1562,6 @@ async fn a_session_given_sessions_to_observe_needs_a_task_and_a_limit() {
     // An id that is no session is caught before anything is launched.
     let (dir, host) = startable_host();
     let err = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &watched),
@@ -1626,11 +1584,9 @@ async fn a_session_given_sessions_to_observe_needs_a_task_and_a_limit() {
 #[tokio::test]
 async fn a_monitor_records_what_it_observes_and_a_coding_agent_may_review_too() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let task = a_task(&db);
     let (_dir, host) = startable_host();
     let coder = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("claude-code", None, Some(&task), &[]),
@@ -1642,7 +1598,6 @@ async fn a_monitor_records_what_it_observes_and_a_coding_agent_may_review_too() 
     let watched = vec![coder_id.clone()];
     let (_dir, host) = startable_host();
     let monitor = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &watched),
@@ -1673,7 +1628,6 @@ async fn a_monitor_records_what_it_observes_and_a_coding_agent_may_review_too() 
     // A coding agent can be the reviewer: the category decides what is refused, not what is allowed.
     let (_dir, host) = startable_host();
     let reviewer = spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("codex", Some(Purpose::Review), Some(&task), &watched),
@@ -1688,13 +1642,12 @@ async fn a_monitor_records_what_it_observes_and_a_coding_agent_may_review_too() 
 async fn a_handoff_to_a_general_purpose_agent_takes_a_purpose_but_not_code() {
     let (dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let req = handoff::HandoffRequest {
         harness: "openclaw".into(),
         purpose: Some(Purpose::Code),
         ..handoff_req("ext-gp")
     };
-    let err = handoff::handoff(vault.path(), &db, Arc::new(host), req)
+    let err = handoff::handoff(&db, Arc::new(host), req)
         .await
         .unwrap_err()
         .to_string();
@@ -1710,9 +1663,7 @@ async fn a_handoff_to_a_general_purpose_agent_takes_a_purpose_but_not_code() {
         purpose: Some(Purpose::Review),
         ..handoff_req("ext-gp2")
     };
-    let report = handoff::handoff(vault.path(), &db, Arc::new(host), req)
-        .await
-        .unwrap();
+    let report = handoff::handoff(&db, Arc::new(host), req).await.unwrap();
     assert_eq!(report["handoff"], "started");
     let row = get_row(&db, report["session_id"].as_str().unwrap()).unwrap();
     assert_eq!(row.purpose, "review");
@@ -1744,9 +1695,8 @@ fn count(db: &Database, sql: &str) -> i64 {
 async fn a_handoff_files_a_task_starts_a_session_and_gives_a_thread_that_owns_it() {
     let (dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    let report = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-42"))
+    let report = handoff::handoff(&db, Arc::new(host), handoff_req("ext-42"))
         .await
         .unwrap();
 
@@ -1792,14 +1742,13 @@ async fn a_handoff_files_a_task_starts_a_session_and_gives_a_thread_that_owns_it
 async fn repeating_a_handoff_returns_the_same_task_and_session_without_a_second_launch() {
     let (_dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
-    let first = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-7"))
+    let first = handoff::handoff(&db, Arc::new(host), handoff_req("ext-7"))
         .await
         .unwrap();
     let session_id = first["session_id"].as_str().unwrap().to_string();
 
     let (dir, host) = fake_host(&[("agent list", live_list(&session_id), None)]);
-    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-7"))
+    let again = handoff::handoff(&db, Arc::new(host), handoff_req("ext-7"))
         .await
         .unwrap();
 
@@ -1821,8 +1770,7 @@ async fn repeating_a_handoff_returns_the_same_task_and_session_without_a_second_
 async fn a_session_marked_running_that_its_host_no_longer_has_does_not_block_a_new_one() {
     let (_dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
-    handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-8"))
+    handoff::handoff(&db, Arc::new(host), handoff_req("ext-8"))
         .await
         .unwrap();
 
@@ -1834,7 +1782,7 @@ async fn a_session_marked_running_that_its_host_no_longer_has_does_not_block_a_n
         ("agent get", agent_json("hs-h", "idle"), None),
         ("agent prompt", OK.into(), None),
     ]);
-    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-8"))
+    let again = handoff::handoff(&db, Arc::new(host), handoff_req("ext-8"))
         .await
         .unwrap();
 
@@ -1854,9 +1802,8 @@ async fn an_unreachable_host_is_reported_and_leaves_no_session_or_dangling_threa
         Some("ssh: connect timed out"),
     )]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-9"))
+    let err = handoff::handoff(&db, Arc::new(host), handoff_req("ext-9"))
         .await
         .unwrap_err()
         .to_string();
@@ -1897,9 +1844,8 @@ async fn an_agent_stuck_at_a_dialog_is_reported_as_blocked_with_no_prompt_typed(
         ),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    let report = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-10"))
+    let report = handoff::handoff(&db, Arc::new(host), handoff_req("ext-10"))
         .await
         .unwrap();
 
@@ -1947,7 +1893,6 @@ async fn an_agent_stuck_at_a_dialog_is_reported_as_blocked_with_no_prompt_typed(
 async fn a_handoff_can_work_an_existing_task_and_refuses_ambiguous_or_empty_requests() {
     let (_dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let task = db
         .with_conn(|c| {
             c.execute(
@@ -1963,7 +1908,7 @@ async fn a_handoff_can_work_an_existing_task_and_refuses_ambiguous_or_empty_requ
         task_id: task.clone(),
         ..handoff_req("ext-11")
     };
-    let err = handoff::handoff(vault.path(), &db, Arc::new(host.clone()), both)
+    let err = handoff::handoff(&db, Arc::new(host.clone()), both)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("not both"), "{err}");
@@ -1972,7 +1917,7 @@ async fn a_handoff_can_work_an_existing_task_and_refuses_ambiguous_or_empty_requ
         ..handoff_req("")
     };
     assert!(
-        handoff::handoff(vault.path(), &db, Arc::new(host.clone()), untitled)
+        handoff::handoff(&db, Arc::new(host.clone()), untitled)
             .await
             .is_err()
     );
@@ -1987,7 +1932,7 @@ async fn a_handoff_can_work_an_existing_task_and_refuses_ambiguous_or_empty_requ
         title: String::new(),
         ..handoff_req("")
     };
-    let report = handoff::handoff(vault.path(), &db, Arc::new(host), existing)
+    let report = handoff::handoff(&db, Arc::new(host), existing)
         .await
         .unwrap();
     assert_eq!(report["task"]["id"], task);
@@ -2104,13 +2049,12 @@ fn a_profile_path_decides_where_the_binary_is_looked_for() {
 async fn a_launch_for_a_missing_binary_fails_fast_without_touching_the_host() {
     let (dir, host) = fake_host_checking_binaries(&[("workspace create", CREATED.into(), None)]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let h = profile_harness(
         "  ghost:\n    base: claude-code\n    command: definitely-not-installed-xyz\n",
         "ghost",
     );
 
-    let err = launch_session(vault.path(), &db, &h, launch(host, "hs-t6", Some("go")))
+    let err = launch_session(&db, &h, launch(host, "hs-t6", Some("go")))
         .await
         .unwrap_err()
         .to_string();
@@ -2124,11 +2068,9 @@ async fn a_launch_for_a_missing_binary_fails_fast_without_touching_the_host() {
 async fn an_agent_that_never_leaves_launch_pending_is_cleaned_up_and_reported() {
     let (dir, host) = stuck_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let started = std::time::Instant::now();
 
     let err = launch_session(
-        vault.path(),
         &db,
         &harness("claude-code"),
         launch(host, "hs-t5", Some("go")),
@@ -2174,10 +2116,8 @@ async fn a_failed_cleanup_is_reported_instead_of_claimed() {
         ("workspace close", String::new(), Some("boom")),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
     let err = launch_session(
-        vault.path(),
         &db,
         &harness("claude-code"),
         launch(host.with_launch_bound(SHORT_BOUND), "hs-t5", None),
@@ -2220,16 +2160,10 @@ async fn a_caller_that_disconnects_mid_launch_still_gets_the_orphan_closed() {
     let (dir, host) = stuck_host();
     slow_down(&dir, "agent start");
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(200),
-        launch_session(
-            vault.path(),
-            &db,
-            &harness("claude-code"),
-            launch(host, "hs-t5", None),
-        ),
+        launch_session(&db, &harness("claude-code"), launch(host, "hs-t5", None)),
     )
     .await;
     assert!(
@@ -2249,11 +2183,10 @@ async fn a_caller_that_disconnects_mid_launch_still_gets_the_session_recorded() 
     let (dir, host) = startable_host();
     slow_down(&dir, "agent start");
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(200),
-        handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-cancel")),
+        handoff::handoff(&db, Arc::new(host), handoff_req("ext-cancel")),
     )
     .await;
     assert!(cancelled.is_err());
@@ -2279,16 +2212,10 @@ async fn a_cancelled_handoff_for_a_stuck_harness_still_settles_the_thread_and_ta
     let (dir, host) = stuck_host();
     slow_down(&dir, "agent start");
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(200),
-        handoff::handoff(
-            vault.path(),
-            &db,
-            Arc::new(host),
-            handoff_req("ext-cancel-stuck"),
-        ),
+        handoff::handoff(&db, Arc::new(host), handoff_req("ext-cancel-stuck")),
     )
     .await;
     assert!(cancelled.is_err());
@@ -2308,9 +2235,8 @@ async fn a_cancelled_handoff_for_a_stuck_harness_still_settles_the_thread_and_ta
 async fn a_handoff_to_a_host_whose_harness_never_starts_leaves_nothing_behind() {
     let (dir, host) = stuck_host();
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-stuck"))
+    let err = handoff::handoff(&db, Arc::new(host), handoff_req("ext-stuck"))
         .await
         .unwrap_err()
         .to_string();
@@ -2334,7 +2260,7 @@ async fn a_handoff_to_a_host_whose_harness_never_starts_leaves_nothing_behind() 
     assert_eq!(status, "to_do", "the task is not left looking started");
 
     let (_dir, host) = startable_host();
-    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-stuck"))
+    let again = handoff::handoff(&db, Arc::new(host), handoff_req("ext-stuck"))
         .await
         .unwrap();
     assert_eq!(
@@ -2354,9 +2280,8 @@ async fn a_failure_after_the_session_was_recorded_says_so_and_keeps_the_thread()
         ("agent prompt", String::new(), Some(boom)),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-late"))
+    let err = handoff::handoff(&db, Arc::new(host), handoff_req("ext-late"))
         .await
         .unwrap_err()
         .to_string();
@@ -2386,17 +2311,11 @@ async fn an_agent_lookup_that_fails_after_the_start_still_closes_the_workspace()
         ("workspace close", OK.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    let err = launch_session(
-        vault.path(),
-        &db,
-        &harness("claude-code"),
-        launch(host, "hs-t7", None),
-    )
-    .await
-    .unwrap_err()
-    .to_string();
+    let err = launch_session(&db, &harness("claude-code"), launch(host, "hs-t7", None))
+        .await
+        .unwrap_err()
+        .to_string();
 
     assert!(err.contains("lookup died"), "{err}");
     assert!(
@@ -2417,17 +2336,11 @@ async fn a_close_that_fails_during_cleanup_is_named_in_the_error() {
         ("workspace close", String::new(), Some("close refused")),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    let err = launch_session(
-        vault.path(),
-        &db,
-        &harness("claude-code"),
-        launch(host, "hs-t7", None),
-    )
-    .await
-    .unwrap_err()
-    .to_string();
+    let err = launch_session(&db, &harness("claude-code"), launch(host, "hs-t7", None))
+        .await
+        .unwrap_err()
+        .to_string();
 
     assert!(
         err.contains("workspace w9 could not be closed") && err.contains("close it by hand"),
@@ -2444,7 +2357,6 @@ async fn a_row_that_cannot_be_recorded_closes_the_workspace_that_was_just_launch
         ("workspace close", OK.into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     db.with_conn(|c| {
         registry::insert(
             c,
@@ -2466,15 +2378,10 @@ async fn a_row_that_cannot_be_recorded_closes_the_workspace_that_was_just_launch
     })
     .unwrap();
 
-    let err = launch_session(
-        vault.path(),
-        &db,
-        &harness("claude-code"),
-        launch(host, "hs-t8", None),
-    )
-    .await
-    .unwrap_err()
-    .to_string();
+    let err = launch_session(&db, &harness("claude-code"), launch(host, "hs-t8", None))
+        .await
+        .unwrap_err()
+        .to_string();
 
     assert!(err.contains("workspace was closed"), "{err}");
     assert!(
@@ -2494,10 +2401,8 @@ async fn an_agent_whose_last_poll_shows_launch_not_pending_is_never_closed() {
         ("agent read", "some banner".into(), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
     let report = launch_session(
-        vault.path(),
         &db,
         &harness("claude-code"),
         launch(host.with_launch_bound(SHORT_BOUND), "hs-t9", None),
@@ -2514,11 +2419,9 @@ async fn a_second_launch_of_the_same_agent_is_refused_while_the_first_is_still_r
     let (dir, host) = startable_host();
     slow_down(&dir, "agent start");
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let first = tokio::time::timeout(
         Duration::from_millis(200),
         launch_session(
-            vault.path(),
             &db,
             &harness("claude-code"),
             launch(host.clone(), "hs-t10", None),
@@ -2528,7 +2431,6 @@ async fn a_second_launch_of_the_same_agent_is_refused_while_the_first_is_still_r
     assert!(first.is_err(), "the caller gave up, the launch carries on");
 
     let err = launch_session(
-        vault.path(),
         &db,
         &harness("claude-code"),
         launch(host.clone(), "hs-t10", None),
@@ -2553,7 +2455,7 @@ fn tool(
     chat: Option<WatchingChat>,
     name: &str,
 ) -> Box<dyn crate::registry::HqTool> {
-    tools::create_harness_session_tools(PathBuf::from("/tmp"), db.clone(), chat, None)
+    tools::create_harness_session_tools(db.clone(), chat, None)
         .into_iter()
         .find(|t| t.name() == name)
         .unwrap()
@@ -2580,16 +2482,10 @@ async fn every_launched_pane_carries_its_session_id_for_the_mcp_client() {
         ("agent get", agent_json("hs-env", "idle"), None),
     ]);
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
 
-    launch_session(
-        vault.path(),
-        &db,
-        &harness("claude-code"),
-        launch(host, "hs-env", None),
-    )
-    .await
-    .unwrap();
+    launch_session(&db, &harness("claude-code"), launch(host, "hs-env", None))
+        .await
+        .unwrap();
 
     assert!(
         calls(&dir).contains("--env HQ_SESSION_ID=hs-env"),
@@ -3189,9 +3085,7 @@ async fn a_specialist_runs_the_task_assigned_to_it_once_and_as_one_shot() {
     assigned_task(&db, "tk-other", "Someone else's", "codex", &[]);
 
     let resolve = stack_resolver(host);
-    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve)
-        .await
-        .unwrap();
+    let report = stack::dispatch(&db, &cfg, &resolve).await.unwrap();
     assert_eq!(report.started.len(), 1, "{report:?}");
     assert!(report.skipped.is_empty(), "{report:?}");
     let run = &report.started[0];
@@ -3234,9 +3128,7 @@ async fn a_specialist_runs_the_task_assigned_to_it_once_and_as_one_shot() {
     // Nothing more starts while the run is up, and the other assignee's task is never touched.
     let (_dir2, host2) = startable_host();
     let resolve2 = stack_resolver(host2);
-    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2)
-        .await
-        .unwrap();
+    let again = stack::dispatch(&db, &cfg, &resolve2).await.unwrap();
     assert!(again.started.is_empty(), "{again:?}");
     assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 1);
 }
@@ -3254,9 +3146,7 @@ async fn a_specialist_is_never_offered_code_work_and_a_tag_picks_its_purpose() {
     let reviewed = assigned_task(&db, "tk-review", "Read the draft", "hermes", &["review"]);
 
     let resolve = stack_resolver(host);
-    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve)
-        .await
-        .unwrap();
+    let report = stack::dispatch(&db, &cfg, &resolve).await.unwrap();
     assert_eq!(report.started.len(), 1, "{report:?}");
     let run = &report.started[0];
     assert_eq!(run["purpose"], "review");
@@ -3275,7 +3165,7 @@ async fn a_specialist_is_never_offered_code_work_and_a_tag_picks_its_purpose() {
         "the code task was left for a coding agent"
     );
 
-    let err = stack::run_for(vault.path(), &db, &cfg, "hermes", "tk-code", &resolve)
+    let err = stack::run_for(&db, &cfg, "hermes", "tk-code", &resolve)
         .await
         .unwrap_err()
         .to_string();
@@ -3297,9 +3187,7 @@ async fn a_run_that_cannot_start_leaves_a_comment_and_backs_off() {
     let task = assigned_task(&db, "tk-fail", "Will not start", "hermes", &[]);
 
     let resolve = stack_resolver(host);
-    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve)
-        .await
-        .unwrap();
+    let report = stack::dispatch(&db, &cfg, &resolve).await.unwrap();
     assert!(report.started.is_empty());
     assert_eq!(report.skipped.len(), 1, "{report:?}");
     assert!(report.skipped[0].starts_with("hermes:"), "{report:?}");
@@ -3319,9 +3207,7 @@ async fn a_run_that_cannot_start_leaves_a_comment_and_backs_off() {
 
     let (_dir2, host2) = startable_host();
     let resolve2 = stack_resolver(host2);
-    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2)
-        .await
-        .unwrap();
+    let again = stack::dispatch(&db, &cfg, &resolve2).await.unwrap();
     assert!(
         again.started.is_empty() && again.skipped.is_empty(),
         "backed off, not retried at once: {again:?}"
@@ -3342,9 +3228,7 @@ async fn a_backed_off_task_does_not_hold_up_the_rest_of_the_queue() {
     stack::back_off(&first);
 
     let resolve = stack_resolver(host);
-    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve)
-        .await
-        .unwrap();
+    let report = stack::dispatch(&db, &cfg, &resolve).await.unwrap();
     assert_eq!(report.started.len(), 1, "{report:?}");
     let row = get_row(&db, report.started[0]["session_id"].as_str().unwrap()).unwrap();
     assert_eq!(
@@ -3368,9 +3252,7 @@ async fn a_spent_budget_is_nothing_to_do_not_a_problem() {
     assigned_task(&db, "tk-two", "Second", "hermes", &[]);
 
     let resolve = stack_resolver(host);
-    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve)
-        .await
-        .unwrap();
+    let report = stack::dispatch(&db, &cfg, &resolve).await.unwrap();
     assert_eq!(report.started.len(), 1, "{report:?}");
     let id = report.started[0]["session_id"]
         .as_str()
@@ -3381,9 +3263,7 @@ async fn a_spent_budget_is_nothing_to_do_not_a_problem() {
 
     let (_dir2, host2) = startable_host();
     let resolve2 = stack_resolver(host2);
-    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2)
-        .await
-        .unwrap();
+    let again = stack::dispatch(&db, &cfg, &resolve2).await.unwrap();
     assert!(
         again.started.is_empty() && again.skipped.is_empty(),
         "a spent budget is quiet: {again:?}"
@@ -3394,7 +3274,6 @@ async fn a_spent_budget_is_nothing_to_do_not_a_problem() {
 #[tokio::test]
 async fn a_stack_run_is_never_resumed() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     db.with_conn(|c| {
         registry::insert(
             c,
@@ -3417,10 +3296,7 @@ async fn a_stack_run_is_never_resumed() {
         registry::set_status(c, "hs-run", registry::STATUS_EXITED)
     })
     .unwrap();
-    let err = resume(vault.path(), &db, "hs-run", None)
-        .await
-        .unwrap_err()
-        .to_string();
+    let err = resume(&db, "hs-run", None).await.unwrap_err().to_string();
     assert!(
         err.contains("one-shot run") && err.contains("hq stack run"),
         "{err}"
@@ -3777,12 +3653,11 @@ fn writer<'a>(owns: &'a [String]) -> SpawnRequest<'a> {
 #[tokio::test]
 async fn a_second_writer_in_a_folder_is_refused_unless_their_paths_do_not_meet() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let start = |req: SpawnRequest<'static>| {
-        let (db, vault) = (db.clone(), vault.path().to_path_buf());
+        let db = db.clone();
         async move {
             let (_dir, host) = startable_host();
-            spawn_on(&vault, &db, Arc::new(host), req).await
+            spawn_on(&db, Arc::new(host), req).await
         }
     };
     let (api, ui, api_handlers) = (
@@ -3822,7 +3697,6 @@ const WORKTREE: &str = r#"{"id":"x","result":{"path":"/h/HQ/worktrees/t/hs-1","r
 #[tokio::test]
 async fn a_writer_with_a_worktree_starts_there_and_leaves_the_folder_free() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let (dir, host) = fake_host(&[
         ("worktree add", WORKTREE.into(), None),
         ("workspace create", CREATED.into(), None),
@@ -3837,9 +3711,7 @@ async fn a_writer_with_a_worktree_starts_there_and_leaves_the_folder_free() {
         }),
         ..spawn_req("claude-code", None, None, &[])
     };
-    let report = spawn_on(vault.path(), &db, Arc::new(host), req)
-        .await
-        .unwrap();
+    let report = spawn_on(&db, Arc::new(host), req).await.unwrap();
     assert_eq!(report["cwd"], "/h/HQ/worktrees/t/hs-1");
     assert_eq!(report["worktree"]["branch"], "feature");
     assert_eq!(report["worktree"]["repo"], "/t");
@@ -3861,7 +3733,6 @@ async fn a_writer_with_a_worktree_starts_there_and_leaves_the_folder_free() {
     // The folder itself has no writer, so a plain session may start there.
     let (_dir, host) = startable_host();
     spawn_on(
-        vault.path(),
         &db,
         Arc::new(host),
         spawn_req("claude-code", None, None, &[]),
@@ -3873,7 +3744,6 @@ async fn a_writer_with_a_worktree_starts_there_and_leaves_the_folder_free() {
 #[tokio::test]
 async fn a_launch_that_fails_takes_the_new_worktree_with_it() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let (dir, host) = fake_host(&[
         ("worktree add", WORKTREE.into(), None),
         (
@@ -3890,11 +3760,7 @@ async fn a_launch_that_fails_takes_the_new_worktree_with_it() {
         }),
         ..spawn_req("claude-code", None, None, &[])
     };
-    assert!(
-        spawn_on(vault.path(), &db, Arc::new(host), req)
-            .await
-            .is_err()
-    );
+    assert!(spawn_on(&db, Arc::new(host), req).await.is_err());
     let calls = std::fs::read_to_string(dir.path().join("calls.log")).unwrap();
     assert!(
         calls.contains("worktree remove /h/HQ/worktrees/t/hs-1"),
@@ -4077,12 +3943,11 @@ fn worktree_and_owns_arguments_are_checked() {
 #[tokio::test]
 async fn a_session_starts_under_its_purposes_policy_unless_it_names_another() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let vault = tempfile::tempdir().unwrap();
     let start = |req: SpawnRequest<'static>| {
-        let (db, vault) = (db.clone(), vault.path().to_path_buf());
+        let db = db.clone();
         async move {
             let (_dir, host) = startable_host();
-            spawn_on(&vault, &db, Arc::new(host), req).await
+            spawn_on(&db, Arc::new(host), req).await
         }
     };
     let coder = start(spawn_req("claude-code", None, None, &[]))

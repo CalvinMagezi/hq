@@ -336,7 +336,6 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
 
     let db = Arc::new(state.db.clone());
     let report = harness::spawn_with(
-        &state.vault_path,
         &db,
         SpawnRequest {
             host: host_name.as_deref(),
@@ -427,7 +426,7 @@ pub(crate) async fn resume_handler(
     {
         tracing::warn!(session = %id, error = %e, "workbench api: could not clear the archive mark on resume");
     }
-    match harness::resume(&state.vault_path, &db, &id, prompt.as_deref()).await {
+    match harness::resume(&db, &id, prompt.as_deref()).await {
         Ok(report) => Json(report).into_response(),
         Err(e) => crate::sessions_api::session_error(e).into_response(),
     }

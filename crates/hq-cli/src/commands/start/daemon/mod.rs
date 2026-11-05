@@ -609,7 +609,7 @@ async fn dispatch_task(
         "session-supervisor" => {
             tasks_periodic::session_supervisor::run_session_supervisor(vault_path, db, config).await
         }
-        "stack-dispatch" => tasks_periodic::run_stack_dispatch(vault_path, db, config).await,
+        "stack-dispatch" => tasks_periodic::run_stack_dispatch(db, config).await,
         "edge-worker-dispatch" => tasks_periodic::run_edge_worker_dispatch(db, config).await,
         "verify-dispatch" => tasks_periodic::run_verify_dispatch(vault_path, db, config).await,
         "verify-audit" => tasks_periodic::run_verify_audit(vault_path, db, config).await,

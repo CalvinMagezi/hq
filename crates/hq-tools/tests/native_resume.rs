@@ -175,7 +175,7 @@ fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
     let agent = backend.agent(SESSION).unwrap().unwrap();
     assert_eq!(agent.agent_session_id.as_deref(), Some("conv-x"));
 
-    refresh_restart_command(tmp.path(), &backend, &row, &agent).unwrap();
+    refresh_restart_command(&backend, &row, &agent).unwrap();
 
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();

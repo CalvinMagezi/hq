@@ -221,7 +221,6 @@ fn governed_watch(session: &Session, db: &std::sync::Arc<hq_db::Database>) -> Bo
         from_ask: false,
     };
     let tools = hq_tools::harness_session::tools::create_harness_session_tools(
-        PathBuf::from("/tmp"),
         db.clone(),
         Some(chat),
         None,
