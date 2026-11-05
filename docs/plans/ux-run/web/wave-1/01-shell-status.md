@@ -66,7 +66,7 @@ matters most is the least consistent.
 **The status line is the only place HQ's connection is reported, in the rules' words and order, and
 colour means one thing each, on every screen of today's app.**
 
-- Replace the header's dot and word with the status line (`02-shared-parts.md`'s Connection module),
+- Replace the header's dot and word with the status line (`../wave-0/02-shared-parts.md`'s Connection module),
   under the place's title, state first, wrapping.
 - Replace `ReachabilityBanner` and the per-section raw errors with the saved strip and the connection
   sheet.

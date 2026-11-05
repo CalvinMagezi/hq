@@ -162,7 +162,7 @@ a 390 px frame renders the phone layout.
   `Switch`, `Chip`, `Tabs`, `Segmented`, `Composer`), in `src/components/ui/` (NEW). Tailwind can
   stay for layout glue, but colour comes only from the tokens.
 - **Tauri control window (`apps/desktop/ui`):** the same stylesheet, copied into `ui/aligned-ui.css`
-  by `scripts/build-ui.ts` (the CSP allows only `'self'` for styles and fonts, so the fonts are bundled
+  by `apps/desktop/scripts/build-ui.ts` (the CSP allows only `'self'` for styles and fonts, so the fonts are bundled
   into `ui/dist/fonts/`). The window is plain TypeScript: write the markup with the same classes. The
   control window then looks like the HQ window (Drift desktop 10).
 
@@ -269,7 +269,7 @@ mark on `--mark-ground`).
 | choice card | `.n-rcard .n-radio` | `.a-rcard .a-radio` | Chosen has an ink edge. |
 | menu | none | `.a-menu .a-menu-item .a-menu-sep` | surface-200, line border. |
 | SheetFrame | `.n-sheet .n-handle .n-scrim` | `.a-sheet` (`.side`, `.center`), `.a-handle`, `.a-sheet-head .a-sheet-body .a-sheet-foot`, `.a-scrim` | Bottom below 768; from 768 side (440 wide, from the right) or centred (640 wide). |
-| AlertDialog | `.n-dlg` | `.a-dlg .a-dlg-actions` | `Dialog`: side by side, safe left; stacked rule in `rules-web.md` 11. |
+| AlertDialog | `.n-dlg` | `.a-dlg .a-dlg-actions` | `Dialog`: side by side, safe left; stacked rule in `../rules-web.md` 11. |
 | Snack | `.n-snack` | `.a-snack .a-snack-act` | `Toast`: bottom right from 768. |
 | offline banner | `.n-banner`, `.sbar` | `.a-banner` (`.work`), `.a-stale` | Always with the status line; one strip "Saved in this browser at 14:32". |
 | NotBuilt, empty | `.cov` | `.a-empty .a-empty-ic` (`.warn`), `.a-loading`, `.a-skel` (`.t .s`) | |
@@ -336,7 +336,7 @@ desktop or release changes; Acceptance checks; Check on a laptop or phone; Open 
 
 ## 5. Open conflicts
 
-Where boards disagree, `decisions.md` wins, then `rules-web.md`, then `rules-shared.md`, then the later
+Where boards disagree, `../decisions.md` wins, then `../rules-web.md`, then `../rules-shared.md`, then the later
 board. Each conflict, and how the specs resolve it:
 
 1. **Lite's gear.** Flow and Shell 2: This browser and Other devices. Notes 2: This browser only.
@@ -403,7 +403,7 @@ board. Each conflict, and how the specs resolve it:
 | OD-W2 | Lite's `/settings/spending` | Open `/settings/browser` (Spending 2 says "opens Settings"; Lite's Settings is This browser). |
 | OD-W3 | Where the HQ window's Copy link and Share go | Copy link stays (it is text); Share hides (no share sheet in the web view). |
 
-Owner decisions still open from `decisions.md` that web specs depend on: N19 (one string catalogue),
+Owner decisions still open from `../decisions.md` that web specs depend on: N19 (one string catalogue),
 W34 (the claude.ai connector on the web), W44 ("This PC" on Macs), W50 (Windows and Linux hub builds),
 WR18 ("Typing to the helper"), WR22 (the bundle rename).
 

@@ -9,7 +9,7 @@ Drift 11. Follows `../../rules-web.md` section 9. Where this spec and the rules 
 - **M11 Time zones.** The server writes local times. Instants from HQ, one HQ zone plus a display zone,
   named when they differ.
 - **Drift 11.** "approved 05:27 AM for Claude" reads as this morning for a grant twelve days old
-  (`04-plain-words.md` fixes the words; this spec fixes the time).
+  (`../wave-1/04-plain-words.md` fixes the words; this spec fixes the time).
 
 Who it hurts: an owner travelling, or one whose HQ runs on a server in another zone: limits "reset at
 midnight" at 03:00 their time, a daily summary arrives at an odd hour, a task "due today" is due

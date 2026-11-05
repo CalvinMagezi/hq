@@ -80,7 +80,7 @@ app beyond the words of a notification and two status lines.
   (`hq-thread-store`): zustand stores persisted to IndexedDB.
 - `apps/hq-web/src/components/chat/draftStore.ts:18-29`: chat drafts in localStorage.
 - `apps/hq-web/src/sw.ts:9` `API_CACHE = 'hq-api'`, `:31-38` the cached reads (notifications, vault
-  assets, search, folders, task comments, thread messages), served "of any age" (line 260) on failure.
+  assets, search, folders, task comments, thread messages), served "of any age" (line 258) on failure.
 - `apps/hq-web/src/components/SignInPrompt.tsx:116`: the banner shown on 401, over the cached screens.
 - `crates/hq-db/src/web_auth.rs:90-93` `mint()`: "a device's sign-in never expires on its own".
 - Server side already drops a signed-out device's push subscription
