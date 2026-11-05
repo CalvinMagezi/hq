@@ -1,8 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, type MutableRefObject } from 'react'
+import { Link, useBlocker } from '@tanstack/react-router'
 import { MarkdownViewer } from './MarkdownViewer'
+import { Dialog, workingLabel } from '~/components/ui/Dialog'
 import { t } from '~/strings'
-import { createNote, getNote, updateNote, type NoteConflict } from '~/lib/vaultApi'
-import { keepBothTitle } from '~/lib/noteConflict'
+import { displayZone } from '~/lib/time'
+import { conflictWhere, stripFrontmatter } from '~/lib/noteConflict'
+import { keepBoth as keepBothNote, liveNoteApi, saveNote, seeTheirVersion, type NoteApi, type SaveStep, type TheirVersion } from '~/lib/noteSave'
+import type { NoteConflict } from '~/lib/vaultApi'
 import { keepUnsaved, onBeforeReload, takeUnsaved } from '~/lib/version'
 
 interface NoteEditorProps {
@@ -10,27 +14,51 @@ interface NoteEditorProps {
     filePath: string
     base?: string
     onSaved?: () => void
+    /** The page asks here before it leaves the editor: unsaved text gets the Save your changes? question. */
+    leaveRef?: MutableRefObject<((go: () => void) => void) | null>
+    api?: NoteApi
 }
 
-export function NoteEditor({ content, filePath, base, onSaved }: NoteEditorProps) {
+interface Asking {
+    go: () => void
+    stay: () => void
+}
+
+function clock(at?: string): string {
+    const ms = at ? Date.parse(at) : Date.now()
+    return new Intl.DateTimeFormat(undefined, { timeZone: displayZone(), hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(Number.isNaN(ms) ? Date.now() : ms)
+}
+
+function whereWords(by: string | undefined, kind: 'cap' | 'low'): string | null {
+    const where = conflictWhere(by)
+    if (where === 'unknown') return null
+    if (where === 'helper') return t(kind === 'cap' ? 'note_where_helper' : 'note_from_helper')
+    return t(kind === 'cap' ? 'note_where_hq' : 'note_from_hq')
+}
+
+export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = liveNoteApi }: NoteEditorProps) {
     const [mode, setMode] = useState<'edit' | 'preview'>('edit')
     const [saving, setSaving] = useState(false)
     const [dirty, setDirty] = useState(false)
     const [conflict, setConflict] = useState<NoteConflict | null>(null)
+    const [theirs, setTheirs] = useState<TheirVersion | null>(null)
+    const [kept, setKept] = useState<{ title: string; path: string } | null>(null)
     const [failed, setFailed] = useState(false)
     const [base0, setBase] = useState(base)
+    const [asking, setAsking] = useState<Asking | null>(null)
+    const [busy, setBusy] = useState(false)
 
     useEffect(() => setBase(base), [base])
 
     // Strip frontmatter for editing — server handles preservation on save
-    const bodyOnly = content.replace(/^---[\s\S]*?---\n?/, '')
+    const bodyOnly = stripFrontmatter(content)
     const [editContent, setEditContent] = useState(bodyOnly)
 
     useEffect(() => {
-        const newBody = content.replace(/^---[\s\S]*?---\n?/, '')
-        const kept = takeUnsaved(`note:${filePath}`)
-        setEditContent(kept ?? newBody)
-        setDirty(kept !== null && kept !== newBody)
+        const newBody = stripFrontmatter(content)
+        const keptText = takeUnsaved(`note:${filePath}`)
+        setEditContent(keptText ?? newBody)
+        setDirty(keptText !== null && keptText !== newBody)
     }, [content, filePath])
 
     // A reload for a newer HQ must not lose what has not been saved.
@@ -44,59 +72,59 @@ export function NoteEditor({ content, filePath, base, onSaved }: NoteEditorProps
         setDirty(true)
     }
 
-    const handleSave = useCallback(async () => {
-        if (!dirty || saving) return
+    const handleSave = useCallback(async (): Promise<SaveStep | null> => {
+        if (!dirty || saving || conflict) return null
         setSaving(true)
         setFailed(false)
-        try {
-            const result = await updateNote(filePath, editContent, base0)
-            if (result.saved) {
-                setDirty(false)
-                if (result.hash) setBase(result.hash)
-                onSaved?.()
-            } else {
-                setConflict(result)
-            }
-        } catch {
+        const step = await saveNote(api, filePath, editContent, base0)
+        if (step.kind === 'saved') {
+            setDirty(false)
+            if (step.hash) setBase(step.hash)
+            onSaved?.()
+        } else if (step.kind === 'conflict') {
+            setConflict(step.conflict)
+        } else {
             setFailed(true)
-        } finally {
-            setSaving(false)
         }
-    }, [dirty, saving, filePath, editContent, base0, onSaved])
+        setSaving(false)
+        return step
+    }, [api, dirty, saving, conflict, filePath, editContent, base0, onSaved])
 
-    // Their version replaces the text here; Keep both saves this text as a second note next to it.
     const seeTheirs = async () => {
-        const theirs = await getNote(filePath)
-        setEditContent(theirs.content.replace(/^---[\s\S]*?---\n?/, ''))
-        setBase(theirs.hash)
+        const seen = await seeTheirVersion(api, filePath, editContent)
+        if (seen) setTheirs(seen)
+        else setFailed(true)
+    }
+
+    // Your text becomes a new note beside theirs; theirs then stays on screen as the note.
+    const keepBoth = async () => {
+        setFailed(false)
+        const done = await keepBothNote(api, filePath, editContent, t('note_conflict_your_version'), () => crypto.randomUUID())
+        if (!done.ok) {
+            setFailed(true)
+            return
+        }
+        setEditContent(done.theirs.text)
+        setBase(done.theirs.hash)
         setDirty(false)
         setConflict(null)
+        setTheirs(null)
+        setKept({ title: done.title, path: done.path })
         onSaved?.()
     }
-    const keepBoth = async () => {
-        const folder = filePath.includes('/') ? filePath.split('/').slice(0, -1).join('/') : undefined
-        const title = keepBothTitle(filePath, t('note_conflict_your_version'))
-        try {
-            await createNote(title, editContent, folder, crypto.randomUUID())
-            await seeTheirs()
-        } catch {
-            setFailed(true)
-        }
-    }
 
-    // Cmd+S / Ctrl+S to save
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             if ((e.metaKey || e.ctrlKey) && e.key === 's') {
                 e.preventDefault()
-                handleSave()
+                void handleSave()
             }
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
     }, [handleSave])
 
-    // Warn before navigating away with unsaved changes
+    // Closing the tab asks the browser's own question; its words cannot be set.
     useEffect(() => {
         const handler = (e: BeforeUnloadEvent) => {
             if (dirty) { e.preventDefault() }
@@ -105,93 +133,126 @@ export function NoteEditor({ content, filePath, base, onSaved }: NoteEditorProps
         return () => window.removeEventListener('beforeunload', handler)
     }, [dirty])
 
+    const dirtyRef = useRef(dirty)
+    dirtyRef.current = dirty
+    const blocker = useBlocker({ shouldBlockFn: () => dirtyRef.current, withResolver: true, enableBeforeUnload: false })
+    useEffect(() => {
+        if (blocker.status === 'blocked') setAsking({ go: blocker.proceed, stay: blocker.reset })
+    }, [blocker.status, blocker.proceed, blocker.reset])
+
+    useEffect(() => {
+        if (!leaveRef) return
+        leaveRef.current = (go) => {
+            if (dirtyRef.current) setAsking({ go, stay: () => undefined })
+            else go()
+        }
+        return () => { leaveRef.current = null }
+    }, [leaveRef])
+
+    const discard = () => {
+        takeUnsaved(`note:${filePath}`)
+        setDirty(false)
+        const go = asking?.go
+        setAsking(null)
+        // The blocker reads the ref, so let the clean state land before it lets the navigation through.
+        dirtyRef.current = false
+        go?.()
+    }
+    const saveAndLeave = async () => {
+        if (!asking) return
+        setBusy(true)
+        const step = await handleSave()
+        setBusy(false)
+        const next = asking
+        setAsking(null)
+        if (step?.kind === 'saved') {
+            dirtyRef.current = false
+            next.go()
+        } else {
+            next.stay()
+        }
+    }
+    const keepEditing = () => {
+        asking?.stay()
+        setAsking(null)
+    }
+
+    const status = conflict ? t('note_conflict_not_saved') : saving ? t('note_save_saving') : failed ? t('note_save_failed') : dirty ? t('note_save_unsaved') : t('note_save_saved')
+    const words = editContent.split(/\s+/).filter(Boolean).length
+    const lines = editContent.split('\n').length
+    const time = clock(conflict?.at)
+    const from = whereWords(conflict?.by, 'cap')
+    const fromLow = whereWords(conflict?.by, 'low')
+
     return (
         <div className="flex flex-col h-full min-h-0">
-            {/* Toolbar */}
-            <div
-                className="flex items-center justify-between px-1 py-2 flex-shrink-0 gap-2"
-            >
-                {/* Mode toggle — glass pills */}
-                <div
-                    className="flex rounded-xl p-0.5"
-                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.04)' }}
-                >
-                    <button
-                        onClick={() => setMode('edit')}
-                        className="px-3 py-1.5 text-[10px] tracking-wider uppercase font-mono font-bold transition-all rounded-lg"
-                        style={{
-                            color: mode === 'edit' ? 'var(--accent-green)' : 'var(--text-dim)',
-                            background: mode === 'edit' ? 'rgba(0,255,163,0.08)' : 'transparent',
-                        }}
-                    >
-                        Edit
+            <div className="flex items-center justify-between px-1 py-2 flex-shrink-0 gap-2">
+                <div className="a-chips" style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" className={`a-chip${mode === 'edit' ? ' is-on' : ''}`} onClick={() => setMode('edit')}>
+                        {t('note_editor_edit')}
                     </button>
-                    <button
-                        onClick={() => setMode('preview')}
-                        className="px-3 py-1.5 text-[10px] tracking-wider uppercase font-mono font-bold transition-all rounded-lg"
-                        style={{
-                            color: mode === 'preview' ? 'var(--accent-green)' : 'var(--text-dim)',
-                            background: mode === 'preview' ? 'rgba(0,255,163,0.08)' : 'transparent',
-                        }}
-                    >
-                        Preview
+                    <button type="button" className={`a-chip${mode === 'preview' ? ' is-on' : ''}`} onClick={() => setMode('preview')}>
+                        {t('note_editor_preview')}
                     </button>
                 </div>
 
-                {/* Save area */}
                 <div className="flex items-center gap-2">
-                    <span className="text-[9px] font-mono hidden sm:inline" style={{ color: 'var(--text-dim)', opacity: 0.5 }}>
-                        {editContent.split(/\s+/).filter(Boolean).length} words / {editContent.split('\n').length} lines
+                    <span className="a-muted a-body-sm hidden sm:inline">{t('note_editor_counts', { words, lines })}</span>
+                    <span className="a-body-sm" role="status" style={{ color: dirty || failed || conflict ? 'var(--warn)' : 'var(--ink-muted)' }}>
+                        {status}
                     </span>
-                    {dirty && (
-                        <span className="text-[10px] font-mono flex items-center gap-1.5" style={{ color: 'var(--accent-amber)' }}>
-                            <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: 'var(--accent-amber)' }} />
-                            unsaved
-                        </span>
-                    )}
-                    <button
-                        onClick={handleSave}
-                        disabled={!dirty || saving}
-                        className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition-all disabled:opacity-30"
-                        style={{
-                            background: dirty ? 'rgba(0,255,163,0.12)' : 'rgba(255,255,255,0.04)',
-                            color: dirty ? 'var(--accent-green)' : 'var(--text-dim)',
-                            border: dirty ? '1px solid rgba(0,255,163,0.2)' : '1px solid rgba(255,255,255,0.06)',
-                        }}
-                    >
-                        {saving ? 'Saving...' : 'Save'}
+                    <button type="button" className="a-btn" onClick={() => void handleSave()} disabled={!dirty || saving || !!conflict}>
+                        {t('quick_note_save')}
                     </button>
                 </div>
             </div>
 
-            {conflict && (
-                <div role="alert" className="glass-card rounded-xl px-4 py-3 mb-2 flex flex-col gap-2 text-xs" style={{ color: 'var(--text-primary)' }}>
-                    <p className="font-bold">{t('note_conflict_title')}</p>
-                    <p style={{ color: 'var(--text-dim)' }}>{conflict.by ? t('note_conflict_by', { name: conflict.by }) : t('note_conflict_line')}</p>
-                    <div className="flex gap-2">
-                        <button onClick={() => void seeTheirs()} className="px-3 py-1.5 rounded-lg glass-card">{t('note_conflict_see_theirs')}</button>
-                        <button onClick={() => void keepBoth()} className="px-3 py-1.5 rounded-lg glass-card">{t('note_conflict_keep_both')}</button>
+            {conflict && !theirs && (
+                <div role="alert" className="a-card" style={{ marginBottom: 8 }}>
+                    <h2 className="a-h3">{t('note_conflict_title')}</h2>
+                    <p className="a-body-sm a-muted">
+                        {from ? t('note_conflict_line', { where: from, time }) : t('note_conflict_line_unknown', { time })}
+                    </p>
+                    <div className="a-card-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button type="button" className="a-btn secondary" onClick={() => void seeTheirs()}>{t('note_conflict_see_theirs')}</button>
+                        <button type="button" className="a-btn secondary" onClick={() => void keepBoth()}>{t('note_conflict_keep_both')}</button>
                     </div>
                 </div>
             )}
-            {failed && <p role="alert" className="text-xs px-1 pb-2" style={{ color: 'var(--accent-amber)' }}>{t('fail_save_note_no_reply')}</p>}
+            {conflict && theirs && (
+                <section aria-label={t('note_conflict_theirs_head')} className="a-card" style={{ marginBottom: 8 }}>
+                    <h2 className="a-h3">{t('note_conflict_theirs_head')}</h2>
+                    <p className="a-body-sm a-muted">
+                        {fromLow ? t('note_conflict_theirs_from', { where: fromLow, time }) : t('note_conflict_theirs_from_unknown', { time })}
+                    </p>
+                    <p className="a-body-sm a-muted">{t('note_conflict_differ', { n: theirs.differ })}</p>
+                    <textarea readOnly aria-readonly="true" className="a-input" rows={8} value={theirs.text} style={{ fontFamily: 'var(--font-mono)' }} />
+                    <div className="a-card-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button type="button" className="a-btn secondary" onClick={() => setTheirs(null)}>{t('note_conflict_back_to_mine')}</button>
+                        <button type="button" className="a-btn secondary" onClick={() => void keepBoth()}>{t('note_conflict_keep_both')}</button>
+                    </div>
+                </section>
+            )}
+            {kept && (
+                <div role="status" className="a-banner">
+                    <span>{t('note_conflict_both_kept', { title: kept.title })}</span>
+                    <Link to="/notes/$" params={{ _splat: kept.path }} className="a-link">{t('note_conflict_open')}</Link>
+                </div>
+            )}
+            {failed && (
+                <div role="alert" className="a-banner">
+                    <span style={{ color: 'var(--warn)' }}>{t('fail_save_changes_no_reply')}</span>
+                    <button type="button" className="a-link" onClick={() => void handleSave()}>{t('note_editor_retry')}</button>
+                </div>
+            )}
 
-            {/* Content area */}
             <div className="flex-1 min-h-0 overflow-y-auto">
                 {mode === 'edit' ? (
                     <textarea
                         value={editContent}
                         onChange={(e) => handleChange(e.target.value)}
-                        className="w-full h-full min-h-[400px] px-4 py-3 text-sm outline-none resize-none rounded-xl"
-                        style={{
-                            background: 'rgba(255,255,255,0.02)',
-                            border: '1px solid rgba(255,255,255,0.06)',
-                            color: 'var(--text-primary)',
-                            fontFamily: 'var(--font-mono)',
-                            fontSize: '13px',
-                            lineHeight: '1.7',
-                            caretColor: 'var(--accent-green)',
-                        }}
+                        className="a-input w-full h-full min-h-[400px] resize-none"
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.7 }}
                         spellCheck={false}
                     />
                 ) : (
@@ -199,31 +260,22 @@ export function NoteEditor({ content, filePath, base, onSaved }: NoteEditorProps
                 )}
             </div>
 
-            {/* Mobile save bar */}
-            <div
-                className="md:hidden flex-shrink-0 flex items-center justify-between px-4 py-3"
-                style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
-            >
-                <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-mono" style={{ color: 'var(--text-dim)' }}>
-                        {dirty ? 'Unsaved changes' : 'All changes saved'}
-                    </span>
-                    <span className="text-[9px] font-mono" style={{ color: 'var(--text-dim)', opacity: 0.6 }}>
-                        {editContent.split(/\s+/).filter(Boolean).length}w / {editContent.split('\n').length}L
-                    </span>
-                </div>
-                <button
-                    onClick={handleSave}
-                    disabled={!dirty || saving}
-                    className="px-4 py-2 rounded-xl text-xs font-mono font-bold transition-all disabled:opacity-30"
-                    style={{
-                        background: dirty ? 'rgba(0,255,163,0.15)' : 'rgba(255,255,255,0.04)',
-                        color: dirty ? 'var(--accent-green)' : 'var(--text-dim)',
-                    }}
-                >
-                    {saving ? 'Saving...' : 'Save'}
-                </button>
-            </div>
+            <p className="a-muted a-body-sm hidden md:block" style={{ padding: '4px 4px' }}>{t('note_editor_shortcut')}</p>
+
+            {asking && (
+                <Dialog
+                    kind="red"
+                    title={t('note_leave_title')}
+                    body={t('note_leave_body', { note: (filePath.split('/').pop() ?? '').replace(/\.md$/, '') })}
+                    keepLabel={t('note_leave_keep')}
+                    actLabel={t('note_leave_discard')}
+                    busy={busy}
+                    busyLabel={workingLabel()}
+                    third={{ label: t('leave_note_save'), onPick: () => void saveAndLeave() }}
+                    onKeep={keepEditing}
+                    onAct={discard}
+                />
+            )}
         </div>
     )
 }

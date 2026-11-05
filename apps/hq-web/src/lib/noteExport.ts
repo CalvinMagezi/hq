@@ -61,6 +61,24 @@ export function defaultExtension(format: NoteExportFormat): string {
   return NOTE_EXPORT_OPTIONS.find((o) => o.format === format)?.extension ?? format
 }
 
+/** The catalogue keys for one format: its name, what it is good for, and what to call the file while making it. */
+export function exportKeys(format: NoteExportFormat) {
+  return {
+    name: `note_export_${format}`,
+    hint: `note_export_${format}_hint`,
+    kind: `note_export_kind_${format}`,
+  } as const
+}
+
+export type ExportGate = 'ok' | 'ask' | 'window' | 'away'
+
+/** What Export does now: HQ's window cannot save files, HQ away cannot make one, a shared computer asks first. */
+export function exportGate(state: { inHub: boolean; away: boolean; shared: boolean }): ExportGate {
+  if (state.inHub) return 'window'
+  if (state.away) return 'away'
+  return state.shared ? 'ask' : 'ok'
+}
+
 /** `Notebooks/Inbox/Plan.md` + `docx` -> `Plan.docx`, with characters a file name cannot hold removed. */
 export function exportFileName(notePath: string, extension: string): string {
   const base = (notePath.split('/').pop() ?? '').replace(/\.(md|markdown|txt)$/i, '')

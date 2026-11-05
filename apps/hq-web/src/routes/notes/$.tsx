@@ -1,10 +1,17 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { lazy, Suspense, useState, useCallback, useEffect, useMemo } from 'react'
+import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchNoteExport, togglePinNote } from '~/lib/vaultApi'
-import { exportFileName, exportOptionsFor, NOTE_EXPORT_OPTIONS, type NoteExportFormat } from '~/lib/noteExport'
+import { exportFileName, exportGate, exportKeys, exportOptionsFor, type NoteExportFormat } from '~/lib/noteExport'
+import { t } from '~/strings'
+import { Dialog, workingLabel } from '~/components/ui/Dialog'
+import { toastNotice, useToasts } from '~/lib/toast'
+import { isSharedComputer } from '~/lib/sharedComputer'
+import { useInHub } from '~/lib/hubWindow'
+import { useSharedConnection } from '~/lib/connection'
+import { AboutNote } from '~/components/notes/AboutNote'
 import { HqHttpError } from '~/lib/hqAuth'
 import { noteQuery, vaultKeys } from '~/lib/queries'
 import type { DirEntry } from '~/lib/vaultApi'
@@ -110,6 +117,11 @@ function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
     const [pinning, setPinning] = useState(false)
     const [editing, setEditing] = useState(false)
     const [exporting, setExporting] = useState<NoteExportFormat | null>(null)
+    const inHub = useInHub()
+    const connection = useSharedConnection()
+    const [askShared, setAskShared] = useState<NoteExportFormat | null>(null)
+    const [exportNote, setExportNote] = useState<string | null>(null)
+    const leaveRef = useRef<((go: () => void) => void) | null>(null)
     const [exportMenu, setExportMenu] = useState<ExportMenuState | null>(null)
     const closeExportMenu = useCallback(() => setExportMenu(null), [])
     // Table formats are only offered for a note that has a table.
@@ -156,9 +168,22 @@ function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
 
     // Server-rendered export in any of the offered formats. Touch devices get the share sheet
     // (WhatsApp, email, Drive); desktops get a download.
+    const startExport = (format: NoteExportFormat) => {
+        setExportMenu(null)
+        const gate = exportGate({
+            inHub,
+            away: connection !== 'connected' && connection !== 'ai_down',
+            shared: isSharedComputer(),
+        })
+        if (gate === 'window') setExportNote(t('note_window_export'))
+        else if (gate === 'away') setExportNote(t('note_export_away'))
+        else if (gate === 'ask') setAskShared(format)
+        else void handleExport(format)
+    }
+
     const handleExport = async (format: NoteExportFormat) => {
         if (exporting) return
-        setExportMenu(null)
+        setExportNote(null)
         setExporting(format)
         try {
             const { blob, extension } = await fetchNoteExport(filePath, format)
@@ -181,13 +206,17 @@ function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
             a.click()
             a.remove()
             setTimeout(() => URL.revokeObjectURL(url), 10_000)
+            toastNotice(t('note_export_done', { name }))
         } catch (err) {
             if (format === 'pdf' && err instanceof HqHttpError && err.status === 503) {
                 // The server's older PDF engine is not installed: print from the browser instead.
                 await handlePrintPDF()
             } else {
-                const label = NOTE_EXPORT_OPTIONS.find((o) => o.format === format)?.label ?? format
-                window.alert(err instanceof Error ? err.message : `Could not export this note as ${label}.`)
+                useToasts.getState().push({
+                    text: t('note_export_failed', { kind: t(exportKeys(format).kind) }),
+                    kind: 'alert',
+                    action: { label: t('note_export_try_again'), run: () => void handleExport(format) },
+                })
             }
         } finally {
             setExporting(null)
@@ -202,7 +231,7 @@ function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
         const body = content.replace(/^---[\s\S]*?---\n?/, '')
         let html: string
         try { html = await marked.parse(body) } catch {
-            window.alert('Could not convert this note to HTML for printing.')
+            useToasts.getState().push({ text: t('note_export_failed', { kind: t('note_export_kind_pdf') }), kind: 'alert' })
             return
         }
         // Escape filename and sanitize html to prevent XSS in the print window
@@ -292,6 +321,7 @@ ${safeHtml}
                     content={content}
                     filePath={filePath}
                     base={hash}
+                    leaveRef={leaveRef}
                     onSaved={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })}
                 />
             )
@@ -326,7 +356,7 @@ ${safeHtml}
                 <div className="flex items-center gap-1 flex-shrink-0">
                     {isMd && (
                         <button
-                            onClick={() => setEditing(!editing)}
+                            onClick={() => (editing && leaveRef.current ? leaveRef.current(() => setEditing(false)) : setEditing(!editing))}
                             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-all"
                             style={{
                                 color: editing ? 'var(--accent-violet)' : 'var(--text-dim)',
@@ -340,7 +370,7 @@ ${safeHtml}
                                     : <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>
                                 }
                             </svg>
-                            {editing ? 'View' : 'Edit'}
+                            {editing ? t('note_editor_view') : t('note_editor_edit')}
                         </button>
                     )}
                     {isMd && (
@@ -397,14 +427,14 @@ ${safeHtml}
                             disabled={exporting !== null}
                             className="flex items-center justify-center gap-1 h-7 px-2 rounded-lg transition-all disabled:opacity-40"
                             style={{ color: 'var(--text-dim)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                            title={exporting ? 'Exporting…' : 'Export as PDF, Word, HTML, Excel and more'}
+                            title={t('note_export_menu_label')}
                             aria-haspopup="menu"
                             aria-expanded={exportMenu !== null}
                         >
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            <span className="hidden sm:inline text-[11px] ">{exporting ? 'Exporting…' : 'Export'}</span>
+                            <span className="hidden sm:inline text-[11px] ">{t('note_action_export')}</span>
                         </button>
                     )}
                     {isMd && (
@@ -444,12 +474,30 @@ ${safeHtml}
                 }>
                     <div className="max-w-[860px] mx-auto p-4 sm:p-6 overflow-x-hidden" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom))' }}>
                         {viewer}
+                        {exportNote && <p role="status" className="a-body-sm a-muted">{exportNote}</p>}
                         {isMd && !editing && <NoteTasks path={filePath} />}
+                        {isMd && !editing && <AboutNote path={filePath} />}
                     </div>
                 </Suspense>
             </div>
             <CopyPathMenu menu={copyMenu} onClose={closeCopyMenu} />
-            <ExportMenu menu={exportMenu} options={exportOptions} busy={exporting} onPick={handleExport} onClose={closeExportMenu} />
+            <ExportMenu menu={exportMenu} options={exportOptions} busy={exporting} title={t('note_export_title')} onPick={startExport} onClose={closeExportMenu} />
+            {askShared && (
+                <Dialog
+                    kind="ask"
+                    title={t('note_export_shared_title')}
+                    body={t('note_export_shared_body')}
+                    keepLabel={t('note_export_shared_keep')}
+                    actLabel={t('note_export_shared_act', { kind: t(exportKeys(askShared).kind) })}
+                    busyLabel={workingLabel()}
+                    onKeep={() => setAskShared(null)}
+                    onAct={() => {
+                        const f = askShared
+                        setAskShared(null)
+                        void handleExport(f)
+                    }}
+                />
+            )}
         </div>
     )
 }
