@@ -1,35 +1,38 @@
-import React, { useEffect, useRef } from 'react'
-import type { NoteExportFormat, NoteExportGroup, NoteExportOption } from '~/lib/noteExport'
+import { useEffect, useRef } from 'react'
+import { t } from '~/strings'
+import { exportKeys, type NoteExportFormat, type NoteExportGroup, type NoteExportOption } from '~/lib/noteExport'
 
 export interface ExportMenuState {
     x: number
     y: number
 }
 
-const MENU_W = 240
-const ITEM_H = 40
+const MENU_W = 300
+const ITEM_H = 56
 
-const GROUP_TITLES: Record<NoteExportGroup, string> = {
-    document: 'Document',
-    image: 'Image',
-    data: 'Tables in this note',
+const GROUP_KEYS: Record<NoteExportGroup, 'note_export_group_document' | 'note_export_group_picture' | 'note_export_group_tables'> = {
+    document: 'note_export_group_document',
+    image: 'note_export_group_picture',
+    data: 'note_export_group_tables',
 }
 
 /**
- * Floating "Export as" menu for a note. Rendered when `menu` is set and anchored near the button that
- * opened it, clamped to the viewport so it stays usable on phones. Like `CopyPathMenu`, it closes on an
- * outside tap, a scroll or Escape. `busy` is the format being exported; every item is disabled while one runs.
+ * The Export menu of a note, anchored under its chip and clamped to the viewport. It closes on an outside
+ * tap, a scroll or Escape, and a file being made still arrives. `busy` is the format being made: its row
+ * says so and the others wait.
  */
 export function ExportMenu({
     menu,
     options,
     busy,
+    title,
     onPick,
     onClose,
 }: {
     menu: ExportMenuState | null
     options: readonly NoteExportOption[]
     busy: NoteExportFormat | null
+    title: string
     onPick: (format: NoteExportFormat) => void
     onClose: () => void
 }) {
@@ -63,47 +66,53 @@ export function ExportMenu({
     const groups = (['document', 'image', 'data'] as const)
         .map((group) => ({ group, items: options.filter((o) => o.group === group) }))
         .filter((g) => g.items.length > 0)
-    const height = groups.length * 26 + options.length * ITEM_H
+    const height = 40 + groups.length * 32 + options.length * ITEM_H
     const left = Math.max(8, Math.min(menu.x, window.innerWidth - MENU_W - 8))
     const top = Math.max(8, Math.min(menu.y, window.innerHeight - height - 8))
-
-    const itemStyle: React.CSSProperties = {
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, width: '100%',
-        padding: '0 14px', background: 'none', border: 'none', textAlign: 'left',
-        fontFamily: 'monospace', fontSize: 12, color: 'var(--text-primary)', cursor: 'pointer',
-        height: ITEM_H,
-    }
 
     return (
         <div
             ref={ref}
             role="menu"
-            aria-label="Export note as"
-            style={{
-                position: 'fixed', left, top, width: MENU_W, zIndex: 1000,
-                background: 'rgba(20,20,28,0.97)', borderRadius: 12,
-                boxShadow: '0 8px 30px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(167,139,250,0.2)',
-                backdropFilter: 'blur(8px)', overflow: 'hidden',
-            }}
+            aria-label={t('note_export_title', { title })}
+            className="a-menu"
+            style={{ position: 'fixed', left, top, width: MENU_W, zIndex: 1000, maxHeight: 'calc(100vh - 16px)', overflowY: 'auto' }}
         >
+            <p className="a-label" style={{ padding: '4px 16px' }}>{t('note_export_title', { title })}</p>
             {groups.map(({ group, items }, i) => (
-                <div key={group} role="group" aria-label={GROUP_TITLES[group]} style={i > 0 ? { borderTop: '1px solid rgba(255,255,255,0.06)' } : undefined}>
-                    <div style={{ padding: '8px 14px 2px', fontFamily: 'monospace', fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', height: 26, boxSizing: 'border-box' }}>
-                        {GROUP_TITLES[group]}
-                    </div>
-                    {items.map((o) => (
-                        <button
-                            key={o.format}
-                            role="menuitem"
-                            data-format={o.format}
-                            style={{ ...itemStyle, opacity: busy && busy !== o.format ? 0.4 : 1 }}
-                            disabled={busy !== null}
-                            onClick={() => onPick(o.format)}
-                        >
-                            <span>{busy === o.format ? 'Exporting…' : o.label}</span>
-                            <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>.{o.extension}</span>
-                        </button>
-                    ))}
+                <div key={group} role="group" aria-label={t(GROUP_KEYS[group])}>
+                    {i > 0 && <div className="a-menu-sep" />}
+                    <p className="a-muted a-body-sm" style={{ padding: '4px 16px' }}>{t(GROUP_KEYS[group])}</p>
+                    {items.map((o) => {
+                        const keys = exportKeys(o.format)
+                        return (
+                            <button
+                                key={o.format}
+                                type="button"
+                                role="menuitem"
+                                data-format={o.format}
+                                className="a-menu-item"
+                                style={{ minHeight: ITEM_H, opacity: busy && busy !== o.format ? 0.4 : 1, justifyContent: 'space-between' }}
+                                disabled={busy !== null}
+                                onClick={() => onPick(o.format)}
+                            >
+                                <span style={{ display: 'flex', flexDirection: 'column' }}>
+                                    {busy === o.format ? (
+                                        <>
+                                            <span>{t('note_export_making', { kind: t(keys.kind) })}</span>
+                                            <span className="a-muted a-body-sm">{t('note_export_making_body')}</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span>{t(keys.name)}</span>
+                                            <span className="a-muted a-body-sm">{t(keys.hint)}</span>
+                                        </>
+                                    )}
+                                </span>
+                                <span className="a-muted a-body-sm">.{o.extension}</span>
+                            </button>
+                        )
+                    })}
                 </div>
             ))}
         </div>

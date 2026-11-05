@@ -7,6 +7,26 @@ interface BeforeInstallPromptEvent extends Event {
 
 const DISMISSED_KEY = 'hq-install-dismissed'
 
+/** The browser's own install offer, for Settings › Install and version. Chromium only. */
+export function useInstallOffer() {
+  const [offer, setOffer] = useState<BeforeInstallPromptEvent | null>(null)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault()
+      setOffer(e as BeforeInstallPromptEvent)
+    }
+    window.addEventListener('beforeinstallprompt', handler)
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [])
+  const install = async () => {
+    if (!offer) return
+    await offer.prompt()
+    await offer.userChoice
+    setOffer(null)
+  }
+  return { canInstall: offer !== null, install }
+}
+
 export function InstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [showIOSHint, setShowIOSHint] = useState(false)

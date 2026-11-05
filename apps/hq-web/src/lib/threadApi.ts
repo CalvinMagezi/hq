@@ -66,9 +66,11 @@ interface ApiMessageMeta {
   step_credits?: unknown
   stopped?: boolean
   driver?: ApiDriverMeta | null
-  source?: ApiSourceMeta | null
+  source?: ApiSource | null
   offer?: ApiOffer | null
 }
+
+type ApiSource = ApiSourceMeta | string
 
 export interface ApiMessage {
   message_id: string
@@ -103,7 +105,12 @@ function toToolStep(step: ApiToolStep): ToolStep {
   }
 }
 
-function toViaMcp(s: ApiSourceMeta | null | undefined): string | undefined {
+function toSpoken(s: ApiSource | null | undefined): boolean {
+  return s === 'voice'
+}
+
+function toViaMcp(s: ApiSource | null | undefined): string | undefined {
+  if (typeof s === 'string') return undefined
   return s?.kind === 'mcp' ? s.caller?.trim() || 'mcp' : undefined
 }
 
@@ -129,6 +136,7 @@ export function toThreadMessage(m: ApiMessage): ThreadMessage {
     stopped: m.meta?.stopped || undefined,
     driver: toDriver(m.meta?.driver),
     viaMcp: toViaMcp(m.meta?.source),
+    spoken: toSpoken(m.meta?.source) || undefined,
     offer: toOffer(m.meta?.offer),
   }
 }
@@ -147,6 +155,14 @@ export const threadApi = {
 
   archiveThread: (threadId: string): Promise<void> =>
     hqJson(`/api/threads/${encodeURIComponent(threadId)}/archive`, 'POST'),
+
+  /** Stop over HTTP, for a page whose socket dropped. Ends the reply for every tab. */
+  stopThread: (threadId: string): Promise<void> =>
+    hqJson(`/api/threads/${encodeURIComponent(threadId)}/stop`, 'POST'),
+
+  /** Puts an archived chat back (Undo). HQ answers 409 when it changed since. */
+  unarchiveThread: (threadId: string): Promise<void> =>
+    hqJson(`/api/threads/${encodeURIComponent(threadId)}/unarchive`, 'POST'),
 }
 
 /** Reload the chat list, and mark chats whose reply is still running on the server. */

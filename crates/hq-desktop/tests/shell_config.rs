@@ -139,6 +139,27 @@ fn only_the_control_window_has_a_capability_and_it_grants_exactly_the_app_comman
         .filter_map(|p| p.strip_prefix("allow-"))
         .map(|c| c.replace('-', "_"))
         .collect();
+    for command in [
+        "helpers_list",
+        "helpers_check",
+        "helper_try",
+        "helper_try_stop",
+        "helper_connect",
+        "helper_disconnect",
+        "helper_restore",
+        "helper_signin",
+    ] {
+        assert!(
+            app_permissions.contains(command),
+            "{command} is not granted"
+        );
+    }
+    for folded in ["claude_status", "claude_change"] {
+        assert!(
+            !app_permissions.contains(folded),
+            "{folded} was folded away"
+        );
+    }
     let others: BTreeSet<&str> = granted
         .iter()
         .filter(|p| !p.starts_with("allow-"))
@@ -243,4 +264,44 @@ fn the_control_window_loads_nothing_from_outside() {
 fn the_app_asks_macos_for_the_local_network_with_a_reason() {
     let plist = read(&shell().join("src-tauri/Info.plist"));
     assert!(plist.contains("NSLocalNetworkUsageDescription"));
+}
+
+#[test]
+fn the_app_is_named_agenthq_and_the_windows_carry_their_titles() {
+    assert_eq!(conf()["productName"], "AgentHQ");
+    let main = read(&shell().join("src-tauri/src/main.rs"));
+    assert!(main.contains("CONTROL_TITLE") && main.contains("main_title"));
+    let html = read(&shell().join("ui/index.html"));
+    assert!(html.contains("<title>HQ Hub</title>"));
+}
+
+#[test]
+fn the_control_window_has_the_three_tabs_and_the_new_commands_are_granted() {
+    let html = read(&shell().join("ui/index.html"));
+    for tab in [
+        "data-tab=\"computer\"",
+        "data-tab=\"devices\"",
+        "data-tab=\"helpers\"",
+    ] {
+        assert!(html.contains(tab), "{tab}");
+    }
+    assert!(!html.contains("data-tab=\"host\"") && !html.contains("data-tab=\"claude\""));
+    let build = read(&shell().join("src-tauri/build.rs"));
+    for command in ["host_log", "host_unlock", "pick_program"] {
+        assert!(build.contains(&format!("\"{command}\"")), "{command}");
+    }
+}
+
+#[test]
+fn the_ui_build_copies_the_shared_styles_and_fonts() {
+    let build = read(&shell().join("scripts/build-ui.ts"));
+    assert!(build.contains("aligned-ui.css") && build.contains("fonts"));
+}
+
+#[test]
+fn the_docs_name_the_tabs() {
+    let docs = read(&shell().join("../../docs/DESKTOP.md"));
+    for tab in ["This computer", "Devices", "Helpers"] {
+        assert!(docs.contains(tab), "{tab}");
+    }
 }

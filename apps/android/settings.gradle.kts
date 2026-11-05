@@ -18,3 +18,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "agenthq-android"
 include(":app")
+include(":lint-checks")

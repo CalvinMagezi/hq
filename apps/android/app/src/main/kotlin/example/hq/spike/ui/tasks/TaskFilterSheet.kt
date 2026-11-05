@@ -20,11 +20,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.SheetFrame
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.shell.HqIcons
@@ -37,14 +39,14 @@ private val INDENT = 16.dp
 @Composable
 fun TaskFilterSheet(ui: TasksUi, actions: TasksActions) {
     SheetFrame({ actions.onFilter(false) }, top = null) {
-        Text("Filter", style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
+        Text(stringResource(R.string.tasks_filter), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp))
         val tree = ui.tree
         when {
             tree != null -> FilterRows(ui, tree, actions)
             ui.treeFailed -> {
                 Text(TaskFilterWords.FAILED, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                 Box(Modifier.padding(start = 20.dp, bottom = 16.dp).heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onFilter(true) }.padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-                    Text("Try again", style = HqType.BodySmBold, color = Mts.OnGreen)
+                    Text(stringResource(R.string.notice_action_try_again), style = HqType.BodySmBold, color = Mts.OnGreen)
                 }
             }
             else -> Row(Modifier.padding(horizontal = 20.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -65,7 +67,7 @@ private fun FilterRows(ui: TasksUi, tree: TaskTree, actions: TasksActions) {
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { Icon(HqIcons.Info, null, Modifier.size(20.dp), tint = Mts.BrandBlue) }
-                Text(BriefingWords.TITLE, style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
+                Text(BriefingWords.title(example.hq.spike.ui.shell.rememberWords()), style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
                 Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
             }
         }
@@ -87,7 +89,7 @@ private fun FilterRows(ui: TasksUi, tree: TaskTree, actions: TasksActions) {
 
 object TaskFilterWords {
     const val READING = "Reading your spaces"
-    const val FAILED = "Could not read your spaces. HQ is not answering."
+    const val FAILED = "Couldn\'t read your spaces. HQ didn\'t answer in time. Try again."
 
     /** The bar's line on the All tab: how many open tasks the list shows. That it is filtered, and by what, is on the chip under the tabs and the green filter icon, so the line keeps room for Live. */
     fun bar(open: Int): String = "$open active"

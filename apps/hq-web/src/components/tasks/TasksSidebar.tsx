@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useMemo, useState, useCallback } from 'react'
 import { ChevronRight, LayoutGrid, Folder as FolderIcon, FolderOpen, ListChecks, X, Plus, Loader2 } from 'lucide-react'
 import type { Space, Folder, Initiative, TaskItem } from '~/lib/tasksApi'
@@ -146,10 +147,10 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
   const body = (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 pt-3 pb-2 gap-2">
-        <span className="text-[11px] tracking-widest uppercase font-bold text-neutral-300">Spaces</span>
+        <span className="text-[11px] tracking-widest uppercase font-bold text-neutral-300">{t('tasks_areas')}</span>
         <div className="flex items-center gap-1">
           <AddRow
-            placeholder="New space"
+            placeholder={t('tasks_new_area')}
             indent={0}
             alwaysVisible
             onAdd={async (name) => {

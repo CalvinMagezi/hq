@@ -119,6 +119,7 @@ pub(crate) async fn replace_handler(
         crate::setup_api::try_key,
     )
     .await?;
+    state.announce_change(crate::CHANGE_SETTINGS);
     Ok(Json(saved))
 }
 

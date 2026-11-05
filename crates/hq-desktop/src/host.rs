@@ -10,8 +10,8 @@ use hq_core::config::{HOST_SOCKET_FILE, HqConfig};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// `hq start all` waits up to 10 s for its cleanup before it exits.
@@ -22,10 +22,29 @@ const PROBE_READ_MAX: usize = 64;
 const HQ_BINARY: &str = "hq";
 /// What `hq --version` starts with, the same check the updater makes.
 const VERSION_PREFIX: &str = "hq ";
-const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+pub const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 /// A slow shell profile (version managers, plugin loaders) can take seconds.
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 const PATH_MARKER: &str = "__HQ_DESKTOP_PATH__";
+/// The steps a start goes through that the app can see for itself: the process started, it is
+/// alive, its port answers, its health check passes.
+pub const START_STEPS: u8 = 4;
+/// A process that has lived this long without exiting counts as alive.
+const ALIVE_AFTER: Duration = Duration::from_secs(1);
+/// A start counts as stopped when its step has not moved for the longer of this and twice the
+/// usual start time (resolutions A7).
+pub const STALL_FLOOR: Duration = Duration::from_secs(60);
+/// Starts remembered to learn the usual start time from.
+pub const RECENT_STARTS: usize = 5;
+/// The last lines of the log a sheet shows.
+pub const LOG_LINES: usize = 200;
+/// How much of the end of the log is read; older text is never needed for the last lines.
+const LOG_TAIL_BYTES: u64 = 128 * 1024;
+const LOG_LINE_CHARS: usize = 2000;
+/// What replaces a key or token in the log sheet and in Copy details.
+pub const HIDDEN: &str = "[hidden]";
+/// Under this much free space where `~/.hq` lives the computer counts as almost full.
+pub const ALMOST_FULL_BYTES: u64 = 200 * 1024 * 1024;
 
 /// How the app tells that a host is up, which depends on what it runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +64,8 @@ pub struct HostSpec {
     pub probe: Probe,
     /// How long a stop waits after the polite signal before it kills what is left.
     pub stop_grace: Duration,
+    /// The shortest a start may stand still before it counts as stopped.
+    pub stall_floor: Duration,
 }
 
 impl HostSpec {
@@ -55,6 +76,7 @@ impl HostSpec {
             log,
             probe: Probe::Health(health_port),
             stop_grace: DEFAULT_STOP_GRACE,
+            stall_floor: STALL_FLOOR,
         }
     }
 
@@ -66,6 +88,7 @@ impl HostSpec {
             log,
             probe: Probe::Socket(socket),
             stop_grace: DEFAULT_STOP_GRACE,
+            stall_floor: STALL_FLOOR,
         }
     }
 
@@ -123,16 +146,167 @@ struct Inner {
     /// lives, so a stop can still reach the survivors, and is forgotten the moment the group is
     /// empty, because a group id can be reused once it has no member.
     group: Option<u32>,
+    /// How the current or last start of the child went.
+    start: Option<StartProgress>,
+    /// When the child ended by itself, as seconds since the epoch.
+    exited_at: Option<u64>,
+    /// When the person last stopped the host from here.
+    you_stopped_at: Option<u64>,
+    last_run: Option<LastRun>,
+}
+
+struct StartProgress {
+    at: Instant,
+    unix: u64,
+    step: u8,
+    step_since: Instant,
+    restarting: bool,
+    /// Whether this start's time has been added to the learned ones.
+    learned: bool,
+}
+
+/// When the last run of the host this app started began and ended, as seconds since the epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct LastRun {
+    pub started_at: u64,
+    pub ended_at: u64,
 }
 
 pub struct HostController {
     spec: HostSpec,
+    /// A program chosen after the app opened, used by the next start.
+    program: Mutex<Option<PathBuf>>,
     inner: Mutex<Inner>,
     /// Held for the whole of a start or a stop, so two clicks cannot start two hosts and a start
     /// cannot slip in while a stop is still waiting.
     gate: tokio::sync::Mutex<()>,
     /// Set by the final stop, under the gate, so nothing starts a host while the app is closing.
     closed: std::sync::atomic::AtomicBool,
+    /// Set while the person's own Stop is the last thing that happened to the host.
+    you_stopped: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// How a start is going, for the window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StartView {
+    pub step: u8,
+    pub steps: u8,
+    pub elapsed_secs: u64,
+    /// The step has stood still for longer than the stall limit.
+    pub stalled: bool,
+    /// This start follows a stop the person asked for.
+    pub restarting: bool,
+}
+
+/// The facts about the host the window words itself from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HostFacts {
+    #[serde(flatten)]
+    pub status: HostStatus,
+    pub start: Option<StartView>,
+    /// When the host ended by itself, seconds since the epoch.
+    pub exited_at: Option<u64>,
+    /// When the person stopped it from here, seconds since the epoch.
+    pub you_stopped_at: Option<u64>,
+    pub last_run: Option<LastRun>,
+}
+
+/// The middle of the recent start times, or none when there are none.
+pub fn median(times: &[u64]) -> Option<u64> {
+    let mut sorted = times.to_vec();
+    sorted.sort_unstable();
+    let n = sorted.len();
+    match n {
+        0 => None,
+        _ if n % 2 == 1 => Some(sorted[n / 2]),
+        _ => Some((sorted[n / 2 - 1] + sorted[n / 2]) / 2),
+    }
+}
+
+/// How long one step may stand still: the longer of the floor and twice the usual start time.
+pub fn stall_limit(floor: Duration, usual_secs: Option<u64>) -> Duration {
+    floor.max(Duration::from_secs(
+        usual_secs.unwrap_or(0).saturating_mul(2),
+    ))
+}
+
+/// Whether a step that has stood still for `still` has stood still too long.
+pub fn is_stalled(still: Duration, floor: Duration, usual_secs: Option<u64>) -> bool {
+    still >= stall_limit(floor, usual_secs)
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+/// Masks every long key-like word: `sk-`, `hqd_`, `ghp_` style tokens and any run of 24 or more
+/// letters, digits, `-` or `_` that mixes digits in, plus `Bearer` values.
+pub fn hide_secrets(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut word = String::new();
+    let mut after_bearer = false;
+    let flush = |word: &mut String, out: &mut String, after_bearer: &mut bool| {
+        if word.is_empty() {
+            return;
+        }
+        let digits = word.chars().any(|c| c.is_ascii_digit());
+        let known = ["sk-", "hqd_", "ghp_", "github_pat_", "xox"]
+            .iter()
+            .any(|p| word.starts_with(p));
+        let long = word.chars().count() >= 24 && digits;
+        if *after_bearer || known && word.len() >= 12 || long {
+            out.push_str(HIDDEN);
+        } else {
+            out.push_str(word);
+        }
+        *after_bearer = word.eq_ignore_ascii_case("bearer");
+        word.clear();
+    };
+    for c in line.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            word.push(c);
+        } else {
+            flush(&mut word, &mut out, &mut after_bearer);
+            if !c.is_whitespace() && c != ':' && c != '=' {
+                after_bearer = false;
+            }
+            out.push(c);
+        }
+    }
+    flush(&mut word, &mut out, &mut after_bearer);
+    out
+}
+
+/// The last `LOG_LINES` lines of the log with keys and tokens hidden. Only the end of the file is read.
+pub fn read_log_tail(path: &Path) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let len = file.metadata().map_or(0, |m| m.len());
+    let from = len.saturating_sub(LOG_TAIL_BYTES);
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(from)).is_err()
+        || file.take(LOG_TAIL_BYTES).read_to_end(&mut bytes).is_err()
+    {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if from > 0 && !lines.is_empty() {
+        lines.remove(0);
+    }
+    let skip = lines.len().saturating_sub(LOG_LINES);
+    lines[skip..]
+        .iter()
+        .map(|l| {
+            let line: String = l.chars().take(LOG_LINE_CHARS).collect();
+            // HQ's shared redactor first (provider keys, hqw_ tokens), then this view's own rules.
+            hide_secrets(&hq_core::redact::redact_secrets(&line))
+        })
+        .collect()
 }
 
 /// After a kill, how long a stop waits for the group to go before it reports what it sees.
@@ -142,9 +316,11 @@ impl HostController {
     pub fn new(spec: HostSpec) -> Self {
         Self {
             spec,
+            program: Mutex::new(None),
             inner: Mutex::new(Inner::default()),
             gate: tokio::sync::Mutex::new(()),
             closed: std::sync::atomic::AtomicBool::new(false),
+            you_stopped: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -163,7 +339,80 @@ impl HostController {
         }
     }
 
+    /// True from the person's Stop until the next start, for the proxy to tell the window.
+    pub fn you_stopped_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        self.you_stopped.clone()
+    }
+
+    /// Where the host's output goes.
+    pub fn log_path(&self) -> &Path {
+        &self.spec.log
+    }
+
+    /// Makes the next start run this program.
+    pub fn set_program(&self, program: PathBuf) {
+        *self.program.lock().unwrap() = Some(program);
+    }
+
+    /// The status with how the start is going. `usual_secs` is how long a start usually takes.
+    pub async fn facts(&self, usual_secs: Option<u64>) -> HostFacts {
+        let status = self.status().await;
+        let port_open = match (&status, &self.spec.probe) {
+            (HostStatus::Starting { .. }, Probe::Health(port)) => tcp_open(*port).await,
+            _ => false,
+        };
+        let mut inner = self.inner.lock().unwrap();
+        let start = match (&status, inner.start.as_mut()) {
+            (HostStatus::Starting { .. } | HostStatus::Running { .. }, Some(p)) => {
+                let elapsed = p.at.elapsed();
+                let step = match status {
+                    HostStatus::Running { .. } => START_STEPS,
+                    _ if port_open => 3,
+                    _ if elapsed >= ALIVE_AFTER => 2,
+                    _ => 1,
+                };
+                if step != p.step {
+                    p.step = step;
+                    p.step_since = Instant::now();
+                }
+                Some(StartView {
+                    step,
+                    steps: START_STEPS,
+                    elapsed_secs: elapsed.as_secs(),
+                    stalled: step < START_STEPS
+                        && is_stalled(p.step_since.elapsed(), self.spec.stall_floor, usual_secs),
+                    restarting: p.restarting,
+                })
+            }
+            _ => None,
+        };
+        HostFacts {
+            status,
+            start,
+            exited_at: inner.exited_at,
+            you_stopped_at: inner.you_stopped_at,
+            last_run: inner.last_run,
+        }
+    }
+
+    /// The seconds the start that just finished took, once per start, for learning the usual time.
+    pub fn take_finished_start_secs(&self) -> Option<u64> {
+        let mut inner = self.inner.lock().unwrap();
+        let p = inner.start.as_mut()?;
+        if p.learned || p.step < START_STEPS {
+            return None;
+        }
+        p.learned = true;
+        Some(p.at.elapsed().as_secs())
+    }
+
     pub async fn start(&self) -> Result<HostStatus, HostError> {
+        self.start_with(false).await
+    }
+
+    /// Starts the host; `restarting` marks a start that follows a stop the person asked for, so
+    /// the window says "Restarting HQ" until it answers.
+    pub async fn start_with(&self, restarting: bool) -> Result<HostStatus, HostError> {
         let _gate = self.gate.lock().await;
         if self.closed.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(HostError::Closing);
@@ -174,10 +423,27 @@ impl HostController {
         if host_answers(&self.spec.probe).await {
             return Err(HostError::AlreadyRunning);
         }
-        let child = spawn(&self.spec)?;
+        let mut spec = self.spec.clone();
+        if let Some(program) = self.program.lock().unwrap().clone() {
+            spec.program = program;
+        }
+        let child = spawn(&spec)?;
         {
             let mut inner = self.inner.lock().unwrap();
             inner.last_exit = None;
+            inner.exited_at = None;
+            inner.you_stopped_at = None;
+            self.you_stopped
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            let now = Instant::now();
+            inner.start = Some(StartProgress {
+                at: now,
+                unix: unix_now(),
+                step: 1,
+                step_since: now,
+                restarting,
+                learned: false,
+            });
             inner.group = Some(child.id());
             inner.child = Some(child);
         }
@@ -234,6 +500,16 @@ impl HostController {
         {
             let mut inner = self.inner.lock().unwrap();
             inner.last_exit = None;
+            inner.exited_at = None;
+            inner.you_stopped_at = Some(unix_now());
+            self.you_stopped
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            if let Some(start) = inner.start.take() {
+                inner.last_run = Some(LastRun {
+                    started_at: start.unix,
+                    ended_at: unix_now(),
+                });
+            }
             if !group_alive(group) {
                 inner.group = None;
             }
@@ -249,6 +525,15 @@ impl HostController {
             Some(Ok(Some(status))) => {
                 inner.last_exit = Some(status.code());
                 inner.child = None;
+                let now = unix_now();
+                inner.exited_at = Some(now);
+                if let Some(start) = inner.start.take() {
+                    inner.last_run = Some(LastRun {
+                        started_at: start.unix,
+                        ended_at: now,
+                    });
+                    inner.start = Some(start);
+                }
                 None
             }
             Some(Err(_)) => {
@@ -262,6 +547,17 @@ impl HostController {
         }
         alive
     }
+}
+
+async fn tcp_open(port: u16) -> bool {
+    matches!(
+        tokio::time::timeout(
+            PROBE_TIMEOUT,
+            tokio::net::TcpStream::connect(("127.0.0.1", port))
+        )
+        .await,
+        Ok(Ok(_))
+    )
 }
 
 fn spawn(spec: &HostSpec) -> Result<Child, HostError> {
@@ -444,8 +740,33 @@ fn is_hq(path: &Path) -> bool {
         .is_some_and(|out| String::from_utf8_lossy(&out).starts_with(VERSION_PREFIX))
 }
 
+/// What `hq --version` prints for this program (for example `hq 0.4.2`), or none when it is not
+/// an `hq` that answers within `limit`.
+pub fn hq_version_within(path: &Path, limit: Duration) -> Option<String> {
+    if !is_runnable(path) {
+        return None;
+    }
+    let mut cmd = Command::new(path);
+    cmd.arg("--version");
+    let out = output_within(cmd, limit)?;
+    let text = String::from_utf8_lossy(&out);
+    let line = text.lines().next()?.trim();
+    line.starts_with(VERSION_PREFIX).then(|| line.to_string())
+}
+
+/// Runs `path` with `args` and returns what it printed, or none if it failed or ran past `limit`.
+pub fn run_within(path: &Path, args: &[&str], limit: Duration) -> Option<Vec<u8>> {
+    let mut cmd = Command::new(path);
+    cmd.args(args);
+    output_within(cmd, limit)
+}
+
 /// What a short command printed, or None if it failed or ran past `limit`. On a timeout its whole
 /// process group is killed, so a shell's children go too.
+pub fn command_output_within(cmd: Command, limit: Duration) -> Option<Vec<u8>> {
+    output_within(cmd, limit)
+}
+
 fn output_within(mut cmd: Command, limit: Duration) -> Option<Vec<u8>> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -548,6 +869,7 @@ mod tests {
             log: dir.join("logs").join("host.log"),
             probe: Probe::Health(health_port),
             stop_grace: Duration::from_millis(600),
+            stall_floor: Duration::from_secs(60),
         }
     }
 
@@ -955,5 +1277,93 @@ mod tests {
         assert_eq!(order[1], home.join("bin").join("hq"));
         assert_eq!(order[2], Path::new("/usr/local/bin/hq"));
         assert_eq!(order[3], on_path);
+    }
+
+    #[test]
+    fn the_usual_start_is_the_middle_of_the_recent_ones() {
+        assert_eq!(median(&[]), None);
+        assert_eq!(median(&[30, 10, 20]), Some(20));
+        assert_eq!(median(&[10, 20, 30, 40]), Some(25));
+    }
+
+    #[test]
+    fn a_start_is_stopped_when_a_step_stands_still_longer_than_the_floor_or_twice_the_usual() {
+        let floor = Duration::from_secs(60);
+        assert!(!is_stalled(Duration::from_secs(59), floor, None));
+        assert!(is_stalled(Duration::from_secs(60), floor, None));
+        assert!(!is_stalled(Duration::from_secs(90), floor, Some(50)));
+        assert!(is_stalled(Duration::from_secs(100), floor, Some(50)));
+    }
+
+    #[tokio::test]
+    async fn a_start_that_never_gets_past_a_step_is_reported_stalled_and_one_that_moves_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sp = spec(dir.path(), "sleep 60", free_port());
+        sp.stall_floor = Duration::from_millis(300);
+        let host = HostController::new(sp);
+        host.start_with(true).await.unwrap();
+        let first = host.facts(None).await.start.unwrap();
+        assert_eq!((first.step, first.steps, first.restarting), (1, 4, true));
+        assert!(!first.stalled);
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let second = host.facts(None).await.start.unwrap();
+        assert_eq!(second.step, 2, "alive after a second");
+        assert!(!second.stalled, "the step moved a moment ago");
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(host.facts(None).await.start.unwrap().stalled);
+        host.stop().await.unwrap();
+        let after = host.facts(None).await;
+        assert!(after.start.is_none() && after.you_stopped_at.is_some());
+        assert!(
+            host.you_stopped_flag()
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_that_ends_by_itself_keeps_when_it_ended_and_a_stop_keeps_who_did_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = HostController::new(spec(dir.path(), "exit 3", free_port()));
+        host.start().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let facts = host.facts(None).await;
+        assert_eq!(facts.status, HostStatus::Exited { code: Some(3) });
+        assert!(facts.exited_at.is_some() && facts.you_stopped_at.is_none());
+        assert!(facts.last_run.is_some());
+    }
+
+    #[test]
+    fn keys_in_a_log_are_hidden_and_other_lines_are_kept() {
+        let key = format!("hqd_{}", "ab12".repeat(16));
+        let line = format!("pairing with {key} ok; Authorization: Bearer abc.def; port 6001");
+        let hidden = hide_secrets(&line);
+        assert!(!hidden.contains(&key) && !hidden.contains("abc.def"));
+        assert!(hidden.contains("[hidden]") && hidden.contains("port 6001"));
+        assert_eq!(
+            hide_secrets("listening on 127.0.0.1:6001"),
+            "listening on 127.0.0.1:6001"
+        );
+    }
+
+    #[test]
+    fn only_the_last_lines_of_the_log_are_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.log");
+        let text: String = (0..500).map(|i| format!("line {i}\n")).collect();
+        std::fs::write(&path, text).unwrap();
+        let tail = read_log_tail(&path);
+        assert_eq!(tail.len(), LOG_LINES);
+        assert_eq!(tail.last().unwrap(), "line 499");
+        assert!(read_log_tail(&dir.path().join("none.log")).is_empty());
+    }
+
+    #[test]
+    fn the_log_view_never_shows_a_device_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.log");
+        let token = format!("hqw_{}", "a1".repeat(32));
+        std::fs::write(&path, format!("signed in with {token}\n")).unwrap();
+        let tail = read_log_tail(&path).join("\n");
+        assert!(!tail.contains(&token), "{tail}");
     }
 }

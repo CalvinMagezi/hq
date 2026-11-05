@@ -6,6 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.HubService
 import example.hq.spike.KeyVault
+import example.hq.spike.NotifAccess
+import example.hq.spike.NotifStep
+import example.hq.spike.R
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +41,13 @@ data class FirstRunUi(
     val keyFileName: String? = null,
     val restoring: Boolean = false,
     val restored: Boolean = false,
+    val moved: Boolean = false,
+    val movedFacts: MovedFacts? = null,
+    val movedChecking: Boolean = false,
+    val movedForgot: Boolean = false,
+    val confirmFresh: Boolean = false,
+    /** The owner passed on notifications, or Android refused: the "Notifications are off" frame shows. */
+    val notifOff: Boolean = false,
 )
 
 class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app) {
@@ -45,10 +55,17 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
     private val mutableUi = MutableStateFlow(FirstRunUi(step = initial))
     val ui: StateFlow<FirstRunUi> = mutableUi.asStateFlow()
 
+    init {
+        if (store.moved()) {
+            mutableUi.update { it.copy(moved = true) }
+            if (initial != null && initial != Step.Welcome && initial != Step.Restore) prepareMoved(notesOnly = false)
+        }
+    }
+
     val actions = FirstRunActions(
         onNewHq = { go(Step.Model) },
         onRestore = { go(Step.Restore) },
-        onBack = { go(FirstRunLogic.back(mutableUi.value.step ?: Step.Welcome)) },
+        onBack = ::back,
         onProvider = { p -> mutableUi.update { it.copy(provider = p, error = null, checkResult = null) } },
         onKey = { v -> mutableUi.update { it.copy(key = v, error = null, checkResult = null) } },
         onShowKey = { mutableUi.update { it.copy(showKey = !it.showKey) } },
@@ -61,18 +78,102 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
         onChatNext = { chatNext(skip = false) },
         onChatSkip = { chatNext(skip = true) },
         onStart = ::start,
+        onNotifNotNow = { mutableUi.update { it.copy(notifOff = true) } },
+        onNotifNext = { go(Step.Start) },
         onBackup = { uri, name -> mutableUi.update { it.copy(backup = uri, backupName = name, error = null) } },
         onUseKeyFile = { on -> mutableUi.update { it.copy(useKeyFile = on, error = null) } },
         onPassphrase = { v -> mutableUi.update { it.copy(passphrase = v, error = null) } },
         onKeyFile = { uri, name -> mutableUi.update { it.copy(keyFile = uri, keyFileName = name, error = null) } },
         onRunRestore = ::restore,
         onContinue = { go(FirstRunLogic.next(Step.Restore)) },
+        onAddKeys = { go(Step.Model) },
+        onStartFresh = { mutableUi.update { it.copy(confirmFresh = true) } },
+        onKeepNotes = { mutableUi.update { it.copy(confirmFresh = false) } },
+        onDeleteMoved = ::deleteMoved,
+        onMovedRestore = { go(Step.Restore) },
+        onNotesOnly = { prepareMoved(notesOnly = true) },
     )
 
-    private fun go(step: Step) {
-        store.save(step)
-        mutableUi.update { it.copy(step = step, error = null, checkResult = null, restored = false) }
+    /**
+     * Before HQ runs on a copied vault: checks the database, then makes HQ forget what belonged to the old phone.
+     * hq is held stopped meanwhile, so nothing has the database open. A broken database stops here and shows frame 7.
+     */
+    /** Whether the moved check holds HQ stopped (until the old phone is forgotten). */
+    @Volatile private var movedHold = false
+
+    override fun onCleared() {
+        // Leaving first run mid-check never keeps HQ stopped for good.
+        if (movedHold) HubService.releaseHq()
+        super.onCleared()
     }
+
+    private fun prepareMoved(notesOnly: Boolean) {
+        mutableUi.update { it.copy(movedChecking = true, error = null) }
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val result = withContext(Dispatchers.IO) {
+                // One hold for the whole moved check: kept across a failed try, given back once it succeeds.
+                val held = movedHold || HubService.holdHq()
+                movedHold = held
+                var forgot = false
+                try {
+                    if (!held) return@withContext null to false
+                    val vault = Moved.vault(app)
+                    if (notesOnly) MovedPhone.dropDatabase(vault)
+                    val facts = MovedPhone.facts(vault)
+                    forgot = facts.databaseOk && MovedPhone.forget(app)
+                    facts to forgot
+                } finally {
+                    // Until the old phone's sign-ins are gone HQ stays stopped, so none of them works here.
+                    if (held && forgot) {
+                        HubService.releaseHq()
+                        movedHold = false
+                    }
+                }
+            }
+            val (facts, forgot) = result
+            mutableUi.update {
+                it.copy(
+                    movedChecking = false, movedFacts = facts ?: it.movedFacts, movedForgot = forgot,
+                    error = if (facts != null && facts.databaseOk && !forgot) app.getString(R.string.moved_forget_failed) else null,
+                )
+            }
+            if (notesOnly && forgot) go(Step.Model)
+            else if (facts != null && !facts.databaseOk && mutableUi.value.step != Step.Moved) go(Step.Moved)
+        }
+    }
+
+    private fun deleteMoved() {
+        mutableUi.update { it.copy(busy = true, confirmFresh = false) }
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            withContext(Dispatchers.IO) {
+                val held = HubService.holdHq()
+                try {
+                    Moved.vault(app).deleteRecursively()
+                } finally {
+                    if (held) HubService.releaseHq()
+                }
+            }
+            store.forgetMoved()
+            mutableUi.update { it.copy(busy = false, moved = false, movedFacts = null, movedForgot = false) }
+            go(Step.Welcome)
+        }
+    }
+
+    private fun go(target: Step) {
+        val step = if (target == Step.Notify && notifDone()) Step.Start else target
+        store.save(step)
+        mutableUi.update { it.copy(step = step, error = null, checkResult = null, restored = false, notifOff = false) }
+    }
+
+    private fun back() {
+        val from = mutableUi.value.step ?: Step.Welcome
+        val target = FirstRunLogic.back(from, mutableUi.value.moved)
+        if (target == Step.Notify && notifDone()) go(FirstRunLogic.back(Step.Notify)) else go(target)
+    }
+
+    private fun notifDone(): Boolean = NotifAccess.next(NotifAccess.read(getApplication())) == NotifStep.Done
 
     private fun check() {
         val s = mutableUi.value
@@ -130,7 +231,7 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
             return
         }
         if (tokens.isEmpty()) {
-            go(Step.Start)
+            go(Step.Notify)
             return
         }
         mutableUi.update { it.copy(busy = true, error = null) }
@@ -140,7 +241,7 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
                 mutableUi.update { it.copy(busy = false, error = FirstRunWords.ERR_NOT_SAVED) }
             } else {
                 mutableUi.update { it.copy(busy = false, telegram = "", discord = "") }
-                go(Step.Start)
+                go(Step.Notify)
             }
         }
     }
@@ -148,6 +249,13 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
     private fun start() {
         mutableUi.update { it.copy(busy = true, error = null) }
         viewModelScope.launch {
+            val app = getApplication<Application>()
+            val s = mutableUi.value
+            // HQ must not run on a copied vault until the old phone's sign-ins are cleared.
+            if (s.moved && !s.movedForgot && !withContext(Dispatchers.IO) { MovedPhone.forget(app) }) {
+                mutableUi.update { it.copy(busy = false, error = app.getString(R.string.moved_forget_failed)) }
+                return@launch
+            }
             val failed = withContext(Dispatchers.IO) {
                 try {
                     HubService.switchMode(getApplication(), true)
@@ -160,7 +268,7 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
                 mutableUi.update { it.copy(busy = false, error = "The run mode could not be saved. Try again.") }
             } else {
                 store.finish()
-                mutableUi.update { it.copy(busy = false, step = null) }
+                mutableUi.update { it.copy(busy = false, step = null, moved = false) }
             }
         }
     }
@@ -173,26 +281,29 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
             s.useKeyFile -> s.keyFile?.let { BackupSecret.KeyFile(it) }
             else -> BackupSecret.Passphrase(s.passphrase)
         }
+        // A notes copy saved by safe mode is a plain .zip and needs no secret (N6).
+        val isCopy = backup != null && RestoreLogic.isZipUri(getApplication(), backup)
         val problem = when {
             backup == null -> FirstRunWords.RESTORE_NEEDS_FILE
+            isCopy -> null
             s.useKeyFile && s.keyFile == null -> FirstRunWords.RESTORE_NEEDS_KEY
             !s.useKeyFile -> RestoreLogic.passphraseProblem(s.passphrase)
             else -> null
         }
-        if (problem != null || backup == null || secret == null) {
+        if (problem != null || backup == null || (secret == null && !isCopy)) {
             mutableUi.update { it.copy(error = problem ?: FirstRunWords.RESTORE_NEEDS_FILE) }
             return
         }
         mutableUi.update { it.copy(restoring = true, error = null) }
         viewModelScope.launch {
-            val outcome = Restore.run(getApplication(), backup, secret)
+            val outcome = Restore.run(getApplication(), backup, secret ?: BackupSecret.Passphrase(""))
             mutableUi.update {
                 when (outcome) {
                     RestoreOutcome.Done -> it.copy(restoring = false, restored = true, passphrase = "", keyFile = null, keyFileName = null)
                     is RestoreOutcome.Failed -> it.copy(restoring = false, error = FirstRunWords.restoreFailedWith(outcome.reason))
                 }
             }
-            if (outcome == RestoreOutcome.Done) store.save(Step.Start)
+            if (outcome == RestoreOutcome.Done) store.save(Step.Notify)
         }
     }
 
@@ -218,10 +329,18 @@ class FirstRunActions(
     val onChatNext: () -> Unit,
     val onChatSkip: () -> Unit,
     val onStart: () -> Unit,
+    val onNotifNotNow: () -> Unit = {},
+    val onNotifNext: () -> Unit = {},
     val onBackup: (Uri, String?) -> Unit,
     val onUseKeyFile: (Boolean) -> Unit,
     val onPassphrase: (String) -> Unit,
     val onKeyFile: (Uri, String?) -> Unit,
     val onRunRestore: () -> Unit,
     val onContinue: () -> Unit,
+    val onAddKeys: () -> Unit = {},
+    val onStartFresh: () -> Unit = {},
+    val onKeepNotes: () -> Unit = {},
+    val onDeleteMoved: () -> Unit = {},
+    val onMovedRestore: () -> Unit = {},
+    val onNotesOnly: () -> Unit = {},
 )

@@ -9,7 +9,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class TasksLogicTest {
     private val today = LocalDate.of(2026, 10, 21)
 
@@ -25,7 +31,7 @@ class TasksLogicTest {
             task("a", "blocked"), task("b", "ready_for_review"), task("c", "in_progress"), task("d", due = "2026-10-21"), task("e", start = "2026-10-20"),
             task("f", due = "2026-10-30"), task("g", "complete"), task("h", parent = "a"),
         )
-        val groups = TasksLogic.today(tasks, today)
+        val groups = TasksLogic.today(testWords(), tasks, today)
         assertEquals(listOf("Waiting on you", "In progress", "Due or starting today"), groups.map { it.title })
         assertEquals(listOf("a", "b"), groups[0].tasks.map { it.id }.sorted())
         assertEquals(listOf("d", "e"), groups[2].tasks.map { it.id }.sorted())
@@ -56,32 +62,34 @@ class TasksLogicTest {
         val tasks = listOf(
             task("a", start = "2026-10-22"), task("b", due = "2026-10-23"), task("c", due = "2026-10-23"), task("d", due = "2026-12-01"), task("e"), task("f", "in_progress", due = "2026-10-21"),
         )
-        val g = TasksLogic.upcoming(tasks, today)
+        val g = TasksLogic.upcoming(testWords(), tasks, today)
         assertTrue(g[0].title.startsWith("Tomorrow · "))
         assertEquals(2, g[1].tasks.size)
-        assertEquals("Later · 1 task", g[2].title)
-        assertEquals("No date · 1 task", g[3].title)
+        assertEquals("Later", g[2].title)
+        assertEquals(1, g[2].count)
+        assertEquals("No date", g[3].title)
+        assertEquals(1, g[3].count)
         assertTrue(g.none { grp -> grp.tasks.any { it.id == "f" } })
     }
 
     @Test fun rowsSayStuckAndReadyInTheBoardsWords() {
-        val stuck = TasksLogic.meta(task("a", "blocked", reason = "needs a reboot window"), today)
+        val stuck = TasksLogic.meta(testWords(), task("a", "blocked", reason = "needs a reboot window"), today)
         assertEquals("Stuck · needs a reboot window", stuck.joinToString("") { it.text })
         assertTrue(stuck[0].amber && stuck[0].bold)
-        val ready = TasksLogic.meta(task("b", "ready_for_review", readyAt = "2026-10-21 09:00:00"), today, LocalDateTime.of(2026, 10, 21, 12, 0))
-        assertEquals("Ready to check · hq finished 3\u00A0h\u00A0ago", ready.joinToString("") { it.text })
+        val ready = TasksLogic.meta(testWords(), task("b", "ready_for_review", readyAt = "2026-10-21 09:00:00"), today, LocalDateTime.of(2026, 10, 21, 12, 0))
+        assertEquals("Ready to check · HQ finished 3\u00A0h\u00A0ago", ready.joinToString("") { it.text })
     }
 
     @Test fun anOrdinaryRowShowsPriorityDueAndSteps() {
-        val m = TasksLogic.meta(task("c", "in_progress", priority = "high", due = "2026-10-24", steps = 1 to 3), today)
-        assertEquals("High · due Saturday · 1 of 3 steps\u00A0done", m.joinToString("") { it.text })
-        assertEquals("due Oct 30", TasksLogic.dueWords("2026-10-30", today))
-        assertEquals("due today", TasksLogic.dueWords("2026-10-21", today))
-        assertNull(TasksLogic.dueWords(null, today))
+        val m = TasksLogic.meta(testWords(), task("c", "in_progress", priority = "high", due = "2026-10-24", steps = 1 to 3), today)
+        assertEquals("High · due Saturday · 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done", m.joinToString("") { it.text })
+        assertEquals("due Oct 30, 2026", TasksLogic.dueWords(testWords(), "2026-10-30", today))
+        assertEquals("due today", TasksLogic.dueWords(testWords(), "2026-10-21", today))
+        assertNull(TasksLogic.dueWords(testWords(), null, today))
     }
 
     @Test fun quickAddReadsWordsWhereverTheyStand() {
-        val q = QuickAdd.parse("Check Samsung battery whitelist tomorrow !high #inbox", today)
+        val q = QuickAdd.parse(testWords(), "Check Samsung battery whitelist tomorrow !high #inbox", today)
         assertEquals("Check Samsung battery whitelist", q.title)
         assertEquals("high", q.priority)
         assertEquals(LocalDate.of(2026, 10, 22), q.startDate)
@@ -90,36 +98,36 @@ class TasksLogicTest {
     }
 
     @Test fun nextWeekIsTheNextMondayAndOtherWordsStayInTheTitle() {
-        val q = QuickAdd.parse("tell the team next week about it", today)
+        val q = QuickAdd.parse(testWords(), "tell the team next week about it", today)
         assertEquals("tell the team about it", q.title)
         assertEquals(LocalDate.of(2026, 10, 26), q.startDate)
         assertEquals("Next week", q.understood.single().label)
-        assertEquals("Call mum!", QuickAdd.parse("Call mum!", today).title)
-        assertNull(QuickAdd.parse("plain", today).priority)
+        assertEquals("Call mum!", QuickAdd.parse(testWords(), "Call mum!", today).title)
+        assertNull(QuickAdd.parse(testWords(), "plain", today).priority)
     }
 
     @Test fun aLongWaitingGroupKeepsEveryTaskButAsksToShowOnlyTheFirstFive() {
         val tasks = (1..74).map { task("r$it", "ready_for_review") }
-        val waiting = TasksLogic.today(tasks, today).first()
+        val waiting = TasksLogic.today(testWords(), tasks, today).first()
         assertEquals(74, waiting.tasks.size)
         assertEquals(TasksLogic.WAITING_PREVIEW, waiting.preview)
-        assertEquals(null, TasksLogic.today(listOf(task("c", "in_progress")), today).first().preview)
+        assertEquals(null, TasksLogic.today(testWords(), listOf(task("c", "in_progress")), today).first().preview)
     }
 
     @Test fun aToDoOnTheTodayListSaysWhyItIsThere() {
-        assertEquals("starts today", TasksLogic.startedWords(task("a", start = "2026-10-21", due = "2026-12-06"), today))
-        assertEquals("started Oct 1", TasksLogic.startedWords(task("b", start = "2026-10-01"), today))
-        assertNull(TasksLogic.startedWords(task("c", start = "2026-10-21", due = "2026-10-21"), today))
-        assertNull(TasksLogic.startedWords(task("d", "in_progress", start = "2026-10-01"), today))
-        assertNull(TasksLogic.startedWords(task("e", start = "2026-10-30"), today))
-        assertNull(TasksLogic.startedWords(task("f"), today))
+        assertEquals("starts today", TasksLogic.startedWords(testWords(), task("a", start = "2026-10-21", due = "2026-12-06"), today))
+        assertEquals("started Oct 1, 2026", TasksLogic.startedWords(testWords(), task("b", start = "2026-10-01"), today))
+        assertNull(TasksLogic.startedWords(testWords(), task("c", start = "2026-10-21", due = "2026-10-21"), today))
+        assertNull(TasksLogic.startedWords(testWords(), task("d", "in_progress", start = "2026-10-01"), today))
+        assertNull(TasksLogic.startedWords(testWords(), task("e", start = "2026-10-30"), today))
+        assertNull(TasksLogic.startedWords(testWords(), task("f"), today))
         // Overdue says so already in the due words.
-        assertNull(TasksLogic.startedWords(task("g", start = "2026-10-12", due = "2026-10-14"), today))
+        assertNull(TasksLogic.startedWords(testWords(), task("g", start = "2026-10-12", due = "2026-10-14"), today))
     }
 
     @Test fun theRowMetaCarriesThatReason() {
-        val words = TasksLogic.meta(task("a", priority = "high", start = "2026-10-21", due = "2026-12-06"), today).joinToString("") { it.text }
-        assertEquals("High · due Dec 6 · starts today", words)
+        val words = TasksLogic.meta(testWords(), task("a", priority = "high", start = "2026-10-21", due = "2026-12-06"), today).joinToString("") { it.text }
+        assertEquals("High · due Dec 6, 2026 · starts today", words)
     }
 
     @Test fun aTaskForTheEdgeWorkerNamesItsRepositoryFirst() {

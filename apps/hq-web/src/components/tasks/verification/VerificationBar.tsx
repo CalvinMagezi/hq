@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown, ClipboardCheck, Gauge, ShieldCheck } from 'lucide-react'
+import { t } from '~/strings'
 import { fetchVerificationStatus, type VerificationStatus } from '~/lib/verificationApi'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { usePolled } from '../../sessions/usePolled'
@@ -22,19 +23,19 @@ export function VerificationBarView({ status, healthOpen, onToggleHealth, onVeri
   const watching = status.mode === 'shadow'
   const audits = status.calibration.open_audits
   return (
-    <section aria-label="Verification" className="mb-4 rounded-2xl hq-glass-card px-3.5 py-3">
+    <section aria-label={t('check_ready_to_check')} className="mb-4 rounded-2xl hq-glass-card px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="flex items-center gap-2 min-w-0 mr-auto">
           <ShieldCheck className={`w-4 h-4 shrink-0 ${watching ? 'text-amber-300' : 'text-emerald-400'}`} />
-          <span className="text-xs font-semibold text-white">Verification</span>
+          <span className="text-xs font-semibold text-white">{t('check_ready_to_check')}</span>
           {watching && (
-            <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-amber-400/15 text-amber-300" title="Verdicts are recorded and nothing is moved">
-              watching only
+            <span className="text-xs px-1.5 py-0.5 rounded-md bg-amber-400/15 text-amber-300" title={t('check_watching_title')}>
+              {t('check_watching_only')}
             </span>
           )}
         </div>
         <ul className="flex flex-wrap items-center gap-1.5">
-          {chips.length === 0 && <li className="text-xs text-neutral-500">Nothing waiting</li>}
+          {chips.length === 0 && <li className="text-xs text-neutral-500">{t('check_nothing_waiting')}</li>}
           {chips.map((c) => (
             <li
               key={c.who}
@@ -47,10 +48,10 @@ export function VerificationBarView({ status, healthOpen, onToggleHealth, onVeri
         <div className="flex items-center gap-1.5">
           <button type="button" onClick={onVerifyNow} className="hq-btn-primary !h-10 !px-3.5 !text-xs">
             <ClipboardCheck className="w-3.5 h-3.5" />
-            Verify now
+            {t('check_check_them_now')}
           </button>
           <button type="button" onClick={onAudit} className="hq-btn-ghost !h-10 !px-3 !text-xs">
-            Audit{audits > 0 ? ` (${audits})` : ''}
+            {audits > 0 ? t('check_audit_count', { n: audits }) : t('check_audit')}
           </button>
           <button
             type="button"
@@ -76,7 +77,7 @@ interface Props {
 
 /** Shown on the tasks page once verification is on; nothing at all while it is off. */
 export function VerificationBar({ onVerifyNow, onAudit }: Props) {
-  const status = usePolled('verification-status', fetchVerificationStatus, STATUS_POLL_MS)
+  const status = usePolled('verification-status', fetchVerificationStatus, STATUS_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], status.refresh)
   const [healthOpen, setHealthOpen] = useState(false)
   if (!status.data || !verificationActive(status.data.mode)) return null

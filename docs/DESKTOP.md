@@ -1,4 +1,4 @@
-# The desktop app (macOS)
+# The desktop app
 
 The first desktop in the Native Bridge sprint ([plan](plans/native-bridge-sprint.md), workstream
 W5). A small Tauri 2 app that is the laptop's one app for HQ: it starts and stops the local
@@ -14,9 +14,16 @@ Pairing itself: [PAIRING.md](PAIRING.md).
 
 | Screen | What you can do |
 |---|---|
-| Host | Start and stop the host and see its state. What it starts depends on the config (see "The phone as the hub"). Open HQ, which shows the web app in a second window. An optional setting starts the host when the app opens. Below that, the coding agents on this Mac's host, the ones waiting for you first (needs you, finished, working, idle, ended). The list only shows them: answer an agent in HQ. |
+| This computer | What HQ is doing on this computer, in one card: working, ready, slow to start, stopped (with what the log says), locked after too many starts, or waiting on a held port. Start, Open HQ, Stop (a red confirmation when helpers are working, a green one otherwise) and Restart for a slow start. A switch that starts HQ when HQ Hub opens, the `hq` program in use with **Change…** (a file panel, or a pasted path), and the log of the last run with Copy details. A locked host is cleared with **Allow helpers again**, which runs `hq host unlock`. |
 | Devices | Switch the app on for paired devices, show a pairing code (QR and the `hqpair://` link), type the six digits the other device shows, list paired devices, revoke one. While the app is on it also lists what it shares with paired devices and the forwards it opened, with "running elsewhere" for a forward whose port another process already holds. |
-| Claude | A short note that Claude Code and Claude Desktop on this laptop reach HQ through the app. It has no buttons yet. The Connect Claude screen is gone: the public claude.ai connector is retired (see the [sprint plan](plans/native-bridge-sprint.md)). |
+| Helpers | The coding helpers on this computer, the ones waiting for you first, with a count on the tab. Each helper has its own page (see "Helpers"). A helper that needs you also raises a macOS notice, "AgentHQ · HQ Hub", once per blocked helper. |
+
+The app is named AgentHQ in the Dock and Finder, and its control window is titled HQ Hub. The HQ window is
+titled HQ, or "HQ · HQ on your phone" while a phone is the hub. HQ Hub opens `/`, `/chat`,
+`/settings/devices`, `/helpers/<id>` and `/inbox/<id>` in that window and nothing else.
+On the first start after the rename, Claude Desktop entries that point at the old `HQ.app` path are
+rewritten to the new one (a dated `.bak` copy is kept) and the Helpers tab says which.
+Windows and Linux are not built yet.
 
 Nothing starts by itself. Opening the app starts no host, opens no network port and writes
 nothing but its own folder (`~/.hq/desktop`). The host starts when you press Start (or when you turned on "Start the
@@ -112,17 +119,32 @@ service comes from `bridge.share_model` in `~/.hq/config.yaml` ([PAIRING.md](PAI
 Either way the hub is told: turning the switch on or off, or picking another model, reaches each hub
 within a few seconds, and the phone then uses the model with no setting of its own.
 
-## Using HQ in Claude
 
-The Claude tab lists each hub this computer is paired with and whether Claude Code and Claude
-Desktop hold it. **Add** writes the entries `hq claude add` does (`docs/PAIRING.md`, "Using HQ in
-Claude") and **Remove** takes out only those. The tab reads Claude when it opens and after a
-change, not on the three-second refresh, because reading Claude Code runs its program.
+## Helpers
 
-Claude Desktop is told to start `hq`, so the app needs that program's absolute path: the one the
-Host button uses (see "Finding `hq`" below). When it
-cannot find one, Add says so instead of writing a bare `hq`. **Revoke** on a device removes its
-entries in Claude before it revokes.
+The Helpers tab lists the nine coding helpers, the two general helpers and Claude Desktop, with each one's version and
+what it needs from you. Nothing runs until you press **Check this computer** once. A check reads the version from the
+program's package file when there is one, and otherwise runs the program's version line once, closed off, with no
+network and a two-second limit. Two checks run at a time and each answer is remembered by the program's path, size and
+modified time; **Check all again** forgets them. Where a platform has no sandbox the version stays unknown and nothing is
+run. A program in a folder others can write to is shown as "Program not found" and is never run.
+
+A helper's page has:
+
+- **Connected to HQ**: Connect and Remove the connection write what `hq mcp install` and `hq mcp remove` write for that
+  helper. Remove offers **Undo** for ten minutes, restoring the files byte for byte if nothing else changed them. For a
+  paired hub, Claude Code and Claude Desktop also list each hub (what `hq claude add` writes).
+- **Try it**: starts the helper through HQ's host in one fixed folder (`~/.hq/desktop/try-it`, emptied before and after),
+  sends it no prompt, and stops it. A question on its screen is never answered for it, except the folder-trust question
+  for Antigravity. A general helper asks you first, and Try it is off while helpers are stopped.
+- **Sign in**: keeps the helper open for up to ten minutes. The link is read from its screen inside the app and never
+  reaches the page. **Copy sign-in link** copies it; **Open the sign-in page** opens it only when it is `https` and on
+  that helper's own sign-in site.
+- The install line for helpers that have one. HQ Hub never runs an installer.
+
+Claude Desktop is told to start `hq`, so the app needs that program's absolute path: the one the Start button uses (see
+"Finding `hq`" below). Removing a paired device removes its entries in Claude first, and says so if one could not be
+taken out.
 
 ## Settings
 
@@ -136,25 +158,26 @@ refused.
 | `bridge_port` | `47475` | UDP port of the pairing endpoint. Fixed, because a paired device stores the address it paired at |
 | `relay` | `none` | `none`, `default` or an `https://` relay URL |
 | `device_name` | the host name | What this Mac is called to the devices it pairs with |
-| `hq_path` | unset | The `hq` program to run. Unset: see "Finding `hq`" |
+| `hq_path` | unset | The `hq` program to run. Unset: see "Finding `hq`". **Change…** sets it |
+| `look_for_helper_updates`, `try_it_dir`, `usual_start_secs`, `recent_start_secs`, `connection_sheet_day`, `bundle_rename_handled` | see below | Written by the app, kept when the window saves the rest |
 | `share_model` | `false` | Lend this Mac's model to its hubs ("Share this computer's model" on the Devices screen) |
 | `shared_model` | unset | The model hubs are told to use. Unset: the first one Ollama lists |
 
-Port, relay, name and `hq_path` changes apply the next time the app opens. The host's own output goes to
+The app-written keys hold what it learned: the usual start time (the median of the last five starts) and whether the rename was handled. Port, relay, name and `hq_path` changes apply the next time the app opens. The host's own output goes to
 `~/.hq/desktop/host.log` (owner-only). The app reads the same `~/.hq/config.yaml` as `hq`.
 
 ## Finding `hq`
 
 The app runs HQ's own `hq` program and looks for it when it opens, in this order:
 
-1. The path in Settings (`hq_path`). If that is wrong, the app says so and does not look elsewhere.
+1. The path in Settings (`hq_path`), or the one picked with Change… If that is wrong, the app says so and does not look elsewhere.
 2. Next to the app, `~/bin`, `/usr/local/bin`, then each directory on the app's `PATH`.
 3. Only when none of those has it: the `PATH` your login shell sets up (`$SHELL -ilc`, given five
    seconds). An app opened from the Dock gets only the system's short `PATH`, so an `hq` that a
    shell profile puts on your `PATH` is otherwise invisible to it.
 
 A candidate counts only when `hq --version` answers `hq <version>` within five seconds: some systems
-have an unrelated program called `hq`. When nothing is found, the Host screen says so as soon as
+have an unrelated program called `hq`. When nothing is found, the This computer tab says so as soon as
 the app opens and lists where it looked.
 
 ## Building it
@@ -171,7 +194,7 @@ bun run typecheck
 bun run build            # tauri build --bundles app; unsigned
 ```
 
-The result is `target/release/bundle/macos/HQ.app` under the Cargo target directory (set
+The result is `target/release/bundle/macos/AgentHQ.app` under the Cargo target directory (set
 `CARGO_TARGET_DIR` to share one with the main workspace). The Tauri CLI is the pinned npm
 package, so there is nothing to `cargo install`. Build with `CARGO_PROFILE_DEV_DEBUG=0
 CARGO_INCREMENTAL=0` on a tight disk, and delete the target directory when done.
@@ -198,9 +221,9 @@ HQ_BRIDGE_BIN=target/debug/hq cargo test -p hq-desktop --test cli_join -- --igno
 ## Signing and the DMG
 
 The **Desktop release** workflow (`.github/workflows/desktop-release.yml`, run by hand or by a
-`desktop-v*` tag) makes `HQ.dmg` in two jobs, split the way `release.yml` splits its own:
+`desktop-v*` tag) makes `AgentHQ.dmg` in two jobs, split the way `release.yml` splits its own:
 
-1. **Build** compiles `HQ.app` unsigned. It runs the repository's build code (and every
+1. **Build** compiles `AgentHQ.app` unsigned. It runs the repository's build code (and every
    dependency's build script), so it has no environment and no secret.
 2. **Sign** downloads that bundle and runs only `scripts/desktop/sign-macos.sh` on it, in the
    `desktop-release` environment that holds the Apple secrets. The certificate and the notary key
@@ -221,7 +244,7 @@ entitlements: the app is not sandboxed and uses none of the JIT or library-valid
 If the sandbox is ever turned on, it needs only `com.apple.security.network.client` and `.server`.
 
 To try the script locally on a built app: `bash scripts/desktop/sign-macos.sh
-<target>/release/bundle/macos/HQ.app /tmp/HQ.dmg` (ad hoc unless the variables above are set).
+<target>/release/bundle/macos/AgentHQ.app /tmp/AgentHQ.dmg` (ad hoc unless the variables above are set).
 
 The bundle identifier is `online.agenthq.desktop`. WebKit keeps the HQ window's sign-in per
 identifier, so a build with the earlier placeholder (`dev.hq-oss.desktop`) asks you to sign in

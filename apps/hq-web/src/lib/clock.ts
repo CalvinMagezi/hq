@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react'
 
-/** localStorage key for the header clock's time zone. Empty or missing means this device's zone. */
-export const CLOCK_ZONE_KEY = 'hq.clock.timeZone'
+/** localStorage key for the zone this browser shows times in. Empty or missing means this device's zone. */
+export const CLOCK_ZONE_KEY = 'hq-display-tz'
+/** The key the header clock used before the display zone; its value moves over on first read. */
+const LEGACY_ZONE_KEY = 'hq.clock.timeZone'
 const CLOCK_ZONE_EVENT = 'hq:clock-zone'
 
 /** Zones offered when the browser cannot list its own. */
@@ -56,7 +58,15 @@ export function availableTimeZones(): string[] {
 /** The chosen zone, or '' to follow the device. A stored zone the browser rejects counts as unset. */
 export function readClockZone(): string {
   try {
-    const stored = localStorage.getItem(CLOCK_ZONE_KEY) ?? ''
+    let stored = localStorage.getItem(CLOCK_ZONE_KEY) ?? ''
+    const legacy = localStorage.getItem(LEGACY_ZONE_KEY)
+    if (legacy !== null) {
+      if (!stored && isValidTimeZone(legacy)) {
+        stored = legacy
+        localStorage.setItem(CLOCK_ZONE_KEY, legacy)
+      }
+      localStorage.removeItem(LEGACY_ZONE_KEY)
+    }
     return isValidTimeZone(stored) ? stored : ''
   } catch {
     return ''

@@ -87,11 +87,15 @@ export async function getVaultRoot(): Promise<{ path: string }> {
   return { path: res.vault_path }
 }
 
-export async function searchNotes(query: string): Promise<{ results: SearchHit[] }> {
+/** The address of a notes search; HQ applies `folder` before the limit. */
+export function searchPath(query: string, folder?: string | null): string {
+  const scope = folder ? `&folder=${encodeURIComponent(folder)}` : ''
+  return `/api/search?q=${encodeURIComponent(query)}&limit=${SEARCH_LIMIT}${scope}`
+}
+
+export async function searchNotes(query: string, folder?: string | null): Promise<{ results: SearchHit[] }> {
   if (!query.trim()) return { results: [] }
-  const res = await hqJson<{ results: Array<Record<string, any>> }>(
-    `/api/search?q=${encodeURIComponent(query)}&limit=${SEARCH_LIMIT}`,
-  )
+  const res = await hqJson<{ results: Array<Record<string, any>> }>(searchPath(query, folder))
   return {
     results: (res.results ?? []).map((r) => ({
       notePath: r.note_path,
@@ -115,6 +119,7 @@ export interface NoteDetailResponse {
   isDir: boolean
   dirEntries?: DirEntry[]
   notFound?: boolean
+  hash?: string
 }
 
 export async function fetchNoteForDrawer(notePath: string): Promise<NoteDetailResponse> {
@@ -132,18 +137,19 @@ export async function fetchNoteForDrawer(notePath: string): Promise<NoteDetailRe
     isDir: !!body.isDir,
     dirEntries: body.entries,
     notFound: false,
+    hash: body.hash,
   }
 }
 
 export async function getNote(
   notePath: string,
-): Promise<{ content: string; isDir: boolean; dirEntries?: DirEntry[] }> {
+): Promise<{ content: string; isDir: boolean; dirEntries?: DirEntry[]; hash?: string }> {
   const res = await hqFetch(`/api/note?path=${encodeURIComponent(notePath)}`)
   if (res.status === 404) return { content: '', isDir: false }
   // Offline or server error: throw so a saved copy of the note stays on screen.
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   const body = await res.json()
-  return { content: body.content ?? '', isDir: !!body.isDir, dirEntries: body.entries }
+  return { content: body.content ?? '', isDir: !!body.isDir, dirEntries: body.entries, hash: body.hash }
 }
 
 /**
@@ -173,12 +179,38 @@ export function togglePinNote(path: string, pinned: boolean): Promise<{ success:
   return hqJson('/api/pin', 'POST', { path, pin: pinned })
 }
 
-export function createNote(title: string, content: string, folder?: string): Promise<{ success: boolean; path: string }> {
-  return hqJson('/api/note/create', 'POST', { title, content, folder })
+/** `clientId` makes a retried create land on the same note instead of a second one. */
+export function createNote(title: string, content: string, folder?: string, clientId?: string): Promise<{ success: boolean; path: string }> {
+  return hqJson('/api/note/create', 'POST', { title, content, folder, client_id: clientId })
 }
 
-export function updateNote(path: string, content: string): Promise<{ success: boolean }> {
-  return hqJson('/api/note', 'PUT', { path, content })
+/** Someone else saved the note since this page loaded it. */
+export interface NoteConflict {
+  changed: true
+  by?: string
+  at?: string
+  theirsHash?: string
+}
+
+export type SaveResult = { saved: true; hash?: string } | ({ saved: false } & NoteConflict)
+
+/** Saves against `base`, the hash this page loaded; a 409 comes back as a conflict, not a throw. */
+export async function updateNote(path: string, content: string, base?: string): Promise<SaveResult> {
+  const res = await hqFetch('/api/note', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content, base }),
+  })
+  if (res.status === 409) {
+    const b = await res.json().catch(() => ({}))
+    return { saved: false, changed: true, by: b.by, at: b.at, theirsHash: b.theirs_hash }
+  }
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}))
+    throw new HqHttpError(b.error || `${res.status} ${res.statusText}`, res.status)
+  }
+  const b = await res.json().catch(() => ({}))
+  return { saved: true, hash: b.hash }
 }
 
 export function getFolderList(): Promise<{ folders: string[] }> {

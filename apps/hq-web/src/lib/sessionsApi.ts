@@ -1,5 +1,6 @@
 import { hqJson } from './hqAuth'
 import type { TaskStatus } from './tasksApi'
+import type { ServerAnswer } from './autoAnswers'
 
 export type SessionStatus = 'running' | 'exited' | 'stopped' | 'orphaned'
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done'
@@ -107,6 +108,8 @@ export interface PendingDialog {
   options: DialogOption[]
   truncated: boolean
   cwd?: string | null
+  loses?: boolean
+  verb?: string | null
 }
 
 export interface AnswerPayload {
@@ -291,6 +294,10 @@ export const globalSessionsApi = {
     const res = await hqJson<{ sessions?: HarnessSession[] }>(`/api/harness-sessions${queryString(filters)}`)
     return res.sessions ?? []
   },
+
+  /** What HQ answered on its own for this helper (Drive, a command policy); the owner's own answers are left out. */
+  answers: async (id: string): Promise<ServerAnswer[]> =>
+    (await hqJson<{ answers?: ServerAnswer[] }>(`${sessionPath(id)}/answers`)).answers ?? [],
 
   get: async (id: string): Promise<HarnessSession> => (await hqJson<{ session: HarnessSession }>(sessionPath(id))).session,
 

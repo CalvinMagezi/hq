@@ -12,6 +12,8 @@ interface HomeSectionsProps {
   recent: SectionState<RecentFile>
   tasks: SectionState<TaskItem>
   onRetryPinned: () => void
+  onKeepPin?: (path: string) => void
+  onNotNow?: (path: string) => void
   onRetryRecent: () => void
   onRetryTasks: () => void
 }
@@ -50,7 +52,7 @@ export function HomeSections(p: HomeSectionsProps) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {notes.map((note, i) => (
               <div key={note.path} className="stagger-item" style={{ animationDelay: `${i * 60}ms` }}>
-                <PinnedCard note={note} isSelected={false} />
+                <PinnedCard note={note} isSelected={false} onKeepPin={p.onKeepPin} onNotNow={p.onNotNow} />
               </div>
             ))}
           </div>

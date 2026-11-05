@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::Database;
 
@@ -17,6 +17,28 @@ pub struct PushSubscription {
     pub last_ok_at: Option<String>,
     pub failures: i64,
     pub last_error: Option<String>,
+    /// Comma list of what it receives: `needs`, `updates` or both.
+    pub kinds: String,
+    /// Whether a push may carry an item's first line.
+    pub details: bool,
+}
+
+/// Push kind for items that need the owner.
+pub const KIND_NEEDS: &str = "needs";
+/// Push kind for finished replies and notices.
+pub const KIND_UPDATES: &str = "updates";
+
+impl PushSubscription {
+    pub fn receives(&self, kind: &str) -> bool {
+        self.kinds.split(',').any(|k| k.trim() == kind)
+    }
+}
+
+/// What a subscriber chose, when the browser sent a choice. `None` keeps what is stored.
+#[derive(Debug, Clone, Default)]
+pub struct Choice<'a> {
+    pub kinds: Option<&'a str>,
+    pub details: Option<bool>,
 }
 
 /// Saves a subscription, replacing the keys of one with the same endpoint (a browser
@@ -30,16 +52,56 @@ pub fn upsert(
     user_agent: Option<&str>,
     device_id: Option<&str>,
 ) -> Result<()> {
+    upsert_with(
+        db,
+        endpoint,
+        p256dh,
+        auth,
+        user_agent,
+        device_id,
+        &Choice::default(),
+    )
+    .map(|_| ())
+}
+
+/// [`upsert`] with the subscriber's choice of kinds and details. Returns the kinds stored before,
+/// or `None` for a new subscription, so the caller can replay what is still waiting.
+pub fn upsert_with(
+    db: &Database,
+    endpoint: &str,
+    p256dh: &str,
+    auth: &str,
+    user_agent: Option<&str>,
+    device_id: Option<&str>,
+    choice: &Choice<'_>,
+) -> Result<Option<String>> {
     db.with_conn(|c| {
+        let before: Option<String> = c
+            .query_row(
+                "SELECT kinds FROM push_subscriptions WHERE endpoint = ?1",
+                params![endpoint],
+                |r| r.get(0),
+            )
+            .optional()?;
         c.execute(
-            "INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent, created_at, device_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+            "INSERT INTO push_subscriptions \
+             (endpoint, p256dh, auth, user_agent, created_at, device_id, kinds, details) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, 'needs,updates'), COALESCE(?8, 0)) \
              ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, \
              user_agent = excluded.user_agent, device_id = excluded.device_id, failures = 0, \
-             last_error = NULL",
-            params![endpoint, p256dh, auth, user_agent, Utc::now().to_rfc3339(), device_id],
+             last_error = NULL, kinds = COALESCE(?7, kinds), details = COALESCE(?8, details)",
+            params![
+                endpoint,
+                p256dh,
+                auth,
+                user_agent,
+                Utc::now().to_rfc3339(),
+                device_id,
+                choice.kinds,
+                choice.details
+            ],
         )?;
-        Ok(())
+        Ok(before)
     })
 }
 
@@ -72,8 +134,8 @@ pub fn delete(db: &Database, endpoint: &str) -> Result<bool> {
 pub fn list(db: &Database) -> Result<Vec<PushSubscription>> {
     db.with_conn(|c| {
         let mut stmt = c.prepare(
-            "SELECT endpoint, p256dh, auth, user_agent, created_at, last_ok_at, failures, last_error \
-             FROM push_subscriptions ORDER BY created_at ASC",
+            "SELECT endpoint, p256dh, auth, user_agent, created_at, last_ok_at, failures, last_error, \
+             kinds, details FROM push_subscriptions ORDER BY created_at ASC",
         )?;
         let rows = stmt
             .query_map([], |r| {
@@ -86,6 +148,8 @@ pub fn list(db: &Database) -> Result<Vec<PushSubscription>> {
                     last_ok_at: r.get(5)?,
                     failures: r.get(6)?,
                     last_error: r.get(7)?,
+                    kinds: r.get(8)?,
+                    details: r.get(9)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -130,6 +194,32 @@ pub fn record_failure(db: &Database, endpoint: &str, error: &str) -> Result<i64>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kinds_and_details_default_and_keep_a_stored_choice() {
+        let db = Database::open_memory().unwrap();
+        let ep = "https://fcm.googleapis.com/fcm/send/k";
+        assert_eq!(
+            upsert_with(&db, ep, "k", "a", None, None, &Choice::default()).unwrap(),
+            None,
+            "a new subscription"
+        );
+        let sub = get(&db, ep).unwrap().unwrap();
+        assert!(sub.receives(KIND_NEEDS) && sub.receives(KIND_UPDATES));
+        assert!(!sub.details);
+        let chosen = Choice {
+            kinds: Some("updates"),
+            details: Some(true),
+        };
+        upsert_with(&db, ep, "k", "a", None, None, &chosen).unwrap();
+        // A browser re-sending its keys without a choice keeps the stored one.
+        let before = upsert(&db, ep, "k2", "a2", None, None);
+        assert!(before.is_ok());
+        let sub = get(&db, ep).unwrap().unwrap();
+        assert_eq!(sub.kinds, "updates");
+        assert!(!sub.receives(KIND_NEEDS));
+        assert!(sub.details);
+    }
 
     #[test]
     fn upsert_replaces_keys_and_clears_failures() {

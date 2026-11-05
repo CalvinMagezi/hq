@@ -1,9 +1,9 @@
 {
-  "name": "HQ Control Center",
-  "short_name": "HQ",
-  "description": "Agent HQ monitoring dashboard",
-  "theme_color": "#0a0a0f",
-  "background_color": "#0a0a0f",
+  "name": "AgentHQ",
+  "short_name": "AgentHQ",
+  "description": "Your assistant, your notes and your tasks in one place",
+  "theme_color": "#000000",
+  "background_color": "#000000",
   "display": "standalone",
   "display_override": [
     "window-controls-overlay",
@@ -39,24 +39,19 @@
   ],
   "shortcuts": [
     {
-      "name": "Vault",
-      "url": "/vault",
-      "description": "Browse vault notes"
-    },
-    {
       "name": "Chat",
       "url": "/chat",
-      "description": "Chat with HQ"
+      "description": "Talk to HQ"
     },
     {
-      "name": "Tasks",
-      "url": "/tasks",
-      "description": "Tasks and initiatives"
+      "name": "Notes",
+      "url": "/notes",
+      "description": "Browse your notes"
     },
     {
       "name": "Inbox",
-      "url": "/notifications",
-      "description": "Approvals and notifications"
+      "url": "/inbox",
+      "description": "What needs you"
     }
   ]
 }

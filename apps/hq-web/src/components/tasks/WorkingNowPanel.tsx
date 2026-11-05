@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { agentName } from '~/lib/names'
 import { parseSqliteUtc, type TaskItem, type WorkSession } from '~/lib/tasksApi'
+import { t } from '~/strings'
 
 const TICK_MS = 1000
 const SECONDS_PER_MINUTE = 60
@@ -41,9 +43,9 @@ export function WorkingNowPanel({ sessions, taskById, onSelect }: Props) {
   const now = useNow(sessions.length > 0)
   if (sessions.length === 0) return null
   return (
-    <section aria-label="Working now" className="mb-4 rounded-2xl hq-card p-2">
+    <section aria-label={t('task_working_now')} className="mb-4 rounded-2xl hq-card p-2">
       <h2 className="px-2 pt-1 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
-        Working now ({sessions.length})
+        {t('task_working_now_count', { n: sessions.length })}
       </h2>
       <ul className="space-y-1">
         {sessions.map((s) => {
@@ -60,7 +62,7 @@ export function WorkingNowPanel({ sessions, taskById, onSelect }: Props) {
                   <span className="block truncate text-xs text-neutral-100">{task?.title ?? s.task_id}</span>
                   <span className="block truncate text-[11px] text-neutral-500">
                     {s.actor}
-                    {s.harness ? ` on ${s.harness}` : ''}
+                    {s.harness ? ` · ${agentName(s.harness)}` : ''}
                     {s.branch ? `, ${s.branch}` : ''}
                   </span>
                 </span>

@@ -38,11 +38,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.blocks.BlockActions
 import example.hq.spike.ui.chat.blocks.NoteRefs
 import example.hq.spike.ui.chat.blocks.rememberCopier
@@ -91,8 +93,8 @@ fun rememberSystemPickers(onFiles: (List<android.net.Uri>) -> Unit): SystemPicke
 fun AddSheet(actions: ChatActions, pickers: SystemPickers) {
     SheetFrame(actions.onCloseAdd, top = null) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 28.dp)) {
-            Text("Add to this chat", style = HqType.H2, color = Mts.Ink)
-            Text("HQ reads what you add before it answers.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
+            Text(stringResource(R.string.chat_add_to_this_chat), style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.chat_hq_reads_what_you), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Tile(HqIcons.Notes, "A note", Modifier.weight(1f)) { actions.onPickKind(ContextRef.Kind.Note) }
                 Tile(HqIcons.Tasks, "A task", Modifier.weight(1f)) { actions.onPickKind(ContextRef.Kind.Task) }

@@ -34,7 +34,9 @@ pub struct AskRow {
     pub answer: Option<String>,
     pub answer_message_id: Option<String>,
     pub error: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub answered_at: Option<String>,
 }
 

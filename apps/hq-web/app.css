@@ -26,7 +26,7 @@
   --accent-blue: #00adee;
   --accent-violet: #00adee;   /* brand blue — replaces violet everywhere */
   --text-primary: #e8e8f0;
-  --text-dim: #6b6b8a;
+  --text-dim: #D0D2D3;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
   --font-body: 'Inter', 'Clear Sans', sans-serif;
   --font-heading: 'Nunito', 'Aller', 'Inter', sans-serif;
@@ -162,7 +162,7 @@ body {
 
 /* Section headers */
 .hq-section-title {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -247,7 +247,7 @@ body {
   gap: 4px;
   padding: 2px 8px;
   border-radius: 6px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -516,7 +516,7 @@ body {
   top: 0;
   left: 0;
   padding: 2px 10px;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -530,7 +530,7 @@ body {
   top: 4px;
   right: 6px;
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: 12px;
   font-family: var(--font-mono);
   background: rgba(8, 8, 8, 0.8);
   border: 1px solid var(--border);
@@ -728,7 +728,7 @@ body {
   background: rgba(8, 8, 8, 0.6);
   color: var(--accent-blue);
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1000,17 +1000,17 @@ textarea:focus {
   }
 }
 
-/* Inside the Android app's own screen (see lib/embedHost.ts): no header or bottom bar, so no room kept for them.
-   The head script sets data-host before first paint, so the chrome never shows even for a frame. */
-html[data-host="android"] .hq-header,
-html[data-host="android"] .hq-bottom-nav,
-html[data-host="android"] .hq-rail {
+/* Inside the phone app's screen or any `?embed=1` page (see lib/embedHost.ts): no header or bottom bar, so no room kept for them.
+   The head script sets data-embed before first paint, so the chrome never shows even for a frame. */
+html[data-embed="1"] .hq-header,
+html[data-embed="1"] .hq-bottom-nav,
+html[data-embed="1"] .hq-rail {
   display: none !important;
 }
-html[data-host="android"] .main-content {
+html[data-embed="1"] .main-content {
   padding-bottom: var(--safe-bottom);
 }
-html[data-host="android"] .vault-sidebar {
+html[data-embed="1"] .vault-sidebar {
   bottom: var(--safe-bottom);
 }
 
@@ -1088,7 +1088,7 @@ html[data-host="android"] .vault-sidebar {
   bottom: 12px;
   width: 4px;
   border-radius: 4px;
-  background: var(--accent-green);
+  background: var(--ink);
 }
 .hq-rail-badge {
   position: absolute;
@@ -1098,11 +1098,11 @@ html[data-host="android"] .vault-sidebar {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 18px;
   text-align: center;
-  background: var(--accent-blue);
+  background: var(--warn);
   color: #000;
 }
 
@@ -1342,3 +1342,25 @@ html[data-host="android"] .vault-sidebar {
   -webkit-backdrop-filter: blur(28px) saturate(150%);
   box-shadow: var(--glass-hi), 0 30px 80px rgba(0, 0, 0, 0.55);
 }
+
+/* Shell status (web wave 1): the header, toast, state pills and tone classes. */
+.hq-header .a-tt{height:auto;min-height:48px;padding:4px 0}
+.hq-header .a-status{padding:2px 0}
+.hq-chip-link{display:none}
+@media (min-width: 400px) { .hq-chip-link{display:inline-flex} }
+.hq-more{display:none;position:relative}
+.hq-more-menu{position:absolute;right:0;top:100%;z-index:40}
+@media (max-width: 359px) {
+  .hq-more{display:block}
+  .hq-header-search,.hq-header-gear,.hq-chip-link{display:none !important}
+}
+.hq-toast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;max-width:min(560px,calc(100vw - 24px));padding:10px 16px;border-radius:var(--radius-md);background:var(--surface-200);border:1px solid var(--line);color:var(--ink);font:400 14px/20px var(--font-sans)}
+@media (min-width: 768px) { .hq-toast{bottom:24px} }
+.hq-toast-action{min-height:44px;padding:0 8px;font-weight:700;color:var(--ink)}
+@media print { .hq-header,.hq-rail,.hq-bottom-nav,.a-top,.a-rail,.a-nav{display:none !important} }
+.hq-tone-warn{color:var(--warn);border-color:var(--warn)}
+.hq-tone-work{color:var(--brand-blue);border-color:var(--brand-blue)}
+.hq-tone-ink{color:var(--ink);border-color:var(--ink)}
+.hq-tone-grey{color:var(--ink-muted);border-color:var(--line)}
+.hq-chip-on{background:transparent;color:var(--ink);border-color:var(--ink)}
+.hq-card-needs{border-color:var(--warn)}

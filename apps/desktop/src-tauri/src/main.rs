@@ -4,6 +4,8 @@
 //! All logic lives in `hq-desktop`; this file only turns its calls into commands and windows.
 
 mod commands;
+#[cfg(target_os = "macos")]
+mod native;
 
 use hq_core::config::HqConfig;
 use hq_desktop::{Desktop, DesktopInit};
@@ -59,14 +61,8 @@ fn open_desktop() -> (Arc<Desktop>, Startup) {
         Ok(desktop) => desktop,
         Err(e) => fatal(&format!("{e:#}")),
     };
-    let warning = [warning.as_deref(), desktop.hq_problem()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let startup = Startup {
-        warning: (!warning.is_empty()).then_some(warning),
-    };
+    // A missing hq is not a warning: the This computer tab shows a card for choosing one.
+    let startup = Startup { warning };
     (Arc::new(desktop), startup)
 }
 
@@ -87,7 +83,7 @@ fn main() {
         .invoke_handler(commands::handler())
         .setup(move |app| {
             WebviewWindowBuilder::new(app, CONTROL, WebviewUrl::App("index.html".into()))
-                .title("HQ")
+                .title(hq_desktop::window::CONTROL_TITLE)
                 .inner_size(CONTROL_SIZE.0, CONTROL_SIZE.1)
                 .min_inner_size(CONTROL_MIN.0, CONTROL_MIN.1)
                 .on_navigation(|url| hq_desktop::window::app_page_allowed(url.as_str()))
@@ -101,6 +97,15 @@ fn main() {
                 }
             });
             let launch = for_setup.clone();
+            let renamed = for_setup.clone();
+            let renamed_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let changed = renamed.rewrite_after_rename().await;
+                if !changed.is_empty() {
+                    let _ = renamed_handle.emit_to(CONTROL, "claude-entries-moved", changed);
+                }
+            });
+            tauri::async_runtime::spawn(watch_for_blocked(for_setup.clone()));
             tauri::async_runtime::spawn(async move { launch.on_launch().await });
             // A plain kill (SIGTERM, ctrl-c) closes what the app opened too.
             let (handle, desktop, phase) = (
@@ -157,21 +162,75 @@ async fn close_then_exit(app: tauri::AppHandle, desktop: Arc<Desktop>, phase: Ar
     }
 }
 
-/// Shows HQ's web app, or brings its window forward.
-pub async fn show_main(app: &tauri::AppHandle, desktop: &Desktop) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(MAIN) {
-        return window.set_focus().map_err(|e| e.to_string());
+/// How often helpers are looked at for one that has just stopped for the person's OK.
+const BLOCKED_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Posts one system notice when a helper newly needs the person's OK.
+async fn watch_for_blocked(desktop: Arc<Desktop>) {
+    let mut seen = std::collections::HashSet::new();
+    let mut first = true;
+    loop {
+        let view = desktop.agents().await;
+        if view.reachable {
+            if !first {
+                for agent in hq_desktop::notice::newly_blocked(&seen, &view.agents) {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let n = hq_desktop::notice::notice_for(agent);
+                        native::post_notice(&n.title, &n.body);
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    let _ = agent;
+                }
+            }
+            seen = hq_desktop::notice::blocked_names(&view.agents);
+            first = false;
+        }
+        tokio::time::sleep(BLOCKED_POLL).await;
     }
+}
+
+/// The file chosen in the open panel, or none when it was closed.
+pub async fn choose_program_file(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    #[cfg(target_os = "macos")]
+    app.run_on_main_thread(move || {
+        let picked = objc2::MainThreadMarker::new().and_then(native::choose_file);
+        let _ = tx.send(picked);
+    })
+    .ok()?;
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, tx);
+    }
+    rx.await.ok().flatten()
+}
+
+/// Shows HQ's web app at one page, or brings its window forward and takes it there.
+pub async fn show_main(
+    app: &tauri::AppHandle,
+    desktop: &Desktop,
+    path: &str,
+) -> Result<(), String> {
     let url = desktop
-        .main_window_url()
+        .main_window_url_at(path)
         .await
         .map_err(|e| format!("{e:#}"))?;
+    if let Some(window) = app.get_webview_window(MAIN) {
+        if path != "/" {
+            let parsed: tauri::Url = url
+                .parse()
+                .map_err(|_| "the proxy address is not a URL".to_string())?;
+            window.navigate(parsed).map_err(|e| e.to_string())?;
+        }
+        return window.set_focus().map_err(|e| e.to_string());
+    }
     let origin = desktop.proxy_origin().await.map_err(|e| format!("{e:#}"))?;
     let parsed: tauri::Url = url
         .parse()
         .map_err(|_| "the proxy address is not a URL".to_string())?;
     WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(parsed))
-        .title("HQ")
+        .title(hq_desktop::window::main_title(desktop.hub_web_active()))
         .inner_size(1200.0, 800.0)
         .on_navigation(move |url| hq_desktop::window::main_page_allowed(url.as_str(), &origin))
         .on_new_window(|_, _| NewWindowResponse::Deny)

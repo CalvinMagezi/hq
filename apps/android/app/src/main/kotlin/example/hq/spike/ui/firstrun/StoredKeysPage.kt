@@ -2,6 +2,7 @@ package example.hq.spike.ui.firstrun
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import example.hq.spike.HubService
+import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.KeyVault
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
@@ -55,6 +59,7 @@ fun StoredKeysPage() {
     suspend fun reload() { names = withContext(Dispatchers.IO) { KeyVault.names(context) } }
     LaunchedEffect(Unit) { reload() }
 
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(FirstRunWords.KEYS_BODY, style = HqType.BodySm, color = Mts.InkMuted)
         val shape = RoundedCornerShape(12.dp)
@@ -65,24 +70,9 @@ fun StoredKeysPage() {
                 if (i > 0) Row(Modifier.fillMaxWidth().size(0.dp, 1.dp).background(Mts.Hairline)) {}
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(HqIcons.Key, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-                    Text(n, style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                    if (confirming == n) {
-                        TextAction(FirstRunWords.BACK, enabled = !busy) { confirming = null }
-                        TextAction(FirstRunWords.KEYS_REMOVE, enabled = !busy) {
-                            busy = true
-                            scope.launch {
-                                val ok = withContext(Dispatchers.IO) { KeyVault.remove(context, n).also { if (it) HubService.restartHq() } }
-                                confirming = null
-                                bad = !ok
-                                line = if (ok) FirstRunWords.KEYS_REMOVED else FirstRunWords.KEYS_NOT_REMOVED
-                                reload()
-                                busy = false
-                            }
-                        }
-                    } else {
-                        TextAction("Replace", enabled = !busy) { name = n; line = null }
-                        TextAction(FirstRunWords.KEYS_REMOVE, enabled = !busy) { confirming = n; line = null }
-                    }
+                    Text(KeyNames.display(n), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    TextAction("Replace", enabled = !busy) { name = n; line = null }
+                    TextAction(FirstRunWords.KEYS_REMOVE, enabled = !busy) { confirming = n; line = null }
                 }
             }
         }
@@ -109,5 +99,24 @@ fun StoredKeysPage() {
                 busy = false
             }
         }
+    }
+    }
+    confirming?.let { n ->
+        val only = KeyVault.isOnlyModelKey(names.orEmpty(), n)
+        ConfirmDialog(
+            ConfirmCopy.removeKey(context, ConfirmCopy.keyLabel(n), only), onKeep = { confirming = null }, busy = busy,
+            onExtra = { name = n; confirming = null; line = null },
+            onAct = {
+                busy = true
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { KeyVault.remove(context, n).also { if (it) HubService.restartHq() } }
+                    confirming = null
+                    bad = !ok
+                    line = if (ok) context.getString(if (only) R.string.remove_only_key_done else R.string.remove_key_done) else FirstRunWords.KEYS_NOT_REMOVED
+                    reload()
+                    busy = false
+                }
+            },
+        )
     }
 }

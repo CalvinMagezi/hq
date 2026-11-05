@@ -41,7 +41,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.res.stringResource
+import example.hq.spike.R
+import example.hq.spike.data.Connection
+import example.hq.spike.ui.shell.NothingYet
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,17 +94,16 @@ private suspend fun waitForHq(client: HqClient, authed: Boolean, giveUpMs: Long)
 }
 
 /**
- * A page of the web app (Home, Usage, Board, Timeline) under the app's own bar. Only the local hq loads here, signed in without
+ * A page of the web app (Usage, Board, Timeline) under the app's own bar. Only the local hq loads here, signed in without
  * the token ever being in an address; any other link opens in the browser, and Back walks the page's history before it closes this screen.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
+fun WebHostScreen(page: WebPage, onClose: () -> Unit, onStartHq: () -> Unit = {}, onNotes: () -> Unit = {}) {
     val context = LocalContext.current
     var progress by remember { mutableIntStateOf(0) }
-    var webTitle by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
-    var failedBody by remember { mutableStateOf(WebHost.FAILED_BODY) }
+    var renderGone by remember { mutableStateOf(false) }
     var canBack by remember { mutableStateOf(false) }
     val state = remember { HostState() }
     val chooser = remember { arrayOfNulls<ValueCallback<Array<Uri>>>(1) }
@@ -134,7 +138,7 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
      */
     fun start(patient: Boolean = false, newToken: Boolean = false) {
         failed = false
-        failedBody = WebHost.FAILED_BODY
+        renderGone = false
         // A sliver of the line shows while HQ is waited for.
         progress = WAITING_PROGRESS
         // A load still under way is ended first, so a slow answer from an earlier one cannot cover this page or load it twice,
@@ -154,6 +158,7 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
     web.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
+            if (WebHost.opensNotes(url)) { onNotes(); return true }
             if (WebHost.allows(url)) return false
             if (WebHost.opensInBrowser(url)) {
                 try { context.startActivity(Intent(Intent.ACTION_VIEW, request.url).addCategory(Intent.CATEGORY_BROWSABLE)) } catch (e: ActivityNotFoundException) { }
@@ -184,7 +189,7 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
             loading[0]?.cancel()
             state.reset()
-            failedBody = WebHost.RENDER_BODY
+            renderGone = true
             failed = true
             progress = 0
             canBack = false
@@ -198,7 +203,6 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
     }
     web.webChromeClient = object : WebChromeClient() {
         override fun onProgressChanged(view: WebView, newProgress: Int) { if (!state.hopping) progress = newProgress }
-        override fun onReceivedTitle(view: WebView, title: String?) { webTitle = title }
 
         override fun onJsAlert(view: WebView, url: String?, message: String?, result: JsResult): Boolean {
             dialog[0] = AlertDialog.Builder(context).setMessage(message).setPositiveButton(android.R.string.ok) { _, _ -> result.confirm() }.setOnCancelListener { result.cancel() }.show() to result
@@ -222,7 +226,10 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
         }
     }
 
+    val hq by remember { HqServices.get(context.applicationContext).status }.collectAsState()
     LaunchedEffect(page) { start(patient = true) }
+    // A page that could not load comes by itself once HQ answers.
+    LaunchedEffect(hq) { if (hq == Connection.Connected && failed && !renderGone) start(patient = true) }
     DisposableEffect(web) {
         // A new token (after "Sign out everywhere" or a recovery) is loaded in at once, so the page is not left signed out.
         val onNewToken = Runnable { web.post { start(patient = true, newToken = true) } }
@@ -244,16 +251,25 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
 
     Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp) { if (canBack && !failed) web.goBack() else onClose() }
-            Text(WebHost.barTitle(page, if (failed) null else webTitle), style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 4.dp))
-            IconAction(HqIcons.RotateCw, "Reload", iconSize = 24.dp) { start() }
+            IconAction(HqIcons.ArrowBack, stringResource(R.string.search_back), iconSize = 24.dp) { if (canBack && !failed) web.goBack() else onClose() }
+            Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                Text(stringResource(page.title), style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(stringResource(page.subtitle), style = HqType.Caption, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconAction(HqIcons.RotateCw, stringResource(R.string.web_reload), iconSize = 24.dp) { start() }
         }
         Box(Modifier.fillMaxWidth().height(PROGRESS_HEIGHT).background(if (progress in 1 until FULL) Mts.Surface100 else Mts.Surface000)) {
             if (progress in 1 until FULL) Box(Modifier.fillMaxWidth(progress / FULL.toFloat()).fillMaxHeight().background(Mts.BrandBlue))
         }
         Box(Modifier.weight(1f).fillMaxWidth().background(Mts.Surface000)) {
             key(web) { AndroidView(factory = { web }, modifier = Modifier.fillMaxSize()) }
-            if (failed) FailedPage(page, failedBody, onRetry = { start() })
+            val pageName = stringResource(page.title)
+            when {
+                renderGone && failed -> NothingYet(stringResource(R.string.web_render_gone), "", stringResource(R.string.web_try_again)) { start() }
+                hq is Connection.Stopped -> NothingYet(stringResource(R.string.web_opens_when_up, pageName), stringResource(R.string.web_wait_stopped), stringResource(R.string.web_start_hq), onStartHq)
+                hq is Connection.Starting || hq is Connection.Restarting -> NothingYet(stringResource(R.string.web_opens_when_up, pageName), stringResource(R.string.web_wait_starting))
+                failed -> NothingYet(stringResource(R.string.web_load_no_reply, pageName), "", stringResource(R.string.web_try_again)) { start() }
+            }
         }
     }
 }
@@ -265,15 +281,4 @@ private class HostState {
     var clearHistory = false
 
     fun reset() { hopping = false; script = ""; clearHistory = false }
-}
-
-@Composable
-private fun FailedPage(page: WebPage, body: String, onRetry: () -> Unit) {
-    Column(Modifier.fillMaxSize().background(Mts.Surface000).padding(32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(WebHost.failedTitle(page), style = HqType.H2, color = Mts.Ink, textAlign = TextAlign.Center)
-        Text(body, style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center)
-        Box(Modifier.padding(top = 8.dp).heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onRetry).padding(horizontal = 32.dp), contentAlignment = Alignment.Center) {
-            Text(WebHost.TRY_AGAIN, style = HqType.BodySmBold, color = Mts.OnGreen)
-        }
-    }
 }

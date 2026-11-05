@@ -40,7 +40,7 @@ pub(crate) async fn budgets_handler(
 }
 
 pub(crate) async fn put_budgets_handler(
-    State(_state): State<Arc<WsState>>,
+    State(state): State<Arc<WsState>>,
     Json(new): Json<BudgetsConfig>,
 ) -> Result<impl IntoResponse, ApiError> {
     let problems = new.problems();
@@ -48,5 +48,6 @@ pub(crate) async fn put_budgets_handler(
         return Err(ApiError::bad_request(problems.join("; ")));
     }
     let saved = HqConfig::save_patch(|c| c.budgets = new)?;
+    state.announce_change(crate::CHANGE_BUDGET);
     Ok(Json(json!({ "saved": saved.budgets.budgets.len() })))
 }

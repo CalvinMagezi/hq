@@ -14,9 +14,11 @@ pub const REVERIFY_FAILED: &str = "failed";
 pub struct ReverifyRequest {
     pub task_id: String,
     pub display_id: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub requested_at: String,
     pub state: String,
     pub detail: String,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub answered_at: Option<String>,
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Trash2, Pencil, Check, X as XIcon, CornerLeftUp } from 'lucide-react'
+import { X, Archive, Pencil, Check, X as XIcon, CornerLeftUp } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '~/lib/tasksApi'
 import { STATUS_LABELS, STATUS_ORDER } from '~/lib/tasksApi'
 import { TaskRelations } from './TaskRelations'
@@ -15,6 +15,8 @@ import { TaskVerification } from './verification/TaskVerification'
 import { useIsStale } from './staleContext'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
 import { formatLocalTime } from './timeFormat'
+import { Dialog } from '../ui/Dialog'
+import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
 interface Props {
@@ -24,14 +26,15 @@ interface Props {
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
   /** Brings an archived task back. */
   onRestore?: (id: string) => Promise<void>
-  onDelete: (id: string, cascade: boolean) => Promise<void>
+  /** Archives the task; `purge` deletes an archived one for good. */
+  onDelete: (id: string, cascade: boolean, purge?: boolean) => Promise<void>
   onSelectTask: (id: string) => void
   onCreateSubtask: (parent: TaskItem, title: string) => Promise<void>
   busy: boolean
 }
 
 const DATE_INPUT_CLASS =
-  'px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
+  'px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white'
 
 export function TaskDetailDrawer({
   task,
@@ -106,8 +109,7 @@ export function TaskDetailDrawer({
   const parent = task.parent_task_id ? allTasks.find((t) => t.id === task.parent_task_id) : undefined
 
   const handleDeleteClick = () => {
-    if (task.subtask_count > 0) setConfirmingDelete(true)
-    else onDelete(task.id, false)
+    void onDelete(task.id, task.subtask_count > 0)
   }
 
   const content = (
@@ -124,20 +126,20 @@ export function TaskDetailDrawer({
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold text-neutral-500">{task.display_id}</span>
+              <span className="text-xs font-bold text-neutral-500">{task.display_id}</span>
               {task.priority && (
-                <span className="text-[11px] font-semibold uppercase text-amber-400">
+                <span className="text-xs font-semibold uppercase text-[var(--warn)]">
                   {task.priority}
                 </span>
               )}
-              {task.long_horizon && <span className="text-[11px] text-neutral-400">long running</span>}
-              {stale && <span className="text-[11px] text-neutral-400" title="Nobody holds it and nothing has changed for a while">stale</span>}
+              {task.long_horizon && <span className="text-xs text-neutral-400">{t('task_long_running')}</span>}
+              {stale && <span className="text-xs text-neutral-400" title={t('task_stale_hint')}>{t('task_stale_label')}</span>}
             </div>
             {editing ? (
               <input
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
-                className="text-base font-semibold text-white bg-transparent border-b border-white/20 focus:outline-none focus:border-emerald-400 mt-1 w-full"
+                className="text-base font-semibold text-white bg-transparent border-b border-white/20 focus:outline-none focus:border-white mt-1 w-full"
               />
             ) : (
               <h2 className="text-base font-semibold text-white mt-1 break-words">{task.title}</h2>
@@ -150,8 +152,8 @@ export function TaskDetailDrawer({
                   type="button"
                   onClick={handleSaveEdit}
                   disabled={busy || isInvalidEstimate(draftEstimate)}
-                  className="p-1.5 rounded-lg text-emerald-400 hover:bg-white/10 transition-colors disabled:opacity-50"
-                  title="Save"
+                  className="p-1.5 rounded-lg text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                  title={t('quick_note_save')}
                 >
                   <Check className="w-4 h-4" />
                 </button>
@@ -159,7 +161,7 @@ export function TaskDetailDrawer({
                   type="button"
                   onClick={() => setEditing(false)}
                   className="p-1.5 rounded-lg text-neutral-400 hover:bg-white/10 transition-colors"
-                  title="Cancel"
+                  title={t('dl_btn_cancel')}
                 >
                   <XIcon className="w-4 h-4" />
                 </button>
@@ -169,7 +171,7 @@ export function TaskDetailDrawer({
                 type="button"
                 onClick={() => setEditing(true)}
                 className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
-                title="Edit"
+                title={t('note_editor_edit')}
               >
                 <Pencil className="w-4 h-4" />
               </button>
@@ -178,10 +180,10 @@ export function TaskDetailDrawer({
               type="button"
               onClick={handleDeleteClick}
               disabled={busy}
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-white/10 transition-colors disabled:opacity-50"
-              title="Delete"
+              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+              title={t('chat_archive')}
             >
-              <Trash2 className="w-4 h-4" />
+              <Archive className="w-4 h-4" />
             </button>}
             <button
               type="button"
@@ -194,28 +196,17 @@ export function TaskDetailDrawer({
         </div>
 
         {confirmingDelete && (
-          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-rose-500/20 bg-rose-500/10">
-            <span className="text-xs text-rose-300">
-              Delete {task.display_id} and its {task.subtask_count} sub-task{task.subtask_count === 1 ? '' : 's'}?
-            </span>
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => onDelete(task.id, true)}
-                disabled={busy}
-                className="px-3 py-1 rounded-lg text-xs font-semibold text-rose-300 border border-rose-500/40 hover:bg-rose-500/20 disabled:opacity-50"
-              >
-                Delete all
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(false)}
-                className="px-3 py-1 rounded-lg text-xs text-neutral-400 hover:text-neutral-200"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <Dialog
+            kind="red"
+            title={t('delete_task_title')}
+            body={t('delete_task_body', { title: task.title })}
+            keepLabel={t('delete_task_keep')}
+            actLabel={t('delete_task_act')}
+            busyLabel={t('confirm_busy_deleting')}
+            busy={busy}
+            onKeep={() => setConfirmingDelete(false)}
+            onAct={() => void onDelete(task.id, true, true)}
+          />
         )}
 
         {archived && (
@@ -230,9 +221,18 @@ export function TaskDetailDrawer({
                 disabled={busy}
                 className="px-3 py-1 rounded-lg text-xs font-semibold text-neutral-200 border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
               >
-                Restore
+                {t('tasks_restore')}
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              disabled={busy}
+              className="px-3 py-1 rounded-lg text-xs font-semibold border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
+              style={{ color: 'var(--accent-red)' }}
+            >
+              {t('delete_task_act')}
+            </button>
           </div>
         )}
 
@@ -240,10 +240,10 @@ export function TaskDetailDrawer({
           <button
             type="button"
             onClick={() => onSelectTask(parent.id)}
-            className="flex items-center gap-1.5 px-6 py-2 border-b border-white/10 text-left text-[11px] text-neutral-400 hover:text-white"
+            className="flex items-center gap-1.5 px-6 py-2 border-b border-white/10 text-left text-xs text-neutral-400 hover:text-white"
           >
             <CornerLeftUp className="w-3 h-3 shrink-0" />
-            Sub-task of <span className="text-neutral-500">{parent.display_id}</span>
+            {t('task_drawer_sub_of')} <span className="text-neutral-500">{parent.display_id}</span>
             <span className="truncate">{parent.title}</span>
           </button>
         )}
@@ -258,7 +258,7 @@ export function TaskDetailDrawer({
               onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:cursor-default ${
                 status === task.status
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                  ? 'bg-transparent border hq-tone-ink'
                   : 'bg-white/5 text-neutral-400 border border-white/10 hover:text-white hover:border-white/20'
               }`}
             >
@@ -270,13 +270,13 @@ export function TaskDetailDrawer({
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           <div>
-            <SectionLabel>Description</SectionLabel>
+            <SectionLabel>{t('task_drawer_description')}</SectionLabel>
             {editing ? (
               <textarea
                 value={draftDescription}
                 onChange={(e) => setDraftDescription(e.target.value)}
                 rows={5}
-                className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-200 border bg-black/30 focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"
+                className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-200 border bg-black/30 focus:outline-none focus:ring-1 focus:ring-white resize-none"
                 style={{ borderColor: 'rgba(255,255,255,0.1)' }}
               />
             ) : task.description ? (
@@ -284,12 +284,12 @@ export function TaskDetailDrawer({
                 <MarkdownViewer content={task.description} bare />
               </div>
             ) : (
-              <p className="text-sm text-neutral-600 italic">No description</p>
+              <p className="text-sm text-neutral-600 italic">{t('task_drawer_no_description')}</p>
             )}
           </div>
 
           <div>
-            <SectionLabel className="mb-2">Priority</SectionLabel>
+            <SectionLabel className="mb-2">{t('tasks_priority')}</SectionLabel>
             <div className="flex items-center gap-1.5 flex-wrap">
               {PRIORITIES.map((p) => (
                 <button
@@ -297,9 +297,9 @@ export function TaskDetailDrawer({
                   type="button"
                   disabled={busy}
                   onClick={() => onUpdate(task.id, { priority: p === task.priority ? null : p })}
-                  className={`px-3 py-1 rounded-lg text-[11px] font-semibold uppercase transition-all ${
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold uppercase transition-all ${
                     p === task.priority
-                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                      ? 'bg-transparent border hq-tone-warn'
                       : 'bg-white/5 text-neutral-500 border border-white/10 hover:text-neutral-300'
                   }`}
                 >
@@ -330,24 +330,24 @@ export function TaskDetailDrawer({
               {task.status === 'blocked' && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <SectionLabel>Why it is blocked</SectionLabel>
+                    <SectionLabel>{t('task_drawer_why_blocked')}</SectionLabel>
                     <input
                       value={draftReason}
                       onChange={(e) => setDraftReason(e.target.value)}
                       maxLength={500}
-                      placeholder="what is in the way"
-                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      placeholder={t('task_drawer_in_the_way')}
+                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                       style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                     />
                   </div>
                   <div>
-                    <SectionLabel>Waiting on</SectionLabel>
+                    <SectionLabel>{t('task_drawer_waiting_on')}</SectionLabel>
                     <input
                       value={draftWaiting}
                       onChange={(e) => setDraftWaiting(e.target.value)}
                       maxLength={500}
-                      placeholder="a person, a task, an outside thing"
-                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      placeholder={t('task_drawer_waiting_hint')}
+                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                       style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                     />
                   </div>
@@ -355,25 +355,25 @@ export function TaskDetailDrawer({
               )}
               <label className="flex items-center gap-2 text-xs text-neutral-300">
                 <input type="checkbox" checked={draftLong} onChange={(e) => setDraftLong(e.target.checked)} />
-                Long running: a session finishing a turn or exiting does not move this task
+                {t('task_drawer_long_running')}
               </label>
               <div>
-                <SectionLabel>Assigned to (comma-separated; an agent named here is notified)</SectionLabel>
+                <SectionLabel>{t('task_drawer_assigned_label')}</SectionLabel>
                 <input
                   value={draftAssignees}
                   onChange={(e) => setDraftAssignees(e.target.value)}
-                  placeholder="hq, reviewer"
-                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  placeholder={t('task_drawer_assigned_hint')}
+                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                   style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                 />
               </div>
               <div>
-                <SectionLabel>Tags (comma-separated; what the task is about)</SectionLabel>
+                <SectionLabel>{t('task_drawer_tags_label')}</SectionLabel>
                 <input
                   value={draftTags}
                   onChange={(e) => setDraftTags(e.target.value)}
-                  placeholder="hq, backend, infra"
-                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  placeholder={t('task_drawer_tags_hint')}
+                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
                   style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                 />
               </div>
@@ -381,17 +381,17 @@ export function TaskDetailDrawer({
           )}
 
           {!editing && task.status === 'blocked' && (task.blocked_reason || task.waiting_on) && (
-            <div className="px-3 py-2 rounded-xl border border-rose-500/20 bg-rose-500/5 text-xs text-neutral-200 space-y-0.5">
+            <div className="px-3 py-2 rounded-xl border hq-tone-warn bg-white/5 text-xs text-neutral-200 space-y-0.5">
               {task.blocked_reason && <p className="break-words">Blocked: {task.blocked_reason}</p>}
-              {task.waiting_on && <p className="break-words text-neutral-400">Waiting on {task.waiting_on}</p>}
-              {task.blocked_since && <p className="text-[11px] text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
+              {task.waiting_on && <p className="break-words text-neutral-400">{t('task_waiting_on', { ids: task.waiting_on })}</p>}
+              {task.blocked_since && <p className="text-xs text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
             </div>
           )}
 
           {!editing && (task.tags.length > 0 || task.assignees.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at || task.completed_at) && (
             <div className="flex items-center gap-2 flex-wrap text-xs ">
               {task.assignees.length > 0 && (
-                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-200 border border-white/10 break-all" title="Assigned to">
+                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-200 border border-white/10 break-all" title={t('task_assigned_to')}>
                   for {task.assignees.join(', ')}
                 </span>
               )}

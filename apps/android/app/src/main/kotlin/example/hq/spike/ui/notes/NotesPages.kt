@@ -31,6 +31,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
+import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.ui.chat.blocks.Block
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -97,7 +101,6 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
             when (top) {
                 is NotesRoute.Reader -> ReaderPage(ui, actions, onAskHq)
                 is NotesRoute.Folder -> FolderPage(ui, actions)
-                is NotesRoute.Search -> SearchPage(ui, actions, onAskHq)
                 is NotesRoute.Write -> ui.write?.let { WritePage(it, ui.folders, actions) }
             }
         }
@@ -131,7 +134,7 @@ private fun NotesSnack(text: String, onDismiss: () -> Unit, modifier: Modifier) 
 @Composable
 private fun TopBar(title: String, crumb: String?, onBack: () -> Unit, trailing: @Composable () -> Unit = {}) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = onBack)
+        IconAction(HqIcons.ArrowBack, stringResource(R.string.notify_back), iconSize = 24.dp, onClick = onBack)
         Column(Modifier.weight(1f).padding(start = 4.dp)) {
             Text(title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (!crumb.isNullOrBlank()) Text(crumb, style = HqType.Caption, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -154,13 +157,13 @@ private fun GreenPill(label: String, modifier: Modifier = Modifier, enabled: Boo
 private fun ReaderPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String, String>>) -> Unit) {
     when (val phase = ui.reader) {
         is ReaderPhase.Ready -> ReaderReady(phase, actions) { onAskHq(listOf(phase.note.path to phase.note.title)) }
-        ReaderPhase.Loading -> Column { TopBar("Note", null, actions.onBack); Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner(32) } }
+        ReaderPhase.Loading -> Column { TopBar(stringResource(R.string.quick_note_body), null, actions.onBack); Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner(32) } }
         ReaderPhase.Gone -> GonePage(ui, actions)
         ReaderPhase.Failed -> Column {
-            TopBar("Note", null, actions.onBack)
+            TopBar(stringResource(R.string.quick_note_body), null, actions.onBack)
             Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("HQ is not running", style = HqType.H2, color = Mts.Ink)
-                Text("The note will open when HQ is back.", style = HqType.BodySm, color = Mts.InkMuted)
+                Text(stringResource(R.string.notes_hq_is_not_running_2), style = HqType.H2, color = Mts.Ink)
+                Text(stringResource(R.string.notes_the_note_will_open), style = HqType.BodySm, color = Mts.InkMuted)
             }
         }
     }
@@ -170,11 +173,12 @@ private fun ReaderPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<S
 private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: () -> Unit) {
     val note = phase.note
     val blocks = remember(note.body) { parseBlocks(NoteText.withoutFrontmatter(note.body)) }
-    val handlers = remember(actions) { BlockActions(onOpenNote = actions.onOpenNote, onCopied = { actions.onNotice("Copied") }) }
+    val copied = stringResource(R.string.chat_copied)
+    val handlers = remember(actions, copied) { BlockActions(onOpenNote = actions.onOpenNote, onCopied = { actions.onNotice(copied) }) }
     Column(Modifier.fillMaxSize()) {
         TopBar(note.title, listOf(note.trail, phase.edited).filter { it.isNotBlank() }.joinToString(" · "), actions.onBack) {
-            GreenPill("Edit", Modifier.padding(end = 4.dp), onClick = actions.onEdit)
-            IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { actions.onMenu(true) }
+            GreenPill(stringResource(R.string.note_editor_edit), Modifier.padding(end = 4.dp), onClick = actions.onEdit)
+            IconAction(HqIcons.MoreVertical, stringResource(R.string.tasks_more), iconSize = 24.dp) { actions.onMenu(true) }
         }
         ReaderChips(note, actions, onAsk)
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
@@ -186,11 +190,12 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: 
 @Composable
 private fun ReaderChips(note: example.hq.spike.ui.chat.NoteSheet, actions: NotesActions, onAsk: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val tooLong = stringResource(R.string.notes_too_long_share)
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ReaderChip(HqIcons.Spark, "Ask HQ", Mts.BrandBlue, onAsk)
-        ReaderChip(HqIcons.Tasks, "Make a task", Mts.Ink, actions.onMakeTask)
-        ReaderChip(HqIcons.Pin, if (note.pinned) "Unpin" else "Pin", Mts.Ink, actions.onTogglePin)
-        ReaderChip(HqIcons.Share, "Share", Mts.Ink) { if (note.truncated) actions.onNotice("This note is too long to share as text.") else example.hq.spike.ui.chat.shareText(context, note) }
+        ReaderChip(HqIcons.Spark, stringResource(R.string.notes_ask_hq), Mts.BrandBlue, onAsk)
+        ReaderChip(HqIcons.Tasks, stringResource(R.string.notes_make_task), Mts.Ink, actions.onMakeTask)
+        ReaderChip(HqIcons.Pin, stringResource(if (note.pinned) R.string.pin_unpin else R.string.notes_pin), Mts.Ink, actions.onTogglePin)
+        ReaderChip(HqIcons.Share, stringResource(R.string.notes_share), Mts.Ink) { if (note.truncated) actions.onNotice(tooLong) else example.hq.spike.ui.chat.shareText(context, note) }
     }
 }
 
@@ -217,7 +222,7 @@ private fun NoteBody(path: String, blocks: List<Block>, handlers: BlockActions, 
     DisposableEffect(path) { onDispose { actions.onScrolled(path, list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset) } }
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = ReaderPadding) {
         itemsIndexed(blocks) { i, block -> Box(Modifier.padding(top = blockGap(blocks, i))) { BlockView(block, handlers) } }
-        if (truncated) item { Text("This note is long. Only the start is shown.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
+        if (truncated) item { Text(stringResource(R.string.notes_this_note_is_long), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
     }
 }
 
@@ -225,19 +230,20 @@ private fun NoteBody(path: String, blocks: List<Block>, handlers: BlockActions, 
 @Composable
 private fun GonePage(ui: NotesUi, actions: NotesActions) {
     val path = (ui.top as? NotesRoute.Reader)?.path.orEmpty()
+    val openSearch = example.hq.spike.ui.shell.LocalOpenSearch.current
     Column(Modifier.fillMaxSize()) {
-        TopBar("Note", null, actions.onBack)
+        TopBar(stringResource(R.string.quick_note_body), null, actions.onBack)
         Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(72.dp).background(Mts.Surface200, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Icon(HqIcons.Warning, null, Modifier.size(34.dp), tint = Mts.Amber) }
-            Text("This note is not here any more", style = HqType.H2, color = Mts.Ink)
-            Text("It may have been moved or deleted. ${path.removePrefix("Notebooks/")}", style = HqType.BodySm, color = Mts.InkMuted)
+            Text(stringResource(R.string.notes_this_note_is_not), style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.notes_may_be_moved, path.removePrefix("Notebooks/")), style = HqType.BodySm, color = Mts.InkMuted)
             Box(Modifier.padding(top = 8.dp)) {
                 Row(
-                    Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onBack(); actions.onOpenSearch() }.padding(horizontal = 24.dp),
+                    Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onBack(); openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, null, example.hq.spike.ui.chat.blocks.NoteRefs.title(path))) }.padding(horizontal = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-                ) { Icon(HqIcons.Search, null, Modifier.size(20.dp), tint = Mts.OnGreen); Text("Search for it", style = HqType.BodySmBold, color = Mts.OnGreen) }
+                ) { Icon(HqIcons.Search, null, Modifier.size(20.dp), tint = Mts.OnGreen); Text(stringResource(R.string.notes_search_for_it), style = HqType.BodySmBold, color = Mts.OnGreen) }
             }
-            Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onBack).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text("Go to Notes", style = HqType.BodySmBold, color = Mts.BrandBlue) }
+            Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onBack).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_go_to_notes), style = HqType.BodySmBold, color = Mts.BrandBlue) }
         }
     }
 }
@@ -247,29 +253,24 @@ private fun GonePage(ui: NotesUi, actions: NotesActions) {
 @Composable
 private fun FolderPage(ui: NotesUi, actions: NotesActions) {
     val view = ui.folder ?: return
+    val openSearch = example.hq.spike.ui.shell.LocalOpenSearch.current
     val name = view.path.substringAfterLast('/')
     Column(Modifier.fillMaxSize()) {
         val parents = view.path.removePrefix("Notebooks/").substringBeforeLast('/', "")
-        TopBar(name, if (parents.isEmpty()) "Notes" else "Notes › " + parents.replace("/", " › "), actions.onBack) {
-            IconAction(HqIcons.Search, "Search notes", iconSize = 24.dp, onClick = actions.onOpenSearch)
+        TopBar(name, if (parents.isEmpty()) stringResource(R.string.place_notes) else stringResource(R.string.notes_crumb_in, parents.replace("/", " › ")), actions.onBack) {
+            IconAction(HqIcons.Search, stringResource(R.string.search_field_notes), iconSize = 24.dp, onClick = { openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, view.path.removePrefix("Notebooks/"))) })
         }
-        if (ui.offline) OfflineBanner()
         Box(Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
-                item {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 36.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(HqIcons.Sort, null, Modifier.size(18.dp), tint = Mts.Ink)
-                        Text("A to Z", style = HqType.BodySmBold, color = Mts.Ink)
-                    }
-                }
-                if (view.folders.isNotEmpty()) item { SubFolders(view.folders, actions.onOpenFolder) }
+                if (view.folders.isNotEmpty()) { item { SectionLabel(stringResource(R.string.notes_folders), view.folders.size) }; item { SubFolders(view.folders, actions.onOpenFolder) } }
+                if (view.notes.isNotEmpty()) item { SectionLabel(stringResource(R.string.notes_a_to_z), view.notes.size) }
                 if (view.loading) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Spinner(28) } }
                 items(view.notes, key = { it }) { path ->
                     example.hq.spike.ui.notes.NoteRow(example.hq.spike.data.HqClient.NoteItem(path, NoteRefs.title(path), "", "", false)) { actions.onOpenNote(path) }
                 }
-                if (!view.loading && view.notes.isEmpty() && view.folders.isEmpty()) item { Text("Nothing in this folder yet.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
+                if (!view.loading && view.notes.isEmpty() && view.folders.isEmpty()) item { Text(stringResource(R.string.notes_nothing_in_this_folder), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
             }
-            NewNoteButton("New note here", Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onNew(view.path) }
+            NewNoteButton(stringResource(R.string.notes_new_here), Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onNew(view.path) }
         }
     }
 }
@@ -292,106 +293,6 @@ private fun SubFolders(folders: List<Pair<String, Int>>, onOpen: (String) -> Uni
     }
 }
 
-// ---------------------------------------------------------------- search
-
-@Composable
-private fun SearchPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String, String>>) -> Unit) {
-    val s = ui.search
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    val hits = remember(s.hits, s.filter) { s.hits.filter { s.filter == null || folderOf(it.path) == s.filter } }
-    Column(Modifier.fillMaxSize().imePadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-            val shape = RoundedCornerShape(24.dp)
-            Row(Modifier.weight(1f).heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                BasicTextField(
-                    value = s.query, onValueChange = actions.onQuery, singleLine = true, textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
-                    modifier = Modifier.weight(1f).focusRequester(focus),
-                    decorationBox = { inner -> Box { if (s.query.isEmpty()) Text("Search your notes", style = HqType.Body, color = Mts.InkMuted); inner() } },
-                )
-                if (s.query.isNotEmpty()) Box(Modifier.size(32.dp).clickable(role = Role.Button, onClickLabel = "Clear") { actions.onQuery("") }.semantics { contentDescription = "Clear" }, contentAlignment = Alignment.Center) { Icon(HqIcons.Close, null, Modifier.size(20.dp), tint = Mts.InkMuted) }
-            }
-        }
-        if (s.hits.isNotEmpty()) FilterChips(s.hits, s.filter, actions.onFilter)
-        Box(Modifier.weight(1f)) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
-                items(hits, key = { it.path }) { hit -> HitRow(hit, s.query) { actions.onOpenNote(hit.path) } }
-                if (s.query.isNotBlank() && !s.loading && hits.isEmpty()) item { Text("Nothing matches that.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
-                if (s.loading) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Spinner(28) } }
-            }
-            if (hits.isNotEmpty()) {
-                val n = hits.take(ASK_MAX).size
-                Row(
-                    Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 12.dp).fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface000).border(1.dp, Mts.Line, CircleShape)
-                        .clickable(role = Role.Button) { onAskHq(hits.take(ASK_MAX).map { it.path to it.title }) },
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(HqIcons.Spark, null, Modifier.size(20.dp), tint = Mts.Ink)
-                    Text(askWords(hits.size), style = HqType.BodySmBold, color = Mts.Ink)
-                }
-            }
-        }
-    }
-}
-
-private const val ASK_MAX = 10
-
-/** The label on the Ask HQ pill: HQ is given at most ten notes, and the label says so when there are more hits than that. */
-internal fun askWords(found: Int): String {
-    val n = found.coerceAtMost(ASK_MAX)
-    return "Ask HQ about " + when { n == 1 -> "this note"; found > n -> "the first $n notes"; else -> "these $n notes" }
-}
-
-private fun folderOf(path: String) = path.removePrefix("Notebooks/").substringBefore('/', "")
-
-@Composable
-private fun FilterChips(hits: List<SearchHit>, selected: String?, onFilter: (String?) -> Unit) {
-    val groups = hits.groupingBy { folderOf(it.path) }.eachCount().filterKeys { it.isNotBlank() }
-    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Filter("All ${hits.size}", selected == null) { onFilter(null) }
-        groups.forEach { (name, n) -> Filter("$name $n", selected == name) { onFilter(name) } }
-    }
-}
-
-@Composable
-private fun Filter(label: String, on: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.heightIn(min = 36.dp).clip(CircleShape).then(if (on) Modifier.background(Mts.BrandGreen) else Modifier.border(1.dp, Mts.Line, CircleShape)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) { Text(label, style = HqType.BodySmBold, color = if (on) Mts.OnGreen else Mts.Ink, maxLines = 1) }
-}
-
-@Composable
-private fun HitRow(hit: SearchHit, query: String, onClick: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(hit.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            val folder = folderOf(hit.path).ifBlank { hit.notebook }
-            if (folder.isNotBlank()) Text(folder, style = HqType.Caption.copy(lineHeight = 24.sp), color = Mts.InkMuted, modifier = Modifier.padding(start = 12.dp))
-        }
-        val trail = NoteRefs.folderTrail(hit.path)
-        if (trail.isNotBlank()) Text(trail, style = SmallText, color = Mts.BrandBlue, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (hit.snippet.isNotBlank()) Text(marked(Plain.oneLine(hit.snippet), query), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-    }
-}
-
-/** The snippet with each word of the search picked out: on a green wash, in white. */
-internal fun marked(snippet: String, query: String): AnnotatedString = buildAnnotatedString {
-    val words = query.split(' ').map { it.trim() }.filter { it.length >= 2 }.map { Regex(Regex.escape(it), RegexOption.IGNORE_CASE) }
-    val spans = words.flatMap { it.findAll(snippet).map { m -> m.range } }.sortedBy { it.first }
-    var at = 0
-    for (r in spans) {
-        if (r.first < at) continue
-        append(snippet.substring(at, r.first))
-        withStyle(SpanStyle(color = Mts.Ink, background = Color(0x3822FF37))) { append(snippet.substring(r.first, r.last + 1)) }
-        at = r.last + 1
-    }
-    append(snippet.substring(at))
-}
-
 // ---------------------------------------------------------------- writing
 
 @Composable
@@ -399,23 +300,24 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
     BackHandler(onBack = actions.onBack)
     val focus = LocalFocusManager.current
     Column(Modifier.fillMaxSize().imePadding()) {
-        TopBar(if (w.isNew) "New note" else w.title, null, actions.onBack) {
-            if (!w.isNew) IconAction(HqIcons.Eye, if (w.preview) "Edit" else "Preview", iconSize = 24.dp, onClick = actions.onPreview)
-            GreenPill("Save", Modifier.padding(end = 8.dp), enabled = w.status != SaveStatus.Saving, onClick = actions.onSave)
+        TopBar(if (w.isNew) stringResource(R.string.quick_note_title) else w.title, null, actions.onBack) {
+            if (!w.isNew) IconAction(HqIcons.Eye, stringResource(if (w.preview) R.string.note_editor_edit else R.string.note_editor_preview), iconSize = 24.dp, onClick = actions.onPreview)
+            GreenPill(stringResource(R.string.quick_note_save), Modifier.padding(end = 8.dp), enabled = w.status != SaveStatus.Saving, onClick = actions.onSave)
         }
         if (!w.isNew) StatusLine(w.status)
+        w.conflict?.let { ChangedCard(it, actions) }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp)) {
             if (w.isNew) {
                 BasicTextField(
                     value = w.title, onValueChange = actions.onTitle, textStyle = HqType.H2.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (w.title.isEmpty()) Text("Title", style = HqType.H2, color = Mts.InkMuted); inner() } },
+                    decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (w.title.isEmpty()) Text(stringResource(R.string.notes_title), style = HqType.H2, color = Mts.InkMuted); inner() } },
                 )
                 Row(
                     Modifier.padding(top = 8.dp, bottom = 12.dp).heightIn(min = 36.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { actions.onChooseFolder(true) }.padding(horizontal = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(HqIcons.Folder, null, Modifier.size(18.dp), tint = Mts.Ink)
-                    Text("Saving to ${w.folder.removePrefix("Notebooks/")}", style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1)
+                    Text(stringResource(R.string.notes_saving_to, w.folder.removePrefix("Notebooks/")), style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1)
                     Icon(HqIcons.ChevronDown, null, Modifier.size(16.dp), tint = Mts.Ink)
                 }
                 Box(Modifier.fillMaxWidth().padding(bottom = 12.dp).drawBehind { drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) })
@@ -427,23 +329,40 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
                 BasicTextField(
                     value = w.text, onValueChange = actions.onText, textStyle = HqType.Body.copy(color = Mts.Ink, lineHeight = 26.sp), cursorBrush = SolidColor(Mts.BrandGreen), visualTransformation = MarkdownTransformation,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
-                    decorationBox = { inner -> Box { if (w.text.text.isEmpty()) Text("Start writing", style = HqType.Body.copy(lineHeight = 26.sp), color = Mts.InkMuted); inner() } },
+                    decorationBox = { inner -> Box { if (w.text.text.isEmpty()) Text(stringResource(R.string.notes_start_writing), style = HqType.Body.copy(lineHeight = 26.sp), color = Mts.InkMuted); inner() } },
                 )
             }
         }
         if (!w.preview) FormatBar(w, actions) { focus.clearFocus() }
     }
     if (w.chooser) FolderChooser(w, folders, actions)
-    if (w.leaving) LeaveDialog(w.leaveBody, actions)
+    if (w.leaving) LeaveDialog(w.leaveName, actions)
+}
+
+/** The save HQ refused: the note changed elsewhere, so the owner picks what happens to their text. */
+@Composable
+private fun ChangedCard(c: Conflict, actions: NotesActions) {
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, Mts.Amber, RoundedCornerShape(12.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
+            Text(stringResource(R.string.notes_changed_elsewhere), style = HqType.BodyBold, color = Mts.Ink)
+        }
+        c.by?.let { Text(stringResource(R.string.notes_changed_by, it), style = HqType.BodySm, color = Mts.InkMuted) }
+        c.theirs?.let { Text(it.ifBlank { stringResource(R.string.notes_their_version_empty) }, style = HqType.BodySm, color = Mts.Ink, maxLines = 12, overflow = TextOverflow.Ellipsis) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(enabled = !c.busy, role = Role.Button, onClick = actions.onSeeTheirs).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_see_theirs), style = HqType.BodySmBold, color = Mts.Ink) }
+            Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Ink).clickable(enabled = !c.busy, role = Role.Button, onClick = actions.onKeepBoth).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_keep_both), style = HqType.BodySmBold, color = Mts.Surface000) }
+        }
+    }
 }
 
 @Composable
 private fun StatusLine(status: SaveStatus) {
     val (text, color) = when (status) {
-        SaveStatus.Saved -> "Saved" to Mts.InkMuted
-        SaveStatus.Unsaved -> "Unsaved changes" to Mts.Amber
-        SaveStatus.Saving -> "Saving…" to Mts.InkMuted
-        SaveStatus.Failed -> "Could not save. Try again." to Mts.DangerText
+        SaveStatus.Saved -> stringResource(R.string.note_save_saved) to Mts.InkMuted
+        SaveStatus.Unsaved -> stringResource(R.string.note_save_unsaved) to Mts.Amber
+        SaveStatus.Saving -> stringResource(R.string.note_save_saving) to Mts.InkMuted
+        SaveStatus.Failed -> stringResource(R.string.notes_save_failed) to Mts.DangerText
     }
     Row(Modifier.padding(start = 20.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (status == SaveStatus.Unsaved) Box(Modifier.size(8.dp).background(Mts.Amber, CircleShape))
@@ -456,14 +375,14 @@ private fun FormatBar(w: WriteState, actions: NotesActions, onDone: () -> Unit) 
     fun edit(change: (androidx.compose.ui.text.input.TextFieldValue) -> androidx.compose.ui.text.input.TextFieldValue) = actions.onText(change(w.text))
     Row(Modifier.fillMaxWidth().background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }, verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-            Key("Heading", { edit(example.hq.spike.ui.notes.MarkdownEditing::heading) }) { Text("H", style = HqType.BodyBold.copy(fontSize = 18.sp), color = Mts.Ink) }
-            Key("Bold", { edit { example.hq.spike.ui.notes.MarkdownEditing.wrap(it, "**") } }) { Text("B", style = HqType.BodyBold.copy(fontSize = 18.sp), color = Mts.Ink) }
-            Key("Italic", { edit { example.hq.spike.ui.notes.MarkdownEditing.wrap(it, "*") } }) { Text("I", style = HqType.BodyBold.copy(fontSize = 18.sp, fontStyle = FontStyle.Italic, fontWeight = FontWeight.Normal), color = Mts.Ink) }
-            Key("Bulleted list", { edit { example.hq.spike.ui.notes.MarkdownEditing.prefixLines(it, "- ") } }) { Icon(HqIcons.List, null, Modifier.size(22.dp), tint = Mts.Ink) }
-            Key("Checklist", { edit { example.hq.spike.ui.notes.MarkdownEditing.prefixLines(it, "- [ ] ") } }) { Icon(HqIcons.Tasks, null, Modifier.size(22.dp), tint = Mts.Ink) }
-            Key("Link", { edit(example.hq.spike.ui.notes.MarkdownEditing::link) }) { Icon(HqIcons.Link, null, Modifier.size(22.dp), tint = Mts.Ink) }
+            Key(stringResource(R.string.notes_fmt_heading), { edit(example.hq.spike.ui.notes.MarkdownEditing::heading) }) { Text("H", style = HqType.BodyBold.copy(fontSize = 18.sp), color = Mts.Ink) }
+            Key(stringResource(R.string.notes_fmt_bold), { edit { example.hq.spike.ui.notes.MarkdownEditing.wrap(it, "**") } }) { Text("B", style = HqType.BodyBold.copy(fontSize = 18.sp), color = Mts.Ink) }
+            Key(stringResource(R.string.notes_fmt_italic), { edit { example.hq.spike.ui.notes.MarkdownEditing.wrap(it, "*") } }) { Text("I", style = HqType.BodyBold.copy(fontSize = 18.sp, fontStyle = FontStyle.Italic, fontWeight = FontWeight.Normal), color = Mts.Ink) }
+            Key(stringResource(R.string.notes_fmt_bullets), { edit { example.hq.spike.ui.notes.MarkdownEditing.prefixLines(it, "- ") } }) { Icon(HqIcons.List, null, Modifier.size(22.dp), tint = Mts.Ink) }
+            Key(stringResource(R.string.notes_fmt_checklist), { edit { example.hq.spike.ui.notes.MarkdownEditing.prefixLines(it, "- [ ] ") } }) { Icon(HqIcons.Tasks, null, Modifier.size(22.dp), tint = Mts.Ink) }
+            Key(stringResource(R.string.notes_fmt_link), { edit(example.hq.spike.ui.notes.MarkdownEditing::link) }) { Icon(HqIcons.Link, null, Modifier.size(22.dp), tint = Mts.Ink) }
         }
-        Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onDone).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text("Done", style = HqType.BodySmBold, color = Mts.BrandBlue) }
+        Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onDone).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.safe_done_button), style = HqType.BodySmBold, color = Mts.BrandBlue) }
     }
 }
 
@@ -478,12 +397,12 @@ private fun FolderChooser(w: WriteState, folders: List<String>, actions: NotesAc
     val all = (listOf(INBOX) + folders).distinct().let { if (w.folder in it) it else it + w.folder }
     val shown = all.filter { find.isBlank() || it.contains(find, ignoreCase = true) }
     SheetFrame({ actions.onChooseFolder(false) }, top = 250.dp) {
-        Text("Save to", style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
+        Text(stringResource(R.string.notes_save_to), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
         val shape = RoundedCornerShape(24.dp)
         BasicTextField(
             value = find, onValueChange = { find = it }, singleLine = true, textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(horizontal = 16.dp, vertical = 11.dp),
-            decorationBox = { inner -> Box { if (find.isEmpty()) Text("Find a folder", style = HqType.Body, color = Mts.InkMuted); inner() } },
+            decorationBox = { inner -> Box { if (find.isEmpty()) Text(stringResource(R.string.notes_find_a_folder), style = HqType.Body, color = Mts.InkMuted); inner() } },
         )
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             items(shown, key = { it }) { folder ->
@@ -497,7 +416,7 @@ private fun FolderChooser(w: WriteState, folders: List<String>, actions: NotesAc
                     Icon(HqIcons.Folder, null, Modifier.size(24.dp), tint = Mts.Ink)
                     Column(Modifier.weight(1f)) {
                         Text(folder.substringAfterLast('/'), style = HqType.BodyBold, color = Mts.Ink, maxLines = 1)
-                        val sub = if (folder == INBOX) "Where new notes go unless you pick another" else NoteRefs.folderTrail("$folder/x").substringBeforeLast(" › ", "")
+                        val sub = if (folder == INBOX) stringResource(R.string.notes_inbox_hint) else NoteRefs.folderTrail("$folder/x").substringBeforeLast(" › ", "")
                         if (sub.isNotBlank()) Text(sub, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (selected) Icon(HqIcons.Check, null, Modifier.size(22.dp), tint = Mts.BrandGreen)
@@ -508,16 +427,7 @@ private fun FolderChooser(w: WriteState, folders: List<String>, actions: NotesAc
 }
 
 @Composable
-private fun LeaveDialog(body: String, actions: NotesActions) {
-    BackHandler(onBack = actions.onKeepEditing)
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = actions.onKeepEditing))
-        Column(Modifier.padding(start = 24.dp, top = 240.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Save your changes?", style = HqType.H2, color = Mts.Ink)
-            Text(body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 12.dp))
-            GreenPill("Save", Modifier.fillMaxWidth(), onClick = actions.onSave)
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = actions.onKeepEditing), contentAlignment = Alignment.Center) { Text("Keep editing", style = HqType.BodySmBold, color = Mts.Ink) }
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onDiscard), contentAlignment = Alignment.Center) { Text("Discard changes", style = HqType.BodySmBold, color = Mts.DangerText) }
-        }
-    }
+private fun LeaveDialog(name: String, actions: NotesActions) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    ConfirmDialog(ConfirmCopy.leaveNote(context, name.ifBlank { context.getString(R.string.leave_note_fallback) }), onKeep = actions.onKeepEditing, onAct = actions.onDiscard, onExtra = actions.onSave)
 }

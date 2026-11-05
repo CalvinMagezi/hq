@@ -2,16 +2,10 @@ package example.hq.spike.voice
 
 import android.content.Context
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
-import java.security.MessageDigest
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
+import example.hq.spike.download.Downloads
+import example.hq.spike.download.Item
+import example.hq.spike.measure.DataPurpose
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 
@@ -22,10 +16,10 @@ import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 data class ModelSource(val url: String, val sha256: String, val bytes: Long, val files: Map<String, String>)
 
 /**
- * The speech models, fetched once from the sherpa-onnx releases on GitHub. Only the models travel: the download
+ * The speech models, fetched once from the sherpa-onnx releases on GitHub by the shared download engine (see [item]). Only the model travels: the
  * request carries no audio, no words and no account. Everything lives in app storage that is not backed up.
  */
-class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClient()) {
+class VoiceModels(private val context: Context) {
     private val root = File(context.noBackupFilesDir, "voice")
     val stt = File(root, "stt")
 
@@ -36,66 +30,41 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
 
     fun ready(): Boolean = SOURCES.all { (dir, source) -> doneMark(dir, source).isFile }
 
-    /** Downloads, checks and unpacks whatever is missing; [progress] gets 0 to 1 over the whole set. */
-    suspend fun fetch(progress: (Float) -> Unit) = withContext(Dispatchers.IO) {
-        val total = SOURCES.sumOf { it.second.bytes }.toFloat()
-        var before = 0L
-        for ((dirName, source) in SOURCES) {
-            val dir = File(root, dirName).apply { mkdirs() }
-            if (!doneMark(dirName, source).isFile) fetchOne(dir, source) { got -> progress((before + got) / total) }
-            doneMark(dirName, source).writeText(source.sha256)
-            before += source.bytes
-        }
-        progress(1f)
-    }
-
     private fun doneMark(dir: String, source: ModelSource) = File(File(root, dir), ".ok-" + source.sha256.take(MARK_CHARS))
 
-    /**
-     * A download cut short (screen off, lost signal) is kept and continued with a Range request next time; the
-     * checksum still covers every byte, so a resumed file is trusted no more than a fresh one.
-     */
-    private suspend fun fetchOne(dir: File, source: ModelSource, progress: (Long) -> Unit) {
-        val partial = File(dir, ".download-" + source.sha256.take(MARK_CHARS))
-        if (partial.length() > source.bytes) partial.delete()
-        val digest = MessageDigest.getInstance("SHA-256")
-        var have = partial.length()
-        if (have > 0) partial.inputStream().use { copy(it, null, digest) {} }
-        if (have < source.bytes) {
-            val request = Request.Builder().url(source.url).apply { if (have > 0) header("Range", "bytes=$have-") }.build()
-            http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("model download answered ${response.code}")
-                val resumed = have > 0 && response.code == HTTP_PARTIAL
-                if (!resumed) {
-                    digest.reset()
-                    have = 0
-                }
-                val base = have
-                FileOutputStream(partial, resumed).use { out -> copy(response.body.byteStream(), out, digest) { got -> progress(base + got) } }
-            }
-        }
-        val got = digest.digest().joinToString("") { "%02x".format(it) }
-        if (got != source.sha256) {
-            partial.delete()
-            throw IOException("model download did not match its pinned checksum")
-        }
-        if (source.url.endsWith(TAR_BZ2)) unpack(partial, dir, source.files) else partial.copyTo(File(dir, source.files.values.single()), overwrite = true)
-        partial.delete()
+    /** The engine's job for the one download: the archive is kept under [ARCHIVE] until [finish] has unpacked it. */
+    fun item(): Item {
+        val source = SOURCES.single().second
+        return Item(ITEM_ID, NAME, source.url, source.bytes, source.sha256, DataPurpose.SpeechModel, UNPACKED_BYTES, ARCHIVE, speech = true)
     }
 
-    private suspend fun copy(input: InputStream, out: OutputStream?, digest: MessageDigest, progress: (Long) -> Unit) {
-        val buffer = ByteArray(BUFFER)
-        var total = 0L
-        while (true) {
-            kotlin.coroutines.coroutineContext.ensureActive()
-            val n = input.read(buffer)
-            if (n < 0) break
-            out?.write(buffer, 0, n)
-            digest.update(buffer, 0, n)
-            total += n
-            progress(total)
+    /** Unpacks the checked archive, writes the done mark and deletes the archive. Safe to call twice: the second call finds it done. */
+    fun finish(): Boolean = synchronized(LOCK) {
+        if (ready()) return true
+        val archive = File(Downloads.dirOf(context), ARCHIVE)
+        if (!archive.isFile) return false
+        val (dirName, source) = SOURCES.single()
+        val dir = File(root, dirName).apply { mkdirs() }
+        try {
+            unpack(archive, dir, source.files)
+        } catch (_: IOException) {
+            dir.deleteRecursively()
+            return false
         }
+        doneMark(dirName, source).writeText(source.sha256)
+        archive.delete()
+        true
     }
+
+    /** Removes the model from the phone; the next ask offers the download again. */
+    fun delete() = synchronized(LOCK) {
+        File(root, SOURCES.single().first).deleteRecursively()
+        File(Downloads.dirOf(context), ARCHIVE).delete()
+        Downloads.get(ITEM_ID)?.discard()
+    }
+
+    /** Bytes the model takes on this phone, from the files themselves. */
+    fun onPhoneBytes(): Long = File(root, SOURCES.single().first).walkTopDown().filter { it.isFile && !it.name.startsWith(".ok-") }.sumOf { it.length() }
 
     /** Takes only the named entries, under the names this app chose, so an archive's own paths are never trusted. */
     private fun unpack(archive: File, dir: File, wanted: Map<String, String>) {
@@ -115,9 +84,6 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
     }
 
     companion object {
-        private const val TAR_BZ2 = ".tar.bz2"
-        private const val HTTP_PARTIAL = 206
-        private const val BUFFER = 64 * 1024
         private const val MARK_CHARS = 12
         private const val RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
         private const val STT_DIR = "sherpa-onnx-streaming-zipformer-en-kroko-2025-08-06"
@@ -148,7 +114,16 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
         /** Where the spoken voice's models lived before answers became text only; removed from phones that have it. */
         const val RETIRED_TTS_DIR = "tts"
 
-        /** What the owner is told before the one download. */
-        val DOWNLOAD_MB = SOURCES.sumOf { it.second.bytes } / (1024 * 1024)
+        const val ITEM_ID = "speech"
+
+        /** What the download weighs, pinned with the checksum. */
+        val SIZE_BYTES: Long get() = SOURCES.single().second.bytes
+
+        private const val NAME = "Speech model"
+        private const val ARCHIVE = "speech-model.tar.bz2"
+        private val LOCK = Any()
+
+        // Placeholder until measured on a phone: the four unpacked files of the Kroko model, rounded up. Device check in the report.
+        const val UNPACKED_BYTES = 120_000_000L
     }
 }

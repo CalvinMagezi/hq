@@ -65,7 +65,7 @@ pub struct PairingController {
     /// a slow start or revoke (both can wait on a relay) never freezes the refresh.
     host: Mutex<Option<HostCard>>,
     /// The forwards' state, set and cleared with `host`.
-    forward_views: Mutex<Vec<ForwardView>>,
+    forward_views: Arc<Mutex<Vec<ForwardView>>>,
     offered: Mutex<Vec<String>>,
     /// Whether the bridge lends this computer's model to its hubs; flipped while it runs.
     share: hq_bridge::ServiceSwitch,
@@ -207,7 +207,7 @@ impl PairingController {
             bridge: tokio::sync::Mutex::new(None),
             forwards: Mutex::new(None),
             host: Mutex::new(None),
-            forward_views: Mutex::new(Vec::new()),
+            forward_views: Arc::new(Mutex::new(Vec::new())),
             offered: Mutex::new(Vec::new()),
             share: hq_bridge::ServiceSwitch::new(false),
             shared_model: Arc::default(),
@@ -607,6 +607,35 @@ impl PairingController {
                 last_seen_at: p.last_seen_at,
             })
             .collect())
+    }
+}
+
+/// Whether this app holds the forward listening on `listen`: `None` when pairing is off or it
+/// opened no such forward, `Some(false)` when another program had the port first.
+fn holds(views: &Mutex<Vec<ForwardView>>, listen: SocketAddr) -> Option<bool> {
+    let wanted = listen.to_string();
+    views
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|f| f.listen == wanted)
+        .map(|f| !f.running_elsewhere)
+}
+
+impl PairingController {
+    /// Whether this app opened the forward on `listen` itself (see [`holds`]).
+    pub fn holds_forward(&self, listen: SocketAddr) -> Option<bool> {
+        holds(&self.forward_views, listen)
+    }
+
+    /// A gate for the proxy: open only while this app holds the forward on `listen`.
+    pub fn forward_gate(&self, listen: SocketAddr) -> crate::proxy::UpstreamGate {
+        let views = self.forward_views.clone();
+        Arc::new(move || match holds(&views, listen) {
+            Some(true) => None,
+            Some(false) => Some(crate::proxy::HELD_PORT_LINE),
+            None => Some(crate::desktop::FORWARD_WAIT_LINE),
+        })
     }
 }
 

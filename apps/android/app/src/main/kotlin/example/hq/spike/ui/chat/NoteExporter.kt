@@ -43,7 +43,7 @@ class NoteExporter(
             } catch (e: ExportRefused) {
                 ExportState.Failed(note, format, e.message?.takeIf { it.isNotBlank() } ?: failed(format))
             } catch (e: HqUnavailable) {
-                ExportState.Failed(note, format, "HQ is not running")
+                ExportState.Failed(note, format, "HQ has stopped")
             } catch (e: java.io.IOException) {
                 ExportState.Failed(note, format, failed(format))
             }

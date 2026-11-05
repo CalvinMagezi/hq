@@ -1,13 +1,14 @@
 import { AlertTriangle, Check, Circle } from 'lucide-react'
 import type { Rollout } from '~/lib/verificationApi'
 import { rolloutView } from './verification'
+import { t } from '~/strings'
 
 /** Where verification is in being turned on, and what the next step waits for. Read only: the owner changes the setting. */
 export function RolloutPanel({ rollout }: { rollout: Rollout }) {
   const v = rolloutView(rollout)
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">Turning it on</p>
+      <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">{t('verify_rollout_title')}</p>
       <p className="text-neutral-200">{v.stage}</p>
       {v.warnings.map((w) => (
         <p key={w} className="flex items-start gap-1.5 text-amber-300">
@@ -37,7 +38,7 @@ export function RolloutPanel({ rollout }: { rollout: Rollout }) {
             </ul>
           )}
           <p className="text-neutral-500">
-            Setting: <code className="text-neutral-300">{v.next.change}</code>
+            {t('verify_rollout_setting')} <code className="text-neutral-300">{v.next.change}</code>
           </p>
         </div>
       )}

@@ -36,7 +36,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -58,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -75,6 +75,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.bridge.BridgePeer
 import example.hq.spike.bridge.BridgeState
 import example.hq.spike.bridge.JoinState
@@ -107,7 +110,7 @@ fun PairingHost(vm: PairingViewModel, onClose: () -> Unit) {
                 PairingScreen.Joining -> Joining(vm, bridge)
             }
         }
-        ui.askRemove?.let { RemoveDialog(it, { vm.askRemove(null) }, vm::confirmRemove) }
+        ui.askRemove?.let { peer -> ConfirmDialog(ConfirmCopy.removeDevice(androidx.compose.ui.platform.LocalContext.current, peer.name.ifBlank { "Unnamed device" }), { vm.askRemove(null) }, vm::confirmRemove, error = ui.removeError) }
         (ui.line ?: bridge.line)?.let { Notice(it, Modifier.align(Alignment.BottomCenter), vm::dismissLine) }
     }
 }
@@ -144,7 +147,7 @@ private fun title(s: PairingScreen) = when (s) {
 internal fun TopBar(title: String, onBack: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = onBack)
-        Text(title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+        Text(title, style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
     }
 }
 
@@ -192,7 +195,7 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
         Body(PairingWords.INTRO)
         Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Paired devices", style = HqType.BodyBold, color = Mts.Ink)
+                Text(stringResource(R.string.pairing_paired_devices), style = HqType.BodyBold, color = Mts.Ink)
                 Text(PairingWords.switchLine(bridge), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.testTag("switch-line"))
             }
             Switch(
@@ -212,6 +215,10 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
         val peers = bridge.peers
         when {
             peers == null -> Body(if (bridge.enabled) "Looking…" else "Turn paired devices on to see them.")
+            peers.isEmpty() && example.hq.spike.ui.firstrun.FirstRunStore(LocalContext.current).movedSeen() -> {
+                Text(stringResource(R.string.moved_none_paired_title), style = HqType.BodyBold, color = Mts.Ink)
+                Body(stringResource(R.string.moved_none_paired_body))
+            }
             peers.isEmpty() -> Body("No device is paired.")
             else -> peers.forEach { PeerRow(it) { vm.askRemove(it) } }
         }
@@ -241,26 +248,14 @@ private fun PeerRow(peer: BridgePeer, onRemove: () -> Unit) {
     val now = System.currentTimeMillis() / MS_PER_SEC
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("peer-${peer.id.take(8)}"), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-            Text(peer.name.ifBlank { "Unnamed device" }, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(peer.name.ifBlank { "Unnamed device" }, style = HqType.BodyBold, color = Mts.Ink)
             Text(PairingWords.peerLine(peer, now), style = HqType.BodySm, color = Mts.InkMuted)
         }
-        TextButton(onClick = onRemove) { Text("Remove", color = Mts.DangerText, style = HqType.BodySmBold) }
+        TextButton(onClick = onRemove) { Text(stringResource(R.string.outbox_remove), color = Mts.Ink, style = HqType.BodySmBold) }
     }
 }
 
 private const val MS_PER_SEC = 1_000L
-
-@Composable
-private fun RemoveDialog(peer: BridgePeer, onCancel: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        containerColor = Mts.Surface100,
-        title = { Text(PairingWords.removeTitle(peer), style = HqType.ScreenTitle, color = Mts.Ink) },
-        text = { Text(PairingWords.REMOVE_BODY, style = HqType.Body, color = Mts.InkMuted) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Remove", color = Mts.DangerText, style = HqType.BodySmBold) } },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel", color = Mts.Ink, style = HqType.BodySmBold) } },
-    )
-}
 
 // ---------------------------------------------------------------- this phone shows a code
 
@@ -288,7 +283,7 @@ private fun Show(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
                 Spacer(Modifier.height(12.dp))
                 PillButton("Copy the link", primary = false, tag = "copy-link") { copy(context, ticket.link) }
                 Spacer(Modifier.height(12.dp))
-                PillButton("Cancel", primary = false, tag = "cancel-code") { vm.home() }
+                PillButton("Stop pairing", primary = false, tag = "cancel-code") { vm.home() }
             }
             end != null -> {
                 Body(PairingWords.ended(end), Modifier.testTag("ended"))

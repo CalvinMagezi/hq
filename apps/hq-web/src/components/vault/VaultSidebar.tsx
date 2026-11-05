@@ -230,7 +230,7 @@ function PinnedSection({ pinned, pinnedExpanded, togglePinned, activePath, onNav
                     {pinned.slice(0, 3).map((n) => (
                         <Link
                             key={n.path}
-                            to="/vault/$"
+                            to="/notes/$"
                             params={{ _splat: n.path }}
                             onClick={onNavigate}
                             className="text-[11px] truncate py-1 px-2 rounded-lg transition-all flex items-center gap-1.5"

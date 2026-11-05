@@ -43,6 +43,7 @@ pub struct TaskCheckpoint {
     pub next_step: String,
     pub open_questions: String,
     pub files: Vec<String>,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 

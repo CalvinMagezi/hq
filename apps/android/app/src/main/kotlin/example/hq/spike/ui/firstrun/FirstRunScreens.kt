@@ -29,17 +29,29 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmDialog
+import example.hq.spike.ui.shell.ConfirmKind
+import example.hq.spike.ui.shell.ConfirmWords
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
@@ -52,15 +64,17 @@ private val Title = HqType.H2.copy(fontSize = 28.sp, lineHeight = 34.sp)
 fun FirstRunHost(ui: FirstRunUi, actions: FirstRunActions) {
     val step = ui.step ?: return
     val locked = ui.busy || ui.restoring
-    BackHandler(enabled = step != Step.Welcome || locked) { if (!locked) actions.onBack() }
+    BackHandler(enabled = (step != Step.Welcome && step != Step.Moved) || locked) { if (!locked) actions.onBack() }
     Column(
         Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         when (step) {
             Step.Welcome -> WelcomeStep(actions)
+            Step.Moved -> MovedStep(ui, actions)
             Step.Model -> ModelStep(ui, actions)
             Step.Chat -> ChatStep(ui, actions)
+            Step.Notify -> NotifyStep(ui, actions)
             Step.Start -> StartStep(ui, actions)
             Step.Restore -> RestoreStep(ui, actions)
         }
@@ -76,12 +90,13 @@ private fun WelcomeStep(actions: FirstRunActions) {
     }
     Column(Modifier.padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         GreenPill(FirstRunWords.SET_UP_NEW, onClick = actions.onNewHq)
-        OutlinePill(FirstRunWords.RESTORE, onClick = actions.onRestore)
+        OutlinePill(stringResource(R.string.welcome_restore), onClick = actions.onRestore)
+        Text(stringResource(R.string.welcome_moving_hint), style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
     }
 }
 
 @Composable
-private fun Heading(title: String, body: String) {
+fun Heading(title: String, body: String) {
     Text(title, style = Title, color = Mts.Ink)
     Text(body, style = HqType.Body, color = Mts.InkMuted)
 }
@@ -90,6 +105,8 @@ private fun Heading(title: String, body: String) {
 private fun ModelStep(ui: FirstRunUi, actions: FirstRunActions) {
     val context = LocalContext.current
     Heading(FirstRunWords.MODEL_TITLE, FirstRunWords.MODEL_BODY)
+    val service = if (ui.moved) ui.movedFacts?.service else null
+    if (service != null) Text(stringResource(R.string.moved_ai_note, service), style = HqType.BodySm, color = Mts.InkMuted)
     Text(FirstRunWords.PROVIDER_LABEL, style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Provider.entries.forEach { p ->
@@ -148,8 +165,16 @@ private fun ChatStep(ui: FirstRunUi, actions: FirstRunActions) {
 
 @Composable
 private fun StartStep(ui: FirstRunUi, actions: FirstRunActions) {
-    Heading(FirstRunWords.START_TITLE, FirstRunWords.START_BODY)
+    if (ui.moved) {
+        Text(FirstRunWords.START_TITLE, style = Title, color = Mts.Ink)
+        OldPhoneWarning()
+    } else {
+        Text(FirstRunWords.START_TITLE, style = Title, color = Mts.Ink)
+    }
     ui.error?.let { Message(it) }
+    StartNotifCard()
+    AssistantCard(example.hq.spike.ui.settings.rememberAssistantFacts())
+    if (!ui.moved) Text(stringResource(R.string.assist_one_machine), style = HqType.BodySm, color = Mts.InkMuted)
     GreenPill(if (ui.busy) FirstRunWords.STARTING else FirstRunWords.START, busy = ui.busy, onClick = actions.onStart)
     TextAction(FirstRunWords.BACK, enabled = !ui.busy, onClick = actions.onBack)
 }
@@ -159,9 +184,13 @@ private fun RestoreStep(ui: FirstRunUi, actions: FirstRunActions) {
     val context = LocalContext.current
     val pickBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { actions.onBackup(it, displayName(context, it)) } }
     val pickKey = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { actions.onKeyFile(it, displayName(context, it)) } }
-    Heading(FirstRunWords.RESTORE_TITLE, FirstRunWords.RESTORE_BODY)
+    Heading(stringResource(R.string.restore_title), stringResource(R.string.restore_body))
     OutlinePill(FirstRunWords.PICK_BACKUP, enabled = !ui.restoring) { pickBackup.launch(arrayOf("*/*")) }
-    Text(ui.backupName ?: FirstRunWords.NO_FILE_CHOSEN, style = HqType.BodySm, color = Mts.InkMuted)
+    val name = ui.backupName
+    val size = remember(ui.backup) { ui.backup?.let { fileSize(context, it) } }
+    val row = if (name != null && size != null && name.endsWith(".zip", ignoreCase = true)) stringResource(R.string.restore_file_row, name, size) else name
+    Text(row ?: FirstRunWords.NO_FILE_CHOSEN, style = HqType.BodySm, color = Mts.InkMuted)
+    Text(stringResource(R.string.restore_keys_again), style = HqType.BodySm, color = Mts.InkMuted)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Choice(FirstRunWords.USE_PASSPHRASE, !ui.useKeyFile, !ui.restoring, Modifier.weight(1f)) { actions.onUseKeyFile(false) }
         Choice(FirstRunWords.USE_KEY_FILE, ui.useKeyFile, !ui.restoring, Modifier.weight(1f)) { actions.onUseKeyFile(true) }
@@ -183,6 +212,68 @@ private fun RestoreStep(ui: FirstRunUi, actions: FirstRunActions) {
     }
 }
 
+/** Frame 2, and frame 7 when the copied database is not clean. Only the vault moved; the owner is told what did not. */
+@Composable
+private fun MovedStep(ui: FirstRunUi, actions: FirstRunActions) {
+    val facts = ui.movedFacts
+    Text(stringResource(R.string.moved_title), style = Title, color = Mts.Ink)
+    when {
+        ui.movedChecking || facts == null -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Spinner(24) }
+        !facts.databaseOk -> NotClean(ui, actions)
+        else -> {
+            val notes = pluralStringResource(R.plurals.moved_notes, facts.notes, facts.notes)
+            val tasks = pluralStringResource(R.plurals.moved_tasks, facts.tasks, facts.tasks)
+            Text(stringResource(R.string.moved_count, notes, tasks), style = HqType.Body, color = Mts.InkMuted)
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Mts.Surface100).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.moved_keys_title), style = HqType.BodyBold, color = Mts.Ink)
+                Text(stringResource(R.string.moved_keys_body), style = HqType.BodySm, color = Mts.InkMuted)
+            }
+            Text(stringResource(R.string.moved_fresh_title), style = HqType.BodyBold, color = Mts.Ink)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(R.string.moved_fresh_signins, R.string.moved_fresh_outbox, R.string.moved_fresh_settings).forEach {
+                    Text(stringResource(it), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+            }
+            ui.error?.let { Message(it) }
+            GreenPill(stringResource(R.string.moved_add_keys), enabled = ui.movedForgot, onClick = actions.onAddKeys)
+            OutlinePill(stringResource(R.string.moved_start_fresh), enabled = !ui.busy, onClick = actions.onStartFresh)
+        }
+    }
+    if (ui.confirmFresh) FreshDialog(actions)
+}
+
+@Composable
+private fun NotClean(ui: FirstRunUi, actions: FirstRunActions) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, Mts.Amber, RoundedCornerShape(12.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.moved_db_title), style = HqType.BodyBold, color = Mts.Amber)
+        Text(stringResource(R.string.moved_db_why), style = HqType.BodySm, color = Mts.Ink)
+        Text(stringResource(R.string.moved_db_fix), style = HqType.BodySm, color = Mts.Ink)
+    }
+    GreenPill(stringResource(R.string.moved_db_restore), onClick = actions.onMovedRestore)
+    OutlinePill(stringResource(R.string.moved_db_notes_only), enabled = !ui.movedChecking, onClick = actions.onNotesOnly)
+}
+
+@Composable
+private fun FreshDialog(actions: FirstRunActions) {
+    ConfirmDialog(
+        ConfirmWords(
+            stringResource(R.string.moved_fresh_dialog_title), stringResource(R.string.moved_fresh_dialog_body),
+            stringResource(R.string.moved_keep_notes), stringResource(R.string.moved_delete_notes), stringResource(R.string.confirm_busy_deleting), ConfirmKind.Red,
+        ),
+        onKeep = actions.onKeepNotes, onAct = actions.onDeleteMoved,
+    )
+}
+
+/** Frame 5's warning: the old phone may still be answering the same chats. */
+@Composable
+private fun OldPhoneWarning() {
+    val shape = RoundedCornerShape(12.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Amber, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(R.string.moved_old_phone_title), style = HqType.BodyBold, color = Mts.Amber)
+        Text(stringResource(R.string.moved_old_phone_body), style = HqType.BodySm, color = Mts.Ink)
+    }
+}
+
 @Composable
 private fun Choice(text: String, picked: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
@@ -192,6 +283,10 @@ private fun Choice(text: String, picked: Boolean, enabled: Boolean, modifier: Mo
     ) { Text(text, style = if (picked) HqType.BodySmBold else HqType.BodySm, color = Mts.Ink, textAlign = TextAlign.Center) }
 }
 
+private fun fileSize(context: Context, uri: Uri): String? = runCatching {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c -> if (c.moveToFirst() && !c.isNull(0)) android.text.format.Formatter.formatShortFileSize(context, c.getLong(0)) else null }
+}.getOrNull()
+
 private fun openLink(context: Context, url: String) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
@@ -200,3 +295,37 @@ private fun openLink(context: Context, url: String) {
 private fun displayName(context: Context, uri: Uri): String? = runCatching {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
 }.getOrNull()
+
+/** The optional "make HQ your phone's assistant" card. Shown only where the phone has the setting; it never blocks Start HQ. */
+@Composable
+internal fun AssistantCard(facts: example.hq.spike.ui.settings.AssistantFacts) {
+    val context = LocalContext.current
+    var steps by remember { mutableStateOf(false) }
+    var skipped by remember { mutableStateOf(false) }
+    if (!facts.available) return
+    if (facts.held) androidx.compose.runtime.LaunchedEffect(Unit) { example.hq.spike.measure.Counters.get(context).bump(example.hq.spike.measure.Counter.AssistantChosen) }
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (facts.held) Mts.Ink else Mts.Line, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val big = LocalDensity.current.fontScale >= 1.5f
+        val head: @Composable () -> Unit = {
+            androidx.compose.material3.Icon(if (facts.held) example.hq.spike.ui.shell.HqIcons.Check else example.hq.spike.ui.shell.HqIcons.Mic, null, Modifier.size(24.dp), tint = Mts.Ink)
+            Text(stringResource(if (facts.held) R.string.assist_card_chosen_title else R.string.assist_card_title), style = HqType.BodyBold, color = Mts.Ink)
+        }
+        if (big) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { head() } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { head() }
+        if (facts.held) {
+            val size = example.hq.spike.download.DownloadRules.sizeMb(example.hq.spike.voice.VoiceModels.SIZE_BYTES)
+            Text(stringResource(R.string.assist_card_chosen_body, stringResource(R.string.dl_mb, size)), style = HqType.BodySm, color = Mts.InkMuted)
+        } else {
+            Text(stringResource(R.string.assist_optional), style = HqType.Caption, color = Mts.InkMuted)
+            Text(stringResource(R.string.assist_card_body), style = HqType.BodySm, color = Mts.InkMuted)
+            if (skipped) Text(stringResource(R.string.assist_card_not_set), style = HqType.BodySm, color = Mts.InkMuted)
+            OutlinePill(stringResource(if (skipped) R.string.assist_try_again else R.string.assist_card_set_up)) { steps = true }
+        }
+    }
+    if (steps) androidx.compose.ui.window.Dialog(onDismissRequest = { steps = false; skipped = true }) {
+        Column(Modifier.clip(shape).background(Mts.Surface100)) { example.hq.spike.ui.settings.AssistantTapSteps { steps = false; skipped = true } }
+    }
+}

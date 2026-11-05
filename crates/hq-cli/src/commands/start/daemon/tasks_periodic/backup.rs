@@ -21,9 +21,6 @@ use tracing::{error, info, warn};
 
 const SECS_PER_HOUR: u64 = 3600;
 
-/// Set while a scheduled backup is running.
-static RUNNING: AtomicBool = AtomicBool::new(false);
-
 /// Clears the flag when the job ends, however it ends.
 struct Running(&'static AtomicBool);
 
@@ -259,7 +256,7 @@ fn start(config: &HqConfig, running: &'static AtomicBool) -> Result<()> {
 }
 
 pub async fn run_backup(config: &HqConfig) -> Result<()> {
-    start(config, &RUNNING)
+    start(config, &status::RUNNING)
 }
 
 #[cfg(test)]

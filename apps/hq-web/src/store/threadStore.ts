@@ -54,6 +54,8 @@ export interface ThreadMessage {
   stopped?: boolean
   /** Posted by HQ for a watched coding-agent session, not in answer to the user. */
   driver?: DriverMeta
+  /** Asked by voice: HQ quotes these words when it asks permission. */
+  spoken?: boolean
   /** Asked by an outside MCP client (hq_ask) rather than typed here: the name it gave itself. */
   viaMcp?: string
   offer?: ChatOffer
@@ -96,9 +98,14 @@ interface ThreadState {
   removeFrom: (threadId: string, messageId: string) => void
 
   startTurn: (threadId: string) => void
+  /** Chats whose last turn ended while HQ waits for the owner's yes. */
+  waiting: Record<string, boolean>
+  setWaitingForOwner: (threadId: string, waiting: boolean) => void
   /** Match live turns to the server's running list; returns chats that finished while we weren't listening. */
   syncRunning: (threadIds: string[]) => string[]
   appendContent: (threadId: string, delta: string) => void
+  /** Replace the words a running reply shows (a reconnect brings what it wrote so far). */
+  setLiveContent: (threadId: string, content: string) => void
   appendReasoning: (threadId: string, delta: string) => void
   /** Flag every running reply as incomplete after the socket skipped events. */
   markGap: () => void
@@ -222,6 +229,8 @@ export const useThreadStore = create<ThreadState>()(
             }
           }),
 
+        waiting: {},
+        setWaitingForOwner: (threadId, waiting) => set((s) => (!!s.waiting[threadId] === waiting ? s : { waiting: { ...s.waiting, [threadId]: waiting } })),
         startTurn: (threadId) => patchLive(threadId, () => ({})),
         syncRunning: (threadIds) => {
           const current = get().live
@@ -231,6 +240,7 @@ export const useThreadStore = create<ThreadState>()(
           set({ live })
           return finished
         },
+        setLiveContent: (threadId, content) => patchLive(threadId, () => ({ content, gap: undefined })),
         appendContent: (threadId, delta) => patchLive(threadId, (t) => ({ content: t.content + delta })),
         appendReasoning: (threadId, delta) => patchLive(threadId, (t) => ({ reasoning: t.reasoning + delta })),
         markGap: () => set((s) => ({ live: Object.fromEntries(Object.entries(s.live).map(([id, t]) => [id, { ...t, gap: true }])) })),

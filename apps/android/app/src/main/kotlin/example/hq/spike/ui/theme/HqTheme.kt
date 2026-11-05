@@ -25,7 +25,10 @@ object Mts {
     val BrandGreen = Color(0xFF22FF37)
     val OnGreen = Color(0xFF000000)
     val Amber = Color(0xFFFFB300)
-    val DangerText = Color(0xFFFF6B6B)
+    val Danger = Color(0xFFFF6B6B)
+    val DangerHover = Color(0xFFFF8F8F)
+    val OnDanger = Color(0xFF000000)
+    val DangerText = Danger
     val LauncherGround = Color(0xFF0A0A0F)
     val BrandIndigo = Color(0xFF2E3191)
     /** Undo on the snackbar; the design uses it outside the MTS set. */
@@ -67,7 +70,7 @@ fun HqTheme(content: @Composable () -> Unit) {
             background = Mts.Surface000, onBackground = Mts.Ink,
             surface = Mts.Surface100, onSurface = Mts.Ink,
             surfaceVariant = Mts.Surface200, onSurfaceVariant = Mts.InkMuted,
-            outline = Mts.Line, outlineVariant = Mts.Hairline, error = Mts.DangerText,
+            outline = Mts.Line, outlineVariant = Mts.Hairline, error = Mts.Danger, onError = Mts.OnDanger,
         ),
         content = content,
     )

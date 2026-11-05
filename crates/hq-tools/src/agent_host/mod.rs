@@ -169,6 +169,21 @@ pub struct PendingDialog {
     pub cwd: Option<String>,
 }
 
+impl PendingDialog {
+    /// The verb of what answering yes would lose, from the command it shows (N17).
+    pub fn losing_verb(&self) -> Option<&'static str> {
+        hq_core::losing::dialog_verb(&self.kind, self.command.as_deref())
+    }
+
+    /// A yes here may lose something: it names a losing command, or it is a command dialog HQ
+    /// cannot read whole (cut short, hidden code, inline scripts).
+    pub fn may_lose(&self) -> bool {
+        self.losing_verb().is_some()
+            || (self.kind == "command" && self.truncated)
+            || hq_core::losing::dialog_unreadable(&self.kind, self.command.as_deref())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, serde::Deserialize)]
 pub struct PendingOption {
     pub id: u32,

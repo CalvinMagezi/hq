@@ -29,7 +29,9 @@ pub struct HarnessSessionRow {
     /// mission engine may hold ids that match no task; readers treat those as
     /// unlinked.
     pub mission_id: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub updated_at: String,
     /// Web chat thread watching this session; its events post there.
     pub owner_thread: Option<String>,
@@ -37,9 +39,11 @@ pub struct HarnessSessionRow {
     pub drive: bool,
     /// Why the owning thread owes the session a look, until the web driver takes it.
     pub pm_wake: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub last_driven_at: Option<String>,
     /// host agent status at the supervisor's last sweep.
     pub last_agent_status: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub last_seen_at: Option<String>,
     /// What the session is for. HQ drives it only while this and `done_criteria`
     /// pass `harness_drive_gate::gaps`.
@@ -442,6 +446,7 @@ pub struct SessionEvent {
     pub goal: Option<String>,
     pub done_criteria: Option<String>,
     pub detail: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 

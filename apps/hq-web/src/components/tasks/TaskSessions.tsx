@@ -11,7 +11,7 @@ const TASK_SESSIONS_POLL_MS = 120_000
 
 /** The coding-agent sessions launched for or linked to this task, each linking to the Workbench. */
 export function TaskSessions({ taskId }: { taskId: string }) {
-  const sessions = usePolled(taskId, () => globalSessionsApi.list({ task_id: taskId }), TASK_SESSIONS_POLL_MS)
+  const sessions = usePolled(taskId, () => globalSessionsApi.list({ task_id: taskId }), TASK_SESSIONS_POLL_MS, true, true, ['task:sync', 'sessions:sync'])
   useRefreshOn(['session:changed', 'task:sync'], sessions.refresh)
   return (
     <section aria-label="Linked agents">
@@ -32,8 +32,8 @@ export function TaskSessions({ taskId }: { taskId: string }) {
           {sessions.data.map((s) => (
             <li key={s.id}>
               <Link
-                to="/sessions"
-                search={{ id: s.id }}
+                to="/helpers/$id"
+                params={{ id: s.id }}
                 className="block px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 space-y-0.5"
               >
                 <span className="flex items-center gap-2 min-w-0 text-xs text-neutral-200">

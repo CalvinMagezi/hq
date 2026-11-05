@@ -117,7 +117,7 @@ mcp_connector:
 2. In Claude, open Settings, then Connectors, add a custom connector with the URL Settings shows,
    and press Connect. Claude detects the sign-in method on its own; leave its defaults.
 3. Your browser opens HQ's consent page. Check that the request arrived when you pressed Connect,
-   pick what Claude may do, name the connection, and approve.
+   pick what Claude may do, name the connection, and press Allow (Decline refuses it).
 
 For Claude Code, add the same URL as an HTTP server (`claude mcp add --transport http hq
 https://hq.example.com/mcp`) and authenticate when it asks; its sign-in uses a local callback.

@@ -10,11 +10,14 @@ sealed interface ChatEvent {
     data class ToolStarted(val threadId: String?, val step: ToolStep) : ChatEvent
     data class ToolProgress(val threadId: String?, val toolCallId: String, val message: String) : ChatEvent
     data class ToolFinished(val threadId: String?, val toolCallId: String, val result: String?) : ChatEvent
-    data class TurnEnd(val threadId: String?, val messageId: String?, val stopped: Boolean) : ChatEvent
+    data class TurnEnd(val threadId: String?, val messageId: String?, val stopped: Boolean, val waitingForOwner: Boolean = false) : ChatEvent
     data class Failed(val threadId: String?, val message: String) : ChatEvent
     data class Rejected(val clientId: String?, val threadId: String?, val reason: String, val running: Boolean) : ChatEvent
     data class Titled(val threadId: String, val title: String) : ChatEvent
     data class Lagged(val skipped: Int) : ChatEvent
+
+    /** HQ's answer to `resume`: while [running] the reply so far, else the id of the thread's last saved message. */
+    data class ReplySoFar(val threadId: String?, val running: Boolean, val content: String, val messageId: String?) : ChatEvent
 
     companion object {
         /** Reads one frame. Frames this app does not use (credits, other tabs' bookkeeping) give null. */
@@ -28,11 +31,12 @@ sealed interface ChatEvent {
                 "tool_start" -> ToolStarted(thread, ToolStep(o.optString("tool_call_id"), o.optString("tool_name"), o.optStringOrNull("args"), null, null))
                 "tool_progress" -> ToolProgress(thread, o.optString("tool_call_id"), o.optString("message"))
                 "tool_end" -> ToolFinished(thread, o.optString("tool_call_id"), o.optStringOrNull("result"))
-                "turn_end" -> TurnEnd(thread, o.optStringOrNull("message_id"), o.optBoolean("stopped", false))
+                "turn_end" -> TurnEnd(thread, o.optStringOrNull("message_id"), o.optBoolean("stopped", false), o.optBoolean("waiting_for_owner", false))
                 "error" -> Failed(thread, o.optString("content"))
                 "chat_rejected" -> Rejected(o.optStringOrNull("client_id"), thread, o.optString("reason"), o.optBoolean("running", false))
                 "thread_title" -> thread?.let { Titled(it, o.optString("title")) }
                 "stream_lag" -> Lagged(o.optInt("skipped"))
+                "reply_so_far" -> ReplySoFar(thread, o.optBoolean("running", false), o.optString("content"), o.optStringOrNull("message_id"))
                 else -> null
             }
         }

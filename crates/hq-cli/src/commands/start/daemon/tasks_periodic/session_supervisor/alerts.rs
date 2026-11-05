@@ -327,8 +327,8 @@ pub(super) fn badge_web_inbox(db: &Database, row: &registry::HarnessSessionRow, 
 }
 
 /// The web app's page for one session, where every option of its dialog is a button.
-fn session_page(session_id: &str) -> String {
-    format!("/sessions?id={session_id}")
+pub(super) fn session_page(session_id: &str) -> String {
+    format!("/helpers/{session_id}")
 }
 
 pub(super) const WEB_INBOX_SOURCE: &str = "session_chat";

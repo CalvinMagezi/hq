@@ -1,6 +1,8 @@
 // Signing in another device with a one-time code from one that is already signed in.
 
-import { CLIENT_HEADER, CLIENT_HEADER_VALUE, hqJson } from './hqAuth'
+import { CLIENT_HEADER, CLIENT_HEADER_VALUE, hqJson, saveWebToken } from './hqAuth'
+import { setSharedComputer } from './sharedComputer'
+import { t } from '~/strings'
 
 const DEVICE_CODE_URL = '/api/auth/device-code'
 const EXCHANGE_URL = '/api/auth/exchange'
@@ -54,34 +56,41 @@ const HTTP_TOO_MANY = 429
 export function exchangeErrorMessage(status: number): string {
   switch (status) {
     case HTTP_UNAUTHORIZED:
-      return 'That code is wrong, already used or expired. Get a new one on the signed-in device.'
+      return t('signin_wrong_code')
     case HTTP_TOO_MANY:
-      return 'Too many tries. Wait a few minutes, then get a new code.'
+      return t('signin_too_many')
     case HTTP_NOT_FOUND:
-      return 'This server has no sign-in to hand out.'
+      return t('signin_no_server')
     case HTTP_FORBIDDEN:
-      return 'This page is not allowed to sign in to this server.'
+      return t('signin_not_allowed')
     default:
-      return `Could not sign in (error ${status}). Try again.`
+      return t('signin_failed')
   }
 }
 
 /**
  * Trade a code for a device token of its own. Plain fetch: there is no token to send yet, and a refused code
- * must not mark the stored token as rejected.
+ * must not mark the stored token as rejected (nothing is wiped). The server names the device from the User-Agent.
  */
-export async function exchangeCode(raw: string): Promise<string> {
+export async function exchangeCode(raw: string, shared = false): Promise<string> {
   const code = normalizeCode(raw)
-  if (code.length !== CODE_LENGTH) throw new Error(`A code has ${CODE_LENGTH} letters and digits.`)
+  if (code.length !== CODE_LENGTH) throw new Error(t('signin_wrong_code'))
   const res = await fetch(EXCHANGE_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', [CLIENT_HEADER]: CLIENT_HEADER_VALUE },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({ code, shared }),
   })
   if (!res.ok) throw new Error(exchangeErrorMessage(res.status))
   const data = (await res.json().catch(() => ({}))) as { token?: unknown }
-  if (typeof data.token !== 'string' || !data.token) throw new Error('The server answered without a token. Try again.')
+  if (typeof data.token !== 'string' || !data.token) throw new Error(t('signin_no_token'))
   return data.token
+}
+
+/** Exchange a code and keep the token where the choice says: this tab only on a shared computer. */
+export async function signInWithCode(raw: string, shared: boolean): Promise<void> {
+  const token = await exchangeCode(raw, shared)
+  setSharedComputer(shared)
+  if (!saveWebToken(token)) throw new Error(t('signin_blocked'))
 }
 
 const DEVICES_URL = '/api/auth/devices'
@@ -93,6 +102,12 @@ export interface SignedInDevice {
   created_at: number
   last_used_at: number | null
   expires_at: number | null
+  browser: string
+  system: string
+  shared: boolean
+  keep: boolean
+  idle_expires_after: number | null
+  new: boolean
   current: boolean
 }
 
@@ -111,10 +126,20 @@ export function signOutDevice(id: string): Promise<void> {
   return hqJson<void>(`${DEVICES_URL}/${encodeURIComponent(id)}`, 'DELETE')
 }
 
+/** Sign this browser out on the server; 400 means it uses the operator link, which only Sign out everywhere ends. */
+export function signOutCurrentDevice(): Promise<void> {
+  return hqJson<void>(`${DEVICES_URL}/current`, 'DELETE')
+}
+
+/** Keep a device signed in past 90 days without use, or let the rule apply again. */
+export function keepDevice(id: string, keep: boolean): Promise<void> {
+  return hqJson<void>(`${DEVICES_URL}/${encodeURIComponent(id)}/keep`, 'POST', { keep })
+}
+
 /** Sign out every device and the operator's link; returns the one token this device keeps. */
 export async function signOutEverywhere(): Promise<string> {
   const data = await hqJson<{ token?: unknown }>(ROTATE_URL, 'POST')
-  if (typeof data.token !== 'string' || !data.token) throw new Error('The server answered without a token.')
+  if (typeof data.token !== 'string' || !data.token) throw new Error(t('signin_no_token'))
   return data.token
 }
 

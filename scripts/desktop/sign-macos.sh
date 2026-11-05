@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Signs a built HQ.app and wraps it in a DMG. Runs only on the downloaded artifact, never next to
+# Signs a built AgentHQ.app and wraps it in a DMG. Runs only on the downloaded artifact, never next to
 # build code, so the certificate and the notary key never meet a dependency's build script.
 #
-# Usage: sign-macos.sh <path/to/HQ.app> <out.dmg>
+# Usage: sign-macos.sh <path/to/AgentHQ.app> <out.dmg>
 #
 # With no APPLE_CERTIFICATE the app is signed ad hoc: it opens on the machine that has it, and
 # Gatekeeper refuses it when downloaded. With the certificate it gets a Developer ID signature and
@@ -16,8 +16,8 @@
 #   APPLE_API_KEY_P8            the key's .p8 contents
 set -euo pipefail
 
-app=${1:?usage: sign-macos.sh HQ.app out.dmg}
-out=${2:?usage: sign-macos.sh HQ.app out.dmg}
+app=${1:?usage: sign-macos.sh AgentHQ.app out.dmg}
+out=${2:?usage: sign-macos.sh AgentHQ.app out.dmg}
 [[ $(uname -s) == Darwin ]] || { echo 'sign-macos.sh runs on macOS only' >&2; exit 1; }
 [[ -d $app && $app == *.app ]] || { echo "not an app bundle: $app" >&2; exit 1; }
 [[ $out == *.dmg && ! -e $out ]] || { echo "the output must be a new .dmg path: $out" >&2; exit 1; }

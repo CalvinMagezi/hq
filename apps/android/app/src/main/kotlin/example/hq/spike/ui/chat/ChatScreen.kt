@@ -30,6 +30,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -60,11 +61,11 @@ import kotlinx.coroutines.delay
 
 /** The Chat v2 board of the design: chat name row, the conversation or the empty start, and the composer. */
 @Composable
-fun ChatScreen(state: ChatUiState, actions: ChatActions, starting: Boolean = false) {
+fun ChatScreen(state: ChatUiState, actions: ChatActions, status: example.hq.spike.data.Connection = example.hq.spike.data.Connection.Connected, onStartHq: () -> Unit = {}, onAiKeys: () -> Unit = {}) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            if (starting) StartingBanner() else if (!state.connected) ReconnectBanner()
-            NameRow(state.title, actions.onOpenChats)
+            example.hq.spike.ui.connection.ChatBanner(status, onStartHq, onAiKeys)
+            NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.shown(state.suggestions), actions.onDraft) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
@@ -127,40 +128,15 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (Strin
     }
 }
 
-/** While HQ is starting: the draft is kept and Send waits. */
 @Composable
-private fun StartingBanner() {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text(example.hq.spike.ui.startup.StartupWords.STARTING_BANNER, style = HqType.BodySm, color = Mts.Ink)
-    }
-}
-
-@Composable
-private fun ReconnectBanner() {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(HqIcons.WifiOff, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text("Reconnecting. Your draft is kept and can be sent once HQ is back.", style = HqType.BodySm, color = Mts.Ink)
-    }
-}
-
-@Composable
-private fun NameRow(title: String, onClick: () -> Unit) {
+private fun NameRow(title: String, spoken: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(24.dp)
     Row(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
-            .clickable(role = Role.Button, onClickLabel = "Show your chats", onClick = onClick).padding(horizontal = 16.dp),
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_show_chats), onClick = onClick).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(HqIcons.Chat, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+        Icon(if (spoken) HqIcons.Mic else HqIcons.Chat, null, Modifier.size(20.dp), tint = Mts.InkMuted)
         Text(title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.InkMuted)
     }
@@ -172,6 +148,7 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
     val newestFirst = state.messages.asReversed()
     val blocks = rememberBlockActions(state, actions)
     val list = rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(Place.Chat, list, readsAgain = false)
     val away by remember { derivedStateOf { list.firstVisibleItemIndex > LATEST_AFTER } }
     val scope = rememberCoroutineScope()
     LaunchedEffect(list, state.hasOlder, state.threadId) {
@@ -194,7 +171,7 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
                 ) {
                     // Only the newest reply carries its offer: one written to since has moved on.
                     val answer = if (m === newestFirst.firstOrNull() && state.live == null) { yes: Boolean -> actions.onOffer(m.id, yes) } else null
-                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile) else ReplyBubble(m, blocks, onOffer = answer)
+                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile, spoken = m.spoken) else ReplyBubble(m, blocks, onOffer = answer)
                 }
             }
         }
@@ -209,7 +186,7 @@ private fun LatestPill(modifier: Modifier, onClick: () -> Unit) {
         modifier.heightIn(min = 36.dp).clip(CircleShape).background(Mts.Surface200).border(1.dp, Mts.Hairline, CircleShape).clickable(role = Role.Button, onClick = onClick).padding(start = 14.dp, end = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Latest", style = HqType.ToolLine, color = Mts.Ink)
+        Text(stringResource(R.string.chat_latest), style = HqType.ToolLine, color = Mts.Ink)
         Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.Ink)
     }
 }
@@ -228,8 +205,8 @@ private fun EmptyChat(suggestions: List<Suggestion>, onPick: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom)) {
         Image(painterResource(R.drawable.hq_mark), null, Modifier.size(56.dp).alpha(0.8f), contentScale = ContentScale.Fit)
         Column {
-            Text("What would you like to do?", style = HqType.H2, color = Mts.Ink)
-            Text("HQ can read your notes and tasks, write to them, and send helpers to do work.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp))
+            Text(stringResource(R.string.chat_what_would_you_like), style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.chat_hq_can_read_your), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp))
         }
         suggestions.forEach { s -> SuggestionChip(iconFor(s.group), s.label) { onPick(s.text) } }
     }

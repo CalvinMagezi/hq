@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { t } from '~/strings'
 import { SelectionToolbar } from './SelectionToolbar'
 import { useHQStore } from '~/store/hqStore'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
@@ -66,7 +67,8 @@ async function configureMarked() {
                 if (token.lang === 'chart') {
                     const chart = parseChart(token.text)
                     if (chart.ok) return chartSlot(renderChartHtml(chart.spec))
-                    langLabel = escapeHtml(`chart (not rendered: ${chart.reason})`)
+                    // The words say why, and the data stays visible as written.
+                    langLabel = escapeHtml(t('chat_chart_fail', { reason: chart.reason }))
                 }
                 if (token.lang === 'mermaid') {
                     const pie = parseMermaidPie(token.text)

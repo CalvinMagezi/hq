@@ -115,3 +115,36 @@ test('a load that throws synchronously reports the error and keeps polling', asy
   expect(errors[0]).toBe('sync boom')
   expect(calls).toBeGreaterThan(1)
 })
+
+test('check 3: a hidden tab loads nothing and keeps no timer; waking loads once and starts again', async () => {
+  let visible = false
+  let loads = 0
+  const poller = createPoller({
+    load: async () => ++loads,
+    onData: () => {},
+    onError: () => {},
+    everyMs: 5,
+    isVisible: () => visible,
+  })
+  poller.start()
+  await new Promise((r) => setTimeout(r, 10))
+  const afterFirst = loads
+  await new Promise((r) => setTimeout(r, 40))
+  expect(loads).toBe(afterFirst)
+  visible = true
+  poller.wake()
+  await new Promise((r) => setTimeout(r, 30))
+  expect(loads).toBeGreaterThan(afterFirst + 1)
+  poller.stop()
+})
+
+test('a period of 0 means no timer: it loads on start and on refresh only', async () => {
+  let loads = 0
+  const poller = createPoller({ load: async () => ++loads, onData: () => {}, onError: () => {}, everyMs: 0 })
+  poller.start()
+  await new Promise((r) => setTimeout(r, 30))
+  expect(loads).toBe(1)
+  await poller.refresh()
+  expect(loads).toBe(2)
+  poller.stop()
+})

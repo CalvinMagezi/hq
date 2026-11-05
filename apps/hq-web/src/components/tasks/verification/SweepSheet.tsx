@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useState } from 'react'
 import { ChevronDown, Loader2, Pause, Play, RotateCcw, X } from 'lucide-react'
 import {
@@ -47,7 +48,7 @@ interface PickerProps {
 
 const CHOICES: { id: ScopeChoice; label: string }[] = [
   { id: 'all', label: 'Everything waiting' },
-  { id: 'initiative', label: 'This initiative' },
+  { id: 'initiative', label: t('tasks_this_list') },
   { id: 'since', label: 'Since a date' },
   { id: 'selected', label: 'The tasks I picked' },
 ]
@@ -56,7 +57,7 @@ export function ScopePickerView({ inputs, initiativeName, choice, onChoice, onSi
   const scope = pickScope(choice, inputs)
   const missing =
     choice === 'initiative' && !inputs.initiativeId
-      ? 'Pick an initiative in the sidebar first.'
+      ? t('tasks_pick_list_first')
       : choice === 'selected' && inputs.selectedIds.length === 0
         ? 'Tick some tasks with Select first.'
         : choice === 'since' && !scope
@@ -98,13 +99,13 @@ export function ScopePickerView({ inputs, initiativeName, choice, onChoice, onSi
       </button>
       {recent.length > 0 && (
         <div>
-          <h3 className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Earlier sweeps</h3>
+          <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Earlier sweeps</h3>
           <ul className="space-y-1.5">
             {recent.slice(0, 5).map((s) => (
               <li key={s.id}>
                 <button type="button" onClick={() => onOpen(s.id)} className="w-full text-left min-h-11 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 hover:bg-white/[0.06]">
                   <span className="block text-xs text-neutral-100">{scopeLabel(s.scope)}</span>
-                  <span className="block text-[11px] text-neutral-500">
+                  <span className="block text-xs text-neutral-500">
                     {s.status} · {s.plan.total ?? 0} tasks · {s.created_at}
                   </span>
                 </button>
@@ -142,7 +143,7 @@ function ItemList({ items }: { items: SweepItem[] }) {
           {i.state === 'stale' || i.state === 'kept' ? <span className="text-amber-300/80"> · {i.detail}</span> : null}
         </li>
       ))}
-      {items.length > shown.length && <li className="text-[11px] text-neutral-500">and {items.length - shown.length} more</li>}
+      {items.length > shown.length && <li className="text-xs text-neutral-500">and {items.length - shown.length} more</li>}
     </ul>
   )
 }
@@ -184,7 +185,7 @@ export function SweepBodyView({ detail, initiativeName, busy, error, confirmed, 
           <div className="h-2 rounded-full bg-white/10 overflow-hidden">
             <div className="h-full bg-emerald-400 transition-all" style={{ width: `${bar.percent}%` }} />
           </div>
-          <p className="text-[11px] text-neutral-500 mt-1">{bar.label}</p>
+          <p className="text-xs text-neutral-500 mt-1">{bar.label}</p>
         </div>
       )}
 
@@ -199,7 +200,7 @@ export function SweepBodyView({ detail, initiativeName, busy, error, confirmed, 
                     <span className="text-sm text-neutral-100">
                       <span className="font-semibold text-white">{r.count}</span> {r.label.toLowerCase()}
                     </span>
-                    <span className="text-[11px] text-neutral-500 text-right">{BUCKET_INFO[r.bucket].does}</span>
+                    <span className="text-xs text-neutral-500 text-right">{BUCKET_INFO[r.bucket].does}</span>
                     <ChevronDown className="w-3.5 h-3.5 text-neutral-500 shrink-0 self-center" aria-hidden="true" />
                   </summary>
                   <ItemList items={mine} />
@@ -211,7 +212,7 @@ export function SweepBodyView({ detail, initiativeName, busy, error, confirmed, 
       )}
 
       {sweep.plan.would_wait_on_you !== undefined && sweep.plan.would_wait_on_you > 0 && (
-        <p className="text-xs text-neutral-400">{sweep.plan.would_wait_on_you} would wait on you, including tier 2 tasks, which get a veto window.</p>
+        <p className="text-xs text-neutral-400">{sweep.plan.would_wait_on_you} would wait on you, including risky ones, which wait a while before HQ marks them done.</p>
       )}
       {estimate && <p className="text-xs text-neutral-400">{estimate}</p>}
 
@@ -312,7 +313,7 @@ export function SweepSheet({ open, onClose, inputs, initiativeName, initialSweep
   }
 
   return (
-    <Sheet title={sweepId ? 'Sweep' : 'Verify now'} onClose={close}>
+    <Sheet title={sweepId ? 'Sweep' : t('check_sweep_title')} onClose={close}>
       {sweepId === null ? (
         <ScopePickerView
           inputs={{ ...inputs, since }}

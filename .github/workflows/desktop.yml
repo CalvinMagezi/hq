@@ -75,11 +75,11 @@ jobs:
 
       - name: Check the bundle
         run: |
-          app="src-tauri/target/release/bundle/macos/HQ.app"
+          app="src-tauri/target/release/bundle/macos/AgentHQ.app"
           test -x "$app/Contents/MacOS/hq-desktop"
           plutil -extract NSLocalNetworkUsageDescription raw "$app/Contents/Info.plist"
 
       - name: Sign ad hoc and make the DMG (the release script, no secrets)
         run: |
-          bash ../../scripts/desktop/sign-macos.sh src-tauri/target/release/bundle/macos/HQ.app "$RUNNER_TEMP/HQ.dmg"
-          hdiutil verify "$RUNNER_TEMP/HQ.dmg"
+          bash ../../scripts/desktop/sign-macos.sh src-tauri/target/release/bundle/macos/AgentHQ.app "$RUNNER_TEMP/AgentHQ.dmg"
+          hdiutil verify "$RUNNER_TEMP/AgentHQ.dmg"

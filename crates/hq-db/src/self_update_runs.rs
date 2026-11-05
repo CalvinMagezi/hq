@@ -24,7 +24,9 @@ pub struct SelfUpdateRun {
     pub prev_binary_path: Option<String>,
     pub status: String,
     pub test_output_tail: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub installed_at: Option<String>,
     /// SHA-256 of the binary the owner approved, with its signature.
     pub approved_binary_sha256: Option<String>,

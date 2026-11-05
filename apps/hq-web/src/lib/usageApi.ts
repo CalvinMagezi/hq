@@ -1,5 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import { hqJson } from './hqAuth'
+import { limitChip } from './spendLimits'
+import { t, type StringKey } from '~/strings'
 
 export type BudgetState = 'ok' | 'warning' | 'exceeded'
 export type BudgetPeriod = 'day' | 'week' | 'month'
@@ -117,19 +119,16 @@ export const USAGE_POLL_MS = 60_000
 export const budgetsQuery = queryOptions({
   queryKey: ['usage-budgets'],
   queryFn: (): Promise<BudgetsResponse> => hqJson('/api/budgets'),
-  refetchInterval: USAGE_POLL_MS,
 })
 
 export const forecastQuery = queryOptions({
   queryKey: ['usage-forecast'],
   queryFn: (): Promise<ForecastResponse> => hqJson('/api/usage/forecast'),
-  refetchInterval: USAGE_POLL_MS,
 })
 
 export const providersQuery = queryOptions({
   queryKey: ['usage-providers'],
   queryFn: (): Promise<ProvidersResponse> => hqJson('/api/usage/providers'),
-  refetchInterval: USAGE_POLL_MS,
 })
 
 export function saveBudgets(defs: BudgetDef[], rest: Pick<BudgetsResponse, 'background_run_usd' | 'allow_unpriced_models'>) {
@@ -179,12 +178,16 @@ export function budgetChipLabel(r: BudgetsResponse | undefined): string | null {
   const worst = [...(r?.budgets ?? [])]
     .filter((b) => b.state !== 'ok')
     .sort((a, b) => b.pct - a.pct)[0]
-  return worst ? `${worst.name} ${pct(worst.pct)}` : null
+  return worst ? limitChip(worst) : null
+}
+
+const CHIP_TITLE: Record<BudgetPeriod, StringKey> = {
+  day: 'usage_chip_title_day',
+  week: 'usage_chip_title_week',
+  month: 'usage_chip_title_month',
 }
 
 export function budgetChipTitle(r: BudgetsResponse | undefined): string {
   const worst = [...(r?.budgets ?? [])].filter((b) => b.state !== 'ok').sort((a, b) => b.pct - a.pct)[0]
-  return worst
-    ? `Budget ${worst.name}: ${usd(worst.spent_usd)} of ${usd(worst.limit_usd)} ${PERIOD_ADVERB[worst.period]} on ${worst.scope}`
-    : 'Budgets'
+  return worst ? t(CHIP_TITLE[worst.period], { spent: usd(worst.spent_usd), limit: usd(worst.limit_usd), pct: pct(worst.pct) }) : t('row_spending')
 }

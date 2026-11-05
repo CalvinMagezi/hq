@@ -5,6 +5,7 @@ import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { useBackClosesLayer } from '~/lib/backLayer'
 import { fetchNoteForDrawer, type NoteDetailResponse } from '~/lib/vaultApi'
 import { MarkdownViewer } from './MarkdownViewer'
+import { t } from '~/strings'
 
 export function VaultNoteDrawer() {
   const { open, notePath, closeNote } = useVaultNoteStore()
@@ -108,7 +109,7 @@ export function VaultNoteDrawer() {
         ref={drawerRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`Vault note: ${title}`}
+        aria-label={t('note_drawer_label', { title })}
         className="w-full max-w-2xl h-full flex flex-col hq-modal border-l shadow-2xl overflow-hidden animate-in slide-in-from-right duration-200 pad-safe-top pb-[var(--safe-bottom)]"
       >
         {/* Header */}
@@ -130,9 +131,9 @@ export function VaultNoteDrawer() {
               <button
                 type="button"
                 onClick={handleCopyPath}
-                title="Copy relative path"
+                title={t('note_drawer_copy_path')}
                 className="p-1 rounded text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
-                aria-label="Copy relative path"
+                aria-label={t('note_drawer_copy_path')}
               >
                 {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
               </button>
@@ -144,7 +145,7 @@ export function VaultNoteDrawer() {
             type="button"
             onClick={closeNote}
             className="p-2 rounded-xl text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
-            aria-label="Close note drawer"
+            aria-label={t('note_drawer_close')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -155,7 +156,7 @@ export function VaultNoteDrawer() {
           {loading && (
             <div className="flex flex-col items-center justify-center py-20 text-neutral-400" role="status">
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400 mb-2" />
-              <span className="text-xs ">Loading note...</span>
+              <span className="text-xs ">{t('note_drawer_loading')}</span>
             </div>
           )}
 
@@ -163,7 +164,7 @@ export function VaultNoteDrawer() {
             <div className="p-4 rounded-xl border border-rose-500/20 bg-rose-500/10 text-rose-300">
               <div className="flex items-center gap-2 mb-2 font-semibold text-sm">
                 <AlertCircle className="w-4 h-4" />
-                Error loading note
+                {t('note_drawer_failed')}
               </div>
               <p className="text-xs text-rose-300/80 mb-3">{error}</p>
               <button
@@ -183,7 +184,7 @@ export function VaultNoteDrawer() {
                 }}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium border border-rose-500/30 hover:bg-rose-500/20 text-white"
               >
-                Retry
+                {t('note_drawer_try_again')}
               </button>
             </div>
           )}
@@ -193,16 +194,14 @@ export function VaultNoteDrawer() {
               <div className="w-12 h-12 rounded-2xl hq-card flex items-center justify-center mx-auto text-neutral-500">
                 <FileText className="w-6 h-6" />
               </div>
-              <div className="font-semibold text-neutral-200">Note Not Found</div>
-              <p className="text-xs text-neutral-400 max-w-sm mx-auto">
-                <span className="text-neutral-300">{notePath}</span> does not exist in the vault or may have been moved.
-              </p>
+              <div className="font-semibold text-neutral-200">{t('note_drawer_gone_title')}</div>
+              <p className="text-xs text-neutral-400 max-w-sm mx-auto">{t('note_drawer_gone_body', { title })}</p>
               <button
                 type="button"
                 onClick={closeNote}
                 className="px-4 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-neutral-200 border border-white/10 transition-colors"
               >
-                Dismiss
+                {t('note_drawer_gone_close')}
               </button>
             </div>
           )}
@@ -211,9 +210,9 @@ export function VaultNoteDrawer() {
             <div>
               {data.isDir ? (
                 <div className="space-y-2">
-                  <div className="text-xs uppercase text-neutral-500 mb-3">Directory Contents</div>
+                  <div className="text-xs uppercase text-neutral-500 mb-3">{t('note_drawer_folder')}</div>
                   {(!data.dirEntries || data.dirEntries.length === 0) && (
-                    <div className="text-xs text-neutral-500 italic">Empty directory</div>
+                    <div className="text-xs text-neutral-500 italic">{t('note_drawer_folder_empty')}</div>
                   )}
                   {data.dirEntries?.map((entry) => (
                     <button
@@ -236,7 +235,7 @@ export function VaultNoteDrawer() {
                 </div>
               ) : (
                 <div className="prose prose-invert max-w-none text-sm leading-relaxed">
-                  <MarkdownViewer content={data.content || '*Empty note*'} bare={false} />
+                  <MarkdownViewer content={data.content || t('note_drawer_empty')} bare={false} />
                 </div>
               )}
             </div>

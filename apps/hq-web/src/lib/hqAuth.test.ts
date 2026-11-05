@@ -8,7 +8,11 @@ function browser(href: string) {
   const store = new Map<string, string>()
   const replaced: string[] = []
   globals.window = { location: { href }, history: { replaceState: (_s: unknown, _t: string, url: string) => replaced.push(url) } }
-  globals.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) }
+  globals.localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  }
   return { store, replaced }
 }
 
@@ -117,4 +121,24 @@ test('a blank paste stores nothing', () => {
   const { store } = browser('https://hq.example.ts.net:8443/vault')
   expect(saveWebToken('   ')).toBe(false)
   expect(store.has('hq-web-token')).toBe(false)
+})
+
+test('a refused sign-in drops the token at once, and a token pasted after it stays', async () => {
+  const { store } = browser('https://hq.example.ts.net/')
+  saveWebToken(TOKEN)
+  serverAnswers(401)
+  await hqFetch('/api/spaces')
+  expect(needsSignIn()).toBe(true)
+  expect(store.has('hq-web-token')).toBe(false)
+  // A request still in flight with the old token is refused after a fresh sign-in.
+  const fresh = 'b'.repeat(64)
+  saveWebToken(fresh)
+  let release: (r: Response) => void = () => {}
+  globalThis.fetch = (() => new Promise<Response>((r) => (release = r))) as unknown as typeof fetch
+  saveWebToken(TOKEN)
+  const late = hqFetch('/api/spaces')
+  saveWebToken(fresh)
+  release(new Response(null, { status: 401 }))
+  await late
+  expect(store.get('hq-web-token')).toBe(fresh)
 })

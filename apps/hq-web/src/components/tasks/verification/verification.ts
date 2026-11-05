@@ -16,13 +16,14 @@ import type {
   TierCalibration,
   WaitingFor,
 } from '~/lib/verificationApi'
+import { t } from '~/strings'
 
 /** Owner first: it is the only one that is waiting on the person reading. */
 export const WAITING_ORDER: readonly WaitingFor[] = ['owner', 'verifier', 'ci', 'budget', 'worker']
 
 export const WAITING_LABEL: Record<WaitingFor, string> = {
   owner: 'Needs you',
-  verifier: 'Queued',
+  verifier: 'Being checked',
   ci: 'Checks running',
   budget: 'Waiting for budget',
   worker: 'With the worker',
@@ -57,8 +58,8 @@ export const BUCKET_INFO: Record<SweepBucket, { label: string; does: string }> =
   unplanned: { label: 'Not looked at yet', does: '' },
   needs_review: { label: 'Need a reviewer', does: 'Judged when you run it, within your budget' },
   passed: { label: 'Passed', does: 'Completed, with the evidence level recorded' },
-  failed: { label: 'Failed', does: 'Back to to_do with what is wrong' },
-  no_artifact: { label: 'Nothing to check', does: 'Back to to_do with what to link; never completed' },
+  failed: { label: 'Failed', does: 'Sent back with what is wrong' },
+  no_artifact: { label: 'Nothing to check', does: 'Sent back with what to link; never marked done' },
   undecidable: { label: 'Could not decide', does: 'Left where they are' },
   needs_you: { label: 'Need you', does: 'Stay in your list' },
 }
@@ -94,7 +95,7 @@ export function sweepStage(status: SweepStatus, preview: ApplyPreview | null): S
     case 'planned':
       return { label: 'Plan ready', hint: 'Read the groups, then run it. Running records verdicts and still moves nothing.', actions: ['run', 'cancel'] }
     case 'running':
-      return { label: 'Verifying', hint: 'Verdicts are recorded as they come. Nothing moves until you apply.', actions: ['pause', 'cancel'] }
+      return { label: 'Checking', hint: 'Verdicts are recorded as they come. Nothing moves until you apply.', actions: ['pause', 'cancel'] }
     case 'paused':
       return { label: 'Paused', hint: 'It stopped between tasks. Run it again to continue.', actions: ['run', 'cancel'] }
     case 'ready':
@@ -132,18 +133,18 @@ export function sweepProgress(status: SweepStatus, p: SweepProgress | undefined)
   let label: string
   if (status === 'planning') {
     done = p.total - n('unplanned')
-    label = 'planned'
+    label = 'done'
   } else if (status === 'running' || status === 'paused') {
     done = p.total - n('unplanned') - n('planned')
-    label = 'verified'
+    label = 'done'
   } else if (status === 'applying') {
     done = n('applied') + n('kept') + n('stale')
-    label = 'applied'
+    label = 'done'
   } else {
     return null
   }
   const percent = Math.min(100, Math.round((done / p.total) * 100))
-  return { done, total: p.total, percent, label: `${done} of ${p.total} ${label}` }
+  return { done, total: p.total, percent, label: t('check_sweep_progress', { n: done, m: p.total }) }
 }
 
 /** The cost line for a plan: what the reviewer runs would take, and where the number comes from. */
@@ -164,7 +165,7 @@ export function scopeLabel(scope: SweepScope, initiativeName?: string): string {
     case 'all':
       return 'Everything waiting for review'
     case 'initiative':
-      return initiativeName ? `Everything waiting in ${initiativeName}` : 'Everything waiting in one initiative'
+      return initiativeName ? `Everything waiting in ${initiativeName}` : 'Everything waiting in one list'
     case 'since':
       return `Waiting since ${scope.date}`
     case 'tasks':
@@ -201,10 +202,10 @@ export function pickScope(choice: ScopeChoice, inputs: ScopeInputs): SweepScope 
 const PERCENT = (rate: number) => `${Math.round(rate * 100)}%`
 
 /** What a tier's calibration says, in a line. */
-export function calibrationLine(t: TierCalibration): string {
-  const head = `Tier ${t.tier}: ${t.state === 'earned' ? 'earned' : t.state === 'withdrawn' ? 'withdrawn' : 'not enough data yet'}`
-  const bits = [`${t.audits} audits`, `${t.disagreements} disagreed`]
-  if (t.disagreement_upper !== null) bits.push(`upper bound ${PERCENT(t.disagreement_upper)}`)
+export function calibrationLine(cal: TierCalibration): string {
+  const head = `${kindLabel(cal.tier)}: ${cal.state === 'earned' ? 'earned' : cal.state === 'withdrawn' ? 'withdrawn' : 'not enough data yet'}`
+  const bits = [`${cal.audits} audits`, `${cal.disagreements} disagreed`]
+  if (cal.disagreement_upper !== null) bits.push(`upper bound ${PERCENT(cal.disagreement_upper)}`)
   return `${head}. ${bits.join(', ')}.`
 }
 
@@ -223,7 +224,7 @@ export function auditEstimate(cal: Calibration): string {
     return `${disagreed} of ${sample} disagreed. Too few to say how often HQ is wrong: it takes about ${AUDITS_FOR_A_RATE} in one tier.`
   }
   const upper = sampled.reduce((m, t) => Math.max(m, t.disagreement_upper ?? 0), 0)
-  const names = sampled.map((t) => `tier ${t.tier}`).join(' and ')
+  const names = sampled.map((t) => kindLabel(t.tier).toLowerCase()).join(' and ')
   return `${disagreed} of ${sample} disagreed. For ${names}, HQ is wrong at most ${PERCENT(upper)} of the time, with 95% confidence.`
 }
 
@@ -252,6 +253,10 @@ const LEVELS: Record<string, string> = {
   owner: 'you',
   none: 'no evidence',
 }
+
+/** Tier 0, 1 and 2 are never shown; the person sees what kind of change it was. */
+export const kindLabel = (tier: number): string =>
+  tier >= 2 ? t('check_kind_risky') : tier === 1 ? t('check_kind_code') : t('check_kind_notes')
 
 export const levelLabel = (level: string): string => LEVELS[level] ?? level
 

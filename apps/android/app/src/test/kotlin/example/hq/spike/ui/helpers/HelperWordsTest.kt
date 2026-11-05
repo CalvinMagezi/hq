@@ -7,9 +7,17 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import example.hq.spike.testing.testWords
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class HelperWordsTest {
+    private val w get() = testWords()
+
     private val now = LocalDateTime.of(2026, 10, 21, 12, 0, 0)
 
     private fun row(
@@ -18,16 +26,16 @@ class HelperWordsTest {
     ) = HelperRow("h1", harness, label, host, "/Users/example/hq-orch-probe", status, agent, seen, created, goal, task, alive, reachable, detail, false)
 
     @Test fun theTitleIsTheJobAndNeverTheFolder() {
-        assertEquals("Fix the backup script", HelperWords.title(row(label = "Fix the backup script", goal = "ignored")))
-        assertEquals("Print ready then done", HelperWords.title(row(goal = "Print ready then done")))
-        assertEquals("Phone sign-in", HelperWords.title(row(task = "Phone sign-in")))
-        assertEquals("Claude helper", HelperWords.title(row()))
-        assertEquals("Codex helper", HelperWords.title(row(harness = "codex")))
+        assertEquals("Fix the backup script", HelperWords.title(w, row(label = "Fix the backup script", goal = "ignored")))
+        assertEquals("Print ready then done", HelperWords.title(w, row(goal = "Print ready then done")))
+        assertEquals("Phone sign-in", HelperWords.title(w, row(task = "Phone sign-in")))
+        assertEquals("Claude helper", HelperWords.title(w, row()))
+        assertEquals("Codex helper", HelperWords.title(w, row(harness = "codex")))
     }
 
     @Test fun aLongGoalIsCutAndOnlyItsFirstLineIsUsed() {
         val long = "word ".repeat(40).trim() + "\nsecond line"
-        val title = HelperWords.title(row(goal = long))
+        val title = HelperWords.title(w, row(goal = long))
         assertTrue(title.length <= 81)
         assertFalse(title.contains("second"))
         assertTrue(title.endsWith("…"))
@@ -47,16 +55,16 @@ class HelperWordsTest {
     @Test fun aComputerThatIsDownIsNeverFinished() {
         val s = HelperWords.state(row(agent = "blocked", reachable = false, alive = null))
         assertEquals(HelperState.Offline, s)
-        assertEquals("Computer offline", HelperWords.stateWords(s))
+        assertEquals("Computer offline", HelperWords.stateWords(w, s))
     }
 
     @Test fun namesAreInTheOwnersWords() {
-        assertEquals("Claude", HelperWords.agentName("claude-code"))
-        assertEquals("Codex", HelperWords.agentName("codex"))
-        assertEquals("Open Code", HelperWords.agentName("open-code"))
-        assertEquals("your mac-mini", HelperWords.placeName("mac-mini"))
-        assertEquals("this phone", HelperWords.placeName("local"))
-        assertEquals("this phone", HelperWords.placeName("native"))
+        assertEquals("Claude", HelperWords.agentName(w, "claude-code"))
+        assertEquals("Codex", HelperWords.agentName(w, "codex"))
+        assertEquals("Open Code", HelperWords.agentName(w, "open-code"))
+        assertEquals("your mac-mini", HelperWords.placeName(w, "mac-mini"))
+        assertEquals("this phone", HelperWords.placeName(w, "local"))
+        assertEquals("this phone", HelperWords.placeName(w, "native"))
     }
 
     private val editScreen = listOf(
@@ -74,10 +82,10 @@ class HelperWordsTest {
         val ask = HelperWords.blocked(editScreen)!!
         assertEquals(AskKind.Edit, ask.kind)
         assertEquals("Chat.dc.html", ask.subject)
-        assertEquals("Claude wants to edit a file", HelperWords.askTitle("Claude", ask))
-        assertEquals("Wants to edit one file: Chat.dc.html", HelperWords.askLine(ask))
-        assertEquals("Allow once lets it change this file one time.", HelperWords.allowHint(ask))
-        assertEquals("It changes this one file on your mac-mini, then carries on.", HelperWords.ifAllowed(ask, "your mac-mini"))
+        assertEquals("Claude wants to edit a file", HelperWords.askTitle(w, "Claude", ask))
+        assertEquals("Wants to edit one file: Chat.dc.html", HelperWords.askLine(w, ask))
+        assertEquals("Allow once lets it change this file one time.", HelperWords.allowHint(w, ask))
+        assertEquals("It changes this one file on your mac-mini, then carries on.", HelperWords.ifAllowed(w, ask, "your mac-mini"))
     }
 
     @Test fun aPathIsReducedToItsFileName() {
@@ -85,21 +93,21 @@ class HelperWordsTest {
         // The owner sees the whole path: "hosts" could be /etc/hosts or a file of the same name in the project.
         assertEquals("/Users/example/work/src/main.rs", ask.subject)
         assertEquals("main.rs", HelperWords.fileName(ask))
-        assertEquals("Wants to edit one file: /Users/example/work/src/main.rs", HelperWords.askLine(ask))
+        assertEquals("Wants to edit one file: /Users/example/work/src/main.rs", HelperWords.askLine(w, ask))
     }
 
     @Test fun aCreateQuestionAndACommandQuestionAreTold() {
         assertEquals(AskKind.Create, HelperWords.blocked(listOf("Do you want to create notes.md?"))!!.kind)
         val run = HelperWords.blocked(listOf("Bash command", "  rm -rf build", "Do you want to proceed?"))!!
         assertEquals(AskKind.Command, run.kind)
-        assertEquals("Claude wants to run a command", HelperWords.askTitle("Claude", run))
+        assertEquals("Claude wants to run a command", HelperWords.askTitle(w, "Claude", run))
     }
 
     @Test fun anyOtherQuestionIsShownAsItWasAsked() {
         val ask = HelperWords.blocked(listOf("Which colour do you prefer?"))!!
         assertEquals(AskKind.Other, ask.kind)
-        assertEquals("Which colour do you prefer?", HelperWords.askLine(ask))
-        assertEquals("Codex has a question", HelperWords.askTitle("Codex", ask))
+        assertEquals("Which colour do you prefer?", HelperWords.askLine(w, ask))
+        assertEquals("Codex has a question", HelperWords.askTitle(w, "Codex", ask))
     }
 
     @Test fun aScreenThatAsksNothingGivesNoQuestion() {
@@ -120,7 +128,7 @@ class HelperWordsTest {
 
     @Test fun aBlockedCardShowsTheQuestionAndAnAnswerableOne() {
         val ask = HelperWords.blocked(editScreen)
-        val c = HelperWords.card(row(agent = "blocked", label = "Move the build"), ask, now)
+        val c = HelperWords.card(w, row(agent = "blocked", label = "Move the build"), ask, now)
         assertEquals(HelperState.NeedsOk, c.state)
         assertEquals("Wants to edit one file: Chat.dc.html", c.line)
         assertEquals("12 min", c.time)
@@ -128,22 +136,22 @@ class HelperWordsTest {
     }
 
     @Test fun aBlockedHelperWithNoReadableQuestionOffersNoAnswer() {
-        val c = HelperWords.card(row(agent = "blocked"), null, now)
+        val c = HelperWords.card(w, row(agent = "blocked"), null, now)
         assertEquals("Waiting for your answer", c.line)
         assertNull(c.ask)
     }
 
     @Test fun aWorkingCardPrefersWhatTheComputerSaidThenTheScreen() {
-        assertEquals("Updating the build files", HelperWords.card(row(detail = "Updating the build files"), null, now, "from screen").line)
-        assertEquals("from screen", HelperWords.card(row(), null, now, "from screen").line)
-        assertEquals("Working", HelperWords.card(row(), null, now).line)
+        assertEquals("Updating the build files", HelperWords.card(w, row(detail = "Updating the build files"), null, now, "from screen").line)
+        assertEquals("from screen", HelperWords.card(w, row(), null, now, "from screen").line)
+        assertEquals("Working", HelperWords.card(w, row(), null, now).line)
     }
 
     @Test fun finishedAndOfflineCardsSayWhenAndWhy() {
-        val done = HelperWords.card(row(status = "exited", agent = "done", seen = "2026-10-21 09:55:00"), null, now)
+        val done = HelperWords.card(w, row(status = "exited", agent = "done", seen = "2026-10-21 09:55:00"), null, now)
         assertEquals("Finished 2 h ago", done.line)
         assertEquals("2 h ago", done.time)
-        val off = HelperWords.card(row(reachable = false, alive = null, agent = "unknown"), null, now)
+        val off = HelperWords.card(w, row(reachable = false, alive = null, agent = "unknown"), null, now)
         assertEquals("HQ cannot reach your mac-mini right now", off.line)
     }
 
@@ -152,12 +160,12 @@ class HelperWordsTest {
             row(status = "exited", agent = "done").copy(id = "old"), row(agent = "working").copy(id = "w"), row(agent = "blocked").copy(id = "b"),
             row(status = "stopped").copy(id = "s"), row(agent = "idle").copy(id = "r"),
         )
-        val cards = rows.map { HelperWords.card(it, null, now) }.sortedWith(HelperWords.order)
+        val cards = rows.map { HelperWords.card(w, it, null, now) }.sortedWith(HelperWords.order)
         assertEquals(listOf("b", "w", "r", "old", "s"), cards.map { it.id })
     }
 
     @Test fun theFiltersCountTheRightCards() {
-        val ui = HelpersUi(
+        val ui = HelpersUi(words = w,
             loaded = true, now = now,
             rows = listOf(row(agent = "blocked").copy(id = "a"), row().copy(id = "b"), row(status = "exited").copy(id = "c"), row(status = "stopped").copy(id = "d"), row(agent = "idle").copy(id = "e")),
         )
@@ -168,16 +176,16 @@ class HelperWordsTest {
     }
 
     @Test fun anArchivedHelperIsNotListed() {
-        val ui = HelpersUi(loaded = true, now = now, rows = listOf(row().copy(archived = true), row().copy(id = "x")))
+        val ui = HelpersUi(words = w, loaded = true, now = now, rows = listOf(row().copy(archived = true), row().copy(id = "x")))
         assertEquals(listOf("x"), ui.cards.map { it.id })
     }
 
     @Test fun spansReadInMinutesHoursAndDays() {
-        assertEquals("just now", HelperWords.span("2026-10-21 11:59:40", now))
-        assertEquals("12 min", HelperWords.span("2026-10-21 11:48:00", now))
-        assertEquals("3 h", HelperWords.span("2026-10-21 08:30:00", now))
-        assertEquals("2 d", HelperWords.span("2026-10-19 11:00:00", now))
-        assertNull(HelperWords.span("not a time", now))
+        assertEquals("just now", HelperWords.span(w, "2026-10-21 11:59:40", now))
+        assertEquals("12 min", HelperWords.span(w, "2026-10-21 11:48:00", now))
+        assertEquals("3 h", HelperWords.span(w, "2026-10-21 08:30:00", now))
+        assertEquals("2 d", HelperWords.span(w, "2026-10-19 11:00:00", now))
+        assertNull(HelperWords.span(w, "not a time", now))
     }
 
     private fun bash(command: String, cursorOn: Int = 1) = listOf(
@@ -204,7 +212,7 @@ class HelperWordsTest {
         val ask = HelperWords.blocked(bash("rm -rf build"))!!
         assertEquals(AskKind.Command, ask.kind)
         assertTrue(ask.detail.any { it.contains("rm -rf build") })
-        assertEquals("Wants to run a command", HelperWords.askLine(ask))
+        assertEquals("Wants to run a command", HelperWords.askLine(w, ask))
         assertTrue(HelperWords.askText(ask).contains("rm -rf build"))
     }
 
@@ -247,7 +255,7 @@ class HelperWordsTest {
     @Test fun aPlanPromptIsAPlanNotACommand() {
         val ask = HelperWords.blocked(listOf("Here is the plan: move the build.", "Would you like to proceed?", "❯ 1. Yes, and auto-accept edits", "  2. No"))!!
         assertEquals(AskKind.Plan, ask.kind)
-        assertEquals("Claude has a plan to approve", HelperWords.askTitle("Claude", ask))
+        assertEquals("Claude has a plan to approve", HelperWords.askTitle(w, "Claude", ask))
         assertFalse(HelperWords.enterMeansOnce(listOf("Would you like to proceed?", "❯ 1. Yes, and auto-accept edits", "  2. No")))
     }
 
@@ -280,27 +288,27 @@ class HelperWordsTest {
 
     @Test fun aHelperWithNoNameIsGenericAndShowsItsFolder() {
         val nameless = row(label = "", goal = null, task = null).copy(cwd = "/Users/example/Documents/HQ/egress-probe 2026-10-19 1731/")
-        val c = HelperWords.card(nameless, null, now)
+        val c = HelperWords.card(w, nameless, null, now)
         assertTrue(c.generic)
         assertEquals("Claude helper", c.title)
         assertEquals("egress-probe 2026-10-19 1731", c.folder)
-        assertFalse(HelperWords.card(row(label = "Fix the backup"), null, now).generic)
-        assertFalse(HelperWords.card(row(goal = "Print ready"), null, now).generic)
+        assertFalse(HelperWords.card(w, row(label = "Fix the backup"), null, now).generic)
+        assertFalse(HelperWords.card(w, row(goal = "Print ready"), null, now).generic)
     }
 
     @Test fun aMissingKeyIsSaidInPlainWords() {
         val error = "host 'laptop' unreachable: no gate key at /data/user/0/example.hq.spike/files/hqhome/.hq/gate/laptop.key; make one with `hq host gate-key <host>`"
-        assertEquals("This phone has no key to reach your laptop yet.", HelperWords.hostProblem("laptop", error))
-        assertEquals("HQ cannot reach your laptop right now.", HelperWords.hostProblem("laptop", "connection refused"))
-        assertEquals("HQ cannot reach your laptop right now.", HelperWords.hostProblem("laptop", null))
-        val offline = HelperWords.card(row(agent = "unknown", reachable = false, alive = null, host = "laptop", detail = error), null, now)
+        assertEquals("This phone has no key to reach your laptop yet.", HelperWords.hostProblem(w, "laptop", error))
+        assertEquals("HQ cannot reach your laptop right now.", HelperWords.hostProblem(w, "laptop", "connection refused"))
+        assertEquals("HQ cannot reach your laptop right now.", HelperWords.hostProblem(w, "laptop", null))
+        val offline = HelperWords.card(w, row(agent = "unknown", reachable = false, alive = null, host = "laptop", detail = error), null, now)
         assertEquals("This phone has no key to reach your laptop yet", offline.line)
-        assertEquals("HQ cannot reach your mac-mini right now", HelperWords.card(row(agent = "unknown", reachable = false, alive = null), null, now).line)
+        assertEquals("HQ cannot reach your mac-mini right now", HelperWords.card(w, row(agent = "unknown", reachable = false, alive = null), null, now).line)
     }
 
     @Test fun aRowWithNoLastSeenTimeUsesWhenItStarted() {
         val old = row(status = "stopped", agent = "idle", seen = "", created = "2026-10-19 10:00:00")
-        val c = HelperWords.card(old, null, now)
+        val c = HelperWords.card(w, old, null, now)
         assertEquals("Stopped 2 d ago", c.line)
         assertEquals("2 d ago", c.time)
         assertEquals("2026-10-19 10:00:00", HelperWords.lastSeen(old))
@@ -320,7 +328,7 @@ class HelperWordsTest {
         assertEquals("", rows[0].lastSeenAt)
         assertNull(rows[0].goal)
         assertNull(rows[1].alive)
-        val cards = rows.map { HelperWords.card(it, null, now) }
+        val cards = rows.map { HelperWords.card(w, it, null, now) }
         assertEquals("Stopped 26 d ago", cards[0].line)
         assertEquals("26 d ago", cards[0].time)
         assertEquals("Finished 1 d ago", cards[1].line)
@@ -408,8 +416,8 @@ class HelperWordsTest {
     @Test fun aReadThatIsNotLiveIsNeverUsed() {
         val ask = HelperWords.blocked(editScreen)
         assertEquals(AnswerCheck.NotLive, HelperWords.checkAnswer(ask, editScreen, "esc", live = false))
-        assertTrue(HelperWords.checkWords(AnswerCheck.NotLive).isNotBlank())
-        assertEquals("", HelperWords.checkWords(AnswerCheck.Ok))
+        assertTrue(HelperWords.checkWords(w, AnswerCheck.NotLive).isNotBlank())
+        assertEquals("", HelperWords.checkWords(w, AnswerCheck.Ok))
     }
 
     @Test fun anAnsweredDialogComesBackAfterTheGraceIfItIsStillUp() {
@@ -435,21 +443,21 @@ class HelperWordsTest {
     }
 
     @Test fun followInChatSaysWhyItFailed() {
-        assertEquals("That helper is gone.", HelperWords.followFailed(404))
-        assertEquals("HQ is not answering.", HelperWords.followFailed(0))
-        assertEquals("HQ is not answering.", HelperWords.followFailed(503))
-        assertEquals("Could not open the chat.", HelperWords.followFailed(500))
-        assertEquals("Could not open the chat.", HelperWords.followFailed(null))
+        assertEquals("That helper is gone.", HelperWords.followFailed(w, 404))
+        assertEquals("HQ didn't answer in time.", HelperWords.followFailed(w, 0))
+        assertEquals("HQ didn't answer in time.", HelperWords.followFailed(w, 503))
+        assertEquals("Could not open the chat.", HelperWords.followFailed(w, 500))
+        assertEquals("Could not open the chat.", HelperWords.followFailed(w, null))
     }
 
     private fun run(status: String, started: String = "2026-10-21T11:50:00+00:00", finished: String? = null, taskStatus: String? = null) =
         EdgeRun("ask-1", "thread-1", status, started, finished, "tk-1", "PERSONAL-INBOX-163", "Show the plant count", taskStatus)
 
     @Test fun aRunningEdgeWorkerIsAWorkingHelperOnThisPhone() {
-        val c = HelperWords.edgeCard(run("pending"), now)
+        val c = HelperWords.edgeCard(w, run("pending"), now)
         assertEquals(HelperState.Working, c.state)
         assertEquals("Show the plant count", c.title)
-        assertEquals("HQ edge worker", c.agent)
+        assertEquals("HQ", c.agent)
         assertEquals("this phone", c.where)
         assertEquals("Working on PERSONAL-INBOX-163", c.line)
         assertEquals("10 min", c.time)
@@ -457,10 +465,10 @@ class HelperWordsTest {
     }
 
     @Test fun aFinishedRunSaysWhereItsTaskStands() {
-        val done = HelperWords.edgeCard(run("answered", finished = "2026-10-21T10:00:00Z", taskStatus = "ready_for_review"), now)
+        val done = HelperWords.edgeCard(w, run("answered", finished = "2026-10-21T10:00:00Z", taskStatus = "ready_for_review"), now)
         assertEquals(HelperState.Finished, done.state)
         assertEquals("PERSONAL-INBOX-163 · ready for your review", done.line)
         assertEquals("2 h ago", done.time)
-        assertEquals(HelperState.Stopped, HelperWords.edgeCard(run("failed"), now).state)
+        assertEquals(HelperState.Stopped, HelperWords.edgeCard(w, run("failed"), now).state)
     }
 }

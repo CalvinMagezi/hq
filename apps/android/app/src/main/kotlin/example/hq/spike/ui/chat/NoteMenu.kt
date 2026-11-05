@@ -34,12 +34,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import example.hq.spike.R
 import example.hq.spike.ui.chat.blocks.Attachment
 import example.hq.spike.ui.chat.blocks.NoteText
 import example.hq.spike.ui.chat.blocks.rememberCopier
@@ -117,7 +119,7 @@ fun ExportOverlay(state: ExportState, actions: ExportActions) {
 private fun ExportChooser(state: ExportState.Choosing, actions: ExportActions) {
     SheetFrame(actions.onClose, top = ExportTop) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) {
-            Text("Export as", style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.chat_export_as), style = HqType.H2, color = Mts.Ink)
             Text(state.note.title, style = Small, color = Mts.InkMuted)
         }
         Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -172,14 +174,14 @@ private fun MakingDialog(state: ExportState.Making, actions: ExportActions) {
 @Composable
 private fun FailedDialog(state: ExportState.Failed, actions: ExportActions) {
     Dialog(DIALOG_TOP, actions.onClose) {
-        Text("Could not export", style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
+        Text(stringResource(R.string.chat_could_not_export), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
         Text(state.reason, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 20.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
             TextButton("Close", actions.onClose)
             Box(
                 Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onFormat(state.format) }.padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Try again", style = HqType.BodySmBold, color = Mts.OnGreen) }
+            ) { Text(stringResource(R.string.notice_action_try_again), style = HqType.BodySmBold, color = Mts.OnGreen) }
         }
     }
 }
@@ -219,7 +221,7 @@ private fun ReadySheet(state: ExportState.Ready, actions: ExportActions) {
             WideButton(HqIcons.Share, "Share", primary = true) { shareFile(context, state, actions) }
             WideButton(HqIcons.Download, "Save to Files", primary = false) { save.launch(state.name) }
             Box(Modifier.align(Alignment.CenterHorizontally).heightIn(min = 48.dp).clickable(role = Role.Button) { viewFile(context, state, actions) }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                Text("Open", style = HqType.BodySmBold, color = Mts.BrandBlue)
+                Text(stringResource(R.string.notice_action_open), style = HqType.BodySmBold, color = Mts.BrandBlue)
             }
         }
         if (state.mime == "application/zip" && state.note.tables > 1) {

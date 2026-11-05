@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import type { ChatAppsStatus } from './chatAppsApi'
 import { HqHttpError } from './hqAuth'
 import type { PushState } from './webPush'
@@ -25,8 +26,10 @@ export interface GetStartedItem {
   id: GetStartedItemId
   title: string
   detail: string
+  /** What a finished step says in place of its detail. */
+  doneDetail?: string
   linkLabel: string
-  to: '/settings' | '/notifications'
+  to: '/settings' | '/inbox'
   hash?: string
   done: boolean
 }
@@ -42,46 +45,60 @@ export interface GetStartedSignals {
 }
 
 const CHAT_PLATFORMS = ['telegram', 'discord'] as const
+const PLATFORM_NAMES = { telegram: 'Telegram', discord: 'Discord' } as const
+
+/** The first chat app that is connected, by its name, or null. */
+export function connectedApp(status: ChatAppsStatus | undefined): string | null {
+  if (!status) return null
+  const found = CHAT_PLATFORMS.find((p) => status[p].token_set && status[p].owner.paired)
+  return found ? PLATFORM_NAMES[found] : null
+}
 
 /** A chat app counts once its bot token is saved and the owner has paired with it. */
 export function chatAppConnected(status: ChatAppsStatus | undefined): boolean {
-  if (!status) return false
-  return CHAT_PLATFORMS.some((p) => status[p].token_set && status[p].owner.paired)
+  return connectedApp(status) !== null
 }
 
+/** "1 of 3 done" for the card's heading. */
+export function progressLine(items: GetStartedItem[]): string {
+  return t('gs_progress', { done: items.filter((i) => i.done).length, total: items.length })
+}
+
+/** The web's real steps, in the order the phone's first run names them. The AI key is not a step. */
 export function getStartedItems(s: GetStartedSignals): GetStartedItem[] {
-  const items: GetStartedItem[] = [
+  const items: GetStartedItem[] = []
+  // Without a Push API, or with push off in the server config, the owner cannot finish this step from the web.
+  if (s.push !== 'unsupported' && s.push !== 'server-off') {
+    items.push({
+      id: 'notifications',
+      title: t('gs_notify_title'),
+      detail: t('gs_notify_detail'),
+      linkLabel: t('gs_notify_action'),
+      to: '/inbox',
+      done: s.push === 'on',
+    })
+  }
+  items.push(
     {
       id: 'phone',
-      title: 'Open HQ on your phone',
-      detail:
-        'Sign the phone in with a code from Devices, then add HQ to its home screen: Share, then Add to Home Screen on iPhone, or the browser menu on Android.',
-      linkLabel: 'Devices',
+      title: t('gs_phone_title'),
+      detail: t('gs_phone_detail'),
+      linkLabel: t('gs_phone_action'),
       to: '/settings',
       hash: 'devices',
       done: s.standalone || s.prefs.phoneDone,
     },
     {
       id: 'chat',
-      title: 'Connect Telegram or Discord',
-      detail: 'Talk to HQ from the chat app you already use. If you are ever signed out, send /login there for a new link.',
-      linkLabel: 'Chat apps',
+      title: t('gs_chat_title'),
+      detail: t('gs_chat_detail'),
+      linkLabel: t('gs_chat_action'),
       to: '/settings',
       hash: 'chat-apps',
+      doneDetail: connectedApp(s.chatApps) ? t('gs_chat_detail_done', { app: connectedApp(s.chatApps) ?? '' }) : undefined,
       done: chatAppConnected(s.chatApps),
     },
-  ]
-  // Without a Push API, or with push off in the server config, the owner cannot finish this step from the web.
-  if (s.push !== 'unsupported' && s.push !== 'server-off') {
-    items.push({
-      id: 'notifications',
-      title: 'Turn on notifications',
-      detail: 'Get a notification on this device when HQ needs you, even while the app is closed.',
-      linkLabel: 'Notifications',
-      to: '/notifications',
-      done: s.push === 'on',
-    })
-  }
+  )
   return items
 }
 

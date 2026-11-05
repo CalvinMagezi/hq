@@ -16,6 +16,32 @@ use std::sync::Arc;
 pub(crate) const DEVICES_PATH: &str = "/api/auth/devices";
 pub(crate) const DEVICE_PATH: &str = "/api/auth/devices/{id}";
 pub(crate) const ROTATE_PATH: &str = "/api/auth/rotate";
+pub(crate) const CURRENT_DEVICE_PATH: &str = "/api/auth/devices/current";
+pub(crate) const KEEP_PATH: &str = "/api/auth/devices/{id}/keep";
+
+/// Devices whose new sign-in item still waits for the owner.
+fn new_devices(db: &hq_db::Database) -> std::collections::HashSet<String> {
+    let found = db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT dedup_key FROM value_items WHERE dedup_key LIKE ?1 \
+             AND state IN ('pending', 'delivered', 'routed')",
+        )?;
+        let keys = stmt
+            .query_map([format!("{}%", super::SIGN_IN_ITEM_PREFIX)], |r| {
+                r.get::<_, String>(0)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(keys)
+    });
+    found
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|k| {
+            k.strip_prefix(super::SIGN_IN_ITEM_PREFIX)
+                .map(str::to_string)
+        })
+        .collect()
+}
 /// How the token that "Sign out everywhere" hands back shows in Settings, Devices.
 pub(crate) const ROTATE_LABEL: &str = "Sign out everywhere";
 
@@ -49,6 +75,7 @@ pub(crate) async fn list_handler(
         Err(e) => return ApiError::internal(e).into_response(),
     };
     let current = current_device(credential.as_ref());
+    let fresh = new_devices(&state.db);
     let rows: Vec<_> = devices
         .into_iter()
         .map(|d| {
@@ -59,6 +86,12 @@ pub(crate) async fn list_handler(
                 "created_at": d.created_at,
                 "last_used_at": d.last_used_at,
                 "expires_at": d.expires_at,
+                "browser": d.browser,
+                "system": d.system,
+                "shared": d.shared,
+                "keep": d.keep,
+                "idle_expires_after": d.idle_expires_after,
+                "new": fresh.contains(&d.id),
                 "current": is_current,
             })
         })
@@ -88,12 +121,56 @@ pub(crate) async fn delete_handler(
     if let Some(refused) = sign_in_off(&state) {
         return refused;
     }
-    match hq_db::web_auth::delete(&state.db, &id) {
+    sign_out_device(&state, &id)
+}
+
+/// `DELETE /api/auth/devices/current`: Sign out this browser. Only a device token can; the
+/// operator link signs out with Sign out everywhere.
+pub(crate) async fn delete_current_handler(
+    State(state): State<Arc<WsState>>,
+    credential: Option<Extension<WebCredential>>,
+) -> Response {
+    if let Some(refused) = sign_in_off(&state) {
+        return refused;
+    }
+    match current_device(credential.as_ref()) {
+        Some(id) => sign_out_device(&state, id),
+        None => ApiError::bad_request(
+            "this browser uses the first sign-in link; sign out everywhere to turn it off",
+        )
+        .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct KeepBody {
+    keep: bool,
+}
+
+/// `POST /api/auth/devices/{id}/keep`: Keep signed in, so 90 days without use never sign it out.
+pub(crate) async fn keep_handler(
+    State(state): State<Arc<WsState>>,
+    Path(id): Path<String>,
+    axum::Json(body): axum::Json<KeepBody>,
+) -> Response {
+    if let Some(refused) = sign_in_off(&state) {
+        return refused;
+    }
+    match hq_db::web_auth::set_keep(&state.db, &id, body.keep, now()) {
+        Ok(true) => no_store(StatusCode::OK, json!({ "id": id, "keep": body.keep })),
+        Ok(false) => ApiError::not_found().into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+fn sign_out_device(state: &WsState, id: &str) -> Response {
+    match hq_db::web_auth::delete(&state.db, id) {
         Ok(false) => ApiError::not_found().into_response(),
         Err(e) => ApiError::internal(e).into_response(),
         Ok(true) => {
+            super::settle_sign_in_item(&state.db, id);
             state.end_web_sessions();
-            if let Err(e) = hq_db::push_subscriptions::delete_for_device(&state.db, &id) {
+            if let Err(e) = hq_db::push_subscriptions::delete_for_device(&state.db, id) {
                 tracing::warn!(device = %id, "web: a signed-out device keeps its push subscription: {e}");
             }
             tracing::info!(device = %id, "web: a device was signed out");
@@ -120,6 +197,13 @@ fn end_other_access(state: &WsState, now: i64) {
     }
     if let Err(e) = hq_db::push_subscriptions::delete_all(&state.db) {
         tracing::error!("web: sign-out everywhere could not drop push subscriptions: {e}");
+    }
+}
+
+/// Every device that signed in is gone, so no new sign-in waits for an answer.
+fn settle_every_sign_in_item(db: &hq_db::Database) {
+    for id in new_devices(db) {
+        super::settle_sign_in_item(db, &id);
     }
 }
 
@@ -153,6 +237,7 @@ pub(crate) async fn rotate_handler(State(state): State<Arc<WsState>>) -> Respons
     state.device_codes.clear();
     state.end_web_sessions();
     end_other_access(&state, at.timestamp());
+    settle_every_sign_in_item(&state.db);
     tracing::info!(device = %minted.id, "web: signed out everywhere");
     state.notify_owner(
         DEVICE_SIGN_IN_SOURCE,

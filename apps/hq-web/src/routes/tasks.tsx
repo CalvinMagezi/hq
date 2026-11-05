@@ -1,5 +1,5 @@
 import { HqHttpError } from '~/lib/hqAuth'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useParams, useRouterState } from '@tanstack/react-router'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { CheckSquare, ClipboardList, ListChecks, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
 import {
@@ -21,12 +21,22 @@ import {
   type TaskUpdateResult,
   type UpdateTaskInput,
 } from '~/lib/tasksApi'
+import { toastUndo, toastAlert } from '~/lib/toast'
+import { Dialog } from '~/components/ui/Dialog'
+import { t, tn } from '~/strings'
+import { dependentsOf, doneQuestion, type DoneQuestion } from '~/lib/doneAsk'
+import { fetchTaskVerification } from '~/lib/verificationApi'
 import { TaskListView, type ListSections } from '~/components/tasks/TaskListView'
 import { BulkActionBar } from '~/components/tasks/BulkActionBar'
 import { bulkMessage, failureNotice, runBulk, splitUnchanged, uniqueWarnings } from '~/components/tasks/bulk'
 import { useTaskSelection } from '~/components/tasks/useTaskSelection'
 import { withoutSections } from '~/components/tasks/hierarchy'
+import { OutboxGroup } from '~/components/chat/OutboxGroup'
+import { titleOf, useTaskOutbox } from '~/components/tasks/useTaskOutbox'
+import { newClientId } from '~/lib/outbox'
 import { usePersistedState } from '~/lib/usePersistedState'
+import { CHIPS, TABS, chipStatus, matchesTab, type TaskChip, type TaskTab } from '~/lib/tasksFilters'
+import { formatDay, todayDay } from '~/components/tasks/dates'
 import { TaskBoardView } from '~/components/tasks/TaskBoardView'
 import { TaskGanttView } from '~/components/tasks/TaskGanttView'
 import { TaskDetailDrawer } from '~/components/tasks/TaskDetailDrawer'
@@ -39,18 +49,20 @@ import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
 import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext'
 import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { InitiativeBriefing } from '~/components/tasks/InitiativeBriefing'
-import { useRefreshOn } from '~/lib/useRefreshOn'
 import { VerificationBar } from '~/components/tasks/verification/VerificationBar'
-import { BriefingCard } from '~/components/tasks/verification/BriefingCard'
+import { AwayPage } from '~/components/tasks/AwayPage'
+import { AwayLinkRow, TasksBody } from '~/components/tasks/TasksBody'
 import { SweepSheet } from '~/components/tasks/verification/SweepSheet'
 import { AuditSheet } from '~/components/tasks/verification/AuditSheet'
 
 type TasksView = 'list' | 'board' | 'timeline'
+const VIEW_KEY = 'hq.tasks.view'
+const isTasksView = (v: unknown): v is TasksView => v === 'list' || v === 'board' || v === 'timeline'
 
 const VIEWS: { id: TasksView; label: string; icon: typeof List }[] = [
-  { id: 'list', label: 'List', icon: List },
-  { id: 'board', label: 'Board', icon: Columns3 },
-  { id: 'timeline', label: 'Timeline', icon: GanttChart },
+  { id: 'list', label: t('tasks_field_list'), icon: List },
+  { id: 'board', label: t('web_board'), icon: Columns3 },
+  { id: 'timeline', label: t('web_timeline'), icon: GanttChart },
 ]
 
 /** How far back the timeline draws actual work, and how often it refreshes. */
@@ -85,6 +97,7 @@ const errorMessage = (e: unknown, fallback: string) => (e instanceof Error ? e.m
 interface TaskFilters {
   statusTab: StatusTab
   statusFilter: TaskStatus | 'all'
+  tab: TaskTab
   tagFilter: string
   selection: TaskSelection
   searchQuery: string
@@ -120,6 +133,7 @@ function filterTasks(tasks: TaskItem[], f: TaskFilters, initiativeById: Map<stri
       // The board shows every status as a column, so the coarse tab is ignored there.
       if (f.statusTab === 'active' && t.status === 'complete') return false
       if (f.statusTab === 'complete' && t.status !== 'complete') return false
+      if (!matchesTab(t, f.tab, formatDay(todayDay()))) return false
     }
     if (f.tagFilter !== 'all' && !t.tags.includes(f.tagFilter)) return false
     if (!matchesSelection(t, f.selection, initiativeById)) return false
@@ -128,11 +142,15 @@ function filterTasks(tasks: TaskItem[], f: TaskFilters, initiativeById: Map<stri
 }
 
 function TasksPage() {
-  const view: TasksView = Route.useSearch().view ?? 'list'
+  const [rememberedView, setRememberedView] = usePersistedState<TasksView>(VIEW_KEY, 'list', isTasksView)
+  const view: TasksView = Route.useSearch().view ?? rememberedView
   const navigate = Route.useNavigate()
   const [notice, setNotice] = useState<string | null>(null)
-  const [statusTab, setStatusTab] = useState<StatusTab>('active')
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all')
+  const [tab, setTab] = useState<TaskTab>('all')
+  const [chip, setChip] = useState<TaskChip>('active')
+  const onAll = tab === 'all' && view !== 'board'
+  const statusTab: StatusTab = onAll && chip === 'archived' ? 'archived' : onAll && chip === 'done' ? 'complete' : 'active'
+  const statusFilter: TaskStatus | 'all' = (onAll && chipStatus(chip)) || 'all'
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [selection, setSelection] = useState<TaskSelection>(ALL_SELECTION)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -164,22 +182,27 @@ function TasksPage() {
     'timeline-work',
     async () => (await fetchRecentWorkSessionsClient(TIMELINE_WORK_DAYS)).work_sessions,
     TIMELINE_WORK_POLL_MS,
-    view === 'timeline'
+    view === 'timeline',
+    true,
+    ['task:sync']
   )
 
   const live = usePolled(
     'live-work',
     async () => (await fetchRecentWorkSessionsClient(LIVE_WORK_DAYS)).work_sessions.filter((s) => s.ended_at === null),
-    LIVE_WORK_POLL_MS
+    LIVE_WORK_POLL_MS,
+    true,
+    true,
+    ['task:sync']
   )
-
-  useRefreshOn(['task:sync'], live.refresh)
 
   const archived = usePolled(
     'archived-tasks',
     async () => (await fetchTasksClient({ archived: true })).tasks,
     ARCHIVED_POLL_MS,
-    statusTab === 'archived'
+    statusTab === 'archived',
+    true,
+    ['task:sync']
   )
   const staleSeen = useRef<ReadonlySet<string>>(NO_STALE)
   const stale = usePolled(
@@ -189,13 +212,17 @@ function TasksPage() {
       staleSeen.current = stableSet(next, staleSeen.current)
       return staleSeen.current
     },
-    STALE_POLL_MS
+    STALE_POLL_MS,
+    true,
+    true,
+    ['task:sync']
   )
-  useRefreshOn(['task:sync'], stale.refresh)
-  useRefreshOn(['task:sync'], recentWork.refresh)
   const archivedTasks = archived.data ?? []
 
-  const { task: linkedTaskId } = Route.useSearch()
+  const { task: linkedSearchId } = Route.useSearch()
+  const away = useRouterState({ select: (s) => s.location.pathname }) === '/tasks/away'
+  const linkedParam = useParams({ strict: false }).id
+  const linkedTaskId = linkedParam ?? linkedSearchId
   useEffect(() => {
     if (linkedTaskId) setSelectedTaskId(linkedTaskId)
   }, [linkedTaskId, setSelectedTaskId])
@@ -225,10 +252,10 @@ function TasksPage() {
     () =>
       filterTasks(
         statusTab === 'archived' ? archivedTasks : tasks,
-        { statusTab, statusFilter, tagFilter, selection, searchQuery, view },
+        { statusTab, statusFilter, tab, tagFilter, selection, searchQuery, view },
         initiativeById
       ),
-    [tasks, archivedTasks, statusTab, statusFilter, tagFilter, selection, initiativeById, searchQuery, view]
+    [tasks, archivedTasks, statusTab, statusFilter, tab, tagFilter, selection, initiativeById, searchQuery, view]
   )
 
   // Initiative sections the list folds away. Kept in the browser, so a section skipped once stays skipped.
@@ -255,18 +282,33 @@ function TasksPage() {
   const [bulkProgress, setBulkProgress] = useState<{ settled: number; total: number } | null>(null)
   const [bulkResult, setBulkResult] = useState<string | null>(null)
 
-  const setView = (next: TasksView) =>
-    navigate({ search: next === 'list' ? {} : { view: next }, replace: true })
+  const setView = (next: TasksView) => {
+    setRememberedView(next)
+    navigate({ search: { view: next }, replace: true })
+  }
 
   const showWarnings = (result: TaskUpdateResult) => {
     if (result.warnings?.length) setNotice(result.warnings.join(' '))
   }
 
+  const taskOutbox = useTaskOutbox(upsertTask)
+
   const handleCreate = async (input: Parameters<typeof createTaskClient>[0]) => {
-    const task = await createTaskClient(input)
-    upsertTask(task)
+    const withId = { ...input, client_id: newClientId() }
+    try {
+      upsertTask(await createTaskClient(withId))
+    } catch (e) {
+      // Only a lost connection is kept for later; a refusal from HQ is shown to the person.
+      if (!(e instanceof TypeError) || !taskOutbox.enabled) throw e
+      const refusal = await taskOutbox.queue(withId)
+      if (refusal) throw new Error(refusal)
+      return
+    }
     await loadTaxonomy()
   }
+
+  const [bulkDonePending, setBulkDonePending] = useState<TaskItem[] | null>(null)
+  const [doneAsk, setDoneAsk] = useState<{ id: string; patch: Record<string, unknown>; why: Exclude<DoneQuestion, null> } | null>(null)
 
   const withBusy = async (fn: () => Promise<void>, fallback: string) => {
     setBusy(true)
@@ -280,12 +322,36 @@ function TasksPage() {
     }
   }
 
-  const handleUpdate = (id: string, patch: Record<string, unknown>) =>
+  const handleUpdate = async (id: string, patch: Record<string, unknown>) => {
+    const previous = taskById.get(id)
+    let checkPending = false
+    if (patch.status === 'complete' && previous && previous.status !== 'complete') {
+      // A check that cannot be looked up does not block the person from marking it done.
+      checkPending = await fetchTaskVerification(id).then((v) => v.waiting_for?.who === 'verifier', () => false)
+    }
+    const why = doneQuestion(previous, patch, taskById.values(), checkPending)
+    if (why) {
+      setDoneAsk({ id, patch, why })
+      return
+    }
+    return applyUpdate(id, patch)
+  }
+
+  const applyUpdate = (id: string, patch: Record<string, unknown>) =>
     withBusy(async () => {
+      const previous = taskById.get(id)
       const task = await updateTaskClient(id, patch)
       upsertTask(task)
       showWarnings(task)
-    }, 'Update failed')
+      if (patch.status === 'complete' && previous && previous.status !== 'complete') {
+        toastUndo(
+          t('undo_done_task', { title: task.title }),
+          async () => upsertTask(await updateTaskClient(id, { status: previous.status, expected_status: 'complete' })),
+          t('restored_task'),
+          'undo.task_done',
+        )
+      }
+    }, t('tasks_update_failed'))
 
   // Optimistic writes for drag-and-drop: show the change at once, revert if the server refuses it.
   const applyOptimistic = async (task: TaskItem, patch: UpdateTaskInput, conflictMessage: string) => {
@@ -297,7 +363,7 @@ function TasksPage() {
     } catch (e) {
       upsertTask(task)
       const conflict = e instanceof HqHttpError && e.status === HTTP_CONFLICT
-      setNotice(conflict ? conflictMessage : errorMessage(e, 'Update failed'))
+      setNotice(conflict ? conflictMessage : errorMessage(e, t('tasks_update_failed')))
       if (conflict) loadTasks()
     }
   }
@@ -306,33 +372,46 @@ function TasksPage() {
     applyOptimistic(
       task,
       { status, expected_status: task.status },
-      `${task.display_id} was moved by someone else in the meantime, so the board has been refreshed.`
+      t('tasks_moved_by_other', { id: task.display_id })
     )
 
   const handleReschedule = (task: TaskItem, patch: UpdateTaskInput) =>
-    applyOptimistic(task, patch, `${task.display_id} changed in the meantime, so the timeline has been refreshed.`)
+    applyOptimistic(task, patch, t('tasks_timeline_changed', { id: task.display_id }))
 
   const handleCreateSubtask = async (parent: TaskItem, title: string) => {
     try {
       const task = await createTaskClient({ title, parent_task_id: parent.id, created_by: 'operator' })
       upsertTask(task)
     } catch (e) {
-      setNotice(errorMessage(e, 'Could not add the sub-task'))
+      setNotice(errorMessage(e, t('tasks_sub_add_failed')))
     }
   }
 
-  const handleDelete = (id: string, cascade: boolean) =>
+  const handleDelete = (id: string, cascade: boolean, purge = false) =>
     withBusy(async () => {
-      const res = await deleteTaskClient(id, cascade)
+      const res = await deleteTaskClient(id, cascade, purge)
       for (const deletedId of res.deleted_ids ?? [id]) removeTask(deletedId)
       setSelectedTaskId(null)
-    }, 'Delete failed')
+      if (purge) {
+        await archived.refresh()
+        return
+      }
+      toastUndo(
+        t('undo_task_archived'),
+        async () => {
+          upsertTask(await restoreTaskClient(id))
+          await archived.refresh()
+        },
+        t('restored_task'),
+        'undo.task_archived',
+      )
+    }, t('fail_archive_task_no_reply'))
 
   const handleRestore = (id: string) =>
     withBusy(async () => {
       upsertTask(await restoreTaskClient(id))
       await archived.refresh()
-    }, 'Restore failed')
+    }, t('tasks_restore_failed'))
 
   // One PATCH per task, a few at a time: each keeps its own checks, notifications and
   // soft-dependency warnings, and one task failing leaves the rest done.
@@ -341,11 +420,11 @@ function TasksPage() {
     unchanged: number,
     patchFor: (task: TaskItem) => UpdateTaskInput,
     phrase: string
-  ) => {
+  ): Promise<TaskItem[]> => {
     setNotice(null)
     if (targets.length === 0) {
       setBulkResult(bulkMessage(0, 0, unchanged, phrase))
-      return
+      return []
     }
     setBulkResult(null)
     setBulkProgress({ settled: 0, total: targets.length })
@@ -365,10 +444,47 @@ function TasksPage() {
     const problems = [failureNotice(outcome.failed), ...uniqueWarnings(outcome.done.map((d) => d.value.warnings))]
     if (problems.some(Boolean)) setNotice(problems.filter(Boolean).join(' '))
     if (outcome.failed.some((f) => f.error instanceof HqHttpError && f.error.status === HTTP_CONFLICT)) loadTasks()
+    return outcome.done.map((d) => d.task)
+  }
+
+  // Marking many tasks done asks first (others may wait on them), then offers Undo for all of them.
+  const confirmBulkDone = async () => {
+    const targets = bulkDonePending ?? []
+    setBulkDonePending(null)
+    const before = new Map(targets.map((task) => [task.id, task.status]))
+    const done = await runBulkUpdate(
+      targets,
+      0,
+      (task) => ({ status: 'complete', expected_status: task.status }),
+      t('tasks_bulk_phrase_done', { status: STATUS_LABELS.complete })
+    )
+    if (done.length === 0) return
+    toastUndo(
+      t('bulk_done_line', { n: done.length }),
+      async () => {
+        const failed: TaskItem[] = []
+        for (const task of done) {
+          try {
+            upsertTask(await updateTaskClient(task.id, { status: before.get(task.id) ?? 'to_do', expected_status: 'complete' }))
+          } catch {
+            failed.push(task)
+          }
+        }
+        if (failed.length > 0) {
+          throw new Error(t('fail_change_some_tasks', { done: done.length - failed.length, task: failed[0].title }))
+        }
+      },
+      t('restored_task'),
+      'undo.task_done',
+    )
   }
 
   const handleBulkStatus = (status: TaskStatus) => {
     const { toChange, unchanged } = splitUnchanged(picking.selected, (t) => t.status === status)
+    if (status === 'complete' && toChange.length > 0) {
+      setBulkDonePending(toChange)
+      return Promise.resolve()
+    }
     return runBulkUpdate(
       toChange,
       unchanged,
@@ -388,95 +504,8 @@ function TasksPage() {
     fn(...args)
   }
 
-  const activeCount = tasks.filter((t) => t.status !== 'complete').length
-
-  return (
-    <WorkingNowContext.Provider value={workingMap}>
-    <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
-    <div className="flex h-full min-h-0 w-full max-w-full overflow-x-hidden">
-      <TasksSidebar
-        spaces={spaces}
-        folders={folders}
-        initiatives={initiatives}
-        tasks={tasks}
-        selection={selection}
-        onSelect={setSelection}
-        onTaxonomyChanged={loadTaxonomy}
-        mobileOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
-      />
-
-      <div className="flex-1 flex flex-col h-full overflow-y-auto overflow-x-hidden px-4 py-6 sm:px-8 w-full max-w-full min-w-0 box-border">
-        <TasksHeader
-          activeCount={activeCount}
-          isRefreshing={isRefreshing}
-          onRefresh={loadTasks}
-          onNew={() => setFormOpen(true)}
-          onOpenSidebar={() => setMobileSidebarOpen(true)}
-        />
-
-        <VerificationBar onVerifyNow={() => setSweepOpen(true)} onAudit={() => setAuditOpen(true)} />
-        <BriefingCard
-          variant="tasks"
-          onOpenTask={setSelectedTaskId}
-          onPlanSweep={() => setSweepOpen(true)}
-          onAudit={() => setAuditOpen(true)}
-        />
-
-        <TasksFilterBar
-          view={view}
-          setView={setView}
-          statusTab={statusTab}
-          setStatusTab={setStatusTab}
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
-          tagFilter={tagFilter}
-          setTagFilter={setTagFilter}
-          allTags={allTags}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          canSelect={view === 'list' && statusTab !== 'archived'}
-          selecting={picking.active}
-          onToggleSelecting={() => {
-            setBulkResult(null)
-            if (picking.active) picking.stop()
-            else picking.start()
-          }}
-        />
-
-        {selection.initiativeId && (
-          <div className="mb-4">
-            {briefingFor === selection.initiativeId ? (
-              <InitiativeBriefing
-                initiativeId={selection.initiativeId}
-                name={initiativeById.get(selection.initiativeId)?.name ?? 'Initiative'}
-                onClose={() => setBriefingFor(null)}
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setBriefingFor(selection.initiativeId ?? null)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 hq-field text-neutral-300 hover:text-neutral-100"
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                Briefing
-              </button>
-            )}
-          </div>
-        )}
-
-        <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={setSelectedTaskId} />
-
-        {notice && (
-          <div className="mb-4 flex items-start justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs text-amber-300">
-            <span>{notice}</span>
-            <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-amber-300/70 hover:text-amber-200">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-
-        {isRefreshing && tasks.length === 0 ? (
+  const listNode =
+    isRefreshing && tasks.length === 0 ? (
           <div className="py-16 flex items-center justify-center text-neutral-500">
             <Loader2 className="w-5 h-5 animate-spin" />
           </div>
@@ -485,10 +514,15 @@ function TasksPage() {
             <div className="p-4 rounded-2xl bg-white/5 text-neutral-500 mb-3">
               <CheckSquare className="w-8 h-8" />
             </div>
-            <h3 className="text-sm font-bold text-neutral-300">No tasks found</h3>
+            <h3 className="text-sm font-bold text-neutral-300">{tasks.length === 0 ? t('tasks_none_yet_title') : t('tasks_none_found')}</h3>
             <p className="text-xs text-neutral-500 max-w-sm mt-1">
-              {statusTab === 'active' ? 'Nothing active right now.' : 'No tasks match the current filters.'}
+              {tasks.length === 0 ? t('tasks_none_yet_body') : statusTab === 'active' ? t('tasks_none_active') : t('tasks_none_match')}
             </p>
+            {tasks.length === 0 && (
+              <button type="button" onClick={() => setFormOpen(true)} className="hq-btn-primary mt-3">
+                {t('tasks_new_task')}
+              </button>
+            )}
           </div>
         ) : view === 'board' ? (
           <TaskBoardView tasks={filtered} allById={taskById} onSelect={(t) => setSelectedTaskId(t.id)} onMove={handleStatusMove} />
@@ -517,6 +551,132 @@ function TasksPage() {
                   }
                 : undefined
             }
+          />
+        
+    )
+
+  const activeCount = tasks.filter((t) => t.status !== 'complete').length
+
+  return (
+    <WorkingNowContext.Provider value={workingMap}>
+    <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
+    <div className="flex h-full min-h-0 w-full max-w-full overflow-x-hidden">
+      <TasksSidebar
+        spaces={spaces}
+        folders={folders}
+        initiatives={initiatives}
+        tasks={tasks}
+        selection={selection}
+        onSelect={setSelection}
+        onTaxonomyChanged={loadTaxonomy}
+        mobileOpen={mobileSidebarOpen}
+        onMobileClose={() => setMobileSidebarOpen(false)}
+      />
+
+      <div className="flex-1 flex flex-col h-full overflow-y-auto overflow-x-hidden px-4 py-6 sm:px-8 w-full max-w-full min-w-0 box-border">
+        <TasksHeader
+          activeCount={activeCount}
+          isRefreshing={isRefreshing}
+          onRefresh={loadTasks}
+          onNew={() => setFormOpen(true)}
+          onOpenSidebar={() => setMobileSidebarOpen(true)}
+        />
+
+        <TasksFilterBar
+          view={view}
+          setView={setView}
+          tab={tab}
+          setTab={setTab}
+          chip={chip}
+          setChip={setChip}
+          tagFilter={tagFilter}
+          setTagFilter={setTagFilter}
+          allTags={allTags}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          canSelect={view === 'list' && statusTab !== 'archived'}
+          selecting={picking.active}
+          onToggleSelecting={() => {
+            setBulkResult(null)
+            if (picking.active) picking.stop()
+            else picking.start()
+          }}
+        />
+
+        {selection.initiativeId && (
+          <div className="mb-4">
+            {briefingFor === selection.initiativeId ? (
+              <InitiativeBriefing
+                initiativeId={selection.initiativeId}
+                name={initiativeById.get(selection.initiativeId)?.name ?? t('tasks_initiative')}
+                onClose={() => setBriefingFor(null)}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setBriefingFor(selection.initiativeId ?? null)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 hq-field text-neutral-300 hover:text-neutral-100"
+              >
+                <ClipboardList className="w-3.5 h-3.5" />
+                {t('tasks_briefing')}
+              </button>
+            )}
+          </div>
+        )}
+
+        <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={setSelectedTaskId} />
+
+        {notice && (
+          <div className="mb-4 flex items-start justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs text-amber-300">
+            <span>{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-amber-300/70 hover:text-amber-200">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {away ? (
+          <AwayPage owner onOpenTask={setSelectedTaskId} onAudit={() => setAuditOpen(true)} />
+        ) : (
+          <TasksBody
+            list={listNode}
+            checking={
+              <>
+                <AwayLinkRow />
+                <VerificationBar onVerifyNow={() => setSweepOpen(true)} onAudit={() => setAuditOpen(true)} />
+              </>
+            }
+          />
+        )}
+        {doneAsk && taskById.get(doneAsk.id) && (
+          <Dialog
+            kind="ask"
+            title={t('tasks_done_one_title')}
+            body={
+              doneAsk.why === 'check'
+                ? t('tasks_done_check_body')
+                : tn('tasks_done_one_body', dependentsOf({ id: doneAsk.id }, taskById.values()).length, { title: taskById.get(doneAsk.id)?.title ?? '' })
+            }
+            keepLabel={doneAsk.why === 'check' ? t('tasks_done_check_keep') : t('tasks_done_one_keep')}
+            actLabel={t('tasks_mark_done')}
+            onKeep={() => setDoneAsk(null)}
+            onAct={() => {
+              const ask = doneAsk
+              setDoneAsk(null)
+              void applyUpdate(ask.id, ask.patch)
+            }}
+          />
+        )}
+
+        {bulkDonePending && (
+          <Dialog
+            kind="ask"
+            title={t('bulk_done_title', { n: bulkDonePending.length })}
+            body={t('bulk_done_body_undo', { n: bulkDonePending.length })}
+            keepLabel={t('bulk_done_keep')}
+            actLabel={t('bulk_done_act', { n: bulkDonePending.length })}
+            onKeep={() => setBulkDonePending(null)}
+            onAct={() => void confirmBulkDone()}
           />
         )}
 
@@ -554,6 +714,15 @@ function TasksPage() {
           initiativeName={selection.initiativeId ? initiativeById.get(selection.initiativeId)?.name : undefined}
         />
         <AuditSheet open={auditOpen} onClose={() => setAuditOpen(false)} />
+
+        <OutboxGroup
+          entries={taskOutbox.entries}
+          state={taskOutbox.state}
+          inHub={false}
+          textOf={titleOf}
+          onRemove={(id) => void taskOutbox.remove(id)}
+          onSendNow={() => void taskOutbox.sendNow()}
+        />
 
         <TaskFormModal
           open={formOpen}
@@ -595,8 +764,8 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
           <CheckSquare className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold text-white tracking-tight" style={{ fontFamily: 'var(--font-heading)' }}>Tasks</h1>
-          <p className="text-xs text-neutral-400 mt-0.5">{activeCount} active</p>
+          <h1 className="text-2xl font-semibold text-white tracking-tight" style={{ fontFamily: 'var(--font-heading)' }}>{t('place_tasks')}</h1>
+          <p className="text-xs text-neutral-400 mt-0.5">{t('fact_active', { n: activeCount })}</p>
         </div>
       </div>
 
@@ -604,12 +773,12 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         <button
           type="button"
           onClick={onRefresh}
-          aria-label="Refresh tasks"
+          aria-label={t('tasks_refresh')}
           disabled={isRefreshing}
           className="hq-btn-ghost disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Refresh</span>
+          <span className="hidden sm:inline">{t('spend_refresh')}</span>
         </button>
         <button
           type="button"
@@ -617,8 +786,8 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
           className="hq-btn-primary !h-9 !px-4"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span className="hidden min-[420px]:inline">New Task</span>
-          <span className="min-[420px]:hidden sr-only">New Task</span>
+          <span className="hidden min-[420px]:inline">{t('tasks_new_task')}</span>
+          <span className="min-[420px]:hidden sr-only">{t('tasks_new_task')}</span>
         </button>
       </div>
     </div>
@@ -628,10 +797,10 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
 interface TasksFilterBarProps {
   view: TasksView
   setView: (v: TasksView) => void
-  statusTab: StatusTab
-  setStatusTab: (t: StatusTab) => void
-  statusFilter: TaskStatus | 'all'
-  setStatusFilter: (s: TaskStatus | 'all') => void
+  tab: TaskTab
+  setTab: (t: TaskTab) => void
+  chip: TaskChip
+  setChip: (c: TaskChip) => void
   tagFilter: string
   setTagFilter: (t: string) => void
   allTags: string[]
@@ -642,8 +811,14 @@ interface TasksFilterBarProps {
   onToggleSelecting: () => void
 }
 
+function chipLabel(id: TaskChip): string {
+  const status = chipStatus(id)
+  if (status) return STATUS_LABELS[status]
+  return id === 'archived' ? t('tasks_chip_archived') : t('tasks_chip_active')
+}
+
 function TasksFilterBar(p: TasksFilterBarProps) {
-  const { view, setView, statusTab, setStatusTab, statusFilter, setStatusFilter } = p
+  const { view, setView, tab, setTab, chip, setChip } = p
   const { tagFilter, setTagFilter, allTags, searchQuery, setSearchQuery } = p
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5 w-full max-w-full">
@@ -667,16 +842,17 @@ function TasksFilterBar(p: TasksFilterBarProps) {
 
         {view !== 'board' && (
           <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start max-w-full overflow-x-auto no-scrollbar shrink-0">
-            {(['active', 'all', 'complete', 'archived'] as StatusTab[]).map((tab) => (
+            {TABS.map((id) => (
               <button
-                key={tab}
+                key={id}
                 type="button"
-                onClick={() => setStatusTab(tab)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all shrink-0 ${
-                  statusTab === tab ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
+                onClick={() => setTab(id)}
+                aria-pressed={tab === id}
+                className={`px-3 py-1.5 min-h-9 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+                  tab === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                {tab}
+                {t(`tasks_tab_${id}` as const)}
               </button>
             ))}
           </div>
@@ -684,24 +860,12 @@ function TasksFilterBar(p: TasksFilterBarProps) {
 
         <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
           <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as TaskStatus | 'all')}
-            title="Filter by status"
-            className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
-          >
-            <option value="all">All statuses</option>
-            {STATUS_ORDER.map((status) => (
-              <option key={status} value={status}>{STATUS_LABELS[status]}</option>
-            ))}
-          </select>
-
-          <select
             value={tagFilter}
             onChange={(e) => setTagFilter(e.target.value)}
-            title="Filter by tag"
+            title={t('tasks_filter_by_tag')}
             className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
           >
-            <option value="all">All tags</option>
+            <option value="all">{t('tasks_all_tags')}</option>
             {allTags.map((tag) => (
               <option key={tag} value={tag}>{tag}</option>
             ))}
@@ -712,17 +876,35 @@ function TasksFilterBar(p: TasksFilterBarProps) {
               type="button"
               onClick={p.onToggleSelecting}
               aria-pressed={p.selecting}
-              title="Pick several tasks to change at once"
+              title={t('tasks_pick_several_title')}
               className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-all ${
                 p.selecting ? 'hq-seg-on' : 'hq-field text-neutral-300 hover:text-white'
               }`}
             >
               <ListChecks className="w-3.5 h-3.5 shrink-0" />
-              Select
+              {t('tasks_pick_several')}
             </button>
           )}
         </div>
       </div>
+
+      {view !== 'board' && tab === 'all' && (
+        <div role="group" aria-label={t('tasks_tab_all')} className="flex items-center gap-1.5 flex-wrap w-full order-last sm:basis-full">
+          {CHIPS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setChip(id)}
+              aria-pressed={chip === id}
+              className={`px-3 py-1.5 min-h-9 rounded-full text-xs font-semibold border border-white/10 ${
+                chip === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              {chipLabel(id)}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="relative w-full sm:w-auto sm:max-w-xs sm:flex-1 min-w-0">
         <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
@@ -730,7 +912,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search tasks..."
+          placeholder={t('tasks_find')}
           className="w-full box-border pl-8 pr-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
         />
       </div>

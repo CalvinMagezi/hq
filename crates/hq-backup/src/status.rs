@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 const STATUS_FILE: &str = "backup-status.json";
 const STATUS_TMP: &str = ".backup-status.tmp";
 
+/// Set while this process makes a scheduled backup; the web's busy route reads it, so an update
+/// never installs in the middle of one (docs/plans/ux-run/mobile/wave-0/02-safe-mode.md).
+pub static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Status {
     /// When the run ended, RFC 3339.

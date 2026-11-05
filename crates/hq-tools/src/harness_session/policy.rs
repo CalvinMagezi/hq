@@ -11,7 +11,7 @@ use hq_core::command_policy::{self as cp, Decision, Policy};
 
 /// Who answers when the policy does, as far as `answer` is concerned: never the owner, so a
 /// "remember" option stays out of reach.
-pub const POLICY_ANSWERER: Answerer = Answerer::Automated("the command policy");
+pub const POLICY_ANSWERER: Answerer = Answerer::Policy;
 
 /// What the caller named in `policy`, if anything.
 pub fn parse(args: &Value) -> Option<String> {

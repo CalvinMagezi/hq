@@ -1,12 +1,21 @@
+import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckCircle2, Loader2, OctagonX, X } from 'lucide-react'
-import { workbenchApi, type LockdownResult, type WorkbenchHost } from '~/lib/sessionsApi'
+import { globalSessionsApi, workbenchApi, type HarnessSession, type LockdownResult, type WorkbenchHost } from '~/lib/sessionsApi'
 import { computerName } from '~/lib/workbench'
+import { lockFact, unreachableHosts } from '~/lib/lockdown'
 import { ErrorText } from './ErrorText'
 import { useModal } from './useModal'
 
 const ALL_COMPUTERS = ''
+
+/** How many helpers run on each computer, for the numbers in the dialog. */
+export function runningByHost(list: HarnessSession[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const s of list) if (s.status === 'running') out[s.host] = (out[s.host] ?? 0) + 1
+  return out
+}
 const MAX_REASON_CHARS = 300
 
 interface ButtonProps {
@@ -14,22 +23,25 @@ interface ButtonProps {
   compact?: boolean
   /** Called after a stop went through, so the page can refresh what it shows. */
   onStopped: () => void
+  /** Why stopping is off while HQ can't be reached. */
+  off?: string | null
 }
 
 /** The emergency stop: kills every agent on one computer or all of them, after one confirmation. */
-export function StopAllButton({ compact = false, onStopped }: ButtonProps) {
+export function StopAllButton({ compact = false, onStopped, off = null }: ButtonProps) {
   const [open, setOpen] = useState(false)
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
+        disabled={off !== null}
         className={compact ? 'hq-btn-stop !h-11 !w-11 !p-0' : 'hq-btn-stop'}
-        aria-label="Stop every agent"
-        title="Stop every agent"
+        aria-label={t('stop_all_act')}
+        title={off ?? t('stop_all_act')}
       >
         <OctagonX className="w-4 h-4" />
-        {!compact && 'Stop all'}
+        {!compact && t('stop_all_act')}
       </button>
       {open && <StopAllDialog onClose={() => setOpen(false)} onStopped={onStopped} />}
     </>
@@ -38,6 +50,7 @@ export function StopAllButton({ compact = false, onStopped }: ButtonProps) {
 
 function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped: () => void }) {
   const [hosts, setHosts] = useState<WorkbenchHost[]>([])
+  const [counts, setCounts] = useState<Record<string, number>>({})
   const [target, setTarget] = useState(ALL_COMPUTERS)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -54,7 +67,12 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
       .hosts()
       .then((res) => setHosts(res.hosts))
       .catch(() => setHosts([]))
+    globalSessionsApi
+      .list({})
+      .then((list) => setCounts(runningByHost(list)))
+      .catch(() => setCounts({}))
   }, [])
+  const total = Object.entries(counts).reduce((n, [host, c]) => n + (hosts.find((h) => h.host === host)?.reachable === false ? 0 : c), 0)
 
   const stop = async () => {
     setBusy(true)
@@ -67,7 +85,7 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
       setResult(done)
       onStopped()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not stop the agents.')
+      setError(e instanceof Error ? e.message : t('helpers_stop_all_failed'))
     } finally {
       setBusy(false)
     }
@@ -87,49 +105,53 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <h2 id="stop-all-title" className="text-sm font-bold text-white">
-            Stop every agent
+            {t('stop_all_title')}
           </h2>
-          <button type="button" onClick={close} disabled={busy} aria-label="Close" className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
+          <button type="button" onClick={close} disabled={busy} aria-label={t('helpers_new_cancel')} className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
             <X className="w-4 h-4" />
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
           {result ? (
-            <StopReport result={result} />
+            <StopReport result={result} onRetry={() => void stop()} />
           ) : (
             <>
               <p id="stop-all-what" className="text-xs text-neutral-300 leading-relaxed">
-                Every agent on the computer is killed at once, and it starts none until someone at that computer runs{' '}
-                <code className="text-neutral-100">hq host unlock</code>. Stopped agents do not come back by themselves.
+                {t('stop_all_body')}
               </p>
-              <div>
-                <label htmlFor="stop-all-computer" className="block mb-1 text-[11px] text-neutral-400">
-                  Computer
+              <fieldset className="space-y-2">
+                <legend className="mb-1 text-[11px] text-neutral-400">{t('helpers_stop_all_pick')}</legend>
+                <label className="flex items-start gap-2 min-h-11 text-xs text-neutral-200">
+                  <input type="radio" name="stop-all-computer" checked={target === ALL_COMPUTERS} onChange={() => setTarget(ALL_COMPUTERS)} className="mt-1" />
+                  <span>{t('helpers_stop_all_every', { n: total })}</span>
                 </label>
-                <select
-                  id="stop-all-computer"
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                  className="w-full min-w-0 h-11 px-3 rounded-lg text-xs text-neutral-200 hq-field"
-                >
-                  <option value={ALL_COMPUTERS}>Every computer</option>
-                  {hosts.map((h) => (
-                    <option key={h.host} value={h.host}>
-                      {computerName(h.host)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {hosts.map((h) => (
+                  <label key={h.host} className="flex items-start gap-2 min-h-11 text-xs text-neutral-200">
+                    <input
+                      type="radio"
+                      name="stop-all-computer"
+                      checked={target === h.host}
+                      disabled={!h.reachable}
+                      onChange={() => setTarget(h.host)}
+                      className="mt-1"
+                    />
+                    <span>
+                      {t('helpers_stop_all_one', { computer: computerName(h.host), n: counts[h.host] ?? 0 })}
+                      {!h.reachable && <span className="block text-neutral-400">{t('helpers_stop_all_cant')}</span>}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
               <div>
                 <label htmlFor="stop-all-reason" className="block mb-1 text-[11px] text-neutral-400">
-                  Why (optional)
+                  {t('helpers_stop_all_why')}
                 </label>
                 <input
                   id="stop-all-reason"
                   value={reason}
                   maxLength={MAX_REASON_CHARS}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Agents I did not start"
+                  placeholder={t('helpers_stop_all_why_hint')}
                   className="w-full min-w-0 h-11 px-3 rounded-lg text-xs text-neutral-200 hq-field"
                 />
               </div>
@@ -140,15 +162,17 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
         <div className="px-4 py-3 border-t border-white/10 pb-[calc(0.75rem+var(--safe-bottom))]">
           {result ? (
             <button type="button" onClick={close} className="hq-btn-primary w-full">
-              Done
+              {t('helpers_stop_all_done')}
             </button>
           ) : (
-            <button type="button" onClick={() => void stop()} disabled={busy} className="hq-btn-primary w-full">
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <OctagonX className="w-4 h-4" />}
-              <span className="truncate">
-                {busy ? 'Stopping' : target ? `Stop agents on ${computerName(target)}` : 'Stop every agent everywhere'}
-              </span>
-            </button>
+            <div className="flex flex-col gap-2">
+              <button type="button" onClick={close} disabled={busy} className="a-btn secondary block">
+                {t('stop_all_keep')}
+              </button>
+              <button type="button" onClick={() => void stop()} disabled={busy} aria-busy={busy || undefined} className="a-btn danger block">
+                {busy ? t('confirm_busy_stopping') : t('stop_all_act')}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -157,41 +181,53 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
   )
 }
 
-function StopReport({ result }: { result: LockdownResult }) {
+function StopReport({ result, onRetry }: { result: LockdownResult; onRetry: () => void }) {
+  const failed = unreachableHosts(result)
   return (
-    <ul className="space-y-2" role="status">
-      {result.hosts.map((h) => (
-        <li key={h.host} className="flex items-start gap-2 text-xs">
-          {h.locked ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--accent-green)' }} />
-          ) : (
-            <OctagonX className="w-4 h-4 shrink-0" style={{ color: 'var(--accent-amber)' }} />
-          )}
-          <span className="min-w-0 break-words text-neutral-200">
-            {h.locked
-              ? `${computerName(h.host)} is stopped and locked.`
-              : `${computerName(h.host)} did not lock: it may be offline or need an HQ update. Run hq host lockdown on it.`}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <div role="status" className="space-y-2">
+      <ul className="space-y-2">
+        {result.hosts
+          .filter((h) => h.locked)
+          .map((h) => (
+            <li key={h.host} className="flex items-start gap-2 text-xs">
+              <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--ink)' }} />
+              <span className="min-w-0 break-words text-neutral-200">{t('stop_all_locked_host', { computer: computerName(h.host) })}</span>
+            </li>
+          ))}
+      </ul>
+      {failed.length > 0 && (
+        <div className="flex items-start gap-2 text-xs">
+          <OctagonX className="w-4 h-4 shrink-0" style={{ color: 'var(--warn)' }} />
+          <div className="min-w-0 space-y-2">
+            <p className="break-words text-neutral-200">{t('stop_all_unreachable')}</p>
+            <button type="button" onClick={onRetry} className="a-btn secondary">
+              {t('stop_all_try_again')}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
-/** Names each computer that is locked down and how to lift it. */
+/** Says which computers refuse to start helpers and who stopped them. There is no way to lift it here: only HQ Hub on that computer can. */
 export function LockdownBanner({ hosts }: { hosts: WorkbenchHost[] }) {
   const locked = hosts.filter((h) => h.lockdown)
   if (locked.length === 0) return null
   return (
-    <div role="status" className="mx-4 mb-3 px-3 py-2 rounded-xl text-xs text-neutral-200 border" style={{ borderColor: 'var(--accent-green)' }}>
+    <div role="status" className="mx-4 mb-3 px-3 py-2 rounded-xl text-xs text-neutral-200 border" style={{ borderColor: 'var(--warn)' }}>
+      <p className="font-semibold" style={{ color: 'var(--warn)' }}>
+        {t('helpers_locked_banner')}
+      </p>
       {locked.map((h) => (
         <p key={h.host} className="break-words">
-          <span className="font-semibold" style={{ color: 'var(--accent-green)' }}>
-            {computerName(h.host)} is locked down
-          </span>{' '}
-          ({h.lockdown?.reason}). Run <code>hq host unlock</code> on it to start agents again.
+          {h.lockdown && lockFact(h.host, h.lockdown)}
         </p>
       ))}
+      <details>
+        <summary className="flex items-center min-h-11 cursor-pointer text-neutral-400 select-none">{t('helpers_technical_details')}</summary>
+        <p className="break-words text-neutral-400">{t('helpers_locked_technical')}</p>
+      </details>
     </div>
   )
 }

@@ -24,15 +24,17 @@ data class UiMessage(
     /** When the server saved it; blank for a reply that just finished in this session. */
     val createdAt: String = "",
     val files: List<Attachment> = emptyList(),
+    /** The owner asked this by voice. */
+    val spoken: Boolean = false,
     val offer: Offer? = null,
 ) {
     companion object {
         /** A saved message: the attachment marker the server appends is split off into [files]. */
-        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", offer: Offer? = null): UiMessage {
+        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false, offer: Offer? = null): UiMessage {
             // Only the user's own messages carry the marker; a model reply that contains one is just text.
             if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt, offer = offer)
             val (text, files) = Attachments.split(content)
-            return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files)
+            return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files, spoken = spoken)
         }
     }
 }
@@ -49,7 +51,7 @@ data class LiveReply(val text: String = "", val steps: List<LiveStep> = emptyLis
 
 enum class Group(val label: String) { Today("Today"), Yesterday("Yesterday"), Week("Previous 7 days"), Older("Older") }
 
-data class ChatRow(val id: String, val title: String, val subtitle: String, val group: Group, val running: Boolean, val unread: Boolean)
+data class ChatRow(val id: String, val title: String, val subtitle: String, val group: Group, val running: Boolean, val unread: Boolean, val spoken: Boolean = false)
 
 data class ChatUiState(
     val threadId: String? = null,
@@ -62,6 +64,8 @@ data class ChatUiState(
     /** When the socket dropped (epoch milliseconds), so the status line can say how old what is shown is. */
     val offlineSince: Long? = null,
     val draft: String = "",
+    /** Goes up each time a link asks for the composer (hq://chat?compose=1); the field takes focus and the keyboard on every change. */
+    val focusDraft: Int = 0,
     /** The empty chat's chips from HQ (`GET /api/capabilities`); null until it answers. */
     val suggestions: List<Suggestion>? = null,
     val notice: Notice? = null,
@@ -103,6 +107,9 @@ data class ContextRef(val kind: Kind, val ref: String, val label: String) {
 
 enum class FileStatus { Uploading, Ready, Failed }
 
+/** Why a file chip failed; the words come from the catalogue. */
+enum class FileError { TooBig, Empty, UploadFailed }
+
 /** A file picked for the next message, from pick to upload result. [uri] stays so a failed upload can be tried again. */
 data class PendingFile(
     val id: String,
@@ -111,15 +118,11 @@ data class PendingFile(
     val size: Long,
     val mime: String,
     val status: FileStatus,
-    val error: String? = null,
+    val error: FileError? = null,
     val uploaded: Attachment? = null,
 ) {
     /** A failed upload can be tried again; a file that is too big or empty cannot. */
-    val retryable: Boolean get() = status == FileStatus.Failed && uploaded == null && error == UPLOAD_FAILED
-
-    companion object {
-        const val UPLOAD_FAILED = "upload failed"
-    }
+    val retryable: Boolean get() = status == FileStatus.Failed && uploaded == null && error == FileError.UploadFailed
 }
 
 /** The note or task picker: what is typed and what matched. */
@@ -140,6 +143,8 @@ data class NoteSheet(
     val truncated: Boolean,
     val savedAge: String?,
     val pinned: Boolean = false,
+    /** The note's hash when it was read, sent back with a save so HQ can tell it changed meanwhile. */
+    val hash: String? = null,
 )
 
 enum class ExportGroup(val label: String) { Document("Document"), Picture("Picture"), Tables("Tables in this note") }
@@ -306,7 +311,7 @@ object ChatTime {
         parse(at)?.atZone(zone)?.toLocalTime()?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")).orEmpty()
 
     /** hq writes `+00:00`, not `Z`; Instant.parse takes only `Z` before Android 14, so the offset form is read instead. */
-    private fun parse(value: String): Instant? = try { java.time.OffsetDateTime.parse(value).toInstant() } catch (e: DateTimeParseException) { null }
+    private fun parse(value: String): Instant? = example.hq.spike.data.Instants.parse(value)
 
     private const val WEEK_DAYS = 7L
     private const val MINUTES_PER_HOUR = 60L

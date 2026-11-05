@@ -14,6 +14,12 @@ use std::time::Duration;
 use tracing::info;
 
 pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
+    // The web port answers "Starting HQ" from the first moment, before the slow steps below.
+    let early = if component == "all" {
+        bind_web_early(config).await
+    } else {
+        None
+    };
     let vault =
         Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
 
@@ -30,7 +36,7 @@ pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
     match component {
         "all" => {
             println!("Starting all HQ components...");
-            start_all(config, vault, db).await
+            start_all(config, vault, db, early).await
         }
         "daemon" => {
             println!("Starting daemon...");
@@ -80,9 +86,17 @@ const CLEANUP_FAILSAFE: Duration = Duration::from_secs(10);
 /// Settle time for spawned tasks to finish their own shutdown sequences.
 const SHUTDOWN_SETTLE: Duration = Duration::from_millis(500);
 
-async fn start_all(config: &HqConfig, vault: Arc<VaultClient>, db: Arc<Database>) -> Result<()> {
+async fn start_all(
+    config: &HqConfig,
+    vault: Arc<VaultClient>,
+    db: Arc<Database>,
+    early: Option<hq_web::hello::StartingServer>,
+) -> Result<()> {
     ensure_no_running_daemon(config)?;
     print_components(config);
+    if let Some(server) = &early {
+        server.progress.at(STEP_LOADING);
+    }
 
     let shutdown = ShutdownSignal::new();
     let cleanup = CleanupRegistry::new();
@@ -92,7 +106,7 @@ async fn start_all(config: &HqConfig, vault: Arc<VaultClient>, db: Arc<Database>
         spawn_discord(config, &vault, &db);
         spawn_telegram(config, &vault, &db);
     }
-    spawn_web_server(config, &vault, &db);
+    spawn_web_server(config, &vault, &db, early);
 
     println!("All components running. Press Ctrl+C to stop.");
     println!();
@@ -215,9 +229,45 @@ fn spawn_telegram(config: &HqConfig, _vault: &Arc<VaultClient>, _db: &Arc<Databa
     }
 }
 
+/// Start steps the early web port reports (`hq_web::hello::START_STEPS`).
+const STEP_LOADING: usize = 1;
+const STEP_ALMOST_READY: usize = 2;
+
+fn web_addr(bind: &str, port: u16) -> std::net::SocketAddr {
+    format!("{bind}:{port}")
+        .parse()
+        .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], port)))
+}
+
+/// Binds the web port before the vault and database open, answering `/api/hello` with the start
+/// step and every other route with "starting". `None` leaves the port to [`spawn_web_server`].
+async fn bind_web_early(config: &HqConfig) -> Option<hq_web::hello::StartingServer> {
+    hq_web::auth::check_web_bind(&config.web_bind, config.web_auth_token.as_deref()).ok()?;
+    let server = hq_web::hello::StartingServer::new(&config.vault_path, config.profile)
+        .inspect_err(|e| tracing::warn!("ws: no early start page: {e:#}"))
+        .ok()?;
+    let listener = tokio::net::TcpListener::bind(web_addr(&config.web_bind, config.ws_port))
+        .await
+        .inspect_err(|e| tracing::error!(port = config.ws_port, "ws: failed to bind port: {e}"))
+        .ok()?;
+    let app = server.router();
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app).await {
+            tracing::error!("ws server error: {e}");
+        }
+    });
+    Some(server)
+}
+
 /// The WebSocket and web UI server. An open non-loopback bind skips only this
-/// server; the relays and the daemon still start.
-fn spawn_web_server(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Database>) {
+/// server; the relays and the daemon still start. With an `early` port already
+/// answering "starting", the full router takes it over.
+fn spawn_web_server(
+    config: &HqConfig,
+    vault: &Arc<VaultClient>,
+    db: &Arc<Database>,
+    early: Option<hq_web::hello::StartingServer>,
+) {
     let web_auth_token = config.web_auth_token.clone();
     if let Err(e) = hq_web::auth::check_web_bind(&config.web_bind, web_auth_token.as_deref()) {
         tracing::error!("ws: not starting the web server: {e}");
@@ -232,6 +282,15 @@ fn spawn_web_server(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Databa
         web_auth_token,
         &config.web_bind,
     );
+    if let Some(server) = early {
+        server.progress.at(STEP_ALMOST_READY);
+        server.ready(hq_web::create_router(state));
+        info!(
+            port = config.ws_port,
+            "ws: serving on the port opened at start"
+        );
+        return;
+    }
     let (bind, port) = (config.web_bind.clone(), config.ws_port);
     tokio::spawn(async move {
         info!(port, "ws: starting server");
@@ -290,10 +349,7 @@ pub(crate) fn build_web_state(
 
 async fn serve_web(state: Arc<hq_web::WsState>, bind: &str, port: u16) {
     let app = hq_web::create_router(state);
-    let addr: std::net::SocketAddr = format!("{bind}:{port}")
-        .parse()
-        .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], port)));
-    let listener = match tokio::net::TcpListener::bind(addr).await {
+    let listener = match tokio::net::TcpListener::bind(web_addr(bind, port)).await {
         Ok(listener) => listener,
         Err(e) => {
             tracing::error!(port, "ws: failed to bind port: {e}");

@@ -6,6 +6,7 @@ pub mod background_turns;
 pub mod bridge;
 pub mod bridge_setup;
 pub mod chat;
+pub mod client_ids;
 pub mod copilot_usage_samples;
 pub mod dialog_alerts;
 pub mod folder_grants;
@@ -14,7 +15,9 @@ pub mod harness_sessions_registry;
 pub mod host_outages;
 pub mod mcp_connector;
 pub mod migrations;
+pub mod moved;
 pub mod offers;
+pub mod owner_approvals;
 pub mod pool;
 pub mod provenance;
 pub mod push_subscriptions;
@@ -37,6 +40,7 @@ pub mod usage_ledger;
 pub mod value_items;
 pub mod vault_cache;
 pub mod web_auth;
+pub mod wire_time;
 
 pub use pool::Database;
 

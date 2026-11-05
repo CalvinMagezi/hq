@@ -1,10 +1,21 @@
 import { create } from 'zustand'
+import { currentHqId, hqIdReady, keyFor } from '~/lib/savedCopy'
+import { onBeforeReload } from '~/lib/version'
+import { isSharedComputer } from '~/lib/sharedComputer'
+import { t } from '~/strings'
 import { MAX_ATTACHMENTS, isPreviewableImage, rejectReason, uploadChatFile, type ChatAttachment } from '~/lib/chatUploads'
 import type { PendingAttachment } from './AttachmentChips'
 
 // A chat that does not exist yet (the first message creates it) keeps its draft here.
-const NEW_CHAT_KEY = 'new'
-const TEXT_STORAGE_KEY = 'hq.chat.drafts'
+export const NEW_CHAT_KEY = 'new'
+export const DRAFTS_KEY = 'hq-drafts'
+
+/** Drafts belong to one HQ (shared parts rule 7); with no HQ id yet they are not kept. */
+const textStorageKey = () => {
+  if (isSharedComputer()) return null
+  const id = currentHqId()
+  return id ? keyFor(DRAFTS_KEY, id) : null
+}
 
 interface Draft {
   text: string
@@ -15,7 +26,8 @@ const EMPTY: Draft = { text: '', attachments: [] }
 
 function readSavedText(): Record<string, string> {
   try {
-    return JSON.parse(localStorage.getItem(TEXT_STORAGE_KEY) ?? '{}') as Record<string, string>
+    const key = textStorageKey()
+    return key ? (JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>) : {}
   } catch {
     return {}
   }
@@ -26,7 +38,8 @@ function saveText(drafts: Record<string, Draft>) {
   const text: Record<string, string> = {}
   for (const [key, d] of Object.entries(drafts)) if (d.text.trim()) text[key] = d.text
   try {
-    localStorage.setItem(TEXT_STORAGE_KEY, JSON.stringify(text))
+    const key = textStorageKey()
+    if (key) localStorage.setItem(key, JSON.stringify(text))
   } catch {
     // Storage can be blocked; drafts still work for this session.
   }
@@ -86,7 +99,7 @@ export function useDraft(threadId: string | null | undefined) {
     } catch (err) {
       store().patchAttachment(key, item.id, {
         status: 'error',
-        error: err instanceof Error ? err.message : 'upload failed',
+        error: t('chat_file_failed'),
         retryable: true,
       })
     }
@@ -137,4 +150,26 @@ export function useDraft(threadId: string | null | undefined) {
 export function restoreDraft(threadId: string, text: string) {
   const state = useDraftStore.getState()
   if (!state.drafts[threadId]?.text.trim()) state.setText(threadId, text)
+}
+
+/** Writes every draft's text down now; a reload for a newer HQ calls it first. */
+export function flushDrafts() {
+  saveText(useDraftStore.getState().drafts)
+}
+if (typeof window !== 'undefined') onBeforeReload(flushDrafts)
+
+/** Drops every draft in memory; the saved text goes with the browser's wipe. */
+export function clearDrafts() {
+  useDraftStore.setState({ drafts: {} })
+}
+
+// The HQ id is known only once this page's first hello answers, so saved drafts load then.
+if (typeof window !== 'undefined') {
+  void hqIdReady().then(() => {
+    const saved = readSavedText()
+    if (Object.keys(saved).length === 0) return
+    const drafts = { ...useDraftStore.getState().drafts }
+    for (const [key, text] of Object.entries(saved)) if (!drafts[key]?.text) drafts[key] = { text, attachments: drafts[key]?.attachments ?? [] }
+    useDraftStore.setState({ drafts })
+  })
 }

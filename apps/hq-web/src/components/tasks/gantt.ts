@@ -1,8 +1,14 @@
 import type { TaskItem, UpdateTaskInput } from '~/lib/tasksApi'
-import { formatDay, parseDay } from './dates'
+import { dayOfWeek, formatDay, parseDay } from './dates'
 
 export type Zoom = 'week' | 'month'
 export type DragMode = 'move' | 'start' | 'end'
+
+export const ZOOM_KEY = 'hq.tasks.timeline.zoom'
+
+export function isZoom(v: unknown): v is Zoom {
+  return v === 'week' || v === 'month'
+}
 
 export const DAY_PX: Record<Zoom, number> = { week: 36, month: 12 }
 export const ROW_HEIGHT = 36
@@ -56,6 +62,15 @@ export function visibleRange(spans: Span[], today: number): { start: number; end
     end = Math.max(end, s.end)
   }
   return { start: start - RANGE_PAD_BEFORE_DAYS, end: end + RANGE_PAD_AFTER_DAYS }
+}
+
+const MONTH_WEEKS = 5
+const DAYS_PER_WEEK = 7
+
+/** Month is always five weeks from this week's Monday, however far the tasks reach. */
+export function monthRange(today: number): { start: number; end: number } {
+  const start = today - ((dayOfWeek(today) + 6) % DAYS_PER_WEEK)
+  return { start, end: start + MONTH_WEEKS * DAYS_PER_WEEK - 1 }
 }
 
 /** Curved connector from the end of a blocker's bar to the start of the dependent's. */

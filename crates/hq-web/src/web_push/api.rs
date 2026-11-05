@@ -23,6 +23,38 @@ const MAX_ENDPOINT_CHARS: usize = 2048;
 pub(crate) struct SubscribeRequest {
     endpoint: String,
     keys: SubscriptionKeys,
+    /// Which pushes this browser wants; absent keeps what is stored (an older client).
+    #[serde(default)]
+    kinds: Option<Vec<String>>,
+    /// Whether a push may carry an item's first line; absent keeps what is stored.
+    #[serde(default)]
+    details: Option<bool>,
+}
+
+/// The kinds a browser may ask for, checked so the stored list holds nothing else.
+fn chosen_kinds(kinds: &[String]) -> Result<String, ApiError> {
+    use super::PushKind;
+    let known = [PushKind::Needs.name(), PushKind::Updates.name()];
+    if let Some(bad) = kinds.iter().find(|k| !known.contains(&k.as_str())) {
+        return Err(ApiError::bad_request(format!(
+            "unknown push kind '{bad}'; use needs or updates"
+        )));
+    }
+    Ok(known
+        .into_iter()
+        .filter(|k| kinds.iter().any(|c| c == k))
+        .collect::<Vec<_>>()
+        .join(","))
+}
+
+/// The kinds `now` has that `before` did not; all of them for a new subscription.
+fn gained_kinds(before: Option<&str>, now: &str) -> Vec<super::PushKind> {
+    use super::PushKind;
+    let has = |list: &str, k: PushKind| list.split(',').any(|x| x.trim() == k.name());
+    [PushKind::Needs, PushKind::Updates]
+        .into_iter()
+        .filter(|k| has(now, *k) && !before.is_some_and(|b| has(b, *k)))
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,16 +116,39 @@ pub(crate) async fn subscribe_handler(
         .get(header::USER_AGENT)
         .and_then(|v| v.to_str().ok())
         .map(|ua| ua.chars().take(200).collect::<String>());
-    hq_db::push_subscriptions::upsert(
+    let kinds = req.kinds.as_deref().map(chosen_kinds).transpose()?;
+    let choice = hq_db::push_subscriptions::Choice {
+        kinds: kinds.as_deref(),
+        details: req.details,
+    };
+    let before = hq_db::push_subscriptions::upsert_with(
         &state.db,
         &endpoint,
         &B64.encode(&p256dh),
         &B64.encode(&auth),
         user_agent.as_deref(),
         device_id(credential.as_ref()),
+        &choice,
     )
     .map_err(ApiError::internal)?;
-    Ok(Json(json!({ "subscribed": true })))
+    let now = hq_db::push_subscriptions::get(&state.db, &endpoint)
+        .map_err(ApiError::internal)?
+        .map(|s| s.kinds)
+        .unwrap_or_default();
+    let gained = gained_kinds(before.as_deref(), &now);
+    if !gained.is_empty() {
+        // What still waits reaches a browser that turned a kind back on, once.
+        let state = state.clone();
+        tokio::spawn(async move {
+            let Some(push) = state.web_push.as_deref() else {
+                return;
+            };
+            if let Err(e) = push.replay(&state.db, &endpoint, &gained).await {
+                tracing::warn!("web push: replay failed: {e:#}");
+            }
+        });
+    }
+    Ok(Json(json!({ "subscribed": true, "kinds": now })))
 }
 
 /// `POST /api/notifications/push/unsubscribe`: forgets one browser's subscription.
@@ -116,9 +171,9 @@ pub(crate) async fn test_handler(
 ) -> Result<Json<Value>, ApiError> {
     let push = push_on(&state)?;
     let payload = serde_json::to_vec(&json!({
-        "title": "HQ push works",
-        "body": "Notifications from HQ and its agents will show up here.",
-        "url": "/notifications",
+        "title": "HQ",
+        "body": "Notifications from HQ are on in this browser.",
+        "url": "/inbox",
         "tag": "hq-push-test",
     }))
     .map_err(ApiError::internal)?;
@@ -232,6 +287,26 @@ mod tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+
+    #[test]
+    fn kinds_are_checked_and_a_gain_is_only_what_is_new() {
+        use super::super::PushKind;
+        assert_eq!(
+            chosen_kinds(&["updates".into(), "needs".into()]).unwrap(),
+            "needs,updates"
+        );
+        assert!(chosen_kinds(&["all".into()]).is_err());
+        assert_eq!(
+            gained_kinds(None, "needs,updates").len(),
+            2,
+            "a new subscription"
+        );
+        assert_eq!(
+            gained_kinds(Some("updates"), "needs,updates"),
+            [PushKind::Needs]
+        );
+        assert!(gained_kinds(Some("needs,updates"), "needs").is_empty());
     }
 
     #[tokio::test]

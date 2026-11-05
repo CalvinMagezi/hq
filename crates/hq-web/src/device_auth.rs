@@ -20,6 +20,9 @@ pub(crate) const DEVICE_CODE_PATH: &str = "/api/auth/device-code";
 pub(crate) const EXCHANGE_PATH: &str = "/api/auth/exchange";
 /// Inbox source of the "a device signed in" notice; Web Push always sends it.
 pub(crate) const DEVICE_SIGN_IN_SOURCE: &str = "device-sign-in";
+/// The dedup key of a new sign-in's Needs you item is this and the device id, so signing the
+/// device out answers it and the device list can tell it is new.
+pub(crate) const SIGN_IN_ITEM_PREFIX: &str = "device-sign-in:";
 /// How a device token minted by the exchange shows in Settings, Devices.
 pub(crate) const CODE_SIGN_IN_LABEL: &str = "Signed in with a code";
 
@@ -204,6 +207,9 @@ pub(crate) async fn device_code_handler(State(state): State<Arc<WsState>>) -> Re
 pub(crate) struct ExchangeBody {
     #[serde(default)]
     code: String,
+    /// "This is a shared computer": stored on the device, so its row says so.
+    #[serde(default)]
+    shared: bool,
 }
 
 /// `POST /api/auth/exchange`: trades a pending code for a new device token. Unauthenticated, so
@@ -230,12 +236,28 @@ pub(crate) async fn exchange_handler(
             StatusCode::UNAUTHORIZED,
             json!({ "error": "that code is not valid" }),
         ),
-        Redeemed::Accepted => sign_in_with_code(&state, at),
+        Redeemed::Accepted => sign_in_with_code(&state, at, &headers, body.shared),
     }
 }
 
-fn sign_in_with_code(state: &WsState, at: chrono::DateTime<chrono::Utc>) -> Response {
-    let minted = match hq_db::web_auth::mint(&state.db, CODE_SIGN_IN_LABEL, at.timestamp(), None) {
+fn sign_in_with_code(
+    state: &WsState,
+    at: chrono::DateTime<chrono::Utc>,
+    headers: &HeaderMap,
+    shared: bool,
+) -> Response {
+    let ua = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default();
+    let (browser, system) = names::parse(ua);
+    let label = names::label(browser, system, CODE_SIGN_IN_LABEL);
+    let device = hq_db::web_auth::SignIn {
+        browser: browser.map(str::to_string),
+        system: system.map(str::to_string),
+        shared,
+    };
+    let minted = match hq_db::web_auth::mint_sign_in(&state.db, &label, &device, at.timestamp()) {
         Ok(minted) => minted,
         Err(e) => {
             tracing::error!(
@@ -246,19 +268,52 @@ fn sign_in_with_code(state: &WsState, at: chrono::DateTime<chrono::Utc>) -> Resp
         }
     };
     tracing::info!(device = %minted.id, "web: a device signed in with a one-time code");
-    state.notify_owner(
-        DEVICE_SIGN_IN_SOURCE,
-        "A new device signed in to HQ",
-        &format!(
-            "A device signed in with a one-time code at {} UTC. If it was not you, open \
-             Settings, Devices in HQ and sign it out.",
-            at.format("%Y-%m-%d %H:%M")
-        ),
-    );
+    ask_owner_about(state, &minted.id, &label, at);
     no_store(StatusCode::OK, json!({ "token": minted.token }))
 }
 
+/// A new sign-in is a Needs you item: "It was me" answers it, "Sign it out" signs the device out
+/// (`DELETE /api/auth/devices/{id}`), which answers it too.
+fn ask_owner_about(
+    state: &WsState,
+    device_id: &str,
+    label: &str,
+    at: chrono::DateTime<chrono::Utc>,
+) {
+    use hq_core::types::{ValueItem, ValueKind};
+    let item = ValueItem::new(
+        DEVICE_SIGN_IN_SOURCE,
+        ValueKind::ActionNeeded,
+        "A new sign-in to your HQ",
+        format!(
+            "{label} signed in with a one-time code at {} UTC. If it was not you, sign it out \
+             now. Then make a new code only on your own device.",
+            at.format("%Y-%m-%d %H:%M")
+        ),
+    )
+    .with_dedup_key(format!("{SIGN_IN_ITEM_PREFIX}{device_id}"));
+    if let Err(e) = hq_db::value_items::insert(&state.db, &item) {
+        tracing::warn!("web: the new sign-in was not put in the inbox: {e:#}");
+    }
+}
+
+/// Answers the new sign-in item of `device_id`, if it still waits: the device was signed out.
+pub(crate) fn settle_sign_in_item(db: &hq_db::Database, device_id: &str) {
+    let key = format!("{SIGN_IN_ITEM_PREFIX}{device_id}");
+    let settled = db.with_conn(|c| {
+        Ok(c.execute(
+            "UPDATE value_items SET state='dismissed', engagement='dismissed', engaged_at=datetime('now') \
+             WHERE dedup_key = ?1 AND state IN ('pending', 'delivered', 'routed')",
+            [key],
+        )?)
+    });
+    if let Err(e) = settled {
+        tracing::warn!(device = %device_id, "web: a signed-out device's sign-in item stays open: {e}");
+    }
+}
+
 pub(crate) mod devices;
+mod names;
 
 #[cfg(test)]
 mod tests;

@@ -1,131 +1,516 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { Search, X } from 'lucide-react'
+import { t } from '~/strings'
+import { useHQStore } from '~/store/hqStore'
+import { useThreadStore } from '~/store/threadStore'
+import { useSharedConnection } from '~/lib/connection'
+import { useEdition } from '~/lib/edition'
+import { globalSessionsApi } from '~/lib/sessionsApi'
+import { STATUS_LABELS } from '~/lib/tasksApi'
+import { agentName, computerName } from '~/lib/names'
+import { sessionTitle, statusInfo } from '~/lib/workbench'
+import { relTime } from '~/lib/time'
+import { toastUndo } from '~/lib/toast'
+import { currentHqId } from '~/lib/savedCopy'
+import { NEW_CHAT_KEY, restoreDraft } from '~/components/chat/draftStore'
+import {
+  ASK_MAX,
+  LITE_SCOPES,
+  SCOPES,
+  foundParts,
+  folderLabel,
+  folderTrail,
+  matchChats,
+  matchHelpers,
+  matchTasks,
+  readRecent,
+  searchFailureLine,
+  topFolders,
+  visibleRows,
+  withRecent,
+  writeRecent,
+  type SearchScope,
+} from '~/lib/search'
+import type { SearchHit } from '~/lib/vaultApi'
 import { useVaultSearch } from './useVaultSearch'
+import { forgetSearch, readBack, rememberSearch } from '~/lib/searchBack'
 
-function HighlightedSnippet({ text, query }: { text: string; query: string }) {
-  if (!query.trim()) return <>{text}</>
-  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`(${escaped})`, 'gi')
-  const parts = text.split(regex)
+type Kind = Exclude<SearchScope, 'all'>
+
+interface Row {
+  id: string
+  title: string
+  sub: string
+  trail?: string
+  pill?: string
+  open: () => void
+}
+
+interface OpenDetail {
+  scope?: SearchScope
+  folder?: string
+  q?: string
+  scroll?: number
+}
+
+const CHIP_KEYS = {
+  all: 'search_chip_all',
+  notes: 'search_chip_notes',
+  tasks: 'search_chip_tasks',
+  chats: 'search_chip_chats',
+  helpers: 'search_chip_helpers',
+} as const
+
+const FIELD_KEYS = {
+  all: 'search_field_all',
+  notes: 'search_field_notes',
+  tasks: 'search_field_tasks',
+  chats: 'search_field_chats',
+  helpers: 'search_field_helpers',
+} as const
+
+const NONE_KEYS = {
+  notes: 'search_none_notes',
+  tasks: 'search_none_tasks',
+  chats: 'search_none_chats',
+  helpers: 'search_none_helpers',
+} as const
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+function Found({ text, query }: { text: string; query: string }) {
   return (
     <>
-      {parts.map((part, i) =>
-        regex.test(part) ? (
-          <mark key={i} style={{ background: 'rgba(255,179,0,0.25)', color: 'var(--accent-amber)', borderRadius: 2 }}>{part}</mark>
-        ) : (
-          <span key={i}>{part}</span>
-        )
-      )}
+      {foundParts(text, query).map((p, i) => (p.found ? <strong key={i}>{p.text}</strong> : <span key={i}>{p.text}</span>))}
     </>
   )
 }
 
+/** The one Search: Ctrl or Cmd K, the top bar field and the Notes pill open it over whatever place you are in. */
 export function SearchOverlay() {
-  const [isOpen, setIsOpen] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const close = useCallback(() => setIsOpen(false), [])
-  const { query, setQuery, results, isLoading, selectedIndex, openResult, onKeyDown, reset } = useVaultSearch(close)
+  const [open, setOpen] = useState(false)
+  const [start, setStart] = useState<OpenDetail>({})
+  const opener = useRef<Element | null>(null)
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
-        e.preventDefault()
-        setIsOpen((v) => !v)
-      }
-      if (e.key === 'Escape') setIsOpen(false)
+    const show = (detail: OpenDetail) => {
+      opener.current = document.activeElement
+      setStart(detail)
+      setOpen(true)
     }
-    const onOpen = () => setIsOpen(true)
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        if (open) setOpen(false)
+        else show({})
+      }
+    }
+    const onOpen = (e: Event) => show((e as CustomEvent<OpenDetail | null>).detail ?? {})
+    // Back from an opened result lands on the entry marked at that time: Search reopens once, as it was left.
+    const onPop = () => {
+      const back = readBack(window.location.search, window.history.state)
+      if (!back) return
+      forgetSearch()
+      show({ q: back.q, scope: back.scope, ...(back.folder ? { folder: back.folder } : {}), scroll: back.scroll })
+    }
     window.addEventListener('keydown', onKey)
     window.addEventListener('hq:open-search', onOpen)
+    window.addEventListener('popstate', onPop)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('hq:open-search', onOpen)
+      window.removeEventListener('popstate', onPop)
     }
+  }, [open])
+
+  const close = useCallback(() => {
+    setOpen(false)
+    const back = opener.current
+    if (back instanceof HTMLElement) requestAnimationFrame(() => back.focus())
   }, [])
 
-  useEffect(() => {
-    if (isOpen) {
-      reset()
-      inputRef.current?.focus()
-    }
-  }, [isOpen, reset])
+  if (!open) return null
+  return <SearchPanel start={start} close={close} />
+}
 
-  if (!isOpen) return null
+function SearchPanel({ start, close }: { start: OpenDetail; close: () => void }) {
+  const lite = useEdition() === 'lite'
+  const scopes = lite ? LITE_SCOPES : SCOPES
+  const navigate = useNavigate()
+  const connection = useSharedConnection()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [scope, setScope] = useState<SearchScope>(start.folder ? 'notes' : (start.scope ?? 'all'))
+  const [folder, setFolder] = useState<string | null>(start.folder ?? null)
+  const [expanded, setExpanded] = useState<Kind | null>(null)
+  const [selected, setSelected] = useState(0)
+  const hqId = currentHqId()
+  const [recent, setRecent] = useState(() => readRecent(hqId))
+
+  const notes = useVaultSearch(() => undefined, folder, start.q)
+  const { query, setQuery, again } = notes
+  const typed = query.trim().length > 0
+
+  const tasks = useHQStore((s) => s.tasks)
+  const threads = useThreadStore((s) => s.threads)
+  const helpersQuery = useQuery({
+    queryKey: ['search', 'helpers'],
+    queryFn: () => globalSessionsApi.list({}),
+    enabled: !lite,
+    staleTime: 30_000,
+  })
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  // HQ coming back runs a search that failed again, without a tap.
+  const wasFailed = useRef(false)
+  useEffect(() => {
+    if (connection === 'connected' && wasFailed.current) again()
+    wasFailed.current = notes.failed
+  }, [connection, notes.failed, again])
+
+  const wantsNotes = scope === 'all' || scope === 'notes'
+  const wantsChats = !lite && (scope === 'all' || scope === 'chats')
+  const wantsTasks = scope === 'all' || scope === 'tasks'
+  const wantsHelpers = !lite && (scope === 'all' || scope === 'helpers')
+  const notesFailed = typed && wantsNotes && notes.failed
+
+  const taskHits = useMemo(() => (typed && wantsTasks ? matchTasks(tasks, query) : []), [typed, wantsTasks, tasks, query])
+  const helperHits = useMemo(
+    () => (typed && wantsHelpers ? matchHelpers(helpersQuery.data ?? [], query) : []),
+    [typed, wantsHelpers, helpersQuery.data, query],
+  )
+  const chatHits = useMemo(() => (typed && wantsChats ? matchChats(threads, query) : []), [typed, wantsChats, threads, query])
+  const noteHits: SearchHit[] = typed && wantsNotes && !notes.failed ? notes.results : []
+
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (start.scroll && listRef.current) listRef.current.scrollTop = start.scroll
+  }, [start.scroll, noteHits.length, taskHits.length])
+
+  const go = useCallback(
+    (row: Row) => {
+      setRecent((r) => writeRecent(hqId, withRecent(r, query)))
+      if (query.trim()) rememberSearch({ q: query, scope, folder, scroll: listRef.current?.scrollTop ?? 0 })
+      close()
+      row.open()
+    },
+    [hqId, query, scope, folder, close],
+  )
+
+  const rows = useMemo<Record<Kind, Row[]>>(
+    () => ({
+      notes: noteHits.map((h) => ({
+        id: `note:${h.notePath}`,
+        title: h.title,
+        trail: folderTrail(h.notePath.split('/').slice(0, -1).join('/')),
+        sub: h.snippet,
+        open: () => void navigate({ to: '/notes/$', params: { _splat: h.notePath } }),
+      })),
+      tasks: taskHits.map((x) => ({
+        id: `task:${x.id}`,
+        title: x.title,
+        sub: t('search_task_line', { id: x.display_id, status: STATUS_LABELS[x.status] }),
+        open: () => void navigate({ to: '/tasks/$id', params: { id: x.id } }),
+      })),
+      chats: chatHits.map((x) => ({
+        id: `chat:${x.threadId}`,
+        title: x.title,
+        sub: [relTime(x.updatedAt), x.lastMessagePreview].filter(Boolean).join(' · '),
+        open: () => void navigate({ to: '/chat/$id', params: { id: x.threadId } }),
+      })),
+      helpers: helperHits.map((s) => {
+        const info = statusInfo(s)
+        return {
+          id: `helper:${s.id}`,
+          title: sessionTitle(s),
+          sub: t('search_helper_line', { agent: agentName(s.harness), computer: computerName(s.host), state: info.word }),
+          pill: info.warn || info.agent === 'blocked' ? info.word : undefined,
+          open: () => void navigate({ to: '/helpers/$id', params: { id: s.id } }),
+        }
+      }),
+    }),
+    [noteHits, taskHits, chatHits, helperHits, navigate],
+  )
+
+  const order: Kind[] = scope === 'all' ? ['notes', 'tasks', 'chats', 'helpers'] : [scope]
+  const shown = order.map((kind) => ({
+    kind,
+    all: rows[kind],
+    rows: visibleRows(rows[kind], scope !== 'all' || expanded === kind),
+  }))
+  const flat = shown.flatMap((g) => g.rows)
+  const active = Math.min(selected, Math.max(flat.length - 1, 0))
+  const total = rows.notes.length + rows.tasks.length + rows.chats.length + rows.helpers.length
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      close()
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelected((i) => (flat.length ? (i + 1) % flat.length : 0))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelected((i) => (flat.length ? (i - 1 + flat.length) % flat.length : 0))
+    } else if (e.key === 'Enter' && flat[active]) {
+      e.preventDefault()
+      go(flat[active])
+    }
+  }
+
+  const pickScope = (next: SearchScope) => {
+    setScope(next)
+    setExpanded(null)
+    setSelected(0)
+  }
+
+  const clearRecent = () => {
+    const before = recent
+    setRecent(writeRecent(hqId, []))
+    toastUndo(t('search_recent_cleared'), async () => setRecent(writeRecent(hqId, before)), t('search_recent'))
+  }
+
+  const askNotes = noteHits.slice(0, ASK_MAX)
+  // Chat has no attach seam yet: the notes go into the new chat's draft as note references.
+  const ask = () => {
+    restoreDraft(NEW_CHAT_KEY, askNotes.map((h) => `\`${h.notePath}\``).join('\n'))
+    close()
+    void navigate({ to: '/chat', search: { compose: '1' } })
+  }
+
+  const folders = scope === 'notes' && !folder ? topFolders(notes.results) : []
+  const placeholder = lite
+    ? t('search_field_lite')
+    : folder
+      ? t('search_field_notes_in', { folder: folderLabel(folder) })
+      : t(FIELD_KEYS[scope])
+  const savedAt = helpersQuery.dataUpdatedAt ? clock(helpersQuery.dataUpdatedAt) : null
+  const countOf = (s: SearchScope) => (s === 'all' ? total : rows[s].length)
+  const countKnown = (s: SearchScope) => typed && !(notesFailed && (s === 'notes' || s === 'chats'))
+  const listId = 'hq-search-list'
 
   return (
     <>
-      <div className="fixed inset-0 z-50 hq-scrim" onClick={() => setIsOpen(false)} />
-
+      <div className="fixed inset-0 z-50 hq-scrim" onClick={close} />
       <div
-        className="fixed z-50 w-full shadow-2xl overflow-hidden flex flex-col inset-0 pad-safe-top rounded-none md:inset-auto md:top-[10vh] md:left-1/2 md:-translate-x-1/2 md:max-w-2xl md:rounded-2xl md:max-h-[70vh] hq-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('search_open_label')}
+        className="fixed z-50 w-full shadow-2xl overflow-hidden flex flex-col inset-0 pad-safe-top rounded-none md:inset-auto md:top-[10vh] md:left-1/2 md:-translate-x-1/2 md:max-w-[760px] md:rounded-2xl md:max-h-[70vh] hq-modal"
       >
-        <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
-          <span className="text-base" style={{ color: 'var(--text-dim)' }}>⌕</span>
+        <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--line)' }}>
+          <Search className="w-4 h-4 shrink-0" style={{ color: 'var(--ink-muted)' }} aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
+            role="combobox"
+            aria-expanded={flat.length > 0}
+            aria-controls={listId}
+            aria-activedescendant={flat.length > 0 ? `hq-search-row-${active}` : undefined}
+            aria-label={placeholder}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setSelected(0)
+            }}
             onKeyDown={onKeyDown}
-            placeholder="Search vault..."
-            className="flex-1 bg-transparent outline-none "
-            style={{ color: 'var(--text-primary)', fontSize: '16px', caretColor: 'var(--accent-green)' }}
+            placeholder={placeholder}
+            className="flex-1 min-w-0 bg-transparent outline-none"
+            style={{ color: 'var(--ink)', fontSize: 16 }}
             enterKeyHint="go"
           />
-          {isLoading && (
-            <div className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: 'var(--accent-amber)', borderTopColor: 'transparent' }} />
-          )}
-          <button onClick={() => setIsOpen(false)} style={{ color: 'var(--text-dim)' }}>
-            <span className="text-sm ">✕</span>
+          <button type="button" onClick={close} aria-label={t('search_close')} className="a-ib">
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {query && !isLoading && results.length === 0 && (
-            <div className="px-6 py-12 text-center text-sm " style={{ color: 'var(--text-dim)' }}>
-              No vault results for "{query}"
+        <div role="tablist" aria-label={t('search_chips_label')} className="a-chips">
+          {scopes.map((s) => (
+            <button key={s} type="button" role="tab" aria-selected={scope === s} className={`a-chip${scope === s ? ' is-on' : ''}`} onClick={() => pickScope(s)}>
+              {t(CHIP_KEYS[s])}
+              {countKnown(s) && <em>{countOf(s)}</em>}
+            </button>
+          ))}
+          {folder && (
+            <button type="button" className="a-chip is-on" onClick={() => setFolder(null)} aria-label={t('search_chip_in_folder_clear', { folder: folderLabel(folder) })}>
+              {t('search_chip_in_folder', { folder: folderLabel(folder) })} <X className="w-3 h-3" aria-hidden="true" />
+            </button>
+          )}
+          {folders.length > 0 && (
+            <>
+              <button type="button" className="a-chip is-on" aria-pressed="true">
+                {t('search_chip_all_folders')}
+              </button>
+              {folders.map((f) => (
+                <button key={f.folder} type="button" className="a-chip" onClick={() => setFolder(f.folder)}>
+                  {f.folder} <em>{f.count}</em>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+
+        {folder && (
+          <p className="px-4 pb-2 text-xs" style={{ color: 'var(--ink-muted)' }}>
+            {t('search_folder_note', { folder: folderTrail(folder) })}
+          </p>
+        )}
+
+        <div ref={listRef} id={listId} role="listbox" aria-label={t('search_results_label')} className="flex-1 overflow-y-auto">
+          {!typed && (
+            <div className="px-4 py-3">
+              {recent.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
+                      {t('search_recent')}
+                    </p>
+                    <button type="button" className="a-btn secondary" onClick={clearRecent}>
+                      {t('search_recent_clear')}
+                    </button>
+                  </div>
+                  <ul className="mt-2">
+                    {recent.map((r) => (
+                      <li key={r} className="flex items-center justify-between">
+                        <button type="button" className="text-left text-sm py-1.5 flex-1" onClick={() => setQuery(r)}>
+                          {r}
+                        </button>
+                        <button type="button" className="a-ib" aria-label={t('search_recent_remove', { query: r })} onClick={() => setRecent(writeRecent(hqId, recent.filter((x) => x !== r)))}>
+                          <X className="w-3 h-3" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="text-sm py-3" style={{ color: 'var(--ink-muted)' }}>
+                {scope === 'notes' ? t('search_hint_notes') : t('search_hint_empty')}
+              </p>
+              {lite && (
+                <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
+                  {t('search_lite_note')}
+                </p>
+              )}
             </div>
           )}
 
-          {results.map((hit, idx) => (
-            <button
-              key={hit.notePath}
-              onClick={() => openResult(hit)}
-              className="w-full text-left px-4 py-3 transition-all"
-              style={{
-                borderBottom: '1px solid rgba(255,255,255,0.04)',
-                background: idx === selectedIndex ? 'rgba(167,139,250,0.06)' : 'transparent',
-                borderLeft: idx === selectedIndex ? '2px solid var(--accent-violet)' : '2px solid transparent',
-              }}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
-                  <HighlightedSnippet text={hit.title} query={query} />
-                </span>
-                <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
-                  {hit.notebook}
-                </span>
-              </div>
-              {hit.snippet && (
-                <p className="text-xs line-clamp-2 leading-relaxed mt-1" style={{ color: 'var(--text-dim)' }}>
-                  <HighlightedSnippet text={hit.snippet} query={query} />
-                </p>
+          {notesFailed && (
+            <div className="px-4 py-3 text-sm" role="status" style={{ color: 'var(--warn)' }}>
+              <p>{searchFailureLine(connection, lite)}</p>
+              {!lite && savedAt && <p style={{ color: 'var(--ink-muted)' }}>{t('search_saved_note', { time: savedAt })}</p>}
+              {!lite && <p style={{ color: 'var(--ink-muted)' }}>{t('search_back_note')}</p>}
+            </div>
+          )}
+
+          {typed && wantsNotes && notes.isLoading && !notes.failed && (
+            <p className="px-4 py-2 text-xs" style={{ color: 'var(--ink-muted)' }} role="status">
+              <span className="inline-block w-3 h-3 mr-2 rounded-full border-2 animate-spin align-middle" style={{ borderColor: 'var(--ink-muted)', borderTopColor: 'transparent' }} />
+              {t('search_loading')}
+            </p>
+          )}
+
+          {typed &&
+            shown.map((g, gi) => {
+              if (g.all.length === 0) return null
+              const offset = shown.slice(0, gi).reduce((n, x) => n + x.rows.length, 0)
+              const heading = t(CHIP_KEYS[g.kind])
+              return (
+                <section key={g.kind} aria-label={t('search_group_label', { kind: heading, n: g.all.length })}>
+                  <h3 className="px-4 pt-3 pb-1 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
+                    {heading} <span>{g.all.length}</span>
+                  </h3>
+                  {g.rows.map((r, i) => {
+                    const idx = offset + i
+                    const on = idx === active
+                    return (
+                      <div
+                        key={r.id}
+                        id={`hq-search-row-${idx}`}
+                        role="option"
+                        aria-selected={on}
+                        onClick={() => go(r)}
+                        onMouseMove={() => setSelected(idx)}
+                        className="px-4 py-2.5 cursor-pointer"
+                        style={{ background: on ? 'var(--surface-200)' : 'transparent', outline: on ? '2px solid var(--brand-blue)' : 'none', outlineOffset: -2 }}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm truncate" style={{ color: 'var(--ink)' }}>
+                            <Found text={r.title} query={query} />
+                          </span>
+                          {r.pill && (
+                            <span className="text-xs font-semibold px-2 rounded-full shrink-0" style={{ border: '1px solid var(--warn)', color: 'var(--warn)' }}>
+                              {r.pill}
+                            </span>
+                          )}
+                        </div>
+                        {r.trail && (
+                          <div className="text-xs truncate" style={{ color: 'var(--brand-blue)' }}>
+                            {r.trail}
+                          </div>
+                        )}
+                        {r.sub && (
+                          <p className="text-xs line-clamp-2" style={{ color: 'var(--ink-muted)' }}>
+                            <Found text={r.sub} query={query} />
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {g.all.length > g.rows.length && (
+                    <button
+                      type="button"
+                      className="px-4 py-2 text-sm font-semibold"
+                      style={{ color: 'var(--brand-blue)' }}
+                      onClick={() => {
+                        pickScope(g.kind)
+                        setExpanded(g.kind)
+                      }}
+                    >
+                      {t('search_show_all', { n: g.all.length })}
+                    </button>
+                  )}
+                  {g.kind === 'notes' && !lite && askNotes.length > 0 && (
+                    <button type="button" className="a-btn secondary mx-4 my-2" onClick={ask}>
+                      {noteHits.length === 1
+                        ? t('search_ask_one')
+                        : noteHits.length > ASK_MAX
+                          ? t('search_ask_first', { n: ASK_MAX })
+                          : t('search_ask_some', { n: noteHits.length })}
+                    </button>
+                  )}
+                </section>
+              )
+            })}
+
+          {typed && !notes.isLoading && total === 0 && !notesFailed && (
+            <div className="px-6 py-10 text-center text-sm" style={{ color: 'var(--ink-muted)' }}>
+              {scope === 'all' ? (
+                <>
+                  <p>{t('search_none_any')}</p>
+                  <p className="md:hidden">{t('search_none_try')}</p>
+                </>
+              ) : (
+                <>
+                  <p>{t(NONE_KEYS[scope])}</p>
+                  <button type="button" className="a-btn secondary mt-3" onClick={() => pickScope('all')}>
+                    {t('search_everything')}
+                  </button>
+                </>
               )}
-              <div className="text-[9px] mt-1.5 truncate" style={{ color: 'var(--accent-blue)', opacity: 0.55 }}>
-                {hit.notePath}
-              </div>
-            </button>
-          ))}
+            </div>
+          )}
         </div>
 
-        {results.length > 0 && (
-          <div className="px-4 py-2 flex items-center justify-between text-[11px] " style={{ color: 'var(--text-dim)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-            <span>{results.length} vault results</span>
-            <div className="flex items-center gap-3">
-              <span><kbd className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>↑↓</kbd> navigate</span>
-              <span><kbd className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>↵</kbd> open</span>
-            </div>
-          </div>
-        )}
+        <div className="hidden md:flex items-center gap-4 px-4 py-2 text-xs" style={{ color: 'var(--ink-muted)', borderTop: '1px solid var(--hairline)' }}>
+          <span>{t('search_key_up_down')}</span>
+          <span>{t('search_key_enter')}</span>
+          <span>{t('search_key_tab')}</span>
+          <span>{t('search_key_esc')}</span>
+        </div>
       </div>
     </>
   )

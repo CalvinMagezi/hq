@@ -5,7 +5,6 @@ object FirstRunWords {
     const val WELCOME_TITLE = "Welcome to HQ"
     const val WELCOME_BODY = "HQ is your own AI assistant that lives on this phone and keeps its notes, tasks and memory here."
     const val SET_UP_NEW = "Set up a new HQ"
-    const val RESTORE = "Restore from a backup"
 
     const val MODEL_TITLE = "Your AI model"
     const val MODEL_BODY = "HQ needs a key from an AI service to think. It is kept sealed on this phone and is never written to a file."
@@ -15,7 +14,7 @@ object FirstRunWords {
     const val PASTE = "Paste"
     const val SHOW = "Show key"
     const val HIDE = "Hide key"
-    const val BASE_URL_LABEL = "Base URL"
+    const val BASE_URL_LABEL = "Service address"
     const val BASE_URL_HINT = "https://example.com/v1"
     const val MODEL_NAME_LABEL = "Model name (optional)"
     const val CHECK_KEY = "Check key"
@@ -26,7 +25,7 @@ object FirstRunWords {
     const val BACK = "Back"
     const val SKIP = "Skip"
 
-    const val CHAT_TITLE = "Chat apps (optional)"
+    const val CHAT_TITLE = "Messaging apps (optional)"
     const val CHAT_BODY = "Talk to HQ from Telegram or Discord. Paste a bot token for either one, or skip this and add them later in Settings."
     const val TELEGRAM_LABEL = "Telegram bot token"
     const val DISCORD_LABEL = "Discord bot token"
@@ -37,8 +36,6 @@ object FirstRunWords {
     const val START = "Start HQ"
     const val STARTING = "Starting..."
 
-    const val RESTORE_TITLE = "Restore a backup"
-    const val RESTORE_BODY = "Pick the backup file (it ends in .hqbak), then its passphrase or its key file. Your notes and tasks come back as they were."
     const val PICK_BACKUP = "Choose backup file"
     const val PICK_KEY_FILE = "Choose key file"
     const val USE_PASSPHRASE = "Use a passphrase"
@@ -57,7 +54,7 @@ object FirstRunWords {
     const val KEYS_BODY = "These are the names of the keys sealed on this phone. Their values are never shown."
     const val KEYS_NONE = "No keys are stored."
     const val KEYS_ADD = "Add or replace a key"
-    const val KEYS_NAME_LABEL = "Name"
+    const val KEYS_NAME_LABEL = "Exact name HQ looks for"
     const val KEYS_NAME_HINT = "OPENROUTER_API_KEY"
     const val KEYS_SAVE = "Save and restart HQ"
     const val KEYS_REMOVE = "Remove"
@@ -67,14 +64,20 @@ object FirstRunWords {
 
     const val ERR_KEY_EMPTY = "Paste your key first."
     const val ERR_KEY_SPACES = "A key has no spaces or line breaks."
-    const val ERR_URL_EMPTY = "Enter the base URL."
-    const val ERR_URL_SHAPE = "The base URL must start with https:// or http:// and have no spaces."
-    const val ERR_URL_LOGIN = "Leave a username or password out of the URL."
+    const val ERR_URL_EMPTY = "Enter the service address."
+    const val ERR_URL_SHAPE = "The address must start with https:// or http:// and have no spaces."
+    const val ERR_URL_LOGIN = "Leave a username or password out of the address."
     const val ERR_PASSPHRASE_SHORT = "A passphrase has at least 10 characters."
     const val ERR_NOT_SAVED = "The key could not be sealed on this phone."
-    const val ERR_CONFIG_HAS_BACKENDS = "Your settings file already lists AI backends. Add this service there."
-    const val ERR_CONFIG_WRITE = "The settings file could not be written."
+    const val ERR_CONFIG_HAS_BACKENDS = "HQ already has AI services set up. Add this one there."
+    const val ERR_CONFIG_WRITE = "The settings could not be saved."
 
-    fun checkFailed(status: Int?): String = if (status == null) "Could not reach the service. Check your connection." else "The service answered $status."
+    fun checkFailed(status: Int?): String = if (status == null) "Could not reach the service. Check your connection." else when (status) {
+        401, 403 -> "The service did not accept this key."
+        404 -> "The service address looks wrong."
+        429 -> "The service says too many tries. Wait a minute."
+        in 500..599 -> "The service had a problem. Try again later."
+        else -> "The service did not accept the check."
+    }
     fun restoreFailedWith(reason: String): String = "$RESTORE_FAILED $reason"
 }

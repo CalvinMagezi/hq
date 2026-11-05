@@ -39,6 +39,16 @@ data class InboxCard(
     val fullBody: String = "",
     /** For a helper's question the server read: the dialog the answer goes to. Answered through the server, never by keys typed here. */
     val dialog: HqClient.AlertDialog? = null,
+    /** HQ's own word that allowing this takes something away, and the one verb for it. The card's words never decide this. */
+    val loses: Boolean = false,
+    val verb: String? = null,
+    /** For an approval: the tool and its arguments, exactly as HQ sent them. */
+    val tool: String? = null,
+    val toolArgs: String? = null,
+    /** For an approval from a voice turn: what the owner said, taken off the front of the description. */
+    val quote: String? = null,
+    /** The chat an approval came from, so Keep going can answer in it. */
+    val threadId: String? = null,
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
@@ -61,9 +71,10 @@ object InboxWords {
                 InboxCard(item.id, CardKind.TaskReview, Plain.strip(item.title.trim()).replace(TASK_PREFIX, ""), body, "Task ready to check", item.createdAt, CardIcon.Task, null, false, "Check it", item.link, askedBy(item, null), item.state, taskRef = TASK_PREFIX.find(item.title.trim())?.value?.trim()?.removeSuffix(":"))
             }
             item.actions.any { it == "approve" || it == "reject" } -> {
-                val full = Plain.strip(item.description.trim())
+                val (quote, rest) = splitQuote(item.description)
+                val full = Plain.strip(rest.trim())
                 val body = if (full.length > APPROVAL_BODY) full.take(APPROVAL_BODY).trimEnd() + "…" else full
-                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, full.length <= APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state, fullBody = full)
+                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, full.length <= APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state, fullBody = full, loses = item.approval?.loses == true, verb = item.approval?.verb, tool = item.approval?.tool?.ifBlank { null }, toolArgs = item.approval?.args?.ifBlank { null }, quote = quote, threadId = item.approval?.threadId)
             }
             else -> InboxCard(item.id, CardKind.Update, Plain.strip(item.title.trim()), Plain.strip(item.description.trim()), whereOf(item, null), item.createdAt, updateIcon(item), null, false, "", item.link, askedBy(item, null), item.state)
         }
@@ -112,11 +123,19 @@ object InboxWords {
         val canAllow = d.approveLabel != null
         return InboxCard(
             item.id, CardKind.HelperAsks, "$who needs your OK", body, whereOf(item, host), item.createdAt, CardIcon.Sparkle, d.sessionId, canAllow,
-            if (canAllow) "Allow once" else "Open helper", item.link, askedBy(item, host), item.state, dialog = d,
+            if (canAllow) "Allow once" else "Open helper", item.link, askedBy(item, host), item.state, dialog = d, loses = d.loses, verb = d.verb,
         )
     }
 
     /** What the helper is asking, from the screen excerpt the supervisor includes. */
+    private val SAID = Regex("^You said: “(.*?)”\\n\\n", RegexOption.DOT_MATCHES_ALL)
+
+    /** An approval from a voice turn starts with the question the owner spoke; it is shown as a quote and left out of the body. */
+    internal fun splitQuote(description: String): Pair<String?, String> {
+        val m = SAID.find(description.trimStart()) ?: return null to description
+        return m.groupValues[1].trim().ifBlank { null } to description.trimStart().removeRange(m.range)
+    }
+
     internal fun lastLine(description: String): String {
         val lines = description.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val readIt = lines.indexOfFirst { it.startsWith("Read it with") }
@@ -145,7 +164,7 @@ object InboxWords {
         }
     }
 
-    private fun parse(value: String): Instant? = try { OffsetDateTime.parse(value).toInstant() } catch (e: DateTimeParseException) { null }
+    private fun parse(value: String): Instant? = example.hq.spike.data.Instants.parse(value)
 
     /** "now", "2 min ago", "1 hour ago", "3 days ago": the age in a card's meta line. */
     fun ago(createdAt: String, now: Instant = Instant.now()): String {

@@ -48,9 +48,16 @@ data class StoredMessage(
     val createdAt: String,
     val tools: List<ToolStep>,
     val stopped: Boolean,
+    /** HQ's own mark that the question was spoken (`meta.source`), and the id the sender gave it. */
+    val source: String? = null,
+    val clientId: String? = null,
     val offer: Offer? = null,
 ) {
+    val spoken: Boolean get() = role == "user" && source == SPOKEN
+
     companion object {
+        const val SPOKEN = "voice"
+
         fun from(o: JSONObject): StoredMessage {
             val meta = o.optJSONObject("meta")
             return StoredMessage(
@@ -61,6 +68,8 @@ data class StoredMessage(
                 createdAt = o.optString("created_at", ""),
                 tools = meta?.optJSONArray("tool_steps").toToolSteps(),
                 stopped = meta?.optBoolean("stopped", false) ?: false,
+                source = meta?.optString("source", "")?.ifBlank { null },
+                clientId = meta?.optString("client_id", "")?.ifBlank { null },
                 offer = Offer.from(meta?.optJSONObject("offer")),
             )
         }
@@ -68,7 +77,7 @@ data class StoredMessage(
 }
 
 /** A note's text as saved, front matter included. [truncated] when hq cut a very long note. */
-data class NoteBody(val path: String, val content: String, val truncated: Boolean)
+data class NoteBody(val path: String, val content: String, val truncated: Boolean, val hash: String? = null)
 
 data class ThreadList(val threads: List<ChatThread>, val running: Set<String>)
 

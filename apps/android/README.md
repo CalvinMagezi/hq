@@ -100,9 +100,11 @@ higher or lower than the board.
 
 ## Hey HQ: the phone's assistant
 
-AgentHQ can take Google's place as the phone's assistant: Settings, Apps, Choose default apps, Digital
-assistant app, AgentHQ. Holding Home (or the assist gesture) then opens a voice sheet over whatever is on
-screen. It does not open over the lock screen (unlock first). It listens, shows what it heard, sends those
+AgentHQ can take Google's place as the phone's assistant. The app offers it on the last first-run step and in
+Settings, Phone assistant, which open Android's own page (Digital assistant app, AgentHQ) and read the answer
+back; it is optional and checked live, never stored. Holding Home (or the assist gesture) then opens a voice sheet over whatever is on
+screen. It does not open over the lock screen (unlock first): the signed `lockScreenAssistant` switch is off, and Settings
+says so. Stop only stops; closing the sheet keeps a running answer in the chat (Open in chat). It listens, shows what it heard, sends those
 words to HQ's chat with a note asking for a short plain-text answer, and shows the reply as it streams
 ("Looking it up" while HQ runs a tool first). Answers are text only: the on-device voice was tried and
 retired. Tap the button to stop listening early, to interrupt the reply, or to ask a follow-up in the same
@@ -125,9 +127,11 @@ lets in only apps that hold the microphone permission. Before the models are dow
 People open with "Hey HQ" out of habit; the recogniser has never learned "HQ" and writes it as "Ue",
 "Ahq" and so on, so `voice/Invocation.kt` takes that greeting off the start before the question is sent.
 
-The speech model (about 55 MB) is downloaded once, after the owner taps Get under a notice, from the
-sherpa-onnx releases on GitHub. Each archive has a pinned SHA-256 in `voice/VoiceModels.kt`, and only the
-named files are unpacked into `no_backup/voice/`. The download sends nothing about the owner. Logcat gets
+The speech model (57 MB) is downloaded once, after the owner taps Download in the voice sheet, from the
+sherpa-onnx releases on GitHub. It is one job on the shared download engine (`download/`), so it asks before
+using mobile data or a paid Wi-Fi, resumes, and shows in the Downloads notice. The archive has a pinned
+SHA-256 in `voice/VoiceModels.kt`, and only the named files are unpacked into `no_backup/voice/`. When it
+lands the sheet says so and waits for a tap: nothing listens by itself. Settings, Speech model deletes it. The download sends nothing about the owner. Logcat gets
 the sheet's phase changes with a clock (`adb logcat -s HqVoice`), never the words.
 
 Test it beside the real app without touching it: `./gradlew :app:assembleDebug -Phq.appId=online.agenthq.voicetest`,

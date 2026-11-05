@@ -85,18 +85,38 @@ pub struct OwnerApproval {
     db: Arc<Database>,
     /// Which chat the approvals belong to, set by the runtime and never by the model.
     scope: String,
+    /// The owner's question when it was asked by voice, quoted at the top of each request.
+    spoken: Option<String>,
+}
+
+/// The dedup-key prefix every request from chat `scope` starts with.
+pub fn owner_approval_prefix(scope: &str) -> String {
+    format!("{KEY_PREFIX}:{scope}:")
 }
 
 impl OwnerApproval {
     pub fn new(db: Arc<Database>, scope: impl Into<String>) -> Arc<Self> {
+        Self::for_turn(db, scope, None)
+    }
+
+    /// Like [`Self::new`], for a turn whose question was spoken: each request quotes it.
+    pub fn for_turn(
+        db: Arc<Database>,
+        scope: impl Into<String>,
+        spoken: Option<&str>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             db,
             scope: scope.into(),
+            spoken: spoken
+                .map(str::trim)
+                .filter(|q| !q.is_empty())
+                .map(str::to_string),
         })
     }
 
     fn prefix(&self) -> String {
-        format!("{KEY_PREFIX}:{}:", self.scope)
+        owner_approval_prefix(&self.scope)
     }
 
     fn key(&self, tool: &str, args: &Value) -> String {
@@ -144,7 +164,8 @@ impl OwnerApproval {
                  the owner. Wait for them to answer before asking for more."
             ));
         }
-        let shown = serde_json::to_string_pretty(&without_runtime_keys(args)).unwrap_or_default();
+        let held = without_runtime_keys(args);
+        let shown = serde_json::to_string_pretty(&held).unwrap_or_default();
         if shown.chars().count() > MAX_APPROVAL_ARGS_CHARS {
             return Err(format!(
                 "This {tool} call is too large for the owner to review in a message, so it cannot \
@@ -156,12 +177,19 @@ impl OwnerApproval {
             ValueKind::ActionNeeded,
             format!("HQ wants to run {tool}"),
             format!(
-                "Your chat with HQ asks to run {tool} with exactly these arguments:\n\n{shown}\n\n\
-                 Approve to let it run once. Dismiss to refuse."
+                "{}Your chat with HQ asks to run {tool} with exactly these arguments:\n\n{shown}\n\n\
+                 Approve to let it run once. Dismiss to refuse.",
+                self.spoken
+                    .as_ref()
+                    .map(|q| format!("You said: \u{201c}{q}\u{201d}\n\n"))
+                    .unwrap_or_default()
             ),
         )
         .with_dedup_key(key.to_string());
         item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(APPROVAL_TTL_HOURS));
+        // The call first: an item the apps can see always has its call to quote.
+        hq_db::owner_approvals::record(&self.db, &item.id, tool, &held)
+            .map_err(|_| lookup_failed())?;
         value_items::insert(&self.db, &item).map_err(|_| lookup_failed())
     }
 

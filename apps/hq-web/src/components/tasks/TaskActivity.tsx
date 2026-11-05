@@ -28,7 +28,7 @@ export type NoteRenderer = (path: string) => ReactNode
 const plainPath: NoteRenderer = (path) => <span className="break-all">{path}</span>
 
 const vaultLink: NoteRenderer = (path) => (
-  <Link to="/vault/$" params={{ _splat: path }} className="break-all text-neutral-200 hover:underline">
+  <Link to="/notes/$" params={{ _splat: path }} className="break-all text-neutral-200 hover:underline">
     {path}
   </Link>
 )
@@ -228,7 +228,7 @@ export function TaskActivityView({
 
 /** The activity panel in the task drawer: fetches the view and keeps it current. */
 export function TaskActivity({ task }: { task: TaskItem }) {
-  const found = usePolled(task.id, () => fetchTaskActivityClient(task.id), ACTIVITY_POLL_MS)
+  const found = usePolled(task.id, () => fetchTaskActivityClient(task.id), ACTIVITY_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], found.refresh)
   const { refresh } = found
   useEffect(() => {

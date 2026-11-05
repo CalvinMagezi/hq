@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useState } from 'react'
 import { X, Loader2, Plus } from 'lucide-react'
 import type { Folder, Initiative, Space, TaskItem, TaskPriority } from '~/lib/tasksApi'
@@ -171,7 +172,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
               ))}
             </select>
             {parentId && (
-              <p className="text-[11px] text-neutral-500 mt-1">Filed in the parent's initiative.</p>
+              <p className="text-[11px] text-neutral-500 mt-1">{t('tasks_filed_in_parent_list')}</p>
             )}
           </div>
 
@@ -179,13 +180,13 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <FieldLabel>Space</FieldLabel>
+                  <FieldLabel>{t('tasks_field_area')}</FieldLabel>
                   {addingSpace ? (
                     <div className="flex items-center gap-1.5">
                       <input
                         value={newSpaceName}
                         onChange={(e) => setNewSpaceName(e.target.value)}
-                        placeholder="New space name"
+                        placeholder={t('tasks_new_area_name')}
                         className="flex-1 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border"
                         style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                       />
@@ -210,7 +211,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
                       <button
                         type="button"
                         onClick={() => setAddingSpace(true)}
-                        title="New space"
+                        title={t('tasks_new_area')}
                         className="p-1.5 rounded-lg text-neutral-400 hover:text-emerald-400 hover:bg-white/10"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -225,7 +226,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
                     list="folder-names"
                     value={folderName}
                     onChange={(e) => setFolderName(e.target.value)}
-                    placeholder="None — directly in Space"
+                    placeholder={t('tasks_none_in_area')}
                     className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border"
                     style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                   />
@@ -238,7 +239,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
               </div>
 
               <div>
-                <FieldLabel>Initiative</FieldLabel>
+                <FieldLabel>{t('tasks_field_list')}</FieldLabel>
                 <input
                   list="initiative-names"
                   value={initiativeName}

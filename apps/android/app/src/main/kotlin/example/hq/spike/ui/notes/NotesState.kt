@@ -10,7 +10,6 @@ import example.hq.spike.ui.chat.blocks.NoteRefs
 /** A page pushed over the Notes home. Back pops one. */
 sealed interface NotesRoute {
     data class Folder(val path: String) : NotesRoute
-    data object Search : NotesRoute
     data class Reader(val path: String) : NotesRoute
     data class Write(val path: String?) : NotesRoute
 }
@@ -27,9 +26,11 @@ data class FolderView(val path: String, val folders: List<Pair<String, Int>> = e
 
 data class SearchHit(val path: String, val title: String, val notebook: String, val snippet: String)
 
-data class SearchState(val query: String = "", val hits: List<SearchHit> = emptyList(), val filter: String? = null, val loading: Boolean = false)
 
 enum class SaveStatus { Saved, Unsaved, Saving, Failed }
+
+/** A save HQ refused: [theirs] is their text once the owner asked to see it. */
+data class Conflict(val by: String?, val theirs: String? = null, val busy: Boolean = false)
 
 data class WriteState(
     val path: String?,
@@ -41,21 +42,16 @@ data class WriteState(
     val status: SaveStatus = SaveStatus.Saved,
     val chooser: Boolean = false,
     val leaving: Boolean = false,
+    /** The hash the note had when the editor opened; null for a new note or an older HQ. */
+    val base: String? = null,
+    /** Set when HQ refused the save because the note changed elsewhere. */
+    val conflict: Conflict? = null,
 ) {
     val isNew: Boolean get() = path == null
     val dirty: Boolean get() = text.text != original || (isNew && title.isNotBlank())
 
-    /** What the leave dialog says: the note by name, and that the text stays on the phone unless it is discarded. */
-    val leaveBody: String get() {
-        val name = title.ifBlank { path?.substringAfterLast('/')?.removeSuffix(".md").orEmpty() }
-        // Only the text is kept on the phone, not a title typed over an empty note.
-        val kept = if (text.text.isBlank()) "" else " Your text is kept on this phone unless you discard it."
-        return when {
-            !isNew -> "You edited ${name.ifBlank { "this note" }} and have not saved.$kept"
-            name.isNotBlank() -> "You wrote $name and have not saved it.$kept"
-            else -> "You wrote a note and have not saved it.$kept"
-        }
-    }
+    /** The note as the leave dialog names it. */
+    val leaveName: String get() = title.ifBlank { path?.substringAfterLast('/')?.removeSuffix(".md").orEmpty() }
 }
 
 data class NotesUi(
@@ -66,7 +62,6 @@ data class NotesUi(
     val folders: List<String> = emptyList(),
     val stack: List<NotesRoute> = emptyList(),
     val folder: FolderView? = null,
-    val search: SearchState = SearchState(),
     val reader: ReaderPhase = ReaderPhase.Loading,
     val write: WriteState? = null,
     val menu: Boolean = false,

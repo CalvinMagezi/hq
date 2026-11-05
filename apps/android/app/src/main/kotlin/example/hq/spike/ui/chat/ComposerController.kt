@@ -79,7 +79,7 @@ class ComposerController(
                 return
             }
             val (name, size) = describe(uri)
-            val reject = when { size == 0L -> "empty file"; size > MAX_BYTES -> "over 25 MB"; else -> null }
+            val reject = when { size == 0L -> FileError.Empty; size > MAX_BYTES -> FileError.TooBig; else -> null }
             val file = PendingFile(
                 UUID.randomUUID().toString(), uri.toString(), name, size, app.contentResolver.getType(uri).orEmpty(),
                 if (reject == null) FileStatus.Uploading else FileStatus.Failed, reject,
@@ -110,7 +110,7 @@ class ComposerController(
                 }
             }
             result.onSuccess { saved -> update(id) { it.copy(status = FileStatus.Ready, uploaded = saved, error = null) } }
-                .onFailure { e -> update(id) { it.copy(status = FileStatus.Failed, error = if (e.message?.contains("over the limit") == true) "over 25 MB" else PendingFile.UPLOAD_FAILED) } }
+                .onFailure { e -> update(id) { it.copy(status = FileStatus.Failed, error = if (e.message?.contains("over the limit") == true) FileError.TooBig else FileError.UploadFailed) } }
         }
     }
 

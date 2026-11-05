@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { Loader2, Send } from 'lucide-react'
 import { ErrorText } from './ErrorText'
@@ -25,7 +26,7 @@ export function useSend(sessionId: string, onSent: () => void | Promise<void>) {
       await onSent()
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send that.')
+      setError(err instanceof Error && !(err instanceof TypeError) ? err.message : t('helpers_tell_failed'))
       // A refused prompt usually means a dialog opened; show the screen it is waiting on.
       await onSent()
       return false

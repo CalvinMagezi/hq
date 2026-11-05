@@ -1,5 +1,6 @@
 package example.hq.spike
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -11,6 +12,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import example.hq.spike.data.HqClient.InboxItem
+import example.hq.spike.measure.Counter
+import example.hq.spike.measure.Counters
 import example.hq.spike.ui.inbox.CardKind
 import example.hq.spike.ui.shell.Links
 import example.hq.spike.ui.inbox.InboxCard
@@ -18,37 +21,103 @@ import example.hq.spike.ui.inbox.InboxWords
 import org.json.JSONObject
 
 /**
- * Turns the owner's pending items into Android notifications in the board's words: who needs what in a few words, a
- * body of one sentence, and buttons that are verbs. Allow asks for the phone to be unlocked first; Not now does not.
- * What is private is hidden on the lock screen.
+ * Turns the owner's pending items into Android notifications. By default a notice says who and what kind
+ * ([NoticeWords.general]) with Open as its only button. The details, and Decline and Allow once, are posted only while the
+ * owner has switched details on, the phone has a secure lock and it is unlocked ([detailsNow]); the hub posts the general
+ * words again when the phone locks. Every notice also carries a public version for owners who hide sensitive content.
  */
 object AlertPoster {
     const val NEEDS = "needs"
     const val UPDATES = "updates"
-    private const val MAX_BODY = 400
+    const val APP_UPDATES = "app_updates"
+    const val DOWNLOADS = "downloads"
+    const val HUB = "hub_min"
+
+    /** The running notice's first channel: Low, and importance cannot change after creation, so it was replaced. */
+    const val OLD_HUB = "hub"
+    const val EXTRA_NOTICE_TAP = "notice_tap"
     private const val ID_BASE = 100
     private const val ID_SPAN = 100_000
     private const val SDK_AUTH_ACTION = 31
     private const val PREFS = "alerts"
-    private const val ALLOW_ANSWERS = "allow_answers"
+    private const val SHOW_DETAILS = "show_details"
+    private const val OLD_ALLOW_ANSWERS = "allow_answers"
+    private const val UPGRADE_CHECKED = "details_migrated"
+    private const val UPGRADER_NOTE = "upgrader_note"
+    private const val SEEN = "seen"
     private const val RESULT_KEEP_MS = 15_000L
+    private const val UPDATES_PER_HOUR = 3
+    private const val HOUR_MS = 3_600_000L
+    private const val UPDATES_FOLD_ID = ID_BASE - 2
+    private const val UPD_START = "updates_window_start"
+    private const val UPD_COUNT = "updates_window_count"
     private val answeredAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    @Volatile private var appContext: Context? = null
 
+    /** The five channels, made once at the hub's start; names come from the string catalogue. */
     @JvmStatic
-    fun channels(): List<NotificationChannel> = listOf(
-        NotificationChannel(NEEDS, "Needs you", NotificationManager.IMPORTANCE_HIGH).apply { description = "Questions that wait for your answer" },
-        NotificationChannel(UPDATES, "Updates", NotificationManager.IMPORTANCE_DEFAULT).apply { description = "What HQ finished or noticed"; setSound(null, null) },
-    )
+    fun channels(c: Context): List<NotificationChannel> {
+        appContext = c.applicationContext
+        fun channel(id: String, name: Int, description: Int, importance: Int, silent: Boolean = false) =
+            NotificationChannel(id, c.getString(name), importance).apply { this.description = c.getString(description); if (silent) setSound(null, null) }
+        return listOf(
+            channel(NEEDS, R.string.channel_needs_name, R.string.channel_needs_description, NotificationManager.IMPORTANCE_HIGH),
+            channel(UPDATES, R.string.channel_updates_name, R.string.channel_updates_description, NotificationManager.IMPORTANCE_DEFAULT, silent = true),
+            channel(APP_UPDATES, R.string.channel_app_updates_name, R.string.channel_app_updates_description, NotificationManager.IMPORTANCE_LOW),
+            channel(DOWNLOADS, R.string.channel_downloads_name, R.string.channel_downloads_description, NotificationManager.IMPORTANCE_LOW),
+            channel(HUB, R.string.channel_hub_name, R.string.channel_hub_description, NotificationManager.IMPORTANCE_MIN),
+        )
+    }
+
+    /** For a caller with no context at hand: the channels once any caller with one has asked for them, else none. */
+    @JvmStatic
+    fun channels(): List<NotificationChannel> = appContext?.let { channels(it) } ?: emptyList()
 
     /** The Android notification number for an inbox id, the same each time so an answer can replace the question. */
     @JvmStatic
     fun notificationId(id: String): Int = ID_BASE + Math.abs(id.hashCode() % ID_SPAN)
 
-    internal fun answersAllowed(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ALLOW_ANSWERS, true)
+    /** The owner's choice to see details in notifications. Off unless they turned it on: the old "answers" switch is not carried over. */
+    @JvmStatic
+    fun showDetails(c: Context): Boolean = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SHOW_DETAILS, false)
 
-    /** Off removes Allow and Not now from notifications, so an approval waits in the Inbox. */
-    internal fun setAnswersAllowed(c: Context, on: Boolean) {
-        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(ALLOW_ANSWERS, on).apply()
+    /** Stores the choice and re-posts every shown notice at once, so turning details off takes them off the shade. */
+    @JvmStatic
+    fun setShowDetails(c: Context, on: Boolean) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(SHOW_DETAILS, on).apply()
+        Alerts.refresh(c)
+    }
+
+    /** True when the phone has a PIN, pattern or password; without one a swipe opens it, so details are never posted. */
+    @JvmStatic
+    fun deviceSecure(c: Context): Boolean = c.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true
+
+    /** Rule 5: the switch is on, the phone has a secure lock and it is unlocked at this moment. */
+    @JvmStatic
+    fun detailsNow(c: Context): Boolean {
+        val km = c.getSystemService(KeyguardManager::class.java) ?: return false
+        return showDetails(c) && km.isDeviceSecure && !km.isKeyguardLocked
+    }
+
+    /**
+     * Run once at the hub's start. An owner who already had a seen list is upgrading: details start off, and they get a
+     * one-time note on the Notifications page. The old answers switch is dropped.
+     */
+    @JvmStatic
+    fun migrate(c: Context) {
+        val p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (p.getBoolean(UPGRADE_CHECKED, false)) return
+        p.edit().putBoolean(UPGRADE_CHECKED, true).remove(OLD_ALLOW_ANSWERS).putBoolean(UPGRADER_NOTE, p.contains(SEEN)).apply()
+    }
+
+    /** True once for an upgrader: read by the Notifications page, which shows its card and then lets the note go. */
+    internal fun upgraderNote(c: Context): Boolean {
+        migrate(c)
+        return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(UPGRADER_NOTE, false)
+    }
+
+    internal fun clearUpgraderNote(c: Context) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(UPGRADER_NOTE, false).apply()
     }
 
     /** True for an item that waits on the owner; an update is only news and does not count toward "Needs you". */
@@ -66,17 +135,69 @@ object AlertPoster {
         )
     }
 
-    /** Oldest first so the newest ends on top; past [maxShown] one line stands for the rest. */
+    /** Oldest first so the newest ends on top; past [maxShown] one line stands for the rest. Returns the ids that got their own notice. */
     @JvmStatic
-    fun post(c: Context, items: Map<String, JSONObject>, fresh: List<String>, maxShown: Int) {
+    @JvmOverloads
+    fun post(c: Context, items: Map<String, JSONObject>, fresh: List<String>, maxShown: Int, replay: Boolean = false): List<String> {
         val nm = c.getSystemService(NotificationManager::class.java)
         val shown = if (fresh.size > maxShown) fresh.subList(0, maxShown) else fresh
+        // Questions that waited while notifications were off come back in the default words; details need a live unlock.
+        val details = !replay && detailsNow(c)
+        var folded = 0
+        var postedUpdates = 0
+        val own = mutableListOf<String>()
+        var updatesLeft = updatesLeft(c)
         for (id in shown.reversed()) {
             val card = InboxWords.card(itemOf(items.getValue(id)))
-            nm.notify(notificationId(id), build(c, card))
+            if (card.kind == CardKind.Update) {
+                if (updatesLeft == 0) { folded++; continue }
+                updatesLeft--
+                postedUpdates++
+            }
+            own += id
+            nm.notify(notificationId(id), build(c, card, details, quiet = false))
+            Counters.get(c).apply { bump(Counter.NoticePosted); if (ServerHq.isServer(card.id)) bump(Counter.NoticeServerTapped, 1) }
         }
+        if (folded > 0) {
+            nm.notify(UPDATES_FOLD_ID, simple(c, UPDATES, c.getString(R.string.updates_folded, folded.toString()), c.getString(R.string.updates_folded_body), open(c)))
+        }
+        recordUpdates(c, postedUpdates)
         if (fresh.size > shown.size) {
-            nm.notify(ID_BASE - 1, simple(c, NEEDS, "${fresh.size - shown.size} more waiting for you", "Open AgentHQ to see them.", open(c)))
+            val more = fresh.size - shown.size
+            nm.notify(ID_BASE - 1, simple(c, NEEDS, c.getString(R.string.needs_folded, more.toString()), c.getString(R.string.needs_folded_body), open(c)))
+        }
+        return own
+    }
+
+    /** Updates still allowed to have their own notice in this hour; past that they fold into one line. */
+    internal fun updatesLeft(c: Context, now: Long = System.currentTimeMillis()): Int {
+        val p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (now - p.getLong(UPD_START, 0L) >= HOUR_MS) return UPDATES_PER_HOUR
+        return (UPDATES_PER_HOUR - p.getInt(UPD_COUNT, 0)).coerceAtLeast(0)
+    }
+
+    private fun recordUpdates(c: Context, posted: Int, now: Long = System.currentTimeMillis()) {
+        if (posted <= 0) return
+        val p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val fresh = now - p.getLong(UPD_START, 0L) >= HOUR_MS
+        p.edit().putLong(UPD_START, if (fresh) now else p.getLong(UPD_START, now)).putInt(UPD_COUNT, (if (fresh) 0 else p.getInt(UPD_COUNT, 0)) + posted).apply()
+    }
+
+    /**
+     * Posts [items] again over what is on the shade, without sound or pop-up: general words when the phone is locking
+     * ([forceGeneral], since the keyguard may not read as locked yet) or details are off, details when rule 5 holds.
+     * A notice the owner already swiped away, or one that now shows an answer's result, is left alone.
+     */
+    @JvmStatic
+    fun repost(c: Context, items: Map<String, JSONObject>, forceGeneral: Boolean) {
+        val nm = c.getSystemService(NotificationManager::class.java)
+        val active = nm.activeNotifications.map { it.id }.toSet()
+        val now = SystemClock.elapsedRealtime()
+        val details = !forceGeneral && detailsNow(c)
+        for ((id, item) in items) {
+            val nid = notificationId(id)
+            if (nid !in active || now - (answeredAt[id] ?: Long.MIN_VALUE / 2) <= RESULT_KEEP_MS) continue
+            nm.notify(nid, build(c, InboxWords.card(itemOf(item)), details, quiet = true))
         }
     }
 
@@ -95,13 +216,15 @@ object AlertPoster {
     }
 
     /** Taps open what the notification is about: the helper for a helper's question, else the Inbox item; the Inbox when it is about nothing in particular. */
-    internal fun open(c: Context, link: String = "hq://inbox"): PendingIntent {
+    internal fun open(c: Context, link: String = "hq://inbox", counted: Boolean = false): PendingIntent {
         val intent = Intent(c, ShellActivity::class.java).setData(Uri.parse(link)).putExtra(Links.EXTRA, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // The tap is counted by the shell, only for an "HQ answered" notice this app posted.
+        if (counted) intent.putExtra(EXTRA_NOTICE_TAP, true)
         return PendingIntent.getActivity(c, link.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     /** What a tap on [card] opens: for a question from the server HQ, that HQ's own web app, since this phone's pages do not know its helpers. */
-    internal fun tapFor(c: Context, card: InboxCard): PendingIntent = if (ServerHq.isServer(card.id)) openServer(c) else open(c, linkFor(card))
+    internal fun tapFor(c: Context, card: InboxCard): PendingIntent = if (ServerHq.isServer(card.id)) openServer(c) else open(c, linkFor(card), counted = true)
 
     /** The server HQ's notifications page in the browser, or this app's Inbox when no server is kept. */
     internal fun openServer(c: Context): PendingIntent {
@@ -110,12 +233,12 @@ object AlertPoster {
         return PendingIntent.getActivity(c, address.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    /** One notice when the server HQ signs this phone out (Settings, Devices there, or Sign out everywhere): its questions stop arriving here. */
+    /** One notice when the server HQ signs this phone out (Settings, Devices there, or Sign out everywhere): its questions stop arriving here. It names no address. */
     @JvmStatic
-    fun serverSignedOut(c: Context, address: String) {
+    fun serverSignedOut(c: Context) {
         c.getSystemService(NotificationManager::class.java).notify(
             ID_BASE - 2,
-            simple(c, NEEDS, "Your server HQ signed this phone out", "Its questions no longer arrive here. To get them again, sign in from Settings, Notifications with a new code from $address.", open(c)),
+            simple(c, NEEDS, c.getString(R.string.notice_server_signed_out_title), c.getString(R.string.notice_server_signed_out_body), open(c)),
         )
     }
 
@@ -125,37 +248,43 @@ object AlertPoster {
         else -> "hq://inbox/${card.id}"
     }
 
+    /** The words a lock screen shows when the owner hides sensitive content; every notice carries them, whatever else it says. */
+    internal fun publicVersion(c: Context, channel: String): Notification {
+        val words = NoticeWords.publicWords(c, channel == NEEDS)
+        return Notification.Builder(c, channel).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setContentText(words.body).build()
+    }
+
+    internal fun simpleNotice(c: Context, channel: String, title: String, body: String, tap: PendingIntent): Notification = simple(c, channel, title, body, tap)
+
     private fun simple(c: Context, channel: String, title: String, body: String, tap: PendingIntent): Notification =
         Notification.Builder(c, channel).setSmallIcon(HubService.statIcon(c)).setContentTitle(title).setContentText(body)
-            .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(tap).setAutoCancel(true).build()
+            .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(tap).setAutoCancel(true)
+            .setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(publicVersion(c, channel)).build()
 
-    private fun build(c: Context, card: InboxCard): Notification {
+    internal fun build(c: Context, card: InboxCard, details: Boolean, quiet: Boolean): Notification {
         val needs = card.kind != CardKind.Update
-        val body = if (card.body.length > MAX_BODY) card.body.take(MAX_BODY) + "…" else card.body
-        val b = Notification.Builder(c, if (needs) NEEDS else UPDATES).setSmallIcon(HubService.statIcon(c)).setContentTitle(card.title).setContentText(body)
-            .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(tapFor(c, card)).setAutoCancel(true)
+        val words = if (details) NoticeWords.detail(c, card) else NoticeWords.general(c, card)
+        val channel = if (needs) NEEDS else UPDATES
+        val b = Notification.Builder(c, channel).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setContentText(words.body)
+            .setStyle(Notification.BigTextStyle().bigText(words.body)).setContentIntent(tapFor(c, card)).setAutoCancel(true).setOnlyAlertOnce(quiet)
             .setCategory(if (needs) Notification.CATEGORY_REMINDER else Notification.CATEGORY_STATUS).setVisibility(Notification.VISIBILITY_PRIVATE)
-        // The lock screen shows only that something is there, never what.
-        val public = Notification.Builder(c, if (needs) NEEDS else UPDATES).setSmallIcon(HubService.statIcon(c))
-            .setContentTitle(if (needs) "Something needs you" else "1 new update").setContentText(if (needs) "Unlock to see what." else "Unlock to read it.").build()
-        b.setPublicVersion(public)
-        if (needs) actions(c, card).forEach { b.addAction(it) }
+            .setPublicVersion(publicVersion(c, channel))
+        if (needs) actions(c, card, details).forEach { b.addAction(it) }
         return b.build()
     }
 
-    private fun actions(c: Context, card: InboxCard): List<Notification.Action> {
+    /** Which buttons a notice gets: Decline, Allow once, Open in that order only under rule 5 on Android 12+ and never for a losing request; else Open alone. */
+    private fun actions(c: Context, card: InboxCard, details: Boolean): List<Notification.Action> {
         val icon = Icon.createWithResource(c, HubService.statIcon(c))
         val out = mutableListOf<Notification.Action>()
-        val buttons = answersAllowed(c) && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION
-        if (card.dialog != null) {
+        val buttons = details && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION && !NoticeWords.losing(card)
+        if (buttons) {
+            val answerable = card.dialog != null || card.canAllow
             // The server answers the dialog it read: Allow once only when it named a yes-once answer, Decline always.
-            if (buttons && card.canAllow) out += Notification.Action.Builder(icon, card.allowLabel, AnswerReceiver.intent(c, card, "approve")).setAuthenticationRequired(true).build()
-            if (buttons) out += Notification.Action.Builder(icon, "Decline", AnswerReceiver.intent(c, card, "reject")).build()
-        } else if (card.canAllow && buttons) {
-            out += Notification.Action.Builder(icon, card.allowLabel, AnswerReceiver.intent(c, card, "approve")).setAuthenticationRequired(true).build()
-            out += Notification.Action.Builder(icon, "Not now", AnswerReceiver.intent(c, card, "reject")).build()
+            if (answerable) out += Notification.Action.Builder(icon, c.getString(R.string.notice_action_decline), AnswerReceiver.intent(c, card, "reject")).build()
+            if (card.canAllow) out += Notification.Action.Builder(icon, c.getString(R.string.notice_action_allow_once), AnswerReceiver.intent(c, card, "approve")).setAuthenticationRequired(true).build()
         }
-        out += Notification.Action.Builder(icon, if (card.kind == CardKind.HelperStuck) "Take a look" else "Open", tapFor(c, card)).build()
+        out += Notification.Action.Builder(icon, c.getString(R.string.notice_action_open), tapFor(c, card)).build()
         return out
     }
 }

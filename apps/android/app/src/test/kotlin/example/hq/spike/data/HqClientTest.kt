@@ -118,4 +118,16 @@ class HqClientTest {
         assertEquals("th-9", client().followHelper("s 1"))
         assertEquals("POST /api/harness-sessions/s+1/adopt HTTP/1.1", lines.single())
     }
+
+    @Test fun theServersBackupReportIsReadAndAMissingRouteIsNotReported() = runBlocking {
+        answer = { 200 to """{"configured":true,"last_ok_at":"2026-10-21T08:00:00Z","failed":false,"overdue":true,"every_hours":24}""" }
+        val r = client().backupStatus()!!
+        assertTrue(r.configured && r.overdue && !r.failed)
+        assertEquals(24, r.everyHours)
+        assertEquals(java.time.Instant.parse("2026-10-21T08:00:00Z").toEpochMilli(), r.lastOkMs)
+        answer = { 404 to "{}" }
+        assertEquals(null, client().backupStatus())
+        answer = { 200 to "not json" }
+        assertEquals(null, client().backupStatus())
+    }
 }

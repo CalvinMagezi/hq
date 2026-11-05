@@ -1,58 +1,58 @@
+import { t } from '~/strings'
 import { Link } from '@tanstack/react-router'
-import { Bell, BookOpen, CheckSquare, Gauge, MessageSquare, SlidersHorizontal, Terminal } from 'lucide-react'
+import { Bell, BookOpen, CheckSquare, MessageSquare, SlidersHorizontal, Terminal } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { inboxBadge } from '~/lib/inboxBadge'
 import { needsYouAria } from '~/lib/workbench'
+import { placesFor, useEdition } from '~/lib/edition'
+import type { Place } from '~/lib/routes'
 
-interface RailLinkProps {
-  to: '/vault' | '/chat' | '/tasks' | '/sessions' | '/usage' | '/notifications' | '/settings'
-  label: string
-  exact?: boolean
-  children: React.ReactNode
+/** One count for the Inbox badge: what needs the owner, helpers included (W6). */
+export const inboxNeedsYou = (pending: number, helpers: number) => pending + helpers
+
+const ICONS: Record<Place['id'], typeof BookOpen> = {
+  notes: BookOpen,
+  tasks: CheckSquare,
+  chat: MessageSquare,
+  helpers: Terminal,
+  inbox: Bell,
 }
 
-function RailLink({ to, label, exact, children }: RailLinkProps) {
-  return (
-    <Link to={to} search={{}} title={label} aria-label={label} className="hq-rail-item" activeOptions={{ exact: exact ?? false, includeSearch: false }}>
-      {children}
-    </Link>
-  )
+const LABELS: Record<Place['id'], 'place_notes' | 'place_tasks' | 'place_chat' | 'place_helpers' | 'place_inbox'> = {
+  notes: 'place_notes',
+  tasks: 'place_tasks',
+  chat: 'place_chat',
+  helpers: 'place_helpers',
+  inbox: 'place_inbox',
 }
 
 /** The desktop navigation: one column of icons on the left edge. Phones use the BottomNav instead. */
 export function AppRail() {
-  const unread = inboxBadge(useHQStore((s) => s.unreadNotificationsCount))
-  const needsYouCount = useHQStore((s) => s.needsYouCount)
-  const needsYou = inboxBadge(needsYouCount)
+  const helpers = useHQStore((s) => s.needsYouCount)
+  const pending = useHQStore((s) => s.pendingApprovalsCount)
+  const needsYou = inboxBadge(inboxNeedsYou(pending, helpers))
+  const places = placesFor(useEdition())
   return (
     <nav className="hq-rail" aria-label="Main">
-      <Link to="/vault" search={{}} aria-label="Agent HQ home" className="mb-3 mt-1 transition-opacity active:opacity-60">
+      <Link to="/" search={{}} aria-label="Agent HQ home" className="mb-3 mt-1 transition-opacity active:opacity-60">
         <img src="/icons/hq-mark-96.png" alt="" width="32" height="32" className="object-contain" />
       </Link>
-      <RailLink to="/vault" label="Home" exact>
-        <BookOpen className="w-5 h-5" />
-      </RailLink>
-      <RailLink to="/chat" label="Chat" exact>
-        <MessageSquare className="w-5 h-5" />
-      </RailLink>
-      <RailLink to="/tasks" label="Tasks" exact>
-        <CheckSquare className="w-5 h-5" />
-      </RailLink>
-      <RailLink to="/sessions" label={needsYou ? `Workbench, ${needsYouAria(needsYouCount)}` : 'Workbench'}>
-        <Terminal className="w-5 h-5" />
-        {needsYou && <span className="hq-rail-badge">{needsYou.label}</span>}
-      </RailLink>
-      <RailLink to="/usage" label="Usage">
-        <Gauge className="w-5 h-5" />
-      </RailLink>
-      <RailLink to="/notifications" label={unread ? `Inbox, ${unread.aria}` : 'Inbox'} exact>
-        <Bell className="w-5 h-5" />
-        {unread && <span className="hq-rail-badge">{unread.label}</span>}
-      </RailLink>
+      {places.map((place) => {
+        const Icon = ICONS[place.id]
+        const badge = place.id === 'inbox' ? needsYou : null
+        const label = badge ? `${t(LABELS[place.id])}, ${needsYouAria(inboxNeedsYou(pending, helpers))}` : t(LABELS[place.id])
+        return (
+          // Not exact: the place stays lit on every address under it (/notes/Projects/Plan.md lights Notes).
+          <Link key={place.id} to={place.path} search={{}} title={label} aria-label={label} className="hq-rail-item" activeOptions={{ exact: false, includeSearch: false }}>
+            <Icon className="w-5 h-5" />
+            {badge && <span className="hq-rail-badge">{badge.label}</span>}
+          </Link>
+        )
+      })}
       <div className="flex-1" />
-      <RailLink to="/settings" label="Settings">
+      <Link to="/settings" search={{}} title={t('place_settings')} aria-label={t('place_settings')} className="hq-rail-item" activeOptions={{ exact: false, includeSearch: false }}>
         <SlidersHorizontal className="w-5 h-5" />
-      </RailLink>
+      </Link>
     </nav>
   )
 }

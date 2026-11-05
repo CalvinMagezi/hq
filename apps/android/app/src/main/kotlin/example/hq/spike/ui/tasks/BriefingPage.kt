@@ -1,5 +1,6 @@
 package example.hq.spike.ui.tasks
 
+import example.hq.spike.ui.shell.rememberWords
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,9 +23,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
@@ -41,16 +44,16 @@ fun BriefingPage(b: BriefingUi, onClose: () -> Unit, onRetry: () -> Unit, onTask
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = onClose)
             Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                Text(BriefingWords.TITLE, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1)
+                Text(BriefingWords.title(rememberWords()), style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1)
                 Text(b.name, style = HqType.Caption, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         when (val phase = b.phase) {
             BriefingPhase.Loading -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Spinner(28) }
             is BriefingPhase.Failed -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (phase.missing) BriefingWords.MISSING else BriefingWords.FAILED, style = HqType.BodySm, color = Mts.InkMuted)
+                Text(BriefingWords.failed(rememberWords(), phase.missing), style = HqType.BodySm, color = Mts.InkMuted)
                 if (!phase.missing) Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onRetry).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-                    Text("Try again", style = HqType.BodySmBold, color = Mts.OnGreen)
+                    Text(stringResource(R.string.notice_action_try_again), style = HqType.BodySmBold, color = Mts.OnGreen)
                 }
             }
             is BriefingPhase.Ready -> Body(phase.briefing, b.name, onTask, onNote)
@@ -63,10 +66,10 @@ private fun Body(b: Briefing, name: String, onTask: (BriefTask) -> Unit, onNote:
     val now = Instant.now()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
         if (b.tasksShown == 0) {
-            Text(BriefingWords.empty(name), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(20.dp))
+            Text(BriefingWords.empty(rememberWords(), name), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(20.dp))
             return@Column
         }
-        Text(BriefingWords.statusLine(b), style = HqType.Body, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        Text(BriefingWords.statusLine(example.hq.spike.ui.shell.rememberWords(), b), style = HqType.Body, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         if (b.awaiting.isNotEmpty()) {
             Label("Waiting for review")
             b.awaiting.forEach { t -> Entry(t.displayId, t.title, null) { onTask(t) } }
@@ -79,14 +82,14 @@ private fun Body(b: Briefing, name: String, onTask: (BriefTask) -> Unit, onNote:
             }
         }
         Label("Contributors")
-        if (b.contributors.isEmpty()) Text(BriefingWords.NO_AUTHOR, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-        b.contributors.forEach { c -> Entry(c.actor, BriefingWords.contributorLine(c, now), null, null) }
-        Text(BriefingWords.gapsLine(b), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+        if (b.contributors.isEmpty()) Text(BriefingWords.noAuthor(rememberWords()), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+        b.contributors.forEach { c -> Entry(c.actor, BriefingWords.contributorLine(example.hq.spike.ui.shell.rememberWords(), c, now), null, null) }
+        Text(BriefingWords.gapsLine(example.hq.spike.ui.shell.rememberWords(), b), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         if (b.notes.isNotEmpty()) {
             Label("Recent notes")
             b.notes.forEach { n -> NoteRow(n, now) { onNote(n.path) } }
         }
-        Text(BriefingWords.freshnessLine(b, now), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp))
+        Text(BriefingWords.freshnessLine(rememberWords(), b, now), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp))
     }
 }
 
@@ -109,8 +112,8 @@ private fun NoteRow(n: BriefNote, now: Instant, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).heightIn(min = 48.dp).padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f)) {
             Text(n.path.substringAfterLast('/'), style = HqType.BodySm, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(BriefingWords.noteLine(n, now), style = HqType.Caption, color = Mts.InkMuted)
+            Text(BriefingWords.noteLine(rememberWords(), n, now), style = HqType.Caption, color = Mts.InkMuted)
         }
-        Text(BriefingWords.badge(n.review), style = HqType.Badge, color = Mts.InkMuted, modifier = Modifier.border(1.dp, Mts.Line, CircleShape).padding(horizontal = 8.dp, vertical = 2.dp))
+        Text(BriefingWords.badge(rememberWords(), n.review), style = HqType.Badge, color = Mts.InkMuted, modifier = Modifier.border(1.dp, Mts.Line, CircleShape).padding(horizontal = 8.dp, vertical = 2.dp))
     }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Initiative, TaskItem } from '~/lib/tasksApi'
+import { t, tn } from '~/strings'
 import { TaskCard } from './TaskCard'
 import { groupByInitiative, nestRows } from './hierarchy'
 
@@ -54,7 +55,7 @@ export function TaskListView({ tasks, allById, initiativeById, onSelect, section
             onClick={() => sections.onSetMany(names, true)}
             className="text-neutral-500 hover:text-neutral-200 disabled:opacity-40 disabled:pointer-events-none"
           >
-            Collapse all
+            {t('tasks_collapse_all')}
           </button>
           <button
             type="button"
@@ -62,7 +63,7 @@ export function TaskListView({ tasks, allById, initiativeById, onSelect, section
             onClick={() => sections.onSetMany(names, false)}
             className="text-neutral-500 hover:text-neutral-200 disabled:opacity-40 disabled:pointer-events-none"
           >
-            Expand all
+            {t('tasks_expand_all')}
           </button>
         </div>
       )}
@@ -93,6 +94,7 @@ export function TaskListView({ tasks, allById, initiativeById, onSelect, section
                     <TaskCard
                       task={task}
                       onSelect={onSelect}
+                      asLink
                       parentLabel={parentLabel}
                       select={selection && { ticked: selection.ticked.has(task.id), onToggle: selection.onToggle }}
                     />
@@ -103,7 +105,7 @@ export function TaskListView({ tasks, allById, initiativeById, onSelect, section
                         className="mt-1 ml-2 text-[11px] text-neutral-500 hover:text-neutral-300 flex items-center gap-1"
                       >
                         {foldedParents.has(task.id) ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        {task.subtask_count} sub-task{task.subtask_count === 1 ? '' : 's'}
+                        {tn('tasks_sub_task_count', task.subtask_count)}
                       </button>
                     )}
                   </div>
@@ -139,8 +141,8 @@ function GroupBox({ name, items, selection, disabled }: GroupBoxProps) {
       checked={ticked === items.length}
       onChange={(e) => selection.onToggleMany(items, e.target.checked)}
       disabled={disabled}
-      aria-label={`Select all in ${name}`}
-      title={disabled ? 'Expand the section to select its tasks' : undefined}
+      aria-label={t('tasks_select_all_in', { name })}
+      title={disabled ? t('tasks_expand_to_select') : undefined}
       className="w-4 h-4 shrink-0 cursor-pointer accent-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
     />
   )

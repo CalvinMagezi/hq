@@ -10,7 +10,7 @@ const COUNT_POLL_MS = 30_000
 export function useNeedsYouCount() {
   const setCount = useHQStore((s) => s.setNeedsYouCount)
   const fed = useHQStore((s) => s.workbenchFeedsCount)
-  const list = usePolled('nav-count', () => globalSessionsApi.list(), COUNT_POLL_MS, !fed)
+  const list = usePolled('nav-count', () => globalSessionsApi.list(), COUNT_POLL_MS, !fed, true, ['helpers:change', 'sessions:sync', 'inbox:change'])
   const count = list.data ? needsYouCount(list.data) : null
   const failed = list.error !== null && !list.loading
   useEffect(() => {

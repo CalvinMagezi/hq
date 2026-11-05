@@ -43,7 +43,7 @@ class UsageViewModel(app: Application) : AndroidViewModel(app) {
         // A poll where the settings did not answer keeps the order HQ was last seen with, so the chip does not switch service for a minute.
         val settings = got[0] ?: lastSettings
         lastSettings = settings
-        _chip.value = UsageWords.chip(UsageSnapshot(settings, got[1], got[2], got[3]))
+        _chip.value = UsageWords.chip(example.hq.spike.ui.shell.Words.of(getApplication()), UsageSnapshot(settings, got[1], got[2], got[3]))
     }
 
     private suspend fun get(path: String): JSONObject? = try { client.json(path) } catch (e: HqUnavailable) { null }

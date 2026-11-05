@@ -1,6 +1,8 @@
 //! Embedded web UI server with API endpoints and WebSocket.
 
 mod api;
+pub mod hello;
+mod status_ai;
 pub use api::HEALTH_SERVICE;
 pub use vault_api::{lite_hides, lite_hides_resolved};
 mod adoption_api;
@@ -221,6 +223,12 @@ impl WsState {
         Ok(())
     }
 
+    /// Tells open pages that `place` changed (`inbox:change`, `notes:change` and the like), so they
+    /// refetch it instead of polling (web wave 2, rule 5).
+    pub(crate) fn announce_change(&self, place: &str) {
+        self.broadcast(&serde_json::json!({ "type": format!("{place}:change") }).to_string());
+    }
+
     pub(crate) fn broadcast(&self, msg: &str) {
         let _ = self.tx.send(msg.to_string());
     }
@@ -245,6 +253,13 @@ pub fn install_ask_runner(state: &Arc<WsState>) {
 /// Events buffered per client before a slow one starts missing them; every streamed token is one.
 const BROADCAST_CAPACITY: usize = 4096;
 
+/// The places a page listens to on the socket instead of polling (`<place>:change`).
+pub(crate) const CHANGE_INBOX: &str = "inbox";
+pub(crate) const CHANGE_NOTES: &str = "notes";
+pub(crate) const CHANGE_HELPERS: &str = "helpers";
+pub(crate) const CHANGE_BUDGET: &str = "budget";
+pub(crate) const CHANGE_SETTINGS: &str = "settings";
+
 /// Create the web router — vault-focused endpoints only.
 pub fn create_router(state: Arc<WsState>) -> Router {
     state.load_configured_state();
@@ -266,6 +281,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
     let router = oauth::routes(Router::new(), &state)
         .route("/ws", get(ws::ws_handler))
         .route("/health", get(api::health_handler))
+        .route(hello::HELLO_PATH, get(hello::hello_handler))
+        .route("/api/status/ai", get(status_ai::status_ai_handler))
+        .route("/api/status/busy", get(status_ai::status_busy_handler))
+        .route("/api/backup/status", get(status_ai::backup_status_handler))
         .route("/api/vault-status", get(api::vault_status_handler))
         .route("/api/ws-ticket", post(auth::ws_ticket_handler))
         .route(
@@ -281,8 +300,16 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(device_auth::devices::list_handler),
         )
         .route(
+            device_auth::devices::CURRENT_DEVICE_PATH,
+            axum::routing::delete(device_auth::devices::delete_current_handler),
+        )
+        .route(
             device_auth::devices::DEVICE_PATH,
             axum::routing::delete(device_auth::devices::delete_handler),
+        )
+        .route(
+            device_auth::devices::KEEP_PATH,
+            post(device_auth::devices::keep_handler),
         )
         .route(
             device_auth::devices::ROTATE_PATH,
@@ -298,6 +325,8 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(api::note_read_handler).put(vault_api::note_update_handler),
         )
         .route("/api/note/create", post(vault_api::note_create_handler))
+        .route("/api/note/versions", get(vault_api::note_versions_handler))
+        .route("/api/note/review", post(vault_api::note_review_handler))
         .route("/api/note/pdf", get(vault_api::note_pdf_handler))
         .route("/api/note/export", get(vault_api::note_export_handler))
         .route("/api/vault/folders", get(vault_api::folders_handler))
@@ -369,6 +398,14 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             axum::routing::post(threads_api::archive_thread_handler),
         )
         .route(
+            "/api/threads/{thread_id}/unarchive",
+            axum::routing::post(threads_api::unarchive_thread_handler),
+        )
+        .route(
+            "/api/threads/{thread_id}/stop",
+            axum::routing::post(threads_api::stop_thread_handler),
+        )
+        .route(
             "/api/notifications",
             get(notifications_api::list_notifications_handler),
         )
@@ -377,12 +414,12 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             axum::routing::post(notifications_api::notification_action_handler),
         )
         .route(
-            "/api/notifications/{id}/answer",
-            post(dialog_answer::answer_handler),
+            "/api/notifications/{id}/restore",
+            axum::routing::post(notifications_api::restore_notification_handler),
         )
         .route(
-            dialog_answer::PUSH_ANSWER_PATH,
-            post(dialog_answer::push_answer_handler),
+            "/api/notifications/{id}/answer",
+            post(dialog_answer::answer_handler),
         )
         .route(
             "/api/notifications/mark-all-read",
@@ -600,6 +637,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/harness-sessions/{id}/send",
             post(sessions_api::send_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/answers",
+            get(sessions_api::answers_handler),
         )
         .route(
             "/api/harness-sessions/{id}/pending",
@@ -837,6 +878,57 @@ mod web_auth_router_tests {
         assert_eq!(status(&app, own).await, StatusCode::OK);
     }
 
+    #[tokio::test]
+    async fn a_resent_note_or_task_with_its_client_id_is_made_once() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let post = |path: &str, body: &str| {
+            local("POST", path)
+                .header("content-type", "application/json")
+                .header("x-hq-client", "web")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        let note = r#"{"title":"Title","content":"x","client_id":"c-note-1"}"#;
+        let first = json_of(&app, post("/api/note/create", note)).await;
+        let again = json_of(&app, post("/api/note/create", note)).await;
+        assert_eq!(first["path"], again["path"]);
+        assert_eq!(again["deduplicated"], true);
+        assert!(!vault.path().join("Notebooks/Inbox/Title 2.md").exists());
+
+        let task = r#"{"title":"Buy milk","client_id":"c-task-1"}"#;
+        let first = json_of(&app, post("/api/tasks", task)).await;
+        let again = json_of(&app, post("/api/tasks", task)).await;
+        assert_eq!(first["id"], again["id"]);
+        assert_eq!(again["deduplicated"], true);
+    }
+
+    async fn json_of(app: &Router, req: Request<Body>) -> serde_json::Value {
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert!(res.status().is_success(), "{}", res.status());
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn hello_answers_a_signed_out_browser_and_the_rest_of_the_api_does_not() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.web_auth_token = Some("t".repeat(32));
+        let app = create_router(Arc::new(state));
+        let get = |path: &str| local("GET", path).body(Body::empty()).unwrap();
+        assert_eq!(status(&app, get(hello::HELLO_PATH)).await, StatusCode::OK);
+        for refused in ["/api/spaces", "/api/status/ai", "/api/status/busy"] {
+            assert_eq!(
+                status(&app, get(refused)).await,
+                StatusCode::UNAUTHORIZED,
+                "{refused}"
+            );
+        }
+    }
+
     /// A page on another loopback port passes the origin check, so session-changing
     /// requests also need a header it cannot add without a failed CORS preflight.
     #[tokio::test]
@@ -852,27 +944,31 @@ mod web_auth_router_tests {
             }
             b.body(Body::from("{}")).unwrap()
         };
-        for action in ["send", "adopt", "stop", "resume", "rename", "archive"] {
-            let path = format!("/api/harness-sessions/hs-none/{action}");
+        let guarded = [
+            "send", "adopt", "stop", "resume", "rename", "archive", "drive", "goal", "unwatch",
+            "answer",
+        ];
+        let paths = guarded
+            .iter()
+            .map(|action| format!("/api/harness-sessions/hs-none/{action}"))
+            .chain(["answer", "action"].map(|a| format!("/api/notifications/val_x/{a}")));
+        for path in paths {
             assert_eq!(
                 status(&app, post(&path, false)).await,
                 StatusCode::FORBIDDEN,
-                "{action}"
+                "{path}"
             );
             assert_ne!(
                 status(&app, post(&path, true)).await,
                 StatusCode::FORBIDDEN,
-                "{action}"
+                "{path}"
             );
         }
-        for action in ["drive", "goal", "unwatch"] {
-            let path = format!("/api/harness-sessions/hs-none/{action}");
-            assert_ne!(
-                status(&app, post(&path, false)).await,
-                StatusCode::FORBIDDEN,
-                "{action} stays open to cached clients"
-            );
-        }
+        assert_eq!(
+            status(&app, post("/api/notifications/push-answer", true)).await,
+            StatusCode::NOT_FOUND,
+            "a push can no longer answer anything"
+        );
         for path in ["/api/harness-sessions", "/api/workbench/hosts/native/dirs"] {
             assert_eq!(
                 status(&app, post(path, false)).await,

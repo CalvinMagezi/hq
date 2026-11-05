@@ -1,29 +1,15 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { t } from '~/strings'
 import { Paperclip, Send, Square, WifiOff } from 'lucide-react'
 import { SlashCommandPalette, SLASH_COMMANDS, matchingSlashCommands, isSlashInput } from './SlashCommandPalette'
+import { enterSendsMessage, readEnterSends, writeEnterSends } from '~/lib/enterRule'
+import { tooBig } from '~/lib/chatUploads'
 import { ComposerAttachments, type PendingAttachment } from './AttachmentChips'
 
 // The box grows with its text up to this height, then scrolls.
 const MAX_INPUT_HEIGHT_PX = 200
 // Phones have no Shift key for a newline, so there Enter adds one and only the button sends.
 const TOUCH_QUERY = '(pointer: coarse)'
-// The full hint wraps to two lines at phone width and doubles the box's height.
-const WIDE_QUERY = '(min-width: 640px)'
-const PLACEHOLDER_WIDE = 'Message HQ, / for commands'
-const PLACEHOLDER_NARROW = 'Message HQ'
-
-function usePlaceholder() {
-  const [wide, setWide] = useState(() => typeof window !== 'undefined' && window.matchMedia(WIDE_QUERY).matches)
-  useEffect(() => {
-    const mq = window.matchMedia(WIDE_QUERY)
-    const onChange = () => setWide(mq.matches)
-    onChange()
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-  return wide ? PLACEHOLDER_WIDE : PLACEHOLDER_NARROW
-}
-
 interface Props {
   value: string
   onChange: (value: string) => void
@@ -38,18 +24,20 @@ interface Props {
   onRetryAttachment: (id: string) => void
   /** The socket is up; while it is down the draft is kept and sending waits. */
   connected: boolean
+  /** With the socket down, a plain message can still be sent: it waits in the outbox. */
+  canQueue?: boolean
   /** An edited message keeps its earlier files, so it can be sent with no new text or files. */
   hasKeptFiles?: boolean
 }
 
 /** Message input with attachments, the slash-command palette and the send/stop button. */
 export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function ChatComposer(
-  { value, onChange, onSend, onStop, running, attachments, onAddFiles, onRemoveAttachment, onRetryAttachment, connected, hasKeptFiles = false },
+  { value, onChange, onSend, onStop, running, attachments, onAddFiles, onRemoveAttachment, onRetryAttachment, connected, canQueue = false, hasKeptFiles = false },
   ref,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const placeholder = usePlaceholder()
+  const [enterSends, setEnterSends] = useState<boolean | null>(() => (typeof window === 'undefined' ? null : readEnterSends()))
   useImperativeHandle(ref, () => textareaRef.current as HTMLTextAreaElement)
 
   useLayoutEffect(() => {
@@ -62,7 +50,9 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   const uploading = attachments.some((a) => a.status === 'uploading')
   const hasReady = attachments.some((a) => a.status === 'ready')
   // One reply at a time per chat: while one runs the button stops it, and Enter waits.
-  const canSend = connected && !running && !uploading && (!!value.trim() || hasReady || hasKeptFiles)
+  const queueing = !connected && canQueue && attachments.length === 0 && !hasKeptFiles
+  const hasBigFile = attachments.some((a) => tooBig(a.file))
+  const canSend = (connected || queueing) && !running && !uploading && !hasBigFile && (!!value.trim() || hasReady || hasKeptFiles)
 
   const pickCommand = (cmd: string) => {
     const def = SLASH_COMMANDS.find((c) => c.name === cmd)
@@ -75,10 +65,21 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-    if (window.matchMedia(TOUCH_QUERY).matches) return
+    if (e.key === 'Escape' && running) {
+      onStop()
+      return
+    }
     const paletteActive = isSlashInput(value) && !value.includes(' ') && matchingSlashCommands(value).length > 0
-    if (paletteActive) return
+    const send = enterSendsMessage({
+      key: e.key,
+      shiftKey: e.shiftKey,
+      isComposing: e.nativeEvent.isComposing,
+      keyCode: e.keyCode,
+      coarse: window.matchMedia(TOUCH_QUERY).matches,
+      paletteActive,
+      enterSends,
+    })
+    if (!send) return
     e.preventDefault()
     if (canSend) onSend()
   }
@@ -90,18 +91,23 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
     onAddFiles(files)
   }
 
-  const sendTitle = !connected ? 'Reconnecting, your message will wait' : uploading ? 'Waiting for uploads' : 'Send'
+  const sendTitle = !connected ? t('chat_banner_reconnecting') : uploading ? t('chat_send_waiting_files') : t('chat_send')
 
   return (
     <div className="px-3 pt-2 pb-3 sm:px-4 sm:pb-4 hq-composer shrink-0 relative">
       {isSlashInput(value) && <SlashCommandPalette input={value} onSelect={pickCommand} />}
 
-      {!connected && (
+      {!connected && !canQueue && (
         <div className="flex items-center justify-center gap-1.5 pb-2 text-[11px] " style={{ color: 'var(--accent-amber)' }}>
-          <WifiOff className="w-3 h-3" /> Reconnecting. Your draft is kept and can be sent once HQ is back.
+          <WifiOff className="w-3 h-3" /> {t('outbox_shared_send')}
         </div>
       )}
 
+      {hasBigFile && (
+        <p role="status" className="pb-2 text-[11px] text-center" style={{ color: 'var(--accent-amber)' }}>
+          {t('chat_remove_big')}
+        </p>
+      )}
       <ComposerAttachments items={attachments} onRemove={onRemoveAttachment} onRetry={onRetryAttachment} />
 
       <div className="flex items-end gap-2 sm:gap-3 max-w-4xl mx-auto">
@@ -121,7 +127,8 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
           type="button"
           onClick={() => fileInputRef.current?.click()}
           className="w-10 h-10 rounded-full flex items-center justify-center text-neutral-400 hover:text-white hover:bg-white/10 shrink-0"
-          title="Attach files"
+          title={t('chat_attach')}
+          aria-label={t('chat_attach')}
         >
           <Paperclip className="w-4 h-4" />
         </button>
@@ -132,7 +139,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder={placeholder}
+          placeholder={t('chat_message_hq')}
           rows={1}
           enterKeyHint="enter"
           className="flex-1 min-w-0 rounded-3xl px-5 py-3 text-base sm:text-sm leading-6 outline-none resize-none hq-field text-white caret-emerald-400 overflow-y-auto"
@@ -144,7 +151,8 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
             type="button"
             onClick={onStop}
             className="w-10 h-10 rounded-full flex items-center justify-center bg-amber-500 text-black hover:brightness-110 shrink-0"
-            title="Stop response"
+            title={t('chat_stop')}
+            aria-label={t('chat_stop')}
           >
             <Square className="w-4 h-4 fill-current" />
           </button>
@@ -155,11 +163,23 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
             disabled={!canSend}
             className="w-11 h-11 rounded-full flex items-center justify-center bg-emerald-400 text-black font-bold disabled:opacity-30 hover:brightness-110 shrink-0 shadow-[0_6px_20px_rgba(34,255,55,0.2)]"
             title={sendTitle}
+            aria-label={t('chat_send')}
           >
             <Send className="w-4 h-4" />
           </button>
         )}
       </div>
+      <label className="hidden sm:flex items-center justify-center gap-1.5 pt-1.5 text-[11px]" style={{ color: 'var(--ink-muted)' }} title={t('chat_enter_sends_hint')}>
+        <input
+          type="checkbox"
+          checked={enterSends ?? true}
+          onChange={(e) => {
+            writeEnterSends(e.target.checked)
+            setEnterSends(e.target.checked)
+          }}
+        />
+        {t('chat_enter_sends')}
+      </label>
     </div>
   )
 })

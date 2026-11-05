@@ -56,7 +56,7 @@ test('only the parties with something waiting get a chip, and the owner comes fi
 test('the buckets read in the order a person decides them and empty ones are left out', () => {
   const rows = bucketRows({ failed: 3, passed: 10, needs_you: 1, undecidable: 0, unplanned: 4 })
   expect(rows.map((r) => r.bucket)).toEqual(['passed', 'failed', 'needs_you'])
-  expect(rows[1].does).toContain('to_do')
+  expect(rows[1].does).toContain('Sent back')
   expect(bucketRows(undefined)).toEqual([])
 })
 
@@ -75,11 +75,11 @@ test('a sweep offers only the controls that make sense at its stage', () => {
 
 test('progress counts the phase that is running and says nothing otherwise', () => {
   const p = { total: 10, buckets: {}, states: { unplanned: 4, planned: 6 } }
-  expect(sweepProgress('planning', p)).toMatchObject({ done: 6, percent: 60, label: '6 of 10 planned' })
+  expect(sweepProgress('planning', p)).toMatchObject({ done: 6, percent: 60, label: '6 of 10 done' })
   const run = { total: 10, buckets: {}, states: { planned: 3, verdict: 7 } }
-  expect(sweepProgress('running', run)).toMatchObject({ done: 7, percent: 70, label: '7 of 10 verified' })
+  expect(sweepProgress('running', run)).toMatchObject({ done: 7, percent: 70, label: '7 of 10 done' })
   const apply = { total: 10, buckets: {}, states: { verdict: 2, applied: 6, kept: 1, stale: 1 } }
-  expect(sweepProgress('applying', apply)).toMatchObject({ done: 8, label: '8 of 10 applied' })
+  expect(sweepProgress('applying', apply)).toMatchObject({ done: 8, label: '8 of 10 done' })
   expect(sweepProgress('ready', run)).toBeNull()
   expect(sweepProgress('planning', { total: 0, buckets: {}, states: {} })).toBeNull()
 })
@@ -120,9 +120,9 @@ test('a scope is offered only when it has what it needs', () => {
 })
 
 test('calibration never states a rate it has no audits for', () => {
-  expect(calibrationLine(tier({}))).toBe('Tier 1: not enough data yet. 0 audits, 0 disagreed.')
+  expect(calibrationLine(tier({}))).toBe('Code changes: not enough data yet. 0 audits, 0 disagreed.')
   expect(calibrationLine(tier({ audits: 40, disagreements: 1, disagreement_upper: 0.08, state: 'earned' }))).toBe(
-    'Tier 1: earned. 40 audits, 1 disagreed, upper bound 8%.'
+    'Code changes: earned. 40 audits, 1 disagreed, upper bound 8%.'
   )
   const cal = (tiers: TierCalibration[]): Calibration => ({
     verifier_config: 'm',
@@ -133,7 +133,7 @@ test('calibration never states a rate it has no audits for', () => {
   expect(auditEstimate(cal([tier({})]))).toContain('no error estimate')
   expect(auditEstimate(cal([tier({ audits: 12, disagreements: 1 })]))).toContain('Too few to say')
   const enough = auditEstimate(cal([tier({ audits: 35, disagreements: 1, disagreement_upper: 0.12 })]))
-  expect(enough).toBe('1 of 35 audits disagreed. For tier 1, HQ is wrong at most 12% of the time, with 95% confidence.')
+  expect(enough).toBe('1 of 35 audits disagreed. For code changes, HQ is wrong at most 12% of the time, with 95% confidence.')
   // Thirty-odd audits spread over three tiers say nothing about any one of them.
   const spread = auditEstimate(
     cal([
@@ -150,7 +150,7 @@ test('calibration never states a rate it has no audits for', () => {
       tier({ tier: 2, audits: 3, disagreements: 0, disagreement_upper: 0.56 }),
     ])
   )
-  expect(mixed).toBe('1 of 43 audits disagreed. For tier 1, HQ is wrong at most 9% of the time, with 95% confidence.')
+  expect(mixed).toBe('1 of 43 audits disagreed. For code changes, HQ is wrong at most 9% of the time, with 95% confidence.')
 })
 
 test('the veto countdown reads in the largest sensible unit', () => {

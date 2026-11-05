@@ -8,6 +8,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UpdateLogicTest {
+    init { UpdateLogic.repo = "example/hq" }
+
     private val sha = "a".repeat(64)
     private val url = "${UpdateLogic.APK_URL_PREFIX}v0.9.1-main.7/agent-hq-android.apk"
 
@@ -26,7 +28,7 @@ class UpdateLogicTest {
 
     @Test fun refusesAUrlOutsideTheReleasePath() {
         assertNull(UpdateLogic.parse(json(url = "https://example.com/agent-hq-android.apk")))
-        assertNull(UpdateLogic.parse(json(url = "http://github.com/CalvinMagezi/hq/releases/download/v1/a.apk")))
+        assertNull(UpdateLogic.parse(json(url = "http://github.com/example/hq/releases/download/v1/a.apk")))
         assertNull(UpdateLogic.parse(json(url = UpdateLogic.APK_URL_PREFIX + "v1/payload.zip")))
     }
 
@@ -52,7 +54,7 @@ class UpdateLogicTest {
 
     @Test fun anOlderAndroidIsToldWhy() {
         val m = UpdateLogic.parse(json(code = "8", minSdk = "30"))!!
-        assertEquals(UpdateVerdict.NeedsNewerAndroid(30), UpdateLogic.verdict(m, 7, 28))
+        assertEquals(UpdateVerdict.NeedsNewerAndroid(30, m.version), UpdateLogic.verdict(m, 7, 28))
         assertEquals(UpdateVerdict.UpToDate, UpdateLogic.verdict(m, 8, 28))
     }
 
@@ -65,7 +67,7 @@ class UpdateLogicTest {
     }
 
     @Test fun stableFollowsLatestAndMainItsOwnRelease() {
-        assertEquals("https://github.com/CalvinMagezi/hq/releases/latest/download/android-channel.json", UpdateLogic.manifestUrl(UpdateChannel.Stable))
+        assertEquals("https://github.com/example/hq/releases/latest/download/android-channel.json", UpdateLogic.manifestUrl(UpdateChannel.Stable))
         assertEquals("${UpdateLogic.APK_URL_PREFIX}channel-main/android-channel.json", UpdateLogic.manifestUrl(UpdateChannel.Main))
         assertEquals(UpdateChannel.Stable, UpdateChannel.of(null))
         assertEquals(UpdateChannel.Stable, UpdateChannel.of("nightly"))
@@ -85,5 +87,18 @@ class UpdateLogicTest {
         assertEquals(UpdateState.Failed(UpdateLogic.BLOCKED), UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_FAILURE_BLOCKED, "x"))
         assertEquals(UpdateState.Failed("INSTALL_FAILED_X"), UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_FAILURE, "INSTALL_FAILED_X"))
         assertEquals(UpdateState.Failed(UpdateLogic.NOT_INSTALLED), UpdateLogic.installOutcome(android.content.pm.PackageInstaller.STATUS_FAILURE, " "))
+    }
+
+    @Test fun noRepoMeansNoUpdates() {
+        val was = UpdateLogic.repo
+        try {
+            UpdateLogic.repo = ""
+            assertFalse(UpdateLogic.enabled())
+            assertNull(UpdateLogic.parse(json()))
+            UpdateLogic.repo = "not a repo"
+            assertFalse(UpdateLogic.enabled())
+        } finally {
+            UpdateLogic.repo = was
+        }
     }
 }

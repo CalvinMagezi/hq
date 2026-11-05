@@ -1706,8 +1706,8 @@ async fn a_handoff_files_a_task_starts_a_session_and_gives_a_thread_that_owns_it
     let task_id = report["task"]["id"].as_str().unwrap();
     let session_id = report["session_id"].as_str().unwrap();
     let thread = report["thread_id"].as_str().unwrap();
-    assert_eq!(report["links"]["chat"], format!("/chat?thread={thread}"));
-    assert_eq!(report["links"]["task"], format!("/tasks?task={task_id}"));
+    assert_eq!(report["links"]["chat"], format!("/chat/{thread}"));
+    assert_eq!(report["links"]["task"], format!("/tasks/{task_id}"));
 
     let row = get_row(&db, session_id).unwrap();
     assert_eq!(row.mission_id.as_deref(), Some(task_id));

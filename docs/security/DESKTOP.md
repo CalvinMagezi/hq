@@ -224,3 +224,23 @@ Each guard below was broken one at a time and `cargo test -p hq-desktop` run; ev
 | The screen refresh waits on the bridge lock | `the_screen_refresh_does_not_wait_for_the_bridge_lock` |
 
 40 guards, 40 caught. The script edits the source, runs the tests and restores the file; it covers the proxy, the host, the pairing controller, settings, the navigation allow-lists and the shell's configuration files.
+
+## 9. Hub commands (wave 3)
+
+- New control commands: `host_log` (the last 200 lines of the host log with secret-looking values replaced by `[hidden]`), `host_unlock` (runs `hq host unlock` and nothing else) and `pick_program`. They are in `build.rs`, the handler list and the capability, and `shell_config.rs` fails if the three disagree.
+- `pick_program` takes either an `NSOpenPanel` choice or a pasted path. Both go through `chooser::check_program`: a path that is, or sits under, a world-writable directory is refused before anything runs, then the file must answer `--version` with `hq <version>` within five seconds.
+- `open_main_window(path)` accepts only `/`, `/chat`, `/settings/devices`, `/helpers/<id>` and `/inbox/<id>` with an id of letters, digits, `_` and `-` (at most 64). Anything with a query or fragment is refused before the proxy starts.
+- The blocked-helper notice carries a helper name and a fixed sentence, never a message body. It is posted by `UNUserNotificationCenter` and has no click handler, so a click only brings the app forward.
+- The rename rewrite touches only Claude Desktop entries named `hq` or `hq-<hub>` whose args are exactly `mcp-serve --remote <hub>` and whose command is the old `HQ.app` path. It writes a temp file, renames it over the original and keeps a dated backup.
+- Adoption and usage data stay on the device: the start times and last runs are in memory or in `settings.json`, never sent anywhere.
+
+## 10. Helpers tab (wave 3)
+
+- New control commands: `helpers_list`, `helpers_check`, `helper_try`, `helper_try_stop`, `helper_connect`, `helper_disconnect`, `helper_restore` and `helper_signin`. They are in `build.rs`, the handler list and the control capability only; `claude_status` and `claude_change` are gone.
+- Listing runs nothing. A check reads `package.json` next to the resolved program first; otherwise it runs `<program> --version` once under `sandbox-exec` (macOS) or `bwrap` (Linux) with no network, stdin closed, a two-second limit and the process group killed. With no sandbox the version is unknown, never an unsandboxed run. At most two checks run at once and answers are cached by path, size and modified time.
+- A program that is, or sits under, a world-writable directory is not run.
+- Try it goes through the host with the same sandbox plan real work uses, in a fixed folder that must not be world-writable or a symlink, and sends no keys except where the helper's table says the host answers a trust question. General helpers need a yes, and a lockdown refuses Try it.
+- The sign-in link is taken from the helper's screen in Rust and held in memory. The page only learns that one is ready. Opening requires `https`, no user info, and a host equal to or under the helper's own sign-in sites; copying and opening use `/usr/bin/pbcopy` and `/usr/bin/open` with fixed arguments.
+- Undo keeps whole copies of the connection files for ten minutes and restores them only if they are byte-identical to what the removal left. Otherwise nothing is written.
+- The "is a newer version out" check asks the npm registry for the package name only, and only when `look_for_helper_updates` is on.
+- Adoption and usage data stay on the device.

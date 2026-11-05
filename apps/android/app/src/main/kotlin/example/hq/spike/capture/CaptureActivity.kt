@@ -44,10 +44,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import example.hq.spike.R
 import example.hq.spike.ShellActivity
 import example.hq.spike.data.HqServices
 import example.hq.spike.ui.shell.HqIcons
@@ -197,7 +199,7 @@ private fun CaptureSheet(start: CaptureMode, subject: String?, text: String?, fo
                         Field("Notes (optional)", body, { body = it }, minHeight = 72.dp)
                         Static("Where", "Personal · Inbox")
                         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { more = !more }, verticalAlignment = Alignment.CenterVertically) {
-                            Text("More options", style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
+                            Text(stringResource(R.string.capture_more_options), style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
                             Icon(if (more) HqIcons.ChevronUp else HqIcons.ChevronDown, null, Modifier.size(20.dp), tint = Mts.BrandBlue)
                         }
                         if (more) {
@@ -228,7 +230,7 @@ private fun CaptureSheet(start: CaptureMode, subject: String?, text: String?, fo
                         onSave(CaptureDraft(mode, title, body, folder), true)
                     }.padding(horizontal = 24.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text("Save and open", style = HqType.BodySmBold, color = Mts.Ink) }
+                ) { Text(stringResource(R.string.capture_save_and_open), style = HqType.BodySmBold, color = Mts.Ink) }
             }
         }
     }
@@ -300,7 +302,7 @@ private fun FolderField(folder: String, open: Boolean, folders: List<String>, on
     Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Line, shape)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = onToggle).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Save in", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+                Text(stringResource(R.string.capture_save_in), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
                 Text(folder, style = HqType.Body, color = Mts.Ink, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             Icon(HqIcons.ChevronDown, null, Modifier.size(20.dp), tint = Mts.InkMuted)

@@ -31,9 +31,11 @@ pub struct Audit {
     pub source: String,
     pub tier: u8,
     pub verifier_config: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub selected_at: String,
     pub answer: Option<String>,
     pub note: String,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub answered_at: Option<String>,
     pub answered_by: Option<String>,
 }

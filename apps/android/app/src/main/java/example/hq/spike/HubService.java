@@ -8,7 +8,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
+import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.util.Log;
 import example.hq.spike.bridge.BridgeSupervisor;
@@ -30,8 +32,8 @@ import java.util.function.Supplier;
 /** Keeps `hq` and, when the owner supplied a Caddyfile, Caddy running as children of this app, and turns unread HQ notifications into Android ones. */
 public class HubService extends Service {
     static final String TAG = "HQHUB";
-    static final String CHANNEL = "hub";
-    public static final int PORT = 5678;
+    static final String CHANNEL = AlertPoster.HUB;
+    public static final int PORT = BuildConfig.HQ_PORT;
     private static final int NOTIFICATION_ID = 1;
     private static final long BACKOFF_MIN_MS = 2_000;
     private static final long BACKOFF_MAX_MS = 60_000;
@@ -53,11 +55,17 @@ public class HubService extends Service {
     private static volatile boolean childActive;
     private static volatile Process caddyProc;
     /** While true the supervisor does not start hq: a restore is replacing the vault it would hold open. */
-    private static volatile boolean held;
+    /** How many callers hold hq stopped (a restore, the moved-phone check, a safe-mode copy); hq starts again at zero. */
+    private static final java.util.concurrent.atomic.AtomicInteger holds = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicBoolean copyHolding = new java.util.concurrent.atomic.AtomicBoolean();
+
+    private static boolean held() {
+        return holds.get() > 0;
+    }
     private static final long HELD_POLL_MS = 1_000;
 
     /** The notification glyph, looked up by name because the build makes no R class. */
-    static int statIcon(Context c) {
+    public static int statIcon(Context c) {
         int id = c.getResources().getIdentifier("ic_stat_agenthq", "drawable", c.getPackageName());
         return id != 0 ? id : android.R.drawable.stat_notify_sync;
     }
@@ -140,26 +148,81 @@ public class HubService extends Service {
      * ended (at most about 25 s); call it off the main thread. Returns false if it could not be stopped.
      */
     public static boolean holdHq() {
-        held = true;
+        holds.incrementAndGet();
         restartHq();
         Process p = hqProc;
         if (p == null) return true;
         try {
             if (!p.waitFor(FORCE_STOP_AFTER_MS + 5_000, TimeUnit.MILLISECONDS)) {
-                held = false;
+                releaseHq();
                 return false;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            held = false;
+            releaseHq();
             return false;
         }
         return true;
     }
 
-    /** Lets the supervisor start hq again, with whatever mode and credentials are stored by then. */
+    /** Gives back one hold; the supervisor starts hq again, with what is stored by then, once none is left. */
     public static void releaseHq() {
-        held = false;
+        holds.updateAndGet(n -> Math.max(0, n - 1));
+    }
+
+    /** Asked by the safe-mode screen, which runs in its own process, to stop hq while the database files are copied. */
+    public static final String ACTION_COPY_HOLD = "example.hq.spike.COPY_HOLD";
+    public static final String ACTION_COPY_RELEASE = "example.hq.spike.COPY_RELEASE";
+    public static final String EXTRA_REPLY = "reply";
+    /** The answers sent back to the screen: hq is held, hq was not running so nothing needed holding, hq would not stop. */
+    public static final int COPY_HELD = 0;
+    public static final int COPY_NOT_RUNNING = 1;
+    public static final int COPY_FAILED = 2;
+    /** A copy never keeps hq stopped longer than this, whatever happens to the screen. */
+    private static final long COPY_HOLD_MAX_MS = 25_000;
+    private static Thread copyTimer;
+
+    private void copyHold(Intent intent, int startId) {
+        ResultReceiver reply = Build.VERSION.SDK_INT >= 33
+                ? intent.getParcelableExtra(EXTRA_REPLY, ResultReceiver.class) : intent.getParcelableExtra(EXTRA_REPLY);
+        if (!started.get()) {
+            if (reply != null) reply.send(COPY_NOT_RUNNING, Bundle.EMPTY);
+            stopSelf(startId);
+            return;
+        }
+        new Thread(() -> {
+            // One copy holds at most once; a second request while it runs answers held without another hold.
+            boolean ok = copyHolding.get() || holdHq();
+            if (ok && copyHolding.compareAndSet(false, true)) {
+                Thread timer = new Thread(() -> {
+                    try {
+                        Thread.sleep(COPY_HOLD_MAX_MS);
+                    } catch (InterruptedException e) {
+                        // The copy finished first.
+                    }
+                    releaseCopyHold();
+                }, "hq-copy-release");
+                synchronized (LOCK) {
+                    if (copyTimer != null) copyTimer.interrupt();
+                    copyTimer = timer;
+                }
+                timer.start();
+            }
+            if (reply != null) reply.send(ok ? COPY_HELD : COPY_FAILED, Bundle.EMPTY);
+        }, "hq-copy-hold").start();
+    }
+
+    private static void copyRelease() {
+        synchronized (LOCK) {
+            if (copyTimer != null) copyTimer.interrupt();
+            copyTimer = null;
+        }
+        releaseCopyHold();
+    }
+
+    /** The copy's own hold goes once, by the screen or by the timer, never another caller's. */
+    private static void releaseCopyHold() {
+        if (copyHolding.compareAndSet(true, false)) releaseHq();
     }
 
     /** True when the running hq child was started in Active mode. */
@@ -169,8 +232,22 @@ public class HubService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        getSystemService(NotificationManager.class)
-                .createNotificationChannel(new NotificationChannel(CHANNEL, "HQ is running", NotificationManager.IMPORTANCE_LOW));
+        if (intent != null && ACTION_COPY_HOLD.equals(intent.getAction())) {
+            copyHold(intent, startId);
+            return START_STICKY;
+        }
+        if (intent != null && ACTION_COPY_RELEASE.equals(intent.getAction())) {
+            copyRelease();
+            return START_STICKY;
+        }
+        if (intent != null && example.hq.spike.download.DownloadNotices.ACTION.equals(intent.getAction())) {
+            example.hq.spike.download.Downloads.INSTANCE.act(
+                    intent.getStringExtra(example.hq.spike.download.DownloadNotices.EXTRA_ID),
+                    intent.getStringExtra(example.hq.spike.download.DownloadNotices.EXTRA_OP));
+            if (started.get()) return START_STICKY;
+        }
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        for (NotificationChannel ch : AlertPoster.channels(this)) nm.createNotificationChannel(ch);
         Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
         try {
             if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
@@ -178,22 +255,91 @@ public class HubService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "startForeground failed: " + e);
         }
+        // The running notice moved to a Min channel under a new id; the old Low one can go only now that nothing shows on it.
+        nm.deleteNotificationChannel(AlertPoster.OLD_HUB);
         if (started.compareAndSet(false, true)) {
             int gen = generation.incrementAndGet();
+            example.hq.spike.voice.VoiceEngines.INSTANCE.listen(getApplicationContext());
+            example.hq.spike.download.Downloads.INSTANCE.start(getApplicationContext());
             new Thread(() -> supervise(gen, "hq", this::hqProcess, true), "hq-supervisor").start();
+            new Thread(() -> watchNotice(gen), "hq-notice").start();
             new Thread(() -> supervise(gen, "caddy", this::caddyProcess, false), "caddy-supervisor").start();
             new Thread(() -> Alerts.watch(getApplicationContext(), () -> gen == generation.get()), "alerts").start();
+            new Thread(() -> example.hq.spike.voice.VoiceHandoff.restore(getApplicationContext()), "voice-handoff").start();
             new Thread(() -> Updater.INSTANCE.watch(getApplicationContext(), () -> gen == generation.get()), "update-check").start();
         }
+        registerLockReceiver();
         // Does nothing until the owner has turned paired devices on (the pairing screen).
         BridgeSupervisor.INSTANCE.start(getApplicationContext());
         return START_STICKY;
     }
 
+    private android.content.BroadcastReceiver lockReceiver;
+
+    /** The phone locking and unlocking reach only a receiver registered while the service runs. */
+    private void registerLockReceiver() {
+        if (lockReceiver != null) return;
+        lockReceiver = new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent i) {
+                String action = i.getAction();
+                Context app = context.getApplicationContext();
+                if (Intent.ACTION_SCREEN_OFF.equals(action)) new Thread(() -> Alerts.onLocked(app), "alerts-lock").start();
+                else if (Intent.ACTION_USER_PRESENT.equals(action)) new Thread(() -> Alerts.refresh(app), "alerts-unlock").start();
+            }
+        };
+        android.content.IntentFilter filter = new android.content.IntentFilter(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_USER_PRESENT);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(lockReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(lockReceiver, filter);
+    }
+
+    /** True while hq's child process lives. */
+    public static boolean hqAlive() {
+        Process p = hqProc;
+        return p != null && p.isAlive();
+    }
+
+    /** True once the service is in the foreground: the first of the four start steps. */
+    public static boolean hubUp() {
+        return started.get();
+    }
+
+    /** True while hq is being stopped on purpose so it starts again with a new setting. */
+    public static boolean restarting() {
+        return restartAsked;
+    }
+
     private Notification notification(boolean active) {
-        String text = active ? "Answering your chats and running scheduled tasks." : "Only the app is on. Chats and scheduled tasks are paused.";
-        return new Notification.Builder(this, CHANNEL).setContentTitle("HQ is running")
-                .setContentText(text).setSmallIcon(statIcon(this)).build();
+        example.hq.spike.data.Connection status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
+        example.hq.spike.ui.startup.RunningNotice.Text t = example.hq.spike.ui.startup.RunningNotice.INSTANCE.of(
+                example.hq.spike.ui.shell.Words.Companion.of(this), status, active, false);
+        Intent open = new Intent(this, example.hq.spike.ShellActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (t.getOpensSheet()) open.putExtra(example.hq.spike.ShellActivity.EXTRA_SHEET, "connection");
+        android.app.PendingIntent tap = android.app.PendingIntent.getActivity(this, 0, open, android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+        return new Notification.Builder(this, CHANNEL).setContentTitle(t.getTitle())
+                .setContentText(t.getBody()).setContentIntent(tap).setOnlyAlertOnce(true).setSmallIcon(statIcon(this)).build();
+    }
+
+    /** Posts the notice again when its words change (a step, a restart, a stop), never for the seconds. */
+    private void watchNotice(int gen) {
+        String shown = null;
+        while (gen == generation.get()) {
+            try {
+                boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
+                example.hq.spike.data.Connection status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
+                String key = example.hq.spike.ui.startup.RunningNotice.INSTANCE.key(example.hq.spike.ui.shell.Words.Companion.of(this), status, active);
+                if (!key.equals(shown)) {
+                    shown = key;
+                    getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(active));
+                }
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                return;
+            } catch (RuntimeException e) {
+                Log.w(TAG, "notice update failed: " + e);
+            }
+        }
     }
 
     private static final String PREFS = "hub";
@@ -226,7 +372,7 @@ public class HubService extends Service {
                 if (pb == null) {
                     if (!saidUnconfigured) Log.i(TAG, name + " not configured, waiting for its files");
                     saidUnconfigured = true;
-                    if (!pause(gen, held && isHq ? HELD_POLL_MS : BACKOFF_MAX_MS)) return;
+                    if (!pause(gen, held() && isHq ? HELD_POLL_MS : BACKOFF_MAX_MS)) return;
                     continue;
                 }
                 long t0 = System.currentTimeMillis();
@@ -276,7 +422,7 @@ public class HubService extends Service {
      * they cannot change the vault, config, bind address or port.
      */
     private ProcessBuilder hqProcess() {
-        if (held) return null;
+        if (held()) return null;
         SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
         WebAssets.sync(this);
         boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
@@ -361,6 +507,10 @@ public class HubService extends Service {
             if (caddyProc != null) caddyProc.destroy();
         }
         BridgeSupervisor.INSTANCE.stop();
+        if (lockReceiver != null) {
+            unregisterReceiver(lockReceiver);
+            lockReceiver = null;
+        }
         super.onDestroy();
     }
 

@@ -1,3 +1,5 @@
+import { ApprovalCard } from '~/components/ui/ApprovalCard'
+import { t } from '~/strings'
 import { useRouter } from '@tanstack/react-router'
 import { X, CheckCircle2, XCircle, FileCode, Check, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import type { NotificationItem } from '~/lib/notificationsApi'
@@ -96,7 +98,7 @@ export function NotificationDetailDrawer({
           {/* Summary / Description */}
           <div>
             <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">
-              Summary
+              {t('inbox_d_summary')}
             </h3>
             <p className="text-sm text-neutral-200 leading-relaxed whitespace-pre-wrap">
               {notification.description}
@@ -111,7 +113,7 @@ export function NotificationDetailDrawer({
                 className="hq-btn-ghost mt-3"
               >
                 <ArrowUpRight className="w-3.5 h-3.5" />
-                <span>Open</span>
+                <span>{t('inbox_d_open')}</span>
               </button>
             )}
           </div>
@@ -125,22 +127,22 @@ export function NotificationDetailDrawer({
             }}
           >
             <h4 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-              Item Details
+              {t('inbox_d_details')}
             </h4>
             <div className="grid grid-cols-2 gap-3 text-xs ">
               <div>
-                <span className="text-neutral-500 block">ID:</span>
+                <span className="text-neutral-500 block">{t('inbox_d_id')}</span>
                 <span className="text-neutral-300 break-all">{notification.id}</span>
               </div>
               <div>
-                <span className="text-neutral-500 block">Created:</span>
+                <span className="text-neutral-500 block">{t('inbox_d_created')}</span>
                 <span className="text-neutral-300">
                   {new Date(notification.created_at).toLocaleString()}
                 </span>
               </div>
               {notification.metadata.score !== undefined && (
                 <div>
-                  <span className="text-neutral-500 block">Score:</span>
+                  <span className="text-neutral-500 block">{t('inbox_d_score')}</span>
                   <span className="text-amber-400 font-bold">
                     {notification.metadata.score.toFixed(2)}
                   </span>
@@ -162,52 +164,17 @@ export function NotificationDetailDrawer({
             {dialog ? (
               <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
             ) : notification.kind === 'action_needed' ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleDismiss}
-                  disabled={loadingAction !== null}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-all disabled:opacity-50"
-                >
-                  {loadingAction === 'dismiss' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Dismiss'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleReject}
-                  disabled={loadingAction !== null}
-                  className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all disabled:opacity-50"
-                >
-                  {loadingAction === 'reject' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <XCircle className="w-4 h-4" />
-                      Reject
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleApprove}
-                  disabled={loadingAction !== null}
-                  className="px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
-                  style={{
-                    background: 'var(--accent-green, #00ffa3)',
-                    color: '#000',
-                  }}
-                >
-                  {loadingAction === 'approve' ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      Approve & Promote
-                    </>
-                  )}
-                </button>
-              </>
+              <ApprovalCard
+                quoteTitle={t('approval_quote_inbox')}
+                tool={notification.metadata.approval?.tool}
+                args={notification.metadata.approval?.args}
+                inWords={notification.description}
+                loses={notification.metadata.approval?.loses}
+                verb={notification.metadata.approval?.verb}
+                busy={loadingAction !== null}
+                onDecline={handleReject}
+                onAllow={handleApprove}
+              />
             ) : (
               <button
                 type="button"
@@ -220,7 +187,7 @@ export function NotificationDetailDrawer({
                 ) : (
                   <>
                     <Check className="w-4 h-4 text-emerald-400" />
-                    Dismiss
+                    {t('inbox_clear')}
                   </>
                 )}
               </button>

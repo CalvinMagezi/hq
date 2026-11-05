@@ -44,8 +44,9 @@ test('HomeSection renders loading, empty and error states', () => {
   expect(html({ kind: 'loading' })).toContain('Loading Pinned')
   expect(html({ kind: 'empty' })).toContain('Nothing pinned yet.')
   const err = html({ kind: 'error', message: 'offline' })
-  expect(err).toContain('Could not load pinned: offline')
-  expect(err).toContain('Retry')
+  // The shell is not Connected here, so the status line speaks and the section stays quiet.
+  expect(err).not.toContain('Could not load')
+  expect(err).not.toContain('Retry')
 })
 
 test('HomeSections orders pinned, recent, tasks and an empty section keeps its siblings', () => {
@@ -65,5 +66,5 @@ test('HomeSections orders pinned, recent, tasks and an empty section keeps its s
   expect(at('Pinned')).toBeLessThan(at('Recent Project Notes'))
   expect(at('Recent Project Notes')).toBeLessThan(at('In Progress Tasks'))
   expect(out).toContain('No pinned notes yet')
-  expect(out).toContain('Could not load in progress tasks: down')
+  expect(out).not.toContain('Could not load')
 })

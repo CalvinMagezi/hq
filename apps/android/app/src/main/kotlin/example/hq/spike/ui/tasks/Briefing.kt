@@ -1,5 +1,7 @@
 package example.hq.spike.ui.tasks
 
+import example.hq.spike.R
+import example.hq.spike.ui.shell.Words
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
@@ -42,41 +44,40 @@ data class BriefingUi(val initiativeId: String, val name: String, val phase: Bri
 
 /** The words of the briefing, kept as the web app says them so the two agree. */
 object BriefingWords {
-    const val TITLE = "Briefing"
-    const val FAILED = "Could not load the briefing. HQ is not answering."
-    const val MISSING = "This edition of HQ has no briefings."
-    const val NO_AUTHOR = "No one is on record as having written to these tasks."
-    const val FOOTER = "Generated now. Status and ownership come from the task system only; a note edit is not progress."
+    fun title(w: Words) = w.s(R.string.tasks_briefing_title)
+    fun failed(w: Words, missing: Boolean) = w.s(if (missing) R.string.tasks_briefing_missing else R.string.tasks_briefing_failed)
+    fun noAuthor(w: Words) = w.s(R.string.tasks_briefing_no_author)
+    private fun footer(w: Words) = w.s(R.string.tasks_briefing_footer)
     private val REVIEW_ORDER = listOf("accepted", "reviewed", "unreviewed", "disputed", "superseded")
 
-    fun empty(name: String) = "$name has no active tasks, so there is nothing to brief."
+    fun empty(w: Words, name: String) = w.s(R.string.tasks_briefing_empty, name)
 
     /** "2 in progress, 1 to do (3 tasks)", or "(1 task)". */
-    fun statusLine(b: Briefing): String =
-        b.statusCounts.joinToString(", ") { (status, n) -> "$n ${TasksLogic.statusWords(status).lowercase()}" } + if (b.tasksShown > 0) " (${b.tasksShown} ${if (b.tasksShown == 1) "task" else "tasks"})" else ""
+    fun statusLine(w: example.hq.spike.ui.shell.Words, b: Briefing): String =
+        b.statusCounts.joinToString(", ") { (status, n) -> w.s(R.string.tasks_briefing_status_count, n.toString(), TasksLogic.statusWords(w, status).lowercase()) } + if (b.tasksShown > 0) " (${example.hq.spike.ui.shell.Counts.tasks(w, b.tasksShown)})" else ""
 
     /** "2 accepted, 1 unreviewed": states in a fixed order, none left out for being zero. */
-    fun reviewSummary(counts: List<Pair<String, Int>>): String {
+    fun reviewSummary(w: Words, counts: List<Pair<String, Int>>): String {
         val by = counts.toMap()
         val parts = REVIEW_ORDER.filter { (by[it] ?: 0) > 0 }.map { "${by[it]} $it" }
-        return if (parts.isEmpty()) "no reviews recorded" else parts.joinToString(", ")
+        return if (parts.isEmpty()) w.s(R.string.tasks_briefing_no_reviews) else parts.joinToString(", ")
     }
 
-    fun gapsLine(b: Briefing) = "Notes: ${reviewSummary(b.reviewCounts)}. ${b.gapsTotal} ${if (b.gapsTotal == 1) "gap" else "gaps"} in attribution or links."
+    fun gapsLine(w: Words, b: Briefing) = w.s(R.string.tasks_briefing_gaps_line, reviewSummary(w, b.reviewCounts), w.n(R.plurals.brief_gaps, b.gapsTotal, b.gapsTotal))
 
-    fun contributorLine(c: Contributor, now: Instant): String = buildString {
-        append("${c.notes} ${if (c.notes == 1) "note" else "notes"}")
-        if (c.leases > 0) append(", ${c.leases} ${if (c.leases == 1) "lease" else "leases"}")
-        c.lastActive?.let { append(", last ${age(it, now)}") }
+    fun contributorLine(w: Words, c: Contributor, now: Instant): String = buildString {
+        append(w.n(R.plurals.brief_notes, c.notes, c.notes))
+        if (c.leases > 0) append(", " + w.n(R.plurals.brief_leases, c.leases, c.leases))
+        c.lastActive?.let { append(", " + w.s(R.string.tasks_briefing_last_active, age(w, it, now))) }
     }
 
-    fun noteLine(n: BriefNote, now: Instant) = "${n.taskDisplayId}, by ${n.author}, version recorded ${age(n.writtenAt, now)}"
+    fun noteLine(w: Words, n: BriefNote, now: Instant) = w.s(R.string.tasks_briefing_note_line, n.taskDisplayId, n.author, age(w, n.writtenAt, now))
 
     /** Review badge words; a version with no provenance record is "No record", never "Unreviewed". */
-    fun badge(review: String?): String = review?.replaceFirstChar { it.uppercase() } ?: "No record"
+    fun badge(w: Words, review: String?): String = review?.replaceFirstChar { it.uppercase() } ?: w.s(R.string.tasks_briefing_no_record)
 
-    fun freshnessLine(b: Briefing, now: Instant): String =
-        "As of " + b.freshness.joinToString(" · ") { (source, at) -> "$source: ${if (at == null) "nothing yet" else age(at, now)}" } + ". " + FOOTER
+    fun freshnessLine(w: Words, b: Briefing, now: Instant): String =
+        w.s(R.string.tasks_briefing_as_of, b.freshness.joinToString(" · ") { (source, at) -> w.s(R.string.tasks_briefing_source_at, source, if (at == null) w.s(R.string.tasks_briefing_nothing_yet) else age(w, at, now)) }, footer(w))
 
     /** Who wrote a version, in words. Anything not recorded stays "unknown": nobody is guessed. */
     fun author(attribution: String, actor: String?, sourceKind: String?): String = when (attribution) {
@@ -87,22 +88,18 @@ object BriefingWords {
     }
 
     /** "just now", "12m ago", "3h ago", "2d ago"; "unknown" for nothing or something unreadable. Task times are UTC without a zone, note records carry one. */
-    fun age(stamp: String?, now: Instant): String {
-        val then = parse(stamp) ?: return "unknown"
+    fun age(w: Words, stamp: String?, now: Instant): String {
+        val then = parse(stamp) ?: return w.s(R.string.tasks_briefing_unknown)
         val minutes = Duration.between(then, now).toMinutes().coerceAtLeast(0)
         return when {
-            minutes < 1 -> "just now"
-            minutes < 60 -> "${minutes}m ago"
-            minutes < 24 * 60 -> "${minutes / 60}h ago"
-            else -> "${minutes / (24 * 60)}d ago"
+            minutes < 1 -> w.s(R.string.age_just_now)
+            minutes < 60 -> w.s(R.string.tasks_briefing_min_ago, minutes.toString())
+            minutes < 24 * 60 -> w.s(R.string.tasks_briefing_hour_ago, (minutes / 60).toString())
+            else -> w.s(R.string.tasks_briefing_day_ago, (minutes / (24 * 60)).toString())
         }
     }
 
     private fun parse(stamp: String?): Instant? {
-        if (stamp.isNullOrBlank()) return null
-        return try {
-            if (Regex("([zZ]|[+-]\\d{2}:\\d{2})$").containsMatchIn(stamp)) OffsetDateTime.parse(stamp).toInstant()
-            else LocalDateTime.parse(stamp.replace(' ', 'T')).toInstant(ZoneOffset.UTC)
-        } catch (e: DateTimeParseException) { null }
+        return example.hq.spike.data.Instants.parse(stamp)
     }
 }

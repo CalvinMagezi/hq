@@ -20,6 +20,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -28,12 +31,14 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import example.hq.spike.R
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -83,6 +88,9 @@ private fun Chip(icon: ImageVector, label: String, removeLabel: String, onRemove
 /** The files waiting to go with the message: a name, the size or what went wrong, and an x. Retry shows only when trying again can work. */
 @Composable
 private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
+    if (files.any { it.error == FileError.TooBig }) {
+        Text(stringResource(R.string.chat_remove_big), style = HqType.Caption, color = Mts.DangerText, modifier = Modifier.padding(horizontal = 16.dp))
+    }
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         files.forEach { file ->
             val failed = file.status == FileStatus.Failed
@@ -99,7 +107,7 @@ private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
                     Text(file.name, style = HqType.ToolLine, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(fileLine(file), style = HqType.Caption, color = if (failed) Mts.DangerText else Mts.InkMuted, maxLines = 1)
-                        if (file.retryable) Text("Retry", style = HqType.NavLabel, color = Mts.Ink)
+                        if (file.retryable) Text(stringResource(R.string.chat_retry), style = HqType.NavLabel, color = Mts.Ink)
                     }
                 }
                 Box(Modifier.size(36.dp).clickable(role = Role.Button, onClickLabel = "Remove ${file.name}") { actions.onRemoveFile(file.id) }.semantics { contentDescription = "Remove ${file.name}" }, contentAlignment = Alignment.Center) {
@@ -110,9 +118,16 @@ private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
     }
 }
 
+@Composable
 private fun fileLine(file: PendingFile): String = when (file.status) {
-    FileStatus.Uploading -> "Uploading…"
-    FileStatus.Failed -> file.error ?: "upload failed"
+    FileStatus.Uploading -> stringResource(R.string.chat_file_uploading)
+    FileStatus.Failed -> stringResource(
+        when (file.error) {
+            FileError.TooBig -> R.string.chat_file_too_big
+            FileError.Empty -> R.string.chat_file_empty
+            else -> R.string.chat_file_failed
+        },
+    )
     FileStatus.Ready -> sizeWords(file.size)
 }
 
@@ -129,14 +144,17 @@ private fun MessageRow(state: ChatUiState, actions: ChatActions) {
         Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Add to this chat", onClick = actions.onOpenAdd).semantics { contentDescription = "Add to this chat" }, contentAlignment = Alignment.Center) {
             Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.Ink)
         }
+        val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+        LaunchedEffect(state.focusDraft) { if (state.focusDraft > 0) { focus.requestFocus(); keyboard?.show() } }
         BasicTextField(
             value = state.draft, onValueChange = actions.onDraft, textStyle = HqType.Body.copy(color = Mts.Ink),
             cursorBrush = SolidColor(Mts.Ink), maxLines = MAX_LINES,
-            modifier = Modifier.weight(1f).heightIn(min = 48.dp).clip(FieldShape).background(Mts.Surface100)
+            modifier = Modifier.weight(1f).focusRequester(focus).heightIn(min = 48.dp).clip(FieldShape).background(Mts.Surface100)
                 .border(1.dp, Mts.Line, FieldShape).padding(horizontal = 16.dp, vertical = 11.dp),
             decorationBox = { inner ->
                 Box {
-                    if (state.draft.isEmpty()) Text("Message HQ", style = HqType.Body, color = Mts.InkMuted)
+                    if (state.draft.isEmpty()) Text(stringResource(R.string.chat_message_hq), style = HqType.Body, color = Mts.InkMuted)
                     inner()
                 }
             },

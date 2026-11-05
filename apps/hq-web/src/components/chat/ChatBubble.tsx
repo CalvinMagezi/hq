@@ -1,5 +1,6 @@
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
-import { Copy, Check, Pencil, Plug, RotateCw, Terminal, User } from 'lucide-react'
+import { Mic, Copy, Check, Pencil, Plug, RotateCw, Terminal, User } from 'lucide-react'
 import type { ChatOffer, ToolStep } from '~/store/threadStore'
 import type { DriverMeta } from '~/lib/sessionsApi'
 import type { ChatAttachment } from '~/lib/chatUploads'
@@ -7,6 +8,7 @@ import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~
 import { ToolCallBlock } from './ToolCallBlock'
 import { ThinkingPanel } from './ThinkingPanel'
 import { MessageAttachments } from './AttachmentChips'
+import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
 const COPIED_FLASH_MS = 1500
@@ -25,6 +27,8 @@ interface DisplayMessage {
   driver?: DriverMeta
   /** The MCP client that asked this question, when it did not come from this chat's composer. */
   viaMcp?: string
+  /** Asked by voice. */
+  spoken?: boolean
   offer?: ChatOffer
 }
 
@@ -95,6 +99,11 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffe
         }
       >
         {isUser && message.viaMcp && <McpLabel caller={message.viaMcp} />}
+        {isUser && message.spoken && (
+          <span className="flex items-center gap-1 text-[11px] mb-1" style={{ color: 'var(--ink-muted)' }}>
+            <Mic className="w-3 h-3" aria-hidden="true" /> {t('chat_spoken')}
+          </span>
+        )}
         {!isUser && message.driver && <DriverLabel driver={message.driver} />}
         {!isUser && message.reasoning && <ThinkingPanel content={message.reasoning} live={live} />}
         {!isUser && steps.length > 0 && <ToolCallBlock steps={steps} credits={message.stepCredits} live={live} />}
@@ -105,31 +114,31 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffe
         ) : (
           message.content && <MarkdownViewer content={message.content} bare />
         )}
-        {waiting && <div className="text-xs text-neutral-500 animate-pulse">HQ is working...</div>}
+        {waiting && <div className="text-xs text-neutral-500 animate-pulse">{t('chat_working')}</div>}
         {!isUser && !live && message.offer && onOffer && <OfferLine offer={message.offer} onAnswer={onOffer} />}
 
         {!live && (
           <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-white/5 opacity-60 text-xs " style={{ color: 'var(--text-dim)' }}>
             <span>
               {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              {message.stopped && <span className="ml-2" style={{ color: 'var(--accent-amber)' }}>stopped</span>}
+              {message.stopped && <span className="ml-2" style={{ color: 'var(--accent-amber)' }}>{t('chat_stopped')}</span>}
               {replyCredits !== null && (
                 <span className="ml-2" title={CREDITS_TOOLTIP}>{formatCredits(replyCredits)}</span>
               )}
             </span>
             <span className="flex items-center gap-3">
               {onEdit && (
-                <button type="button" onClick={onEdit} className={ACTION_BUTTON} title="Edit and resend">
+                <button type="button" onClick={onEdit} className={ACTION_BUTTON} title={t('chat_edit_resend')} aria-label={t('chat_edit_resend')}>
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
               )}
               {onRegenerate && (
-                <button type="button" onClick={onRegenerate} className={ACTION_BUTTON} title="Regenerate this reply">
+                <button type="button" onClick={onRegenerate} className={ACTION_BUTTON} title={t('chat_regenerate')} aria-label={t('chat_regenerate')}>
                   <RotateCw className="w-3.5 h-3.5" />
                 </button>
               )}
               {message.content && (
-                <button type="button" onClick={handleCopy} className={ACTION_BUTTON} title="Copy message">
+                <button type="button" onClick={handleCopy} className={ACTION_BUTTON} title={copied ? t('chat_copied') : t('chat_copy')} aria-label={t('chat_copy')}>
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               )}
@@ -152,10 +161,10 @@ function OfferLine({ offer, onAnswer }: { offer: ChatOffer; onAnswer: (yes: bool
         className="h-8 px-3 rounded-full border border-white/15 hover:bg-white/10 transition-colors"
         style={{ color: 'var(--accent-blue)' }}
       >
-        Yes
+        {t('chat_offer_yes')}
       </button>
       <button type="button" onClick={() => onAnswer(false)} className="h-8 px-3 rounded-full hover:bg-white/5 transition-colors">
-        Not now
+        {t('chat_offer_not_now')}
       </button>
     </div>
   )
@@ -167,10 +176,10 @@ function McpLabel({ caller }: { caller: string }) {
     <div
       className="flex items-center gap-1.5 mb-1.5 text-[11px] min-w-0"
       style={{ color: 'var(--text-dim)' }}
-      title="Asked through HQ's MCP endpoint by an outside client"
+      title={t('chat_via_mcp_title')}
     >
       <Plug className="w-3 h-3 shrink-0" />
-      <span className="truncate">via MCP: {caller}</span>
+      <span className="truncate">{t('chat_via_mcp', { caller })}</span>
     </div>
   )
 }
@@ -182,14 +191,19 @@ function DriverLabel({ driver }: { driver: DriverMeta }) {
     <div
       className="flex items-center gap-1.5 mb-1.5 text-[11px] min-w-0"
       style={{ color: 'var(--text-dim)' }}
-      title={drove ? 'HQ acted in this session on your behalf' : 'An update from a session this chat watches'}
+      title={drove ? t('chat_helper_acted') : t('chat_helper_update')}
     >
       <Terminal className="w-3 h-3 shrink-0" />
       <span className="truncate">
-        Session {driver.sessionId}
+        {t('chat_helper_label', { id: driver.sessionId })}
         {driver.reason && ` · ${driver.reason}`}
       </span>
-      {drove && <span className="shrink-0" style={{ color: 'var(--accent-amber)' }}>HQ acted for you</span>}
+      {drove && <span className="shrink-0" style={{ color: 'var(--accent-amber)' }}>{t('chat_acted_for_you')}</span>}
+      {!drove && (
+        <Link to="/helpers/$id" params={{ id: driver.sessionId }} className="shrink-0 underline">
+          {t('chat_answer_in_helpers')}
+        </Link>
+      )}
     </div>
   )
 }

@@ -16,6 +16,7 @@ pub struct StreamEvent {
     pub kind: String,
     pub actor: String,
     pub detail: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 

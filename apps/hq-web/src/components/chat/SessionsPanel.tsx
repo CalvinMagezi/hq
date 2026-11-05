@@ -1,19 +1,31 @@
+import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { EyeOff, Loader2, Terminal } from 'lucide-react'
+import { Archive, EyeOff, Loader2, Terminal } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { STATUS_LABELS, parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
-import type { AgentStatus, WatchedSession } from '~/lib/sessionsApi'
+import { agentName, computerName } from '~/lib/names'
+import { t, tn } from '~/strings'
+import { autoAnswers, type AutoAnswer } from '~/lib/autoAnswers'
+import { Dialog } from '../ui/Dialog'
+import { globalSessionsApi, type WatchedSession } from '~/lib/sessionsApi'
 import { STATUS_BADGE_CLASS } from '../tasks/TaskCard'
+import { HelperPill } from '../sessions/SessionRow'
 
-export const AGENT_STATUS_CLASS: Record<AgentStatus, string> = {
-  idle: 'text-neutral-400',
-  working: 'text-blue-400',
-  blocked: 'text-rose-400',
-  done: 'text-emerald-400',
+// What the registry records as the answerer when HQ itself says yes toward the goal.
+const DRIVE_ANSWERER = 'a Drive turn'
+const EXPLAINED_KEY = 'hq.chat.sayYesExplained'
+
+function wasExplained() {
+  try {
+    return localStorage.getItem(EXPLAINED_KEY) === '1'
+  } catch {
+    return false
+  }
 }
 
-const DRIVE_HINT = "HQ answers the agent and approves its prompts toward the task's goal"
+const clock = (when: string | null) =>
+  when ? parseSqliteUtc(when).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
 
 const ago = (when: string | null) => (when ? relTime(parseSqliteUtc(when)) : '')
 
@@ -22,24 +34,64 @@ interface Props {
   busy: Set<string>
   onDrive: (id: string, drive: boolean) => void
   onUnwatch: (id: string) => void
+  /** Archives the chat the panel belongs to. */
+  onArchive?: () => void
 }
 
-/** The coding-agent sessions this chat watches, each with a drive switch and an unwatch action. */
-export function SessionsPanel({ sessions, busy, onDrive, onUnwatch }: Props) {
+/** The details panel: the helpers this chat watches, each with its say-yes switch and answers, and what is set for the chat. */
+export function SessionsPanel({ sessions, busy, onDrive, onUnwatch, onArchive }: Props) {
+  const [explaining, setExplaining] = useState<string | null>(null)
+
+  const turn = (id: string, drive: boolean) => {
+    if (drive && !wasExplained()) setExplaining(id)
+    else onDrive(id, drive)
+  }
+  const confirm = () => {
+    try {
+      localStorage.setItem(EXPLAINED_KEY, '1')
+    } catch {
+      // The explainer shows again next time; turning it on still works.
+    }
+    if (explaining) onDrive(explaining, true)
+    setExplaining(null)
+  }
+
   return (
     <div className="border-b border-white/10 bg-neutral-900/60 shrink-0 max-h-[50dvh] overflow-y-auto overscroll-contain">
-      <p className="sm:hidden px-3 pt-2 text-[11px] text-neutral-500">Drive: {DRIVE_HINT}.</p>
-      <ul className="max-w-4xl mx-auto" aria-label="Watched coding-agent sessions">
+      <h2 className="max-w-4xl mx-auto px-3 sm:px-4 pt-2 text-xs font-semibold">
+        {t('chat_details')} · {t('chat_watching_count', { n: sessions.length })}
+      </h2>
+      <ul className="max-w-4xl mx-auto" aria-label={t('helpers_watched_aria')}>
         {sessions.map((s) => (
           <SessionRow
             key={s.id}
             session={s}
             busy={busy.has(s.id)}
-            onDrive={(drive) => onDrive(s.id, drive)}
+            onDrive={(drive) => turn(s.id, drive)}
             onUnwatch={() => onUnwatch(s.id)}
           />
         ))}
       </ul>
+      <section className="max-w-4xl mx-auto px-3 sm:px-4 py-2.5 text-xs border-t border-white/5">
+        <h3 className="font-semibold">{t('chat_this_chat')}</h3>
+        <p className="mt-1 text-neutral-500">{t('chat_alerts_note')}</p>
+        {onArchive && (
+          <button type="button" onClick={onArchive} className="mt-1.5 flex items-center gap-1.5 h-8 px-2 rounded border border-white/10 text-neutral-300 hover:text-white hover:bg-white/5">
+            <Archive className="w-3.5 h-3.5" aria-hidden="true" /> {t('chat_row_archive')}
+          </button>
+        )}
+      </section>
+      {explaining && (
+        <Dialog
+          kind="ask"
+          title={t('chat_say_yes_title')}
+          body={t('chat_say_yes_body')}
+          keepLabel={t('chat_say_yes_keep')}
+          actLabel={t('chat_say_yes_go')}
+          onKeep={() => setExplaining(null)}
+          onAct={confirm}
+        />
+      )}
     </div>
   )
 }
@@ -58,34 +110,40 @@ function SessionRow({ session: s, busy, onDrive, onUnwatch }: RowProps) {
       <div className="flex items-center gap-2 min-w-0">
         <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
         <span className="text-neutral-200 truncate min-w-0" title={s.cwd}>
-          {s.harness} · {s.label}
+          {agentName(s.harness)} · {s.label}
         </span>
-        <span className="hidden sm:inline text-neutral-500 truncate min-w-0">{s.host}</span>
+        <span className="hidden sm:inline text-neutral-500 truncate min-w-0">{computerName(s.host)}</span>
         <span className="flex-1" />
         <button
           type="button"
           onClick={onUnwatch}
           disabled={busy}
           className="flex items-center justify-center gap-1 h-11 min-w-11 sm:h-8 sm:min-w-0 px-2 rounded text-neutral-400 hover:text-white hover:bg-white/10 disabled:opacity-50 shrink-0"
-          title="Stop posting this session's updates here. The session keeps running."
-          aria-label={`Unwatch ${s.harness} ${s.label}`}
+          title={t('chat_stop_watching_hint')}
+          aria-label={t('helpers_unwatch_aria', { name: `${agentName(s.harness)} ${s.label}` })}
         >
           <EyeOff className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Unwatch</span>
+          <span className="hidden sm:inline">{t('helpers_unwatch')}</span>
         </button>
       </div>
       {s.task && <TaskLine task={s.task} />}
       <GoalLines session={s} />
       <StatusLine session={s} />
+      {s.agent_status === 'blocked' && (
+        <a href={`/helpers/${encodeURIComponent(s.id)}`} className="a-btn mt-1.5 inline-flex">
+          {t('chat_answer_it')}
+        </a>
+      )}
       <DriveSwitch drive={s.drive} busy={busy} onChange={onDrive} />
+      <AnswerLog sessionId={s.id} />
       {!s.drive && s.drive_off_reason && (
-        <p className="mt-1 text-[11px]" style={{ color: 'var(--accent-amber)' }}>
-          Drive switched off: {s.drive_off_reason}
+        <p className="mt-1 text-xs" style={{ color: 'var(--warn)' }}>
+          {t('helpers_drive_off_reason', { reason: s.drive_off_reason })}
         </p>
       )}
       {!s.drive && s.drive_blocked_by.length > 0 && (
-        <p className="mt-1 text-[11px]" style={{ color: 'var(--accent-amber)' }}>
-          HQ only observes until: {s.drive_blocked_by.join('; ')}.
+        <p className="mt-1 text-xs" style={{ color: 'var(--warn)' }}>
+          {t('helpers_observes_until', { reasons: s.drive_blocked_by.join(', ') })}
         </p>
       )}
     </li>
@@ -103,11 +161,11 @@ function TaskLine({ task }: { task: NonNullable<WatchedSession['task']> }) {
         closeOverlay(false)
       }}
       className="mt-1.5 flex items-center gap-2 min-w-0 text-neutral-300 hover:text-white"
-      title="Open the task"
+      title={t('helpers_open_task')}
     >
       <span className="text-neutral-500 shrink-0">{task.display_id}</span>
       <span className="min-w-0 line-clamp-2 sm:line-clamp-1">{task.title}</span>
-      <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
+      <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
         {STATUS_LABELS[task.status]}
       </span>
     </Link>
@@ -120,13 +178,13 @@ function GoalLines({ session: s }: { session: WatchedSession }) {
     <dl className="mt-1 text-neutral-400 space-y-0.5">
       {s.goal && (
         <div className="flex gap-2 min-w-0">
-          <dt className="text-neutral-500 shrink-0">Goal</dt>
+          <dt className="text-neutral-500 shrink-0">{t('helpers_goal')}</dt>
           <dd className="min-w-0 line-clamp-2">{s.goal}</dd>
         </div>
       )}
       {s.done_criteria && (
         <div className="flex gap-2 min-w-0">
-          <dt className="text-neutral-500 shrink-0">Done when</dt>
+          <dt className="text-neutral-500 shrink-0">{t('helpers_done_when')}</dt>
           <dd className="min-w-0 line-clamp-2">{s.done_criteria}</dd>
         </div>
       )}
@@ -139,12 +197,11 @@ function StatusLine({ session: s }: { session: WatchedSession }) {
   const driven = ago(s.last_driven_at)
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-neutral-500">
-      <span className="sm:hidden">{s.host}</span>
-      {s.status !== 'running' && <span style={{ color: 'var(--accent-amber)' }}>{s.status}</span>}
-      {s.agent_status && <span className={AGENT_STATUS_CLASS[s.agent_status]}>{s.agent_status}</span>}
-      {seen && <span>seen {seen}</span>}
-      {s.pending_wake && <span>wake pending: {s.pending_wake}</span>}
-      {driven && <span>driven {driven}</span>}
+      <span className="sm:hidden">{computerName(s.host)}</span>
+      <HelperPill session={s} />
+      {seen && <span>{t('helpers_seen', { when: seen })}</span>}
+      {s.pending_wake && <span>{t('helpers_wake_pending', { what: s.pending_wake })}</span>}
+      {driven && <span>{t('helpers_driven', { when: driven })}</span>}
     </div>
   )
 }
@@ -159,14 +216,54 @@ function DriveSwitch({ drive, busy, onChange }: { drive: boolean; busy: boolean;
         onClick={() => onChange(!drive)}
         disabled={busy}
         className={`flex items-center gap-1.5 h-11 sm:h-8 px-3 sm:px-2 rounded border shrink-0 disabled:opacity-50 ${
-          drive ? 'border-emerald-400/60 text-emerald-400 bg-white/5' : 'border-white/10 text-neutral-400 hover:text-white hover:bg-white/5'
+          drive ? 'hq-chip-on' : 'border-white/10 text-neutral-400 hover:text-white hover:bg-white/5'
         }`}
-        title={DRIVE_HINT}
+        title={drive ? t('chat_say_yes_on') : t('chat_say_yes_off')}
       >
-        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span className={`w-2 h-2 rounded-full ${drive ? 'bg-emerald-400' : 'bg-neutral-500'}`} />}
-        Drive {drive ? 'on' : 'off'}
+        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span className={`w-2 h-2 rounded-full ${drive ? 'bg-white' : 'bg-neutral-500'}`} />}
+        {t('chat_say_yes')} · {drive ? t('helpers_drive_on') : t('helpers_drive_off')}
       </button>
-      <span className="hidden sm:inline text-[11px] text-neutral-500">{DRIVE_HINT}</span>
+      <span className="hidden sm:inline text-xs text-neutral-500">{drive ? t('chat_say_yes_on') : t('chat_say_yes_off')}</span>
     </div>
   )
+}
+
+/** Every answer HQ gave for the helper, with its time, asked of the server's answers list. */
+function AnswerLog({ sessionId }: { sessionId: string }) {
+  const answers = useAnswers(sessionId)
+  return (
+    <div className="mt-1.5 text-neutral-400">
+      <p className="font-semibold text-neutral-300">{tn('chat_say_yes_log', answers.length)}</p>
+      {answers.length === 0 ? (
+        <p className="text-neutral-500">{t('chat_say_yes_none')}</p>
+      ) : (
+        <ul>
+          {answers.map((a, i) => (
+            <li key={`${a.at}-${i}`}>{answerLine(a)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function useAnswers(sessionId: string): AutoAnswer[] {
+  const [answers, setAnswers] = useState<AutoAnswer[]>([])
+  useEffect(() => {
+    let live = true
+    globalSessionsApi
+      .answers(sessionId)
+      .then((list) => live && setAnswers(autoAnswers(list)))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [sessionId])
+  return answers
+}
+
+function answerLine(a: AutoAnswer): string {
+  const time = clock(a.at)
+  if (a.by !== DRIVE_ANSWERER) return t('chat_say_yes_by', { time, by: a.by, kind: a.kind })
+  return t(a.declined ? 'chat_say_yes_declined' : 'chat_say_yes_allowed', { time, kind: a.kind })
 }

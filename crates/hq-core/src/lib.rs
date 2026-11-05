@@ -12,6 +12,7 @@ pub mod fs_private;
 pub mod hardware;
 pub mod heartbeat;
 pub mod identity;
+pub mod losing;
 pub mod machine;
 pub mod mailbox;
 pub mod microcompact;

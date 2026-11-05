@@ -47,57 +47,83 @@ class Ears(app: Context) {
      */
     // Every caller holds the microphone permission: the voice screen asks for it, and Android checks dictation callers.
     @SuppressLint("MissingPermission")
-    suspend fun hear(stop: AtomicBoolean, wait: Boolean = true, onRecording: () -> Unit, onPartial: (String) -> Unit): String =
+    suspend fun hear(stop: AtomicBoolean, wait: Boolean = true, onRecording: () -> Unit, onPartial: (String) -> Unit, onLoad: (Load) -> Unit = {}): String =
         withContext(Dispatchers.IO) {
             if (wait) micLock.lock() else if (!micLock.tryLock()) throw Busy()
             try {
-                hearLocked(stop, onRecording, onPartial) { isActive }
+                hearLocked(stop, onRecording, onPartial, onLoad) { isActive }
             } finally {
                 micLock.unlock()
             }
         }
 
+    /** The recogniser loads while the microphone already records: what was said meanwhile waits in an [AudioBacklog]. */
+    enum class Load { Waiting, Slow, Ready }
+
     /** [onRecording] fires once the microphone really records; opening it takes up to a second on a budget phone. */
-    private fun hearLocked(stop: AtomicBoolean, onRecording: () -> Unit, onPartial: (String) -> Unit, active: () -> Boolean): String {
-        val engine = recognizer ?: throw IllegalStateException("prepare() first")
+    private fun hearLocked(stop: AtomicBoolean, onRecording: () -> Unit, onPartial: (String) -> Unit, onLoad: (Load) -> Unit, active: () -> Boolean): String {
+        val loader = if (recognizer == null) Thread({ runCatching { synchronized(prepareLock) { if (recognizer == null) recognizer = OnlineRecognizer(null, config(models.stt)) } } }, "ears-load").also { it.start() } else null
         val minBuffer = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val mic = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuffer, BUFFER_BYTES))
-        val stream = try {
-            engine.createStream()
-        } catch (e: RuntimeException) {
-            mic.release()
-            throw e
-        }
+        var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
         return try {
             if (mic.state != AudioRecord.STATE_INITIALIZED) throw IOException("microphone did not open")
             mic.startRecording()
+            // Another app (a call, a recorder) holds the microphone: Android starts the stream but never records.
+            if (MicAsk.blocked(mic.recordingState == AudioRecord.RECORDSTATE_RECORDING, android.os.Build.VERSION.SDK_INT, silenced(mic))) throw Busy()
             val chunk = ShortArray(CHUNK)
             var n = mic.read(chunk, 0, chunk.size)
             if (n < 0) throw IOException("microphone did not start")
             onRecording()
             val started = SystemClock.elapsedRealtime()
+            val backlog = AudioBacklog(BACKLOG_CHUNKS)
+            var announced = false
+            var slow = false
             var shown = ""
             while (active() && !stop.get() && SystemClock.elapsedRealtime() - started < LONGEST_REQUEST_MS) {
-                stream.acceptWaveform(FloatArray(n) { chunk[it] / PCM_SCALE }, RATE)
-                while (engine.isReady(stream)) engine.decode(stream)
-                val text = engine.getResult(stream).text
-                if (text != shown) {
-                    shown = text
-                    onPartial(readable(text))
+                val engine = recognizer
+                if (engine == null) {
+                    if (loader != null && !loader.isAlive) throw IllegalStateException("recogniser did not load")
+                    backlog.add(chunk, n)
+                    if (!announced) { announced = true; onLoad(Load.Waiting) }
+                    if (!slow && SystemClock.elapsedRealtime() - started > SLOW_LOAD_MS) { slow = true; onLoad(Load.Slow) }
+                } else {
+                    val st = stream ?: engine.createStream().also { s ->
+                        stream = s
+                        backlog.drain().forEach { piece -> s.acceptWaveform(FloatArray(piece.size) { piece[it] / PCM_SCALE }, RATE) }
+                        if (announced) onLoad(Load.Ready)
+                    }
+                    st.acceptWaveform(FloatArray(n) { chunk[it] / PCM_SCALE }, RATE)
+                    while (engine.isReady(st)) engine.decode(st)
+                    val text = engine.getResult(st).text
+                    if (text != shown) {
+                        shown = text
+                        onPartial(readable(text))
+                    }
+                    if (engine.isEndpoint(st)) break
                 }
-                if (engine.isEndpoint(stream)) break
                 n = mic.read(chunk, 0, chunk.size)
                 if (n < 0) throw IOException("microphone read failed ($n)")
             }
             chunk.fill(0)
-            stream.inputFinished()
-            while (engine.isReady(stream)) engine.decode(stream)
-            readable(engine.getResult(stream).text)
+            val engine = recognizer
+            val st = stream
+            if (engine == null || st == null) "" else {
+                st.inputFinished()
+                while (engine.isReady(st)) engine.decode(st)
+                readable(engine.getResult(st).text)
+            }
         } finally {
             runCatching { mic.stop() }
             mic.release()
-            stream.release()
+            stream?.release()
         }
+    }
+
+    /** From Android 10 the system can silence a client that is recording while another app has priority. */
+    private fun silenced(mic: AudioRecord): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 29) return false
+        return mic.activeRecordingConfiguration?.isClientSilenced == true
     }
 
     private companion object {
@@ -107,6 +133,9 @@ class Ears(app: Context) {
         /** Three seconds of 16-bit audio, so a slow decode never makes Android drop what was said meanwhile. */
         const val BUFFER_BYTES = RATE * 2 * 3
         const val LONGEST_REQUEST_MS = 30_000L
+        /** Past this the label falls back to Getting ready and the oldest audio is dropped. */
+        const val SLOW_LOAD_MS = 2_500L
+        const val BACKLOG_CHUNKS = 30
         const val FEATURE_DIM = 80
         const val THREADS = 2
         /** Silence that ends a request once something was said; short enough to feel like a conversation. */
@@ -143,4 +172,17 @@ class Ears(app: Context) {
             return cased.replaceFirstChar { it.titlecase() }
         }
     }
+}
+
+/** The last few seconds of audio heard before the recogniser was ready: the oldest pieces go first once it is full. */
+class AudioBacklog(private val maxChunks: Int) {
+    private val pieces = ArrayDeque<ShortArray>()
+
+    fun add(chunk: ShortArray, n: Int) {
+        pieces.addLast(chunk.copyOf(n))
+        while (pieces.size > maxChunks) pieces.removeFirst()
+    }
+
+    /** Everything kept, oldest first, and empties the backlog. */
+    fun drain(): List<ShortArray> = pieces.toList().also { pieces.clear() }
 }

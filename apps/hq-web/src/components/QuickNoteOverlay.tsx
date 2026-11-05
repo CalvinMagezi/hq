@@ -4,6 +4,8 @@ import { X, Save, FileText } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { vaultKeys } from '~/lib/queries'
 import { createNote, getFolderList } from '~/lib/vaultApi'
+import { t } from '~/strings'
+import { opensQuickNote, savesQuickNote } from '~/lib/quickNote'
 
 export function QuickNoteOverlay() {
     const [open, setOpen] = useState(false)
@@ -12,12 +14,13 @@ export function QuickNoteOverlay() {
     const [folder, setFolder] = useState('Notebooks/Inbox')
     const [folders, setFolders] = useState<string[]>(['Notebooks/Inbox'])
     const [saving, setSaving] = useState(false)
+    const [failed, setFailed] = useState(false)
+    const [clientId, setClientId] = useState(() => crypto.randomUUID())
     const queryClient = useQueryClient()
 
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
-            // Cmd+N or Ctrl+N to open
-            if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+            if (opensQuickNote(e)) {
                 e.preventDefault()
                 setOpen(true)
             }
@@ -42,8 +45,10 @@ export function QuickNoteOverlay() {
     const handleSave = async () => {
         if (!title && !content) return
         setSaving(true)
+        setFailed(false)
         try {
-            await createNote(title, content, folder)
+            await createNote(title, content, folder, clientId)
+            setClientId(crypto.randomUUID())
             setOpen(false)
             setTitle('')
             setContent('')
@@ -51,6 +56,7 @@ export function QuickNoteOverlay() {
             queryClient.invalidateQueries({ queryKey: vaultKeys.all })
         } catch (err) {
             console.error('Failed to create note', err)
+            setFailed(true)
         } finally {
             setSaving(false)
         }
@@ -79,7 +85,7 @@ export function QuickNoteOverlay() {
                             <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
                                 <div className="flex items-center gap-2">
                                     <FileText className="w-4 h-4" style={{ color: 'var(--accent-green)' }} />
-                                    <span className="text-sm font-bold tracking-wide" style={{ color: 'var(--text-primary)' }}>Quick Note</span>
+                                    <span className="text-sm font-bold tracking-wide" style={{ color: 'var(--text-primary)' }}>{t('quick_note_title')}</span>
                                 </div>
                                 <button onClick={() => setOpen(false)} className="transition-colors" style={{ color: 'var(--text-dim)' }}>
                                     <X className="w-5 h-5" />
@@ -91,7 +97,7 @@ export function QuickNoteOverlay() {
                                     <input
                                         autoFocus
                                         type="text"
-                                        placeholder="Note Title"
+                                        placeholder={t('notes_title')}
                                         value={title}
                                         onChange={e => setTitle(e.target.value)}
                                         className="w-full rounded-lg px-4 py-3 outline-none transition-colors font-medium"
@@ -125,7 +131,7 @@ export function QuickNoteOverlay() {
 
                                 <div className="flex-1 min-h-[200px]">
                                     <textarea
-                                        placeholder="Start typing your note..."
+                                        placeholder={t('notes_start_writing')}
                                         value={content}
                                         onChange={e => setContent(e.target.value)}
                                         className="w-full h-full min-h-[200px] rounded-lg px-4 py-3 text-sm outline-none transition-colors resize-none "
@@ -138,7 +144,7 @@ export function QuickNoteOverlay() {
                                             caretColor: 'var(--accent-green)',
                                         }}
                                         onKeyDown={e => {
-                                            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                                            if (savesQuickNote(e)) {
                                                 e.preventDefault()
                                                 handleSave()
                                             }
@@ -149,7 +155,7 @@ export function QuickNoteOverlay() {
 
                             <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: '1px solid var(--border)' }}>
                                 <div className="text-xs flex items-center gap-2" style={{ color: 'var(--text-dim)' }}>
-                                    Save with <kbd className="px-1.5 rounded" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>Cmd+Enter</kbd>
+                                    {failed ? <span role="alert">{t('quick_note_fail')}</span> : t('quick_note_hint')}
                                 </div>
                                 <button
                                     onClick={handleSave}
@@ -161,9 +167,9 @@ export function QuickNoteOverlay() {
                                         border: '1px solid rgba(0,255,163,0.25)',
                                     }}
                                 >
-                                    {saving ? 'Saving...' : (
+                                    {saving ? t('quick_note_saving') : (
                                         <>
-                                            <Save className="w-4 h-4" /> Save
+                                            <Save className="w-4 h-4" /> {t('quick_note_save')}
                                         </>
                                     )}
                                 </button>

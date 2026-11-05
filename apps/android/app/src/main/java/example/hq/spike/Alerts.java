@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 import android.util.Log;
 import java.io.IOException;
 import java.io.InputStream;
+import example.hq.spike.measure.Counters;
+import example.hq.spike.measure.DataPurpose;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -43,12 +45,15 @@ final class Alerts {
     private static final long SERVER_POLL_MS = 60_000;
     private static final String SEP = "\n";
     private static long lastServerPoll;
+    // What is on the shade with its own notice, so a lock or an unlock can post the same items again in other words.
+    private static final Map<String, JSONObject> SHOWN = new LinkedHashMap<>();
 
     private Alerts() { }
 
     static void watch(Context c, BooleanSupplier alive) {
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
-        for (NotificationChannel ch : AlertPoster.channels()) nm.createNotificationChannel(ch);
+        AlertPoster.migrate(c);
+        for (NotificationChannel ch : AlertPoster.channels(c)) nm.createNotificationChannel(ch);
         nm.deleteNotificationChannel("alerts");
         String lastProblem = "";
         while (alive.getAsBoolean()) {
@@ -105,10 +110,66 @@ final class Alerts {
         List<String> seen = stored == null || stored.isEmpty() ? new ArrayList<String>() : Arrays.asList(stored.split(SEP));
         List<String> fresh = HubConfig.unseen(new ArrayList<>(items.keySet()), seen);
         if (stored != null) AlertPoster.cancelGone(c, seen, items.keySet());
+        synchronized (SHOWN) {
+            for (String id : seen) if (!items.containsKey(id)) SHOWN.remove(id);
+        }
+        // While Needs you cannot reach the owner, questions are counted for the Inbox banner instead; when it can again, they go out once.
+        boolean on = NotifAccess.INSTANCE.read(c).getNeedsOn();
+        String waitKey = seenKey.equals(SEEN) ? NotifAccess.WAITING : NotifAccess.SERVER_WAITING;
+        List<String> waiting = NotifAccess.INSTANCE.ids(prefs.getString(waitKey, ""));
+        waiting.retainAll(items.keySet());
+        if (stored != null && !on) {
+            for (String id : fresh) if (AlertPoster.needsYou(items.get(id)) && !waiting.contains(id)) waiting.add(id);
+        }
+        List<String> replay = new ArrayList<>();
+        if (on) {
+            for (String id : items.keySet()) if (waiting.contains(id) && AlertPoster.needsYou(items.get(id))) replay.add(id);
+            waiting.clear();
+        }
+        prefs.edit().putString(waitKey, String.join(SEP, waiting)).apply();
+        if (stored != null && on && !replay.isEmpty()) {
+            Map<String, JSONObject> back = new LinkedHashMap<>();
+            for (String id : AlertPoster.post(c, items, replay, MAX_PER_POLL, true)) back.put(id, items.get(id));
+            track(back);
+        }
         if (fresh.isEmpty() && stored != null) return;
-        if (stored != null) AlertPoster.post(c, items, fresh, MAX_PER_POLL);
+        if (stored != null && on) {
+            List<String> shown = AlertPoster.post(c, items, fresh, MAX_PER_POLL);
+            Map<String, JSONObject> mine = new LinkedHashMap<>();
+            for (String id : shown) mine.put(id, items.get(id));
+            track(mine);
+        }
         String joined = String.join(SEP, HubConfig.remember(seen, fresh, HubConfig.SEEN_CAP));
         prefs.edit().putString(seenKey, joined).apply();
+    }
+
+    /** Remembers items that now have their own notice, so a lock, an unlock or the details switch can post them again. */
+    static void track(Map<String, JSONObject> shown) {
+        synchronized (SHOWN) {
+            SHOWN.putAll(shown);
+        }
+    }
+
+    /** The phone is locking: every detailed notice is posted again in general words, without sound. */
+    static void onLocked(Context c) {
+        repost(c, true);
+    }
+
+    /** The phone is unlocked, or the details switch changed: notices are posted again in the words that now apply, without sound. */
+    static void refresh(Context c) {
+        repost(c, false);
+    }
+
+    private static void repost(Context c, boolean forceGeneral) {
+        Map<String, JSONObject> copy;
+        synchronized (SHOWN) {
+            copy = new LinkedHashMap<>(SHOWN);
+        }
+        try {
+            AlertPoster.repost(c, copy, forceGeneral);
+        } catch (RuntimeException e) {
+            Log.w(HubService.TAG, "re-post failed: " + e.getClass().getSimpleName());
+        }
     }
 
     /**
@@ -132,11 +193,12 @@ final class Alerts {
         if (server == null) return;
         SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         ServerHq.Reply reply = ServerHq.call(server.getAddress(), "/api/notifications?state=pending&limit=30", server.getToken(), null, prefs.getString(SERVER_ETAG, null));
+        Counters.get(c).addBytes(DataPurpose.ServerChecks, Counters.metered(c), reply.body.length());
         if (reply.status == 304) return;
         if (reply.status == 401) {
             ServerHq.markSignedOut(c);
             prefs.edit().remove(SERVER_ETAG).remove(SERVER_SEEN).apply();
-            AlertPoster.serverSignedOut(c, server.getAddress());
+            AlertPoster.serverSignedOut(c);
             return;
         }
         if (reply.status != 200) throw new IOException("server status " + reply.status);

@@ -60,7 +60,7 @@ export function chooseScreenMode(phase: StreamPhase): 'stream' | 'poll' {
   return phase === 'failed' || phase === 'ended' ? 'poll' : 'stream'
 }
 
-export const HIDDEN_CLOSE_MS = 30_000
+export const HIDDEN_CLOSE_MS = 0
 
 export function screenStatusText(mode: 'stream' | 'poll', phase: StreamPhase, source?: 'live' | 'snapshot'): string {
   if (source === 'snapshot') return 'Last saved view'

@@ -3,6 +3,7 @@
 // the server or its logs) and keeps it. With no token configured this is a no-op.
 
 import { markSynced } from './offlineCache'
+import { tokenStorage } from './sharedComputer'
 
 const STORAGE_KEY = 'hq-web-token'
 const LINK_PARAM = 'token'
@@ -27,10 +28,11 @@ function browserToken(): string | null {
   try {
     const fromLink = tokenFromLink(new URL(window.location.href))
     if (fromLink) {
-      localStorage.setItem(STORAGE_KEY, fromLink)
+      signInArrival = true
+      tokenStorage()?.setItem(STORAGE_KEY, fromLink)
       return fromLink
     }
-    return localStorage.getItem(STORAGE_KEY)
+    return tokenStorage()?.getItem(STORAGE_KEY) ?? null
   } catch {
     return null
   }
@@ -63,6 +65,15 @@ function codeFromLink(url: URL): string | null {
 
 // A code from the link, held until the sign-in banner trades it.
 let linkCode: string | null = null
+// Set once a login link or a QR code brought this page, so the old address it carried opens Chat.
+let signInArrival = false
+
+/** Whether this page was opened by a login link or a one-time code; read once by the router. */
+export function takeSignInArrival(): boolean {
+  const was = signInArrival
+  signInArrival = false
+  return was
+}
 
 /**
  * Store the token from a `#token=` link, and hold the code from a `#code=` link, right away. The
@@ -73,7 +84,9 @@ export function adoptLinkToken(): void {
   hqToken()
   if (typeof window === 'undefined') return
   try {
-    linkCode = codeFromLink(new URL(window.location.href)) ?? linkCode
+    const code = codeFromLink(new URL(window.location.href))
+    if (code) signInArrival = true
+    linkCode = code ?? linkCode
   } catch {
     // An unparseable address carries no code.
   }
@@ -91,7 +104,9 @@ export function saveWebToken(raw: string): boolean {
   const token = tokenFromPaste(raw)
   if (!token) return false
   try {
-    localStorage.setItem(STORAGE_KEY, token)
+    const store = tokenStorage()
+    if (!store) return false
+    store.setItem(STORAGE_KEY, token)
     return true
   } catch {
     return false
@@ -123,11 +138,60 @@ const HTTP_UNAUTHORIZED = 401
 // The service worker marks the copies it answers from its cache with this header.
 const FROM_CACHE_HEADER = 'x-hq-cache'
 
+/**
+ * Whether a 401 means HQ refused the sign-in this browser holds now. A copy from the worker's
+ * cache says nothing, and neither does a request sent with an older token: it can finish after a
+ * fresh sign-in, and wiping then would throw the new one away.
+ */
+export function refusedNow(res: Response, sentToken: string | null, currentToken: string | null): boolean {
+  if (res.headers.has(FROM_CACHE_HEADER) || res.status !== HTTP_UNAUTHORIZED) return false
+  return sentToken === currentToken
+}
+
+// Set when a refusal wiped a sign-in this browser held, so the prompt can say so.
+let signedOut = false
+
+/** Whether HQ refused a sign-in this browser held (it was signed out or its token rotated). */
+export function wasSignedOut(): boolean {
+  return signedOut
+}
+
+/** HQ refused this browser: wipe everything first, then ask to sign in. Once per signed-out spell,
+ * so polling queries and other tabs cannot keep wiping (and echoing) while nobody is signed in. */
+export function refuseSignIn() {
+  if (signInNeeded) return
+  dropRefusedToken()
+  // Imported when needed: the wipe reaches the stores, which import this module.
+  void import('./wipe').then((m) => m.wipeBrowser()).catch((err) => console.warn('wipe failed', err))
+  setSignInNeeded(true)
+}
+
+/** Removes the refused token right away, before any await, so a token pasted a moment later stays. */
+function dropRefusedToken() {
+  try {
+    const store = tokenStorage()
+    if (!store || store.getItem(STORAGE_KEY) === null) return
+    store.removeItem(STORAGE_KEY)
+    signedOut = true
+  } catch {
+    // Blocked storage holds no token.
+  }
+}
+
+/** Another tab of this HQ was refused and wiped this browser; this tab asks to sign in too. */
+export function signedOutElsewhere(): boolean {
+  if (signInNeeded) return false
+  signedOut = true
+  setSignInNeeded(true)
+  return true
+}
+
 /** Track what a response says about sign-in and sync. A copy from the worker's cache says nothing about either, whatever its status. */
-function noteAuth(res: Response) {
+function noteAuth(res: Response, sentToken: string | null) {
   if (res.headers.has(FROM_CACHE_HEADER)) return
-  if (res.status === HTTP_UNAUTHORIZED) setSignInNeeded(true)
-  else if (res.ok) {
+  if (res.status === HTTP_UNAUTHORIZED) {
+    if (refusedNow(res, sentToken, hqToken())) refuseSignIn()
+  } else if (res.ok) {
     setSignInNeeded(false)
     markSynced()
   }
@@ -162,7 +226,7 @@ export async function hqFetch(input: string, init: RequestInit = {}): Promise<Re
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (!SAFE_METHODS.has((init.method ?? 'GET').toUpperCase())) headers.set(CLIENT_HEADER, CLIENT_HEADER_VALUE)
   const res = await fetch(input, { ...init, headers })
-  noteAuth(res)
+  noteAuth(res, token)
   return res
 }
 
@@ -175,9 +239,18 @@ export class HqHttpError extends Error {
   }
 }
 
+const HTTP_UPGRADE_REQUIRED = 426
+let upgradeHandler: (() => void) | null = null
+
+/** Called when HQ refuses a call because this page is too old (426); version.ts sets it. */
+export function setUpgradeHandler(handler: () => void) {
+  upgradeHandler = handler
+}
+
 /** Parse an API response as JSON, throwing HqHttpError on a non-2xx status. */
 export async function readJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    if (res.status === HTTP_UPGRADE_REQUIRED) upgradeHandler?.()
     const data = await res.json().catch(() => ({}))
     throw new HqHttpError(data.error || `${res.status} ${res.statusText}`, res.status)
   }

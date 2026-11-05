@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useWS } from '~/context/WebSocketContext'
+import { visibleTimer } from '~/lib/visibleTimer'
 import { useHQStore } from '~/store/hqStore'
+import { t } from '~/strings'
 import { sessionsApi, type WatchedSession } from '~/lib/sessionsApi'
 
 // A fallback for sync events lost while the socket was down or the tab slept.
@@ -45,10 +47,7 @@ export function useThreadSessions(threadId: string | null, active: boolean, poll
 
   useEffect(() => {
     if (!active || !threadId || !polling) return
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void refresh()
-    }, POLL_MS)
-    return () => clearInterval(timer)
+    return visibleTimer(() => void refresh(), POLL_MS)
   }, [active, threadId, polling, refresh])
 
   const sessions = loaded && loaded.threadId === threadId ? loaded.sessions : []
@@ -79,7 +78,7 @@ export function useThreadSessions(threadId: string | null, active: boolean, poll
         const updated = await sessionsApi.setDrive(id, drive)
         if (tid) replaceSessions(tid, (list) => list.map((s) => (s.id === id ? updated : s)))
       },
-      drive ? 'Could not turn on drive' : 'Could not turn off drive',
+      drive ? t('chat_say_yes_failed_on') : t('chat_say_yes_failed_off'),
     )
 
   const unwatch = (id: string) =>
@@ -90,7 +89,7 @@ export function useThreadSessions(threadId: string | null, active: boolean, poll
         await sessionsApi.unwatch(id)
         if (tid) replaceSessions(tid, (list) => list.filter((s) => s.id !== id))
       },
-      'Could not stop watching the session',
+      t('chat_unwatch_failed'),
     )
 
   return { sessions, busy, setDrive, unwatch }

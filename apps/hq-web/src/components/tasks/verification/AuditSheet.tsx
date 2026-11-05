@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Check, Loader2, MinusCircle, SkipForward, ThumbsDown, ThumbsUp, X } from 'lucide-react'
+import { Check, Loader2, MinusCircle, SkipForward, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
+import { t } from '~/strings'
 import { answerAudit, fetchAudits, type AuditCard, type AuditStack } from '~/lib/verificationApi'
 import { usePolled } from '../../sessions/usePolled'
 import { SHEET_DANGER, SHEET_PRIMARY, SHEET_QUIET, Sheet } from './Sheet'
-import { auditEstimate, criteriaSummary, levelLabel } from './verification'
+import { auditEstimate, criteriaSummary, kindLabel, levelLabel } from './verification'
 
 /** Facts shown on a card; the rest are one tap away in the task. */
 const FACTS_SHOWN = 8
@@ -11,9 +12,9 @@ const MORE = 10
 const IDLE_POLL_MS = 60_000
 
 function ResultIcon({ result }: { result: 'pass' | 'fail' | 'unclear' | boolean | null }) {
-  if (result === 'pass' || result === true) return <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" aria-label="met" />
-  if (result === 'fail' || result === false) return <X className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" aria-label="not met" />
-  return <MinusCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" aria-label="not decided" />
+  if (result === 'pass' || result === true) return <Check className="w-3.5 h-3.5 text-white shrink-0 mt-0.5" aria-label={t('verify_met')} />
+  if (result === 'fail' || result === false) return <TriangleAlert className="w-3.5 h-3.5 text-[var(--warn)] shrink-0 mt-0.5" aria-label={t('verify_not_met')} />
+  return <MinusCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" aria-label={t('verify_not_decided')} />
 }
 
 interface CardProps {
@@ -46,15 +47,19 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
         </p>
         {v && (
           <p className="text-xs text-neutral-400 mt-0.5">
-            Completed on {levelLabel(v.level)}, tier {v.tier}, by {v.verifier}
-            {v.independence !== 'none' ? ` (${v.independence.replaceAll('_', ' ')})` : ''}. Artifact: {v.artifact}.
+            {t('check_audit_done_line', {
+              level: levelLabel(v.level),
+              kind: kindLabel(v.tier),
+              verifier: v.verifier,
+              how: v.independence !== 'none' ? ` (${v.independence.replaceAll('_', ' ')})` : '',
+            })}
           </p>
         )}
       </div>
 
       {v && (
         <div>
-          <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">{criteriaSummary(v.criteria)}</p>
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{criteriaSummary(v.criteria)}</p>
           <ul className="space-y-1">
             {v.criteria.map((c) => (
               <li key={c.text} className="flex items-start gap-1.5 text-xs text-neutral-200">
@@ -71,7 +76,7 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
 
       {facts.length > 0 && (
         <div>
-          <p className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">What HQ saw</p>
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{t('verify_audit_saw')}</p>
           <ul className="space-y-1">
             {facts.map((o) => (
               <li key={o.id} className="flex items-start gap-1.5 text-xs text-neutral-400">
@@ -92,21 +97,21 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
       {disagreeing ? (
         <div className="space-y-2">
           <label className="block text-xs text-neutral-300">
-            What is wrong? It goes on the task, which is reopened.
+            {t('verify_audit_wrong')}
             <textarea
               value={note}
               onChange={(e) => onNote(e.target.value)}
               rows={3}
-              className="mt-1 w-full px-3 py-2 rounded-xl text-sm text-neutral-100 hq-field focus:outline-none focus:ring-1 focus:ring-rose-400"
+              className="mt-1 w-full px-3 py-2 rounded-xl text-sm text-neutral-100 hq-field focus:outline-none focus:ring-1 focus:ring-white"
             />
           </label>
           <div className="flex gap-2">
             <button type="button" disabled={busy} onClick={onCancelDisagree} className={`${SHEET_QUIET} flex-1`}>
-              Back
+              {t('verify_audit_back')}
             </button>
             <button type="button" disabled={busy} onClick={onDisagree} className={`${SHEET_DANGER} flex-1`}>
               <ThumbsDown className="w-4 h-4" />
-              Reopen it
+              {t('verify_audit_reopen')}
             </button>
           </div>
         </div>
@@ -114,13 +119,13 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
         <div className="flex gap-2">
           <button type="button" disabled={busy} onClick={onAgree} className={`${SHEET_PRIMARY} flex-1`}>
             <ThumbsUp className="w-4 h-4" />
-            Agree
+            {t('verify_audit_agree')}
           </button>
           <button type="button" disabled={busy} onClick={onDisagree} className={`${SHEET_DANGER} flex-1`}>
             <ThumbsDown className="w-4 h-4" />
-            Disagree
+            {t('verify_audit_disagree')}
           </button>
-          <button type="button" disabled={busy} onClick={onSkip} className={`${SHEET_QUIET} px-3`} aria-label="Skip">
+          <button type="button" disabled={busy} onClick={onSkip} className={`${SHEET_QUIET} px-3`} aria-label={t('verify_audit_skip')}>
             <SkipForward className="w-4 h-4" />
           </button>
         </div>
@@ -150,11 +155,11 @@ export function AuditStackView({ stack, index, busy, error, disagreeing, note, o
   return (
     <div className="space-y-4">
       <p className="text-xs text-neutral-400">
-        You are checking HQ, not the work: do you agree that these were done? Every disagreement reopens the task and counts against the verifier.
+        {t('verify_audit_intro')}
       </p>
       {card ? (
         <>
-          <p className="text-[11px] text-neutral-500">
+          <p className="text-xs text-neutral-500">
             {index + 1} of {stack.cards.length}
           </p>
           <AuditCardView
@@ -170,9 +175,9 @@ export function AuditStackView({ stack, index, busy, error, disagreeing, note, o
           />
         </>
       ) : (
-        <p className="text-sm text-neutral-200">Nothing left to answer. Ask for more whenever you like: the ones with the least data come first.</p>
+        <p className="text-sm text-neutral-200">{t('verify_audit_none_left')}</p>
       )}
-      {error && <p className="text-xs text-rose-300">{error}</p>}
+      {error && <p className="text-xs text-[var(--warn)]">{error}</p>}
       <div className="pt-3 border-t border-white/10 space-y-2.5">
         <p className="text-xs text-neutral-400" aria-live="polite">
           {auditEstimate(stack.calibration)}

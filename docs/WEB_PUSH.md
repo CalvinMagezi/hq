@@ -62,8 +62,8 @@ From HQ's own chat, a `/watch`, or any MCP client (`hq_call` with `notify_owner`
 }
 ```
 
-- `title` is required, at most 120 characters. The push shows it and the first 300
-  characters of `body`; the full body is in the inbox.
+- `title` is required, at most 120 characters. The push shows the title only; the body
+  stays in the inbox (see "What a push says" below).
 - `link` opens a page of the web app on tap: a path such as `/tasks`,
   `/notifications` or `/chat?thread=<id>`. Full URLs are refused, and the service worker
   refuses any other origin too, so a notification can never send you off-site.
@@ -86,7 +86,7 @@ server picks the row up within a few seconds and pushes it.
     push service relays it without being able to read it.
   - `mod.rs` is the dispatcher. Every 3 seconds it takes new inbox items (claiming each in
     the database, so two server processes never push it twice), and posts them to every
-    subscription. Items older than an hour are never pushed, so a server that was down
+    subscription that receives that kind (`needs` or `updates`). Items older than an hour are never pushed, so a server that was down
     does not replay a backlog. A subscription the push service reports gone (404 or 410)
     is deleted, and one that fails 5 times in a row is dropped.
   - `api.rs` serves `GET /api/notifications/push` (on/off and the public key) and `POST
@@ -95,27 +95,30 @@ server picks the row up within a few seconds and pushes it.
     address a client made up.
 - `crates/hq-db/src/push_subscriptions.rs` and `sql/088_web_push.sql`: the
   subscriptions table, and the `link` and `pushed_at` columns on `value_items`.
-- `crates/hq-web/src/dialog_answer.rs`: answer buttons (below).
+  `sql/111_push_kinds.sql` adds `kinds` (default `needs,updates`) and `details` (default off).
 
-## Answering an agent's question from the notification
+## What a push says
 
-When a coding agent waits at a dialog HQ can read, its push says what it asks (the
-question and the command or path) and has buttons: the agent's own yes-once answer
-(often just "Yes") when there is one, and Decline. A "don't ask again" or "remember"
-answer is never a button, and neither is a choice between answers (open HQ for those).
+The server builds every push's words, so no browser, old service worker or push service
+ever receives an item's content. A push has no buttons: a browser cannot check a screen
+lock, so anyone holding the device could press one.
 
-The service worker has no web token. Each button carries its own token instead: an
-HMAC with the install's approval key (`approval.key` next to the HQ config, outside
-the database) over the inbox item, the dialog's number, the choice and an expiry 15
-minutes out. A click posts it to `POST /api/notifications/push-answer`, the one
-notifications route that takes no web token. The server checks the token, refuses a
-dialog that was already answered (by any device) or that the agent has moved past,
-and otherwise answers that dialog. The notification is replaced by one that says how it
-went. Chrome on macOS shows two buttons; a browser that shows none still opens HQ on a
-click.
+- Something that needs you: "{Helper} needs your OK" (or "HQ needs your OK") and "Open HQ to
+  see what it wants to do." A task: "A task needs your OK", never the task's name. A helper
+  stuck at a prompt: "A helper is stuck" and "Open HQ to see which one."
+- A new sign-in: "A new sign-in to your HQ" and "Open HQ to see it."
+- An update, such as `notify_owner`: its title, with no body.
+- With `details` on for a subscription, the body is the item's own first line, at most 120
+  characters, never a command.
 
-The phone app and the web app answer through `POST /api/notifications/{id}/answer` with
-the web token, under the same rules.
+Tapping opens the item's page. Answer in HQ: the phone app and the web app answer through
+`POST /api/notifications/{id}/answer` with the web token and the `X-HQ-Client` header.
+
+The service worker folds a busy lock screen: past the newest five Needs you notifications,
+one reads "{N} more waiting for you"; a fourth update within an hour folds them into
+"{N} updates from HQ". When a browser subscribes again, or turns a kind back on, each item
+of that kind still waiting is pushed to it once.
+
 - `apps/hq-web/src/lib/webPush.ts`, `components/notifications/PushToggle.tsx` and
   `sw.ts`: subscribing in the browser, the toggle, and the service worker's `push`
   handler. On every start the app re-sends its subscription, so the server keeps it after
@@ -123,8 +126,7 @@ the web token, under the same rules.
 
 ## Privacy
 
-The payload (title, a clipped body, the link, and for an agent's question its buttons and
-their answer tokens) is encrypted end to end. Google, Apple,
+The payload (the fixed words above, the link and a tag) is encrypted end to end. Google, Apple,
 Mozilla or Microsoft see when a push is sent and roughly how big it is, not what it says.
 
 Deleting `.vault/_data/web_push_vapid.p8` makes a new key on the next start. Every

@@ -1,4 +1,6 @@
 /// <reference lib="webworker" />
+import { planPush, type PushKind, type Shown } from './lib/pushFold'
+
 declare const self: ServiceWorkerGlobalScope
 
 // Only the shell cache is per build. Hashed /assets/ files never change under the
@@ -6,8 +8,11 @@ declare const self: ServiceWorkerGlobalScope
 declare const __BUILD_TIME__: string
 const SHELL_CACHE = `shell-hq-${__BUILD_TIME__}`
 const STATIC_CACHE = 'hq-static'
-const API_CACHE = 'hq-api'
-const KEEP_CACHES = [SHELL_CACHE, STATIC_CACHE, API_CACHE]
+// One API cache per HQ (`hq-api:{hq_id}`, shared parts rule 7); the page tells the worker its id.
+const API_CACHE_PREFIX = 'hq-api:'
+const KEEP_CACHES = [SHELL_CACHE, STATIC_CACHE]
+let hqId: string | null = null
+const apiCache = () => (hqId ? `${API_CACHE_PREFIX}${hqId}` : null)
 
 const SHELL_ASSETS = [
   '/manifest.json',
@@ -99,9 +104,10 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys()
-      await Promise.all(keys.filter((k) => !KEEP_CACHES.includes(k)).map((k) => caches.delete(k)))
+      const apiCaches = keys.filter((k) => k.startsWith(API_CACHE_PREFIX))
+      await Promise.all(keys.filter((k) => !KEEP_CACHES.includes(k) && !apiCaches.includes(k)).map((k) => caches.delete(k)))
       await trimCache(STATIC_CACHE, STATIC_CACHE_MAX_ENTRIES)
-      await trimCache(API_CACHE, API_CACHE_MAX_ENTRIES)
+      await Promise.all(apiCaches.map((c) => trimCache(c, API_CACHE_MAX_ENTRIES)))
       await self.clients.claim()
     })(),
   )
@@ -139,83 +145,75 @@ function appUrl(raw: unknown, fallback: string): string {
   return new URL(fallback, self.location.origin).href
 }
 
-/** What a push carries (docs/WEB_PUSH.md). A blocked agent's push also has the inbox item, its
- * buttons and a one-use token per button, which answers that one question in place of the web token. */
+// HQ refused this browser's sign-in (lib/wipe.ts): no saved copy is served until a read succeeds.
+let signedOut = false
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'hq-id' && typeof event.data.id === 'string') {
+    hqId = event.data.id
+    return
+  }
+  if (event.data?.type !== 'signed-out') return
+  signedOut = true
+  const own = apiCache()
+  if (own) event.waitUntil(caches.delete(own))
+})
+
+/** What a push carries (docs/WEB_PUSH.md): words the server chose, a page and a tag. Never an
+ * answer: a browser cannot check a screen lock, so a push only opens HQ. */
 interface PushData {
   title?: string
   body?: string
   url?: string
   tag?: string
-  item?: string
-  actions?: { action: string; title: string }[]
-  tokens?: Record<string, string>
+  kind?: PushKind
 }
 
 const ICON = '/icons/hq-icon-192.png'
 const BADGE = '/icons/hq-mark-96.png'
-/** The token-checked route a push button answers through; it takes no web token. */
-const PUSH_ANSWER_PATH = '/api/notifications/push-answer'
+
+async function showPush(data: PushData): Promise<void> {
+  const shownNow = await self.registration.getNotifications()
+  const shown: Shown[] = shownNow
+    .filter((n) => n.data?.kind)
+    .map((n) => ({ tag: n.tag, kind: n.data.kind, at: n.data.at ?? 0, count: n.data.count }))
+  const now = Date.now()
+  const incoming = {
+    title: data.title || 'HQ',
+    body: data.body ?? '',
+    url: appUrl(data.url, '/inbox'),
+    // An older server sent no tag or kind; a unique tag keeps such pushes apart.
+    tag: data.tag || `hq-push-${now}`,
+    kind: data.kind ?? 'needs',
+  }
+  const plan = planPush(shown, incoming, now)
+  for (const n of shownNow) if (plan.close.includes(n.tag)) n.close()
+  await Promise.all(
+    plan.show.map((n) =>
+      self.registration.showNotification(n.title, {
+        body: n.body,
+        icon: ICON,
+        badge: BADGE,
+        tag: n.tag,
+        data: { url: n.url, kind: n.kind, at: now, count: n.count },
+      }),
+    ),
+  )
+}
 
 self.addEventListener('push', (event) => {
   let data: PushData = {}
   try {
     data = event.data?.json() ?? {}
   } catch {
-    data = { body: event.data?.text() }
+    data = {}
   }
-  const actions = (data.actions ?? []).filter((a) => data.item && data.tokens?.[a.action])
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'HQ', {
-      body: data.body ?? '',
-      icon: ICON,
-      badge: BADGE,
-      tag: data.tag,
-      requireInteraction: actions.length > 0,
-      data: { url: appUrl(data.url, '/notifications'), item: data.item, tokens: data.tokens },
-      ...({ actions } as object),
-    }),
-  )
+  event.waitUntil(showPush(data))
 })
 
-/** Sends a push button's answer and says how it went in the notification's place. */
-async function answerFromPush(notification: Notification, choice: string): Promise<void> {
-  const { item, tokens, url } = notification.data ?? {}
-  const says = (title: string, body: string) =>
-    self.registration.showNotification(title, { body, icon: ICON, badge: BADGE, tag: notification.tag, data: { url } })
-  let res: Response
-  try {
-    res = await fetch(PUSH_ANSWER_PATH, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: item, choice, token: tokens?.[choice] }),
-    })
-  } catch {
-    await says('Not sent', 'HQ could not be reached. Open HQ to answer.')
-    return
-  }
-  if (res.ok) {
-    const report = (await res.json().catch(() => ({}))) as { registered?: boolean }
-    await says(
-      choice === 'approve' ? 'Allowed once' : 'Declined',
-      report.registered === false ? 'The agent did not take it yet. Open HQ to check.' : 'The agent has your answer.',
-    )
-  } else if (res.status === 409) {
-    await says('Already answered', 'That question was answered elsewhere, or the agent moved on.')
-  } else if (res.status === 403) {
-    await says('This button expired', 'Open HQ to answer.')
-  } else {
-    await says('Not sent', 'Open HQ to answer.')
-  }
-}
-
 // A notification (a reply alert or a push) opens its page: in an HQ window already open, or a new one.
-// A push button answers the question it came with instead.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  if (event.action === 'approve' || event.action === 'decline') {
-    event.waitUntil(answerFromPush(event.notification, event.action))
-    return
-  }
   const target = appUrl(event.notification.data?.url, '/chat')
   event.waitUntil(
     (async () => {
@@ -257,17 +255,20 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Those API reads: network first; after 4s or on failure, the last saved copy of any age.
-  if (SW_CACHED_API.some((re) => re.test(url.pathname))) {
+  // Without the page's HQ id the worker keeps no copy: it cannot tell whose it would be.
+  const cacheName = apiCache()
+  if (cacheName && SW_CACHED_API.some((re) => re.test(url.pathname))) {
     const { quick, full } = networkWithin(request, API_TIMEOUT_MS)
     event.waitUntil(
       full
         .then((res) => {
           if (!res.ok) return
+          signedOut = false
           const copy = res.clone()
           return caches
-            .open(API_CACHE)
+            .open(cacheName)
             .then((cache) => cache.put(request, copy))
-            .then(() => trimCache(API_CACHE, API_CACHE_MAX_ENTRIES))
+            .then(() => trimCache(cacheName, API_CACHE_MAX_ENTRIES))
         })
         .catch(() => undefined),
     )
@@ -275,7 +276,8 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const res = await quick
         if (res) return res
-        const cached = await caches.match(request, { ...MATCH, cacheName: API_CACHE })
+        if (signedOut) return markedFromCache(Response.json({ error: 'signed out' }, { status: 401 }))
+        const cached = await caches.match(request, { ...MATCH, cacheName })
         return cached ? markedFromCache(cached) : Response.json({ error: 'offline' }, { status: 503 })
       })(),
     )

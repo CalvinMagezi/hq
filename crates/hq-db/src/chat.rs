@@ -11,7 +11,9 @@ pub struct ChatThread {
     pub thread_type: String,
     pub initiated_by: String,
     pub status: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub updated_at: String,
     pub last_message_preview: Option<String>,
     pub unread_count: i64,
@@ -35,6 +37,7 @@ pub struct ChatMessage {
     pub thread_id: String,
     pub role: String,
     pub content: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 
@@ -353,6 +356,22 @@ pub fn any_message_mentions(conn: &Connection, needle: &str) -> Result<bool> {
     .map_err(Into::into)
 }
 
+/// Undo an archive: back to active while the archive is at most `window_secs` old and nothing
+/// changed the chat since (resolutions.md A6). Returns false otherwise.
+pub fn unarchive_thread(conn: &Connection, thread_id: &str, window_secs: i64) -> Result<bool> {
+    let n = conn.execute(
+        "UPDATE chat_threads SET status = 'active', updated_at = ?3
+          WHERE thread_id = ?1 AND status = 'archived'
+            AND julianday(updated_at) >= julianday('now', ?2)",
+        params![
+            thread_id,
+            format!("-{window_secs} seconds"),
+            Utc::now().to_rfc3339()
+        ],
+    )?;
+    Ok(n > 0)
+}
+
 pub fn archive_thread(conn: &Connection, thread_id: &str) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
@@ -366,6 +385,26 @@ pub fn archive_thread(conn: &Connection, thread_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_archive_is_undone_within_the_window_and_not_after() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::migrations::run(&conn).unwrap();
+        let t = create_thread(&conn, "t", "user", "user").unwrap().thread_id;
+        archive_thread(&conn, &t).unwrap();
+        assert!(unarchive_thread(&conn, &t, 600).unwrap());
+        assert!(
+            !unarchive_thread(&conn, &t, 600).unwrap(),
+            "only an archived chat"
+        );
+        archive_thread(&conn, &t).unwrap();
+        conn.execute(
+            "UPDATE chat_threads SET updated_at = datetime('now', '-11 minutes') WHERE thread_id = ?1",
+            params![t],
+        )
+        .unwrap();
+        assert!(!unarchive_thread(&conn, &t, 600).unwrap(), "too late");
+    }
     use crate::Database;
 
     #[test]

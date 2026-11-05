@@ -18,6 +18,10 @@ val generated = layout.buildDirectory.dir("generated/hq")
 val releaseKeystore = providers.environmentVariable("HQ_RELEASE_KEYSTORE")
 val releaseKeystorePassword = providers.environmentVariable("HQ_RELEASE_KEYSTORE_PASSWORD")
 val releaseKeyAlias = providers.environmentVariable("HQ_RELEASE_KEY_ALIAS")
+// -Phq.releasesRepo=owner/repo names the GitHub repository the in-app updater reads; with none the updater is off.
+val releasesRepo = providers.gradleProperty("hq.releasesRepo").getOrElse("").also {
+    if (it.isNotEmpty() && !Regex("[A-Za-z0-9._-]+/[A-Za-z0-9._-]+").matches(it)) throw GradleException("-Phq.releasesRepo must look like owner/repo")
+}
 val versionCodeProperty = providers.gradleProperty("hq.versionCode")
 val versionNameProperty = providers.gradleProperty("hq.versionName")
 
@@ -85,6 +89,9 @@ android {
         // CI passes a number that only grows (the workflow run number); a phone refuses a lower one.
         versionCode = versionCodeProperty.map(String::toInt).getOrElse(1)
         versionName = versionNameProperty.getOrElse("dev")
+        // -Phq.port= gives a test copy its own loopback port, so its hq never fights the installed app's for 5678.
+        buildConfigField("int", "HQ_PORT", providers.gradleProperty("hq.port").getOrElse("5678"))
+        buildConfigField("String", "RELEASES_REPO", "\"$releasesRepo\"")
         // shortcuts.xml cannot use a manifest placeholder, so its target package is a resource.
         resValue("string", "hq_application_id", applicationId!!)
         ndk { abiFilters += "arm64-v8a" }
@@ -134,7 +141,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     // Keep every file of the web build; the default pattern drops names that start with "." or "_".
     androidResources { ignoreAssetsPattern = "!.svn:!.git" }
@@ -142,8 +152,18 @@ android {
     lint {
         // android.jar 36 holds APIs newer than minSdk 26. This check stops a call to one of them from
         // compiling and then crashing Android 8 to 10 (D8 backports some, such as List.of; lint knows which).
-        checkOnly += setOf("NewApi")
+        // HqInlineText (lint-checks): words a person reads come from the catalogue, so a literal fails the build.
+        checkOnly += setOf("NewApi", "HqInlineText")
         abortOnError = true
+    }
+
+    // Compose UI and screenshot tests run on the JVM under Robolectric (resolutions.md D-11).
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // `-Phq.recordScreenshots=true` writes the golden screenshots after an intended change.
+            test.systemProperty("hq.recordScreenshots", project.findProperty("hq.recordScreenshots") ?: "false")
+        }
     }
 
     packaging {
@@ -187,4 +207,11 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // The platform's org.json is a stub in JVM unit tests.
     testImplementation("org.json:json:20250517")
+    testImplementation(platform("androidx.compose:compose-bom:2026.03.01"))
+    debugImplementation(platform("androidx.compose:compose-bom:2026.03.01"))
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    lintChecks(project(":lint-checks"))
 }

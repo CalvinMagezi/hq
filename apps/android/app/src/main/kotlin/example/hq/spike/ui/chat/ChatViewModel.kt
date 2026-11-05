@@ -11,8 +11,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqClient
+import example.hq.spike.R
 import example.hq.spike.data.HqServices
-import example.hq.spike.data.HqStatus
+import example.hq.spike.ui.shell.ClientRestore
+import example.hq.spike.ui.shell.Undo
+import example.hq.spike.ui.shell.UndoKind
+import example.hq.spike.data.Connection
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.data.NoteNotFound
 import example.hq.spike.data.StoredMessage
@@ -133,7 +137,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         // hq may still be starting when the app opens; open the latest chat the first time it answers.
-        viewModelScope.launch { services.status.collect { if (it == HqStatus.Live && !frozen) openLatest() } }
+        viewModelScope.launch { services.status.collect { if (it == Connection.Connected && !frozen) openLatest() } }
     }
 
     /** Draws a fixed state and stops listening to hq, for checking the screen against the design on a phone with no hq. */
@@ -229,7 +233,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 old?.let(::archive)
                 refreshChats()
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Could not start the new chat. HQ is not answering.")) }
+                _state.update { it.copy(notice = Notice("Couldn\'t start the new chat. HQ didn\'t answer in time. Try again.")) }
             }
         }
     }
@@ -316,6 +320,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Opens a chat a link names, but only one that is in the list: an unknown id would blank the open chat and send the next message to nothing. */
+    fun focusComposer() = _state.update { it.copy(focusDraft = it.focusDraft + 1) }
+
     fun openLinked(id: String) {
         if (_state.value.chats.any { it.id == id }) { openThread(id); return }
         viewModelScope.launch {
@@ -327,6 +333,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadMessages(id: String) {
         val page = try { client.messages(id) } catch (e: HqUnavailable) { return }
         val shown = page.sortedBy { it.createdAt }.map(::toUi)
+        if (page.any { it.spoken }) SpokenThreads.mark(getApplication(), id)
         _state.update {
             if (it.threadId != id) return@update it
             // Sends the server has not acknowledged yet stay at the end.
@@ -335,7 +342,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, m.offer)
+    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer)
 
     /** Hides the line at once and tells HQ, which forgets the offer on that reply. Yes then sends its request, or puts it in the composer. */
     private fun answerOffer(id: String, yes: Boolean) {
@@ -372,7 +379,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: NoteNotFound) {
                 _state.update { it.copy(openingNote = null, missingNotes = it.missingNotes + path, notice = Notice(NOTE_GONE)) }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(openingNote = null, notice = Notice("Could not open the note. HQ is not answering.")) }
+                _state.update { it.copy(openingNote = null, notice = Notice("Couldn\'t open the note. HQ didn\'t answer in time. Try again.")) }
             }
         }
     }
@@ -386,7 +393,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 client.setPinned(sheet.path, pin)
                 _state.update { s -> s.copy(note = s.note?.takeIf { it.path == sheet.path }?.copy(pinned = pin) ?: s.note, notice = Notice(if (pin) "Pinned to the top of Notes" else "Unpinned")) }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Could not change the pin. HQ is not answering.")) }
+                _state.update { it.copy(notice = Notice("Couldn\'t change the pin. HQ didn\'t answer in time. Try again.")) }
             }
         }
     }
@@ -409,7 +416,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
                 app.startActivity(view)
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Could not fetch the file. HQ is not answering.")) }
+                _state.update { it.copy(notice = Notice("Couldn\'t fetch the file. HQ didn\'t answer in time. Try again.")) }
             } catch (e: ActivityNotFoundException) {
                 _state.update { it.copy(notice = Notice("No app on this phone can open that file.")) }
             }
@@ -451,38 +458,46 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun refreshChats() {
         val list = try { client.threads() } catch (e: HqUnavailable) { return }
+        val spokenIds = SpokenThreads.all(getApplication())
         val rows = list.threads.map { t ->
             val group = ChatTime.group(t.updatedAt)
-            val snippet = ChatPreview.snippet(t.preview)
-            val subtitle = if (group == Group.Today && snippet.isNotEmpty()) "${ChatTime.age(t.updatedAt)} · $snippet" else snippet
-            ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0)
+            val snippet = ChatPreview.snippet(t.preview) { n -> getApplication<Application>().resources.getQuantityString(R.plurals.chat_files, n, n) }
+            val spoken = t.id in spokenIds
+            val body = if (group == Group.Today && snippet.isNotEmpty()) "${ChatTime.age(t.updatedAt)} · $snippet" else snippet
+            val subtitle = if (spoken) listOf(getApplication<Application>().getString(R.string.chat_spoken), body).filter { it.isNotEmpty() }.joinToString(" · ") else body
+            ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0, spoken)
         }
         _state.update { s -> s.copy(chats = rows.filter { it.id != archiving?.first }) }
     }
 
-    /** Archiving waits a few seconds so Undo has something to undo; the server is only told after that. */
+    /** The server is told at once; Undo inside the window asks it to bring the chat back. */
     private fun archive(id: String) {
-        archiving?.let { (earlier, job) -> job.cancel(); commit(earlier) }
-        _state.update { it.copy(chats = it.chats.filter { row -> row.id != id }, notice = Notice("Chat archived", "Undo")) }
+        archiving?.second?.cancel()
+        val app = getApplication<Application>()
+        _state.update { it.copy(chats = it.chats.filter { row -> row.id != id }, notice = Notice(app.getString(R.string.undo_chat_archived), app.getString(R.string.undo))) }
         archiving = id to viewModelScope.launch {
-            delay(UNDO_MS)
-            commit(id)
-            archiving = null
-        }
-    }
-
-    private fun commit(id: String) {
-        viewModelScope.launch {
-            try { client.archive(id) } catch (e: HqUnavailable) { return@launch }
+            try { client.archive(id) } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = null) }
+                refreshChats()
+                return@launch
+            }
             if (_state.value.threadId == id) newChat(keepSheet = true)
+            delay(Undo.millis(app))
+            archiving = null
+            _state.update { it.copy(notice = null) }
         }
     }
 
     private fun undoArchive() {
-        archiving?.second?.cancel()
+        val (id, timer) = archiving ?: return
+        timer.cancel()
         archiving = null
-        _state.update { it.copy(notice = null) }
-        viewModelScope.launch { refreshChats() }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val result = Undo.restore(ClientRestore(client), UndoKind.Thread, id)
+            _state.update { it.copy(notice = Undo.failLine(app, result)?.let(::Notice)) }
+            refreshChats()
+        }
     }
 
     private fun draftKey(threadId: String?) = threadId ?: NEW_CHAT_KEY
@@ -490,7 +505,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val DRAFT_PREFS = "chat_drafts"
         const val NEW_CHAT_KEY = "new"
-        const val UNDO_MS = 5_000L
         const val MAX_ATTACHED = 10
         const val NOTE_GONE = "That note is not in your notes any more"
         const val CHAT_GONE = "That chat is not in your list"

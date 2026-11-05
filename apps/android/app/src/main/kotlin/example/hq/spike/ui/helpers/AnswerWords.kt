@@ -1,18 +1,18 @@
 package example.hq.spike.ui.helpers
 
+import example.hq.spike.R
+import example.hq.spike.ui.shell.Words
+
 /** What a notification says while an answer given from it is sent, and after: past tense, and what happens next. */
 object AnswerWords {
     data class Say(val title: String, val body: String?)
 
     private const val NEEDS_OK = " needs your OK"
-    private const val SOMEONE = "The helper"
 
-    val sending = Say("Sending your answer…", null)
-    val failed = Say("Couldn't send your answer", "HQ didn't reply. It may be restarting.")
-    val answersOff = Say("Answers from notifications are off", "Open the app to answer.")
-    val sentNotRecorded = Say("Answer sent", "HQ did not record it. Open the app to check.")
-    val alreadyAnswered = Say("Already answered", "Someone answered this somewhere else.")
-    val movedOn = Say("Already answered", "It was answered somewhere else, or the helper has moved on.")
+    fun sending(w: Words) = Say(w.s(R.string.helpers_answer_sending), null)
+    fun sentNotRecorded(w: Words) = Say(w.s(R.string.helpers_answer_sent_title), w.s(R.string.helpers_answer_sent_body))
+    fun alreadyAnswered(w: Words) = Say(w.s(R.string.helpers_answer_already_title), w.s(R.string.helpers_answer_already_body))
+    fun movedOn(w: Words) = Say(w.s(R.string.helpers_answer_already_title), w.s(R.string.helpers_answer_moved_on_body))
 
     /** True only when HQ's answered items positively list this one as decided; anything else (not listed, cannot tell) lets the answer go. */
     fun answeredElsewhere(id: String, history: List<Pair<String, String>>): Boolean =
@@ -22,13 +22,13 @@ object AnswerWords {
     fun asker(title: String): String? = title.removeSuffix(NEEDS_OK).takeIf { it != title && it.isNotBlank() }
 
     /** [helper] is true for a question from a helper at a prompt; an approval of a task or an action has no one to name. */
-    fun answered(helper: Boolean, approve: Boolean, name: String?, at: String): Say {
-        val who = name ?: SOMEONE
+    fun answered(w: Words, helper: Boolean, approve: Boolean, name: String?, at: String): Say {
+        val who = name ?: w.s(R.string.helpers_the_helper)
         return when {
-            helper && approve -> Say("Allowed. $who is working again.", "Sent at $at.")
-            helper -> Say("Not now. $who is waiting.", "Sent at $at. You can tell it what to do instead.")
-            approve -> Say("Allowed.", "Sent at $at.")
-            else -> Say("Not now. Nothing was done.", "Sent at $at.")
+            helper && approve -> Say(w.s(R.string.helpers_answer_allowed_working, who), w.s(R.string.helpers_answer_sent_at, at))
+            helper -> Say(w.s(R.string.helpers_answer_not_now_waiting, who), w.s(R.string.helpers_answer_sent_at_instead, at))
+            approve -> Say(w.s(R.string.helpers_answer_allowed), w.s(R.string.helpers_answer_sent_at, at))
+            else -> Say(w.s(R.string.helpers_answer_not_now_nothing), w.s(R.string.helpers_answer_sent_at, at))
         }
     }
 }

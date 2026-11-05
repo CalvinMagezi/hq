@@ -34,7 +34,7 @@ test('spans pick a readable unit', () => {
 })
 
 test('the chip names the budget closest to its limit and stays quiet when all are fine', () => {
-  expect(budgetChipLabel(resp(budget('a', 10, 'ok'), budget('b', 85, 'warning'), budget('c', 120, 'exceeded')))).toBe('c 120%')
+  expect(budgetChipLabel(resp(budget('a', 10, 'ok'), budget('b', 85, 'warning'), budget('c', 120, 'exceeded')))).toBe('This month 120%')
   expect(budgetChipLabel(resp(budget('a', 10, 'ok')))).toBeNull()
   expect(budgetChipLabel(undefined)).toBeNull()
 })

@@ -27,7 +27,7 @@ env:
 
 jobs:
   build:
-    name: Build HQ.app (no secrets)
+    name: Build AgentHQ.app (no secrets)
     runs-on: macos-15
     timeout-minutes: 60
     defaults:
@@ -54,12 +54,12 @@ jobs:
 
       - name: Pack the bundle
         # A tarball keeps the bundle's symlinks and permissions through the artifact upload.
-        run: tar -C src-tauri/target/release/bundle/macos -czf "$RUNNER_TEMP/HQ.app.tar.gz" HQ.app
+        run: tar -C src-tauri/target/release/bundle/macos -czf "$RUNNER_TEMP/AgentHQ.app.tar.gz" AgentHQ.app
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hq-app-unsigned
-          path: ${{ runner.temp }}/HQ.app.tar.gz
+          path: ${{ runner.temp }}/AgentHQ.app.tar.gz
           retention-days: 7
 
   sign:
@@ -89,14 +89,14 @@ jobs:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
         run: |
           mkdir -p "$RUNNER_TEMP/app" "$RUNNER_TEMP/out"
-          tar -C "$RUNNER_TEMP/app" -xzf "$RUNNER_TEMP/in/HQ.app.tar.gz"
-          bash scripts/desktop/sign-macos.sh "$RUNNER_TEMP/app/HQ.app" "$RUNNER_TEMP/out/HQ.dmg"
-          shasum -a 256 "$RUNNER_TEMP/out/HQ.dmg" | tee "$RUNNER_TEMP/out/HQ.dmg.sha256"
+          tar -C "$RUNNER_TEMP/app" -xzf "$RUNNER_TEMP/in/AgentHQ.app.tar.gz"
+          bash scripts/desktop/sign-macos.sh "$RUNNER_TEMP/app/AgentHQ.app" "$RUNNER_TEMP/out/AgentHQ.dmg"
+          shasum -a 256 "$RUNNER_TEMP/out/AgentHQ.dmg" | tee "$RUNNER_TEMP/out/AgentHQ.dmg.sha256"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hq-desktop-dmg
           path: |
-            ${{ runner.temp }}/out/HQ.dmg
-            ${{ runner.temp }}/out/HQ.dmg.sha256
+            ${{ runner.temp }}/out/AgentHQ.dmg
+            ${{ runner.temp }}/out/AgentHQ.dmg.sha256
           retention-days: 30

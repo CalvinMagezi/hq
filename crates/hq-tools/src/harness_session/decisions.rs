@@ -30,6 +30,8 @@ pub fn for_task(db: &Arc<Database>, task: &str, reader: &Reader) -> Result<Value
                 "command": a.command,
                 "options": a.options,
                 "approve": a.approve_option.map(|id| json!({ "id": id, "label": a.approve_label() })),
+                "loses": a.losing_verb().is_some(),
+                "verb": a.losing_verb(),
             })
         })
         .collect();

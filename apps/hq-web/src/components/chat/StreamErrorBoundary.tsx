@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react'
 import { RotateCw } from 'lucide-react'
+import { t } from '~/strings'
 
 interface Props {
   children: ReactNode
@@ -33,7 +34,7 @@ export class StreamErrorBoundary extends Component<Props, State> {
     if (!this.state.failed) return this.props.children
     return (
       <div role="alert" className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.04] px-3.5 py-3 text-sm ">
-        <p className="text-neutral-200">This message could not be displayed. Nothing was lost.</p>
+        <p className="text-neutral-200">{t('chat_message_failed')}</p>
         {this.props.plainText && (
           <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-[13px] text-neutral-300">
             {this.props.plainText}
@@ -44,7 +45,7 @@ export class StreamErrorBoundary extends Component<Props, State> {
           onClick={() => this.setState({ failed: false })}
           className="mt-2 flex items-center gap-1.5 h-9 px-3 rounded-full border border-white/15 text-xs text-neutral-200 hover:bg-white/10"
         >
-          <RotateCw className="w-3.5 h-3.5" /> Try again
+          <RotateCw className="w-3.5 h-3.5" /> {t('chat_retry')}
         </button>
       </div>
     )

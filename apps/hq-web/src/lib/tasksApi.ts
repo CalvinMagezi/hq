@@ -1,4 +1,5 @@
 import { hqFetch, readJson } from './hqAuth'
+import { t } from '~/strings'
 
 export type TaskStatus = 'to_do' | 'in_progress' | 'blocked' | 'ready_for_review' | 'complete'
 export type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -179,7 +180,9 @@ export async function createInitiativeClient(spaceId: string, name: string, fold
   )
 }
 
-interface CreateTaskInput {
+export interface CreateTaskInput {
+  /** HQ drops a repeat of this id, so a create whose answer was lost is never made twice. */
+  client_id?: string
   title: string
   description?: string
   initiative_id?: string
@@ -239,9 +242,11 @@ export async function updateTaskClient(id: string, input: UpdateTaskInput): Prom
 
 export async function deleteTaskClient(
   id: string,
-  cascade = false
+  cascade = false,
+  purge = false
 ): Promise<{ deleted: boolean; id: string; deleted_ids: string[] }> {
-  const qs = cascade ? '?cascade=true' : ''
+  const flags = [cascade && 'cascade=true', purge && 'purge=true'].filter(Boolean)
+  const qs = flags.length ? `?${flags.join('&')}` : ''
   return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(id)}${qs}`, { method: 'DELETE' }))
 }
 
@@ -260,11 +265,11 @@ export async function addCommentClient(taskId: string, body: string, author = 'o
 }
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
-  to_do: 'To Do',
-  in_progress: 'In Progress',
-  blocked: 'Blocked',
-  ready_for_review: 'Ready for Review',
-  complete: 'Complete',
+  to_do: t('board_col_todo'),
+  in_progress: t('board_col_working'),
+  blocked: t('board_col_stuck'),
+  ready_for_review: t('board_col_ready'),
+  complete: t('board_col_done'),
 }
 
 export const STATUS_ORDER: TaskStatus[] = ['to_do', 'in_progress', 'blocked', 'ready_for_review', 'complete']
@@ -278,7 +283,8 @@ export const STATUS_ORDER: TaskStatus[] = ['to_do', 'in_progress', 'blocked', 'r
  */
 export function parseSqliteUtc(s: string): Date {
   const iso = s.includes('T') ? s : s.replace(' ', 'T')
-  return new Date(iso.endsWith('Z') ? iso : `${iso}Z`)
+  // RFC 3339 from HQ carries its own Z or offset; only the old zoneless SQLite text is taken as UTC.
+  return new Date(/(?:Z|[+-]\d\d:?\d\d)$/i.test(iso) ? iso : `${iso}Z`)
 }
 
 /** One agent session holding a task for a stretch of time. Times are UTC like every other timestamp. */

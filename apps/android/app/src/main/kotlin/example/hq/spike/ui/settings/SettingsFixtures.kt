@@ -39,7 +39,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         """{"active":true,"quota":{"login":"example","plan":"pro","entitlement":1500,"credits_used":588,"remaining":912,"percent_remaining":60.8,"overage_permitted":false,"reset_at":"2026-11-01T00:00:00Z"},"burn":{"windows":[{"window_hours":6,"credits_used":50,"per_hour":8.3}]}}""",
     )
     val phone = listOf(
-        HomeRow(SettingsPage.Background, "background", "Background work", SettingsWords.BACKGROUND_ON),
+        HomeRow(SettingsPage.Background, "background", "Background work", "On \u00b7 answers chats, runs tasks"),
         HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", "Good · 1 thing to check"),
         HomeRow(SettingsPage.Notifications, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", "Sharing opens a new note"),
@@ -66,7 +66,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-setup" -> base.copy(stack = listOf(SettingsPage.Messaging, SettingsPage.SetupApp), setup = SetupState("telegram", found = "@example_bot"))
         "s-messaging-ask" -> base.copy(stack = listOf(SettingsPage.Messaging), askDisconnect = "telegram")
         "s-key" -> base.copy(stack = listOf(SettingsPage.Keys), keySheet = KeySheet("anthropic", "Anthropic", replace = false))
-        "s-key-error" -> base.copy(stack = listOf(SettingsPage.Keys), keySheet = KeySheet("anthropic", "Anthropic", replace = false, error = SettingsWords.KEY_REFUSED))
+        "s-key-error" -> base.copy(stack = listOf(SettingsPage.Keys), keySheet = KeySheet("anthropic", "Anthropic", replace = false, error = "That key didn't work. Check that you copied all of it."))
         "s-capture" -> base.copy(stack = listOf(SettingsPage.CaptureWidgets))
         "s-capture-waiting" -> base.copy(stack = listOf(SettingsPage.CaptureWidgets), capture = CaptureFacts("task", true, listOf(
             example.hq.spike.capture.Queued("a", "note", "Why Compose beat the WebView for chat", org.json.JSONObject(), 1L),

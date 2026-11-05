@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { newClientId } from '~/lib/outbox'
 import { Paperclip, PencilLine, X } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { useThreadStore, useLiveTurn, type ThreadMessage } from '~/store/threadStore'
 import { useWS } from '~/context/WebSocketContext'
+import { toastUndo, toastAlert, toastNotice } from '~/lib/toast'
+import { failureLine } from '~/lib/version'
+import { t } from '~/strings'
+import { sharedConnectionNow, useSharedConnection } from '~/lib/connection'
+import { isSharedComputer } from '~/lib/sharedComputer'
+import { archiveChatKey } from '~/lib/failureWords'
+import { useInHub } from '~/lib/hubWindow'
+import { bannerKey, savedBannerLine, sendFailureKey, stopFailureKey, stopReply } from '~/lib/chatConnection'
 import { threadApi, refreshThreads, loadMessages, newThread } from '~/lib/threadApi'
 import { rejectSend } from '~/lib/chatEvents'
 import { answerOffer } from '~/lib/offersApi'
@@ -12,15 +21,16 @@ import { ThreadSidebar } from './ThreadSidebar'
 import { ChatComposer } from './ChatComposer'
 import { ChatHeader } from './ChatHeader'
 import { MessageList, isSaved } from './MessageList'
+import { OutboxGroup } from './OutboxGroup'
+import { useChatOutbox } from './useChatOutbox'
 import { useDraft } from './draftStore'
 import { useFileDrop } from './useFileDrop'
 import { useThreadSessions } from './useThreadSessions'
 import { SessionsPanel } from './SessionsPanel'
+import { ChatApprovals } from './ChatApprovals'
 
 const FOCUS_DELAY_MS = 50
 const SIDEBAR_COLLAPSED_KEY = 'hq.chat.sidebarCollapsed'
-const DROPPED_SEND_REASON = 'Not connected, so the message was not sent. It is back in the box to send again.'
-const DROPPED_STOP_REASON = 'Not connected, so Stop was not sent. The reply keeps running on the server.'
 const DESKTOP_QUERY = '(min-width: 768px)'
 // A reply alert links here with the chat to open.
 const THREAD_PARAM = 'thread'
@@ -44,10 +54,12 @@ interface Props {
   active: boolean
   /** Shown as a close button in the header when set (the overlay). */
   onClose?: () => void
+  /** The chat an address names (`/chat/:id`); it opens that chat. */
+  threadId?: string
 }
 
 /** The whole chat UI: thread list, messages and composer. The /chat route and the global overlay both render it. */
-export function ChatView({ active, onClose }: Props) {
+export function ChatView({ active, onClose, threadId }: Props) {
   const chatDraft = useHQStore((s) => s.chatDraft)
   const setChatDraft = useHQStore((s) => s.setChatDraft)
   const clearChatUnread = useHQStore((s) => s.clearChatUnread)
@@ -57,6 +69,12 @@ export function ChatView({ active, onClose }: Props) {
   const messages = useThreadStore((s) => (activeThreadId ? s.threadMessages[activeThreadId] : undefined)) ?? []
   const liveTurn = useLiveTurn(activeThreadId)
   const { send, connected } = useWS()
+  const connState = useSharedConnection()
+  const banner = bannerKey(connState, isSharedComputer())
+  const inHub = useInHub()
+  const savedLine = savedBannerLine(connState, isSharedComputer(), inHub, messages.reduce<number | null>((m, x) => (m === null || x.createdAt > m ? x.createdAt : m), null))
+  const outboxChat = useChatOutbox(activeThreadId)
+  const waitingForOwner = useThreadStore((s) => (activeThreadId ? s.waiting[activeThreadId] === true : false))
 
   const [loadingThreads, setLoadingThreads] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -75,9 +93,9 @@ export function ChatView({ active, onClose }: Props) {
 
   useEffect(() => {
     if (!active) return
-    const linked = new URLSearchParams(window.location.search).get(THREAD_PARAM)
-    if (linked) {
-      setActiveThread(linked)
+    const linked = threadId ?? new URLSearchParams(window.location.search).get(THREAD_PARAM)
+    if (linked) setActiveThread(linked)
+    if (linked && !threadId) {
       const url = new URL(window.location.href)
       url.searchParams.delete(THREAD_PARAM)
       window.history.replaceState(null, '', url.toString())
@@ -85,14 +103,14 @@ export function ChatView({ active, onClose }: Props) {
     setLoadingThreads(true)
     refreshThreads()
       .then((list) => {
-        // A remembered chat can be gone (archived on another device); open the newest instead.
         const current = useThreadStore.getState().activeThreadId
-        if (list.length > 0 && !list.some((t) => t.threadId === current)) setActiveThread(list[0].threadId)
+        // A remembered chat that is gone opens the start screen, not another chat.
+        if (current && !list.some((t) => t.threadId === current)) setActiveThread(null)
       })
       .catch((err) => console.warn('ChatView: failed to list threads', err))
       .finally(() => setLoadingThreads(false))
     focusInput()
-  }, [active, setActiveThread])
+  }, [active, setActiveThread, threadId])
 
   useEffect(() => {
     if (!active || !activeThreadId) return
@@ -147,15 +165,32 @@ export function ChatView({ active, onClose }: Props) {
       const next = useThreadStore.getState().threads.filter((t) => t.threadId !== id)
       useThreadStore.getState().setThreads(next)
       if (useThreadStore.getState().activeThreadId === id) setActiveThread(next[0]?.threadId ?? null)
+      toastUndo(
+        t('undo_chat_archived'),
+        async () => {
+          await threadApi.unarchiveThread(id)
+          await refreshThreads()
+        },
+        t('restored_chat'),
+        'undo.chat_archived',
+      )
     } catch (err) {
       console.error('ChatView: failed to archive chat', err)
+      toastAlert(failureLine(err, 'fail_archive_chat_newer', t(archiveChatKey(sharedConnectionNow()))))
     }
   }, [setActiveThread])
 
   /** `/clear` and `/topic <name>` archive this chat and open a fresh one. */
   const runSlashCommand = async (content: string, tid: string): Promise<boolean> => {
     const parsed = parseSlashCommand(content)
-    if (parsed?.command !== '/clear' && parsed?.command !== '/topic') return false
+    if (parsed?.command !== '/clear' && parsed?.command !== '/topic') {
+      // A lone word after a slash is a command that does not exist; anything longer is ordinary text.
+      if (parsed && parsed.args === null && /^\/[a-z]+$/.test(parsed.command)) {
+        toastNotice(t('chat_slash_unknown'))
+        return true
+      }
+      return false
+    }
     await archiveThread(tid)
     await startNewThread(parsed.command === '/topic' && parsed.args ? parsed.args : undefined)
     return true
@@ -165,7 +200,8 @@ export function ChatView({ active, onClose }: Props) {
   const sendChat = (tid: string, content: string, files: ChatAttachment[], replaceFrom?: string) => {
     const store = useThreadStore.getState()
     if (replaceFrom) store.removeFrom(tid, replaceFrom)
-    const clientId = `local-${Date.now()}`
+    // `local-` marks it unsaved here; the random rest keeps two devices from ever sharing one, since HQ drops repeats.
+    const clientId = `local-${newClientId()}`
     store.appendMessage(tid, {
       messageId: clientId,
       threadId: tid,
@@ -178,10 +214,12 @@ export function ChatView({ active, onClose }: Props) {
     setFollowSignal((n) => n + 1)
     const sent = send({ type: 'chat', content, thread_id: tid, attachments: files, client_id: clientId, replace_from: replaceFrom })
     // The socket closed after the connected check: the message never left, so undo it instead of waiting on a reply that cannot come.
-    if (!sent) rejectSend(tid, clientId, DROPPED_SEND_REASON, false)
+    if (!sent) rejectSend(tid, clientId, t(sendFailureKey(connState)), false)
   }
 
   const handleSend = async (overrideContent?: string) => {
+    // With the socket down a plain message waits in the outbox; anything else waits for the socket.
+    if (!connected && (await queueOffline(overrideContent))) return
     // A send on a closed socket is dropped, which would leave the chat stuck on "working".
     if (!connected || liveTurn || attachments.some((a) => a.status === 'uploading')) return
     const content = overrideContent ?? input.trim()
@@ -202,6 +240,19 @@ export function ChatView({ active, onClose }: Props) {
     }
     if (!replaceFrom && files.length === 0 && isSlashInput(content) && (await runSlashCommand(content, tid))) return
     sendChat(tid, content, files, replaceFrom)
+  }
+
+  /** Puts a typed message in "Waiting to send" while HQ cannot be reached. Returns whether it did. */
+  const queueOffline = async (overrideContent?: string): Promise<boolean> => {
+    const content = overrideContent ?? input.trim()
+    if (!outboxChat.enabled || !content || editing || attachments.length > 0 || !activeThreadId) return false
+    const refused = await outboxChat.queue(activeThreadId, content)
+    if (refused) {
+      useHQStore.getState().setSystemNotice(refused)
+      return true
+    }
+    if (!overrideContent) draft.setText('')
+    return true
   }
 
   const startEdit = (m: ThreadMessage) => {
@@ -235,7 +286,9 @@ export function ChatView({ active, onClose }: Props) {
 
   const handleStop = () => {
     if (!activeThreadId) return
-    if (!send({ type: 'stop', thread_id: activeThreadId })) useHQStore.getState().setSystemNotice(DROPPED_STOP_REASON)
+    void stopReply(activeThreadId, send, threadApi.stopThread).then((ok) => {
+      if (!ok) useHQStore.getState().setSystemNotice(t(stopFailureKey(connState)))
+    })
   }
 
   // One button: a drawer on mobile, a persisted collapse on desktop.
@@ -272,11 +325,12 @@ export function ChatView({ active, onClose }: Props) {
         {drop.dragging && (
           <div className="absolute inset-2 z-30 rounded-2xl border-2 border-dashed border-emerald-400/60 bg-neutral-950/80 flex flex-col items-center justify-center gap-2 text-sm text-neutral-200 pointer-events-none">
             <Paperclip className="w-6 h-6 text-emerald-400" />
-            Drop files to attach (up to {MAX_ATTACHMENTS})
+            <span className="font-medium">{t('chat_drop_title')}</span>
+            <span className="text-xs text-neutral-400">{t('chat_drop_line')}</span>
           </div>
         )}
         <ChatHeader
-          title={activeThread?.title ?? 'New chat'}
+          title={activeThread?.title ?? t('chat_new_chat')}
           onToggleSidebar={toggleSidebar}
           onClose={onClose}
           watching={watched.sessions}
@@ -289,6 +343,7 @@ export function ChatView({ active, onClose }: Props) {
             busy={watched.busy}
             onDrive={(id, drive) => void watched.setDrive(id, drive)}
             onUnwatch={(id) => void watched.unwatch(id)}
+            onArchive={activeThreadId ? () => void archiveThread(activeThreadId) : undefined}
           />
         )}
 
@@ -302,17 +357,30 @@ export function ChatView({ active, onClose }: Props) {
           onOffer={answerOfferOn}
         />
 
-        {liveTurn && !connected && (
+        <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} />
+
+        <OutboxGroup
+          entries={outboxChat.entries}
+          state={outboxChat.state}
+          inHub={inHub}
+          sending={outboxChat.sending}
+          textOf={(e) => (e.payload as { content: string }).content}
+          onRemove={(id) => void outboxChat.remove(id)}
+          onSendNow={(id) => void outboxChat.sendNow(id)}
+        />
+
+        {banner && (
           <div role="status" className="px-4 py-1.5 border-t border-amber-500/30 text-[11px] text-amber-400 bg-neutral-900/60">
-            Connection lost. The reply keeps running on the server and shows here once you are back online.
+            {t(banner)}
+            {savedLine && <span className="block">{savedLine}</span>}
           </div>
         )}
 
         {editing && (
           <div className="flex items-center gap-2 px-4 py-1.5 border-t border-white/10 text-[11px] text-neutral-400 bg-neutral-900/60">
             <PencilLine className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="flex-1 min-w-0 truncate" title="Sending replaces this message and every message after it">
-              Editing. Later messages get replaced.
+            <span className="flex-1 min-w-0 truncate">
+              {t('chat_editing')}. {t('chat_editing_line')}
             </span>
             <button
               type="button"
@@ -322,7 +390,7 @@ export function ChatView({ active, onClose }: Props) {
               }}
               className="flex items-center gap-1 h-8 px-2 rounded hover:bg-white/10 hover:text-white"
             >
-              <X className="w-3.5 h-3.5" /> Cancel
+              <X className="w-3.5 h-3.5" /> {t('chat_stop_editing')}
             </button>
           </div>
         )}
@@ -334,6 +402,7 @@ export function ChatView({ active, onClose }: Props) {
           onSend={(content) => void handleSend(content)}
           onStop={handleStop}
           running={!!liveTurn}
+          canQueue={outboxChat.enabled && !!activeThreadId && !editing}
           attachments={attachments}
           onAddFiles={addFiles}
           onRemoveAttachment={draft.removeAttachment}

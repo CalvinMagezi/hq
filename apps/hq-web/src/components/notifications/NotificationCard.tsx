@@ -1,4 +1,8 @@
-import React from 'react'
+import { ApprovalCard } from '~/components/ui/ApprovalCard'
+import { t } from '~/strings'
+import React, { useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import { answerErrorLine, cardKind, lapsed } from '~/lib/inboxCard'
 import {
   CheckCircle2,
   XCircle,
@@ -7,13 +11,16 @@ import {
   Loader2,
   FileCode,
   AlertCircle,
-  Eye,
   Check,
   X,
 } from 'lucide-react'
 import type { NotificationItem, NotificationKind, NotificationState } from '~/lib/notificationsApi'
 import { relTime } from '~/lib/time'
 import { DialogAnswer, openDialog } from './DialogAnswer'
+import { SignInActions, SignInBody } from './SignInItem'
+import { useQuery } from '@tanstack/react-query'
+import { listDevices, signOutDevice } from '~/lib/deviceSignIn'
+import { toastAlert } from '~/lib/toast'
 
 interface Props {
   notification: NotificationItem
@@ -25,13 +32,32 @@ interface Props {
 
 export function NotificationCard({
   notification,
-  onSelect,
   onAction,
   onAnswered,
   loadingAction,
 }: Props) {
   const isPending = notification.state === 'pending'
+  const [failure, setFailure] = useState<string | null>(null)
+  const [refused, setRefused] = useState(false)
+  const [sent, setSent] = useState<{ answer: string; at: Date } | null>(null)
+  const kind = cardKind(notification)
+  const ranOut = lapsed(notification)
+  const stuckOpen = kind === 'stuck' && isPending && !ranOut
+  const act = async (id: string, action: string) => {
+    setFailure(null)
+    setRefused(false)
+    try {
+      await onAction(id, action)
+      if (action === 'approve' || action === 'reject') setSent({ answer: t(action === 'approve' ? 'inbox_answer_allowed' : 'inbox_answer_declined'), at: new Date() })
+    } catch (e) {
+      setFailure(answerErrorLine(e))
+      setRefused((e as { status?: number } | null)?.status === 409)
+    }
+  }
   const dialog = openDialog(notification)
+  const signInId = notification.metadata.sign_in?.device_id
+  const devices = useQuery({ queryKey: ['auth-devices'], queryFn: listDevices, enabled: !!signInId && isPending })
+  const device = devices.data?.devices.find((d) => d.id === signInId)?.label ?? null
 
   const getKindIcon = (kind: NotificationKind) => {
     switch (kind) {
@@ -55,6 +81,20 @@ export function NotificationCard({
     }
   }
 
+  const signInActions =
+    isPending && signInId ? (
+      <SignInActions
+        device={device}
+        busy={loadingAction !== null}
+        onItWasMe={() => void act(notification.id, 'approve')}
+        onSignOut={async () => {
+          await signOutDevice(signInId)
+          toastAlert(t('sign_out_device_done', { device: device ?? t('new_signin_unknown') }))
+          onAnswered(notification.id, 'decline')
+        }}
+      />
+    ) : null
+
   return (
     <div
       className={`group relative min-w-0 rounded-2xl border p-4 sm:p-5 transition-all duration-200 ${
@@ -74,7 +114,7 @@ export function NotificationCard({
               notification.kind
             )}`}
           >
-            {notification.kind.replace('_', ' ')}
+            {t(notification.kind === 'action_needed' ? 'inbox_badge_needs' : 'inbox_badge_update')}
           </span>
         </div>
 
@@ -84,105 +124,87 @@ export function NotificationCard({
             {relTime(notification.created_at)}
           </span>
 
-          <span
-            className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
-            style={{
-              background:
-                notification.state === 'pending'
-                  ? 'rgba(0,255,163,0.15)'
-                  : 'rgba(255,255,255,0.06)',
-              color:
-                notification.state === 'pending'
-                  ? 'var(--accent-green, #00ffa3)'
-                  : 'var(--text-dim, #888)',
-            }}
-          >
-            {notification.state}
-          </span>
+          {(!isPending || notification.kind === 'action_needed') && (
+            <span
+              className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                color: isPending ? 'var(--warn)' : 'var(--text-dim)',
+              }}
+            >
+              {t(isPending ? 'inbox_tab_needs' : 'inbox_tab_done')}
+            </span>
+          )}
         </div>
       </div>
 
       {/* Title & Description */}
       <div className="mb-3.5">
         <h3 className="text-sm font-semibold text-white break-words group-hover:text-emerald-300 transition-colors">
-          {notification.title}
+          <Link to="/inbox/$id" params={{ id: notification.id }} className="text-left" aria-label={t('inbox_open_title', { title: notification.title })}>
+            {signInId ? t('new_signin_title') : notification.title}
+          </Link>
         </h3>
-        <p className="text-xs text-neutral-400 mt-1 line-clamp-2 leading-relaxed">
-          {notification.description}
-        </p>
+        {signInId ? (
+          <SignInBody device={device} createdAt={notification.created_at} />
+        ) : (
+          <p className="text-xs text-neutral-400 mt-1 line-clamp-2 leading-relaxed">
+            {notification.description}
+          </p>
+        )}
       </div>
 
       {/* Action Footer */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
-        <button
-          type="button"
-          onClick={() => onSelect(notification)}
-          className="text-xs text-neutral-400 hover:text-emerald-400 flex items-center gap-1.5 transition-colors"
-        >
-          <Eye className="w-3.5 h-3.5" />
-          <span>View Details & Diff</span>
-        </button>
 
-        {dialog ? (
+        {failure && !notification.actions.includes('approve') && (
+          <p role="alert" className="w-full text-xs" style={{ color: 'var(--warn)' }}>
+            {failure}
+          </p>
+        )}
+        {refused && (
+          <Link to="/helpers/$id" params={{ id: notification.metadata.extra?.session_id ?? notification.id }} className="a-btn secondary ml-auto">
+            {t('inbox_open_helper')}
+          </Link>
+        )}
+        {sent && (
+          <p role="status" className="w-full text-xs text-neutral-400">
+            {t('inbox_answer_sent_at', { answer: sent.answer, time: new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(sent.at) })}
+          </p>
+        )}
+        {ranOut && <p className="a-muted text-xs">{t('inbox_request_ran_out')}</p>}
+        {stuckOpen && (
+          <Link
+            to="/helpers/$id"
+            params={{ id: notification.metadata.extra?.session_id ?? notification.id }}
+            className="a-btn secondary ml-auto"
+          >
+            {t('inbox_open_it_to_see')}
+          </Link>
+        )}
+        {ranOut || stuckOpen ? null : dialog ? (
           <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
+        ) : signInActions ? (
+          signInActions
         ) : isPending ? (
           <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
-            {notification.kind === 'action_needed' ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onAction(notification.id, 'dismiss')}
-                  disabled={loadingAction !== null}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-white/10 transition-colors disabled:opacity-50"
-                  title="Dismiss"
-                >
-                  {loadingAction === `dismiss-${notification.id}` ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <X className="w-3.5 h-3.5" />
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onAction(notification.id, 'reject')}
-                  disabled={loadingAction !== null}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all flex items-center gap-1 disabled:opacity-50"
-                >
-                  {loadingAction === `reject-${notification.id}` ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <XCircle className="w-3.5 h-3.5" />
-                      Reject
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onAction(notification.id, 'approve')}
-                  disabled={loadingAction !== null}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all disabled:opacity-50"
-                  style={{
-                    background: 'var(--accent-green, #00ffa3)',
-                    color: '#000',
-                  }}
-                >
-                  {loadingAction === `approve-${notification.id}` ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      Approve
-                    </>
-                  )}
-                </button>
-              </>
+            {notification.actions.includes('approve') ? (
+              <ApprovalCard
+                quoteTitle={t('approval_quote_inbox')}
+                tool={notification.metadata.approval?.tool}
+                args={notification.metadata.approval?.args}
+                inWords={notification.description}
+                loses={notification.metadata.approval?.loses}
+                verb={notification.metadata.approval?.verb}
+                busy={loadingAction !== null}
+                error={failure}
+                onDecline={() => void act(notification.id, 'reject')}
+                onAllow={() => void act(notification.id, 'approve')}
+              />
             ) : (
               <button
                 type="button"
-                onClick={() => onAction(notification.id, 'dismiss')}
+                onClick={() => void act(notification.id, 'dismiss')}
                 disabled={loadingAction !== null}
                 className="px-3 py-1.5 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white hover:bg-white/10 border border-white/10 transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
@@ -191,7 +213,7 @@ export function NotificationCard({
                 ) : (
                   <>
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    Dismiss
+                    {t('inbox_clear')}
                   </>
                 )}
               </button>
@@ -200,7 +222,7 @@ export function NotificationCard({
         ) : (
           <div className="flex items-center gap-1.5 text-[11px] text-neutral-500">
             <CheckCircle2 className="w-3.5 h-3.5 text-neutral-400" />
-            <span>Resolved</span>
+            <span>{t('inbox_tab_done')}</span>
           </div>
         )}
       </div>

@@ -43,24 +43,11 @@ export interface ConnectRequest {
   default_scope: GrantScope
 }
 
-export const SCOPE_CHOICES: { id: GrantScope; title: string; detail: string }[] = [
-  {
-    id: 'read_only',
-    title: 'Read only',
-    detail: 'Search and read notes, tasks and session logs. Claude cannot change anything.',
-  },
-  {
-    id: 'tasks',
-    title: 'Tasks',
-    detail: 'Read and update tasks, and nothing else. No notes, no sessions.',
-  },
-  {
-    id: 'full',
-    title: 'Full',
-    detail:
-      'Every HQ tool, including changing notes and tasks and starting coding agents on your machines. Text Claude reads on a web page or in an email could steer these calls.',
-  },
-]
+export const SCOPE_CHOICES = [
+  { id: 'read_only', title: 'connect_scope_read_only_title', line: 'connect_scope_read_only_line' },
+  { id: 'tasks', title: 'connect_scope_tasks_title', line: 'connect_scope_tasks_line' },
+  { id: 'full', title: 'connect_scope_full_title', line: 'connect_scope_full_line' },
+] as const satisfies readonly { id: GrantScope; title: string; line: string }[]
 
 export const fetchConnector = () => hqJson<ConnectorStatus>('/api/oauth/connector')
 export const armConnector = (minutes?: number) =>

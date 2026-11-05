@@ -40,7 +40,7 @@ mod taint;
 mod trackers;
 
 use governed_tool::GovernedTool;
-pub use owner_approval::{OwnerApproval, needs_owner};
+pub use owner_approval::{OwnerApproval, needs_owner, owner_approval_prefix};
 pub use paths::system_temp_paths;
 use paths::{expand_with_canonical_forms, sensitive_denied_paths};
 pub use secrets::{SecretTier, always_denied_roots, classify_path};

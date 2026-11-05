@@ -7,7 +7,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class SettingsWordsTest {
     private val now = Instant.parse("2026-10-21T12:00:00Z")
 
@@ -24,9 +30,9 @@ class SettingsWordsTest {
     )
 
     @Test fun theKeysLineNamesTheFirstAndCountsThem() {
-        assertEquals("OpenRouter · 1 key", SettingsWords.keysStatus(settings))
-        assertEquals("No key yet", SettingsWords.keysStatus(JSONObject("""{"provider_keys":[{"name":"OpenRouter","configured":false}]}""")))
-        assertEquals("Not answering", SettingsWords.keysStatus(null))
+        assertEquals("OpenRouter · 1 key", SettingsWords.keysStatus(testWords(), settings))
+        assertEquals("No key yet", SettingsWords.keysStatus(testWords(), JSONObject("""{"provider_keys":[{"name":"OpenRouter","configured":false}]}""")))
+        assertEquals("No answer yet", SettingsWords.keysStatus(testWords(), null))
     }
 
     /** /api/settings for a config whose first choice runs on GitHub Copilot while an OpenRouter and a DeepSeek key are also stored. */
@@ -50,14 +56,14 @@ class SettingsWordsTest {
     private val snapOnCopilot = SettingsSnapshot(settings = onCopilot, providers = providerRows, copilot = copilotUsage)
 
     @Test fun theAiServiceLineNamesTheOneHqUsesNotTheFirstStoredKey() {
-        assertEquals("GitHub Copilot · 3 services", SettingsWords.keysStatus(onCopilot))
+        assertEquals("GitHub Copilot · 3 services", SettingsWords.keysStatus(testWords(), onCopilot))
     }
 
     @Test fun theKeysPageListsCopilotAndTheOrderHqTries() {
         assertEquals("GitHub Copilot", SettingsWords.keyRows(onCopilot, copilotUsage).first().first)
         assertTrue(SettingsWords.keyRows(onCopilot, copilotUsage).first().second)
         assertEquals(false, SettingsWords.keyRows(onCopilot, JSONObject("""{"active":false}""")).first().second)
-        val rows = SettingsWords.aiRows(snapOnCopilot)
+        val rows = SettingsWords.aiRows(testWords(), snapOnCopilot)
         assertEquals(listOf("1 · GitHub Copilot", "2 · GitHub Copilot", "3 · OpenRouter", "4 · DeepSeek"), rows.map { it.title })
         assertEquals("First choice", rows[0].value)
         assertEquals("If the one before is down", rows[1].value)
@@ -66,7 +72,7 @@ class SettingsWordsTest {
     }
 
     @Test fun spendingIsShownPerServiceWithWhatIsLeft() {
-        val rows = SettingsWords.serviceRows(snapOnCopilot)
+        val rows = SettingsWords.serviceRows(testWords(), snapOnCopilot)
         assertEquals(listOf("GitHub Copilot", "OpenRouter", "DeepSeek"), rows.map { it.title })
         assertEquals("912 of 1.5k credits left", rows[0].value)
         assertEquals("Credits on your plan · Resets 1 Nov", rows[0].text)
@@ -85,117 +91,117 @@ class SettingsWordsTest {
 
     @Test fun aPlanWithNoCreditAllowanceSaysItIsNotMetered() {
         val unmetered = JSONObject("""{"active":true,"quota":{"entitlement":0,"remaining":0},"note":"This plan is not metered."}""")
-        assertEquals("Not metered", SettingsWords.serviceRows(snapOnCopilot.copy(copilot = unmetered)).first().value)
+        assertEquals("Not metered", SettingsWords.serviceRows(testWords(), snapOnCopilot.copy(copilot = unmetered)).first().value)
         assertEquals(Triple("GitHub Copilot", true, "env"), SettingsWords.keyRows(onCopilot, unmetered).first())
     }
 
     @Test fun aServiceReportingChinaYuanIsNotShownInDollars() {
         val cny = JSONObject("""{"backends":[{"backend":"deepseek","adapter":"deepseek","status":"ok","provider":{"balance":{"amount":50.0,"currency":"CNY"},"spend":null,"limit_remaining":null},"ledger":{"today":0.0}}]}""")
         val s = JSONObject("""{"backends":{"configured":true,"primary":"deepseek","fallbacks":[],"entries":[{"name":"deepseek","kind":"openai-compatible","model":"m","endpoint_host":"api.deepseek.com","primary":true,"fallback_position":null}]}}""")
-        assertEquals("50.00 CNY left", SettingsWords.serviceRows(SettingsSnapshot(settings = s, providers = cny)).first().value)
+        assertEquals("50.00 CNY left", SettingsWords.serviceRows(testWords(), SettingsSnapshot(settings = s, providers = cny)).first().value)
     }
 
     @Test fun aCopilotPlanThatCannotBeReadSaysSoInsteadOfGuessing() {
         val unreadable = snapOnCopilot.copy(copilot = JSONObject("""{"active":true,"unavailable":true,"note":"GitHub refused the usage read"}"""))
-        assertEquals("Not readable", SettingsWords.serviceRows(unreadable).first().value)
-        assertEquals("Not measured", SettingsWords.serviceRows(snapOnCopilot.copy(copilot = null)).first().value)
+        assertEquals("Not readable", SettingsWords.serviceRows(testWords(), unreadable).first().value)
+        assertEquals("Not measured", SettingsWords.serviceRows(testWords(), snapOnCopilot.copy(copilot = null)).first().value)
     }
 
     @Test fun messagingNeedsBothTheTokenAndTheSwitch() {
         val chat = JSONObject("""{"telegram":{"token_set":true,"enabled":true},"discord":{"token_set":true,"enabled":false}}""")
-        assertEquals("Telegram on · Discord off", SettingsWords.messagingStatus(chat))
-        assertEquals("Not answering", SettingsWords.messagingStatus(null))
+        assertEquals("Telegram on · Discord off", SettingsWords.messagingStatus(testWords(), chat))
+        assertEquals("No answer yet", SettingsWords.messagingStatus(testWords(), null))
     }
 
     @Test fun devicesAreCounted() {
-        assertEquals("1 signed in", SettingsWords.devicesStatus(JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":"2026-10-20 10:00:00"}]}""")))
-        assertEquals("None signed in", SettingsWords.devicesStatus(JSONObject("""{"devices":[]}""")))
+        assertEquals("1 signed in", SettingsWords.devicesStatus(testWords(), JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":"2026-10-20 10:00:00"}]}""")))
+        assertEquals("None signed in", SettingsWords.devicesStatus(testWords(), JSONObject("""{"devices":[]}""")))
     }
 
     @Test fun spendingShowsTodaysBudgetInDollars() {
         val b = JSONObject("""{"budgets":[{"name":"global","scope":"global","period":"week","limit_usd":20,"spent_usd":4.5},{"name":"daily","scope":"global","period":"day","limit_usd":5,"spent_usd":2.1}]}""")
-        assertEquals("$2.10 of $5.00 today", SettingsWords.spendingStatus(b))
-        assertEquals("No limit set", SettingsWords.spendingStatus(JSONObject("""{"budgets":[]}""")))
+        assertEquals("$2.10 of $5.00 today", SettingsWords.spendingStatus(testWords(), b))
+        assertEquals("No limit set", SettingsWords.spendingStatus(testWords(), JSONObject("""{"budgets":[]}""")))
     }
 
     @Test fun aBudgetForOneProviderIsNotPresentedAsTodaysTotal() {
         val b = JSONObject("""{"budgets":[{"name":"openrouter","scope":"provider:openrouter","period":"day","limit_usd":1,"spent_usd":0.4},{"name":"all","scope":"global","period":"month","limit_usd":50,"spent_usd":12}]}""")
-        assertEquals("$12.00 of $50.00 this month", SettingsWords.spendingStatus(b))
+        assertEquals("$12.00 of $50.00 this month", SettingsWords.spendingStatus(testWords(), b))
         val only = JSONObject("""{"budgets":[{"name":"openrouter","scope":"provider:openrouter","period":"day","limit_usd":1,"spent_usd":0.4}]}""")
-        assertEquals("1 limits set", SettingsWords.spendingStatus(only))
+        assertEquals("1 limit set", SettingsWords.spendingStatus(testWords(), only))
     }
 
     private val at = java.time.Instant.parse("2026-10-22T12:00:00Z")
 
     @Test fun eachBudgetCardSaysWhatItCoversHowMuchIsUsedAndWhenItResets() {
         val b = JSONObject("""{"budgets":[{"name":"daily cap","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":2.1,"pct":42,"state":"ok","resets_at":${at.epochSecond + 9 * 3600}},{"name":"openrouter","scope":"provider:openrouter","period":"week","action":"notify","limit_usd":10,"spent_usd":9.5,"pct":95,"state":"warning","resets_at":${at.epochSecond + 3 * 86_400}}]}""")
-        val cards = SettingsWords.budgetCards(b, at)
-        assertEquals("Daily cap", cards[0].title)
-        assertEquals("global, daily, then block", cards[0].covers)
+        val cards = SettingsWords.budgetCards(testWords(), b, at)
+        assertEquals("All AI spending", cards[0].title)
+        assertEquals("Each day \u00b7 HQ stops using AI at the limit", cards[0].covers)
         assertEquals("$2.10 of $5.00 (42%)", cards[0].used)
-        assertEquals("Within budget, resets in 9h", cards[0].stand)
+        assertEquals("Within the limit \u00b7 resets in 9 h", cards[0].stand)
         assertEquals(0.42f, cards[0].fraction, 0.001f)
-        assertEquals("provider:openrouter, weekly, then notify", cards[1].covers)
-        assertEquals("Past the alert threshold, resets in 3 days", cards[1].stand)
+        assertEquals("Each week \u00b7 HQ tells you at the limit", cards[1].covers)
+        assertEquals("Past your warning point \u00b7 resets in 3 days", cards[1].stand)
         assertEquals(SettingsWords.BudgetTone.Warning, cards[1].tone)
     }
 
     @Test fun aBudgetPastItsLimitFillsTheBarAndSaysSo() {
         val b = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","limit_usd":5,"spent_usd":5.2,"pct":104,"state":"exceeded","resets_at":${at.epochSecond + 1800}}]}""")
-        val c = SettingsWords.budgetCards(b, at).single()
+        val c = SettingsWords.budgetCards(testWords(), b, at).single()
         assertEquals("$5.20 of $5.00 (104%)", c.used)
         assertEquals(1f, c.fraction, 0f)
-        assertEquals("Limit reached, resets in <1h", c.stand)
+        assertEquals("Limit reached \u00b7 resets in under 1 h", c.stand)
         assertEquals(SettingsWords.BudgetTone.Exceeded, c.tone)
     }
 
     @Test fun aBudgetWithoutAPercentOrResetStillReads() {
-        val c = SettingsWords.budgetCards(JSONObject("""{"budgets":[{"name":"x","scope":"global","period":"month","limit_usd":50,"spent_usd":12}]}"""), at).single()
+        val c = SettingsWords.budgetCards(testWords(), JSONObject("""{"budgets":[{"name":"x","scope":"global","period":"month","limit_usd":50,"spent_usd":12}]}"""), at).single()
         assertEquals("$12.00 of $50.00 (24%)", c.used)
-        assertEquals("Within budget", c.stand)
-        assertEquals("global, monthly", c.covers)
+        assertEquals("Within the limit", c.stand)
+        assertEquals("Each month", c.covers)
     }
 
     @Test fun spansReadAsTheBoardWritesThem() {
-        assertEquals("<1h", SettingsWords.span(0.4))
-        assertEquals("<1h", SettingsWords.span(-3.0))
-        assertEquals("9h", SettingsWords.span(9.2))
-        assertEquals("1 day", SettingsWords.span(24.0))
-        assertEquals("10 days", SettingsWords.span(240.0))
+        assertEquals("under 1 h", SettingsWords.span(testWords(), 0.4))
+        assertEquals("under 1 h", SettingsWords.span(testWords(), -3.0))
+        assertEquals("9 h", SettingsWords.span(testWords(), 9.2))
+        assertEquals("1 day", SettingsWords.span(testWords(), 24.0))
+        assertEquals("10 days", SettingsWords.span(testWords(), 240.0))
     }
 
     @Test fun theForecastGivesThreeRowsOrSaysThereIsNothingToForecast() {
-        val f = SettingsWords.forecast(JSONObject("""{"month":{"rate_per_hour":0.18,"spent_this_period":31.8,"hours_to_reset":240,"projected_period_total":74.0}}"""))!!
-        assertEquals(listOf("Spent so far" to "$31.80", "Projected month end" to "$74.00", "Resets in" to "10 days"), f.rows.map { it.title to it.value })
+        val f = SettingsWords.forecast(testWords(), JSONObject("""{"month":{"rate_per_hour":0.18,"spent_this_period":31.8,"hours_to_reset":240,"projected_period_total":74.0}}"""))!!
+        assertEquals(listOf("Spent so far" to "$31.80", "Likely total this month" to "$74.00", "Resets in" to "10 days"), f.rows.map { it.title to it.value })
         assertNull(f.note)
-        val none = SettingsWords.forecast(JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}"""))!!
+        val none = SettingsWords.forecast(testWords(), JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}"""))!!
         assertEquals("No spend recorded yet, so there is nothing to forecast.", none.note)
         assertEquals(0, none.rows.size)
-        assertNull(SettingsWords.forecast(JSONObject("""{}""")))
-        assertNull(SettingsWords.forecast(null))
+        assertNull(SettingsWords.forecast(testWords(), JSONObject("""{}""")))
+        assertNull(SettingsWords.forecast(testWords(), null))
     }
 
     @Test fun theSafetyTabsReadTheServersNumbers() {
-        val safety = SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Safety)
+        val safety = SettingsWords.safetyRows(testWords(), settings, SettingsWords.SafetyTab.Safety)
         assertEquals(listOf("Required", "No", "No", "1"), safety.map { it.value })
-        val time = SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Time)
+        val time = SettingsWords.safetyRows(testWords(), settings, SettingsWords.SafetyTab.Time)
         assertEquals(listOf("10 min", "270 s", "5 days", "5 min"), time.map { it.value })
-        val helpers = SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Helpers)
+        val helpers = SettingsWords.safetyRows(testWords(), settings, SettingsWords.SafetyTab.Helpers)
         assertEquals("mac-mini", helpers.first().value)
         assertEquals("When the phone can", helpers[2].value)
         assertEquals("6 h", helpers[3].value)
-        val tools = SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Tools)
+        val tools = SettingsWords.safetyRows(testWords(), settings, SettingsWords.SafetyTab.Tools)
         assertEquals(listOf("0", "Built in", "On"), tools.map { it.value })
     }
 
     @Test fun noAnswerMeansNoRows() {
-        assertEquals(emptyList<FactRow>(), SettingsWords.safetyRows(null, SettingsWords.SafetyTab.Safety))
+        assertEquals(emptyList<FactRow>(), SettingsWords.safetyRows(testWords(), null, SettingsWords.SafetyTab.Safety))
     }
 
     @Test fun theModelAndFallbackOrderAreRead() {
-        assertEquals("openrouter/auto", SettingsWords.activeModel(settings))
-        assertEquals(listOf("1 · openrouter" to "primary", "2 · luna" to "fallback"), SettingsWords.fallbackRows(settings))
-        assertEquals(listOf("1 · None set" to "no AI is set", "2 · None set" to "no fallback"), SettingsWords.fallbackRows(JSONObject("""{"backends":{"fallbacks":[]}}""")))
+        assertEquals("openrouter/auto", SettingsWords.activeModel(testWords(), settings))
+        assertEquals(listOf("1 · openrouter" to "primary", "2 · luna" to "fallback"), SettingsWords.fallbackRows(testWords(), settings))
+        assertEquals(listOf("1 · None set" to "no AI is set", "2 · None set" to "no fallback"), SettingsWords.fallbackRows(testWords(), JSONObject("""{"backends":{"fallbacks":[]}}""")))
     }
 
     @Test fun aMessagingCardSaysRunningOffOrRestart() {
@@ -203,20 +209,20 @@ class SettingsWordsTest {
             """{"telegram":{"token_set":true,"enabled":true,"needs_restart":false,"owner":{"paired":true},"bot":{"username":"example_bot"},"relay":{"status":"connected"}},
             "discord":{"token_set":false,"enabled":false}}""",
         )
-        val t = SettingsWords.appCard(chat, "telegram", "Telegram")
+        val t = SettingsWords.appCard(testWords(), chat, "telegram", "Telegram")
         assertEquals("Running", t.line)
         assertEquals("@example_bot", t.bot)
         assertEquals("Linked", t.owner)
-        assertEquals("Off", SettingsWords.appCard(chat, "discord", "Discord").line)
+        assertEquals("Off", SettingsWords.appCard(testWords(), chat, "discord", "Discord").line)
         val saved = JSONObject("""{"telegram":{"token_set":true,"enabled":true,"needs_restart":true}}""")
-        assertEquals("Saved · restart needed", SettingsWords.appCard(saved, "telegram", "Telegram").line)
+        assertEquals("Saved · restart needed", SettingsWords.appCard(testWords(), saved, "telegram", "Telegram").line)
     }
 
     @Test fun homeHasTheBoardsGroupsInOrder() {
-        val groups = SettingsWords.home(SettingsSnapshot(settings = settings), now)
+        val groups = SettingsWords.home(testWords(), SettingsSnapshot(settings = settings), now)
         assertEquals(listOf("This phone", "Your accounts", "How HQ behaves", "Your data"), groups.map { it.title })
         assertEquals(listOf("AI service and keys", "Messaging apps", "Other devices"), groups[1].rows.map { it.title })
-        assertEquals(SettingsWords.CLAUDE_VIA_LAPTOP, groups[1].note)
+        assertEquals(SettingsWords.claudeViaLaptop(testWords()), groups[1].note)
         assertEquals("Read only", groups[2].rows.single().status)
         assertNull(groups[0].rows.firstOrNull())
     }
@@ -226,10 +232,10 @@ class SettingsWordsTest {
 
     @Test fun deviceTimesAreDatesAndHowLongAgoNeverRawNumbers() {
         val d = JSONObject("""{"devices":[{"id":"d1","label":"Signed in with a code","created_at":${nowSec - 170_000},"last_used_at":${nowSec - 10_800},"expires_at":null},{"id":"d2","label":"MacBook","created_at":${nowSec - 90_000},"last_used_at":null,"expires_at":null}]}""")
-        val list = SettingsWords.devices(d, now, ZoneOffset.UTC)
+        val list = SettingsWords.devices(testWords(), d, now, ZoneOffset.UTC)
         assertEquals("Signed in Oct 19 · used 3 h ago", list[0].line)
         assertEquals("Signed in Oct 20", list[1].line)
-        assertEquals("2 signed in", SettingsWords.devicesStatus(d))
+        assertEquals("2 signed in", SettingsWords.devicesStatus(testWords(), d))
     }
 
     @Test fun aTimeIsReadFromSecondsMillisecondsDigitsAndText() {
@@ -248,10 +254,10 @@ class SettingsWordsTest {
 
     @Test fun theSandboxIsNamedInWordsNotConfigValues() {
         // The server sends only process or none for the helpers' sandbox, and required, best_effort or off for the commands one.
-        fun helpers(mode: String) = JSONObject("""{"agent_host":{"sandbox_mode":"$mode","hosts":[]}}""").let { SettingsWords.safetyRows(it, SettingsWords.SafetyTab.Helpers)[2].value }
+        fun helpers(mode: String) = JSONObject("""{"agent_host":{"sandbox_mode":"$mode","hosts":[]}}""").let { SettingsWords.safetyRows(testWords(), it, SettingsWords.SafetyTab.Helpers)[2].value }
         assertEquals("Fenced in, internet limited to a list", helpers("process"))
         assertEquals("Off", helpers("none"))
-        fun commands(mode: String) = JSONObject("""{"safety":{"bash_sandbox":"$mode","web_allowed_origins":[]}}""").let { SettingsWords.safetyRows(it, SettingsWords.SafetyTab.Safety)[0].value }
+        fun commands(mode: String) = JSONObject("""{"safety":{"bash_sandbox":"$mode","web_allowed_origins":[]}}""").let { SettingsWords.safetyRows(testWords(), it, SettingsWords.SafetyTab.Safety)[0].value }
         assertEquals("When the phone can", commands("best_effort"))
         assertEquals("Required", commands("required"))
         assertEquals("Off", commands("off"))
@@ -259,36 +265,36 @@ class SettingsWordsTest {
 
     @Test fun theHelpersTabNamesThePhoneAndSaysWhatTheNoProgressLimitReallyDoes() {
         val s = JSONObject("""{"agent_host":{"default_host":"native","hosts":[],"sandbox_mode":"process","driver_no_progress_limit":3}}""")
-        val rows = SettingsWords.safetyRows(s, SettingsWords.SafetyTab.Helpers)
+        val rows = SettingsWords.safetyRows(testWords(), s, SettingsWords.SafetyTab.Helpers)
         assertEquals("This phone", rows[0].value)
         val limit = rows.last()
-        assertEquals("3 turns", limit.value)
+        assertEquals("3 answers", limit.value)
         assertEquals("HQ stops answering its questions for you. The helper itself keeps running.", limit.text)
     }
 
     @Test fun aSearchKeyIsNotCountedAsAnAiKey() {
         val s = JSONObject("""{"provider_keys":[{"name":"OpenRouter","configured":true},{"name":"DeepSeek","configured":true},{"name":"Brave Search","configured":true}]}""")
-        assertEquals("OpenRouter · 2 keys", SettingsWords.keysStatus(s))
+        assertEquals("OpenRouter · 2 keys", SettingsWords.keysStatus(testWords(), s))
         val onlySearch = JSONObject("""{"provider_keys":[{"name":"Brave Search","configured":true}]}""")
-        assertEquals("No key yet", SettingsWords.keysStatus(onlySearch))
+        assertEquals("No key yet", SettingsWords.keysStatus(testWords(), onlySearch))
     }
 
     @Test fun aRelayFileLeftByAnEarlierRunIsNotARunningRelay() {
         val chat = JSONObject("""{"telegram":{"token_set":true,"enabled":true,"owner":{"paired":true},"relay":{"status":"connected","current":false}},"discord":{"token_set":true,"enabled":true,"relay":{"status":"connected","current":true}}}""")
-        assertEquals("Not running yet", SettingsWords.appCard(chat, "telegram", "Telegram").line)
-        assertEquals("Running", SettingsWords.appCard(chat, "discord", "Discord").line)
+        assertEquals("Not connected yet", SettingsWords.appCard(testWords(), chat, "telegram", "Telegram").line)
+        assertEquals("Running", SettingsWords.appCard(testWords(), chat, "discord", "Discord").line)
     }
 
     @Test fun noOrderedListOfAisIsTheFlatDefaultNotNoAi() {
         val s = JSONObject("""{"backends":{"configured":false,"primary":"","fallbacks":[],"entries":[]}}""")
-        assertEquals(listOf("Whichever key is set" to "no order is set"), SettingsWords.fallbackRows(s))
+        assertEquals(listOf("Whichever key is set" to "no order is set"), SettingsWords.fallbackRows(testWords(), s))
     }
 
     @Test fun theHomeListSaysItIsCheckingUntilItHasAskedAndNeverThenSaysNotAnswering() {
-        val groups = SettingsWords.home(SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
+        val groups = SettingsWords.home(testWords(), SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
         assertEquals("On", groups[0].rows.single().status)
-        assertTrue(groups.drop(1).flatMap { it.rows }.all { it.status == "Checking…" })
-        assertTrue(SettingsWords.home(SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "Not answering" })
+        assertTrue(groups.drop(1).flatMap { it.rows }.filter { it.page != SettingsPage.About }.all { it.status == "Not read yet" })
+        assertTrue(SettingsWords.home(testWords(), SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "No answer yet" })
     }
 
     @Test fun anOffsetInIsoTextIsReadWithoutInstantParse() {
@@ -304,22 +310,22 @@ class SettingsWordsTest {
         try {
             java.util.Locale.setDefault(java.util.Locale.GERMANY)
             assertEquals("9:05", SettingsWords.clock(545))
-            assertEquals("$2.10 of $5.00 today", SettingsWords.spendingStatus(JSONObject("""{"budgets":[{"scope":"global","period":"day","limit_usd":5,"spent_usd":2.1}]}""")))
+            assertEquals("$2.10 of $5.00 today", SettingsWords.spendingStatus(testWords(), JSONObject("""{"budgets":[{"scope":"global","period":"day","limit_usd":5,"spent_usd":2.1}]}""")))
         } finally {
             java.util.Locale.setDefault(before)
         }
     }
 
     @Test fun aForecastWithNoRateButSomeSpendStillShowsTheMonthSoFar() {
-        val f = SettingsWords.forecast(JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":3.4,"hours_to_reset":500,"projected_period_total":null,"confidence":"low"}}"""))!!
+        val f = SettingsWords.forecast(testWords(), JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":3.4,"hours_to_reset":500,"projected_period_total":null,"confidence":"low"}}"""))!!
         assertNull(f.note)
         assertEquals(listOf("$3.40", "-", "21 days"), f.rows.map { it.value })
         assertEquals("Not much history yet, so this is a rough guess.", f.rows[1].text)
     }
 
     @Test fun theEmptyBudgetsLineDoesNotClaimNothingIsLimitedWhenBackgroundRunsAreCapped() {
-        assertEquals("No budgets are set, so nothing is limited.", SettingsWords.noBudgets(JSONObject("""{"budgets":[]}""")))
-        assertEquals("No budgets are set.", SettingsWords.noBudgets(JSONObject("""{"budgets":[],"background_run_usd":2.5}""")))
+        assertEquals("No budgets are set, so nothing is limited.", SettingsWords.noBudgets(testWords(), JSONObject("""{"budgets":[]}""")))
+        assertEquals("No budgets are set.", SettingsWords.noBudgets(testWords(), JSONObject("""{"budgets":[],"background_run_usd":2.5}""")))
     }
 
     @Test fun theNotesCountIsShownOnlyWhenThisHqSaysIt() {

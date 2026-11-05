@@ -42,14 +42,22 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.res.stringResource
+import example.hq.spike.LocalNotif
+import example.hq.spike.NotifOrigin
+import example.hq.spike.NoticeWords
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
@@ -118,11 +126,14 @@ private fun Modifier.widthIn20() = this.then(Modifier.defaultMinSize(minWidth = 
 private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
     val cards = ui.shownNeeds
     if (cards.isEmpty() && ui.loaded && !ui.offline) {
-        CaughtUp(ui)
+        CaughtUp(ui, actions)
         return
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (ui.offline) item { Text(if (cards.isEmpty()) "HQ is not answering yet, so what is waiting on you cannot be shown." else "HQ is not running. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Inbox, list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ui.banner?.let { b -> item(key = "notif-banner") { NotifBanner(b, actions) } }
+        if (ui.offline) item { Text(if (cards.isEmpty()) "HQ hasn't answered yet, so what is waiting on you cannot be shown." else "HQ has stopped. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
         items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
     }
 }
@@ -143,6 +154,7 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
                 Text(listOf(card.where, InboxWords.ago(card.createdAt)).filter { it.isNotBlank() }.joinToString(" · "), style = SmallText, color = Mts.InkMuted, maxLines = 1)
             }
         }
+        card.quote?.let { QuoteLine(it, card.createdAt) }
         Text(card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
         (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber) }
         AnswerRow(card, answer, offline, actions, onTakeLook)
@@ -154,8 +166,10 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
     val sending = answer == Answer.Sending
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval)) {
-            PrimaryButton(if (sending) "Answering…" else card.allowLabel, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
-            TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
+            TextButton(stringResource(R.string.inbox_decline), enabled = !sending && !offline) { actions.onNotNow(card) }
+            val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
+            if (NoticeWords.losing(card)) DangerButton(if (sending) stringResource(R.string.approval_answering) else card.verb?.let { stringResource(R.string.approval_allow_verb, it) } ?: stringResource(R.string.inbox_allow), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
+            else PrimaryButton(if (sending) "Answering…" else label, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
         } else if (card.kind == CardKind.TaskReview) {
             PrimaryButton(card.allowLabel, Modifier.weight(1f)) { onTakeLook(card) }
             TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
@@ -176,6 +190,41 @@ internal fun PrimaryButton(label: String, modifier: Modifier = Modifier, enabled
     ) { Text(label, style = HqType.BodySmBold, color = Mts.OnGreen, maxLines = 1) }
 }
 
+/** The one red button: it answers yes to a request that deletes or loses something. */
+@Composable
+internal fun DangerButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Danger).alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, style = HqType.BodySmBold, color = Mts.OnDanger, maxLines = 1) }
+}
+
+/** Shown on the Needs tab while notifications cannot reach the owner, with Turn on and a seven-day Not now. */
+@Composable
+internal fun NotifBanner(banner: InboxBanner, actions: InboxActions) {
+    val notif = LocalNotif.current
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            if (banner.waited > 0) pluralStringResource(R.plurals.banner_waited, banner.waited, banner.waited) else stringResource(R.string.banner_none_yet),
+            style = HqType.BodySm, color = Mts.Ink,
+        )
+        if (banner.server > 0) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(pluralStringResource(R.plurals.banner_server_waiting, banner.server, banner.server), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.weight(1f))
+                TextButton(stringResource(R.string.banner_open), onClick = actions.onServerOpen)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            PrimaryButton(stringResource(R.string.notify_turn_on), Modifier.weight(1f)) { notif?.turnOn(NotifOrigin.Later) }
+            TextButton(stringResource(R.string.notify_not_now), onClick = actions.onBannerNotNow)
+        }
+    }
+}
+
 @Composable
 internal fun TextButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
@@ -190,13 +239,14 @@ private fun Avatar(icon: ImageVector) {
 
 /** Nothing waits on the owner: a check, when it was last looked, and what was decided today. */
 @Composable
-private fun CaughtUp(ui: InboxUi) {
+private fun CaughtUp(ui: InboxUi, actions: InboxActions) {
     val today = ui.done.filter { InboxWords.sameDay(it.createdAt) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        ui.banner?.let { b -> item(key = "notif-banner") { Box(Modifier.padding(top = 12.dp)) { NotifBanner(b, actions) } } }
         item {
             Column(Modifier.fillMaxWidth().padding(start = 24.dp, top = 48.dp, end = 24.dp, bottom = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.size(64.dp).background(Mts.Surface200, CircleShape), contentAlignment = Alignment.Center) { Icon(HqIcons.Check, null, Modifier.size(32.dp), tint = Mts.BrandGreen) }
-                Text("You're all caught up", style = HqType.H2, color = Mts.Ink)
+                Text(stringResource(R.string.inbox_you_re_all_caught), style = HqType.H2, color = Mts.Ink)
                 Text(if (ui.checkedAt.isNotBlank()) "Nothing is waiting on you. Checked at ${ui.checkedAt}." else "Nothing is waiting on you.", style = HqType.BodySm, color = Mts.InkMuted)
             }
         }
@@ -223,7 +273,7 @@ private fun DoneList(entries: List<DoneEntry>) {
 @Composable
 private fun DoneFeed(ui: InboxUi) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
-        if (ui.done.isEmpty()) item { Text("Nothing decided yet.", style = HqType.BodySm, color = Mts.InkMuted) }
+        if (ui.done.isEmpty()) item { Text(stringResource(R.string.inbox_nothing_decided_yet), style = HqType.BodySm, color = Mts.InkMuted) }
         else ui.done.groupBy { InboxWords.dayLabel(it.createdAt) }.forEach { (day, entries) ->
             item(key = "d-$day") { Text(day.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)) }
             item(key = "l-$day") { DoneList(entries) }
@@ -237,10 +287,10 @@ private fun UpdatesFeed(ui: InboxUi, actions: InboxActions) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         if (rows.isNotEmpty()) item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.End) {
-                Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onClearAll).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text("Clear all updates", style = HqType.BodySmBold, color = Mts.BrandBlue) }
+                Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onClearAll).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.inbox_clear_all_updates), style = HqType.BodySmBold, color = Mts.BrandBlue) }
             }
         }
-        if (rows.isEmpty() && ui.loaded) item { Text("No updates.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
+        if (rows.isEmpty() && ui.loaded) item { Text(stringResource(R.string.inbox_no_updates), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         val groups = rows.groupBy { InboxWords.dayLabel(it.createdAt) }
         groups.forEach { (label, group) ->
             item(key = "g-$label") { Text(label.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp)) }
@@ -260,7 +310,7 @@ private fun UpdateRow(card: InboxCard, actions: InboxActions) {
                 Box(Modifier.fillMaxSize().background(Mts.BrandIndigo), contentAlignment = Alignment.CenterEnd) {
                     Column(Modifier.width(104.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Icon(HqIcons.Archive, null, Modifier.size(24.dp), tint = Mts.Ink)
-                        Text("Clear", style = HqType.NavLabel, color = Mts.Ink)
+                        Text(stringResource(R.string.inbox_clear), style = HqType.NavLabel, color = Mts.Ink)
                     }
                 }
             }
@@ -300,10 +350,19 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
     Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp) { actions.onDetails(null) }
-            Text("Details", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
+            Text(stringResource(R.string.inbox_details), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(card.title, style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)
+            card.quote?.let { QuoteLine(it, card.createdAt) }
+            card.tool?.let { tool ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Mts.Surface100).border(1.dp, Mts.Hairline, RoundedCornerShape(12.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(R.string.approval_quote_inbox), style = HqType.BodySmBold, color = Mts.Ink)
+                    Text(tool, style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
+                    card.toolArgs?.let { Text(it, style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink) }
+                }
+                Text(stringResource(R.string.approval_in_words), style = HqType.BodySmBold, color = Mts.Ink)
+            }
             Text(card.fullBody.ifEmpty { card.body }, style = HqType.Body, color = Mts.InkMuted)
             if (card.canAllow || card.kind == CardKind.Approval) {
                 Outcome(HqIcons.Check, Mts.BrandBlue, "If you allow it", "HQ records your yes. What asked then goes ahead.")
@@ -335,5 +394,34 @@ private fun KeyValue(key: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(key, style = HqType.BodySmBold, color = Mts.Ink, modifier = Modifier.width(90.dp))
         Text(value, style = HqType.BodySm, color = Mts.InkMuted)
+    }
+}
+
+/** What the owner said, as the question behind an approval, with the time it was asked (B18). */
+@Composable
+private fun QuoteLine(quote: String, createdAt: String) {
+    val time = InboxWords.clock(createdAt)
+    Text(listOf(stringResource(R.string.chat_spoken_quote, quote), time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
+}
+
+/** After the OK: what happens next, and one button that asks HQ to finish in the same chat. */
+@Composable
+fun AllowedPage(allowed: Allowed, actions: InboxActions, onOpenChat: (String) -> Unit) {
+    BackHandler(onBack = actions.onAllowedDone)
+    val card = allowed.card
+    Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onAllowedDone)
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(stringResource(R.string.chat_approval_allowed_at, allowed.at), style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)
+            Text(stringResource(R.string.chat_approval_can_finish), style = HqType.BodyBold, color = Mts.Ink)
+            card.quote?.let { QuoteLine(it, card.createdAt) }
+            Text(stringResource(R.string.chat_approval_stopped), style = HqType.Body, color = Mts.InkMuted)
+        }
+        Row(Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            card.threadId?.let { id -> TextButton({ onOpenChat(id) }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text(stringResource(R.string.voice_open_chat), style = HqType.BodyBold, color = Mts.Ink) } }
+            TextButton({ actions.onKeepGoing(allowed) }, Modifier.weight(1f).heightIn(min = 48.dp), enabled = !allowed.sent) { Text(stringResource(R.string.chat_keep_going), style = HqType.BodyBold, color = Mts.Ink) }
+        }
     }
 }

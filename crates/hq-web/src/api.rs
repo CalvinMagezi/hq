@@ -57,10 +57,15 @@ pub(crate) async fn search_handler(
     if query.is_empty() {
         return axum::Json(serde_json::json!({"results": [], "error": "no query"})).into_response();
     }
+    let folder = match search_folder(params.get("folder").map(String::as_str)) {
+        Ok(folder) => folder,
+        Err(why) => return crate::error::ApiError::bad_request(why).into_response(),
+    };
+    let prefix = folder.as_ref().map(|f| format!("{NOTEBOOKS}/{f}/"));
 
     if let Ok(hits) = state
         .db
-        .with_conn(|c| hq_db::search::keyword_search(c, &query, limit))
+        .with_conn(|c| hq_db::search::keyword_search_in(c, &query, limit, prefix.as_deref()))
         && !hits.is_empty()
     {
         // The index covers Notebooks, but Lite filters what it returns the same way as the
@@ -80,21 +85,42 @@ pub(crate) async fn search_handler(
     let vault = state.vault_path.clone();
     let needle = query.to_lowercase();
     let lite = state.profile().is_lite();
+    let start = match &folder {
+        Some(f) => vault.join(NOTEBOOKS).join(f),
+        None => vault.join(NOTEBOOKS),
+    };
+    // Under Lite a folder reached through a link into a hidden folder is not walked at all.
+    if !state.resolved_allowed(&start) {
+        return axum::Json(serde_json::json!({ "results": [] })).into_response();
+    }
     let results = tokio::task::spawn_blocking(move || {
         let mut results = Vec::new();
-        walk_for_substring(
-            &vault.join("Notebooks"),
-            &vault,
-            &needle,
-            &mut results,
-            limit,
-            lite,
-        );
+        walk_for_substring(&start, &vault, &needle, &mut results, limit, lite);
         results
     })
     .await
     .unwrap_or_default();
     axum::Json(serde_json::json!({ "results": results })).into_response()
+}
+
+const NOTEBOOKS: &str = "Notebooks";
+
+/// The folder a search is narrowed to, under the notebooks, or why it is refused: it may not climb
+/// (`..`), start at the root (`/`) or use a backslash. An empty value means every folder.
+fn search_folder(raw: Option<&str>) -> Result<Option<String>, &'static str> {
+    let Some(raw) = raw.map(str::trim).filter(|f| !f.is_empty()) else {
+        return Ok(None);
+    };
+    if raw.starts_with('/') || raw.contains('\\') || raw.split('/').any(|seg| seg == "..") {
+        return Err(
+            "folder must be a path inside your notes, without .., a leading / or a backslash",
+        );
+    }
+    let folder = raw
+        .strip_prefix("Notebooks/")
+        .unwrap_or(raw)
+        .trim_end_matches('/');
+    Ok(Some(folder.to_string()))
 }
 
 /// Substring search over the notebooks, skipping `.` and `_` folders.
@@ -347,4 +373,55 @@ pub(crate) async fn admin_broadcast_handler(
     };
     state.broadcast(&serde_json::json!({ "type": "system:notice", "message": msg }).to_string());
     axum::Json(serde_json::json!({"ok": true})).into_response()
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::search_folder;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn under_lite_a_folder_linked_into_a_hidden_one_finds_nothing() {
+        use std::sync::Arc;
+        let v = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(v.path().join("Notebooks")).unwrap();
+        std::fs::create_dir_all(v.path().join("_system")).unwrap();
+        std::fs::write(v.path().join("_system/secret.md"), "quokka hidden").unwrap();
+        std::os::unix::fs::symlink(v.path().join("_system"), v.path().join("Notebooks/link"))
+            .unwrap();
+        let state = Arc::new(
+            crate::WsState::new(v.path().to_path_buf(), None)
+                .with_profile(hq_core::config::Profile::Lite),
+        );
+        let q = std::collections::HashMap::from([
+            ("q".to_string(), "quokka".to_string()),
+            ("folder".to_string(), "link".to_string()),
+        ]);
+        let res = super::search_handler(axum::extract::State(state), axum::extract::Query(q)).await;
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains("secret"),
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+    }
+
+    #[test]
+    fn a_folder_that_climbs_or_starts_at_the_root_is_refused() {
+        for bad in ["../x", "Projects/../../etc", "/etc", "Projects\\x"] {
+            assert!(search_folder(Some(bad)).is_err(), "{bad}");
+        }
+        assert_eq!(
+            search_folder(Some("Projects/Agent-HQ/")),
+            Ok(Some("Projects/Agent-HQ".into()))
+        );
+        assert_eq!(
+            search_folder(Some("Notebooks/Projects")),
+            Ok(Some("Projects".into()))
+        );
+        assert_eq!(search_folder(Some("  ")), Ok(None));
+        assert_eq!(search_folder(None), Ok(None));
+    }
 }

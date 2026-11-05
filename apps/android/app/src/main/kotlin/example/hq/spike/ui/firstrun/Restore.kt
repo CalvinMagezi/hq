@@ -24,6 +24,10 @@ sealed interface RestoreOutcome {
 
 /** The pure parts of a restore: the command, its environment and the checks before it. */
 object RestoreLogic {
+    /** Room kept free on the phone after unpacking a copy (the "almost full" line is 200 MB, D-5). */
+    const val SPACE_MARGIN_BYTES = 200L * 1024 * 1024
+    private const val COPY_BUFFER_BYTES = 64 * 1024
+
     const val MIN_PASSPHRASE = 10
     const val FILE_MODE = 384 // 0600: hq refuses a key file anyone else can read
 
@@ -43,6 +47,64 @@ object RestoreLogic {
         put("HQ_CONFIG_PATH", config)
         androidRoot?.let { put("ANDROID_ROOT", it) }
         androidData?.let { put("ANDROID_DATA", it) }
+    }
+
+    /** True when the file starts with a zip's `PK\u0003\u0004`: a copy saved by safe mode, which has no secret. */
+    fun isZip(file: java.io.File): Boolean = try {
+        file.inputStream().use(::startsLikeZip)
+    } catch (_: IOException) {
+        false
+    }
+
+    private fun startsLikeZip(input: java.io.InputStream): Boolean {
+        val b = ByteArray(ZIP_MAGIC.size)
+        return input.read(b) == b.size && b.contentEquals(ZIP_MAGIC)
+    }
+
+    private val ZIP_MAGIC = byteArrayOf('P'.code.toByte(), 'K'.code.toByte(), 3, 4)
+
+    /** [isZip] for a file the owner picked, read through the content resolver. */
+    fun isZipUri(context: android.content.Context, uri: android.net.Uri): Boolean = try {
+        context.contentResolver.openInputStream(uri)?.use(::startsLikeZip) ?: false
+    } catch (_: IOException) {
+        false
+    }
+
+    /**
+     * Unpacks a safe-mode copy into [into]. A name that would land outside it (`..`, an absolute path) is refused, and a name that is
+     * a symlink target never matters because only plain files are written.
+     */
+    fun unzip(zip: java.io.File, into: java.io.File, spaceLeft: Long = into.absoluteFile.let { it.parentFile ?: it }.usableSpace) {
+        val root = into.canonicalFile
+        into.mkdirs()
+        java.util.zip.ZipFile(zip).use { z ->
+            // A copy that would not fit (or claims to be absurdly large) is refused before anything is written.
+            val total = z.entries().asSequence().sumOf { maxOf(it.size, 0L) }
+            if (total > spaceLeft - SPACE_MARGIN_BYTES) throw IOException("not enough space")
+            var written = 0L
+            for (entry in z.entries()) {
+                val target = java.io.File(root, entry.name).canonicalFile
+                if (target.path != root.path && !target.path.startsWith(root.path + java.io.File.separator)) throw IOException("unsafe name")
+                if (entry.isDirectory) { target.mkdirs(); continue }
+                target.parentFile?.mkdirs()
+                // The sizes a zip claims can lie, so what is written is counted too.
+                val budget = minOf(total, spaceLeft - SPACE_MARGIN_BYTES) - written
+                written += z.getInputStream(entry).use { input -> target.outputStream().use { out -> copyCapped(input, out, budget) } }
+            }
+        }
+    }
+
+    /** Copies at most [budget] bytes; a stream with more is refused. Returns how many were copied. */
+    private fun copyCapped(input: java.io.InputStream, out: java.io.OutputStream, budget: Long): Long {
+        val buf = ByteArray(COPY_BUFFER_BYTES)
+        var copied = 0L
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) return copied
+            copied += n
+            if (copied > budget) throw IOException("the copy is larger than it says")
+            out.write(buf, 0, n)
+        }
     }
 
     /** The first line of a passphrase file is the passphrase. */
@@ -76,6 +138,7 @@ object Restore {
             wipe(work)
             work.mkdirs()
             copy(app, archive, File(work, ARCHIVE))
+            if (RestoreLogic.isZip(File(work, ARCHIVE))) return@withContext restoreZip(app, File(work, ARCHIVE), home, into)
             val secretFile = File(work, SECRET)
             secretFile.createNewFile()
             Os.chmod(secretFile.path, RestoreLogic.FILE_MODE)
@@ -119,6 +182,24 @@ object Restore {
             wipe(work)
             if (held) HubService.releaseHq()
         }
+    }
+
+    /** A copy saved by safe mode: plain files, no secret. The same swap, then the same steps as a move to a new phone. */
+    private fun restoreZip(app: Context, zip: File, home: File, into: File): RestoreOutcome {
+        wipe(into)
+        RestoreLogic.unzip(zip, into)
+        // The old phone is forgotten in the unpacked copy, before it replaces anything: a failure here
+        // leaves this phone's vault as it was.
+        if (!MovedPhone.databaseOk(File(into, MovedPhone.DB))) MovedPhone.dropDatabase(into)
+        if (!MovedPhone.forget(app, into)) {
+            wipe(into)
+            return RestoreOutcome.Failed(app.getString(example.hq.spike.R.string.moved_forget_failed))
+        }
+        if (!swap(home, into)) {
+            wipe(into)
+            return RestoreOutcome.Failed("The restored files could not be put in place.")
+        }
+        return RestoreOutcome.Done
     }
 
     /** Puts the restored folder where the vault lives, keeping the old one until the new one is in place. */

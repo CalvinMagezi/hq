@@ -18,6 +18,12 @@ object KeyVault {
     /** True when any AI service key is stored: a name ending in _API_KEY. */
     fun hasModelKey(context: Context): Boolean = hasModelKey(names(context))
 
+    /** True when [name] is an AI key and no other AI key is stored; tool keys such as Brave Search never count. */
+    fun isOnlyModelKey(names: List<String>, name: String): Boolean {
+        fun model(n: String) = n.endsWith("_API_KEY") && !n.startsWith("BRAVE")
+        return model(name) && names.none { it != name && model(it) }
+    }
+
     fun hasModelKey(names: List<String>): Boolean = names.any { it.endsWith("_API_KEY") }
 
     /** Seals one credential. Returns the reason it was refused, or null when it is stored; hq has to restart to read it. */

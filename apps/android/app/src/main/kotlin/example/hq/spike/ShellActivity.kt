@@ -9,8 +9,10 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,7 +25,7 @@ import androidx.compose.runtime.produceState
 import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import example.hq.spike.data.HqServices
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import example.hq.spike.ui.chat.ChatOverlays
 import example.hq.spike.ui.chat.ChatScreen
 import example.hq.spike.ui.shell.LocalGoTo
@@ -41,12 +43,15 @@ import example.hq.spike.ui.settings.SettingsPage
 import example.hq.spike.ui.settings.SettingsViewModel
 import example.hq.spike.ui.settings.settingsFixture
 import example.hq.spike.ui.inbox.InboxCard
+import example.hq.spike.ui.inbox.AllowedPage
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
+import example.hq.spike.ui.firstrun.NotifUpgraderSheet
 import example.hq.spike.ui.inbox.InboxUi
 import example.hq.spike.ui.inbox.InboxViewModel
 import example.hq.spike.ui.inbox.inboxFixture
 import example.hq.spike.ui.notes.NotesHome
+import example.hq.spike.ui.search.SearchGoes
 import example.hq.spike.ui.search.SearchScreen
 import example.hq.spike.ui.webhost.LocalOpenWeb
 import example.hq.spike.ui.webhost.WebHostScreen
@@ -74,7 +79,6 @@ import example.hq.spike.ui.tasks.tasksFixture
 import example.hq.spike.ui.notes.notesFixture
 import example.hq.spike.ui.chat.ContextRef
 import example.hq.spike.ui.chat.ChatUiState
-import example.hq.spike.ui.chat.ChatTime
 import example.hq.spike.ui.chat.ChatViewModel
 import example.hq.spike.ui.chat.chatFixture
 import example.hq.spike.ui.shell.HqShell
@@ -83,7 +87,6 @@ import example.hq.spike.ui.shell.Links
 import androidx.compose.runtime.remember
 import example.hq.spike.ui.settings.PhoneFix
 import example.hq.spike.ui.settings.PhoneIntents
-import example.hq.spike.ui.startup.DidNotStartScreen
 import example.hq.spike.ui.startup.StartingScreen
 import example.hq.spike.ui.startup.StartupWords
 import example.hq.spike.ui.startup.Startup
@@ -95,6 +98,7 @@ import example.hq.spike.ui.firstrun.FirstRunStore
 import example.hq.spike.ui.firstrun.FirstRunViewModel
 import example.hq.spike.ui.firstrun.Step
 import example.hq.spike.ui.startup.FirstLaunch
+import example.hq.spike.ui.startup.StartRules
 import example.hq.spike.ui.usage.ChipTarget
 import example.hq.spike.ui.usage.UsageViewModel
 import example.hq.spike.ui.usage.balanceFixture
@@ -118,6 +122,17 @@ class ShellActivity : ComponentActivity() {
     private val usage: UsageViewModel by viewModels()
     private val search: SearchViewModel by viewModels()
 
+    /** The lists a search matches, read when it opens; set from the composition that owns the states. */
+    private var searchSources: () -> example.hq.spike.ui.search.SearchSources = { example.hq.spike.ui.search.SearchSources() }
+
+    /** A result is open and Back should bring the search back, once. */
+    private var resumeSearch by mutableStateOf(false)
+
+    private fun openSearch(start: example.hq.spike.ui.search.SearchStart) {
+        resumeSearch = false
+        search.actions.onOpen(searchSources(), start)
+    }
+
     /** Which first-run screen opens, decided in onCreate before hq starts (its first answer would mark the app as used). */
     private var firstRunStep: Step? = null
     private val firstRun: FirstRunViewModel by viewModels {
@@ -130,12 +145,81 @@ class ShellActivity : ComponentActivity() {
     /** A place asked for by a tapped notification while the app is already open; the shell takes it and clears it. */
     private var requested by mutableStateOf<Place?>(null)
 
+    private var notifFacts by mutableStateOf<NotifFactsNow?>(null)
+    private var upgraderOpen by mutableStateOf(false)
+    private var connectionOpen by mutableStateOf(false)
+    private var turnOnOrigin = NotifOrigin.Later
+
+    /** Set while the owner is in Android's settings for a Turn on, so coming back counts a grant. */
+    private var inAndroidSettings: NotifOrigin? = null
+
+    private val askNotifications = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted ->
+        // Only an activity can say whether Android would show its dialog again.
+        val rationale = !granted && shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS)
+        NotifAccess.answered(this, turnOnOrigin, granted, rationale)
+        if (!granted && turnOnOrigin == NotifOrigin.FirstRun) firstRun.actions.onNotifNotNow()
+        rereadNotifications()
+    }
+
+    private fun rereadNotifications() {
+        notifFacts = NotifAccess.read(this)
+        inbox.actions.onServerOpen = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }
+        inbox.refreshBanner()
+    }
+
+    /** The one Turn on: asks Android, or opens the page where the owner switches it on, as the phone's state requires. */
+    private fun turnOnNotifications(origin: NotifOrigin) {
+        turnOnOrigin = origin
+        val c = packageName
+        val intent = when (NotifAccess.next(NotifAccess.read(this))) {
+            NotifStep.AskAndroid -> { askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS); return }
+            NotifStep.OpenApp -> Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, c)
+            NotifStep.OpenChannel -> Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, c).putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, AlertPoster.NEEDS)
+            NotifStep.Done -> { rereadNotifications(); return }
+        }
+        inAndroidSettings = origin
+        try { startActivity(intent) } catch (e: android.content.ActivityNotFoundException) { inAndroidSettings = null }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        example.hq.spike.update.AppVisibility.visible = true
+    }
+
+    override fun onStop() {
+        example.hq.spike.update.AppVisibility.visible = false
+        super.onStop()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        rereadNotifications()
+        Thread { example.hq.spike.update.Updater.onForeground(applicationContext) }.start()
+        val origin = inAndroidSettings ?: return
+        inAndroidSettings = null
+        if (notifFacts?.needsOn == true) NotifAccess.grantedInSettings(this, origin)
+    }
+
+    /** The upgrader sheet: Android 13 and newer, the first open after an update, never asked and not allowed. Once only. */
+    private fun decideUpgrader() {
+        val f = NotifAccess.read(this)
+        val info = packageManager.getPackageInfo(packageName, 0)
+        @Suppress("DEPRECATION")
+        val now = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
+        val stored = NotifAccess.storedVersion(this).let { if (it == 0 && firstRunStep == null) 1 else it }
+        upgraderOpen = NotifAccess.showUpgrader(f.sdk, stored, now, f.granted, f.asked, NotifAccess.upgraderShown(this))
+        if (upgraderOpen) NotifAccess.markUpgraderShown(this)
+        NotifAccess.saveVersion(this, now)
+    }
+
     /** The web page shown in the host screen over everything, or null. */
     private var web by mutableStateOf<WebPage?>(null)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.getStringExtra(EXTRA_SHEET) == "connection") connectionOpen = true
+        countNoticeTap(intent)
         val link = linkOf(intent) ?: return
         // Shared text is kept even when the pages cannot be closed: it joins the chat's draft, and nothing typed there is lost.
         val shared = intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)
@@ -158,10 +242,10 @@ class ShellActivity : ComponentActivity() {
     /** Shows what a link names, over the place it belongs to. Waiting for what is not loaded yet is the view model's job. */
     private fun applyLink(t: LinkTarget) {
         when (t.place) {
-            Place.Chat -> t.id?.let(chat::openLinked)
+            Place.Chat -> { t.id?.let(chat::openLinked); if (t.compose) chat.focusComposer() }
             Place.Inbox -> t.id?.let(inbox::openItem)
-            Place.Tasks -> t.id?.let { tasks.openById(it) { } }
-            Place.Notes -> { t.path?.let(notes::openNote); if (t.search) notes.actions.onOpenSearch() }
+            Place.Tasks -> if (t.away) tasks.actions.onAway(true) else t.id?.let { tasks.openById(it) { } }
+            Place.Notes -> { t.path?.let(notes::openNote); t.search?.let { openSearch(example.hq.spike.ui.search.SearchStart(it)) } }
             Place.Helpers -> t.id?.let(helpers::openSession)
         }
         t.web?.let { WebPage.fromSlug(it) }?.let { web = it }
@@ -215,7 +299,7 @@ class ShellActivity : ComponentActivity() {
         val active = (java.io.File(filesDir, "mode").takeIf { it.length() <= MODE_FILE_MAX }?.readText()?.trim() ?: "") == "active"
         val log = StartupWords.cleanLog(tailOf(java.io.File(filesDir, "hq.log")))
         val build = packageManager.getPackageInfo(packageName, 0).let { "${it.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build ${if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) it.longVersionCode else it.versionCode.toLong()}" }
-        val text = StartupWords.details(build, active, StartupWords.failedLines(HubService.lastStart(this), HubService.lastExit(this)), log)
+        val text = StartupWords.details(build, active, StartupWords.failedLines(example.hq.spike.ui.shell.Words.of(this), HubService.lastStart(this), HubService.lastExit(this), StartRules.STILL_OPENING_S), log)
         (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
         android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
     }
@@ -240,6 +324,11 @@ class ShellActivity : ComponentActivity() {
         return step
     }
 
+    /** Only the app's own "HQ answered" notice carries the extra, so a shared link or a widget is never counted. */
+    private fun countNoticeTap(intent: Intent) {
+        if (intent.getBooleanExtra(AlertPoster.EXTRA_NOTICE_TAP, false)) example.hq.spike.measure.Counters.get(this).bump(example.hq.spike.measure.Counter.NoticeTapped)
+    }
+
     private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -249,10 +338,19 @@ class ShellActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Two launches in a row that never drew a frame: this one goes to the screen that saves the notes.
+        if (intent.getStringExtra("fixture") == null && example.hq.spike.safe.CrashMarker.begin(filesDir)) {
+            example.hq.spike.safe.SafeModeActivity.open(this)
+            finish()
+            return
+        }
+        window.decorView.post { example.hq.spike.safe.CrashMarker.drawn(filesDir) }
         // A rotation keeps the web page open; it loads again from its start.
         web = WebPage.fromSlug(savedInstanceState?.getString(STATE_WEB))
         if (intent.getStringExtra("fixture") == null) firstRunStep = decideFirstRun()
         HqServices.ensureHubRunning(this)
+        notifFacts = NotifAccess.read(this)
+        if (intent.getStringExtra("fixture") == null && savedInstanceState == null) decideUpgrader()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -262,6 +360,7 @@ class ShellActivity : ComponentActivity() {
         val fixtureName = intent.getStringExtra("fixture")
         // A rotation or a restore runs onCreate again with the launch intent; the link was applied the first time.
         if (savedInstanceState == null) {
+            countNoticeTap(intent)
             linkOf(intent)?.let(::applyLink)
             intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)?.let(chat.actions.onDraft)
         }
@@ -289,40 +388,58 @@ class ShellActivity : ComponentActivity() {
             val settingsState by settings.state.collectAsStateWithLifecycle()
             val searchState by search.state.collectAsStateWithLifecycle()
             val balance by usage.chip.collectAsStateWithLifecycle()
-            val offlineSince = chatState.offlineSince
-            val now by produceState(System.currentTimeMillis(), offlineSince) {
-                value = System.currentTimeMillis()
-                while (offlineSince != null) { delay(STATUS_TICK_MS); value = System.currentTimeMillis() }
-            }
-            // A socket that has only just dropped (or not yet opened) is not worth a "Saved" line.
-            val shown = when {
-                status is HqStatus.Starting && fixture == null -> status
-                offlineSince != null && now - offlineSince >= OFFLINE_GRACE_MS -> HqStatus.Saved(ChatTime.short(offlineSince, now))
-                else -> HqStatus.Live
-            }
-            val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; "x-failed" -> Startup.DidNotStart; else -> null }
+            val shown: Connection = if (fixture == null) status else Connection.Connected
+            searchSources = { example.hq.spike.ui.search.SearchSources(tasksState.tasks, chatState.chats, helpersState.cards, shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut) }
+            val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; else -> null }
             val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
             val firstRunUi by firstRun.ui.collectAsStateWithLifecycle()
-            val startup = startupFixture ?: if (fixture == null) StartupWords.decide(status, firstDone) else Startup.None
-            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }) {
+            val coverRemoval = remember { example.hq.spike.update.Updater.startCoverRemoval(this@ShellActivity) }
+            val startup = startupFixture ?: if (fixture == null) StartRules.decide(status, firstDone, coverRemoval) else Startup.None
+            val freeBytes by services.freeBytes.collectAsStateWithLifecycle()
+            val stopped = shown as? Connection.Stopped
+            LaunchedEffect(stopped != null) {
+                val now = System.currentTimeMillis()
+                if (stopped != null && StartRules.autoOpenOk(StartRules.lastAutoOpen(this@ShellActivity), now)) { StartRules.markAutoOpen(this@ShellActivity, now); connectionOpen = true }
+            }
+            LaunchedEffect(chatState.failed, connectionOpen) { if (chatState.failed || connectionOpen) services.refreshAi() }
+            val savedAt = remember(status) { StartRules.lastAnswer(this@ShellActivity).takeIf { it > 0 } }
+            val uiScope = androidx.compose.runtime.rememberCoroutineScope()
+            val atTop: (Place) -> Unit = { place ->
+                if (shown !is Connection.Connected) connectionOpen = true
+                else uiScope.launch {
+                    when (place) {
+                        Place.Notes -> notes.actions.onRefresh()
+                        Place.Tasks -> tasks.refresh()
+                        Place.Helpers -> helpers.refresh()
+                        Place.Inbox -> inbox.refresh()
+                        else -> Unit
+                    }
+                }
+            }
+            val notifUi = notifFacts?.let { NotifUi(it, ::turnOnNotifications) }
+            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi, example.hq.spike.ui.shell.LocalReselectAtTop provides atTop) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
-                else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
-                else if (startup == Startup.DidNotStart) DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
+                else if (startup == Startup.Starting) StartingScreen(((status as? Connection.Starting)?.step ?: 0) + 1, (status as? Connection.Starting)?.seconds ?: 12) { openCapture() }
                 else HqShell(
+                    onStatus = { connectionOpen = true },
+                    strip = { place ->
+                        val server = shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut
+                        if (place != Place.Chat && (!server || place == Place.Inbox)) example.hq.spike.ui.connection.OfflineStrip(shown, savedAt, { connectionOpen = true }, ::tryStartAgain)
+                    },
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
-                    onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen,
+                    onSearch = { openSearch(example.hq.spike.ui.search.SearchStart()) }, onOpenSearch = ::openSearch, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
                     subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
                     topActions = { place ->
                         if (place == Place.Tasks && tasksState.tab == TaskTab.All) IconButton({ tasks.actions.onFilter(true) }, Modifier.size(48.dp)) { Icon(HqIcons.Filter, "Filter", Modifier.size(24.dp), tint = if (tasksState.scope == TaskScope.Everything) Mts.Ink else Mts.BrandGreen) }
                     },
-                    balance = if (shown is HqStatus.Starting) null else balance,
+                    balance = if (shown !is Connection.Connected) null else balance,
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState, shown); if (tasksState.away.open) AwayHost(tasksState); web?.let { page -> WebHostScreen(page, onClose = { web = null }, onStartHq = ::tryStartAgain, onNotes = { web = null; requested = Place.Notes }) } },
                 ) { place ->
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
+                        Place.Chat -> ChatScreen(chatState, chat.actions, status = shown, onStartHq = ::tryStartAgain, onAiKeys = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Keys) })
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)
@@ -334,6 +451,39 @@ class ShellActivity : ComponentActivity() {
         }
     }
 
+    private fun internetNow(): Int? {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return null
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return null) ?: return null
+        return when {
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> R.string.conn_net_wifi
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> R.string.conn_net_mobile
+            else -> null
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun ConnectionHost(status: Connection, freeBytes: Long?) {
+        val w = example.hq.spike.ui.shell.Words.of(this)
+        val saved = StartRules.lastAnswer(this).takeIf { it > 0 }
+        val facts = example.hq.spike.ui.connection.ConnectionFacts(
+            freeBytes = freeBytes,
+            savedAt = saved?.let { w.clock(java.time.Instant.ofEpochMilli(it)) },
+            stoppedAtStep = (status as? Connection.Stopped)?.step?.plus(1),
+            internet = internetNow(),
+            details = StartupWords.failedLines(w, HubService.lastStart(this), HubService.lastExit(this), (status as? Connection.Stopped)?.let { (System.currentTimeMillis() - it.sinceMs) / 1000 } ?: StartRules.STILL_OPENING_S),
+        )
+        example.hq.spike.ui.connection.ConnectionSheet(
+            status, facts,
+            example.hq.spike.ui.connection.ConnectionActions(
+                onStartHq = { connectionOpen = false; tryStartAgain() },
+                onSaveCopy = { connectionOpen = false; example.hq.spike.safe.SafeModeActivity.open(this) },
+                onAndroidSettings = { openBatterySettings() },
+                onRestart = { connectionOpen = false; HubService.restartHq(); HqServices.get(applicationContext).restartWait() },
+                onCopyDetails = ::copyStartDetails,
+            ),
+        ) { connectionOpen = false }
+    }
+
     @androidx.compose.runtime.Composable
     private fun NotesPlace(notesState: NotesUi) {
         val go = LocalGoTo.current
@@ -342,14 +492,36 @@ class ShellActivity : ComponentActivity() {
 
     /** Search sits over everything but a chosen result: the screen closes first, then the note, task or chat opens in its own place. */
     @androidx.compose.runtime.Composable
-    private fun SearchHost(searchState: SearchUi) {
-        if (!searchState.open) return
+    private fun AwayHost(tasksState: TasksUi) {
+        example.hq.spike.ui.tasks.AwayPage(tasksState.away, tasksState.tasks, tasks.actions, onTask = { id -> tasks.actions.onAway(false); requested = Place.Tasks; tasks.openById(id) { } })
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun SearchHost(searchState: SearchUi, shown: Connection) {
         val go = LocalGoTo.current
+        // A result hides the search but keeps it; Back from that page brings it back once.
+        fun shownResult(open: () -> Unit) { search.actions.onHide(); resumeSearch = true; open() }
+        androidx.activity.compose.BackHandler(enabled = resumeSearch && !searchState.open && search.canResume) {
+            resumeSearch = false
+            notes.closeAll(); tasks.actions.onClose(); chat.actions.onCloseNote(); chat.actions.onClosePage(); helpers.actions.onClose()
+            search.resume()
+        }
+        if (!searchState.open) return
         SearchScreen(
             searchState, search.actions,
-            onNote = { path -> search.actions.onClose(); notes.openNote(path) },
-            onTask = { t -> search.actions.onClose(); go(Place.Tasks); tasks.openById(t.id) { } },
-            onChat = { c -> search.actions.onClose(); go(Place.Chat); chat.actions.onOpenChat(c.id) },
+            SearchGoes(
+                onNote = { path -> shownResult { notes.openNote(path) } },
+                onTask = { t -> shownResult { go(Place.Tasks); tasks.openById(t.id) { } } },
+                onChat = { c -> shownResult { go(Place.Chat); chat.actions.onOpenChat(c.id) } },
+                onHelper = { h -> shownResult { go(Place.Helpers); helpers.openSession(h.id) } },
+                onAsk = { hits ->
+                    search.actions.onHide(); resumeSearch = false
+                    chat.startChatWith(hits.map { ContextRef(ContextRef.Kind.Note, it.path, it.title) })
+                    go(Place.Chat)
+                },
+                onStartHq = { search.actions.onClose(); tryStartAgain() },
+            ),
+            stopped = shown is Connection.Stopped,
         )
     }
 
@@ -410,6 +582,7 @@ class ShellActivity : ComponentActivity() {
         }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
+        inboxState.allowed?.let { a -> AllowedPage(a, inbox.actions) { thread -> inbox.actions.onAllowedDone(); chat.actions.onOpenChat(thread); go(Place.Chat) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasksState.edge, tasks.actions) }
         if (tasksState.filterOpen) TaskFilterSheet(tasksState, tasks.actions)
@@ -419,10 +592,10 @@ class ShellActivity : ComponentActivity() {
         HelperOverlays(helpersState, helpers.actions)
     }
 
-    private companion object {
+    companion object {
+        /** The running notice sets this to "connection" so a tap on a stopped HQ opens the sheet. */
+        const val EXTRA_SHEET = "sheet"
         const val STATE_WEB = "web"
-        const val STATUS_TICK_MS = 5_000L
-        const val OFFLINE_GRACE_MS = 5_000L
         const val MODE_FILE_MAX = 64L
         const val TAIL_BYTES = 16_384L
         const val UNSAVED_WORK = "Finish or discard what you are writing first"

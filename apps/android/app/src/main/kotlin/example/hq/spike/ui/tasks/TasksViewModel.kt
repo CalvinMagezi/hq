@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqClient.TaskComment
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.TaskItem
+import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.ui.shell.Undo
 import example.hq.spike.data.HqUnavailable
 import java.time.LocalDate
 import java.util.UUID
@@ -17,6 +19,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -95,6 +98,10 @@ data class TasksUi(
     val briefing: BriefingUi? = null,
     /** The edge worker, read when the new-task sheet opens; null until then or when HQ did not say. */
     val edge: HqClient.EdgeWorker? = null,
+    /** While you were away: what HQ's checks did in the last 24 hours, on this phone and on a server HQ. */
+    val away: AwayUi = AwayUi(),
+    /** The words of this screen; the view model and the screen both set it, and no list shows without it. */
+    val words: example.hq.spike.ui.shell.Words? = null,
 ) {
     /** Whether a task is inside what the All tab is narrowed to. */
     val keep: (TaskItem) -> Boolean get() = TaskFilters.keeps(tree, scope)
@@ -105,11 +112,28 @@ data class TasksUi(
     val visibleIds: Set<String> get() = groups.flatMapTo(HashSet()) { g -> g.tasks.map { it.id } }
     val workingIds: Set<String> get() = sessions.mapTo(HashSet()) { it.taskId }
     val shown: List<TaskItem> get() = tasks.filter { it.id !in hidden }
-    val groups: List<TaskGroup> get() = when (tab) {
-        TaskTab.Today -> TasksLogic.today(shown, today)
-        TaskTab.Upcoming -> TasksLogic.upcoming(shown, today)
-        TaskTab.All -> TasksLogic.allList(shown.filter(keep), chip, archived.filter(keep))
-    }
+    val groups: List<TaskGroup> get() = words?.let { w ->
+        when (tab) {
+            TaskTab.Today -> TasksLogic.today(w, shown, today)
+            TaskTab.Upcoming -> TasksLogic.upcoming(w, shown, today)
+            TaskTab.All -> TasksLogic.allList(w, shown.filter(keep), chip, archived.filter(keep))
+        }
+    } ?: emptyList()
+}
+
+/** The briefing read from this phone's HQ and a server HQ, each with when the phone last read it. A server part read from the saved copy is [serverStale]. */
+data class AwayUi(
+    val phone: Away? = null,
+    val phoneAtMs: Long? = null,
+    val server: Away? = null,
+    val serverHost: String? = null,
+    val serverAtMs: Long? = null,
+    val serverStale: Boolean = false,
+    val open: Boolean = false,
+    /** The failure line shown when this phone's HQ could not be read and nothing was read before; null otherwise. */
+    @androidx.annotation.StringRes val phoneFailure: Int? = null,
+) {
+    val hasNews: Boolean get() = phone?.hasNews == true || server?.hasNews == true
 }
 
 class TasksActions(
@@ -145,11 +169,14 @@ class TasksActions(
     val onBulkPrompt: (String?) -> Unit = {},
     val onBulk: (Bulk) -> Unit = {},
     val onBulkAsk: (Bulk?) -> Unit = {},
+    val onAway: (Boolean) -> Unit = {},
+    val onAwayInitiative: (String) -> Unit = {},
+    val onAwayToday: () -> Unit = {},
 )
 
 class TasksViewModel(app: Application) : AndroidViewModel(app) {
     private val client = HqServices.get(app).client
-    private val _state = MutableStateFlow(TasksUi())
+    private val _state = MutableStateFlow(TasksUi(words = example.hq.spike.ui.shell.Words.of(app)))
     val state: StateFlow<TasksUi> = _state
     private var frozen = false
     private var undo: (suspend () -> Unit)? = null
@@ -173,14 +200,96 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
         onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
         onBulkPrompt = { p -> _state.update { it.copy(bulkPrompt = p) } }, onBulk = ::askBulk, onBulkAsk = { c -> if (c == null) _state.update { it.copy(bulkAsk = null) } else runBulk(c) },
+        onAway = ::openAway,
+        onAwayInitiative = { id -> _state.update { it.copy(tab = TaskTab.All, chip = AllChip.Done, scope = TaskScope.Initiative(id), selected = emptySet(), away = it.away.copy(open = false)) } },
+        onAwayToday = { _state.update { it.copy(tab = TaskTab.Today, away = it.away.copy(open = false)) } },
     )
 
+    private val saved = example.hq.spike.data.SavedCopy.of(app)
+    private var awayReadAt = 0L
+
     init {
+        loadSavedAway()
         viewModelScope.launch {
             while (true) {
                 if (!frozen) refresh()
+                if (!frozen && _state.value.tab == TaskTab.Today) readAway()
                 delay(POLL_MS)
             }
+        }
+        // Every time HQ turns Connected the briefing is read again, whatever the clock says.
+        viewModelScope.launch {
+            var was = false
+            HqServices.get(app).status.collect { st ->
+                val live = st == example.hq.spike.data.Connection.Connected
+                if (live && !was && !frozen) readAway(force = true)
+                was = live
+            }
+        }
+    }
+
+    private fun openAway(open: Boolean) {
+        _state.update { it.copy(away = it.away.copy(open = open)) }
+        if (open) viewModelScope.launch { readAway() }
+    }
+
+    /** What was saved on the phone is shown at once, so the card is there before HQ answers and when it cannot. */
+    private fun loadSavedAway() {
+        val phone = saved.read(AWAY_PHONE)
+        val server = saved.read(AWAY_SERVER)
+        if (phone == null && server == null) return
+        _state.update {
+            it.copy(away = it.away.copy(
+                phone = phone?.let { s -> Away.parse(s.body) }, phoneAtMs = phone?.atMs,
+                server = server?.let { s -> Away.parse(s.body) }, serverAtMs = server?.atMs, serverHost = server?.body?.optString("host")?.takeIf { h -> h.isNotEmpty() }, serverStale = server != null,
+            ))
+        }
+    }
+
+    /** Reads the briefing from this phone's HQ and from a server HQ, at most every two minutes unless [force]. A failed read keeps the saved copy. */
+    private suspend fun readAway(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - awayReadAt < AWAY_EVERY_MS) return
+        awayReadAt = now
+        val app = getApplication<Application>()
+        try {
+            val body = client.verificationBriefing(AWAY_HOURS)
+            if (body == null) {
+                saved.forget(AWAY_PHONE)
+                _state.update { it.copy(away = it.away.copy(phone = null, phoneAtMs = null, phoneFailure = null)) }
+            } else {
+                saved.write(AWAY_PHONE, example.hq.spike.data.SavedCopy.Source.Phone, body, now)
+                _state.update { it.copy(away = it.away.copy(phone = Away.parse(body), phoneAtMs = now, phoneFailure = null)) }
+            }
+        } catch (e: HqUnavailable) {
+            // What is on screen is what was last read, with its time; with nothing read yet the page says why.
+            val failure = AwayWords.loadFailure(HqServices.get(app).status.value)
+            _state.update { it.copy(away = it.away.copy(phoneFailure = failure)) }
+        }
+        val server = withContext(kotlinx.coroutines.Dispatchers.IO) { example.hq.spike.ServerHq.current(app) }
+        if (server == null) {
+            _state.update { it.copy(away = it.away.copy(server = null, serverAtMs = null, serverHost = null, serverStale = false)) }
+            return
+        }
+        val host = java.net.URI(server.address).host
+        val reply = try {
+            withContext(kotlinx.coroutines.Dispatchers.IO) { example.hq.spike.ServerHq.call(server.address, "/api/verification/briefing?hours=$AWAY_HOURS", server.token, null, null) }
+        } catch (e: java.io.IOException) { null }
+        when {
+            reply != null && reply.status == HTTP_OK -> {
+                val body = JSONObject(reply.body).put("host", host)
+                saved.write(AWAY_SERVER, example.hq.spike.data.SavedCopy.Source.Server, body, now)
+                _state.update { it.copy(away = it.away.copy(server = Away.parse(body), serverAtMs = now, serverHost = host, serverStale = false)) }
+            }
+            reply != null && reply.status == HTTP_NOT_FOUND -> {
+                saved.forget(AWAY_SERVER)
+                _state.update { it.copy(away = it.away.copy(server = null, serverAtMs = null, serverHost = null, serverStale = false)) }
+            }
+            reply != null && reply.status == HTTP_UNAUTHORIZED -> {
+                example.hq.spike.ServerHq.markSignedOut(app)
+                _state.update { it.copy(away = it.away.copy(server = null, serverAtMs = null, serverHost = null, serverStale = false)) }
+            }
+            else -> _state.update { it.copy(away = it.away.copy(serverStale = it.away.server != null || it.away.serverAtMs != null)) }
         }
     }
 
@@ -231,7 +340,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             val failedIds = picked.zip(results).filter { it.second is Applied.Failed }.mapTo(HashSet()) { it.first.id }
             refreshSeq++
             _state.update { it.copy(bulking = false, selected = failedIds) }
-            say(BulkEdit.summary(change, results))
+            val moved = picked.zip(results).filter { it.second is Applied.Changed }.map { it.first }
+            if (change == Bulk.Status("complete") && moved.isNotEmpty() && failedIds.isEmpty()) {
+                val line = getApplication<Application>().getString(R.string.bulk_done_line, moved.size.toString())
+                say(line, getApplication<Application>().getString(R.string.undo)) {
+                    moved.forEach { t -> BulkEdit.patchFor(Bulk.Status(t.status), t.copy(status = "complete"))?.let { client.patchTask(t.id, it) } }
+                    refresh()
+                }
+            } else say(BulkEdit.summary(example.hq.spike.ui.shell.Words.of(getApplication()), change, results))
             refresh()
         }
     }
@@ -250,6 +366,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { if (it.bulking) it else it.copy(tab = tab, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
         // Coming to All reads the helpers working now, which are not read while another tab shows.
         if (tab == TaskTab.All) viewModelScope.launch { refresh() }
+        if (tab == TaskTab.Today) viewModelScope.launch { readAway() }
     }
 
     /** The sheet opens at once with the last tree it read; the tree is read again each time, since a space or an initiative can appear with any new task. */
@@ -296,10 +413,10 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.restoreTask(t.id)
                 _state.update { it.copy(detail = null, archived = it.archived.filter { a -> a.id != t.id }) }
-                say("Task restored")
+                say(w().s(R.string.tasks_task_restored))
                 refresh()
             } catch (e: HqUnavailable) {
-                say(why(e, "Could not restore it. HQ is not answering."))
+                say(why(e, R.string.tasks_restore_no_reply))
             } finally {
                 restoring.remove(t.id)
             }
@@ -326,18 +443,20 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(hidden = it.hidden - id) }
     }
 
-    private fun why(e: HqUnavailable, notAnswering: String) = when (e.status) {
-        HTTP_CONFLICT -> "Changed meanwhile. Updated."
-        HTTP_BAD_REQUEST -> "HQ would not accept that."
-        HTTP_NOT_FOUND -> "That task is not there any more."
+    private fun w() = example.hq.spike.ui.shell.Words.of(getApplication<Application>())
+
+    private fun why(e: HqUnavailable, notAnswering: Int) = w().s(when (e.status) {
+        HTTP_CONFLICT -> R.string.tasks_changed_meanwhile
+        HTTP_BAD_REQUEST -> R.string.tasks_not_accepted
+        HTTP_NOT_FOUND -> R.string.tasks_task_gone
         else -> notAnswering
-    }
+    })
 
     private fun say(text: String, action: String? = null, undoWith: (suspend () -> Unit)? = null) {
         undo = undoWith
         lineJob?.cancel()
         _state.update { it.copy(line = TaskLine(text, action)) }
-        lineJob = viewModelScope.launch { delay(LINE_MS); _state.update { it.copy(line = null) }; undo = null }
+        lineJob = viewModelScope.launch { delay(Undo.millis(getApplication())); _state.update { it.copy(line = null) }; undo = null }
     }
 
     /** Finishes a task at once and offers Undo; a 409 says it changed meanwhile and reloads. */
@@ -347,7 +466,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.patchTask(t.id, JSONObject().put("status", "complete").put("expected_status", t.status))
                 succeeded(t.id)
-                say("Done: ${t.title.take(TITLE_IN_LINE)}", "Undo") {
+                say(w().s(R.string.tasks_done_line, t.title.take(TITLE_IN_LINE)), w().s(R.string.undo)) {
                     val back = JSONObject().put("status", t.status).put("expected_status", "complete")
                     // Leaving "blocked" clears the reason, so it goes back with the status.
                     if (t.status == "blocked") t.blockedReason?.let { back.put("blocked_reason", it) }
@@ -356,7 +475,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: HqUnavailable) {
                 failed(t.id)
-                say(why(e, "Could not finish it. HQ is not answering."))
+                say(why(e, R.string.tasks_finish_no_reply))
                 refresh()
             }
         }
@@ -370,14 +489,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.patchTask(t.id, JSONObject().put("start_date", date.toString()))
                 succeeded(t.id)
-                say("Moved to tomorrow", "Undo") {
+                say(w().s(R.string.tasks_moved_tomorrow), w().s(R.string.undo)) {
                     client.patchTask(t.id, JSONObject().put("start_date", t.startDate ?: JSONObject.NULL))
                     refresh()
                 }
                 refresh()
             } catch (e: HqUnavailable) {
                 failed(t.id)
-                say(if (e.status == HTTP_BAD_REQUEST) "It is due before tomorrow, so it cannot move." else why(e, "Could not move it. HQ is not answering."))
+                say(if (e.status == HTTP_BAD_REQUEST) w().s(R.string.tasks_due_before_tomorrow) else why(e, R.string.tasks_move_no_reply))
             }
         }
     }
@@ -387,7 +506,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         undo = null
         lineJob?.cancel()
         _state.update { it.copy(line = null) }
-        viewModelScope.launch { try { action() } catch (e: HqUnavailable) { say("Could not undo that. HQ is not answering.") } }
+        viewModelScope.launch { try { action() } catch (e: HqUnavailable) { say(w().s(R.string.tasks_undo_no_reply)) } }
     }
 
     /**
@@ -397,7 +516,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     fun openRef(ref: String, onMissing: () -> Unit) {
         viewModelScope.launch {
             val task = _state.value.tasks.firstOrNull { it.displayId == ref } ?: run { refresh(); _state.value.tasks.firstOrNull { it.displayId == ref } }
-            if (task != null) open(task) else { say("Could not find $ref in your tasks."); onMissing() }
+            if (task != null) open(task) else { say(w().s(R.string.tasks_not_found_ref, ref)); onMissing() }
         }
     }
 
@@ -405,7 +524,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     fun openById(id: String, onMissing: () -> Unit) {
         viewModelScope.launch {
             val task = _state.value.tasks.firstOrNull { it.id == id } ?: run { refresh(); _state.value.tasks.firstOrNull { it.id == id } }
-            if (task != null) open(task) else { say("Could not find that task."); onMissing() }
+            if (task != null) open(task) else { say(w().s(R.string.tasks_not_found)); onMissing() }
         }
     }
 
@@ -430,7 +549,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 detailOf(id) { it.copy(task = updated, busy = false) }
                 refresh()
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = why(e, "Could not save. HQ is not answering.")) }
+                detailOf(id) { it.copy(busy = false, error = why(e, R.string.tasks_save_no_reply)) }
                 if (e.status == HTTP_CONFLICT) refresh()
             }
         }
@@ -447,7 +566,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.addTaskComment(id, sent)
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = "Could not send it back. HQ is not answering.") }
+                detailOf(id) { it.copy(busy = false, error = w().s(R.string.tasks_send_back_no_reply)) }
                 return@launch
             }
             // The note is in, so it is not typed again if the move below fails.
@@ -455,13 +574,13 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.patchTask(id, JSONObject().put("status", "in_progress").put("expected_status", "ready_for_review"))
                 closeIfOpen(id)
-                say("Sent back to hq")
+                say(w().s(R.string.tasks_sent_back))
             } catch (e: HqUnavailable) {
                 if (e.status == HTTP_CONFLICT) {
                     closeIfOpen(id)
-                    say("Changed meanwhile. Your note was added.")
+                    say(w().s(R.string.tasks_changed_note_added))
                 } else {
-                    detailOf(id) { it.copy(busy = false, prompt = null, error = "Your note was added, but the task did not move. Use the status button to move it.") }
+                    detailOf(id) { it.copy(busy = false, prompt = null, error = w().s(R.string.tasks_note_added_not_moved)) }
                 }
             }
             refresh()
@@ -480,7 +599,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 refresh()
             } catch (e: HqUnavailable) {
                 val subs = try { client.tasks(parentId = parent) } catch (e2: HqUnavailable) { null }
-                detailOf(parent) { d -> d.copy(subtasks = subs ?: d.subtasks, error = why(e, "Could not save. HQ is not answering.")) }
+                detailOf(parent) { d -> d.copy(subtasks = subs ?: d.subtasks, error = why(e, R.string.tasks_save_no_reply)) }
             }
         }
     }
@@ -496,7 +615,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 // The key follows the words, so sending the same ones again after a lost answer adds nothing twice, and different ones are new.
                 client.createTask(JSONObject().put("title", sent).put("parent_task_id", id).put("created_by", "operator").put("external_id", "${d.subKey}-${sent.hashCode()}"))
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = why(e, "Could not add it. HQ is not answering.")) }
+                detailOf(id) { it.copy(busy = false, error = why(e, R.string.tasks_add_sub_no_reply)) }
                 return@launch
             }
             val subs = try { client.tasks(parentId = id) } catch (e: HqUnavailable) { null }
@@ -515,7 +634,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.addTaskComment(id, sent)
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = why(e, "Could not post the comment. HQ is not answering.")) }
+                detailOf(id) { it.copy(busy = false, error = why(e, R.string.tasks_comment_no_reply)) }
                 return@launch
             }
             val comments = try { client.taskComments(id) } catch (e: HqUnavailable) { null }
@@ -531,10 +650,10 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.archiveTask(t.id)
                 succeeded(t.id)
-                say("Task archived", "Undo") { client.restoreTask(t.id); refresh() }
+                say(w().s(R.string.tasks_task_archived), w().s(R.string.undo)) { client.restoreTask(t.id); refresh() }
             } catch (e: HqUnavailable) {
                 failed(t.id)
-                say(if (e.status == HTTP_BAD_REQUEST && t.subtaskCount > 0) "Archive its sub-tasks first." else why(e, "Could not archive it. HQ is not answering."))
+                say(if (e.status == HTTP_BAD_REQUEST && t.subtaskCount > 0) w().s(R.string.tasks_archive_subs_first) else why(e, R.string.tasks_archive_no_reply))
             }
         }
     }
@@ -552,7 +671,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun saveQuick() {
         val q = _state.value.quick ?: return
-        val parsed = QuickAdd.parse(q.text, LocalDate.now())
+        val parsed = QuickAdd.parse(w(), q.text, LocalDate.now())
         if (parsed.title.isBlank() || q.saving) return
         _state.update { it.copy(quick = q.copy(saving = true, error = null)) }
         viewModelScope.launch {
@@ -571,20 +690,26 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(quick = null) }
                 say(
                     when {
-                        repo != null -> "Task added for the edge worker"
-                        q.repo != null -> "Task added, but not for the worker: ${q.repo} is no longer allowed"
-                        else -> "Task added"
+                        repo != null -> w().s(R.string.tasks_task_added_edge)
+                        q.repo != null -> w().s(R.string.tasks_task_added_no_code, q.repo)
+                        else -> w().s(R.string.tasks_task_added)
                     },
                 )
                 refresh()
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(quick = it.quick?.copy(saving = false, error = why(e, "Could not add it. HQ is not answering."))) }
+                _state.update { it.copy(quick = it.quick?.copy(saving = false, error = why(e, R.string.tasks_add_sub_no_reply))) }
             }
         }
     }
 
     private companion object {
         const val POLL_MS = 30_000L
+        const val AWAY_EVERY_MS = 120_000L
+        const val AWAY_HOURS = 24
+        const val AWAY_PHONE = "away_phone"
+        const val AWAY_SERVER = "away_server"
+        const val HTTP_OK = 200
+        const val HTTP_UNAUTHORIZED = 401
         const val LINE_MS = 5_000L
         const val TITLE_IN_LINE = 40
         const val HTTP_BAD_REQUEST = 400

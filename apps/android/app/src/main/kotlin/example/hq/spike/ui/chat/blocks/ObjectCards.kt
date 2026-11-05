@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -89,7 +91,7 @@ fun ReadNotes(paths: List<String>, stateOf: (String) -> ChipState, onOpen: (Stri
     val shown = if (all || paths.size <= FOLD_AFTER + 1) paths else paths.take(FOLD_AFTER)
     Column {
         Text(
-            (if (paths.size == 1) "Read 1 note" else "Read ${paths.size} notes").uppercase(),
+            androidx.compose.ui.res.pluralStringResource(R.plurals.chat_read_notes, paths.size, paths.size).uppercase(),
             style = HqType.Badge.copy(letterSpacing = 0.06.em), color = Mts.InkMuted,
         )
         FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -151,6 +153,6 @@ fun FileCardView(file: Attachment, onOpen: () -> Unit, modifier: Modifier = Modi
         Box(
             Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 12.dp),
             contentAlignment = Alignment.Center,
-        ) { Text("Open", style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
+        ) { Text(stringResource(R.string.notice_action_open), style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
     }
 }

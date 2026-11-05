@@ -3,7 +3,15 @@ package example.hq.spike.ui.inbox
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import example.hq.spike.NotifAccess
+import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.data.StoredMessage
+import example.hq.spike.voice.VoiceTurn
+import example.hq.spike.ui.shell.ClientRestore
+import example.hq.spike.ui.shell.Undo
+import example.hq.spike.ui.shell.UndoKind
+import example.hq.spike.ui.shell.UndoResult
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.ui.helpers.AnswerCheck
 import example.hq.spike.ui.helpers.HelperWords
@@ -26,6 +34,9 @@ data class DoneEntry(val id: String, val title: String, val createdAt: String)
 
 data class InboxLine(val text: String, val action: String? = null)
 
+/** The Needs tab's banner while notifications cannot reach the owner: what waited here, and what waits on a server HQ. */
+data class InboxBanner(val waited: Int, val server: Int)
+
 data class InboxUi(
     val loaded: Boolean = false,
     val offline: Boolean = false,
@@ -39,10 +50,16 @@ data class InboxUi(
     val cleared: Set<String> = emptySet(),
     val line: InboxLine? = null,
     val checkedAt: String = "",
+    val banner: InboxBanner? = null,
+    /** An approval that was just allowed: the page that says what happens next and offers Keep going. */
+    val allowed: Allowed? = null,
 ) {
     val shownNeeds: List<InboxCard> get() = needs.filter { it.id !in cleared }
     val shownUpdates: List<InboxCard> get() = updates.filter { it.id !in cleared }
 }
+
+/** A voice approval just allowed: [at] is the time it was allowed, [sent] after Keep going has been sent. */
+data class Allowed(val card: InboxCard, val at: String, val sent: Boolean = false)
 
 class InboxActions(
     val onTab: (InboxTab) -> Unit = {},
@@ -53,6 +70,10 @@ class InboxActions(
     val onClearAll: () -> Unit = {},
     val onUndo: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
+    val onBannerNotNow: () -> Unit = {},
+    var onServerOpen: () -> Unit = {},
+    val onKeepGoing: (Allowed) -> Unit = {},
+    val onAllowedDone: () -> Unit = {},
 )
 
 class InboxViewModel(app: Application) : AndroidViewModel(app) {
@@ -60,12 +81,15 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(InboxUi())
     val state: StateFlow<InboxUi> = _state
     private var clearing: Job? = null
+    private var lastCleared: List<InboxCard> = emptyList()
     private var frozen = false
 
     val actions = InboxActions(
         onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onNotNow = { answer(it, allow = false) },
-        onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), "Update cleared") },
-        onClearAll = { clear(_state.value.shownUpdates, "Updates cleared") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
+        onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), getApplication<Application>().getString(R.string.undo_update_cleared)) },
+        onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
+        onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
+        onKeepGoing = ::keepGoing, onAllowedDone = { _state.update { it.copy(allowed = null) } },
     )
 
     init {
@@ -93,7 +117,16 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     /** How many things are waiting on the owner, for the badge on the nav bar. */
     val badge: Int get() = _state.value.shownNeeds.size
 
+    /** Re-reads whether the banner shows: on every poll and when the app comes back from Android settings. */
+    fun refreshBanner() {
+        if (frozen) return
+        val c = getApplication<Application>()
+        val banner = NotifAccess.banner(NotifAccess.read(c), NotifAccess.snoozeUntil(c), System.currentTimeMillis(), NotifAccess.waited(c))
+        _state.update { it.copy(banner = banner) }
+    }
+
     suspend fun refresh() {
+        refreshBanner()
         val pending = try { client.notifications("pending", PENDING_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
         if (pending == null) {
@@ -104,6 +137,14 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         if (frozen) return
         val lists = inboxLists(pending.items, history?.items.orEmpty())
         _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
+    }
+
+    /** One follow-up in the same chat, marked spoken: HQ stopped to wait for the OK and this asks it to finish. */
+    private fun keepGoing(a: Allowed) {
+        val thread = a.card.threadId ?: return
+        val words = getApplication<Application>().getString(R.string.chat_approval_followup)
+        val sent = HqServices.get(getApplication()).connection.sendChat(words, thread, VoiceTurn.newClientId(), source = StoredMessage.SPOKEN)
+        if (sent) _state.update { it.copy(allowed = it.allowed?.copy(sent = true)) }
     }
 
     private fun answer(card: InboxCard, allow: Boolean) {
@@ -119,14 +160,20 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
                     if (card.kind == CardKind.HelperAsks && card.sessionId != null && !answerHelper(card, if (allow) "enter" else "esc")) return@launch
                     client.answerNotification(card.id, if (allow) "approve" else "reject")
                 }
-                _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine(if (allow) "Allowed." else "Not now. Nothing was done.")) }
+                val spoken = allow && card.kind == CardKind.Approval && card.quote != null && card.threadId != null
+                _state.update {
+                    it.copy(
+                        answering = it.answering - card.id, details = null, line = InboxLine(if (allow) "Allowed." else "Not now. Nothing was done."),
+                        allowed = if (spoken) Allowed(card, InboxWords.clock(java.time.OffsetDateTime.now().toString())) else it.allowed,
+                    )
+                }
                 refresh()
             } catch (e: HqUnavailable) {
                 if (e.message?.contains("HTTP 409") == true) {
                     _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine("Already answered.")) }
                     refresh()
                 } else {
-                    _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed("Couldn't send your answer. HQ didn't reply. It may be restarting."))) }
+                    _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed("Couldn't send your answer. HQ didn't answer in time. It may be restarting."))) }
                 }
             }
         }
@@ -137,7 +184,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         val screen = client.helperScreen(card.sessionId!!, CHECK_LINES)
         val check = HelperWords.checkAnswer(HelperWords.blocked(card.excerpt), screen.lines, key, screen.live)
         if (check != AnswerCheck.Ok) {
-            _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed(HelperWords.checkWords(check)))) }
+            _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed(HelperWords.checkWords(example.hq.spike.ui.shell.Words.of(getApplication<Application>()), check)))) }
             refresh()
             return false
         }
@@ -151,36 +198,38 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    /** Hides the updates now and dismisses them after a few seconds; Undo inside that time puts them back. */
+    /** Dismisses at once; Undo inside the window restores them on the server. */
     private fun clear(cards: List<InboxCard>, text: String) {
         if (cards.isEmpty()) return
         clearing?.cancel()
-        flushCleared()
-        val ids = cards.map { it.id }.toSet()
-        _state.update { it.copy(cleared = ids, line = InboxLine(text, "Undo")) }
+        val app = getApplication<Application>()
+        val ids = cards.map { it.id }
+        val line = if (ids.size == 1) text else app.resources.getQuantityString(R.plurals.updates_cleared, ids.size, ids.size)
+        _state.update { it.copy(line = InboxLine(line, app.getString(R.string.undo)), updates = it.updates.filter { u -> u.id !in ids }) }
+        lastCleared = cards
         clearing = viewModelScope.launch {
-            delay(UNDO_MS)
-            flushCleared()
-        }
-    }
-
-    private fun flushCleared() {
-        val ids = _state.value.cleared
-        if (ids.isEmpty()) return
-        _state.update { it.copy(cleared = emptySet(), line = null, updates = it.updates.filter { u -> u.id !in ids }) }
-        viewModelScope.launch {
             ids.forEach { id -> try { client.answerNotification(id, "dismiss") } catch (e: HqUnavailable) { /* it shows again on the next refresh */ } }
+            delay(Undo.millis(app))
+            lastCleared = emptyList()
+            _state.update { it.copy(line = null) }
         }
     }
 
     private fun undo() {
         clearing?.cancel()
-        _state.update { it.copy(cleared = emptySet(), line = null) }
+        val cards = lastCleared
+        lastCleared = emptyList()
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            var late = false
+            cards.forEach { c -> if (Undo.restore(ClientRestore(client), UndoKind.Notification, c.id) == UndoResult.TooLate) late = true }
+            _state.update { it.copy(line = if (late) InboxLine(Undo.failLine(app, UndoResult.TooLate).orEmpty()) else null, updates = if (late) it.updates else (it.updates + cards).distinctBy { u -> u.id }) }
+            refresh()
+        }
     }
 
     private companion object {
         const val POLL_MS = 20_000L
-        const val UNDO_MS = 5_000L
         const val HISTORY_LIMIT = 200
         const val PENDING_LIMIT = 500
         /** More lines than the Helpers poll reads, so the check never shares its cached read. */

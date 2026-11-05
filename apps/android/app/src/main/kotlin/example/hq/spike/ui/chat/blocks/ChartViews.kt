@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.theme.ClearSans
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -297,5 +299,5 @@ fun ChartErrorCard(reason: String, source: String) {
 
 @Composable
 fun DrawingChart() {
-    BlockFrame { Text("Drawing the chart…", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(12.dp)) }
+    BlockFrame { Text(stringResource(R.string.chat_drawing_the_chart), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(12.dp)) }
 }

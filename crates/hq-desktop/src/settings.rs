@@ -30,6 +30,19 @@ pub struct Settings {
     pub device_name: String,
     /// The `hq` program to run. Unset: next to the app, then `~/bin`, `/usr/local/bin`, `PATH`.
     pub hq_path: Option<PathBuf>,
+    /// "Look for helper updates": off unless the person turns it on.
+    pub look_for_helper_updates: bool,
+    /// The one folder "Try it" runs a helper in. Unset: `~/.hq/desktop/try-it`.
+    pub try_it_dir: Option<PathBuf>,
+    /// How long HQ usually takes to start here, the median of the last starts. Kept by the app,
+    /// never by the page: a saved copy from the page cannot change it.
+    pub usual_start_secs: Option<u64>,
+    /// The last few start times behind `usual_start_secs`, newest last. Kept by the app.
+    pub recent_start_secs: Vec<u64>,
+    /// The day (`YYYY-MM-DD`) the Connection sheet last opened by itself. Kept by the app.
+    pub connection_sheet_day: Option<String>,
+    /// Set once the Claude entries that pointed into the old HQ.app have been looked at. Kept by the app.
+    pub bundle_rename_handled: bool,
     /// Lend this computer's model (Ollama) to the hubs it is paired with. Off unless turned on.
     pub share_model: bool,
     /// The model hubs should use. Unset: the first one Ollama lists.
@@ -45,6 +58,12 @@ impl Default for Settings {
             relay: RELAY_NONE.into(),
             device_name: String::new(),
             hq_path: None,
+            look_for_helper_updates: false,
+            try_it_dir: None,
+            usual_start_secs: None,
+            recent_start_secs: Vec::new(),
+            connection_sheet_day: None,
+            bundle_rename_handled: false,
             share_model: false,
             shared_model: None,
         }
@@ -69,7 +88,20 @@ impl Settings {
         {
             bail!("relay must be none, default or an https:// relay URL");
         }
+        if self.try_it_dir.as_deref().is_some_and(|d| !d.is_absolute()) {
+            bail!("try_it_dir must be an absolute path");
+        }
         Ok(())
+    }
+
+    /// These settings with the fields only the app writes taken from `kept`, so a stale copy
+    /// sent back by the page cannot undo what the app learned in the meantime.
+    pub fn keeping_app_fields(mut self, kept: &Settings) -> Self {
+        self.usual_start_secs = kept.usual_start_secs;
+        self.recent_start_secs = kept.recent_start_secs.clone();
+        self.connection_sheet_day = kept.connection_sheet_day.clone();
+        self.bundle_rename_handled = kept.bundle_rename_handled;
+        self
     }
 
     /// The saved settings, or the defaults when there is no file yet. A file that cannot be read
@@ -143,6 +175,40 @@ mod tests {
         };
         s.save(dir.path()).unwrap();
         assert_eq!(Settings::load(dir.path()).unwrap(), s);
+    }
+
+    #[test]
+    fn the_helper_settings_start_off_and_the_try_it_folder_is_absolute() {
+        let s = Settings::default();
+        assert!(!s.look_for_helper_updates);
+        assert_eq!(s.try_it_dir, None);
+        assert_eq!(s.usual_start_secs, None);
+        let relative = Settings {
+            try_it_dir: Some("try-it".into()),
+            ..Settings::default()
+        };
+        assert!(relative.validate().is_err());
+    }
+
+    #[test]
+    fn a_page_cannot_overwrite_what_the_app_learned() {
+        let kept = Settings {
+            usual_start_secs: Some(20),
+            recent_start_secs: vec![19, 20, 21],
+            connection_sheet_day: Some("2026-11-05".into()),
+            bundle_rename_handled: true,
+            ..Settings::default()
+        };
+        let from_page = Settings {
+            device_name: "desk".into(),
+            usual_start_secs: Some(1),
+            ..Settings::default()
+        };
+        let merged = from_page.keeping_app_fields(&kept);
+        assert_eq!(merged.device_name, "desk");
+        assert_eq!(merged.usual_start_secs, Some(20));
+        assert_eq!(merged.recent_start_secs, vec![19, 20, 21]);
+        assert!(merged.bundle_rename_handled);
     }
 
     #[test]

@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -45,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.inbox.PrimaryButton
 import example.hq.spike.ui.shell.HqIcons
@@ -57,7 +59,8 @@ private const val LINE_MS = 4_000L
 
 /** The Helpers place: filter chips, a card for each helper, finished ones folded into one row, and a button to start another. */
 @Composable
-fun HelpersScreen(ui: HelpersUi, actions: HelpersActions) {
+fun HelpersScreen(shownUi: HelpersUi, actions: HelpersActions) {
+    val ui = shownUi.copy(words = example.hq.spike.ui.shell.rememberWords())
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Chips(ui, actions)
@@ -74,7 +77,7 @@ private fun Chips(ui: HelpersUi, actions: HelpersActions) {
         HelperFilter.entries.forEach { f ->
             val on = f == ui.filter
             val count = if (f == HelperFilter.All) null else ui.count(f)
-            val label = when (f) { HelperFilter.All -> "All"; HelperFilter.Needs -> "Needs your OK"; HelperFilter.Working -> "Working"; HelperFilter.Finished -> "Finished" }
+            val label = stringResource(when (f) { HelperFilter.All -> R.string.helpers_filter_all; HelperFilter.Needs -> R.string.helpers_needs_your_ok; HelperFilter.Working -> R.string.helpers_filter_working; HelperFilter.Finished -> R.string.helpers_finished })
             Box(
                 Modifier.heightIn(min = 48.dp).clip(CircleShape).selectable(selected = on, role = Role.Tab, onClick = { actions.onFilter(f) }),
                 contentAlignment = Alignment.Center,
@@ -93,10 +96,17 @@ private fun Feed(ui: HelpersUi, actions: HelpersActions) {
     val shown = ui.cards.filter { matches(it, ui.filter) }
     val live = shown.filter { it.state != HelperState.Finished && it.state != HelperState.Stopped }
     val past = shown.filter { it.state == HelperState.Finished || it.state == HelperState.Stopped }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (ui.offline) item { Text("HQ is not running. These are the last helpers it had.", style = HqType.BodySm, color = Mts.Amber) }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Helpers, list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (shown.isEmpty() && ui.loaded && !ui.offline) item { Text(emptyWords(ui.filter), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(vertical = 8.dp)) }
-        items(live, key = { it.id }) { HelperCardView(it, actions) }
+        val own = live.filter { it.own }
+        val others = live.filter { !it.own }
+        items(others, key = { it.id }) { HelperCardView(it, actions) }
+        if (own.isNotEmpty()) {
+            item(key = "own-title") { Text(stringResource(R.string.helpers_own_work).uppercase(), style = HqType.Group, color = Mts.InkMuted, modifier = Modifier.padding(top = 8.dp)) }
+            items(own, key = { it.id }) { HelperCardView(it, actions) }
+        }
         if (past.isNotEmpty()) {
             val open = ui.finishedOpen || ui.filter == HelperFilter.Finished
             item(key = "finished") { FinishedRow(past, open) { actions.onToggleFinished() } }
@@ -105,12 +115,13 @@ private fun Feed(ui: HelpersUi, actions: HelpersActions) {
     }
 }
 
-private fun emptyWords(f: HelperFilter) = when (f) {
-    HelperFilter.All -> "No helpers yet. Start one and it shows up here."
-    HelperFilter.Needs -> "Nothing is waiting for your OK."
-    HelperFilter.Working -> "No helper is working right now."
-    HelperFilter.Finished -> "No finished helpers."
-}
+@Composable
+private fun emptyWords(f: HelperFilter) = stringResource(when (f) {
+    HelperFilter.All -> R.string.helpers_empty_all
+    HelperFilter.Needs -> R.string.helpers_empty_needs
+    HelperFilter.Working -> R.string.helpers_empty_working
+    HelperFilter.Finished -> R.string.helpers_empty_finished
+})
 
 @Composable
 private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
@@ -118,28 +129,28 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
     val waiting = c.state == HelperState.NeedsOk
     Column(
         Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (waiting) Mts.Amber else Mts.Hairline, shape)
-            .clickable(role = Role.Button, onClickLabel = "Open helper") { actions.onOpen(c.id) }.padding(16.dp),
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.inbox_open_helper)) { actions.onOpen(c.id) }.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             Text(c.title, style = HqType.BodyBold.copy(fontSize = 17.sp), color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            StatePill(c.state)
+            StatePill(c.state, c.own)
         }
-        Text(listOf("${c.agent} · on ${c.where}", c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(c.line, style = HqType.BodySm, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(listOf(stringResource(R.string.helpers_agent_where, c.agent, c.where), c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
+        Text(c.line, style = HqType.BodySm, color = Mts.Ink)
         if (c.state == HelperState.Working) WorkingBar()
         if (waiting && c.ask != null && HelperWords.canAnswerInline(c.ask)) {
             if (c.ask.kind == AskKind.Command) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Mts.Surface000).padding(horizontal = 10.dp, vertical = 8.dp)) {
                 c.ask.detail.forEach { Text(it, style = HqType.Caption.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp), color = Mts.Ink) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryButton("Allow once", Modifier.weight(1f)) { actions.onAllow(c.sessionId, c.ask) }
-                OutlineButton("Not now", Modifier.weight(1f)) { actions.onNotNow(c.sessionId, c.ask) }
+                PrimaryButton(stringResource(R.string.notice_action_allow_once), Modifier.weight(1f)) { actions.onAllow(c.sessionId, c.ask) }
+                OutlineButton(stringResource(R.string.confirm_not_now), Modifier.weight(1f)) { actions.onNotNow(c.sessionId, c.ask) }
             }
-            Text(HelperWords.allowHint(c.ask), style = SmallText, color = Mts.InkMuted)
+            Text(HelperWords.allowHint(example.hq.spike.ui.shell.rememberWords(), c.ask), style = SmallText, color = Mts.InkMuted)
         } else if (waiting) {
             // What it asks is too long to read here, or cannot be read at all: the owner reads all of it on the helper's own page.
-            PrimaryButton("Open helper", Modifier.fillMaxWidth()) { actions.onOpen(c.id) }
+            PrimaryButton(stringResource(R.string.inbox_open_helper), Modifier.fillMaxWidth()) { actions.onOpen(c.id) }
         }
     }
 }
@@ -170,7 +181,7 @@ internal fun OutlineButton(label: String, modifier: Modifier = Modifier, enabled
 }
 
 @Composable
-internal fun StatePill(state: HelperState) {
+internal fun StatePill(state: HelperState, own: Boolean = false) {
     val (color, spin) = when (state) {
         HelperState.NeedsOk -> Mts.Amber to false
         HelperState.Working -> Mts.BrandBlue to true
@@ -182,7 +193,7 @@ internal fun StatePill(state: HelperState) {
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         if (spin) Spinner(14, color)
-        Text(HelperWords.stateWords(state), style = HqType.NavLabel, color = color, maxLines = 1)
+        Text(HelperWords.stateWords(example.hq.spike.ui.shell.rememberWords(), state, own), style = HqType.NavLabel, color = color)
     }
 }
 
@@ -190,12 +201,12 @@ internal fun StatePill(state: HelperState) {
 private fun FinishedRow(past: List<HelperCard>, open: Boolean, onToggle: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).clickable(role = Role.Button, onClickLabel = if (open) "Hide finished" else "Show finished", onClick = onToggle).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).clickable(role = Role.Button, onClickLabel = stringResource(if (open) R.string.helpers_hide_finished else R.string.helpers_show_finished), onClick = onToggle).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Finished", style = HqType.BodyBold, color = Mts.Ink)
-            Text(listOf(past.first().title, past.first().time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(stringResource(R.string.helpers_finished), style = HqType.BodyBold, color = Mts.Ink)
+            Text(listOf(past.first().title, past.first().time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
         }
         Text("${past.size}", style = HqType.BodySm, color = Mts.InkMuted)
         Icon(if (open) HqIcons.ChevronUp else HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
@@ -207,8 +218,8 @@ private fun PastRow(c: HelperCard, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Hairline, shape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Text(c.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(listOf(HelperWords.stateWords(c.state), c.agent, c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1)
-        if (c.generic && c.folder.isNotBlank()) Text(c.folder, style = SmallText, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(listOf(HelperWords.stateWords(example.hq.spike.ui.shell.rememberWords(), c.state, c.own), c.agent, c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
+        if (c.generic && c.folder.isNotBlank()) Text(c.folder, style = SmallText, color = Mts.InkMuted)
     }
 }
 
@@ -217,7 +228,7 @@ private fun StartButton(modifier: Modifier, onClick: () -> Unit) {
     Row(
         modifier.heightIn(min = 56.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onClick).padding(start = 20.dp, end = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) { Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.OnGreen); Text("Start a helper", style = HqType.BodySmBold, color = Mts.OnGreen) }
+    ) { Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.OnGreen); Text(stringResource(R.string.helpers_start_a_helper), style = HqType.BodySmBold, color = Mts.OnGreen) }
 }
 
 @Composable

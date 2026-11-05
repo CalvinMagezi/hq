@@ -3570,6 +3570,7 @@ version = "0.9.1"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
  "dirs",
  "futures",
  "hostname",
@@ -3908,6 +3909,7 @@ dependencies = [
  "chrono",
  "futures",
  "hq-agent",
+ "hq-backup",
  "hq-bridge",
  "hq-convert",
  "hq-core",
@@ -3922,6 +3924,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "iana-time-zone",
  "instant-acme",
  "libc",
  "rcgen",

@@ -1,12 +1,14 @@
+import { t } from '~/strings'
+
 interface SlashCommandDef {
   name: string
   args?: string
-  description: string
+  description: Parameters<typeof t>[0]
 }
 
 export const SLASH_COMMANDS: SlashCommandDef[] = [
-  { name: '/clear', description: 'Archive this chat and start a new one' },
-  { name: '/topic', args: '<name>', description: 'Archive this chat and start a new one with that name' },
+  { name: '/clear', description: 'chat_slash_clear' },
+  { name: '/topic', args: '<name>', description: 'chat_slash_topic' },
 ]
 
 export function isSlashInput(val: string): boolean {
@@ -51,7 +53,7 @@ export function SlashCommandPalette({ input, onSelect }: Props) {
       }}
     >
       <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b border-white/5 opacity-60" style={{ color: 'var(--accent-green)' }}>
-        Slash Commands
+        {t('chat_slash_heading')}
       </div>
       <div className="max-h-48 overflow-y-auto p-1.5 space-y-1">
         {matches.map((cmd, idx) => (
@@ -68,7 +70,7 @@ export function SlashCommandPalette({ input, onSelect }: Props) {
               {cmd.args && <span className="opacity-40 text-[11px]">{cmd.args}</span>}
             </div>
             <span className="text-[11px] opacity-60 truncate max-w-[200px]" style={{ color: 'var(--text-dim)' }}>
-              {cmd.description}
+              {t(cmd.description)}
             </span>
           </button>
         ))}
