@@ -13,6 +13,14 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 | N4 | Yes: transfer carries the vault; keys, config, bridge key, run mode and preferences stay behind, then the moved-phone flow | 2026-11-05 |
 | N6 | Yes: the safe-mode copy is a plain .zip with no password, for now | 2026-11-05 |
 | N19 | Yes: one catalogue of whole sentences builds the phone's resources and the web's strings | 2026-11-05 |
+| W34 | The claude.ai web connector is retired: remove its row and text from the web entirely (owner, overrides the spec's "keep, off") | 2026-11-05 |
+| N25 | Yes: Search before the balance chip on the phone, as on the web | 2026-11-05 |
+| N22 | Yes: the screen stays on 30 s while HQ is thinking, then sleeps | 2026-11-05 |
+| W44 | "This computer" (not "This PC") for HQ Hub's first tab | 2026-11-05 |
+| WR22 | Yes: rename the bundle to AgentHQ, rewrite only HQ Hub's own Claude entries, say so once | 2026-11-05 |
+| W50 | After this run: no Windows or Linux hub builds now | 2026-11-05 |
+| WR18 | Yes: "Typing to the helper", off by default, Ctrl ] always leaves | 2026-11-05 |
+| Cutover | PR to main when the gates pass, then the CI release on the A32 and install-hq.sh on the laptop | 2026-11-05 |
 | B11 (resolutions.md) | Approved as recommended: "This window", saved copy and outbox keyed by HQ id, "Saved in HQ Hub at 14:32", no web push, HQ Hub system notices | 2026-11-05 |
 
 ## Web wave 0 (live bugs and shared parts)
