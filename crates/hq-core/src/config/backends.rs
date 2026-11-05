@@ -62,6 +62,18 @@ impl BackendKind {
         !matches!(self, BackendKind::GithubCopilotCli)
     }
 
+    /// The variable that holds this kind's key in `config.yaml` terms (`openai_api_key` is
+    /// `OPENAI_API_KEY`), for kinds that have one.
+    pub fn config_key_env(self) -> Option<&'static str> {
+        match self {
+            BackendKind::Openrouter => Some("OPENROUTER_API_KEY"),
+            BackendKind::KimiCode => Some("KIMI_CODE_API_KEY"),
+            BackendKind::AnthropicCompatible => Some("ANTHROPIC_API_KEY"),
+            BackendKind::OpenaiCompatible => Some("OPENAI_API_KEY"),
+            BackendKind::GithubCopilotCli | BackendKind::GithubCopilotApi => None,
+        }
+    }
+
     /// Canonical default endpoint for kinds that have one, else `None`.
     ///
     /// `openai-compatible` has no canonical default: the generic kind's endpoint
@@ -146,6 +158,21 @@ impl BackendEntry {
             .as_deref()
             .map(str::to_string)
             .or_else(|| self.kind.default_endpoint().map(str::to_string))
+    }
+
+    /// Whether a missing `credential_env` value may be filled from the kind's key in
+    /// `config.yaml`. Only when no variable is named, or the named one is that same key: a
+    /// backend that names its own variable must never be sent another service's key.
+    pub fn may_use_config_key(&self) -> bool {
+        match self
+            .credential_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+        {
+            None => true,
+            Some(name) => self.kind.config_key_env() == Some(name),
+        }
     }
 }
 
