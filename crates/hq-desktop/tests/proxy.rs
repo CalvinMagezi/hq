@@ -349,6 +349,11 @@ async fn an_unreachable_hq_is_a_bad_gateway() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        res.headers()[proxy::UPSTREAM_GONE_HEADER],
+        proxy::UPSTREAM_GONE_VALUE,
+        "the window can tell its HQ is gone from an error HQ sent"
+    );
 }
 
 #[tokio::test]

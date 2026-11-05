@@ -324,7 +324,7 @@ async fn forward(state: &ProxyState, req: Request) -> Response {
         Ok(r) => r,
         Err(e) => {
             tracing::debug!("proxy: upstream unreachable: {e}");
-            return StatusCode::BAD_GATEWAY.into_response();
+            return upstream_gone();
         }
     };
     let mut response = Response::builder().status(upstream.status());
@@ -355,6 +355,18 @@ async fn forward(state: &ProxyState, req: Request) -> Response {
     response
         .body(Body::from_stream(upstream.bytes_stream()))
         .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+}
+
+/// Marks the proxy's own 502, so the window can tell "HQ can't be reached" from an error HQ sent.
+pub const UPSTREAM_GONE_HEADER: &str = "x-hq-proxy";
+pub const UPSTREAM_GONE_VALUE: &str = "upstream-gone";
+
+fn upstream_gone() -> Response {
+    (
+        StatusCode::BAD_GATEWAY,
+        [(UPSTREAM_GONE_HEADER, UPSTREAM_GONE_VALUE)],
+    )
+        .into_response()
 }
 
 /// Headers the chat socket's own handshake needs upstream.
@@ -390,7 +402,7 @@ async fn websocket(state: &ProxyState, req: Request) -> Response {
     let connected =
         tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(request)).await;
     let Ok(Ok((upstream, _))) = connected else {
-        return StatusCode::BAD_GATEWAY.into_response();
+        return upstream_gone();
     };
     upgrade.on_upgrade(move |client| pump(client, upstream))
 }

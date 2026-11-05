@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { fetchHello, type Hello, startingSeconds } from '~/lib/hello'
+import { fetchHello, type Hello, helloUpstreamGone, startingSeconds } from '~/lib/hello'
 import { UNREACHABLE_GRACE_MS, useDeviceOnline } from '~/lib/reachability'
 import { needsSignIn, onSignInChange } from '~/lib/hqAuth'
 import { useHQStore } from '~/store/hqStore'
@@ -180,7 +180,7 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
 
   const lite = hello?.edition === 'lite'
   const aiDown = options?.aiDown ?? false
-  const proxyUpstreamGone = options?.proxyUpstreamGone ?? false
+  const proxyUpstreamGone = options?.proxyUpstreamGone ?? helloUpstreamGone()
   const inHub = options?.inHub ?? false
 
   const inputs: ConnectionInputs = {
