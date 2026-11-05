@@ -55,3 +55,22 @@ test('Not now hides the notifications card for 7 days', () => {
   expect(notifyCardHidden(1000 + NOTIFY_HIDE_MS - 1, store)).toBe(true)
   expect(notifyCardHidden(1000 + NOTIFY_HIDE_MS + 1, store)).toBe(false)
 })
+
+test('Done is grouped by day with Today and Yesterday headings', async () => {
+  const { groupByDay } = await import('./inboxCard')
+  const now = Date.UTC(2026, 5, 10, 15)
+  const at = (h: number) => new Date(now - h * 3600_000).toISOString()
+  const g = groupByDay([item({ id: 'a', created_at: at(1) }), item({ id: 'b', created_at: at(2) }), item({ id: 'c', created_at: at(20) })], now, 'UTC')
+  expect(g.map((x) => x.heading)).toEqual([t('chat_group_today'), t('time_yesterday')])
+  expect(g[0].items).toHaveLength(2)
+})
+
+test('an item from a server HQ leads with On your server HQ', async () => {
+  const { serverHqLine } = await import('./inboxCard')
+  expect(serverHqLine(item({ extra: { server_hq: '1', server_hq_name: 'Office' } }))).toBe('On your server HQ · Office')
+  expect(serverHqLine(item())).toBeNull()
+})
+
+test('a helper-supervisor item without a dialog is a stuck helper', () => {
+  expect(cardKind(item({ extra: { source_task: 'session-supervisor' }, kind: 'info' as never }))).toBe('stuck')
+})

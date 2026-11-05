@@ -2,6 +2,7 @@
 // request ran out, why an answer failed, and the notifications card's 7 day "Not now".
 
 import { t } from '~/strings'
+import { dateByAge, displayZone } from './time'
 import type { NotificationItem } from './notificationsApi'
 
 export type CardKind = 'sign_in' | 'question' | 'approval' | 'task_check' | 'stuck' | 'update'
@@ -61,4 +62,39 @@ export function hideNotifyCard(now: number = Date.now(), store: Pick<Storage, 's
   } catch {
     // Blocked storage: the card returns next visit.
   }
+}
+
+/** The line that leads an item a server HQ sent; null for this HQ's own. */
+export function serverHqLine(n: NotificationItem): string | null {
+  const x = n.metadata.extra
+  if (!x?.server_hq) return null
+  return x.server_hq_name ? t('inbox_on_server_hq', { name: x.server_hq_name }) : t('inbox_on_server_hq_bare')
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function dayStamp(ms: number, zone: string): number {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(ms)
+  return Date.parse(`${p}T00:00:00Z`)
+}
+
+/** Heading for one day of the Done tab: Today, Yesterday, then the date. */
+export function dayHeading(createdAt: string, now: number = Date.now(), zone: string = displayZone()): string {
+  const ms = new Date(createdAt).getTime()
+  if (!Number.isFinite(ms)) return t('time_unknown')
+  const days = Math.round((dayStamp(now, zone) - dayStamp(ms, zone)) / DAY_MS)
+  if (days <= 0) return t('chat_group_today')
+  return dateByAge(ms, now, zone)
+}
+
+/** Items in the order given, split under one heading per day. */
+export function groupByDay(items: NotificationItem[], now: number = Date.now(), zone: string = displayZone()): { heading: string; items: NotificationItem[] }[] {
+  const groups: { heading: string; items: NotificationItem[] }[] = []
+  for (const n of items) {
+    const heading = dayHeading(n.created_at, now, zone)
+    const last = groups[groups.length - 1]
+    if (last?.heading === heading) last.items.push(n)
+    else groups.push({ heading, items: [n] })
+  }
+  return groups
 }

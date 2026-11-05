@@ -1,27 +1,21 @@
 import { useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { hasWebToken } from '~/lib/hqAuth'
+import { useSharedConnection } from '~/lib/connection'
 import type { ProviderKeyRow } from '~/lib/settingsApi'
-import { SETUP_PROVIDERS, keyState, replaceProviderKey, type KeyState, type SetupProviderId } from '~/lib/setupApi'
+import { SETUP_PROVIDERS, keyState, replaceProviderKey, type SetupProviderId } from '~/lib/setupApi'
+import { t } from '~/strings'
 
-const STATE_LABEL: Record<KeyState, string> = {
-  env: "Set by the server's environment",
-  configured: 'Configured',
-  not_set: 'Not set',
+/** What a row offers: a button only for a key the web can change, a note for one set where HQ runs. */
+export function keyRowAction(row: ProviderKeyRow, canEdit: boolean): 'add' | 'replace' | 'env' | 'none' {
+  const state = keyState(row)
+  if (row.id === undefined) return 'none'
+  if (state === 'env') return 'env'
+  if (!canEdit) return 'none'
+  return state === 'configured' ? 'replace' : 'add'
 }
 
-/** The state as a word with a dot, so it never rests on colour alone. */
-function KeyStatus({ state }: { state: KeyState }) {
-  const on = state !== 'not_set'
-  return (
-    <span className={`inline-flex items-center gap-2 ${on ? 'text-emerald-300' : 'text-neutral-400'}`}>
-      <span className={`w-2 h-2 rounded-full ${on ? 'bg-emerald-400' : 'bg-neutral-500'}`} aria-hidden="true" />
-      {STATE_LABEL[state]}
-    </span>
-  )
-}
-
-function KeyForm({ provider, name, onSaved, onCancel }: { provider: SetupProviderId; name: string; onSaved: () => void; onCancel: () => void }) {
+function KeyForm({ provider, name, replacing, onSaved, onCancel }: { provider: SetupProviderId; name: string; replacing: boolean; onSaved: () => void; onCancel: () => void }) {
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -36,46 +30,97 @@ function KeyForm({ provider, name, onSaved, onCancel }: { provider: SetupProvide
       await replaceProviderKey(provider, key.trim())
       setKey('')
       onSaved()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'The key could not be saved.')
+    } catch {
+      setError(t('settings_key_bad'))
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2 pb-4">
-      <label htmlFor={inputId} className="text-xs text-neutral-400">
-        New {name} API key
-      </label>
+    <form onSubmit={submit} className="a-card flex flex-col gap-2 mb-3">
+      <b>{t(replacing ? 'settings_key_replace_title' : 'settings_key_add_title', { service: name })}</b>
+      <p className="a-muted a-body-sm">{t('settings_key_sheet_body', { service: name })}</p>
       <input
         id={inputId}
+        aria-label={name}
         type="password"
         autoComplete="off"
         spellCheck={false}
         value={key}
         onChange={(e) => setKey(e.target.value)}
-        className="rounded-lg bg-neutral-900 border border-white/10 px-3 py-2 text-sm text-neutral-100 font-mono"
+        className="a-field font-mono"
       />
       {keyUrl && (
-        <a href={keyUrl} target="_blank" rel="noreferrer" className="text-xs text-neutral-400 underline underline-offset-2 hover:text-neutral-200 self-start">
-          Get a {name} key
+        <a href={keyUrl} target="_blank" rel="noreferrer" className="a-muted a-body-sm underline self-start">
+          {name}
         </a>
       )}
+      <p className="a-muted a-body-sm">{t('settings_key_keeps')}</p>
       <div className="flex flex-wrap gap-3">
-        <button type="submit" disabled={busy || key.trim() === ''} className="hq-btn-ghost disabled:opacity-40">
-          {busy ? 'Testing' : 'Test and save'}
+        <button type="submit" disabled={busy || key.trim() === ''} className="a-btn">
+          {busy ? t('settings_key_checking') : t('settings_key_check_save')}
         </button>
-        <button type="button" onClick={onCancel} disabled={busy} className="hq-btn-ghost disabled:opacity-40">
-          Cancel
+        <button type="button" onClick={onCancel} disabled={busy} className="a-btn secondary">
+          {t('spend_cancel')}
         </button>
       </div>
       {error && (
-        <p role="alert" className="text-xs" style={{ color: 'var(--accent-red)' }}>
+        <p role="alert" className="a-warn-t a-body-sm">
           {error}
         </p>
       )}
     </form>
+  )
+}
+
+interface ViewProps {
+  rows: ProviderKeyRow[]
+  canEdit: boolean
+  reachable: boolean
+  editing: SetupProviderId | null
+  saved: string | null
+  onEdit: (id: SetupProviderId) => void
+  onSaved: (name: string) => void
+  onCancel: () => void
+}
+
+/** The keys as plain words: saved or not set, with no date, since HQ never checks a key on its own. */
+export function KeysView({ rows, canEdit, reachable, editing, saved, onEdit, onSaved, onCancel }: ViewProps) {
+  return (
+    <section id="keys" aria-labelledby="keys-title" className="flex flex-col gap-2">
+      <h2 id="keys-title" className="a-h3">
+        {t('settings_your_keys')}
+      </h2>
+      <p className="a-muted a-body-sm">{canEdit ? t('settings_key_note') : t('settings_key_no_token')}</p>
+      {!reachable && <p className="a-muted a-body-sm">{t('settings_needs_hq_key')}</p>}
+      {rows.map((row) => {
+        const action = keyRowAction(row, canEdit)
+        const id = row.id
+        return (
+          <div key={row.name} className="a-card">
+            <div className="flex items-baseline justify-between gap-4">
+              <b>{row.name}</b>
+              <span className="a-muted">{keyState(row) === 'not_set' ? t('settings_key_not_set') : t('settings_key_saved')}</span>
+              {(action === 'add' || action === 'replace') && editing !== id && id !== undefined && (
+                <button type="button" disabled={!reachable} onClick={() => onEdit(id)} className="a-btn secondary">
+                  {action === 'replace' ? t('settings_key_replace') : t('settings_key_add')}
+                </button>
+              )}
+            </div>
+            {action === 'env' && <p className="a-muted a-body-sm">{t('settings_key_where_runs')}</p>}
+            {id !== undefined && editing === id && (
+              <KeyForm provider={id} name={row.name} replacing={action === 'replace'} onSaved={() => onSaved(row.name)} onCancel={onCancel} />
+            )}
+          </div>
+        )
+      })}
+      {saved && (
+        <p role="status" className="a-body-sm">
+          {saved}
+        </p>
+      )}
+    </section>
   )
 }
 
@@ -84,64 +129,27 @@ export function ProviderKeysSection({ rows }: { rows: ProviderKeyRow[] }) {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState<SetupProviderId | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
-  const canEdit = hasWebToken()
+  const reachable = useSharedConnection() === 'connected'
 
   const onSaved = (name: string) => {
     setEditing(null)
-    setSaved(`${name} key saved. Your next message uses it.`)
+    setSaved(t('settings_key_saved_note', { service: name }))
     void queryClient.invalidateQueries({ queryKey: ['settings'] })
   }
 
   return (
-    <section id="keys" aria-labelledby="keys-title" className="scroll-mt-4">
-      <h2 id="keys-title" className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
-        Provider keys
-      </h2>
-      <div className="hq-card rounded-2xl px-5">
-        <p className="py-3.5 text-xs text-neutral-400 leading-relaxed">
-          {canEdit
-            ? 'A new key is checked with the provider before it is saved, and the model choice stays as it is. Keys are never shown again.'
-            : 'Changing keys from the web needs a web token on the server. Use hq env there instead.'}
-        </p>
-        {rows.map((row) => {
-          const state = keyState(row)
-          const id = row.id
-          const editable = canEdit && id !== undefined && state !== 'env'
-          return (
-            <div key={row.name} className="border-t border-white/10">
-              <div className="flex gap-4 py-3.5 text-sm items-baseline justify-between">
-                <span className="text-neutral-300 shrink-0 max-w-[50%]">{row.name}</span>
-                <span className="flex flex-wrap items-baseline justify-end gap-x-4 gap-y-1 min-w-0">
-                  <KeyStatus state={state} />
-                  {editable && editing !== id && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSaved(null)
-                        setEditing(id)
-                      }}
-                      className="hq-btn-ghost"
-                    >
-                      {state === 'configured' ? 'Replace' : 'Add'}
-                    </button>
-                  )}
-                </span>
-              </div>
-              {state === 'env' && id !== undefined && (
-                <p className="pb-3.5 -mt-1 text-xs text-neutral-400">Change it in the server's environment, then restart HQ.</p>
-              )}
-              {editable && editing === id && (
-                <KeyForm provider={id} name={row.name} onSaved={() => onSaved(row.name)} onCancel={() => setEditing(null)} />
-              )}
-            </div>
-          )
-        })}
-        {saved && (
-          <p role="status" className="py-3 border-t border-white/10 text-xs text-neutral-300">
-            {saved}
-          </p>
-        )}
-      </div>
-    </section>
+    <KeysView
+      rows={rows}
+      canEdit={hasWebToken()}
+      reachable={reachable}
+      editing={editing}
+      saved={saved}
+      onEdit={(id) => {
+        setSaved(null)
+        setEditing(id)
+      }}
+      onSaved={onSaved}
+      onCancel={() => setEditing(null)}
+    />
   )
 }

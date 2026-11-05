@@ -1,99 +1,138 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, type ReactNode } from 'react'
-import { AlertCircle, Loader2, RefreshCw, Trash2 } from 'lucide-react'
-import { toastUndo, toastAlert } from '~/lib/toast'
+import { useState } from 'react'
+import { AlertCircle, MoreHorizontal, RefreshCw, TriangleAlert } from 'lucide-react'
+import { toastAlert, toastUndo } from '~/lib/toast'
 import { failureLine } from '~/lib/version'
-import { t } from '~/strings'
+import { useSharedConnection } from '~/lib/connection'
+import { spendResetLine } from '~/lib/time'
+import { copilotUsageQuery, formatCompact } from '~/lib/copilotUsageApi'
+import { t, tn } from '~/strings'
+import { LimitSheet } from './LimitSheet'
+import {
+  atLimitWords,
+  driverLine,
+  scopeWords,
+  serviceName,
+  spanWords,
+  standingWords,
+  withLimit,
+} from '~/lib/spendLimits'
 import {
   budgetsQuery,
-  exhaustionSentence,
   forecastQuery,
-  PERIOD_ADVERB,
   pct,
   providersQuery,
   saveBudgets,
-  span,
   usd,
-  type BudgetAction,
   type BudgetDef,
-  type BudgetPeriod,
   type BudgetStatus,
   type Driver,
   type ProviderRow,
 } from '~/lib/usageApi'
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="glass-card rounded-2xl p-4 border border-white/10">
-      <h2 className="text-[11px] font-mono uppercase tracking-wider text-neutral-400 mb-3">{title}</h2>
-      <div className="flex flex-col gap-2">{children}</div>
-    </section>
-  )
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-0.5 sm:gap-4 text-xs">
-      <span className="text-neutral-400 flex-shrink-0">{label}</span>
-      <span className="font-mono text-neutral-100 sm:text-right break-all min-w-0">{children}</span>
-    </div>
-  )
-}
-
 const MAX_BAR_PCT = 100
+const SECONDS_TO_MS = 1000
+const MS_PER_HOUR = 3_600_000
 
-function Bar({ value, exceeded }: { value: number; exceeded: boolean }) {
+const hoursUntil = (resetsAt: number) => Math.max(0, (resetsAt * SECONDS_TO_MS - Date.now()) / MS_PER_HOUR)
+
+/** Within the limit is a grey bar; past the warning point and over it are amber. Never green or red. */
+function Bar({ value, calm }: { value: number; calm: boolean }) {
   return (
-    <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-      <div
-        className={`h-full rounded-full ${exceeded ? 'bg-red-400' : ''}`}
-        style={{ width: `${Math.min(MAX_BAR_PCT, Math.max(0, value))}%`, ...(exceeded ? {} : { background: 'var(--accent-blue)' }) }}
-      />
+    <div className="a-prog" role="img" aria-label={pct(value)}>
+      <u style={{ width: `${Math.min(MAX_BAR_PCT, Math.max(0, value))}%`, background: calm ? 'var(--ink-muted)' : 'var(--warn)' }} />
     </div>
   )
 }
 
-function resetText(resetsAt: number): string {
-  const hours = (resetsAt * 1000 - Date.now()) / 3_600_000
-  return `resets in ${span(Math.max(0, hours))}`
+function Fact({ label, children }: { label: string; children: string }) {
+  return (
+    <div className="flex flex-col sm:flex-row sm:justify-between sm:gap-4 a-body-sm">
+      <span className="a-muted">{label}</span>
+      <span className="min-w-0 break-words sm:text-right">{children}</span>
+    </div>
+  )
 }
 
-function BudgetRow({ b, onDelete }: { b: BudgetStatus; onDelete: () => void }) {
+function LimitRow({ b, def, away, onEdit, onDelete }: { b: BudgetStatus; def: BudgetDef | undefined; away: boolean; onEdit: () => void; onDelete: () => void }) {
+  const [menu, setMenu] = useState(false)
+  const calm = b.state === 'ok'
   return (
-    <div className="flex flex-col gap-1" data-testid="budget-row">
-      <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="text-neutral-100">
-          {b.name} <span className="text-neutral-400 font-mono">{b.scope}, {PERIOD_ADVERB[b.period]}, then {b.action}</span>
-        </span>
-        <span className="font-mono text-neutral-100 flex items-center gap-2">
-          {usd(b.spent_usd)} of {usd(b.limit_usd)} ({pct(b.pct)})
-          <button type="button" onClick={onDelete} aria-label={`Delete budget ${b.name}`} className="text-neutral-400 hover:text-neutral-100">
-            <Trash2 className="w-3.5 h-3.5" />
+    <li className="a-card" data-testid="budget-row" data-state={b.state}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <b className="a-body-b">{b.name}</b>
+          <p className="a-muted a-body-sm">{scopeWords(b.scope)}</p>
+        </div>
+        <div className="relative">
+          <button
+            type="button"
+            className="a-ib"
+            aria-label={t('spend_limit_menu', { name: b.name })}
+            aria-expanded={menu}
+            disabled={away}
+            onClick={() => setMenu(!menu)}
+          >
+            <MoreHorizontal className="w-4 h-4" />
           </button>
-        </span>
+          {menu && (
+            <div className="a-menu absolute right-0 z-10" role="menu">
+              <button type="button" role="menuitem" className="a-menu-item" onClick={() => { setMenu(false); onEdit() }} disabled={!def}>
+                {t('spend_edit')}
+              </button>
+              <button type="button" role="menuitem" className="a-menu-item" onClick={() => { setMenu(false); onDelete() }}>
+                {t('spend_delete')}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-      <Bar value={b.pct} exceeded={b.state === 'exceeded'} />
-      <span className="text-[11px] text-neutral-400">
-        {b.state === 'exceeded' ? 'Limit reached' : b.state === 'warning' ? 'Past the alert threshold' : 'Within budget'}, {resetText(b.resets_at)}
-      </span>
+      <p className="a-body">
+        {t('spend_of', { spent: usd(b.spent_usd), limit: usd(b.limit_usd) })} · {pct(b.pct)}
+      </p>
+      <Bar value={b.pct} calm={calm} />
+      <p className={`a-body-sm flex items-center gap-1.5 ${calm ? 'a-muted' : 'a-warn-t'}`}>
+        {!calm && <TriangleAlert className="a-ic" aria-hidden="true" />}
+        {standingWords(b, spanWords(hoursUntil(b.resets_at)))}
+      </p>
+      <p className="a-muted a-body-sm">{atLimitWords({ action: b.action, downgrade_model: def?.downgrade_model })}</p>
+    </li>
+  )
+}
+
+function StoppedBanner({ b, away, onRaise }: { b: BudgetStatus; away: boolean; onRaise: () => void }) {
+  return (
+    <div className="a-banner" role="alert">
+      <TriangleAlert className="a-ic a-warn-t" aria-hidden="true" />
+      <div className="min-w-0 flex flex-col gap-2">
+        <b>{t('spend_stopped_title')}</b>
+        <p>{t('spend_stopped_body', { name: b.name, spent: usd(b.spent_usd), limit: usd(b.limit_usd), span: spanWords(hoursUntil(b.resets_at)) })}</p>
+        <button type="button" className="a-btn secondary" disabled={away} onClick={onRaise}>
+          {t('spend_raise')}
+        </button>
+      </div>
     </div>
   )
 }
 
-const EMPTY_FORM = { name: '', scope: 'global', period: 'month' as BudgetPeriod, limit: '', action: 'block' as BudgetAction, downgrade: '' }
+function Loading() {
+  return (
+    <p className="a-loading a-muted" role="status">
+      {t('spend_loading')}
+    </p>
+  )
+}
 
-function BudgetsPanel() {
+function LimitsPanel({ onOpenSheet }: { onOpenSheet: (editing: BudgetDef | null) => void }) {
   const qc = useQueryClient()
-  const { data, isLoading } = useQuery(budgetsQuery)
-  const [form, setForm] = useState(EMPTY_FORM)
+  const away = useSharedConnection() !== 'connected'
+  const { data, isLoading, isError, refetch } = useQuery(budgetsQuery)
   const save = useMutation({
     mutationFn: (defs: BudgetDef[]) =>
       saveBudgets(defs, { background_run_usd: data?.background_run_usd ?? null, allow_unpriced_models: data?.allow_unpriced_models ?? [] }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['usage-budgets'] }),
   })
   const defs = data?.definitions ?? []
-  const limit = Number(form.limit)
-  const valid = form.name.trim() !== '' && Number.isFinite(limit) && limit > 0 && (form.action !== 'downgrade' || form.downgrade.trim() !== '')
   // Undo puts the whole list back as it was, so the deleted limit returns with every setting.
   const deleteLimit = (name: string) => {
     const before = defs
@@ -115,184 +154,229 @@ function BudgetsPanel() {
       },
     )
   }
-  const add = () => {
-    const def: BudgetDef = {
-      name: form.name.trim(),
-      scope: form.scope.trim() || 'global',
-      period: form.period,
-      limit_usd: limit,
-      soft_pct: [80],
-      action: form.action,
-      downgrade_model: form.action === 'downgrade' ? form.downgrade.trim() : null,
-    }
-    save.mutate([...defs.filter((d) => d.name !== def.name), def], { onSuccess: () => setForm(EMPTY_FORM) })
+  if (isLoading) return <Loading />
+  if (isError || !data) {
+    return (
+      <div className="a-empty" role="alert">
+        <b>{t('spend_load_failed')}</b>
+        <p className="a-muted">{t('spend_load_failed_body')}</p>
+        <button type="button" className="a-btn secondary" onClick={() => void refetch()}>{t('spend_try_again')}</button>
+      </div>
+    )
   }
-  const input = 'bg-transparent border border-white/10 rounded-md px-2 py-1 text-xs text-neutral-100 font-mono min-w-0'
+  const stopped = data.budgets.find((b) => b.state === 'exceeded' && b.action === 'block')
   return (
-    <Section title="Budgets">
-      {isLoading && <div className="flex items-center gap-2 text-xs text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading budgets</div>}
-      {data?.problems.map((p) => (
-        <div key={p} className="flex items-center gap-2 text-xs text-red-400" role="alert"><AlertCircle className="w-4 h-4" /> {p}</div>
+    <>
+      {data.problems.map((p) => (
+        <p key={p} className="a-warn-t a-body-sm flex items-center gap-1.5" role="alert">
+          <AlertCircle className="a-ic" aria-hidden="true" /> {p}
+        </p>
       ))}
-      {data && data.budgets.length === 0 && (
-        <p className="text-xs text-neutral-400">No budgets are set, so nothing is limited. Add one below; it applies to every call straight away.</p>
+      {stopped && <StoppedBanner b={stopped} away={away} onRaise={() => onOpenSheet(defs.find((d) => d.name === stopped.name) ?? null)} />}
+      {data.budgets.length === 0 ? (
+        <div className="a-empty">
+          <b>{t('spend_empty_title')}</b>
+          <p className="a-muted">{t('spend_empty_body')}</p>
+          <button type="button" className="a-btn" disabled={away} onClick={() => onOpenSheet(null)}>{t('spend_add_limit')}</button>
+        </div>
+      ) : (
+        <>
+          <h2 className="a-h2">{t('spend_limits_heading', { n: data.budgets.length })}</h2>
+          <ul className="flex flex-col gap-3">
+            {data.budgets.map((b) => (
+              <LimitRow
+                key={b.name}
+                b={b}
+                def={defs.find((d) => d.name === b.name)}
+                away={away}
+                onEdit={() => onOpenSheet(defs.find((d) => d.name === b.name) ?? null)}
+                onDelete={() => deleteLimit(b.name)}
+              />
+            ))}
+          </ul>
+        </>
       )}
-      {data?.budgets.map((b) => (
-        <BudgetRow key={b.name} b={b} onDelete={() => deleteLimit(b.name)} />
-      ))}
-      <form
-        className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end pt-2 border-t border-white/10"
-        onSubmit={(e) => { e.preventDefault(); if (valid) add() }}
-      >
-        <label className="flex flex-col gap-1 text-[11px] text-neutral-400">Name
-          <input className={input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </label>
-        <label className="flex flex-col gap-1 text-[11px] text-neutral-400">Scope
-          <input className={input} value={form.scope} placeholder="global, provider:x, model:x, origin:x" onChange={(e) => setForm({ ...form, scope: e.target.value })} />
-        </label>
-        <label className="flex flex-col gap-1 text-[11px] text-neutral-400">Period
-          <select className={input} value={form.period} onChange={(e) => setForm({ ...form, period: e.target.value as BudgetPeriod })}>
-            <option value="day">day</option><option value="week">week</option><option value="month">month</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-[11px] text-neutral-400">Limit (USD)
-          <input className={input} inputMode="decimal" value={form.limit} onChange={(e) => setForm({ ...form, limit: e.target.value })} />
-        </label>
-        <label className="flex flex-col gap-1 text-[11px] text-neutral-400">At the limit
-          <select className={input} value={form.action} onChange={(e) => setForm({ ...form, action: e.target.value as BudgetAction })}>
-            <option value="block">block</option><option value="downgrade">downgrade</option><option value="notify">notify</option>
-          </select>
-        </label>
-        <button type="submit" disabled={!valid || save.isPending} className="px-2 py-1 rounded-md border border-white/10 text-xs text-neutral-100 hover:bg-white/5 disabled:opacity-40">
-          {save.isPending ? 'Saving' : 'Save budget'}
-        </button>
-        {form.action === 'downgrade' && (
-          <label className="flex flex-col gap-1 text-[11px] text-neutral-400 col-span-2 sm:col-span-3">Cheaper model
-            <input className={input} value={form.downgrade} onChange={(e) => setForm({ ...form, downgrade: e.target.value })} />
-          </label>
-        )}
-      </form>
-      {save.isError && (
-        <div className="flex items-center gap-2 text-xs text-red-400" role="alert"><AlertCircle className="w-4 h-4" /> {save.error instanceof Error ? save.error.message : 'Could not save'}</div>
-      )}
-    </Section>
+      {away && <p className="a-muted a-body-sm">{t('spend_needs_hq')}</p>}
+    </>
   )
 }
 
-function DriverTable({ title, rows }: { title: string; rows: Driver[] }) {
+function DriverList({ title, rows }: { title: string; rows: Driver[] }) {
   if (rows.length === 0) return null
   return (
     <div className="flex flex-col gap-1">
-      <h3 className="text-[11px] text-neutral-400">{title}</h3>
+      <h3 className="a-h3">{title}</h3>
       {rows.map((d) => (
-        <div key={d.name} className="flex justify-between gap-3 text-xs">
-          <span className="text-neutral-100 truncate min-w-0">{d.name}</span>
-          <span className="font-mono text-neutral-400 flex-shrink-0">
-            {usd(d.usd)}, {d.calls} calls, avg prompt {Math.round(d.avg_input_tokens)} tokens, cache {d.cache_hit_rate === null ? '-' : pct(d.cache_hit_rate * 100)}
-          </span>
-        </div>
+        <Fact key={d.name} label={d.name}>{driverLine(d.calls, usd(d.usd))}</Fact>
       ))}
     </div>
   )
 }
 
 function ForecastPanel() {
-  const { data, isLoading } = useQuery(forecastQuery)
+  const { data } = useQuery(forecastQuery)
   const m = data?.month
+  if (!data || !m) return null
+  const reaching = data.budgets.find((b) => b.forecast.exhausts_before_reset && b.forecast.projected_exhaustion_at)
   return (
-    <Section title="Forecast, this month">
-      {isLoading && <div className="flex items-center gap-2 text-xs text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading forecast</div>}
-      {m && m.rate_per_hour === null && <p className="text-xs text-neutral-400">No spend recorded yet, so there is nothing to forecast.</p>}
-      {m && m.rate_per_hour !== null && (
+    <section className="a-card flex flex-col gap-2" aria-labelledby="spend-forecast">
+      <h2 className="a-h2" id="spend-forecast">{t('spend_forecast_heading')}</h2>
+      {m.rate_per_hour === null ? (
+        <p className="a-muted">{t('spend_forecast_none')}</p>
+      ) : (
         <>
-          <Row label="Spent so far">{usd(m.spent_this_period)}</Row>
-          <Row label="Burn rate now">{usd(m.rate_per_hour)} per hour ({m.confidence} confidence)</Row>
-          <Row label="Projected month end">{usd(m.projected_period_total)}</Row>
-          <Row label="Resets in">{span(m.hours_to_reset)}</Row>
-          {exhaustionSentence(m) && <Row label="Budget">{exhaustionSentence(m)}</Row>}
-          {m.seasonality_note && <p className="text-[11px] text-neutral-400">{m.seasonality_note}</p>}
+          <Fact label={t('spend_forecast_spent')}>{usd(m.spent_this_period)}</Fact>
+          <Fact label={t('spend_forecast_rate')}>{t('spend_forecast_rate_value', { amount: usd(m.rate_per_hour) })}</Fact>
+          <Fact label={t('spend_forecast_total')}>{usd(m.projected_period_total)}</Fact>
+          <Fact label={t('spend_forecast_resets')}>{spanWords(m.hours_to_reset)}</Fact>
+          {reaching && (
+            <p className="a-warn-t a-body-sm flex items-center gap-1.5">
+              <TriangleAlert className="a-ic" aria-hidden="true" />
+              {t('spend_forecast_reach', {
+                name: reaching.budget,
+                date: new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(reaching.forecast.projected_exhaustion_at!)),
+              })}
+            </p>
+          )}
+          {m.confidence === 'low' && <p className="a-muted a-body-sm">{t('spend_forecast_rough')}</p>}
         </>
       )}
-      {data && (
-        <div className="flex flex-col gap-3 pt-2 border-t border-white/10">
-          <DriverTable title="Biggest models, last 7 days" rows={data.drivers.models} />
-          <DriverTable title="Biggest kinds of work, last 7 days" rows={data.drivers.origins} />
-        </div>
-      )}
-    </Section>
+      <div className="flex flex-col gap-3 pt-2">
+        <h2 className="a-h2">{t('spend_used_most')}</h2>
+        <DriverList title={t('spend_by_model')} rows={data.drivers.models} />
+        <DriverList title={t('spend_by_work')} rows={data.drivers.origins} />
+      </div>
+    </section>
   )
 }
 
-const STATUS_TEXT: Record<ProviderRow['status'], string> = {
-  ok: 'Reported by the provider',
-  refused: 'The provider refused the key',
-  error: 'Could not be read',
-  no_key: 'No key set',
-  local: 'Runs here, nothing billed',
-  subscription: 'Subscription quota',
-  ledger_only: "HQ's own record only",
+function CopilotCard() {
+  const { data } = useQuery(copilotUsageQuery)
+  const q = data?.active ? data.quota : undefined
+  if (!q) return null
+  return (
+    <section className="a-card flex flex-col gap-1">
+      <h3 className="a-h3">{serviceName('copilot')}</h3>
+      <p className="a-muted a-body-sm">{t('spend_svc_plan')}</p>
+      <p>{t('spend_svc_credits_left', { left: formatCompact(q.remaining), total: formatCompact(q.entitlement) })}</p>
+    </section>
+  )
 }
+
+const totals = (w: { today: number; week: number; month: number }) =>
+  t('spend_svc_service_totals', { today: usd(w.today), week: usd(w.week), month: usd(w.month) })
+
+const outOf = (left: number | null, max: number | null) => (left === null ? null : { left: formatCompact(left), max: max === null ? '' : formatCompact(max) })
 
 function ProviderCard({ p }: { p: ProviderRow }) {
+  const name = serviceName(p.backend)
   const r = p.provider
+  const requests = p.rate_limit && outOf(p.rate_limit.requests_remaining, p.rate_limit.requests_limit)
+  const tokens = p.rate_limit && outOf(p.rate_limit.tokens_remaining, p.rate_limit.tokens_limit)
   return (
-    <Section title={p.backend}>
-      <Row label="Source">{p.source === 'provider' ? 'provider' : 'ledger'}, {STATUS_TEXT[p.status]}</Row>
-      {r?.balance && <Row label="Balance">{r.balance.amount} {r.balance.currency}</Row>}
-      {r?.spend && (
-        <Row label="Provider says">{usd(r.spend.today)} today, {usd(r.spend.week)} week, {usd(r.spend.month)} month</Row>
+    <section className="a-card flex flex-col gap-1" data-testid="service-card">
+      <h3 className="a-h3">{name}</h3>
+      {p.status === 'refused' && (
+        <>
+          <p className="a-warn-t flex items-center gap-1.5">
+            <AlertCircle className="a-ic" aria-hidden="true" />
+            {t('spend_svc_refused')}
+          </p>
+          <p className="a-muted a-body-sm">{t('spend_svc_refused_body', { name, amount: usd(p.ledger.month) })}</p>
+          <a className="a-link" href="/settings/keys">{t('spend_svc_check_key')}</a>
+        </>
       )}
-      {r?.limit_remaining !== null && r?.limit_remaining !== undefined && <Row label="Key limit left">{usd(r.limit_remaining)}</Row>}
-      <Row label="HQ recorded">{usd(p.ledger.today)} today, {usd(p.ledger.week)} week, {usd(p.ledger.month)} month</Row>
-      {p.rate_limit && (
-        <Row label="Quota left (from response headers)">
-          {[
-            p.rate_limit.requests_remaining !== null && `${p.rate_limit.requests_remaining}${p.rate_limit.requests_limit !== null ? ` of ${p.rate_limit.requests_limit}` : ''} requests`,
-            p.rate_limit.tokens_remaining !== null && `${p.rate_limit.tokens_remaining}${p.rate_limit.tokens_limit !== null ? ` of ${p.rate_limit.tokens_limit}` : ''} tokens`,
-          ].filter(Boolean).join(', ')}
-        </Row>
+      {p.status === 'no_key' && <p className="a-warn-t">{t('spend_svc_no_key')}</p>}
+      {p.status === 'error' && <p className="a-warn-t">{t('spend_svc_error')}</p>}
+      {p.status === 'local' && <p className="a-muted">{t('spend_svc_local')}</p>}
+      {p.status === 'subscription' && <p className="a-muted">{t('spend_svc_plan')}</p>}
+      {p.status === 'ledger_only' && <p className="a-muted a-body-sm">{t('spend_svc_no_report', { week: usd(p.ledger.week), month: usd(p.ledger.month) })}</p>}
+      {p.status === 'ok' && (
+        <>
+          <p className="a-muted a-body-sm">{t('spend_svc_says')}</p>
+          {r?.balance && <p>{t('spend_svc_balance', { amount: usd(r.balance.amount) })}</p>}
+          {r?.limit_remaining !== null && r?.limit_remaining !== undefined && <Fact label={t('spend_svc_key_left')}>{usd(r.limit_remaining)}</Fact>}
+          {r?.spend && <p>{totals({ today: r.spend.today ?? 0, week: r.spend.week ?? 0, month: r.spend.month ?? 0 })}</p>}
+          <Fact label={t('spend_svc_record')}>{totals(p.ledger)}</Fact>
+        </>
       )}
-      {p.ledger.unpriced_calls > 0 && <Row label="Unpriced calls">{p.ledger.unpriced_calls} this month, so the figures are a lower bound</Row>}
-      {p.note && <p className="text-[11px] text-neutral-400">{p.note}</p>}
-    </Section>
+      {(requests || tokens) && (
+        <Fact label={t('spend_svc_rate')}>
+          {[requests && t('spend_svc_requests', requests), tokens && t('spend_svc_tokens', tokens)].filter(Boolean).join(' · ')}
+        </Fact>
+      )}
+      {p.ledger.unpriced_calls > 0 && <p className="a-muted a-body-sm">{tn('spend_unpriced', p.ledger.unpriced_calls)}</p>}
+    </section>
   )
 }
 
-function ProvidersPanel() {
+function ServicesPanel() {
   const { data, isLoading } = useQuery(providersQuery)
   return (
-    <>
-      {isLoading && <div className="flex items-center gap-2 text-xs text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading providers</div>}
-      {data?.backends.length === 0 && <p className="text-xs text-neutral-400">No backends are configured.</p>}
-      {data?.backends.map((p) => <ProviderCard key={p.backend} p={p} />)}
-    </>
+    <section className="flex flex-col gap-3" aria-labelledby="spend-services">
+      <h2 className="a-h2" id="spend-services">{t('spend_services')}</h2>
+      {isLoading && <Loading />}
+      {data?.backends.length === 0 && <p className="a-muted">{t('spend_no_services')}</p>}
+      <div className="grid gap-3 md:grid-cols-2">
+        <CopilotCard />
+        {data?.backends.map((p) => <ProviderCard key={p.backend} p={p} />)}
+      </div>
+    </section>
   )
 }
 
+/** Spending limits: limits first, then the forecast, what used the most and each AI service. */
 export function UsagePage() {
   const qc = useQueryClient()
-  const refreshing = qc.isFetching({ queryKey: ['usage-budgets'] }) + qc.isFetching({ queryKey: ['usage-forecast'] }) + qc.isFetching({ queryKey: ['usage-providers'] })
+  const away = useSharedConnection() !== 'connected'
+  const budgets = useQuery(budgetsQuery).data
+  const providers = useQuery(providersQuery).data
+  const forecast = useQuery(forecastQuery).data
+  const [sheet, setSheet] = useState<{ editing: BudgetDef | null } | null>(null)
+  const refreshing = qc.isFetching({ predicate: (q) => String(q.queryKey[0]).startsWith('usage-') }) > 0
+  const save = useMutation({
+    mutationFn: (defs: BudgetDef[]) =>
+      saveBudgets(defs, { background_run_usd: budgets?.background_run_usd ?? null, allow_unpriced_models: budgets?.allow_unpriced_models ?? [] }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['usage-budgets'] })
+      setSheet(null)
+    },
+  })
   return (
-    <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 max-w-5xl w-full mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-lg font-semibold text-neutral-100">Usage</h1>
-          <p className="text-xs text-neutral-400">What each provider says about its spend, next to what HQ recorded, with budgets and a forecast.</p>
-        </div>
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-2">
+        <button type="button" className="a-btn" disabled={away} onClick={() => setSheet({ editing: null })}>
+          {t('spend_add_limit')}
+        </button>
         <button
           type="button"
           onClick={() => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('usage-') })}
-          aria-label="Refresh usage"
-          className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5"
+          aria-label={t('spend_refresh')}
+          className="a-ib"
         >
-          <RefreshCw className={`w-4 h-4 ${refreshing > 0 ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="md:col-span-2"><BudgetsPanel /></div>
-        <div className="md:col-span-2"><ForecastPanel /></div>
-        <ProvidersPanel />
-      </div>
+      <p className="a-muted a-body-sm">{spendResetLine()}</p>
+      <LimitsPanel onOpenSheet={(editing) => setSheet({ editing })} />
+      <ForecastPanel />
+      <ServicesPanel />
+      {sheet && (
+        <LimitSheet
+          editing={sheet.editing}
+          existing={budgets?.definitions ?? []}
+          services={(providers?.backends ?? []).map((p) => p.backend)}
+          models={(forecast?.drivers.models ?? []).map((d) => d.name)}
+          busy={save.isPending}
+          failed={save.isError}
+          resetLine={spendResetLine()}
+          onSave={(def) => save.mutate(withLimit(budgets?.definitions ?? [], def, sheet.editing?.name ?? null))}
+          onClose={() => {
+            save.reset()
+            setSheet(null)
+          }}
+        />
+      )}
     </div>
   )
 }

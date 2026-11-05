@@ -1,5 +1,5 @@
 import { NotifyCard } from '~/components/notifications/NotifyCard'
-import { answerErrorLine } from '~/lib/inboxCard'
+import { answerErrorLine, groupByDay, serverHqLine } from '~/lib/inboxCard'
 import { createFileRoute, useParams } from '@tanstack/react-router'
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
@@ -317,15 +317,22 @@ function NotificationsPage() {
       <div className="space-y-3 pb-6">
         {activeTab === 'pending' && <NotifyCard />}
         {filteredNotifications.length > 0 ? (
-          filteredNotifications.map((notif) => (
-            <NotificationCard
-              key={notif.id}
-              notification={notif}
-              onSelect={setSelectedNotification}
-              onAction={handleAction}
-              onAnswered={handleAnswered}
-              loadingAction={loadingAction}
-            />
+          groupByDay(filteredNotifications, Date.now()).map((group) => (
+            <section key={group.heading} className="space-y-3">
+              {activeTab === 'resolved' && <h2 className="a-h3 px-1">{group.heading}</h2>}
+              {group.items.map((notif) => (
+                <div key={notif.id} className="space-y-1">
+                  {serverHqLine(notif) && <p className="a-muted a-body-sm px-1">{serverHqLine(notif)}</p>}
+                  <NotificationCard
+                    notification={notif}
+                    onSelect={setSelectedNotification}
+                    onAction={handleAction}
+                    onAnswered={handleAnswered}
+                    loadingAction={loadingAction}
+                  />
+                </div>
+              ))}
+            </section>
           ))
         ) : (
           <div className="py-16 flex flex-col items-center justify-center text-center p-8 rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
