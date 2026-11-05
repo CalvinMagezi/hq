@@ -19,10 +19,22 @@ use std::time::Duration;
 ///   request with a network error.
 /// - TLS session reuse enabled (reqwest default)
 pub static SHARED_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    builder()
+        .build()
+        .expect("failed to build global HTTP client")
+});
+
+fn builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(300))
         .pool_max_idle_per_host(if cfg!(test) { 0 } else { 10 })
-        .build()
-        .expect("failed to build global HTTP client")
-});
+}
+
+/// A client with the shared settings whose every request goes to the unix socket at `path`, for
+/// a backend reached through a bridge forward that listens on a socket. It cannot share the pool
+/// of [`SHARED_HTTP_CLIENT`], since the socket replaces the network for the whole client.
+#[cfg(unix)]
+pub fn unix_socket_client(path: &std::path::Path) -> reqwest::Result<reqwest::Client> {
+    builder().unix_socket(path).build()
+}

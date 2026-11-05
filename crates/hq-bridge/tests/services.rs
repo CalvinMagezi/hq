@@ -215,3 +215,46 @@ async fn a_forward_stops_when_its_peer_is_revoked_from_another_process() {
     peers::revoke(&mac.db, &phone.id()).unwrap();
     assert_eq!(with_timeout(round_trip(port, b"after")).await, None);
 }
+
+/// A forward from the config that listens on a socket path: it reaches the service, its socket
+/// and the directory made for it are this user's alone, and a second bridge leaves it alone.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_forward_on_a_private_socket_reaches_the_service_and_is_not_taken_over() {
+    use hq_core::config::{BridgeForward, BridgeServicesConfig};
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+    let (phone, mac) = pair().await;
+    let dir = tempfile::tempdir().unwrap();
+    let socket = dir.path().join("bridge").join("web.sock");
+    let config = BridgeServicesConfig {
+        forwards: vec![BridgeForward {
+            peer: phone.id(),
+            service: "web".into(),
+            listen: socket.display().to_string(),
+        }],
+        ..BridgeServicesConfig::default()
+    };
+    let forwards = hq_bridge::start_forwards(&mac.bridge, &config)
+        .await
+        .unwrap();
+    assert!(!forwards.status[0].running_elsewhere);
+    assert_eq!(mode(socket.parent().unwrap()), 0o700);
+    assert_eq!(mode(&socket), 0o600);
+
+    let mut unix = tokio::net::UnixStream::connect(&socket).await.unwrap();
+    unix.write_all(b"through the socket").await.unwrap();
+    let mut got = vec![0u8; b"through the socket".len()];
+    with_timeout(unix.read_exact(&mut got)).await.unwrap();
+    assert_eq!(got, b"through the socket");
+
+    let again = hq_bridge::start_forwards(&mac.bridge, &config)
+        .await
+        .unwrap();
+    assert!(
+        again.status[0].running_elsewhere,
+        "a live socket is not taken over"
+    );
+    forwards.abort();
+}

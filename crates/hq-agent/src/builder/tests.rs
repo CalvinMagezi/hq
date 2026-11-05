@@ -128,6 +128,7 @@ async fn build_session_with_backends(provider: Option<Arc<dyn LlmProvider>>) -> 
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
         }],
         ..Default::default()
     };

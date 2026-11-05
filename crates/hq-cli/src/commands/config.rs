@@ -92,9 +92,12 @@ fn print_backends(config: &HqConfig) {
             }
             None => "(none)".to_string(),
         };
-        let endpoint = entry
+        let mut endpoint = entry
             .resolved_endpoint()
             .unwrap_or_else(|| "(n/a)".to_string());
+        if let Some(path) = &entry.unix_socket {
+            endpoint = format!("{endpoint} via unix:{}", path.display());
+        }
         println!(
             "    - {:<16} kind={:?} enabled={} endpoint={} credential={}",
             entry.name, entry.kind, entry.enabled, endpoint, cred
