@@ -1,6 +1,8 @@
 // `GET /api/hello`: which HQ answers, and whether it is still starting (crates/hq-web/src/hello.rs).
 // Open without a sign-in, so it also tells a signed-out browser which HQ's saved copy is its own.
 
+import { noteHqId } from './savedCopy'
+
 export interface StartStep {
   /** 1-based. */
   step: number
@@ -31,7 +33,10 @@ export async function fetchHello(signal?: AbortSignal): Promise<Hello | null> {
     const res = await fetch(HELLO_URL, { signal, cache: 'no-store' })
     if (!res.ok) return null
     const body: unknown = await res.json()
-    return isHello(body) ? body : null
+    if (!isHello(body)) return null
+    // Every hello tells the saved copy which HQ it belongs to; a different HQ reloads the page.
+    noteHqId(body.hq_id)
+    return body
   } catch {
     return null
   }

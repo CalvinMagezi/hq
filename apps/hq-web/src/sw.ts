@@ -8,8 +8,11 @@ declare const self: ServiceWorkerGlobalScope
 declare const __BUILD_TIME__: string
 const SHELL_CACHE = `shell-hq-${__BUILD_TIME__}`
 const STATIC_CACHE = 'hq-static'
-const API_CACHE = 'hq-api'
-const KEEP_CACHES = [SHELL_CACHE, STATIC_CACHE, API_CACHE]
+// One API cache per HQ (`hq-api:{hq_id}`, shared parts rule 7); the page tells the worker its id.
+const API_CACHE_PREFIX = 'hq-api:'
+const KEEP_CACHES = [SHELL_CACHE, STATIC_CACHE]
+let hqId: string | null = null
+const apiCache = () => (hqId ? `${API_CACHE_PREFIX}${hqId}` : null)
 
 const SHELL_ASSETS = [
   '/manifest.json',
@@ -101,9 +104,10 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const keys = await caches.keys()
-      await Promise.all(keys.filter((k) => !KEEP_CACHES.includes(k)).map((k) => caches.delete(k)))
+      const apiCaches = keys.filter((k) => k.startsWith(API_CACHE_PREFIX))
+      await Promise.all(keys.filter((k) => !KEEP_CACHES.includes(k) && !apiCaches.includes(k)).map((k) => caches.delete(k)))
       await trimCache(STATIC_CACHE, STATIC_CACHE_MAX_ENTRIES)
-      await trimCache(API_CACHE, API_CACHE_MAX_ENTRIES)
+      await Promise.all(apiCaches.map((c) => trimCache(c, API_CACHE_MAX_ENTRIES)))
       await self.clients.claim()
     })(),
   )
@@ -145,9 +149,14 @@ function appUrl(raw: unknown, fallback: string): string {
 let signedOut = false
 
 self.addEventListener('message', (event) => {
+  if (event.data?.type === 'hq-id' && typeof event.data.id === 'string') {
+    hqId = event.data.id
+    return
+  }
   if (event.data?.type !== 'signed-out') return
   signedOut = true
-  event.waitUntil(caches.delete(API_CACHE))
+  const own = apiCache()
+  if (own) event.waitUntil(caches.delete(own))
 })
 
 /** What a push carries (docs/WEB_PUSH.md): words the server chose, a page and a tag. Never an
@@ -246,7 +255,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Those API reads: network first; after 4s or on failure, the last saved copy of any age.
-  if (SW_CACHED_API.some((re) => re.test(url.pathname))) {
+  // Without the page's HQ id the worker keeps no copy: it cannot tell whose it would be.
+  const cacheName = apiCache()
+  if (cacheName && SW_CACHED_API.some((re) => re.test(url.pathname))) {
     const { quick, full } = networkWithin(request, API_TIMEOUT_MS)
     event.waitUntil(
       full
@@ -255,9 +266,9 @@ self.addEventListener('fetch', (event) => {
           signedOut = false
           const copy = res.clone()
           return caches
-            .open(API_CACHE)
+            .open(cacheName)
             .then((cache) => cache.put(request, copy))
-            .then(() => trimCache(API_CACHE, API_CACHE_MAX_ENTRIES))
+            .then(() => trimCache(cacheName, API_CACHE_MAX_ENTRIES))
         })
         .catch(() => undefined),
     )
@@ -266,7 +277,7 @@ self.addEventListener('fetch', (event) => {
         const res = await quick
         if (res) return res
         if (signedOut) return markedFromCache(Response.json({ error: 'signed out' }, { status: 401 }))
-        const cached = await caches.match(request, { ...MATCH, cacheName: API_CACHE })
+        const cached = await caches.match(request, { ...MATCH, cacheName })
         return cached ? markedFromCache(cached) : Response.json({ error: 'offline' }, { status: 503 })
       })(),
     )

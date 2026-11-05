@@ -23,6 +23,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 - [x] web/wave-0/01-live-bugs.md: guard drive, goal and answer routes. Try: nothing to see; a current web app and the phone app keep working (both send the header). A cross-site POST to `/api/harness-sessions/{id}/drive` now gets 403.
 - [ ] web/wave-0/02-shared-parts.md
   - [x] The one string catalogue (N19): `apps/strings/en.yaml`, `scripts/strings/build.ts`, the inline-string ratchet. Try: nothing to see yet.
+  - [x] The saved copy keyed by HQ id, capped at 256 KB a place and 2 MB in all, kept until replaced; the wipe and the worker's cache follow the id. Try: in HQ Hub open this computer's HQ, then the phone's: each shows only its own saved notes (DevTools › Application shows `hq-store:{id}` per HQ).
   - [x] `GET /api/hello` and the starting flag. Try: `hq web stop`, then start HQ and open `/api/hello` in a browser quickly: it shows the start step, then `"starting": null`.
 
 ## Phone wave 0 (safety and shared parts)

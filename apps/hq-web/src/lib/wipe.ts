@@ -8,11 +8,25 @@ import { queryClient } from './offlineCache'
 import { useHQStore } from '~/store/hqStore'
 import { useThreadStore } from '~/store/threadStore'
 import { clearDrafts } from '~/components/chat/draftStore'
+import { currentHqId, keyFor, LEGACY_KEYS } from './savedCopy'
 
-export const WIPED_IDB_KEYS = ['hq-query-cache', 'hq-store', 'hq-thread-store']
+/** One HQ's stores, each named `{name}:{hq_id}` (shared parts rule 7). */
+export const WIPED_IDB_NAMES = ['hq-query-cache', 'hq-store', 'hq-thread-store', 'hq-outbox']
 // The token itself is dropped by hqAuth before the wipe starts (see refuseSignIn).
-export const WIPED_LOCAL_KEYS = ['hq.chat.drafts', 'hq-last-sync']
+export const WIPED_LOCAL_NAMES = ['hq-drafts', 'hq-last-sync']
 export const API_CACHE = 'hq-api'
+/** Names from before the stores were keyed by HQ id; always cleared too. */
+const LEGACY_LOCAL_KEYS = ['hq.chat.drafts', 'hq-last-sync']
+
+/** Every key a wipe removes for `hqId`, the old unkeyed ones included. */
+export function wipedKeys(hqId: string | null) {
+  const keyed = (names: string[]) => (hqId ? names.map((n) => keyFor(n, hqId)) : [])
+  return {
+    idb: [...keyed(WIPED_IDB_NAMES), ...LEGACY_KEYS],
+    local: [...keyed(WIPED_LOCAL_NAMES), ...LEGACY_LOCAL_KEYS],
+    caches: [...keyed([API_CACHE]), API_CACHE],
+  }
+}
 export const AUTH_CHANNEL = 'hq-auth'
 export const SIGNED_OUT_MESSAGE = { type: 'signed-out' } as const
 
@@ -28,10 +42,14 @@ export interface WipeDeps {
 }
 
 /** Clears every store; one failing store never stops the others. */
-export async function wipeWith(deps: WipeDeps, { announce = true } = {}): Promise<void> {
+export async function wipeWith(
+  deps: WipeDeps,
+  { announce = true, hqId = currentHqId() }: { announce?: boolean; hqId?: string | null } = {},
+): Promise<void> {
+  const keys = wipedKeys(hqId)
   // What is on screen goes first, before the next paint.
   deps.resetMemory()
-  for (const key of WIPED_LOCAL_KEYS) {
+  for (const key of keys.local) {
     try {
       deps.removeLocal(key)
     } catch {
@@ -41,8 +59,8 @@ export async function wipeWith(deps: WipeDeps, { announce = true } = {}): Promis
   if (announce) deps.tellTabs()
   deps.tellWorker()
   await Promise.allSettled([
-    ...WIPED_IDB_KEYS.map((k) => deps.removeIdb(k)),
-    deps.deleteCache(API_CACHE),
+    ...keys.idb.map((k) => deps.removeIdb(k)),
+    ...keys.caches.map((c) => deps.deleteCache(c)),
     deps.unsubscribePush(),
   ])
 }

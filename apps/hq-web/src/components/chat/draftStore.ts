@@ -1,10 +1,17 @@
 import { create } from 'zustand'
+import { currentHqId, keyFor } from '~/lib/savedCopy'
 import { MAX_ATTACHMENTS, isPreviewableImage, rejectReason, uploadChatFile, type ChatAttachment } from '~/lib/chatUploads'
 import type { PendingAttachment } from './AttachmentChips'
 
 // A chat that does not exist yet (the first message creates it) keeps its draft here.
 const NEW_CHAT_KEY = 'new'
-const TEXT_STORAGE_KEY = 'hq.chat.drafts'
+export const DRAFTS_KEY = 'hq-drafts'
+
+/** Drafts belong to one HQ (shared parts rule 7); with no HQ id yet they are not kept. */
+const textStorageKey = () => {
+  const id = currentHqId()
+  return id ? keyFor(DRAFTS_KEY, id) : null
+}
 
 interface Draft {
   text: string
@@ -15,7 +22,8 @@ const EMPTY: Draft = { text: '', attachments: [] }
 
 function readSavedText(): Record<string, string> {
   try {
-    return JSON.parse(localStorage.getItem(TEXT_STORAGE_KEY) ?? '{}') as Record<string, string>
+    const key = textStorageKey()
+    return key ? (JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>) : {}
   } catch {
     return {}
   }
@@ -26,7 +34,8 @@ function saveText(drafts: Record<string, Draft>) {
   const text: Record<string, string> = {}
   for (const [key, d] of Object.entries(drafts)) if (d.text.trim()) text[key] = d.text
   try {
-    localStorage.setItem(TEXT_STORAGE_KEY, JSON.stringify(text))
+    const key = textStorageKey()
+    if (key) localStorage.setItem(key, JSON.stringify(text))
   } catch {
     // Storage can be blocked; drafts still work for this session.
   }
