@@ -394,7 +394,7 @@ export function ChatAppsSection() {
   return (
     <section id="chat-apps" aria-labelledby="chat-apps-title" className="scroll-mt-4 flex flex-col gap-3">
       <h2 id="chat-apps-title" className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
-        Chat apps
+        {t('row_messaging')}
       </h2>
       {!data.writable && (
         <p className="px-1 text-sm text-neutral-400">

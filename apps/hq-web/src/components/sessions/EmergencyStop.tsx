@@ -26,11 +26,11 @@ export function StopAllButton({ compact = false, onStopped }: ButtonProps) {
         type="button"
         onClick={() => setOpen(true)}
         className={compact ? 'hq-btn-stop !h-11 !w-11 !p-0' : 'hq-btn-stop'}
-        aria-label="Stop every agent"
-        title="Stop every agent"
+        aria-label={t('stop_all_act')}
+        title={t('stop_all_act')}
       >
         <OctagonX className="w-4 h-4" />
-        {!compact && 'Stop all'}
+        {!compact && t('stop_all_act')}
       </button>
       {open && <StopAllDialog onClose={() => setOpen(false)} onStopped={onStopped} />}
     </>

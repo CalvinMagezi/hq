@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { Link } from '@tanstack/react-router'
 import { Bell, BookOpen, CheckSquare, MessageSquare, SlidersHorizontal, Terminal } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
@@ -41,7 +42,7 @@ export function AppRail() {
       <RailLink to="/tasks" label="Tasks" exact>
         <CheckSquare className="w-5 h-5" />
       </RailLink>
-      <RailLink to="/sessions" label="Workbench">
+      <RailLink to="/sessions" label={t('place_helpers')}>
         <Terminal className="w-5 h-5" />
       </RailLink>
       <RailLink to="/notifications" label={needsYou ? `Inbox, ${needsYouAria(inboxNeedsYou(pending, helpers))}` : 'Inbox'} exact>

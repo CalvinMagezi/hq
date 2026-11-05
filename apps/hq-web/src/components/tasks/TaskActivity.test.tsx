@@ -118,7 +118,7 @@ test('a task with contributors shows who, their notes, review state and the hold
   const out = html(withContributors())
   expect(out).toContain('data-kind="contributors"')
   expect(out).toContain('Held by')
-  expect(out).toContain('relay on native, last heartbeat 5m ago')
+  expect(out).toContain('relay on native, last heartbeat 5 min ago')
   expect(out).toContain('2 notes, 1 lease')
   expect(out).toContain('Accepted')
   expect(out).toContain('Unreviewed')
@@ -204,7 +204,7 @@ test('the briefing shows counts, review waits, recorded blockers, contributors a
   expect(out).toContain('waiting on the bank')
   expect(out).toContain('1 accepted, 2 unreviewed')
   expect(out).toContain('2 gaps')
-  expect(out).toContain('WRK-001, by relay (agent), version recorded 10m ago')
+  expect(out).toContain('WRK-001, by relay (agent), version recorded 10 min ago')
 })
 
 test('a briefing with no contributors says no one is on record, and an empty initiative says there is nothing to brief', () => {

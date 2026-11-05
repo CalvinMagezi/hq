@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import type { FormEvent } from 'react'
@@ -39,7 +40,7 @@ function SetupPage() {
     <div className="h-full w-full overflow-y-auto">
       <form onSubmit={submit} className="glass-card rounded-2xl p-5 border border-white/10 mx-auto my-8 w-[calc(100%-2rem)] max-w-md flex flex-col gap-4">
         <div>
-          <h1 className="text-sm font-mono uppercase tracking-wider text-neutral-100">Connect a model</h1>
+          <h1 className="text-sm font-mono uppercase tracking-wider text-neutral-100">{t('setup_title')}</h1>
           <p className="text-xs text-neutral-400 mt-1">HQ needs one model key to start. You can add more providers or replace this key later in Settings. It is stored on this server and never shown again.</p>
         </div>
 

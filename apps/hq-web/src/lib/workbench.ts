@@ -10,20 +10,8 @@ import {
   type WorkbenchHost,
   type WorkbenchHosts,
 } from './sessionsApi'
+import { agentName, computerName, isThisComputer } from './names'
 
-const AGENT_NAMES: Record<string, string> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  cursor: 'Cursor',
-  pi: 'Pi',
-  opencode: 'OpenCode',
-  kimi: 'Kimi',
-  qwen: 'Qwen',
-  antigravity: 'Antigravity',
-  'github-copilot': 'GitHub Copilot',
-  hermes: 'Hermes',
-  openclaw: 'OpenClaw',
-}
 export const DEFAULT_AGENT = 'claude-code'
 
 export const CATEGORY_NAMES: Record<AgentCategory, string> = {
@@ -51,10 +39,7 @@ export const harnessesIn = (hosts: Pick<WorkbenchHosts, 'harnesses' | 'categorie
 export const BUSY_POLL_MS = 1_500
 export const READY_POLL_MS = 4_000
 
-export const agentName = (harness: string) => AGENT_NAMES[harness] ?? harness
-
-export const isThisComputer = (host: string) => host === 'native' || host === 'local'
-export const computerName = (host: string) => (isThisComputer(host) ? 'This computer' : host)
+export { agentName, computerName, isThisComputer }
 
 /** The project folder: the last path segment of a working directory, whichever separator it uses. */
 export function folderName(cwd: string): string {

@@ -1,4 +1,6 @@
 import { parseSqliteUtc } from '~/lib/tasksApi'
+import { relTime } from '~/lib/time'
+import { t } from '~/strings'
 import type {
   ActivityGap,
   ActivityNote,
@@ -8,26 +10,17 @@ import type {
   TaskActivity,
 } from '~/lib/taskActivityApi'
 
-const MS_PER_MINUTE = 60_000
-const MINUTES_PER_HOUR = 60
-const HOURS_PER_DAY = 24
-
 /** Task times are SQLite UTC ("2026-10-15 14:39:16"); note records are RFC 3339 ("...T09:01:08+00:00"). */
 export function parseStamp(text: string): Date {
   return /[zZ]$|[+-]\d{2}:\d{2}$/.test(text) ? new Date(text) : parseSqliteUtc(text)
 }
 
-/** "just now", "12m ago", "3h ago", "2d ago"; "unknown" for nothing or something unreadable. */
+/** The whole span phrase ("12 min ago", "3 h ago"); "Not known" for nothing or something unreadable. */
 export function ageLabel(text: string | null | undefined, nowMs: number = Date.now()): string {
-  if (!text) return 'unknown'
+  if (!text) return t('time_unknown')
   const then = parseStamp(text).getTime()
-  if (Number.isNaN(then)) return 'unknown'
-  const minutes = Math.max(0, Math.floor((nowMs - then) / MS_PER_MINUTE))
-  if (minutes < 1) return 'just now'
-  if (minutes < MINUTES_PER_HOUR) return `${minutes}m ago`
-  const hours = Math.floor(minutes / MINUTES_PER_HOUR)
-  if (hours < HOURS_PER_DAY) return `${hours}h ago`
-  return `${Math.floor(hours / HOURS_PER_DAY)}d ago`
+  if (Number.isNaN(then)) return t('time_unknown')
+  return relTime(then, nowMs)
 }
 
 export interface Badge {

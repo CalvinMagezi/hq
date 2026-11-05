@@ -160,10 +160,7 @@ function NotificationsPage() {
               <Bell className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">Inbox & Approvals</h1>
-              <p className="text-xs text-neutral-400 mt-0.5">
-                Review proposals, value insights, and relay notifications in real time
-              </p>
+              <h1 className="text-xl font-bold text-white tracking-tight">{t('inbox_title')}</h1>
             </div>
           </div>
         </div>
@@ -206,7 +203,7 @@ function NotificationsPage() {
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            <span>Pending</span>
+            <span>{t('inbox_tab_needs')}</span>
             {pendingApprovalsCount > 0 && (
               <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-400 text-black">
                 {pendingApprovalsCount}
@@ -223,7 +220,7 @@ function NotificationsPage() {
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            All Activity
+            {t('inbox_tab_updates')}
           </button>
 
           <button
@@ -235,7 +232,7 @@ function NotificationsPage() {
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            Resolved History
+            {t('inbox_tab_done')}
           </button>
         </div>
 
@@ -246,7 +243,7 @@ function NotificationsPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search proposals, skills..."
+            placeholder={t('inbox_search')}
             className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
           />
         </div>

@@ -253,7 +253,7 @@ test('a veto window names the task, counts down and offers the veto; shadow mode
   expect(html).toContain('only watching')
   expect(html).toContain('Failed and sent back without you (5)')
   expect(html).toContain('a required check failed')
-  expect(html).toContain('2 completed tasks are waiting for your agree or not.')
+  expect(html).toContain('2 finished tasks wait for your look.')
 })
 
 const sweepDetail = (over: Partial<SweepDetail['sweep']> = {}, rest: Partial<SweepDetail> = {}): SweepDetail => ({
@@ -488,15 +488,15 @@ test('the drawer section shows who the task waits on, the latest verdict with it
   expect(html).toContain('Second opinion')
   expect(html).toContain('Complete anyway')
   // already in to_do: no pointless "return"
-  expect(html).not.toContain('Return to to_do')
-  expect(verification(taskVerification(), { taskStatus: 'ready_for_review' })).toContain('Return to to_do')
+  expect(html).not.toContain('Send back')
+  expect(verification(taskVerification(), { taskStatus: 'ready_for_review' })).toContain('Send back')
 })
 
 test('completing anyway is a two step action and a completed task offers neither override', () => {
   expect(verification(taskVerification(), { confirmingComplete: true })).toContain('Tap again to complete it')
   const done = verification(taskVerification({ waiting_for: null }), { taskStatus: 'complete' })
   expect(done).not.toContain('Complete anyway')
-  expect(done).toContain('Return to to_do')
+  expect(done).toContain('Send back')
 })
 
 test('a tier 2 window shows the countdown and the veto, and a pending second opinion cannot be asked twice', () => {

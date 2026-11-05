@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useCallback, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { attachCommand, canSend, isBlocked, type HarnessSession } from '~/lib/sessionsApi'
@@ -44,7 +45,7 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
             type="button"
             onClick={onBack}
             className="md:hidden flex items-center justify-center h-11 w-11 -ml-2 rounded text-neutral-400 hover:text-white"
-            aria-label="Back to the Workbench"
+            aria-label={t('helpers_back')}
           >
             <ArrowLeft className="w-4 h-4" />
           </button>

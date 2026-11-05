@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { createFileRoute } from '@tanstack/react-router'
 import { Archive, Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Terminal } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -83,7 +84,7 @@ function WorkbenchPage() {
         ) : (
           <>
             <div className="flex items-center gap-2 px-4 pt-4 pb-3">
-              <h1 className="text-xl font-semibold tracking-tight text-neutral-50 mr-auto" style={{ fontFamily: 'var(--font-heading)' }}>Workbench</h1>
+              <h1 className="text-xl font-semibold tracking-tight text-neutral-50 mr-auto" style={{ fontFamily: 'var(--font-heading)' }}>{t('place_helpers')}</h1>
               <button
                 type="button"
                 onClick={() => void list.refresh()}
@@ -101,7 +102,7 @@ function WorkbenchPage() {
             <div className="flex gap-2 px-4 pb-3">
               <button type="button" onClick={() => setCreating(true)} className="hq-btn-primary flex-1 min-w-0">
                 <Plus className="w-4 h-4" />
-                New agent
+                {t('helpers_start_a_helper')}
               </button>
               <StopAllButton onStopped={afterStop} />
             </div>
@@ -245,7 +246,7 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onSelect, o
           <p className="text-xs font-mono text-neutral-400">No agents yet. Start one and it will show up here.</p>
           <button type="button" onClick={onNew} className={NEW_AGENT_BUTTON_CLASS}>
             <Plus className="w-3.5 h-3.5" />
-            New agent
+            {t('helpers_start_a_helper')}
           </button>
         </div>
       )}
@@ -310,7 +311,7 @@ function DetailPlaceholder({ error, loading, onBack }: { error: string | null; l
     <div className="m-auto flex flex-col items-center gap-2 p-6 text-center text-xs font-mono">
       <ErrorText className="text-xs">{error ?? 'We could not find that agent.'}</ErrorText>
       <button type="button" onClick={onBack} className="h-9 px-3 rounded border border-white/10 text-neutral-300 hover:bg-white/10">
-        Back to the Workbench
+        {t('helpers_back')}
       </button>
     </div>
   )
@@ -341,7 +342,7 @@ function CollapsedRail({ list, selectedId, onSelect, onNew, onExpand, onStopped 
       <button type="button" onClick={onExpand} className="hq-icon-btn" aria-label="Expand the sidebar">
         <PanelLeftOpen className="w-4 h-4" />
       </button>
-      <button type="button" onClick={onNew} className="hq-btn-primary !h-11 !w-11 !p-0" aria-label="New agent">
+      <button type="button" onClick={onNew} className="hq-btn-primary !h-11 !w-11 !p-0" aria-label={t('helpers_new_aria')}>
         <Plus className="w-4 h-4" />
       </button>
       <StopAllButton compact onStopped={onStopped} />

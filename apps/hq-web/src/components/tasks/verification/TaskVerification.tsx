@@ -164,7 +164,7 @@ export function TaskVerificationView({ data, taskStatus, nowMs, busy, confirming
         )}
         {taskStatus !== 'to_do' && (
           <button type="button" disabled={busy} onClick={onReturnToDo} className="hq-btn-ghost !h-10 !px-3.5 !text-xs disabled:opacity-40">
-            Return to to_do
+            {t('tasks_send_back')}
           </button>
         )}
       </div>

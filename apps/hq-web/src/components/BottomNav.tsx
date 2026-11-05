@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { Link } from '@tanstack/react-router'
 import { useHQStore } from '~/store/hqStore'
 import { inboxBadge } from '~/lib/inboxBadge'
@@ -68,7 +69,7 @@ export function BottomNav() {
             <line x1="12" y1="19" x2="20" y2="19" />
           </svg>
         </div>
-        <span className="text-xs font-semibold tracking-wide">Workbench</span>
+        <span className="text-xs font-semibold tracking-wide">{t('place_helpers')}</span>
       </Link>
 
       <Link

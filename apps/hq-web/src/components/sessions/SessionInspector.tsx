@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
 import type { HarnessSession } from '~/lib/sessionsApi'
@@ -21,12 +22,12 @@ export function SessionInspector({ session: s }: { session: HarnessSession }) {
   const started = ago(s.created_at)
   const seen = ago(s.last_seen_at)
   return (
-    <aside aria-label="Agent details" className="flex flex-col gap-4 w-[340px] shrink-0 overflow-y-auto p-5 border-l border-white/10">
-      <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">Details</h2>
+    <aside aria-label={t('helpers_details_aria')} className="flex flex-col gap-4 w-[340px] shrink-0 overflow-y-auto p-5 border-l border-white/10">
+      <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">{t('inbox_details')}</h2>
       {status.agent === 'blocked' && (
         <div className="hq-card hq-card-needs rounded-xl p-4">
-          <p className="text-sm font-semibold text-neutral-50">Waiting for you</p>
-          <p className="mt-1 text-xs text-neutral-400">Nothing is answered on your behalf. Use the terminal to choose.</p>
+          <p className="text-sm font-semibold text-neutral-50">{t('helpers_waiting_for_you')}</p>
+          <p className="mt-1 text-xs text-neutral-400">{t('helpers_answer_in_terminal')}</p>
         </div>
       )}
       <dl className="hq-card rounded-xl p-4 flex flex-col gap-3">
@@ -34,8 +35,8 @@ export function SessionInspector({ session: s }: { session: HarnessSession }) {
         <Row label="Runtime">{agentName(s.harness)}</Row>
         <Row label="Folder">{s.cwd || 'Unknown'}</Row>
         <Row label="Computer">{computerName(s.host)}</Row>
-        {started && <Row label="Started">{started} ago</Row>}
-        {seen && <Row label="Last seen">{seen} ago</Row>}
+        {started && <div className="text-sm text-neutral-100">{t('helper_started', { when: started })}</div>}
+        {seen && <div className="text-sm text-neutral-100">{t('helper_last_seen', { when: seen })}</div>}
         <Row label="HQ">{s.mode === 'drive' && s.drive ? 'Driving' : 'Watching'}</Row>
       </dl>
       {s.goal && (

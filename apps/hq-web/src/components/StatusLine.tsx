@@ -39,7 +39,7 @@ export function placeTitle(pathname: string): string {
     case 'tasks':
       return t('place_tasks')
     case 'sessions':
-      return t('place_workbench')
+      return t('place_helpers')
     case 'usage':
       return t('place_usage')
     case 'notifications':

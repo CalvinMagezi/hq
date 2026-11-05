@@ -87,7 +87,7 @@ export function SessionTaskLink({ session: s }: { session: HarnessSession }) {
       to="/tasks"
       search={{ task: task.id }}
       className="flex items-center gap-2 min-w-0 text-xs text-neutral-300 hover:text-white"
-      title="Open the task"
+      title={t('helpers_open_task')}
     >
       <span className="text-neutral-500 shrink-0">{task.display_id}</span>
       <span className="min-w-0 truncate">{task.title}</span>

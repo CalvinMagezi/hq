@@ -23,12 +23,12 @@ test('both timestamp shapes the API sends are read as UTC', () => {
 })
 
 test('ages are coarse and a missing or unreadable time is unknown, never zero', () => {
-  expect(ageLabel('2026-10-15 11:59:40', NOW)).toBe('just now')
-  expect(ageLabel('2026-10-15 11:48:00', NOW)).toBe('12m ago')
-  expect(ageLabel('2026-10-15 09:00:00', NOW)).toBe('3h ago')
-  expect(ageLabel('2026-10-13 12:00:00', NOW)).toBe('2d ago')
-  expect(ageLabel(null, NOW)).toBe('unknown')
-  expect(ageLabel('garbage', NOW)).toBe('unknown')
+  expect(ageLabel('2026-10-15 11:59:40', NOW)).toBe('now')
+  expect(ageLabel('2026-10-15 11:48:00', NOW)).toBe('12 min ago')
+  expect(ageLabel('2026-10-15 09:00:00', NOW)).toBe('3 h ago')
+  expect(ageLabel('2026-10-13 12:00:00', NOW)).toBe('2 days ago')
+  expect(ageLabel(null, NOW)).toBe('Not known')
+  expect(ageLabel('garbage', NOW)).toBe('Not known')
 })
 
 test('accepted and unreviewed never look alike, and a version with no record is neither', () => {
@@ -87,5 +87,5 @@ test('a gap kind has a plain title and an unknown kind is shown as it came', () 
 })
 
 test('a source with nothing is named as having nothing, not given a time', () => {
-  expect(freshnessLines({ task: '2026-10-15 11:00:00', notes: null }, NOW)).toEqual(['task: 1h ago', 'notes: nothing yet'])
+  expect(freshnessLines({ task: '2026-10-15 11:00:00', notes: null }, NOW)).toEqual(['task: 1 h ago', 'notes: nothing yet'])
 })
