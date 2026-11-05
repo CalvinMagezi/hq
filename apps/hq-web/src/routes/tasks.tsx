@@ -42,7 +42,6 @@ import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
 import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext'
 import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { InitiativeBriefing } from '~/components/tasks/InitiativeBriefing'
-import { useRefreshOn } from '~/lib/useRefreshOn'
 import { VerificationBar } from '~/components/tasks/verification/VerificationBar'
 import { BriefingCard } from '~/components/tasks/verification/BriefingCard'
 import { SweepSheet } from '~/components/tasks/verification/SweepSheet'
@@ -167,22 +166,27 @@ function TasksPage() {
     'timeline-work',
     async () => (await fetchRecentWorkSessionsClient(TIMELINE_WORK_DAYS)).work_sessions,
     TIMELINE_WORK_POLL_MS,
-    view === 'timeline'
+    view === 'timeline',
+    true,
+    ['task:sync']
   )
 
   const live = usePolled(
     'live-work',
     async () => (await fetchRecentWorkSessionsClient(LIVE_WORK_DAYS)).work_sessions.filter((s) => s.ended_at === null),
-    LIVE_WORK_POLL_MS
+    LIVE_WORK_POLL_MS,
+    true,
+    true,
+    ['task:sync']
   )
-
-  useRefreshOn(['task:sync'], live.refresh)
 
   const archived = usePolled(
     'archived-tasks',
     async () => (await fetchTasksClient({ archived: true })).tasks,
     ARCHIVED_POLL_MS,
-    statusTab === 'archived'
+    statusTab === 'archived',
+    true,
+    ['task:sync']
   )
   const staleSeen = useRef<ReadonlySet<string>>(NO_STALE)
   const stale = usePolled(
@@ -192,10 +196,11 @@ function TasksPage() {
       staleSeen.current = stableSet(next, staleSeen.current)
       return staleSeen.current
     },
-    STALE_POLL_MS
+    STALE_POLL_MS,
+    true,
+    true,
+    ['task:sync']
   )
-  useRefreshOn(['task:sync'], stale.refresh)
-  useRefreshOn(['task:sync'], recentWork.refresh)
   const archivedTasks = archived.data ?? []
 
   const { task: linkedSearchId } = Route.useSearch()

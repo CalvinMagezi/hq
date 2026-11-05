@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { searchNotes, type SearchHit } from '~/lib/vaultApi'
+import { searchDebounceMs } from '~/lib/dataUsage'
 
 const SEARCH_DEBOUNCE_MS = 200
 
@@ -60,7 +61,7 @@ export function useVaultSearch(onClose: () => void) {
             } finally {
                 if (!controller.signal.aborted) setIsLoading(false)
             }
-        }, SEARCH_DEBOUNCE_MS)
+        }, searchDebounceMs(SEARCH_DEBOUNCE_MS))
         return () => {
             clearTimeout(timer)
             controller.abort()

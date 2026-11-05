@@ -15,6 +15,7 @@ import { useSidebarLayout } from '~/components/sessions/useSidebarLayout'
 import { SIDEBAR_MAX, SIDEBAR_MIN } from '~/lib/sidebarLayout'
 import { ErrorText } from '~/components/sessions/ErrorText'
 
+const HELPER_EVENTS = ['helpers:change', 'sessions:sync'] as const
 const LIST_POLL_MS = 8_000
 const DETAIL_POLL_MS = 5_000
 /** Each computer is asked over the network, so its lockdown state is read less often. */
@@ -46,9 +47,9 @@ function WorkbenchPage() {
   const sidebar = useSidebarLayout()
   // Archived agents are always fetched and hidden here, so the toggle is instant and never blanks the list.
   const filters = useMemo(() => ({ ...(task ? { task_id: task } : {}), include_archived: true }), [task])
-  const list = usePolled(JSON.stringify(filters), () => globalSessionsApi.list(filters), LIST_POLL_MS, true, true)
-  const detail = usePolled(selectedId ?? '', () => globalSessionsApi.get(selectedId ?? ''), DETAIL_POLL_MS, Boolean(selectedId), true)
-  const hosts = usePolled('hosts', () => workbenchApi.hosts(), HOSTS_POLL_MS, true, true)
+  const list = usePolled(JSON.stringify(filters), () => globalSessionsApi.list(filters), LIST_POLL_MS, true, true, HELPER_EVENTS)
+  const detail = usePolled(selectedId ?? '', () => globalSessionsApi.get(selectedId ?? ''), DETAIL_POLL_MS, Boolean(selectedId), true, HELPER_EVENTS)
+  const hosts = usePolled('hosts', () => workbenchApi.hosts(), HOSTS_POLL_MS, true, true, HELPER_EVENTS)
   const afterStop = () => void Promise.all([list.refresh(), hosts.refresh()])
 
   // An unfiltered list is the nav badge's source, so the nav stops polling while this page is open.

@@ -117,19 +117,16 @@ export const USAGE_POLL_MS = 60_000
 export const budgetsQuery = queryOptions({
   queryKey: ['usage-budgets'],
   queryFn: (): Promise<BudgetsResponse> => hqJson('/api/budgets'),
-  refetchInterval: USAGE_POLL_MS,
 })
 
 export const forecastQuery = queryOptions({
   queryKey: ['usage-forecast'],
   queryFn: (): Promise<ForecastResponse> => hqJson('/api/usage/forecast'),
-  refetchInterval: USAGE_POLL_MS,
 })
 
 export const providersQuery = queryOptions({
   queryKey: ['usage-providers'],
   queryFn: (): Promise<ProvidersResponse> => hqJson('/api/usage/providers'),
-  refetchInterval: USAGE_POLL_MS,
 })
 
 export function saveBudgets(defs: BudgetDef[], rest: Pick<BudgetsResponse, 'background_run_usd' | 'allow_unpriced_models'>) {

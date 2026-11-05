@@ -29,7 +29,6 @@ export const OPENROUTER_USAGE_POLL_MS = 60_000
 export const openrouterUsageQuery = queryOptions({
   queryKey: ['openrouter-usage'],
   queryFn: (): Promise<OpenRouterUsageResponse> => hqJson('/api/openrouter-usage'),
-  refetchInterval: OPENROUTER_USAGE_POLL_MS,
 })
 
 const SMALL_USD = 10

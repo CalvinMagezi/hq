@@ -1,50 +1,18 @@
 import { Dialog } from '~/components/ui/Dialog'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { availableTimeZones, deviceTimeZone, readClock, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
 import { formatSize } from '~/lib/settingsGroups'
 import { readDataUsed } from '~/lib/dataUsed'
+import { lastHourBytes, overIdleTarget, readFirstLoad } from '~/lib/dataUsage'
 import { fetchHello } from '~/lib/hello'
 import { useInHub } from '~/lib/hubWindow'
-import { reloadForNewer, useNewerHq } from '~/lib/newerHq'
+import { APP_VERSION, reloadForNewer, useNewerHq } from '~/lib/version'
 import { HqHttpError, refuseSignIn } from '~/lib/hqAuth'
 import { signOutCurrentDevice } from '~/lib/deviceSignIn'
 import { useInstallOffer } from '~/components/InstallPrompt'
 import { t } from '~/strings'
 
-const TICK_MS = 15_000
 const HTTP_BAD_REQUEST = 400
-
-/** Time zone: how times show in this browser, kept here only. */
-export function TimeZonePage() {
-  const pinned = useClockZone()
-  const device = deviceTimeZone()
-  const zones = useMemo(availableTimeZones, [])
-  const [now, setNow] = useState<Date | null>(null)
-  useEffect(() => {
-    setNow(new Date())
-    const id = window.setInterval(() => setNow(new Date()), TICK_MS)
-    return () => window.clearInterval(id)
-  }, [])
-  const zone = pinned || device
-  return (
-    <div className="flex flex-col gap-4">
-      <label className="a-field">
-        <span className="a-field-label">{t('time_show_in')}</span>
-        <select value={pinned} onChange={(e) => setClockZone(e.target.value)} className="a-input" style={{ colorScheme: 'dark' }}>
-          <option value="">{t('time_same_browser', { city: zoneCity(device) })}</option>
-          {zones.map((z) => (
-            <option key={z} value={z}>
-              {z.replace(/_/g, ' ')}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="a-muted a-body-sm">{t('time_kept')}</p>
-      {now && <p className="a-body">{t('time_now', { time: readClock(now, zone).time, city: zoneCity(zone) })}</p>}
-    </div>
-  )
-}
 
 /** Install and version: the browser's install offer and the HQ version, with Reload when a newer one waits. */
 export function VersionPage() {
@@ -74,26 +42,34 @@ export function VersionPage() {
       </div>
       <div className="a-card">
         <b>{t('ver_version_title')}</b>
+        <span className="a-muted">{t('ver_browser_line', { version: APP_VERSION })}</span>
         {hello && <span className="a-muted">{t('ver_hq_line', { version: hello.version })}</span>}
       </div>
     </div>
   )
 }
 
-/** Data used by HQ in this browser this month. */
+/** Data used by HQ in this browser this month: the month, an idle hour and the Chat first load. */
 export function DataUsedPage() {
   const hub = useInHub()
-  const [bytes, setBytes] = useState<number | null>(null)
-  useEffect(() => setBytes(readDataUsed()), [])
+  const [numbers, setNumbers] = useState<{ month: number; idle: number | null; first: number | null } | null>(null)
+  useEffect(() => setNumbers({ month: readDataUsed(), idle: lastHourBytes(), first: readFirstLoad() }), [])
+  const idleOver = numbers?.idle != null && overIdleTarget(numbers.idle)
   return (
     <div className="flex flex-col gap-4">
       <div className="a-card">
-        <b>{t('data_month_title')}</b>
-        <span className="a-muted">{hub ? t('data_used_row_window') : bytes === null ? '' : formatSize(bytes)}</span>
+        <b>{hub ? t('data_phone') : t('data_month_title')}</b>
+        <span className="a-muted">{numbers ? formatSize(numbers.month) : ''}</span>
       </div>
-      <div className="a-card">
+      <div className={idleOver ? 'a-card warn' : 'a-card'}>
         <b>{t('data_idle_title')}</b>
         <span className="a-muted">{t('data_idle_body')}</span>
+        <span className="a-muted">{numbers?.idle != null ? formatSize(numbers.idle) : ''}</span>
+        {idleOver && <span className="a-muted">{t('data_idle_over')}</span>}
+      </div>
+      <div className="a-card">
+        <b>{t('data_chat_first')}</b>
+        <span className="a-muted">{numbers?.first != null ? formatSize(numbers.first) : ''}</span>
       </div>
       <p className="a-muted a-body-sm">{t('data_note')}</p>
     </div>

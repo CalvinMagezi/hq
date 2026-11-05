@@ -108,7 +108,7 @@ export function InitiativeBriefingView({ view, nowMs }: { view: InitiativeActivi
 
 /** The briefing panel above a selected initiative's tasks. */
 export function InitiativeBriefing({ initiativeId, name, onClose }: { initiativeId: string; name: string; onClose: () => void }) {
-  const found = usePolled(initiativeId, () => fetchInitiativeActivityClient(initiativeId), BRIEFING_POLL_MS)
+  const found = usePolled(initiativeId, () => fetchInitiativeActivityClient(initiativeId), BRIEFING_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], found.refresh)
   return (
     <section aria-label={`Briefing for ${name}`} className="mb-4 rounded-2xl hq-card p-3">

@@ -2,12 +2,20 @@ import { createContext, useContext, useEffect, useRef, useCallback, useState, ty
 import { useHQStore } from '~/store/hqStore'
 import { refreshThreads } from '~/lib/threadApi'
 import { handleChatEvent } from '~/lib/chatEvents'
+import { addSocketBytes } from '~/lib/dataUsage'
 import { socketUrl } from '../lib/hqAuth'
 
 type MessageHandler = (msg: Record<string, unknown>) => void
 
 /** Chat events subscribers also hear: a reply ending, and HQ's answer about a sent message (the outbox waits on these). */
-const SHARED_CHAT_EVENTS = new Set(['turn_end', 'turn_start', 'chat_duplicate', 'chat_rejected'])
+export const SHARED_CHAT_EVENTS = new Set(['turn_end', 'turn_start', 'chat_duplicate', 'chat_rejected'])
+/** What changed on HQ: a page that shows it refetches instead of polling (data budget, rule 5). */
+export const CHANGE_EVENTS = new Set(['inbox:change', 'notes:change', 'helpers:change', 'budget:change', 'settings:change', 'task:sync', 'sessions:sync'])
+
+/** Whether a frame that chat handling consumed is still one subscribers must hear. */
+export function sharedWithSubscribers(type: unknown): boolean {
+  return SHARED_CHAT_EVENTS.has(String(type)) || CHANGE_EVENTS.has(String(type))
+}
 
 interface WebSocketContextValue {
   /** False when the socket is not open: nothing was sent, so callers must not wait for a reply. */
@@ -76,9 +84,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       }
       ws.onmessage = (e) => {
         try {
+          if (typeof e.data === 'string') addSocketBytes(e.data.length)
           const msg = JSON.parse(e.data) as Record<string, unknown>
           if (handleChatEvent(msg)) {
-            if (SHARED_CHAT_EVENTS.has(String(msg.type))) for (const handler of handlersRef.current) handler(msg)
+            if (sharedWithSubscribers(msg.type)) for (const handler of handlersRef.current) handler(msg)
             return
           }
           if (msg.type === 'notification:badge_count') {
@@ -162,6 +171,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       {children}
     </WebSocketContext.Provider>
   )
+}
+
+/** The socket when there is a provider, else null: for hooks that also run in tests and the prerender. */
+export function useWSOptional() {
+  return useContext(WebSocketContext)
 }
 
 export function useWS() {

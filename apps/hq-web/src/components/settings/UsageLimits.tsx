@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { toastUndo, toastAlert } from '~/lib/toast'
+import { failureLine } from '~/lib/version'
 import { t } from '~/strings'
 import {
   budgetsQuery,
@@ -110,7 +111,7 @@ function BudgetsPanel() {
             t('restored_limit'),
             'undo.limit_deleted',
           ),
-        onError: () => toastAlert(t('fail_delete_limit_no_reply')),
+        onError: (err) => toastAlert(failureLine(err, 'fail_delete_limit_newer', t('fail_delete_limit_no_reply'))),
       },
     )
   }

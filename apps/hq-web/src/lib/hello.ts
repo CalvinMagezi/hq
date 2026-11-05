@@ -17,6 +17,9 @@ export interface Hello {
   edition: 'full' | 'lite' | 'mobile' | string
   version: string
   min_client: number
+  /** HQ's own IANA zone, or null when the host will not say. */
+  tz?: string | null
+  tz_offset_minutes?: number
   starting: StartStep | null
 }
 

@@ -47,7 +47,6 @@ export const COPILOT_USAGE_POLL_MS = 60_000
 export const copilotUsageQuery = queryOptions({
   queryKey: ['copilot-usage'],
   queryFn: (): Promise<CopilotUsage> => hqJson('/api/copilot-usage'),
-  refetchInterval: COPILOT_USAGE_POLL_MS,
 })
 
 const THOUSAND = 1000

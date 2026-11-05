@@ -5,6 +5,7 @@ import { useHQStore } from '~/store/hqStore'
 import { useThreadStore, useLiveTurn, type ThreadMessage } from '~/store/threadStore'
 import { useWS } from '~/context/WebSocketContext'
 import { toastUndo, toastAlert } from '~/lib/toast'
+import { failureLine } from '~/lib/version'
 import { t } from '~/strings'
 import { threadApi, refreshThreads, loadMessages, newThread } from '~/lib/threadApi'
 import { rejectSend } from '~/lib/chatEvents'
@@ -165,7 +166,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
       )
     } catch (err) {
       console.error('ChatView: failed to archive chat', err)
-      toastAlert(t('fail_archive_chat_no_reply'))
+      toastAlert(failureLine(err, 'fail_archive_chat_newer', t('fail_archive_chat_no_reply')))
     }
   }, [setActiveThread])
 

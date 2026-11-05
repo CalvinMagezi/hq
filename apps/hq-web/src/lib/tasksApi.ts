@@ -280,7 +280,8 @@ export const STATUS_ORDER: TaskStatus[] = ['to_do', 'in_progress', 'blocked', 'r
  */
 export function parseSqliteUtc(s: string): Date {
   const iso = s.includes('T') ? s : s.replace(' ', 'T')
-  return new Date(iso.endsWith('Z') ? iso : `${iso}Z`)
+  // RFC 3339 from HQ carries its own Z or offset; only the old zoneless SQLite text is taken as UTC.
+  return new Date(/(?:Z|[+-]\d\d:?\d\d)$/i.test(iso) ? iso : `${iso}Z`)
 }
 
 /** One agent session holding a task for a stretch of time. Times are UTC like every other timestamp. */

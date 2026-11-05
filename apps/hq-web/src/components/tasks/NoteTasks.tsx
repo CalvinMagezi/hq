@@ -7,7 +7,7 @@ const NOTE_TASKS_POLL_MS = 300_000
 
 /** The tasks that started from this note. Renders nothing for a note with none. */
 export function NoteTasks({ path }: { path: string }) {
-  const found = usePolled(path, async () => (await fetchTasksLinkedToClient('vault_note', path)).tasks, NOTE_TASKS_POLL_MS)
+  const found = usePolled(path, async () => (await fetchTasksLinkedToClient('vault_note', path)).tasks, NOTE_TASKS_POLL_MS, true, true, ['task:sync', 'notes:change'])
   useRefreshOn(['task:sync'], found.refresh)
   if (!found.data || found.data.length === 0) return null
   return (

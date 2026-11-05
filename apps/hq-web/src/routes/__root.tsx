@@ -11,7 +11,7 @@ import {
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import { CACHE_BUSTER, CACHE_MAX_AGE_MS, queryClient, queryPersister } from '~/lib/offlineCache'
 import type { ReactNode } from 'react'
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { MoreHorizontal, Search, Settings } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
@@ -32,12 +32,17 @@ import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
 import alignedCss from '~/styles/aligned-ui.css?url'
 import appCss from '../../app.css?url'
 import { t } from '~/strings'
-import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
-import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
-import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
+import { startDataCounter } from '~/lib/dataUsage'
+import { useRefreshOn } from '~/lib/useRefreshOn'
+import { visibleTimer } from '~/lib/visibleTimer'
+import { openrouterChipLabel, openrouterChipTitle, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
+import { budgetChipLabel, budgetChipTitle, type BudgetsResponse } from '~/lib/usageApi'
+import { chipLabel, chipTitle, type CopilotUsage } from '~/lib/copilotUsageApi'
 import { hqJson, needsSignIn, onSignInChange, refuseSignIn, signedOutElsewhere, takeSignInArrival } from '~/lib/hqAuth'
 import { lastKnownEdition, setEdition, useEdition } from '~/lib/edition'
 import { fetchHello } from '~/lib/hello'
+import { noteHelloVersion, noteWaitingWorker } from '~/lib/version'
+import { noteHqTimeZone } from '~/lib/time'
 import { legacyRedirect, liteRedirect } from '~/lib/routes'
 import { toastNotice } from '~/lib/toast'
 import { isSharedComputer, watchIdle } from '~/lib/sharedComputer'
@@ -137,26 +142,25 @@ function useChip() {
   const [data, setData] = useState<CopilotUsage | undefined>(undefined)
   const [openrouter, setOpenrouter] = useState<OpenRouterUsageResponse | undefined>(undefined)
   const [budgets, setBudgets] = useState<BudgetsResponse | undefined>(undefined)
-  useEffect(() => {
-    let alive = true
-    const load = () => {
-      hqJson<CopilotUsage>('/api/copilot-usage')
-        .then((d) => alive && setData(d))
-        .catch(() => undefined)
-      hqJson<OpenRouterUsageResponse>('/api/openrouter-usage')
-        .then((d) => alive && setOpenrouter(d))
-        .catch(() => undefined)
-      hqJson<BudgetsResponse>('/api/budgets')
-        .then((d) => alive && setBudgets(d))
-        .catch(() => undefined)
-    }
-    load()
-    const timer = window.setInterval(load, Math.min(COPILOT_USAGE_POLL_MS, OPENROUTER_USAGE_POLL_MS, USAGE_POLL_MS))
-    return () => {
-      alive = false
-      window.clearInterval(timer)
-    }
+  const load = useCallback(() => {
+    hqJson<CopilotUsage>('/api/copilot-usage')
+      .then(setData)
+      .catch(() => undefined)
+    hqJson<OpenRouterUsageResponse>('/api/openrouter-usage')
+      .then(setOpenrouter)
+      .catch(() => undefined)
+    hqJson<BudgetsResponse>('/api/budgets')
+      .then(setBudgets)
+      .catch(() => undefined)
   }, [])
+  // No timer: HQ says when a limit or a key changed, and the chip catches up when the tab is shown.
+  useEffect(() => {
+    load()
+    const onVisible = () => document.visibilityState === 'visible' && load()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [load])
+  useRefreshOn(['budget:change', 'settings:change'], load)
   const copilotLabel = chipLabel(data)
   // A budget that needs attention outranks a balance: it is the thing about to block a call.
   const budgetLabel = budgetChipLabel(budgets)
@@ -200,7 +204,14 @@ function MoreMenu({ state, chip, lite }: { state: ConnectionState; chip: ReturnT
   )
 }
 
+const BUDGET_QUERY_KEYS = ['usage-budgets', 'usage-forecast', 'usage-providers', 'copilot-usage', 'openrouter-usage']
+const refetchBudgetQueries = () => {
+  for (const queryKey of BUDGET_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [queryKey] })
+}
+
 function VaultShell({ embedded }: { embedded: boolean }) {
+  useEffect(() => startDataCounter(), [])
+  useRefreshOn(['budget:change', 'settings:change'], refetchBudgetQueries)
   const wsConnected = useHQStore((s) => s.wsConnected)
   const setGlobalChatOpen = useHQStore((s) => s.setGlobalChatOpen)
   useNeedsYouCount()
@@ -214,14 +225,24 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   const navigate = useNavigate()
   const activeTasks = useHQStore((s) => s.tasks.filter((x) => x.status === 'in_progress').length)
   const statusLineRef = useRef<HTMLButtonElement>(null)
-  const [swUpdateAvailable, setSwUpdateAvailable] = useState(false)
 
   // HQ says which edition it is; the rail and bar draw the places that edition serves.
   useEffect(() => {
     let alive = true
-    void fetchHello().then((h) => alive && h && setEdition(h.edition))
+    const look = () =>
+      void fetchHello().then((h) => {
+        if (!alive || !h) return
+        setEdition(h.edition)
+        noteHelloVersion(h)
+        noteHqTimeZone(h)
+      })
+    look()
+    // An HQ that updated while the tab sat hidden is noticed the moment the tab is shown.
+    const onVisible = () => document.visibilityState === 'visible' && look()
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       alive = false
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])
 
@@ -263,23 +284,19 @@ function VaultShell({ embedded }: { embedded: boolean }) {
     // navigation, so it is asked again on a timer and whenever the app comes back into view.
     let registration: ServiceWorkerRegistration | undefined
     const checkForUpdate = () => void registration?.update().catch(() => undefined)
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') checkForUpdate()
-    }
-    const updateTimer = window.setInterval(checkForUpdate, SW_UPDATE_CHECK_MS)
-    document.addEventListener('visibilitychange', onVisible)
+    const stopUpdateTimer = visibleTimer(checkForUpdate, SW_UPDATE_CHECK_MS)
 
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
         registration = reg
-        if (reg.waiting) setSwUpdateAvailable(true)
+        if (reg.waiting) noteWaitingWorker(true)
         reg.addEventListener('updatefound', () => {
           const nextWorker = reg.installing
           if (!nextWorker) return
           nextWorker.addEventListener('statechange', () => {
             if (nextWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              setSwUpdateAvailable(true)
+              noteWaitingWorker(true)
             }
           })
         })
@@ -299,17 +316,9 @@ function VaultShell({ embedded }: { embedded: boolean }) {
       reg.active?.postMessage({ type: 'CACHE_ASSETS', urls })
     }, ROUTE_CHUNKS_SETTLE_MS))
     return () => {
-      window.clearInterval(updateTimer)
-      document.removeEventListener('visibilitychange', onVisible)
+      stopUpdateTimer()
     }
   }, [])
-
-  const handleSwUpdate = async () => {
-    const reg = await navigator.serviceWorker.ready
-    reg.waiting?.postMessage({ type: 'SKIP_WAITING' })
-    setSwUpdateAvailable(false)
-    window.location.reload()
-  }
 
   return (
     <div
@@ -332,24 +341,6 @@ function VaultShell({ embedded }: { embedded: boolean }) {
       )}
 
       {!embedded && <ToastHost />}
-
-      {!embedded && swUpdateAvailable && (
-        <div
-          className="flex items-center justify-between px-4 py-2 text-sm relative z-10"
-          style={{ background: 'rgba(0,255,163,0.08)', borderBottom: '1px solid rgba(0,255,163,0.2)' }}
-        >
-          <span className="text-xs font-mono" style={{ color: 'var(--accent-green)' }}>
-            A new vault app version is available
-          </span>
-          <button
-            onClick={handleSwUpdate}
-            className="px-3 py-1 rounded-lg text-xs font-mono font-bold transition-all"
-            style={{ background: 'var(--accent-green)', color: '#000' }}
-          >
-            Update now
-          </button>
-        </div>
-      )}
 
       {!embedded && <header
         className="flex-shrink-0 flex items-center gap-2 px-3 sticky top-0 z-30 hq-header"

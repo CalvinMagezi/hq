@@ -19,7 +19,7 @@ const ASKS: Record<string, string> = {
 
 /** The dialogs this task's agents wait on you for. Shown only while there are any. */
 export function TaskDecisions({ taskId }: { taskId: string }) {
-  const decisions = usePolled(taskId, () => fetchTaskDecisions(taskId), DECISIONS_POLL_MS)
+  const decisions = usePolled(taskId, () => fetchTaskDecisions(taskId), DECISIONS_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['session:changed', 'task:sync'], decisions.refresh)
   const open = decisions.data?.decisions ?? []
   if (open.length === 0) return null

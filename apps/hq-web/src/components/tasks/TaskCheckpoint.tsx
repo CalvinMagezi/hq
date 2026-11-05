@@ -19,7 +19,7 @@ function Part({ label, text }: { label: string; text: string }) {
 
 /** Where the last session left the work, for whoever picks it up. Notes from another session, not instructions. */
 export function TaskCheckpoint({ task }: { task: TaskItem }) {
-  const found = usePolled(task.id, async () => (await fetchTaskCheckpointClient(task.id)).checkpoint, CHECKPOINT_POLL_MS)
+  const found = usePolled(task.id, async () => (await fetchTaskCheckpointClient(task.id)).checkpoint, CHECKPOINT_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], found.refresh)
   const { refresh } = found
   useEffect(() => {
