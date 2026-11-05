@@ -14,7 +14,8 @@ The tab replaces today's Claude tab. One helper's detail and Try it are `04-help
   network, two at a time, cached by path and date; show the full path once.
 - **M16.** The check limit is 2 s, as the machine probe (the old board said 5 s).
 - **W47.** Claude Desktop in "Apps that use HQ". Eleven helpers and one app, the same count everywhere.
-- **W26.** "Done by HQ" for the edge worker's runs, never a helper.
+- **W26, as `../../resolutions.md` B4 words it.** The edge worker's runs read "HQ is working on it"
+  while working and "Done by HQ" when finished, in the group "HQ's own work", never a helper.
 - **W06.** Title-link rows with the button beside the link.
 - **WB5.** A lockdown state that points to This PC.
 - **W42** (helpers at work move from This PC to this tab), **W45** (update check behind a switch, off),
@@ -75,10 +76,10 @@ pages when the list is built, and the list kept current like any other content (
 
 ## 3. Decision
 
-**One list of every helper HQ can use on this PC, and the apps that use HQ, each with its version, its
+**One list of every helper HQ can use on this computer, and the apps that use HQ, each with its version, its
 state in words and one next action. Checked, not watched: when the tab opens and on Check all again,
 never on a timer, and only what changed since.** The tab answers three questions without a terminal:
-which helpers are on this PC, does each one work, and can it reach HQ.
+which helpers are on this computer, does each one work, and can it reach HQ.
 
 Rejected:
 
@@ -95,20 +96,21 @@ from you." and "Checked at 14:30, when you opened this tab." [Check all again].
 - **H1 · At work here** (`.a-grp` "At work here 4"): each row opens that helper in the HQ window at
   `/helpers/:id`; Needs your OK first. "Fix the flaky relay test · Claude Code · started 40 min ago ·
   Needs your OK · Opens in HQ"; "Review the update installer · Codex · started 12 min ago · Working on it";
-  "Sort the release notes · Done by HQ · started 5 min ago" (HQ's own runs, never a helper, not counted);
+  "Sort the release notes · HQ is working on it · started 5 min ago" (HQ's own runs, never a helper, not
+  counted; once finished "Done by HQ", `../../resolutions.md` B4);
   "Docs pass · Codex · finished 1 h ago · Finished".
 - **H2 · Coding helpers 9.** The five that need you first, then Ready, then Not installed. Each row: the
   name as a link (opens the detail), its version or why there is none, one state pill, one button beside
   the link:
   - "Antigravity · 1.4.0 · not connected to HQ yet · Not connected to HQ" [Connect to HQ]
   - "Qwen Code · 0.2.1 · its sign-in screen showed · Needs sign-in" [Sign in…]
-  - "Cursor · Its last Try it stopped on a question · Needs you on this PC" [See what it asked]
+  - "Cursor · Its last Try it stopped on a question · Needs you on this computer" [See what it asked]
   - "Kimi · Its settings are here, its program is not · Program not found" [Choose the program…]
   - "OpenCode · Couldn't read its version in 2 s · Check failed" [Check again]
   - "Codex · 0.58.0 · 0.60.1 is out · Update available" [How to update] (grey)
   - "Claude Code · 2.1.12 · connected to HQ · Ready" [Try it]
   - "Pi · 0.12.3 · Ready" [Try it]
-  - "GitHub Copilot · Not on this PC · Not installed" [How to install] (grey)
+  - "GitHub Copilot · Not on this computer · Not installed" [How to install] (grey)
 - **H3 · General helpers 2.** "They research, review and watch other helpers. HQ never gives them code
   changes." "OpenClaw · 2026.10.2", "Hermes".
 - **H4 · Apps that use HQ 1.** "Apps you open yourself that can use HQ. HQ does not start them." "Claude
@@ -116,16 +118,16 @@ from you." and "Checked at 14:30, when you opened this tab." [Check all again].
 - **H5 · Checking.** "Checking 11 helpers and 1 app · 5 done" / "Two at a time. Most versions come from
   the program's own files." Rows: "1.4.0 · new here: /Users/alex/.local/bin/agy", "Reading its version ·
   Checking" (blue, spinner), "Looking for its program · Waiting its turn · Waiting" (grey).
-- **H6 · First open: ask before running anything.** "Check this PC for helpers" / "HQ Hub looks for each
+- **H6 · First open: ask before running anything.** "Check this computer for helpers" / "HQ Hub looks for each
   helper HQ can use and reads its version. Most versions come from the program's own files." / "Other
-  checks run the program once, closed off, with no network. Nothing is installed." [Check this PC]. With
+  checks run the program once, closed off, with no network. Nothing is installed." [Check this computer]. With
   HQ off: "HQ is off, so no helpers are at work here." Checking does not need HQ running; only Try it
   does.
 - **H7 · During a lockdown.** The amber card "Every helper here is stopped" / "Stopped for safety" / "Stop
   every helper was used at 14:20, from Pixel 8. Allow them again on This PC." [Go to This PC]. Stopped
   helpers "Claude Code · stopped at 14:20 · Stopped" (grey). "Try it waits until helpers are allowed
   again on This PC." Checking versions still works.
-- **H8 · No helpers on this PC.** "No helpers on this PC yet" / "Coding work needs a helper. Most people
+- **H8 · No helpers on this computer.** "No helpers on this computer yet" / "Coding work needs a helper. Most people
   start with Claude Code. Copy this line into a terminal, sign in once, then check again." /
   `npm install -g @anthropic-ai/claude-code` [Copy] / "It needs Node.js. Every helper's own install line
   is in its row below." Every row Not installed with How to install.
@@ -141,13 +143,13 @@ from you." and "Checked at 14:30, when you opened this tab." [Check all again].
   connects a helper to your phone's HQ." "At work here · Helpers your phone starts here show up once
   helpers here are on." Rows "2.1.12 · connected to your phone's HQ", "1.0.105 · not connected to your
   phone's HQ", "0.12.3". "Try it needs helpers on here. Start them on This PC first." Needs building: the
-  phone learns which helpers this PC has, so its Start a helper offers only those.
+  phone learns which helpers this computer has, so its Start a helper offers only those.
 - **Sizes.** 320 px: rows wrap, the button goes under the name; 200% text the same; 2200 one 760 column.
 
 ### Colour (rules-shared 3)
 
 Grey for fine or nothing to do (Ready, Update available, Not installed, Finished, Stopped, Waiting).
-Amber with words for needs you (Not connected to HQ, Needs sign-in, Needs you on this PC, Program not
+Amber with words for needs you (Not connected to HQ, Needs sign-in, Needs you on this computer, Program not
 found, Check failed). Blue with a spinner for working (Checking, Trying it, Working on it). Red only in a
 remove dialog. The tab count is amber and counts only helpers at work that need your OK; a helper that
 needs setting up is amber in the list but does not raise the count.
@@ -164,14 +166,14 @@ needs setting up is amber in the list but does not raise the count.
 | `hh_group_general` | "General helpers" · "They research, review and watch other helpers. HQ never gives them code changes." |
 | `hh_group_apps` | "Apps that use HQ" · "Apps you open yourself that can use HQ. HQ does not start them." |
 | `hh_started` | "{Claude Code} · started {40 min ago}" · "Opens in HQ" |
-| `hh_done_by_hq` | "Done by HQ · started {5 min ago}" |
-| `hh_states` | "Not connected to HQ" · "Needs sign-in" · "Needs you on this PC" · "Program not found" · "Check failed" · "Update available" · "Ready" · "Not installed" · "Checking" · "Waiting" · "Trying it" |
-| `hh_row_lines` | "{1.4.0} · not connected to HQ yet" · "{0.2.1} · its sign-in screen showed" · "Its last Try it stopped on a question" · "Its settings are here, its program is not" · "Couldn't read its version in 2 s" · "{0.58.0} · {0.60.1} is out" · "{2.1.12} · connected to HQ" · "Not on this PC" · "Reading its version" · "Looking for its program" · "Waiting its turn" · "new here: {full path}" |
+| `hh_hq_own` | "HQ is working on it · started {5 min ago}" while working · "Done by HQ · finished {1 h ago}" when finished (B4) |
+| `hh_states` | "Not connected to HQ" · "Needs sign-in" · "Needs you on this computer" · "Program not found" · "Check failed" · "Update available" · "Ready" · "Not installed" · "Checking" · "Waiting" · "Trying it" |
+| `hh_row_lines` | "{1.4.0} · not connected to HQ yet" · "{0.2.1} · its sign-in screen showed" · "Its last Try it stopped on a question" · "Its settings are here, its program is not" · "Couldn't read its version in 2 s" · "{0.58.0} · {0.60.1} is out" · "{2.1.12} · connected to HQ" · "Not on this computer" · "Reading its version" · "Looking for its program" · "Waiting its turn" · "new here: {full path}" |
 | `hh_actions` | "Connect to HQ" · "Sign in…" · "See what it asked" · "Choose the program…" · "Check again" · "How to update" · "Try it" · "How to install" |
 | `hh_checking` | "Checking {11} helpers and {1} app · {5} done" · "Two at a time. Most versions come from the program's own files." |
-| `hh_first_open` | "Check this PC for helpers" · "HQ Hub looks for each helper HQ can use and reads its version. Most versions come from the program's own files." · "Other checks run the program once, closed off, with no network. Nothing is installed." · "Check this PC" · "HQ is off, so no helpers are at work here." |
+| `hh_first_open` | "Check this computer for helpers" · "HQ Hub looks for each helper HQ can use and reads its version. Most versions come from the program's own files." · "Other checks run the program once, closed off, with no network. Nothing is installed." · "Check this computer" · "HQ is off, so no helpers are at work here." |
 | `hh_lockdown` | "Stop every helper was used at {14:20}, from {Pixel 8}. Allow them again on This PC." · "Go to This PC" · "{Claude Code} · stopped at {14:20}" · "Try it waits until helpers are allowed again on This PC." |
-| `hh_none` | "No helpers on this PC yet" · "Coding work needs a helper. Most people start with Claude Code. Copy this line into a terminal, sign in once, then check again." · "It needs Node.js. Every helper's own install line is in its row below." · "Copy" |
+| `hh_none` | "No helpers on this computer yet" · "Coding work needs a helper. Most people start with Claude Code. Copy this line into a terminal, sign in once, then check again." · "It needs Node.js. Every helper's own install line is in its row below." · "Copy" |
 | `hh_windows` | "On Windows, helpers live in Ubuntu" · "Helpers run inside Ubuntu (WSL2) here, so HQ uses only helpers installed there. Install each one in Ubuntu, and sign in there." · "How helpers work on Windows" · "In Windows, not in Ubuntu" · "{1.4.0} · in Ubuntu" · "App in Windows · {1.0.9}" |
 | `hh_phone` | "Helpers here work for HQ on your phone" · "HQ runs on {Pixel 8}. It starts these helpers here once you press Start helpers here on This PC. Connect to HQ connects a helper to your phone's HQ." · "Helpers your phone starts here show up once helpers here are on." · "{2.1.12} · connected to your phone's HQ" · "{1.0.105} · not connected to your phone's HQ" · "Try it needs helpers on here. Start them on This PC first." |
 
@@ -197,8 +199,8 @@ needs setting up is amber in the list but does not raise the count.
 9. **Title-link rows.** The name is the link to the detail; the one button sits beside it, never inside.
 10. **The count everywhere is eleven helpers and one app,** in three groups: Coding helpers (9), General
     helpers (2) and Apps that use HQ (1).
-11. **HQ's own runs** (from `/api/edge-worker`) show as "Done by HQ" in At work here and are never counted
-    as helpers.
+11. **HQ's own runs** (from `/api/edge-worker`) show as "HQ is working on it" in At work here, and as
+    "Done by HQ" once finished; they are never counted as helpers (B4).
 12. **Lockdown:** Try it is off with the reason; checking still works (it starts no helper through the
     host).
 
@@ -238,7 +240,7 @@ needs setting up is amber in the list but does not raise the count.
 
 ## 11. Check on a laptop or phone
 
-- macOS with Claude Code and Codex installed: first open asks; Check this PC; versions from package files;
+- macOS with Claude Code and Codex installed: first open asks; Check this computer; versions from package files;
   Activity Monitor shows no more than two helper processes during the check.
 
 ## 12. Open decisions it depends on

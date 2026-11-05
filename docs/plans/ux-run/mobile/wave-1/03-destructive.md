@@ -3,7 +3,8 @@
 Board: **FixDestructive** ("Fix 10: destructive actions"), revised after review, 5 Nov 2026.
 Area: every destructive action: `ui/theme/HqTheme.kt`, a shared dialog, eight screens.
 Follows rules section 4 (D2 and D8 revised, approvals, Undo), section 2 (failure lines) and section 3
-(colour) in `../../rules-shared.md`. Where this board differs, the rules win.
+(colour) in `../../rules-shared.md`. Where this board differs, the rules win, and `../../resolutions.md`
+wins over the rules (here A2, A6, B1, B2, B3, B8, B18 and C-1, C-4, C-5, C-7).
 
 ## 1. Finding and the review items it closes
 
@@ -26,7 +27,8 @@ What changed in this revision:
 - **Failure lines from rules section 2,** amber with an icon, never red. "HQ didn't reply" and "HQ is not
   answering" are gone (R5).
 - **Undo:** the phone's accessibility timeout, 10 s on Android 8 and 9. A soft delete on HQ where HQ
-  holds the item. If HQ stops inside the window, the change waits in the outbox as "Waiting for HQ".
+  holds the item, and HQ accepts the restore for 10 minutes (`../../resolutions.md` A6, C-1). If HQ stops
+  inside the window, the change waits in the outbox under "Waiting to send".
 - **Red only on the button that acts.** Triggers are ink text. No green status dots, no green chosen card.
 - **Added:** server HQ approvals and notices, Android 8 and 9 Undo, a 360 dp frame at font scale 2.0, the
   Android versions card, Delete speech model in the audit (review: "Delete speech model uses the old
@@ -122,7 +124,9 @@ snackbar: "Task archived" · "Undo").
   restores it there.
 - Where the phone holds it (a capture not sent yet), it is hidden at once and deleted when the snackbar
   closes.
-- HQ stops inside the window: the change waits in the outbox as "Waiting for HQ".
+- HQ stops inside the window: the change waits in the outbox under "Waiting to send" (the outbox's own
+  words, `../../resolutions.md` A2). An Undo that waits in the outbox and reaches HQ after the 10 minutes
+  fails with "Couldn't undo. It changed on another device, or too much time passed." (A6).
 - Copy: "{Thing} {done}" plus Undo. Past tense, no "successfully".
 
 **Ask · nothing is lost, but something stops.** Pause or start background work, restart HQ, mark
@@ -172,9 +176,9 @@ Colour: filled Danger, black label, a verb and its object. Never green, never on
 | Action | Where | Today | Kind | After: the safe choice · the action · what it says when done |
 |--------|-------|-------|------|--------------------------------------------------------------|
 | Stop a helper | `helpers/HelperPages.kt` StopDialog, MenuSheet | Green "Yes, stop it" on top, outline "Keep going"; menu row red with a pause icon | Red | Keep it running · Stop Codex · "Codex stopped." Menu row: ink "Stop". |
-| Remove a paired device | `pairing/PairingScreen.kt` RemoveDialog | Material AlertDialog, red text "Remove" beside "Cancel" | Red | Keep it paired · Remove device · "Device removed." |
-| Sign out one device | `settings/SettingsScreens.kt` Devices, onSignOut | Blue text link, signs out at once, no question | Red | Keep signed in · Sign out device · "MacBook is signed out." |
-| Sign out everywhere | `SettingsWords.SIGN_OUT_ALL_WORDS` | Red link; dialog with white "Cancel" and "Sign out" side by side | Red | Stacked (labels over 18): Keep everyone signed in · Sign out everywhere · "Signed out everywhere. HQ is restarting." |
+| Remove a paired device | `pairing/PairingScreen.kt` RemoveDialog | Material AlertDialog, red text "Remove" beside "Cancel" | Red | Keep it paired · Remove device · "Work laptop removed." (`../../resolutions.md` B18) |
+| Sign out one device | `settings/SettingsScreens.kt` Devices, onSignOut | Blue text link, signs out at once, no question | Red | Keep signed in · Sign out device · "Safari on macOS is signed out." (B3) |
+| Sign out everywhere | `SettingsWords.SIGN_OUT_ALL_WORDS` | Red link; dialog with white "Cancel" and "Sign out" side by side | Red | Stacked (labels over 18): Keep everyone signed in · Sign out everywhere · "Signed out everywhere. HQ is restarting." (B2) |
 | Disconnect Telegram or Discord | `SettingsWords.disconnectWords` | Red link; white "Disconnect" beside "Cancel" | Red | Stacked: Keep Telegram · Disconnect Telegram · "Telegram is disconnected. HQ is restarting." |
 | Link a different account | `SettingsWords.REPLACE_WORDS` | Blue link; white "Continue"; body ends "Continue?" | Red | Title "Unlink your Telegram account?" · Keep my account · Unlink account · goes on to the pairing code |
 | Disconnect from a server HQ | `SettingsScreens.ServerHqSection` | White "Disconnect" in the row, acts at once | Red | Keep connected · Disconnect server · "Disconnected from your server HQ." |
@@ -182,13 +186,14 @@ Colour: filled Danger, black label, a verb and its object. Never green, never on
 | Remove the only AI key | same, plus `KeyVault`, `SettingsWords.configuredKeys`, `UsageWords.chain` | Same as any key: nothing says HQ will have no AI | Red | Replace it instead above · Keep the key · Remove key · "Key removed. HQ has no AI key now." with Add a key |
 | Delete the speech model | FixAssistantModel, settings/speech | Its own pattern | Red | Stacked: Keep the speech model · Delete speech model · "Speech model deleted." |
 | Discard unsaved note changes | `notes/NotesPages.kt` LeaveDialog | Green Save, outline Keep editing, red text "Discard changes" last | Red | Save changes above · Keep editing · Discard changes · no snackbar |
-| Approve a request that loses something | `inbox/InboxScreen.kt` cards, `AlertPoster`, `AnswerReceiver` | Green "Allow once" like any request; Allow in the shade on 12+ | Red | In the app: Decline · Allow delete (the request's verb). In the shade: Open only, also with details on. |
+| Approve a request that loses something | `inbox/InboxScreen.kt` cards, `AlertPoster`, `AnswerReceiver` | Green "Allow once" like any request; Allow in the shade on 12+ | Red | In the app: the card quotes the tool and its arguments verbatim, then "In HQ's words" (B1); Decline · Allow delete (the request's verb). In the shade: Open only, also with details on. |
 | Discard a capture waiting to send | `SettingsScreens` Capture, `SettingsViewModel.kt:191` | White "Discard", deleted at once, no undo | Undo | "Task discarded" or "Note discarded" · Undo, for the accessibility timeout; the file is deleted when the snackbar closes |
 | Archive a task | `tasks/TaskSheets.kt`, `TasksViewModel` | "Task archived" · Undo | Undo | Soft delete on HQ (`/api/tasks/{id}/restore` exists). Timeout as above. |
 | Archive a chat (swipe, or /clear) | `chat/ChatsSheet.kt`, `ChatViewModel` | Swipe: "Chat archived" · Undo. /clear: no undo line | Undo | /clear shows the same "Chat archived" · Undo |
 | Clear one update, or all | `inbox/InboxScreen.kt`, `InboxViewModel.clear` | "Update cleared" or "Updates cleared" · Undo, held on the phone for 5 s | Undo | "3 updates cleared" · Undo. Sent at once as a soft delete on HQ; Undo restores it, on the web too. |
 | Mark done, move to tomorrow | `tasks/TasksViewModel` | "Done: …" or "Moved to tomorrow" · Undo | Undo | Timeout as above |
-| Mark several tasks done | `tasks/TasksScreen.kt` bulkAsk sheet | A sheet: "Mark 3 tasks done" row first, Cancel last | Ask | Shared dialog: Keep them as they are · Mark 3 tasks done, stacked |
+| Mark several tasks done | `tasks/TasksScreen.kt` bulkAsk sheet | A sheet: "Mark 3 tasks done" row first, Cancel last | Ask | Shared dialog: Keep them as they are · Mark 3 tasks done, stacked · "3 tasks done · Undo" (`../../resolutions.md` B8) |
+| Mark one task done that others wait on, or with a check pending | `tasks/TasksViewModel` | Acts at once | Ask (B8) | Not now · Mark done (or Wait for the check · Mark done) · "Done: {title} · Undo" |
 | Pause or start background work | `SettingsWords.modeDialog` | White "Cancel" and "Pause" side by side | Ask | Stacked: Keep it on · Pause background work; Not now · Start background work |
 | Restart HQ | `SettingsWords.RESTART_WORDS` | White "Cancel" and "Restart" side by side | Ask | Not now · Restart HQ |
 
@@ -213,14 +218,13 @@ action filled `#FF6B6B` with a black label. Ask action filled green with a black
   seen 3 min ago · Remove", "Unnamed device · 7d20e9b4 · not seen yet · Remove" (ink triggers). Dialog
   "Remove “Work laptop”?" / "It loses access to this phone at once. Its open connection is closed. You can
   pair it again later." / [Keep it paired] [Remove device] (pin 3).
-- **A4 · Sign out one device (new question).** Behind: "Other devices · Signed in · MacBook · Signed in
-  Nov 3 · used 3 h ago · Sign out". Dialog "Sign out “MacBook”?" / "It can no longer open HQ. Anything
-  open on it stops at once. To use it again, sign it in with a new code." / [Keep signed in] [Sign out
-  device] (pin 4).
+- **A4 · Sign out one device (new question).** Behind: "Other devices · Signed in · Safari on macOS ·
+  Signed in Nov 3 · used 3 h ago · Sign out" (devices are named by browser and system,
+  `../../resolutions.md` B3). Dialog 'Sign out "Safari on macOS"?' / "It can no longer open HQ until it
+  signs in again." / [Keep signed in] [Sign out device] (pin 4). Done: "Safari on macOS is signed out."
 - **A5 · Sign out everywhere (stacked: long labels).** Dialog "Sign out everywhere?" / "Every other device
-  is signed out. So is any sign-in link you made earlier. Claude connections end too. HQ restarts for a
-  moment. Each device then needs a new code." / stacked: [Keep everyone signed in] on top, [Sign out
-  everywhere] (red) below (pin 5).
+  is signed out. This one stays signed in." / stacked: [Keep everyone signed in] on top, [Sign out
+  everywhere] (red) below (pin 5; `../../resolutions.md` B2).
 - **A6 · Disconnect Telegram (stacked).** Behind: "Messaging apps · Telegram · Connected · Unlink account
   · Disconnect". Dialog "Disconnect Telegram?" / "HQ stops answering on Telegram and forgets the bot token.
   To use Telegram again, you set it up from the start. HQ restarts for a moment." / stacked [Keep
@@ -255,27 +259,29 @@ action filled `#FF6B6B` with a black label. Ask action filled green with a black
   is waiting." Note: "The task "Call the supplier about the fridge" is hidden at once. Its file is deleted
   when the snackbar closes." Snackbar "Task discarded · Undo" (pin 14).
 - **A15 · Inbox, approving a request that loses something.** Tabs "Needs you 2 · Updates · Done". Card
-  "Claude needs your OK · Mac mini · 2 min ago" / "Delete 3 old backups?" / "It wants to delete 3 files in
-  backups on your Mac mini. They cannot be brought back." / [Decline] (left, text) [Allow delete] (right,
-  red; pin 15). Card "Claude needs your OK · On your server HQ · hq.example.com · 5 min ago" / "Run this
-  command?" / `cargo build --release` / [Decline] [Allow once] (green, harmless).
+  "Claude needs your OK · Mac mini · 2 min ago" / "What it will run" / `bash {"command": "rm
+  ~/backups/2026-09-14.tar ~/backups/2026-09-17.tar ~/backups/2026-09-20.tar"}` (the tool and its
+  arguments verbatim from HQ's runtime, monospace, `../../resolutions.md` B1) / "In HQ's words: Delete 3
+  old backups, from before Sep 21. They cannot be brought back." / [Decline] (left, text) [Allow delete]
+  (right, red; pin 15). Card "Claude needs your OK · On your server HQ · hq.example.com · 5 min ago" /
+  "What it will run" / `bash {"command": "cargo build --release"}` / "In HQ's words: Build the release
+  version." / [Decline] [Allow once] (green, harmless).
 - **A16 · Notification shade, a losing request shows Open only** (pin 16). "Details off (the default)":
   "AgentHQ · now / Claude needs your OK / Open HQ to see what it wants to do. / Open". "Details on,
   unlocked, Android 12+": "Claude needs your OK / Delete 3 old backups? / Open". Caption: "A losing
   request never gets Allow in the shade. A harmless one may, as rules section 1 says." "From your server
-  HQ": "AgentHQ · your server HQ · 3 min / Claude needs your OK / Open HQ to see what it wants to do. /
-  Open".
+  HQ": "AgentHQ · 3 min / Your server HQ needs your OK / Open HQ to see what it wants to do. / Open"
+  (`../../resolutions.md` B19).
 - **A17 · Undo on Android 8 and 9 (10 s).** Tasks "8 active · Connected", tabs Today, Upcoming, All, "2
   tasks today.", "Pay the electricity bill · due today", "Order more rice · due today", snackbar "Task
   archived · Undo" (pin 17). Caption: "The same snackbar on every version. Android 8 and 9: 10 s. Android
   10+: `getRecommendedTimeoutMillis(5000, …)`, the owner's own setting."
 - **A18 · HQ stops inside the Undo window.** Inbox top bar "HQ has stopped" (amber dot with stop icon).
-  Tabs "Needs you 3 · Updates · Done". An amber-marked row "Clear 3 updates · Waiting for HQ" / "It will
-  be sent when HQ is back." (pin 18), then "No updates." Caption: "The cleared items stay hidden. The
+  Tabs "Needs you 3 · Updates · Done". An amber-marked row "Clear 3 updates · Waiting to send" / "It will
+  try again when HQ is back." (pin 18; A2), then "No updates." Caption: "The cleared items stay hidden. The
   change also lists in Capture and widgets, Waiting to send, where Undo still works."
 - **A19 · 360 dp, font scale 2.0, stacked** (pin 19). "Sign out everywhere?" / "Every other device is
-  signed out. So is any sign-in link you made earlier. Each device then needs a new code." / stacked [Keep
-  everyone signed in] · [Sign out everywhere]. Caption: "At font scale 1.5 and up, every dialog stacks,
+  signed out. This one stays signed in." / stacked [Keep everyone signed in] · [Sign out everywhere]. Caption: "At font scale 1.5 and up, every dialog stacks,
   safe on top. The body scrolls inside the dialog if it must. The buttons never leave the screen."
 
 ## 5. Exact copy
@@ -286,13 +292,19 @@ the safe choice, the action and the done line for every row.
 | Element | String |
 |---------|--------|
 | Stop a helper | "Stop {helper}?" / "It stops now. Its work so far is kept." / "Keep it running" · "Stop {helper}" (the rules section 4 example, word for word) |
-| Approval of a losing request | title "{Helper} needs your OK", the request as HQ wrote it, then "Decline" · "Allow {verb}" ("Allow delete", "Allow remove", "Allow stop", "Allow sign out") |
+| Approval card (every request) | title "{Helper} needs your OK", "What it will run", the tool and its arguments verbatim from HQ's runtime, then "In HQ's words" and HQ's description (B1); "Decline" · "Allow once", or for a losing request "Decline" · "Allow {verb}" ("Allow delete", "Allow remove", "Allow stop", "Allow sign out") |
+| After declining | "Declined. Nothing was done." (N23) |
+| A request left 24 hours | "This request ran out. Ask again from the helper." (C-7) |
 | Same, in the shade | "{Helper} needs your OK" · "Open HQ to see what it wants to do." · "Open" |
 | Only AI key when HQ can't be reached | the body adds "The app cannot ask HQ about keys set elsewhere right now." |
 | Busy labels | "Stopping…", "Removing…", "Signing out…", "Disconnecting…", "Unlinking…", "Deleting…" |
 | Undo | "Task archived", "Chat archived", "Update cleared", "{N} updates cleared" (plural resource), "Note discarded", "Task discarded", "Done: {title}", "Moved to tomorrow" · "Undo" |
-| Held for HQ | "{Change} · Waiting for HQ" / "It will be sent when HQ is back." |
-| Done lines | "Codex stopped." · "Device removed." · "MacBook is signed out." · "Signed out everywhere. HQ is restarting." · "Telegram is disconnected. HQ is restarting." · "Disconnected from your server HQ." · "Key removed. HQ is restarting." · "Key removed. HQ has no AI key now." (with "Add a key") · "Speech model deleted." |
+| Held for HQ | "{Change} · Waiting to send" / "It will try again when HQ is back." (A2) |
+| Late Undo | "Couldn't undo. It changed on another device, or too much time passed." (A6) |
+| Sign out one device | 'Sign out "{device}"?' · "It can no longer open HQ until it signs in again." · "Keep signed in" · "Sign out device" (B3) |
+| Sign out everywhere | "Sign out everywhere?" · "Every other device is signed out. This one stays signed in." · "Keep everyone signed in" · "Sign out everywhere" (B2) |
+| Several tasks done | "Mark {N} tasks done?" · "Keep them as they are" · "Mark {N} tasks done" · then "{N} tasks done" · "Undo" (B8) |
+| Done lines | "Codex stopped." · "{Work laptop} removed." · "{Safari on macOS} is signed out." · "Signed out everywhere. HQ is restarting." · "Telegram is disconnected. HQ is restarting." · "Disconnected from your server HQ." · "Key removed. HQ is restarting." · "Key removed. HQ has no AI key now." (with "Add a key") · "Speech model deleted." |
 | Remove-only-key context line | "HQ has no other AI key" |
 
 Failure lines (rules section 2), keys in resources:
@@ -300,12 +312,13 @@ Failure lines (rules section 2), keys in resources:
 | Key | String |
 |-----|--------|
 | `fail_stop_helper_no_reply` | "Couldn't stop Codex. HQ didn't answer in time. Try again." |
-| `fail_sign_out_stopped` | "Couldn't sign out MacBook. HQ has stopped. Start HQ to try again." |
-| `fail_remove_device_pairing` | "Couldn't remove “Work laptop”. Pairing is not running. Try again in a moment." |
-| `fail_disconnect_server_unreachable` | "Couldn't disconnect. Your server HQ can't be reached. Check your internet." |
+| `fail_sign_out_stopped` | "Couldn't sign out Safari on macOS. HQ has stopped. Start HQ to try again." |
+| `fail_remove_device_pairing_off` | "Couldn't remove “Work laptop”. Pairing is off. Switch it on and try again." |
+| `fail_disconnect_server_unreachable` | "Couldn't disconnect. Your server HQ can't be reached. Try again when it's back." |
+| `fail_undo_too_late` | "Couldn't undo. It changed on another device, or too much time passed." |
 
-`fail_remove_device_pairing` uses a reason ("Pairing is not running. Try again in a moment.") that is not
-in the rules section 2 table; see "Open conflicts" in `../README.md`.
+Every line is "Couldn't {action}." + the reason + the outcome of `../../resolutions.md` A2 (the
+pairing reason is A2's "Pairing is off" row).
 
 ## 6. Behaviour rules (numbers match the After pins)
 
@@ -323,9 +336,12 @@ in the rules section 2 table; see "Open conflicts" in `../README.md`.
     width.
 12. **Ask kind:** green action on the right, or at the bottom when stacked. The safe label is "Keep …" or
     "Not now".
-13. **Undo where HQ holds it:** sent at once as a soft delete. Undo sends the restore. Tasks have
-    `/api/tasks/{id}/restore`. Cleared updates are kept as `state = 'dismissed'` (`notifications_api.rs:110`
-    and `:397`), but no route sets one back yet.
+13. **Undo where HQ holds it:** sent at once as a soft delete. Undo sends the restore, which HQ accepts
+    for 10 minutes and only while the item has not changed since (added by resolutions.md C-1, the same
+    restore routes as the web, `../../web/wave-1/03-undo.md`). Tasks have `/api/tasks/{id}/restore`.
+    Cleared updates are kept as `state = 'dismissed'` (`notifications_api.rs:110` and `:397`), but no
+    route sets one back yet. A refused restore shows "Couldn't undo. It changed on another device, or
+    too much time passed."
 14. **Undo where the phone holds it:** hidden at once, deleted when the snackbar closes or the app goes to
     the background. The word follows the item's kind.
 15. **Losing request:** HQ marks the approval as losing from the tool's category (delete, remove, stop,
@@ -333,9 +349,29 @@ in the rules section 2 table; see "Open conflicts" in `../README.md`.
 16. **Shade:** a losing request has exactly one action, Open, on every version and with details on or
     off.
 17. **Undo time:** API 29+ the recommended timeout for 5 s of content and controls; API 26 to 28, 10 s.
-18. **HQ stops inside the window:** the change goes to the outbox, shows "Waiting for HQ", and is sent
-    when HQ is back. Undo there removes it from the outbox.
+18. **HQ stops inside the window:** the change goes to the outbox under "Waiting to send", and is sent
+    when HQ is back. Undo there removes it from the outbox. A restore that waited in the outbox and
+    reaches HQ after the 10 minutes fails with the A6 line.
 19. **Large text:** stacked at 1.5 and up; the body scrolls inside the dialog; buttons stay on screen.
+20. **Approval cards quote what runs** (`../../resolutions.md` B1): the tool and its arguments verbatim
+    from HQ's runtime (`owner_approval.rs` without HQ's own `_hq_` keys, up to 3000 characters,
+    monospace), then HQ's description under "In HQ's words". Never the description alone. Notifications
+    stay general (rules section 1).
+21. **Marking done** (B8): one task acts at once with "Done: {title} · Undo", unless other tasks wait on
+    it or a check is pending (then it asks); several ask first ("Keep them as they are" · "Mark {N}
+    tasks done"), then "{N} tasks done · Undo".
+22. **A new sign-in on the phone hub (added by resolutions.md C-4).** When the phone is the hub, Other
+    devices' "Sign in another device" code screen says "Type this only into HQ on your own device. HQ
+    never asks for it in a chat or a call." above the code at all times. A new sign-in is a Needs you
+    item, "A new sign-in to your HQ" / "{Chrome on Windows} signed in with a one-time code at {14:32
+    today}." with [It was me] (left) and [Sign it out] (right, ink: only the dialog's action is red). Sign
+    it out opens A4's dialog. Sign-ins expire after 90 days without use (HQ's rule, shared with the web,
+    `../../web/wave-1/05-sign-in-safety.md`).
+23. **The lockdown banner on Helpers (added by resolutions.md C-5).** While Stop every helper holds a
+    computer: "All helpers are stopped. Allow them again in HQ Hub on that computer." No button: the lock
+    lifts only in HQ Hub on that computer.
+24. **An approval lapses after 24 hours (added by resolutions.md C-7).** Its card loses its buttons and
+    reads "This request ran out. Ask again from the helper."; its notification is removed.
 
 - **Dismiss:** Back, the back gesture and a tap on the scrim choose the safe side. They never act.
 - **Triggers:** ink text or an ink menu row with the same verb. Red appears only on the button that acts.
@@ -358,10 +394,12 @@ in the rules section 2 table; see "Open conflicts" in `../README.md`.
 |------|--------|--------|
 | `ui/theme/HqTheme.kt` | Add `Mts.Danger = Color(0xFFFF6B6B)` (alias today's `DangerText`, line 28) and `Mts.OnDanger = Color(0xFF000000)`; set `onError` in the colour scheme (line 70 sets `error` only). | yes |
 | `ui/shell/Confirm.kt` | `enum ConfirmKind { Ask, Red }`, `data class ConfirmWords(title, body, keep, act, busy, kind, extra = null)` with string resource ids, `@Composable ConfirmDialog(words, busy, error, onKeep, onAct, onExtra)` that lays out side by side or stacked by the rule, and `DangerButton`. | NEW |
-| `ui/shell/Undo.kt` | One snackbar host with the API split, a soft-delete path for HQ items, a hold-then-delete path for phone items, and the hand-off to the outbox. Replace `UNDO_MS` in `ChatViewModel.kt:468` and `InboxViewModel.kt:183`. | NEW |
+| `ui/shell/Undo.kt` | One snackbar host with the API split, a soft-delete path for HQ items, a hold-then-delete path for phone items, and the hand-off to the outbox. Replace `UNDO_MS` in `ChatViewModel.kt:468` and `InboxViewModel.kt:183`. Maps a 409 from a restore route to the A6 line (C-1). | NEW |
 | Replace | `HelperPages.StopDialog` (line 294; the green button at 301) and the menu icon; `SettingsScreens.ConfirmDialog` (line 669) and `DialogButton` (line 685); `PairingScreen.RemoveDialog` (line 254); the inline confirm in `StoredKeysPage`; `NotesPages.LeaveDialog` (line 511); the bulk sheet in `TasksScreen` (line 83). | yes |
 | Add questions | `SettingsScreens` device Sign out and `ServerHqSection` (line 795) Disconnect. `onDiscard` (`SettingsViewModel.kt:191`) becomes held with Undo. | yes |
-| Inbox and shade | The approval card reads a `loses` field; `AlertPoster` posts Open only when it is set. | yes |
+| Inbox and shade | The approval card reads a `loses` field, the tool and its arguments (B1) and the lapse time (C-7); `AlertPoster` posts Open only when it is set. | yes |
+| `ui/settings/SettingsScreens.kt` Devices | The code screen line and the new sign-in card's two buttons (rule 22, C-4); device rows by browser and system (B3). | yes |
+| `ui/helpers/` (Helpers screen) | The lockdown banner (rule 23, C-5). | yes |
 | HQ (Rust) | A `loses` flag on approval items set from the tool category, and a restore action for a dismissed inbox item. Neither exists today. | NEW |
 
 ## 9. Server, release or desktop changes
@@ -370,7 +408,12 @@ in the rules section 2 table; see "Open conflicts" in `../README.md`.
   N17).
 - **A restore route for a cleared update,** so Undo is shared with the web (FixPlan; N18). Today
   `notifications_api.rs` can set `dismissed` (line 254 maps "dismiss" and "reject") but nothing sets it
-  back.
+  back. Every restore route accepts a restore for 10 minutes only (WR7, C-1; built once for both, see
+  `../../changes.md` "Restore routes for every Undo").
+- **Approval items carry the tool and its arguments** (B1) and a 24-hour lapse (C-7); a device sign-in
+  writes a Needs you item and sign-ins expire after 90 days without use (C-4). These are the web's
+  server changes (`../../web/wave-1/02-dialogs-approvals.md`, `../../web/wave-1/05-sign-in-safety.md`),
+  reused by the phone's own HQ.
 
 ## 10. Acceptance checks (each fails on today's build)
 
@@ -389,13 +432,29 @@ in the rules section 2 table; see "Open conflicts" in `../README.md`.
    both.
 7. Discarding a waiting task shows "Task discarded" · Undo, and Undo brings it back. Today it is deleted
    at once.
-8. Kill HQ during a "3 updates cleared" snackbar: the change shows "Waiting for HQ" and reaches HQ after
+8. Kill HQ during a "3 updates cleared" snackbar: the change shows under "Waiting to send" and reaches HQ after
    it starts. Check on device.
 9. A grep for "HQ didn't reply", "HQ is not answering" and "Could not sign out" in `helpers/`,
    `settings/`, `pairing/` and `inbox/` finds nothing. Today it finds them in HelperWords,
    HelpersViewModel, SettingsWords and others.
 10. Back, the back gesture and a scrim tap call `onKeep` and never `onAct`, in every dialog (a Compose
     test per dialog).
+11. An approval card for `vault_delete {"path": "Projects/Old plan.md"}` shows the tool name and
+    arguments above "In HQ's words" (B1). Today only the request's prose shows.
+12. Sign out one device reads 'Sign out "Safari on macOS"?' / "It can no longer open HQ until it signs
+    in again."; Sign out everywhere's body is "Every other device is signed out. This one stays signed
+    in."; removing a paired device ends with "Work laptop removed." (B2, B3, B18).
+13. A restore sent 601 s after the change shows "Couldn't undo. It changed on another device, or too
+    much time passed." (added by resolutions.md C-1, A6). Today there is no window.
+14. Phone as the hub: a code sign-in from a browser posts the Needs you card with It was me and an ink
+    Sign it out; the code screen shows "Type this only into HQ on your own device." (added by
+    resolutions.md C-4).
+15. With a lockdown on the Mac mini, Helpers shows "All helpers are stopped. Allow them again in HQ Hub
+    on that computer." and no Allow button (added by resolutions.md C-5).
+16. An approval fixture 24 h and 1 min old shows "This request ran out. Ask again from the helper." and
+    no buttons (added by resolutions.md C-7).
+17. Marking one task with no dependents done shows "Done: {title}" with Undo and no dialog; marking
+    three asks first and ends with "3 tasks done" (B8).
 
 ## 11. Check on device
 
@@ -417,6 +476,7 @@ Open questions for the owner, with the board's recommendation:
    dismissed item back. It makes Undo work across the phone and the web, as rules section 4 asks.
    (Decided: N18.)
 
-Depends on: D2, D3, N17, N18, rules sections 2, 3, 4; `../wave-0/01-lock-screen.md` (Open only in the
+Depends on: D2, D3, N17, N18, N23, `../../resolutions.md` A2, A6, B1, B2, B3, B8, B18, B19, C-1, C-4,
+C-5, C-7; rules sections 2, 3, 4; `../wave-0/01-lock-screen.md` (Open only in the
 shade); `../wave-0/04-measure.md` (`undo.{kind}` counters); `../wave-2/03-assistant-model.md` (Delete
 speech model).

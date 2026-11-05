@@ -16,7 +16,7 @@ Where this spec and the rules differ, the rules win.
   good; failure lines from the catalogue.
 - **W33 revised.** One done acts at once with Undo, but asks first when other tasks wait on it or a check is
   pending.
-- **WB4 (Undo).** "Task marked done · Undo" and "3 tasks archived · Undo" restore on HQ within 10 minutes.
+- **WB4 (Undo).** "Done: {title} · Undo" and "3 tasks archived · Undo" restore on HQ within 10 minutes.
 - **M4, WR14.** "Space" and "Initiative" become "area" and "list"; the filter is "Filter by list".
 - **M12 (Tasks).** Dropped capabilities come back: verdict history, areas and lists, the task form,
   dependencies, the checkpoint, decisions, Collapse all, the stale and long-running chips, the tasks search,
@@ -84,7 +84,8 @@ above the list on a phone.
 
 - **T1 · 1440.** Top bar "Tasks" / "Connected · 9 active" / chip / the segmented switch List · Board ·
   Timeline. List pane head "Your tasks" [New task]; tabs "Today", "Upcoming", "All 2". A link row "While
-  you were away · 2 need you · HQ finished 6" (not a block). Groups: "Waiting on you 2": "Soak, reboot
+  you were away · HQ checked and finished 6 tasks." (not a block; the phone's first sentence,
+  `../../resolutions.md` B7). Groups: "Waiting on you 2": "Soak, reboot
   test, cleanup of old copies · Stuck · waits for a reboot window" (amber Stuck with an icon); "Nightly
   off-device backup · Ready to check · HQ finished 3 h ago" [Check it] (beside the row link, never inside).
   "In progress": "Workstream A: first run for a phone-only user · 1 of 3 sub-tasks done"; "Workstream C: a
@@ -131,7 +132,8 @@ above the list on a phone.
   opinion" › "Ask for a second look"; "Veto" › "Keep it open"; "Complete anyway" › Mark done; "Return to
   to_do" › Send back; Tier 0, 1 and 2 › "Notes and plans", "Code changes" and "Risky"; "Inspected",
   "artifact" and "inconclusive" are not shown.
-- **Mark done and Send back:** Send back left, Mark done right. Mark done gives "Task marked done · Undo".
+- **Mark done and Send back:** Send back left, Mark done right. Mark done gives "Done: {title} · Undo"
+  (`../../resolutions.md` B8).
   Send back asks "What should change?" / "Tell HQ in a sentence or two" (e.g. "Also check that the copy can
   be opened on the Mac.") / "Your answer goes on the task as a comment. It moves back to In progress."
   [Cancel] [Send back]; closing the sheet keeps it ready to check.
@@ -145,26 +147,32 @@ above the list on a phone.
   (ink: it can be brought back). "3 tasks picked · Change them together with the bar. Press Esc to stop
   picking."
 - **P2 · Several done asks.** "Mark 3 tasks done?" / "Tasks that wait on them are told they can start. Undo
-  puts all 3 back." / [Not now] [Mark 3 done] (green).
+  puts all 3 back." / [Keep them as they are] [Mark 3 tasks done] (green). Done: "3 tasks done · Undo"
+  (`../../resolutions.md` B8).
 - **P3 · One task, others wait on it.** "Mark this done?" / "2 tasks wait on "Release build". HQ tells them
-  they can start." (the count from its "Waiting on this" list, `TaskRelations`). Back and a tap outside
-  choose Not now.
+  they can start." (the count from its "Waiting on this" list, `TaskRelations`) / [Not now] [Mark done].
+  Back and a tap outside choose Not now. Done: "Done: {title} · Undo".
 - **P4 · One task, a check pending.** "HQ is still checking it. Marking it done now skips the check."
-  [Wait for the check] [Mark done]. "Wait for the check" is 18 characters, so the pair stays side by side; a
-  longer label stacks.
+  [Wait for the check] [Mark done]. Side by side when the pair fits on one line, stacked when it does not
+  (`../../decisions.md` WR27).
 - **P5 · Undo.** "3 tasks archived · Undo" (restores on HQ within 10 minutes; the toast may stay until
-  closed). Too late: "Couldn't undo. It changed on another device." Partial: "2 tasks marked done. Couldn't
-  change T-4. It changed on another device." (kept until closed).
+  closed). Too late: "Couldn't undo. It changed on another device, or too much time passed." Partial: "2
+  tasks done. Couldn't change T-4. It changed on another device, or too much time passed." (kept until
+  closed; `../../resolutions.md` A6).
 
 ### 4.4 While you were away (Tasks 1, section 4)
 
-- **W1 · `/tasks/away`** in the detail pane (1024 to 1399; Details is a button there). "Last 24 hours".
-  "Needs you 2": "T-8 · a person signs off on release changes"; "Export menu: add Markdown with front matter
-  · T-7 · HQ could not open what it made". "HQ will finish 1": "Discord bot reconnect after a new token ·
-  T-10 · done at 17:30 unless you keep it open". "HQ finished on its own 6": "3 in Relay · 2 tested, 1 read
-  over", "3 in Web app · 3 read over". "Spot checks · Did HQ get this right? · 1 of 2": "Chat list keyboard
-  focus. HQ marked it done because Tab now reaches every row." [No, reopen it] [Yes, it is done]. "Sent back
-  without you 1": "Chat list keyboard focus · The first try missed the archived chats."
+- **W1 · `/tasks/away`** in the detail pane (1024 to 1399; Details is a button there). The phone's words
+  and sections, in the phone's order (`../../resolutions.md` B7): "While you were away" / "Last 24 hours
+  · checked at 14:32". "Finishing soon 1": "Discord bot reconnect after a new token · T-10 · Finishes at
+  17:30" (Keep it open stays beside it). "Checked and finished 6": "Relay · 3 tasks · 2 tested, 1 read
+  over", "Web app · 3 tasks · 3 read over". "Went back to Codex to finish 1": "Chat list keyboard focus ·
+  Failed a check. The first try missed the archived chats." (a task with no helper reads "Went back to
+  you to finish" and "Failed a check. Reopened for you to finish."). "Waiting on you 2": "T-8 · a person
+  signs off on release changes"; "Export menu: add Markdown with front matter · T-7 · HQ could not open
+  what it made". "Spot checks · Did HQ get this right? · 1 of 2" (web only, owner only): "Chat list
+  keyboard focus. HQ marked it done because Tab now reaches every row." [No, reopen it] [Yes, it is
+  done].
 - **W2 · Briefing for one list.** With the filter on a list, the phone's Briefing (in progress, waiting for
   review, blocked, who worked on it, recent notes) opens at the top of this page instead.
 
@@ -179,11 +187,11 @@ above the list on a phone.
   task]; a chip with nothing "Nothing is ready to check." "Nothing is stuck."
 - **E3 · Loading:** "Getting your tasks" with the blue spinner, two skeleton rows. Never an empty state
   before the first answer.
-- **E4 · Failed, nothing saved:** "Couldn't load your tasks. Your HQ can't be reached. Try again soon." [Try
-  again]. The filter: "Couldn't load your lists." and the same reason.
+- **E4 · Failed, nothing saved:** "Couldn't load your tasks. Your HQ can't be reached. It will try again
+  when HQ is back." [Try again now] (`../../resolutions.md` A2: a load retries by itself). The filter: "Couldn't load your lists." and the same reason.
 - **E5 · Other states:** Starting HQ · 12 s (blue): the saved list, actions off, "It will try again by
-  itself." You're offline: the same, with "It will send when you're back online." for a new task, which
-  waits in "Waiting to send". Signed out of this HQ: nothing saved is shown, only Sign in.
+  itself." You're offline: the same, with "It will try again when you're back online." for a new task,
+  which waits in "Waiting to send". Signed out of this HQ: nothing saved is shown, only Sign in.
 - **Late:** "2 days late" is amber with the warn icon, never red; the words say it.
 
 ### 4.6 Areas, folders and lists (Tasks 3, section 1)
@@ -193,7 +201,8 @@ above the list on a phone.
   list in Agent HQ] ("Enter adds the list. Esc cancels."); "Home · Area · 1 open" [New list in Home]; [New
   area]. "Tags": "release", "web", "relay" [Clear]. [Show 3 tasks] / [Show 9 tasks]. Typed in place.
 - **L2 · Empty and failed.** No areas yet: "Your tasks go to your Inbox list until you make an area."
-  Failed: "Couldn't add the list. Your HQ can't be reached. Try again soon." The typed name stays.
+  Failed: "Couldn't add the list. Your HQ can't be reached. Try again when it's back." The typed name
+  stays.
 - A folder is made by naming it in the task form, as the web does today.
 
 ### 4.7 New task, and Edit details (Tasks 3, section 2)
@@ -257,11 +266,11 @@ Order under the task's facts:
   short · Back to To do with what is wrong."; "Nothing to check · Back to To do with what to link. Never
   marked done."; "Need you · They stay in your list. One is a risky change." "About 3 reviewer runs, from
   this month's budget." [Run it].
-- **C3 · While it runs:** "Checking · 9 of 14 checked" with a blue bar, Pause and Cancel; verdicts as they
+- **C3 · While it runs:** "Checking · 9 of 14 done" (`../../resolutions.md` B18) with a blue bar, Pause and Cancel; verdicts as they
   come. Paused: "It stopped between tasks. Run it again to keep going." Cancelled: "Nothing was moved."
 - **C4 · When it can't:** checking off: the button off with "Checking is off. Turn it on in How checking is
   going."; a scope with nothing: "Pick a list in the filter first." "Pick some tasks first."; failed:
-  "Couldn't plan the check. Your HQ can't be reached. Try again soon."
+  "Couldn't plan the check. Your HQ can't be reached. Try again when it's back."
 - **C5 · Ready to apply.** "Everything waiting · 40 tasks checked. Applying checks each task again first,
   because the work may have changed." "22 · Marked done.", "Back to To do with what to link.", "9 · Need you
   or could not decide · Left where they are." Past the limit (25 by default, `sweep_confirm_over`) an amber
@@ -301,7 +310,7 @@ Order under the task's facts:
   again, with its comments and sub-tasks." [Restore] (green). Its menu: Delete for good, a red dialog
   "Delete this task for good?" / "“Old relay notes” and its comments are removed. This can't be undone.
   Leave it archived to keep it out of the way." / [Keep it] [Delete for good] ("Delete for good" is 15
-  characters, side by side). Failed: "Couldn't delete the task. Your HQ can't be reached. Try again soon."
+  characters, side by side). Failed: "Couldn't delete the task. Your HQ can't be reached. Try again when it's back."
   The dialog stays. Archive gives "Task archived · Undo".
 
 ### 4.11 Board and Timeline (Tasks views)
@@ -354,8 +363,8 @@ Order under the task's facts:
   list. The view switch moves into the list's menu ("Show as"). The filter and Pick several stay in the list
   head. Group headings are buttons that fold, read as "Waiting on you, 2, expanded". All rows have no check
   box, as on the phone. Picking several: long press, or Pick several; "Mark 2 tasks done?" / "Tasks that
-  wait on them are told they can start. Undo puts both back." / [Not now] [Mark 2 done]; Archive acts at
-  once: "2 tasks archived · Undo". The check: "Ready for you to check · HQ says this is finished, 3 h ago.
+  wait on them are told they can start. Undo puts both back." / [Keep them as they are] [Mark 2 tasks
+  done], then "2 tasks done · Undo" (B8); Archive acts at once: "2 tasks archived · Undo". The check: "Ready for you to check · HQ says this is finished, 3 h ago.
   Look it over, then mark it done." "What HQ checked · 2 of 2 met": "One archive written · Met.", "Every
   note checked after copying · Met. 2,860 notes." [Send back] [Mark done] [Ask for a second look]; "What was
   done · Set up a nightly encrypted copy of the vault to the Mac. First run wrote one archive and checked
@@ -370,17 +379,19 @@ Order under the task's facts:
 - **320 and 200%.** At 320 the top bar holds the title and the state; Search, the balance and Settings move
   to one menu; the state wraps to two lines; the bottom bar keeps five places at 64 px each; chips scroll
   sideways inside their row; the page never does. At 200% a 1040 window lays out at 520: the phone layout;
-  the toast ("Task marked done · Undo") sits above the bottom bar and moves above a focused field. Forced
+  the toast ("Done: {title} · Undo") sits above the bottom bar and moves above a focused field. Forced
   colours keep borders; a printed list is black on white with its state in words.
-- **Lite.** "HQ Lite · 9 active"; Notes, Tasks, Inbox; starts on Notes. Example "Quarterly report draft ·
+- **Lite.** "Connected · HQ Lite · 9 active"; Notes, Tasks, Inbox; starts on Notes. Example "Quarterly report draft ·
   In progress · due Friday", "Pull the numbers from the shared folder and write the first page.",
   "Sub-tasks · 0 of 2 done". No helpers (no "Working on it now"), no Check it from HQ (Lite runs
   housekeeping only, not the checking of finished work); a task moved to Ready to check by hand still shows
-  there. A stored link to Chat or Helpers opens Notes with "This HQ is HQ Lite. It has no Chat." (WR4; the
-  board's "HQ Lite has no Chat." is superseded). The gear per WR2 (`../README.md` Open conflict 1).
+  there; Needs you never holds HQ's checks (Lite refuses the verification routes). A stored link to Chat
+  or Helpers opens Notes with "This HQ is HQ Lite. It has no {place}." (WR4; the board's "HQ Lite has no
+  Chat." is superseded). The gear shows This browser and Other devices (WR2, `../../resolutions.md`
+  B13).
 - **The phone as the hub (HQ window).** "HQ on your phone · Pixel 8" in the window, status "Connected · HQ
-  on your phone"; "Tasks from your phone · Pick a task to open it here." No web push; saved copies keyed by
-  the HQ's id; the held-port line if another program holds the forward; the phone pays for the traffic.
+  on your phone"; "Tasks from your phone · Pick a task to open it here." No web push; saved copies and the
+  outbox keyed by the HQ's id, labelled "Saved in HQ Hub at 14:32" (`../../resolutions.md` B11); the held-port line if another program holds the forward; the phone pays for the traffic.
 
 ## 5. Exact copy
 
@@ -391,8 +402,9 @@ Every string quoted in section 4 is exact. Keys `tasks_*`, `task_*`, `check_*`, 
 1. **Tabs Today, Upcoming, All;** chips under All: Active, Stuck, Ready to check, Done, Archived.
 2. **Rows** are a link plus a real check box (list view on wide screens); the action link sits beside the
    row link.
-3. **One done** acts at once with "Task marked done · Undo", unless it has dependents (P3) or a check
-   pending (P4); several always ask (P2).
+3. **One done** acts at once with "Done: {title} · Undo", unless it has dependents (P3) or a check
+   pending (P4); several always ask (P2) and end with "{N} tasks done · Undo" (`../../resolutions.md`
+   B8).
 4. **Archive** with Undo everywhere; Delete for good only from an archived task's menu, as a red dialog.
 5. **Progress** reads "{n} of {m} sub-tasks done" on a blue bar.
 6. **Late and Stuck** are amber with an icon; met checks ink; red only on Delete for good.
@@ -443,6 +455,11 @@ question. The checking routes exist (`crates/hq-web/src/verification_api.rs`).
 5. Board cards are links with a Move button; pressing M moves the focused card.
 6. Timeline Month draws Mondays only and remembers the zoom.
 7. A task created while HQ is away is sent once (client id).
+8. Marking one task done shows "Done: {title}" with Undo; marking three asks "Mark 3 tasks done?" with
+   "Keep them as they are" and ends with "3 tasks done" (B8). Today "Task marked done".
+9. `/tasks/away` shows the sections "Finishing soon", "Checked and finished", "Went back to you to
+   finish" (or to the helper) and "Waiting on you" in that order, and the Tasks link row reads "HQ
+   checked and finished {N} tasks." (B7). The sweep's progress reads "{N} of {M} done" (B18).
 
 ## 11. Check on a laptop or phone
 
@@ -451,6 +468,7 @@ question. The checking routes exist (`crates/hq-web/src/verification_api.rs`).
 
 ## 12. Open decisions it depends on
 
-- **W7, W28 to W30, W33, WR14 to WR16** (Recommended or Revised).
+- **W7, W28 to W30, W33, WR14 to WR16, WR27** (Recommended or Revised), `../../resolutions.md` A2, A6,
+  B7, B8, B11, B13, B18.
 - Depends on: `../wave-1/02-dialogs-approvals.md`, `../wave-1/03-undo.md`, `../wave-2/02-embed-and-lite.md`,
   `07-helpers.md` (Helpers on a task).

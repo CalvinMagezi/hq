@@ -15,7 +15,8 @@ This spec builds the covers and the signed-out state in the new shell.
 - **Phone words on `/setup`:** Check key, "Checking…", "The service accepted this key.", "You can also
   continue without checking." Base URL and Model name are not on the web, and the spec says so (WR9).
 - **W32 on `/connect`:** Decline and Allow, Decline on the left (today Deny and Approve).
-- **W34, M4.** The connector lives under Settings, Your accounts, Claude connector ("Claude on the web").
+- **W34, M4.** The connector lives under Settings, Your accounts, as the row "Claude on the web";
+  "connector" shows only in Technical details (`../../resolutions.md` B14).
 - **M2.** The chosen card has an ink edge; the warning card uses the amber card class, no inline colour.
 - **WB1, WR8.** Signed out shows only Sign in; the shell with an empty view and the Sign in sheet; a full
   page only for a browser that never signed in.
@@ -79,7 +80,8 @@ step of the phone's first run, Your AI model.
   opens Chat, checked or not. No Base URL or Model name (the phone's "Other OpenAI-compatible" has them;
   the web's `/setup` has only its three services; other backends live in the settings file). Lite serves no
   `/setup` and no Settings (`docs/HQ_LITE.md`), so this page never shows there. Elsewhere Chat opens next,
-  with Get started: Let HQ reach you, Open HQ on your phone, Chat apps (optional).
+  with Get started: Let HQ reach you, Open HQ on your phone, Messaging apps (optional)
+  (`../../resolutions.md` B15).
 - **Widths:** 320 to 2200 one centred column, 560 wide at most (Recommended); 200% zoom the same column.
 
 ### `/connect`: Claude asks to use this HQ (First run 2)
@@ -96,11 +98,12 @@ Settings, Your accounts, Claude on the web (W34, owner to confirm).
   nothing else. No notes, no helpers.", "Everything · Every HQ tool: change notes and tasks, and start
   helpers on your computers. Text Claude reads on a web page or in an email could steer these." Field
   "Name for this connection". "What HQ's tools return becomes part of your Claude chat, which Anthropic
-  keeps under its own terms. You can disconnect it any time in Settings, Your accounts, Claude connector."
+  keeps under its own terms. You can disconnect it any time in Settings, Your accounts, Claude on the
+  web."
   [Decline] (left) [Allow] (right, the one primary). Esc means Decline.
 - **K2 · Not taking new connections.** "HQ is not taking new connections" / "Open Settings, Your accounts,
-  Claude connector. Choose Allow a new connection, then press Connect in Claude again." [Open Claude
-  connector].
+  Claude on the web. Choose Allow a new connection, then press Connect in Claude again." [Open Claude on
+  the web] (B14).
 - **K3 · Run out.** "This request has run out" / "It ran out, was already answered, or was started in
   another browser. Press Connect in Claude again, from this browser."
 - **K4 · Signed out.** "Sign in to HQ first" / "This browser is not signed in to your HQ. Sign in, then
@@ -127,7 +130,7 @@ Settings, Your accounts, Claude on the web (W34, owner to confirm).
 - **Widths.** 320: the sheet fills the width, the code field and Use code stack, the state wraps under the
   title (a 640 px window at 200% looks the same). 768 to 1023 and 2200: centred, 640 wide; at 2200 the rest
   of the window stays empty, since nothing is shown while signed out. Lite: the same; once signed in the
-  status line says "HQ Lite" and HQ opens on Notes. HQ Hub's HQ window: serves this computer's HQ or HQ on
+  status line says "Connected · HQ Lite" and HQ opens on Notes. HQ Hub's HQ window: serves this computer's HQ or HQ on
   your phone; sign-ins and saved copies are kept by the HQ's id (`../wave-3/02-devices.md` W2).
 - **Retired here:** "Signed out · Saved · 2 h", the saved notes behind the sheet, "This device", the
   off-grey dot for signed out.
@@ -150,7 +153,8 @@ Settings, Your accounts, Claude on the web (W34, owner to confirm).
 | `signed_out_place` | "Sign in to see your {notes, chats, tasks}" / "Sign in to see what needs you" · "HQ no longer accepts this browser's sign-in, so nothing from it is kept here." · "Sign in" |
 
 Retired: "Connect a model", "HQ needs one model key to start…", "The provider rejected that key.",
-"Setup failed.", "Deny", "Approve", "OPENROUTER_API_KEY" on screen.
+"Setup failed.", "Deny", "Approve", "OPENROUTER_API_KEY" on screen, "Claude connector" outside
+Technical details.
 
 ## 6. Behaviour rules
 
@@ -196,6 +200,8 @@ None new (the setup routes exist; the sign-in pieces are in wave 1). Docs: `docs
 4. A 401 shows the shell with "Signed out of this HQ" and the empty view, with no cached content and no
    "unauthorized". Today a banner sits over cached screens.
 5. A browser with nothing stored for this HQ opens `/signin`. Today it gets the banner.
+6. No text on `/connect` outside Technical details contains "connector"; K1 and K2 name "Claude on the
+   web" (B14).
 
 ## 11. Check on a laptop or phone
 
@@ -204,6 +210,6 @@ None new (the setup routes exist; the sign-in pieces are in wave 1). Docs: `docs
 
 ## 12. Open decisions it depends on
 
-- **W34** (owner to confirm), **WR8, WR9** (Recommended).
+- **W34** (owner to confirm), **WR8, WR9** (Recommended), `../../resolutions.md` B14, B15.
 - Depends on: `../wave-1/05-sign-in-safety.md`, `../wave-0/02-shared-parts.md`, `01-chat.md` (Get
   started).

@@ -13,12 +13,13 @@ Where this spec and the rules differ, the rules win.
 - **M1.** The place behind reads "Connected" or "Your HQ can't be reached", never "Live" or "Saved · 3
   min". The chip only while Connected.
 - **M3.** Failure lines from the catalogue: "Couldn't search your notes and chats. Your HQ can't be
-  reached. It will try again by itself." Chats are not saved in a browser, so they are never searched while
+  reached. It will try again when HQ is back." (`../../resolutions.md` A2) Chats are not saved in a browser, so they are never searched while
   HQ is away (the old board said they were).
-- **M2.** Words found are bold on grey, no longer washed green.
+- **M2.** Words found are bold, never washed in a colour (`../../resolutions.md` A3); no longer washed
+  green.
 - **M12.** The folder filter is done by HQ; Inbox text search is kept in the Inbox.
 - **WR12.** Search waits 300 ms after the last key.
-- **New:** Clear recent searches, with Undo; "See all N" in the phone's words.
+- **New:** Clear recent searches, with Undo; "Show all {N}" (`../../resolutions.md` B6).
 
 ## 2. Before (as built, verified at `e5f9d5f`)
 
@@ -36,7 +37,7 @@ Where this spec and the rules differ, the rules win.
 ## 3. Decision
 
 **Ctrl K (Cmd K), the field in the top bar, or the magnifier opens the same Search over whatever place you
-are in: notes, tasks, chats and helpers. Scope chips show before typing; one recent list; "See all N"; Ask
+are in: notes, tasks, chats and helpers. Scope chips show before typing; one recent list; "Show all {N}"; Ask
 HQ about the notes found; a folder filter that HQ applies; a plain line when notes cannot be searched. A
 centred overlay from 768, the whole screen below.**
 
@@ -61,7 +62,7 @@ Rejected:
   back to what opened it; the place behind kept its scroll.
 - **Q5 · Results (query "battery").** Chips with counts "All 6", "Notes 2", "Tasks", "Chats", "Helpers".
   Grouped by kind, five rows each, then "Show all N". Notes: "Samsung battery steps · Projects › Agent-HQ ·
-  Open Settings, then Battery. Find HQ in the list of apps." (trail blue, words found bold on grey);
+  Open Settings, then Battery. Find HQ in the list of apps." (trail blue, words found bold, no colour wash);
   "Mobile-First-Roadmap · Samsung may undo the battery setting after an update."; [Ask HQ about these 2
   notes]. Tasks: "Check Samsung battery whitelist · T-5 · To do", "T-2 · Ready to check · "battery saver
   off"". Chats: last line "3 min ago · Open Settings, then Battery." Helpers: "Test the battery whitelist on
@@ -79,14 +80,14 @@ Rejected:
   match that." with [Search everything] (keeps the words), e.g. "Search helpers 0 · No helpers match that. 1
   note does."
 - **Q10 · Notes that cannot be searched.** "Your HQ can't be reached" in the place behind. "Couldn't search
-  your notes and chats. Your HQ can't be reached. It will try again by itself." / "Tasks and helpers below
+  your notes and chats. Your HQ can't be reached. It will try again when HQ is back." / "Tasks and helpers below
   are from the copy saved in this browser at 14:02." Reasons: "HQ is still starting. It will try again by
-  itself." "Your HQ can't be reached. It will try again by itself." "You're offline. It will try again when
+  itself." "Your HQ can't be reached. It will try again when HQ is back." "You're offline. It will try again when
   you're back online." "HQ didn't answer in time. Try again." Signed out shows only Sign in, so Search is not
   offered. When HQ can be reached again, the notes search runs by itself ("When HQ is up, notes and chats
   appear here without a tap.").
 - **Q11 · Counts.** Chips count once something is typed. 0 is shown, it is the answer. Notes and Chats show
-  no number when they were not searched. Groups past five end in "See all N".
+  no number when they were not searched. Groups past five end in "Show all {N}".
 - **Q12 · While notes load.** A spinner under the Notes heading, "Searching your notes". The other groups
   show at once.
 - **Q13 · Folders.** "Search notes 4" with chips "All folders", "Projects", "Inbox" (the top folders of the
@@ -107,10 +108,10 @@ Rejected:
 - **Lite.** Two scopes plus All (All, Notes, Tasks), "Search notes and tasks", by keyword: "Lite finds the
   words you type. It does not search by meaning." No Ask HQ. The folder filter works the same; folders
   starting with _ or . are never searched. "Couldn't search your notes. Your HQ can't be reached. It will
-  try again by itself."
+  try again when HQ is back."
 - **The phone as the hub (HQ window).** "Connected · HQ on your phone". Search asks HQ on your phone for
   everything; with the phone away, notes and chats are not searched and tasks and helpers come from the copy
-  saved for that HQ ("Saved on this PC at 14:02"; `../README.md` Open conflict 4). Each search costs the
+  saved for that HQ ("Saved in HQ Hub at 14:02"; `../../resolutions.md` B11). Each search costs the
   phone a little data, so Search waits 300 ms after the last key (WR12). Helpers on this computer and on the
   phone show together, each with where it runs.
 
@@ -125,7 +126,7 @@ Rejected:
 | `search_hint_empty` | "Type to search notes, tasks, chats and helpers." · "Type to search your notes." |
 | `search_keys` | "Up" "Down" "move" · "Enter" "open" · "Tab" "scope chips" · "Esc" "close" |
 | `search_close` | "Close search" |
-| `search_show_all` | "See all {N}" |
+| `search_show_all` | "Show all {N}" (B6) |
 | `search_ask` | "Ask HQ about this note" · "Ask HQ about these {2} notes" · "Ask HQ about the first {10} notes" |
 | `search_none_any` | "Nothing matches that." · "Try fewer words, or another spelling." |
 | `search_none_kind` | "No notes match that." · "No tasks match that." · "No chats match that." · "No helpers match that." · "{1} note does." · "Search everything" |
@@ -137,12 +138,13 @@ Rejected:
 | `search_server_helper` | "on your server HQ · saved at {14:18}" · "Helpers are matched in this browser, from the list Helpers saved. Your server HQ can't be reached, so its helper shows as saved at {14:18}." |
 | `search_lite` | "Search notes and tasks" · "Lite finds the words you type. It does not search by meaning." |
 
-Retired: "Search vault...", "Search vault (Cmd+/)".
+Retired: "Search vault...", "Search vault (Cmd+/)", "See all {N}", a colour wash on found words.
 
 ## 6. Behaviour rules
 
-1. **Ctrl K (Cmd K) opens Search,** from anywhere (it no longer opens the chat overlay); `?q=` opens it
-   with the words.
+1. **Ctrl K (Cmd K) opens Search,** from anywhere (it no longer opens the chat overlay). The address keeps
+   `?q=` for Back and Forward only (`../../resolutions.md` B6); a phone link (`hq://search`,
+   `search/notes`) never carries the words.
 2. **Debounce 300 ms** after the last key (WR12); the notes and chats calls go to HQ; tasks and helpers are
    matched in this browser from the saved lists (and also asked of HQ when Connected).
 3. **Groups** of five per kind, "Show all N" switches to that kind; chips count once something is typed.
@@ -189,6 +191,8 @@ takes `folder`"). Desktop: none.
 4. With HQ unreachable, the notes group shows the failure line and tasks come from the saved copy. Today
    the overlay shows nothing or an error.
 5. A request is sent 300 ms after the last key, not on every key.
+6. A group past five ends in "Show all {N}"; a found word renders bold with no background colour (B6,
+   A3). Today words are washed green.
 
 ## 11. Check on a laptop or phone
 
@@ -197,6 +201,6 @@ takes `folder`"). Desktop: none.
 
 ## 12. Open decisions it depends on
 
-- **D20, W12, W27, WR12** (Recommended). **N3** (a server HQ's notes on the phone; open on the web).
+- **D20, W12, W27, WR12** (Recommended), `../../resolutions.md` A2, A3, B6, B11. **N3** (a server HQ's notes on the phone; open on the web).
 - Depends on: `03-notes.md` (the pill), `07-helpers.md` (the saved helpers list), `06-tasks.md` (Find in
   tasks).

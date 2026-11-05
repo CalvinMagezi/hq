@@ -7,10 +7,11 @@ place); other fixes refer to it. Shared rules: `../../rules-shared.md` sections 
 Headline: **When HQ is starting, stopped, or the AI cannot be reached: one status line, one sheet, one
 strip, one set of words.**
 
-Note on waves: FixPlan wave 0 builds "the Connection state and the failure catalogue (no UI yet)"; wave 2
-(`../wave-2/04-startup.md`) puts the start steps in the Connection sheet; wave 4 (this file) builds the
-connection UI in every place, saved copies and server HQ rows. Build the `Connection` type and the
-catalogue first, the sheet with its start part in wave 2, the rest here.
+Note on waves (`../../resolutions.md` D-5): the Connection sheet's data model and words are wave 0
+(`data/Connection`, `ConnectionWords`, and the failure catalogue, no UI yet); its UI is built once in
+`ui/connection/` in wave 2 with Startup (`../wave-2/04-startup.md`: the start steps, "usually about",
+"Stopped at", "almost full"); wave 4 (this file) extends it with saved copies and server rows and brings
+the connection UI to every place. One "almost full" formula: under 200 MB free for the app's files (N15).
 
 ## 1. Finding and the review items it closes
 
@@ -43,8 +44,8 @@ What changed in this revision:
   atomically under a size cap, server parts cleared on sign-out, and data-extraction rules. Tested with a
   real phone-to-phone copy, not adb backup.
 - **Shared words and colours:** "Connected" in grey, a blue dot while HQ works, an amber stop icon for
-  "HQ has stopped" (was a red dot), "You're offline", one label "AI service and keys", "It will be sent
-  when HQ is back.", "HQ" in capitals. Settings is drawn as rules section 5 ("1 signed in").
+  "HQ has stopped" (was a red dot), "You're offline", one label "AI service and keys", "It will try
+  again when HQ is back." (`../../resolutions.md` A2), "HQ" in capitals. Settings is drawn as rules section 5 ("1 signed in").
 - **New:** the running notice (W1), 360 dp and font scale 2.0 frames (W2, W3), an Android versions card.
 
 ## 2. Before (as built, verified at `c04a100`)
@@ -135,8 +136,8 @@ Rejected:
 2. **While HQ itself is down,** every place shows the copy saved on the phone under one OfflineStrip ("HQ
    is starting. Saved on this phone at 14:32."), actions that change HQ turn off, new notes and tasks go
    to the outbox; with no copy, NothingYet; everything reads again by itself when HQ is back.
-3. **Every failure line comes from one catalogue** (rules section 2): what could not happen, then the
-   reason. For example: "Couldn't post the comment. HQ is still starting. It will try again by itself."
+3. **Every failure line comes from one catalogue** (rules section 2, which is `../../resolutions.md` A2):
+   what could not happen, the reason, then the outcome. For example: "Couldn't post the comment. HQ is still starting. It will try again by itself."
 
 The first launch, with nothing on the phone yet, keeps its own full screen ("Starting HQ", First run
 board). That is the only cover left; after it, the sheet holds the start steps.
@@ -162,7 +163,8 @@ any place line) is one 48 dp button.
 | "Tasks · Starting HQ · 12 s · 9 active" | The state comes first. A long line wraps; the state is never cut off. Name, line and status are one 48 dp button. |
 
 **P2 · The sheet: HQ starting, with the start steps** (pin 3). Bottom sheet over Notes. "HQ is starting" /
-"HQ runs on this phone. You can read and write while you wait." Checklist "Starting on this phone",
+"HQ runs on this phone. After a reboot it can take up to a minute. You can read and write while you
+wait." (one body for this board and FixStartup; `../README.md` "Still open") Checklist "Starting on this phone",
 "Loading HQ", "Opening your notes and tasks", "Almost ready" with the 4 dp blue bar; "Step 3 of 4 · 12 s ·
 usually about 25 s". Rows: "Internet · Mobile data", "AI service · OpenRouter · answered at 14:30", "Saved
 on this phone · at 14:32". Button [Background work].
@@ -174,12 +176,12 @@ opening your notes. Restarting starts over." Checklist; "Step 3 of 4 · 72 s · 
 **P3 · The sheet: HQ has stopped** (pin 5). "HQ has stopped" / "Android may have stopped it to save
 battery, or the phone ran low on memory. Nothing you wrote is lost." "Stopped at: Opening your notes and
 tasks". Rows "Internet · Wi-Fi", "AI service · OpenRouter · answered at 14:30", "Saved on this phone · at
-14:32". "Technical details" (closed). [Start HQ] (green), [Open Android settings] with "In Battery, choose
-Unrestricted for AgentHQ.", [Copy details].
+14:32". "Technical details" (closed). [Start HQ] (green), [Open Android settings] with "Then set Battery
+to Unrestricted." (FixStartup's line, the same on both boards), [Copy details].
 
 **P3b · Stopped: the phone is almost full** (pin 6). "HQ has stopped" / amber "The phone is almost full.
-Free up 300 MB and try again." "Stopped at: Opening your notes and tasks". Rows "Free on this phone · 140
-MB", "Saved on this phone · at 14:32". [Open Android settings] with "In Storage, free up space.", [Start
+Free up 60 MB and try again." (the one formula, D-5: {size} is 200 MB less what is free) "Stopped at:
+Opening your notes and tasks". Rows "Free on this phone · 140 MB", "Saved on this phone · at 14:32". [Open Android settings] with "In Storage, free up space.", [Start
 HQ], "Technical details".
 
 **P4 · The sheet: you're offline** (pin 7). Over Chat. "You're offline" / "HQ is running on this phone, so
@@ -214,7 +216,7 @@ be out of credit." Rows "HQ on this phone · Connected", "Internet · Mobile dat
   started." When there is no saved copy. Stopped adds "HQ has stopped. Start HQ to try again." and Start
   HQ.
 - Waiting to send (pin 12): heading "Waiting to send 1", row "Check the backup status · Saved on this
-  phone. It will be sent when HQ is back." New notes and tasks made while HQ is down go to the capture
+  phone. It will try again when HQ is back." (the web's outbox line, `../../web/wave-0/02-shared-parts.md`) New notes and tasks made while HQ is down go to the capture
   outbox and show at the top of their list.
 - Reading again: the 4 dp blue line under the top bar while a list is read again. Used by a second tap on
   the selected tab, and when HQ comes back.
@@ -259,8 +261,8 @@ be out of credit." Rows "HQ on this phone · Connected", "Internet · Mobile dat
   minute."; [New note].
 - **R3 · Tasks, a new task while HQ is stopped** (pin 22). Strip "HQ has stopped. Saved on this phone at
   14:32." [Start HQ]; "Waiting to send 1": "Check Samsung battery whitelist · Saved on this phone. It will
-  be sent when HQ is back."; "Waiting on you 2": "Soak, reboot test, cleanup of old copies · Stuck · needs a
-  reboot window"; snackbar "Task saved on this phone. It will be sent when HQ is back."
+  try again when HQ is back."; "Waiting on you 2": "Soak, reboot test, cleanup of old copies · Stuck · needs
+  a reboot window"; snackbar "Task saved on this phone. It will try again when HQ is back."
 - **R4 · A Settings page, stopped, nothing saved** (pin 23). "Messaging apps": "Nothing saved on this phone
   yet" / "These settings come from HQ. HQ has stopped. Start HQ to try again." [Start HQ] [What happened].
 - **R5 · Chat, offline** (pin 24). Banner "You're offline. Messages wait here and send when you're back
@@ -286,7 +288,8 @@ be out of credit." Rows "HQ on this phone · Connected", "Internet · Mobile dat
 ### 5 · Owners with a server HQ
 
 - **V1 · Sheet: your server HQ can't be reached** (pin 30). Over Inbox. "Your server HQ can't be reached"
-  / "Your server HQ can't be reached. Check your internet." / "HQ on this phone is fine. Notes and tasks
+  / "Your server HQ can't be reached. It will try again when HQ is back." (A2; the phone polls it by
+  itself) / "HQ on this phone is fine. Notes and tasks
   on this phone still work." Rows "HQ on this phone · Connected", "Your server HQ · hq.example.ts.net · no
   answer since 14:20", "Internet · Wi-Fi", "Saved from your server · at 14:18". [Server HQ settings] [Try
   now].
@@ -376,23 +379,23 @@ Connection sheet:
 |---------|--------|
 | Titles | "Connected" · "HQ is starting" · "HQ is restarting" · "HQ has stopped" · "Reconnecting" · "Your server HQ can't be reached" · "Signed out of your server" · "You're offline" · "The AI service isn't answering" |
 | Connected | "HQ is running on this phone and answering." |
-| Starting | "HQ runs on this phone. You can read and write while you wait." |
+| Starting | "HQ runs on this phone. After a reboot it can take up to a minute. You can read and write while you wait." |
 | Slow, still alive | "HQ is still opening your notes. Restarting starts over." Buttons: "Keep waiting" · "Restart HQ" |
 | Steps (FixStartup) | "Starting on this phone" · "Loading HQ" · "Opening your notes and tasks" · "Almost ready" |
 | Time | "Step 3 of 4 · 12 s · usually about 25 s" ("usually" from the second start) |
 | Restarting | "HQ is restarting because a setting changed. It is back in a few seconds." |
 | Stopped | "Android may have stopped it to save battery, or the phone ran low on memory. Nothing you wrote is lost." |
 | Where it stopped | "Stopped at: Opening your notes and tasks" |
-| Phone almost full | "The phone is almost full. Free up 300 MB and try again." |
+| Phone almost full | "The phone is almost full. Free up {size} and try again." ({size} = 200 MB less what is free, D-5) |
 | Reconnecting | "HQ is running, but the chat link dropped. The app reconnects by itself." |
-| Server | "Your server HQ can't be reached. Check your internet." · "HQ on this phone is fine. Notes and tasks on this phone still work." |
+| Server | "Your server HQ can't be reached. It will try again when HQ is back." · "HQ on this phone is fine. Notes and tasks on this phone still work." |
 | Signed out | "This phone is signed out of your server HQ. Sign in again." · "Its questions and saved items were removed from this phone." |
 | Offline | "HQ is running on this phone, so notes and tasks work. Chats need the internet to reach the AI service." |
 | AI service | "HQ is running and the phone is online. OpenRouter did not answer at 14:38. It may be busy, or your key may be out of credit." |
 | Row labels | "HQ on this phone" · "Your server HQ" · "Internet" · "AI service" · "Checked by HQ" · "Free on this phone" · "Saved on this phone" · "Saved from your server" |
 | Row values (as drawn) | "Mobile data" · "Wi-Fi" · "None since {time}" · "Needs the internet" · "{service} · answered at {time}" · "{service} · no answer at {time}" · "{address} · no answer since {time}" · "{address} · signed out at {time}" · "at {time}" |
 | Buttons | "Start HQ" · "Keep waiting" · "Restart HQ" · "Open Android settings" · "Copy details" · "Background work" · "AI service and keys" · "Try now" · "Server HQ settings" · "Sign in again" · "Not now" |
-| Line under Open Android settings | "In Battery, choose Unrestricted for AgentHQ." · "Turn on Wi-Fi or mobile data." · "In Storage, free up space." |
+| Line under Open Android settings | "Then set Battery to Unrestricted." · "Turn on Wi-Fi or mobile data." · "In Storage, free up space." |
 | Technical details (closed) | "Health check timed out after 60 s." · "Last start: 08:41" · "exit code none" · "Stopped at: step 3 of 4" |
 
 Nothing saved yet:
@@ -407,11 +410,12 @@ Failures (rules section 2), turned off, outbox:
 
 | Element | String |
 |---------|--------|
-| Shape | "Couldn't post the comment." + the reason's sentence |
-| Reasons | "HQ is still starting. It will try again by itself." · "HQ is restarting. Try again in a moment." · "HQ has stopped. Start HQ to try again." · "HQ didn't answer in time. Try again." · "Your server HQ can't be reached. Check your internet." · "This phone is signed out of your server HQ. Sign in again." · "You're offline. It will send when you're back online." · "The AI service isn't answering. HQ is fine. Try again soon." · "The phone is almost full. Free up {size} and try again." |
+| Shape | "Couldn't post the comment." + the reason sentence + the outcome sentence (`../../resolutions.md` A2: the outcome depends only on whether the action waits and retries by itself) |
+| Reasons, waits and retries | "HQ is still starting. It will try again by itself." · "HQ is restarting. It will try again by itself." · "HQ has stopped. It will try again when HQ is back." · "Your server HQ can't be reached. It will try again when HQ is back." · "You're offline. It will try again when you're back online." |
+| Reasons, does not | "HQ is still starting. Try again in a moment." · "HQ is restarting. Try again in a moment." · "HQ has stopped. Start HQ to try again." · "HQ didn't answer in time. Try again." · "Your server HQ can't be reached. Try again when it's back." · "This phone is signed out of your server HQ. Sign in again." · "You're offline. Try again when you're back online." · "The AI service isn't answering. HQ is fine. Try again soon." · "The phone is almost full. Free up {size} and try again." |
 | Turned off, TalkBack | "Allow once. Needs HQ, which is starting" |
-| Outbox heading, row | "Waiting to send" · "Saved on this phone. It will be sent when HQ is back." |
-| Outbox snack | "Task saved on this phone. It will be sent when HQ is back." |
+| Outbox heading, row | "Waiting to send" · "Saved on this phone. It will try again when HQ is back." |
+| Outbox snack | "Task saved on this phone. It will try again when HQ is back." |
 | Helper, last seen | "Last seen 14:32" |
 | Server item | "on your server HQ · 14:15" |
 | Chat reply failed (R6) | "Couldn't finish the reply. The AI service isn't answering. HQ is fine. Try again soon." · "Try again" |
@@ -434,9 +438,9 @@ has stopped" · "Tap to see why".
 5. **Stopped:** "Stopped at: {step}", Technical details closed. Start HQ restarts the service and the wait.
    Open Android settings opens the battery page (Samsung's first, then Android's), with one line naming
    the switch.
-6. **Almost full:** when free space is below what HQ needs, the starting and stopped sheets add the line
-   and Open Android settings goes to Storage. {size} is the database file's size plus 100 MB, less what is
-   free: a design number to measure on the A32.
+6. **Almost full** (`../../resolutions.md` D-5, one formula with FixStartup): under 200 MB free for the
+   app's files (`getAllocatableBytes`, N15), the starting and stopped sheets add the line and Open Android
+   settings goes to Storage. {size} is 200 MB less what is free. N15 tunes the 200 MB with the counters.
 7. **You're offline** after 3 s with no validated network. Only the status line and Chat change. A message
    sent while offline waits in the chat as "Waiting to send" and goes, in order, when the network is back.
 8. **The AI state** comes from `/api/status/ai`, read when the sheet opens and after a failed turn; never
@@ -449,7 +453,9 @@ has stopped" · "Tap to see why".
     becomes "HQ didn't answer in time. Try again."
 11. **With no saved copy** a place shows NothingYet; New note and New task stay on.
 12, 22. **New notes and tasks while down** save to the outbox, show under "Waiting to send" and go when HQ
-    is back, in the order made.
+    is back, in the order made. Each carries a client id made when it was saved, never on a retry, and HQ
+    drops a repeat (added by resolutions.md C-3, N1 extended; the server side is the web's,
+    `../../web/wave-0/02-shared-parts.md` rule 13).
 13, 20. **Chat while starting or stopped:** the draft stays, Send is off with its reason. Offline and the
     AI state leave Send on.
 14, 19. **Saved copy:** written after each good read for Notes home and each folder opened, the three task
@@ -489,6 +495,11 @@ has stopped" · "Tap to see why".
   cleared on Sign out everywhere.
 - **TalkBack** announces only the change to HQ has stopped and the return to Connected, politely.
 - **Links:** none change; a link opened while HQ is down opens its place with the saved copy.
+- **Note edits never overwrite silently (added by resolutions.md C-2).** A note save sends the version it
+  started from (`PUT /api/note {path, content, base}`, `base` the content hash the editor opened with).
+  When HQ answers that the note changed, nothing is saved and the editor shows "This note changed
+  somewhere else." with [See their version] and [Keep both]. Keep both saves your text as a new note
+  "{title}, your version" (WR11). The same check and words as the web (`../../web/wave-4/03-notes.md`).
 
 ## 7. Android versions
 
@@ -508,11 +519,14 @@ has stopped" · "Tap to see why".
 | `java/example/hq/spike/HubService.java` | `supervise()` (lines 219-237) already waits on the hq process; expose whether it is alive and the start step, so Stopped means the process ended. | yes |
 | `K/data/HqClient.kt` | `healthy()` (line 49, reads `/health`) stays for liveness only; new `aiStatus()` reads `/api/status/ai` with the token. | yes |
 | `K/data/NetworkWatch.kt` | The default network callback on `NET_CAPABILITY_VALIDATED`, debounced 3 s. | NEW |
-| `K/data/SavedCopy.kt` | `SavedCopyStore`, one JSON file per place under `filesDir/savedcopy/`, each with the time HQ answered and its source (this phone or the server). Written with AtomicFile; 256 KB a place, 2 MB in all; `clearServer()` and `clearAll()`. | NEW |
+| `K/data/SavedCopy.kt` | `SavedCopyStore`, one JSON file per place under `filesDir/savedcopy/`, each with the time HQ answered and its source (this phone or the server). Written with AtomicFile; 256 KB a place, 2 MB in all, per HQ (the same cap as the web, `../../resolutions.md` B16); `clearServer()` and `clearAll()`. | NEW |
 | `K/ServerHq.kt` | `markSignedOut()` (line 52, the 401 path) and `disconnect()` (line 57) call `SavedCopyStore.clearServer()`; its poll result feeds the two server states. | yes |
 | `res/xml/data_extraction_rules.xml`, manifest `android:dataExtractionRules` | As wave 0 builds it; `android:allowBackup="false"` stays for Android 11 and below. | NEW (wave 0) |
-| `K/ui/connection/` | `ConnectionSheet.kt` (with FixStartup's `StartStep`), `OfflineStrip.kt`, `ChatBanner.kt`, `NothingYet.kt`, `TechnicalDetails.kt`, `Modifier.needsHq()`. Words are string resources: `fail_<action>_<reason>` from rules section 2. | NEW (package; FixStartup names `ui/shell/ConnectionSheet.kt`, see "Open conflicts") |
-| `K/ui/shell/HqShell.kt` | The status text and colours (lines 113-115: green "Live", amber "Starting", amber "Saved") become the Connection words, grey, blue or amber; the title column is one button; `LocalReselect` and `ReselectEffect`. | yes (`LocalReselect`, `ReselectEffect` do NOT exist today; the board says "as before") |
+| `K/ui/connection/` | `ConnectionSheet.kt` (built in wave 2 with FixStartup's `StartStep`, `../../resolutions.md` D-5; this board adds the saved-copy and server rows), `OfflineStrip.kt`, `ChatBanner.kt`, `NothingYet.kt`, `TechnicalDetails.kt`, `Modifier.needsHq()`. Words are string resources: `fail_<action>_<reason>` from rules section 2. | NEW (wave 2), extended here |
+| `K/ui/shell/HqShell.kt` | The status text and colours (lines 113-115: green "Live", amber "Starting", amber "Saved") become the Connection words, grey, blue or amber; the title column is one button. | yes |
+| `K/ui/shell/Reselect.kt` | `LocalReselect` and `ReselectEffect`, the re-tap of the selected tab (rules 26 to 28). | NEW (`../../resolutions.md` D-12: neither exists today) |
+| `capture/Outbox.kt` | Each entry gets a `client_id` when saved (C-3). | yes |
+| `K/data/HqClient.kt`, `K/ui/notes/NotesPages.kt` | The note save sends `base`; a "changed" answer opens the C-2 card with See their version and Keep both. | yes |
 | `K/ShellActivity.kt` | The "Saved" status (lines 299-300) goes; the sheet's daily auto-open is one preference. | yes |
 | `K/ui/startup/Startup.kt` | "HQ did not start" (line 34) covers only the first launch (`FirstLaunch.markDone` in HqServices). | yes |
 | Failure strings to replace | `AnswerReceiver.kt`, `capture/Outbox.kt`, `voice/VoiceTurn.kt` (lines 148-154), `ui/startup/Startup.kt`, `ui/chat/ChatViewModel.kt`, `NoteExporter.kt`, `ui/helpers/` (AnswerWords, HelperWords, HelpersScreen, HelpersViewModel), `ui/inbox/` (InboxFixtures, InboxScreen, InboxViewModel), `ui/notes/` (NotesHome, NotesPages, NotesViewModel), `ui/search/SearchWords.kt`, `ui/settings/` (SettingsScreens, SettingsViewModel, SettingsWords), `ui/tasks/` (Briefing, TaskFilterSheet, TasksScreen, TasksViewModel), `ui/webhost/` (WebHost, WebHostScreen). | yes |
@@ -565,25 +579,32 @@ has stopped" · "Tap to see why".
     "…".
 12. A fresh install still shows the first-launch "Starting HQ" screen; a second tap on a selected tab
     scrolls to the top, then reads again.
+13. Edit a note on the phone while the web saves a change to it: the phone's save shows "This note
+    changed somewhere else." with See their version and Keep both, and nothing is overwritten; Keep both
+    makes "{title}, your version" (added by resolutions.md C-2). Today the later save wins.
+14. A task made while HQ is stopped is sent once even when the app sends it twice (a test that drops the
+    first answer): HQ holds one task with that client id (added by resolutions.md C-3).
+15. With 140 MB free for the app's files, the stopped sheet says "The phone is almost full. Free up 60 MB
+    and try again."; with 250 MB free it says nothing about space (D-5, N15).
 
 ## 11. Check on device
 
-- The saved-copy size on a 2,000-note vault (FixPlan wave 4 device check; N2 "measured first"; the board
-  asks for it "before wave 0 ends").
+- The saved-copy size on a 2,000-note vault, measured in wave 0 (`../../decisions.md` N2: "measured on
+  a 2,000-note vault in wave 0"), then checked again here.
 - Repeat the data-extraction check with Samsung Smart Switch, and vendor copy tools (Tecno and Infinix
   clone apps), which may not follow Android's rules.
 - On some 8.x phones a min-importance channel still shows an icon in the status bar.
-- The almost-full `{size}` formula, measured on the A32.
+- The almost-full line on the A32 (the one 200 MB formula, D-5, N15).
 
 ## 12. Open questions and decisions it depends on
 
-- **Hold chat messages sent while offline?** Rules section 2 says "It will send when you're back online",
-  so the app must keep its word. Recommendation: yes, held in the chat for up to 24 hours, in order, each
+- **Hold chat messages sent while offline?** Rules section 2 says "It will try again when you're back
+  online", so the app must keep its word. Recommendation: yes, held in the chat for up to 24 hours, in order, each
   one removable, never sent twice. (Decided: N1.)
-- **Size of the saved copy:** 256 KB a place and 2 MB in all. Recommendation: accept these numbers, then
-  measure on a 2,000-note vault before wave 0 ends. (Decided: N2, "256 KB a place, 2 MB in all, measured
-  first.")
+- **Size of the saved copy:** 256 KB a place and 2 MB in all, per HQ, on phone and web alike
+  (`../../resolutions.md` B16). Measured on a 2,000-note vault in wave 0 (Decided: N2).
 
-Depends on: D16, D17, N1, N2, N15, rules sections 2, 3, 5, 6, 7, 10; `../wave-2/04-startup.md` (steps,
+Depends on: D16, D17, N1, N2, N15, WR11, `../../resolutions.md` A2, A7, B16, C-2, C-3, D-5, D-12, rules
+sections 2, 3, 5, 6, 7, 10; `../wave-2/04-startup.md` (steps,
 slow rule); `../wave-0/03-data-transfer.md` (rules file); `../wave-0/02-safe-mode.md` (stopped sheet's
 Save a copy).

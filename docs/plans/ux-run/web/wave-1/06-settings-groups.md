@@ -63,18 +63,19 @@ Rejected:
   The four groups (`.a-label` heading, `.a-set` of `.a-li` rows) are the list pane, 360 wide; the open
   section is the detail pane. One card slot on top of the list. Rows and their trailing words:
   - This browser: Notifications "Needs you on · Updates on"; Time zone "Nairobi, same as HQ"; Install and
-    version "Not installed · HQ 0.9.2"; Data used "6 MB today in this browser"; Sign out this browser
-    "Wipes what this browser saved".
+    version "Not installed · HQ 0.9.2"; Data used "120 MB this month in this browser" (monthly on every
+    surface, `../../resolutions.md` B17); Sign out this browser "Wipes what this browser saved".
   - Your accounts: AI service and keys "GitHub Copilot · 3 services"; Messaging apps "Telegram on ·
     Discord off"; Other devices "4 signed in"; Claude on the web "Off".
   - How HQ behaves: Spending limits "$4.25 of $5.00 today"; Safety and limits "Read only"; Folders
     helpers may use "3 approved".
-  - Your data: Backup and about "Last backup 9 days ago" (amber only when HQ reports a problem; today
-    "Backups are set up where HQ runs." in grey, since HQ has no backup route yet).
+  - Your data: Backup and about "Last backup 3 h ago" in grey once HQ's backup status route exists; today
+    "Backups are set up where HQ runs." in grey, since HQ has no backup route yet. It is amber only when
+    that route reports failed or overdue and the page can start a backup (`../../resolutions.md` B10).
 - **H2 · The card slot**, one card, in this order: "A newer HQ is running" (Reload), else "Notifications
   are off in this browser" ("Questions from helpers wait in the Inbox until you look." [Turn on]), else
-  "Check your backups" ("The last backup is 9 days old. It should run every day." [Open Backup and
-  about]). With none, no card.
+  "Check your backups" ("Last backup 3 d ago. A new one should be made every 24 hours." [Open Backup and
+  about]), shown only on B10's amber condition. With none, no card.
 - **H3 · 390.** The four groups are the page; each row opens its section as a pushed page with a back
   arrow. The status line and the balance chip stay in the top bar.
 - **H4 · 768 to 1023.** The rail and one pane: the home list fills it; a row opens its section in the
@@ -84,14 +85,16 @@ Rejected:
   that does not fit ends in an ellipsis; the section shows it in full. Switch rows keep a 48 px target.
 - **H6 · 2200.** The list keeps 360, the section its reading width (760), centred.
 - **H7 · 200%.** The phone layout with the bottom bar.
-- **H8 · Lite.** The gear opens This browser and Other devices only (WR2), with "HQ Lite has no other
-  settings here. Keys, spending, messaging apps and helpers are not part of HQ Lite." Notifications is
-  hidden unless `lite.allow_egress` allows the push service.
-- **H9 · HQ window (phone hub).** The group is "This window": "Shown by HQ Hub on this Mac"; Data used
-  "Counted on your phone · 4 MB today"; "Sign out this window · Wipes what this window saved";
-  Notifications "Needs you on this Mac · HQ Hub shows a notice on this Mac. Its only button is Open." and
-  "Updates · This window has no web push. Your phone shows its own notifications." No Install and
-  version (HQ Hub updates itself). One line on top: "These are the settings of HQ on your phone." and
+- **H8 · Lite.** The gear opens This browser and Other devices only (WR2, `../../resolutions.md` B13),
+  with "HQ Lite has no other settings here. Keys, spending, messaging apps and helpers are not part of
+  HQ Lite." Notifications is hidden unless `lite.allow_egress` allows the push service.
+  `/settings/spending` opens This browser with "This HQ is HQ Lite. It has no Spending limits." (WR28).
+- **H9 · HQ window (phone hub).** The group is "This window" (`../../resolutions.md` B11, confirmed by
+  the owner): "Shown by HQ Hub on this computer"; Data used "Counted on your phone this month · 96 MB"
+  (B17); "Sign out this window · Wipes what this window saved"; Notifications "Needs you on this
+  computer · HQ Hub shows a notice on this computer. Its only button is Open." and "Updates · This
+  window has no web push. Your phone shows its own notifications." Its saved copy reads "Saved in HQ
+  Hub at 14:32". No Install and version (HQ Hub updates itself). One line on top: "These are the settings of HQ on your phone." and
   "The phone's own settings, like Background work and Keep running, are on the phone."
 
 ### This browser › Notifications
@@ -135,8 +138,8 @@ Rejected:
   Install shows only when the browser offers it. "Version" / "HQ in this browser · 0.9.1" / "HQ · Updated
   by itself from a signed release at 14:20. · 0.9.2". When they differ: "A newer HQ is running" / "Reload
   to keep going. Drafts are kept." [Reload] (`../wave-2/03-version-and-data.md`).
-- **Z3 · Data used.** "Today · 6 MB", "This week · 38 MB", "An hour with HQ open and idle · HQ aims for
-  under 1 MB an hour. · 0.4 MB", "Opening Chat · 240 KB". "HQ gets changes over one link and pauses while
+- **Z3 · Data used.** "Data used by HQ this month · 120 MB" (B17: monthly on every surface), "An hour
+  with HQ open and idle · HQ aims for under 1 MB an hour. · 0.4 MB", "Opening Chat · 240 KB". "HQ gets changes over one link and pauses while
   this tab is hidden. It follows your browser's data saver. Big readers, like PDF and spreadsheets, load
   only when opened." Technical details: What HQ noticed (`../wave-0/02-shared-parts.md`).
 - **Z4 · Sign out this browser.** The row opens the stacked red dialog of `05-sign-in-safety.md` D7.
@@ -175,8 +178,11 @@ All strings in section 4 are exact. Keys follow `settings_{group}_{row}` and `no
 | `group_data` | "Your data" |
 | `card_newer` | "A newer HQ is running" · "Reload to keep going. Drafts are kept." · "Reload" |
 | `card_notif_off` | "Notifications are off in this browser" · "Questions from helpers wait in the Inbox until you look." · "Turn on" |
-| `card_backups` | "Check your backups" · "The last backup is {9} days old. It should run every day." · "Open Backup and about" |
+| `card_backups` | "Check your backups" · "Last backup {3 d} ago. A new one should be made every 24 hours." · "Open Backup and about" (B10) |
+| `backup_row` | "Last backup {3 h} ago" (B10) |
 | `backup_not_reported` | "Backups are set up where HQ runs." |
+| `data_used_row` | "{120 MB} this month in this browser" · in the HQ window "Counted on your phone this month · {96 MB}" (B17) |
+| `lite_no_spending` | "This HQ is HQ Lite. It has no Spending limits." (WR28) |
 
 Retired: "Push on", "Turn on push", "Clock", "Devices" (as the section name), "Chat apps", "Provider
 keys", "Backend chain", "Coding agents", "Integrations", "Session folders", "Claude connector" (as the
@@ -192,8 +198,8 @@ row name), "This device".
    home list on a phone.
 3. **The card slot** shows the first true card of H2 and nothing else. A card is never the only way to
    reach its page.
-4. **Rows from HQ** keep their saved values under one strip when HQ is out of reach; no row says
-   "Checking…" (states in `../wave-4/08-settings.md`).
+4. **Rows from HQ** keep their saved values under one strip when HQ is out of reach; no row shows a
+   "checking" value (states in `../wave-4/08-settings.md`).
 5. **Notifications are per browser.** The switches write the subscription's `kinds` and `details`
    (`../wave-0/01-live-bugs.md` rule 4). Turning both kind switches off unsubscribes. The switch rows
    are real switches (`role="switch"`), named by what they turn on, never by their state.
@@ -202,6 +208,9 @@ row name), "This device".
 8. **The Inbox card** shows on Needs you once per browser until Turn on or Not now; Not now hides it 7
    days (W31, D13).
 9. **Lite and the HQ window** follow H8 and H9.
+10. **Backup is amber only** when HQ's backup status route reports failed or overdue and the page can
+    start a backup; otherwise the row is grey (`../../resolutions.md` B10).
+11. **Data used is monthly** (B17); the counter resets on the 1st, in the display zone.
 
 ## 7. Browser and platform notes
 
@@ -243,6 +252,11 @@ row name), "This device".
 4. The card slot shows "Notifications are off in this browser" when permission is default and nothing
    newer is running; "A newer HQ is running" takes it first.
 5. The header has no clock and the rail has no Usage. Today both are there.
+6. Data used's row reads "{N} MB this month in this browser"; with no backup route the Backup row is grey
+   "Backups are set up where HQ runs."; a fixture route reporting overdue turns it amber with the card
+   "Last backup 3 d ago. A new one should be made every 24 hours." (B10, B17).
+7. In Lite, `/settings/spending` opens This browser with "This HQ is HQ Lite. It has no Spending
+   limits." (WR28).
 
 ## 11. Check on a laptop or phone
 
@@ -251,8 +265,8 @@ row name), "This device".
 
 ## 12. Open decisions it depends on
 
-- **W37, W40, W16, W31, W36, WR2, WR5** (Recommended or Revised). **W34** (owner to confirm) for the
-  Claude row.
+- **W37, W40, W16, W31, W36, WR2, WR5, WR28** (Recommended or Revised). **W34** (owner to confirm) for
+  the Claude row. `../../resolutions.md` B10, B11, B13, B17.
 - Depends on: `../wave-0/01-live-bugs.md` (push kinds and details), `05-sign-in-safety.md` (Sign out
   this browser, Other devices), `../wave-2/03-version-and-data.md`, `../wave-2/04-time-zones.md`,
   `../wave-4/08-settings.md`, `../wave-4/09-spending.md`.

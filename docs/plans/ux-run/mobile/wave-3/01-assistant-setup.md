@@ -24,7 +24,7 @@ What changed in this revision:
 - **#2, Android 8 and 9:** HQ being the assistant is read with `VoiceInteractionService.isActiveService`
   on every version. RoleManager is API 29 and minSdk is 26, so it is never the main check. New After 11
   and 12 draw Android 8 and 9. (Review #2: "RoleManager needs Android 10 but the app runs on 8".)
-- **Colour:** the chosen card has a check and a grey border, not green (After 4, 8). No green status
+- **Colour:** the chosen card has a check and an ink border (white on the dark theme), never green (After 4, 8; `../../resolutions.md` A3). No green status
   anywhere. The Phone assistant row is never amber; only the page's microphone line can be (After 14).
 - **Speech model:** the card says "Understands English". The model never downloads by itself: a tap,
   with the size shown first.
@@ -99,7 +99,7 @@ Rejected:
 
 Cards on Ready to start are the shared option card (surface-100, hairline border, 12 dp radius, 16 dp
 padding, a small "Optional" label, bold title, ink-muted body, an outlined pill button). The chosen state
-adds a check icon and keeps a grey (line) border, never green (rules section 5).
+adds a check icon and an ink border, never green (rules section 5, `../../resolutions.md` A3).
 
 1. **Ready to start, as rules section 5** (pin 1). "Ready to start". Card: "Optional" / "Use HQ as your
    phone's assistant" / "Hold Home on any screen and ask by voice. Understands English. You can also do
@@ -112,7 +112,7 @@ adds a check icon and keeps a grey (line) border, never green (rules section 5).
 3. **Android's page opens (generic).** "Digital assistant app" / "Device assistance app · Google" (pin 5)
    / "Assist settings": "Use text from screen · Allow the assist app to access the screen contents as
    text", "Use screenshot · Allow the assist app to access an image of the screen".
-4. **Back in HQ: chosen** (pin 6). Card with check and grey border: "Optional" / "HQ is your phone's
+4. **Back in HQ: chosen** (pin 6). Card with check and ink border: "Optional" / "HQ is your phone's
    assistant" / "Hold Home on any screen to ask. Understands English. Before your first question, you tap
    to download the speech model, 57 MB." Then the hint, Start HQ, Back.
 5. **Back in HQ: not chosen** (pin 7). Card "Optional" / "Use HQ as your phone's assistant" / "Not set
@@ -129,7 +129,7 @@ adds a check icon and keeps a grey (line) border, never green (rules section 5).
    Samsung phones the side key opens Bixby or the power menu. Hold Home instead, or swipe up from a bottom
    corner if you use gestures." Privacy note "Your screen is never read. Your voice stays on this phone.
    Only the words of your question go to HQ."
-8. **Phone assistant, set up.** Card (check, grey border) "HQ is your phone's assistant / Hold Home on any
+8. **Phone assistant, set up.** Card (check, ink border) "HQ is your phone's assistant / Hold Home on any
    screen to ask. Understands English." "Right now": "Assistant app · AgentHQ", "Microphone · Allowed",
    "Speech model · On this phone · [U] MB". **Card slot** (pin 13): "Empty here. Holds FixAssistantLocked's
    "When the phone is locked" card on a phone model whose device check failed, or the screen-lock card
@@ -212,7 +212,7 @@ Every string is a whole sentence with its own key in `res/values/strings.xml` (k
    turns off assist data and the screenshot.
 5. Android's page, drawn generic. HQ cannot draw on it or come back by itself; the owner presses Back.
 6. **On return the app asks Android, never a saved flag:** `isActiveService` at every resume. Chosen shows
-   a check and a grey border within one frame. Nothing is stored.
+   a check and an ink border within one frame. Nothing is stored.
 7. Back without choosing: the card says so and offers Try again. No warning colour; it is optional.
 8. **The row sits after Notifications** and opens `hq://settings/assistant`. Its status is the first that
    applies: Not available on this phone, Not set up, On · microphone off, On · speech model not
@@ -297,8 +297,8 @@ None. Release notes carry one line for upgraders (open question, D6).
 ## 10. Acceptance checks (each fails on today's build)
 
 1. **Android 8.1 emulator**, fresh install, new HQ: Ready to start shows the card, no crash. Set up, Open
-   Android settings lands on Assist & voice input. Choose AgentHQ, Back: the card shows the check and a
-   grey border.
+   Android settings lands on Assist & voice input. Choose AgentHQ, Back: the card shows the check and an
+   ink border.
 2. **Galaxy A32** (13, One UI 5) and one Tecno, Infinix or itel phone: the same, landing on Digital
    assistant app.
 3. Back without choosing: "Not set yet". Start HQ works. The status-bar microphone dot never lights, and

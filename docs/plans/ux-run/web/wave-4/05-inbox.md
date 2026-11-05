@@ -68,7 +68,8 @@ Rejected:
 - **N5 · A task to check.** "Nightly off-device backup · Task ready to check · 20 min ago" / "HQ says this
   is finished. Look it over, then mark it done." [Check it].
 - **N6 · A stuck helper.** "A helper is stuck · Mac mini · 1 hour ago" / "Codex keeps hitting the same
-  question, so HQ stopped answering it." [Take a look].
+  question, so HQ stopped answering it." [Open it to see] (was "Take a look", `../../resolutions.md`
+  B18).
 - **N7 · Details pane.** "What it will run, exactly" / `bash` / the JSON / "The nightly backup wants to
   remove the 3 oldest copies, from before Sep 21. They take 4.2 GB on your Mac mini. The 11 newer copies
   stay." / "If you allow it, HQ runs exactly this, once. The 3 copies are deleted and cannot be brought
@@ -76,9 +77,10 @@ Rejected:
   14:27 today", "Waits until · 14:27 tomorrow".
 - **Buttons by kind:** a helper's question: Decline and Allow once, when HQ read a plain yes once;
   otherwise Open helper. A request that loses something: Decline and a red "Allow {verb}", from the
-  runtime's losing flag (new). A task to check: Check it. A stuck helper: Take a look.
+  runtime's losing flag (new). A task to check: Check it. A stuck helper: Open it to see.
 - **What is quoted:** the tool and its arguments, verbatim, as `owner_approval.rs` stores them ("with
-  exactly these arguments"), then HQ's own sentence, labelled. It waits 24 hours, then lapses.
+  exactly these arguments"), then HQ's own sentence, labelled. It waits 24 hours, then lapses: "This
+  request ran out. Ask again from the helper." (`../../resolutions.md` C-7).
 - **Keyboard:** Tab reaches each card's title (a link to its details) and then its buttons; cards are not
   clickable divs; Up and Down move between cards; Enter opens the details.
 
@@ -112,7 +114,7 @@ Rejected:
   Backup in Settings].
 - **U2 · Clearing.** One: "Update cleared · Undo"; all: "4 updates cleared · Undo". Cleared items stay on
   HQ as dismissed; Undo calls the restore route within 10 minutes, so the web and the phone agree; after
-  that: "Couldn't undo. It changed on another device."
+  that: "Couldn't undo. It changed on another device, or too much time passed." (A6)
 - **U3 · Search** matches titles and text on the open tab. **Refresh:** changes arrive over the one socket,
   so it is rarely needed; it stays for the owner who wants to be sure, and while Reconnecting.
 - **U4 · From a server HQ:** "On your server HQ · Office" leads the line; clearing it clears it on that HQ.
@@ -155,17 +157,19 @@ Rejected:
   colours:** cards keep their borders; the amber edge of a Needs you card becomes a thicker border.
 - **Signed out:** "Signed out of this HQ" / "Sign in to see what needs you. Nothing from this HQ stays in
   this browser." [Sign in]. No badge, no cards and no saved time.
-- **A new sign-in** as `../wave-1/05-sign-in-safety.md` N1: "New sign-in: Edge on Windows · HQ · 2 min ago"
-  / "Edge on Windows signed in to this HQ at 14:20. If it was not you, sign it out." [It was me] [Sign it
-  out]; "Sign out Edge on Windows?" / "It is signed out at once. To come back it needs a new code from your
-  own device." / [Keep it signed in] [Sign it out]; after: "Edge on Windows is signed out." and listed under
-  Settings › Other devices as signed out. New sign-ins expire after 90 days without use.
-- **Lite:** Lite serves the Inbox (`/api/notifications` in `profile_gate.rs`). Needs you holds tasks to
-  check and new sign-ins only; left out: helper questions, chat approvals and the stuck-helper card; Updates
+- **A new sign-in** as `../wave-1/05-sign-in-safety.md` N1: "A new sign-in to your HQ · 2 min ago" /
+  "Edge on Windows signed in with a one-time code at 14:20 today." "If it was not you, sign it out now.
+  Then make a new code only on your own device." [It was me] [Sign it out] (ink: only the dialog's
+  action is red); 'Sign out "Edge on Windows"?' / "It can no longer open HQ until it signs in again." /
+  [Keep signed in] [Sign out device] (red, `../../resolutions.md` B3); after: "Edge on Windows is signed
+  out." and listed under Settings › Other devices as signed out. New sign-ins expire after 90 days without use.
+- **Lite:** Lite serves the Inbox (`/api/notifications` in `profile_gate.rs`). Needs you holds new
+  sign-ins and tasks the owner moved to Ready to check by hand only, never HQ's checks (Lite refuses the
+  verification routes, `../../resolutions.md` B13); left out: helper questions, chat approvals and the stuck-helper card; Updates
   are HQ's own housekeeping. No notifications card unless `lite.allow_egress` lists the push service. No
   balance chip; the top bar ends with Search ("Search notes and tasks").
 - **The phone as the hub (HQ window):** "Connected · HQ on your phone". No web push, so no notifications
-  card; HQ Hub posts a system notice for Needs you items ("HQ Hub · now / Open HQ to see what it wants to do.
+  card (`../../resolutions.md` B11); Needs you arrives as HQ Hub's system notice ("HQ Hub · now / Open HQ to see what it wants to do.
   / Open"). The phone also reads a server HQ: "On your server HQ · Office · 5 min ago · Wants to run a
   command: cargo build --release"; details "Asked by · Claude, on your server HQ · 14:25 today"; an answer
   goes to that HQ. Same buttons and words as a browser.
@@ -175,7 +179,7 @@ Rejected:
 All strings in section 4 are exact. Keys `inbox_*`. Words that go: "Inbox & Approvals", "relay
 notifications", "View Details & Diff", "action needed", "value item", "Pending", "All Activity",
 "Resolved History", "Mark all read", "Not now" or a bare "Allow" on approvals, "Push on", "Turn on push",
-"Search proposals, skills...", "Approve", "Reject", "Approve & Promote", "Dismiss".
+"Search proposals, skills...", "Approve", "Reject", "Approve & Promote", "Dismiss", "Take a look".
 
 ## 6. Behaviour rules
 
@@ -228,6 +232,9 @@ sign-in item (wave 1). Desktop: HQ Hub's system notice (wave 3).
    was done." on the card. Today a six-second notice.
 5. Card titles are links reachable by Tab. Today cards are divs.
 6. The badge is amber and counts Needs you only.
+7. A stuck helper's card has [Open it to see]; an approval left 24 hours reads "This request ran out.
+   Ask again from the helper." and has no answer buttons; the new sign-in card's "Sign it out" is ink and
+   its dialog's action is the red "Sign out device" (B3, B18, C-7).
 
 ## 11. Check on a laptop or phone
 
@@ -236,6 +243,7 @@ sign-in item (wave 1). Desktop: HQ Hub's system notice (wave 3).
 
 ## 12. Open decisions it depends on
 
-- **W6, W27, W31, W32, N17, N18, D13** (Recommended or Revised).
+- **W6, W27, W31, W32, N17, N18, D13** (Recommended or Revised), `../../resolutions.md` A6, B3, B11,
+  B13, B18, C-7.
 - Depends on: `../wave-1/02-dialogs-approvals.md`, `../wave-1/03-undo.md`, `../wave-1/05-sign-in-safety.md`,
   `../wave-1/06-settings-groups.md`.

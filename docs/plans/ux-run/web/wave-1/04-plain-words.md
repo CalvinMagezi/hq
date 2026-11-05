@@ -83,7 +83,9 @@ catalogue. Notes on placement:
   a date ("24 Oct"), "yesterday" for yesterday, never a bare clock time.
 - **Names of computers.** Each computer by its own name ("Mac mini", "Studio PC", "Pixel 8"). "On your
   server HQ · {Office}" for a server HQ. "HQ on your phone" when the phone is the hub. "This browser"
-  for the web's own group; "This window" inside HQ Hub's HQ window (WR5).
+  for the web's own group; "This window" inside HQ Hub's HQ window (`../../resolutions.md` B11,
+  confirmed). "This PC" is HQ Hub's tab name only; anywhere else the word is the machine's own name or
+  "this computer" (B12).
 - **320 px and 200%.** Longer words wrap; no label is cut with an ellipsis where a word carries meaning
   (row titles may clamp to two lines, then "…").
 
@@ -106,13 +108,21 @@ catalogue. Notes on placement:
 | Live | Connected |
 | Can't reach HQ, HQ is not answering | Your HQ can't be reached |
 | Allow, Not now (approvals) | Decline, Allow once |
-| HQ edge worker | Done by HQ |
+| HQ edge worker | HQ's own work: "HQ is working on it" while working, "Done by HQ" when finished (`../../resolutions.md` B4) |
 | Claude Desktop under General helpers | Apps that use HQ |
 | HQ Control Center | AgentHQ |
 | Later | Not now |
 | Chat apps | Messaging apps |
 | Session folders | Folders helpers may use |
-| Claude connector | Claude (in the Settings row: "Claude on the web") |
+| Claude connector, claude.ai connector | "Claude on the web"; "connector" only in Technical details (B14) |
+| This PC (anywhere but HQ Hub's tab) | the machine's own name, or "this computer" (B12) |
+| Take a look | Open it to see. (B18) |
+| Cancel (on the pairing code) | Stop pairing (B18) |
+| 9 of 14 checked | 9 of 14 done (B18) |
+| Search notes, Search the vault (placeholders) | Search notes, tasks, chats and helpers (B18) |
+| Device removed, Removed. | {device} removed. (B18) |
+| Daily limit 85%, Over the limit 104% | Today 85%, Today 104% (B5) |
+| See all | Show all {N} (B6) |
 | to_do, ready_for_review, blocked | To do, Ready to check, Stuck |
 | 2/3, 1 of 3 steps | 1 of 3 sub-tasks done |
 | Push on (a state on a button) | Notifications, a switch |
@@ -157,6 +167,13 @@ Other fixed lines:
 6. **HQ, never "hq"** in the UI; "AgentHQ" only where the system shows the app's name.
 7. **The words agent, session, harness, sandbox, provider and scope** do not appear in owner-facing
    text outside Technical details.
+8. **Word checks run on the web too (added by resolutions.md C-13).** As on the phone
+   (`../../mobile/wave-1/04-plain-words.md`), three checks fail the build: (a) a rendered-text check
+   that mounts every place's fixtures and reads every text node and accessible name, not only the
+   catalogue file; (b) a lint against literals in JSX text and string props (`title`, `aria-label`,
+   `placeholder`), which is `../wave-0/02-shared-parts.md` rule 22; (c) at most 15 words a sentence,
+   no semicolons and none of the retired words of section 5. Repository names like `{owner}/{repo}`,
+   code samples and Technical details are allowed.
 
 ## 7. Browser and platform notes
 
@@ -177,6 +194,8 @@ Every file in the Before table, plus:
 | `apps/hq-web/src/strings/en.ts` | The keys above. | NEW (wave 0) |
 | `apps/hq-web/src/lib/sessionFoldersApi.ts` | `formatApprovedText()` by date (line 25-26). | yes |
 | `apps/hq-web/src/components/sessions/SessionInspector.tsx` | Drop the extra "ago" (37-38). | yes |
+| `apps/hq-web/src/strings/words.test.ts` | Rule 8 (a) and (c): render every fixture, read the text, count words a sentence, refuse retired words (added by resolutions.md C-13). | NEW |
+| `apps/hq-web/src/strings/catalogue.test.ts` | Rule 8 (b), shared with wave 0 rule 22. | NEW (wave 0) |
 
 ## 9. Server, desktop or release changes
 
@@ -194,6 +213,10 @@ None. The desktop's own words change in wave 3.
    'claude-code'}`. Today it renders "blocked" and "claude-code".
 5. No owner-facing string contains "agent", "session", "harness" or "native" (allow-list for Technical
    details). Today many do.
+6. `bun test strings/words.test.ts` (added by resolutions.md C-13): rendering every place's fixtures
+   finds no sentence over 15 words, no semicolon and no retired word in any text node or accessible
+   name; a fixture with the inline text "This PC is offline" outside HQ Hub's tab fails it. Today
+   there is no such check.
 
 ## 11. Check on a laptop or phone
 
@@ -202,6 +225,8 @@ None. The desktop's own words change in wave 3.
 
 ## 12. Open decisions it depends on
 
-- **W35** (Revised), **WR5**, **WR14**, **N19** (the catalogue), **W44** ("This PC" on Macs).
+- **W35** (Revised), **WR5** (its saved line replaced by B11), **WR14**, **N19** (the catalogue),
+  **W44** ("This PC" on Macs, owner to confirm), and `../../resolutions.md` B4, B5, B6, B11, B12, B14,
+  B18, C-13.
 - Depends on: `../wave-0/02-shared-parts.md` (catalogue), `01-shell-status.md` (state pills),
   `02-dialogs-approvals.md` (approval words), `../wave-2/01-route-table.md` (place names in the rail).

@@ -97,9 +97,9 @@ Rejected:
 ## 4. Screens and states (After: one SearchScreen; where you open it only sets the scope)
 
 - **A1 · From the magnifier, before typing.** Scope chips "All · Notes · Tasks · Chats · Helpers" (pin 1,
-  All selected). "Recent searches" (pin 2): "battery", "roadmap", "soak test"; "Clear recent searches".
+  All selected; the chosen chip is ink, never green, `../../resolutions.md` A3). "Recent searches" (pin 2): "battery", "roadmap", "soak test"; "Clear recent searches".
 - **A2 · Results on All, with Ask HQ.** Chips "All 5 · Notes 2 · Tasks 2 · Chats 1 · Helpers 0"; groups as
-  B2 (matched words in a green wash); pill [Ask HQ about these 2 notes] (pin 3).
+  B2, matched words in bold, never washed in a colour (A3); pill [Ask HQ about these 2 notes] (pin 3).
 - **A3 · From the Notes pill.** Chips "All 4 · Notes 3 · Tasks 1 · Chats 0 · Helpers 0" with Notes selected
   (pin 4); folder chips "All folders 3 · Projects 2 · Inbox 1" (pin 5); the three roadmap notes (path line
   "Projects › Agent-HQ" or "Inbox"); [Ask HQ about these 3 notes].
@@ -121,7 +121,7 @@ Rejected:
   battery setting after an update." Caption: "Back opens the search again with "battery", the All scope
   and the list where it was. Back once more closes it."
 - **A8 · HQ stopped** (pin 10). Chips as A5; amber "Couldn't search your notes and chats. HQ has stopped.
-  Start HQ to try again." / "Tasks below are from the copy saved on this phone at 14:32." [Start HQ];
+  It will try again when HQ is back." (A2: the search runs again by itself) / "Tasks below are from the copy saved on this phone at 14:32." [Start HQ];
   Tasks 2.
 - **A9 · Helpers, one on a server HQ** (pin 11). Chips "All 3 · Notes 1 · Tasks 0 · Chats 0 · Helpers 2";
   "Move the build from scripts to **Gradle** · Claude · on your Mac mini · needs your OK"; "Clean old
@@ -155,18 +155,19 @@ Rejected:
 | Cleared | "Recent searches cleared" · "Undo" |
 | Empty field, no recent | "Type to search notes, tasks, chats and helpers." (Notes scope: "Type to search your notes.") |
 | No match, All | "Nothing matches that." |
-| No match, one scope | "No notes match that." · "No tasks match that." · "No chats match that." Button: "Search everything" |
+| No match, one scope | "No notes match that." · "No tasks match that." · "No chats match that." · "No helpers match that." (`../../resolutions.md` D-9) Button: "Search everything" |
 | HQ starting | "Couldn't search your notes and chats. HQ is still starting. It will try again by itself." |
-| HQ restarting | "Couldn't search your notes and chats. HQ is restarting. Try again in a moment." |
-| HQ stopped | "Couldn't search your notes and chats. HQ has stopped. Start HQ to try again." Button: "Start HQ" |
+| HQ restarting | "Couldn't search your notes and chats. HQ is restarting. It will try again by itself." |
+| HQ stopped | "Couldn't search your notes and chats. HQ has stopped. It will try again when HQ is back." Button: "Start HQ" |
 | No reply in time | "Couldn't search your notes and chats. HQ didn't answer in time. Try again." |
 | Second line | "Tasks below are from the copy saved on this phone at 14:32." |
 | Notes home pill | "Search your notes" (kept) |
 | Back on a result page | Read as "Back to search results" |
 
 String resource keys for the failure line: `fail_search_notes_chats_starting`, `_restarting`, `_stopped`,
-`_timeout`. Today's "HQ is not answering" lines in `SearchWords.kt` go. ("No helpers match that." is not
-on the board; add it for the Helpers scope in the same pattern.)
+`_timeout`. Today's "HQ is not answering" lines in `SearchWords.kt` go. The outcomes are A2's "waits and
+retries" ones, since the search runs again by itself (rule 7); only no reply in time says "Try again."
+"No helpers match that." is added for the Helpers scope (D-9).
 
 ## 6. Behaviour rules
 
@@ -201,8 +202,9 @@ on the board; add it for the Helpers scope in the same pattern.)
 14. **At 360 dp and font scale 2.0,** chips scroll sideways, titles wrap, and Ask HQ stays above the
     keyboard.
 
-- **Unchanged:** 250 ms wait after typing, 30 note hits from HQ per ask, five rows a group on All, the
-  green wash on matched words.
+- **Unchanged:** 250 ms wait after typing, 30 note hits from HQ per ask, five rows a group on All.
+- **Changed:** matched words are bold, never washed in a colour (`../../resolutions.md` A3); the green
+  wash goes.
 - **Links that change:** `hq://search` now opens this search on All (it opened the Notes search). New:
   `hq://search/notes`. A link never types a query.
 
@@ -268,6 +270,8 @@ still applies. A test in `api.rs`: 40 matches outside the folder and 2 inside gi
     with no query.
 12. All new strings are string resources; a test renders each failure line and matches it to the rules
     section 2 catalogue, and covers the plural and zero cases.
+13. A matched word renders bold with no background colour; with the Helpers scope chosen and no match,
+    "No helpers match that." shows (A3, D-9).
 
 ## 11. Check on device
 
@@ -281,7 +285,7 @@ still applies. A test in `api.rs`: 40 matches outside the folder and 2 inside gi
 - **Search a server HQ's notes too?** Today only the HQ on this phone is asked. The server already serves
   `/api/search` to the phone's device token. Recommendation: yes, in wave 4, as its own "On your server
   HQ" group, never mixed into the phone's notes. (Decided: N3, "Wave 4, its own group." The board draws no
-  frame for that group; see "Open conflicts".)
+  frame for that group yet; it is drawn when wave 4 starts, `../../resolutions.md` D-9.)
 
-Depends on: D20, N3, rules sections 2, 4 (Undo), 8 (links); `01-offline.md` (saved copies of tasks and
+Depends on: D20, N3, `../../resolutions.md` A2, A3, B6, D-9, rules sections 2, 4 (Undo), 8 (links); `01-offline.md` (saved copies of tasks and
 helpers, the Connection state); `../wave-1/05-progress.md` ("Show all N").

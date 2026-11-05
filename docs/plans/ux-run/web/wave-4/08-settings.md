@@ -87,8 +87,10 @@ Rejected: config keys on screen ("Set mcp_connector.enabled…"); a green "healt
   username that ends in bot." "BotFather replies with a token. Copy it and paste it below." [Open Telegram]
   "Bot token" [Check the bot] → "Found your bot: @example_bot" (ink with a check) [Save and restart].
   Discord adds the invite link and the Message Content Intent check, as the web does today.
-- **M3 · Disconnect asks** (stacked, label over 18): "Disconnect Telegram?" / "HQ stops answering on
-  Telegram and forgets the bot token. HQ restarts for a moment." / [Keep Telegram] [Disconnect Telegram].
+- **M3 · Disconnect asks** (stacked when the pair does not fit on one line, `../../decisions.md` WR27):
+  "Disconnect Telegram?" / "HQ stops answering on Telegram and forgets the bot token. To use Telegram
+  again, you set it up from the start. HQ restarts for a moment." / [Keep Telegram] [Disconnect Telegram]
+  (`../../resolutions.md` B18).
   "Link a different account" asks with the phone's words ("Unlink your Telegram account?" · Keep my account
   · Unlink account).
 
@@ -99,10 +101,11 @@ everywhere, the operator link).
 
 ### Claude on the web (Settings more 2, section 1)
 
-- **C1 · On.** "Claude on claude.ai can use this HQ through a connector. It needs HQ to have a public web
-  address. So it is off until whoever runs HQ turns it on." "New connections · Open until 14:40" (blue
+- **C1 · On.** "Claude on claude.ai can use this HQ. It needs HQ to have a public web address. So it is
+  off until whoever runs HQ turns it on." (HQ's own words never say "connector" outside Technical
+  details, `../../resolutions.md` B14; Claude's own menu names below are quoted as Claude shows them.) "New connections · Open until 14:40" (blue
   countdown) / "In Claude, open Settings, then Connectors. Add a custom connector with this address and
-  press Connect. Approve it on the page that opens here." / "Connector address" [Copy] / [Close it now].
+  press Connect. Approve it on the page that opens here." / "Address for Claude" [Copy] / [Close it now].
   "Connected 2": "Claude · claude.ai · Read only · used 2 h ago" [Disconnect]; "Claude for the shop ·
   claude.ai · Tasks only · never used" [Disconnect]; [Disconnect all]. Technical details: "hq_call · allowed
   · 2 h ago", "hq_discover · allowed · 2 h ago", "hq_call · asked you · yesterday". "Claude Desktop and
@@ -147,8 +150,10 @@ everywhere, the operator link).
   - Time limits: "Longest time for one reply · How long a reply can take before it moves to the background ·
     4 min 30 s"; "How long background work can run · 5 days"; "How often long work checks in · 5 min".
   - Tools: connected tools, the search server and the disk space check; a count opens its list.
-- **S2 · Backup and about.** "Backup · Backup is on · Backed up today at 03:10. It runs every day where HQ
-  runs." (ink with a grey check, never green). "About · HQ version · 0.9.2", notes "2,860", "Updates · HQ
+- **S2 · Backup and about.** "Backup · Backup is on · Last backup 3 h ago. It runs every day where HQ
+  runs." (ink with a grey check, never green; `../../resolutions.md` B10). Failed or overdue, and only
+  when the page can start a backup: amber "Last backup 3 d ago. A new one should be made every 24
+  hours." with [Back up now]. "About · HQ version · 0.9.2", notes "2,860", "Updates · HQ
   installs signed releases on its own. · By itself". "Support · Copy details · Versions and recent errors,
   with keys blanked". Not reported (today): "Backups are set up where HQ runs" / "This HQ does not tell the
   web about its backups yet." in grey (nothing is known to be wrong).
@@ -172,7 +177,7 @@ everywhere, the operator link).
 
 Inside a section: saved, the strip, then saved values and every button that changes HQ off with one
 sentence; never loaded: "Nothing saved in this browser yet" / "These settings come from HQ. Your HQ can't
-be reached. It will try again by itself." [Try again now]. A section failed: "Couldn't load your messaging
+be reached. It will try again when HQ is back." [Try again now]. A section failed: "Couldn't load your messaging
 apps." / "HQ didn't answer in time. Try again." [Try again] [Copy details]. Inside AI service and keys with
 HQ away: "Changing a key needs HQ. Your HQ can't be reached."
 
@@ -190,14 +195,16 @@ HQ away: "Changing a key needs HQ. Your HQ can't be reached."
 - **2200:** the list keeps 360 and the section its reading width, centred.
 - **Lite (740, the phone layout with Lite's three places):** "HQ Lite has no other settings here. Keys,
   spending, messaging apps and helpers are not part of HQ Lite." The gear opens This browser (without
-  Notifications unless allowed) and Other devices (WR2).
+  Notifications unless allowed) and Other devices (WR2, B13); `/settings/spending` opens This browser with
+  "This HQ is HQ Lite. It has no Spending limits." (WR28).
 - **The HQ window (1100), showing HQ on your phone:** "These are the settings of HQ on your phone." Group
-  "This window": "Shown by HQ Hub on this Mac"; "Counted on your phone · 4 MB today"; "Sign out this window ·
-  Wipes what this window saved". Rows "OpenRouter · 1 key", "2 signed in", "$1.10 of $3.00 today", "Asks
-  before changes outside notes", "HQ version 0.9.1". "Needs you on this Mac · HQ Hub shows a notice on this
-  Mac. Its only button is Open." "Updates · This window has no web push. Your phone shows its own
+  "This window" (`../../resolutions.md` B11): "Shown by HQ Hub on this computer"; "Counted on your phone
+  this month · 96 MB" (B17); "Sign out this window · Wipes what this window saved". Rows "OpenRouter · 1 key", "2 signed in", "$1.10 of $3.00 today", "Asks
+  before changes outside notes", "HQ version 0.9.1". "Needs you on this computer · HQ Hub shows a notice on
+  this computer. Its only button is Open." "Updates · This window has no web push. Your phone shows its own
   notifications." "The phone's own settings, like Background work and Keep running, are on the phone." No
-  Install and version (HQ Hub updates itself). Saved copy and sign-in keyed by HQ's id.
+  Install and version (HQ Hub updates itself). Saved copy, outbox and sign-in keyed by HQ's id; the strip
+  reads "Saved in HQ Hub at 14:32".
 
 ## 5. Exact copy
 
@@ -215,7 +222,9 @@ then restart HQ.", "approved {clock} for", "Stop allowing sessions in {path} on 
 5. **Claude on the web** never shows config keys; Disconnect and Disconnect all are red dialogs.
 6. **Folders** show the computer by name, the path in full, the day, and which helper asked; Revoke asks.
 7. **Safety and limits** is read-only; the safe box reads in plain words from `settings_api.rs` fields.
-8. **Backup** is amber only when HQ reports a problem; until a backup route exists, the grey line.
+8. **Backup** is amber only when HQ's backup status route reports failed or overdue and the page can start
+   a backup; otherwise grey, and until a backup route exists the grey "Backups are set up where HQ runs."
+   (`../../resolutions.md` B10).
 9. **Copy details** blanks keys and includes What HQ noticed.
 10. **States** per the table; no row says "Checking…"; one strip per place.
 
@@ -249,6 +258,9 @@ Server: backup status, update status and diagnostics routes (`../../changes.md`)
 4. A folder approved twelve days ago reads "approved 24 Oct for Claude" (fixture date). Today a clock time.
 5. With HQ unreachable, Messaging apps shows saved values under one strip and Disconnect is off with
    "Changing this needs HQ. Your HQ can't be reached." Today the section errors.
+6. No owner-facing text on Claude on the web contains "connector" outside Technical details and Claude's
+   own quoted menu names; Backup reads "Last backup 3 h ago"; the Disconnect Telegram body contains "To
+   use Telegram again, you set it up from the start." (B10, B14, B18).
 
 ## 11. Check on a laptop or phone
 
@@ -256,6 +268,7 @@ Server: backup status, update status and diagnostics routes (`../../changes.md`)
 
 ## 12. Open decisions it depends on
 
-- **W34** (owner to confirm). **W36, WR2, WR5** (Recommended).
+- **W34** (owner to confirm). **W36, WR2, WR5, WR27, WR28** (Recommended), `../../resolutions.md` B10,
+  B11, B13, B14, B17, B18.
 - Depends on: `../wave-1/06-settings-groups.md`, `../wave-1/05-sign-in-safety.md`,
   `../wave-1/02-dialogs-approvals.md`, `09-spending.md`.

@@ -12,12 +12,14 @@ rules win.
 - **WB6 (blocker). Losing approvals get a green Allow, first; "Let HQ answer it" can allow them.**
   "Delete 3 old backups?" with green Allow on the left; the card shows HQ's prose, not the tool and
   arguments being approved.
-- **W32 revised.** Allow / Not now becomes the phone's "Allow once · Decline"; losing ones a red "Allow
+- **W32 revised.** Allow / Not now becomes the phone's "Decline · Allow once" (Decline left, `../../resolutions.md` B1); losing ones a red "Allow
   {verb}".
 - **M5 (dialogs half).** Each losing action is drawn its own way, or not asked at all.
 - **Drift 06 (part).** Deleting a task without sub-tasks has no confirm; Archive chat uses a trash icon
   with a red hover.
-- **W39.** "Stop HQ" is a red danger dialog (built in wave 3; the component is built here).
+- **W39, as `../../resolutions.md` B9 settles it.** "Stop HQ" is red only when helpers are working;
+  with none working it is the Ask kind with a green "Stop HQ" (built in wave 3; the component is built
+  here).
 
 Who it hurts: an owner answering in a hurry. A green Allow on the left of a delete reads as "go".
 
@@ -87,23 +89,25 @@ safe `.a-btn.secondary` on the left, the action on the right.
 
 - **D1 · Red, side by side.** "Stop Codex?" / "It stops now. Its work so far is kept." / [Keep it
   running] [Stop Codex] (red fill, black label).
-- **D2 · Red, stacked** (a label over 18 characters): "Sign out everywhere?" / "Every other device is
-  signed out, and so is any sign-in link you made earlier. Claude connections end too. HQ restarts for
-  a moment." / [Keep them signed in] on top, [Sign out everywhere] below, both full width.
+- **D2 · Red, stacked** (the pair does not fit side by side): "Sign out everywhere?" / "Every other
+  device is signed out. This one stays signed in." / [Keep everyone signed in] on top, [Sign out
+  everywhere] below, both full width (`../../resolutions.md` B2).
 - **D3 · Ask.** "Mark 3 tasks done?" / "Tasks that wait on them are told they can start. Undo puts all 3
-  back." / [Not now] [Mark 3 done] (green).
+  back." / [Keep them as they are] [Mark 3 tasks done] (green). Done: "3 tasks done · Undo"
+  (`../../resolutions.md` B8). One task acts at once with "Done: {title} · Undo" unless other tasks
+  wait on it or a check is pending; then it asks the same way.
 - **D4 · Spending.** Two equal outlined buttons, the wait first, the cost in the label: "Try OpenClaw?"
   / "Try it asks OpenClaw one short question. That uses a little of your OpenClaw plan." / [Not now]
   [Ask 1 question].
 - **D5 · Busy.** The action shows the spinner and its busy word ("Stopping…"); both buttons are off.
 - **D6 · Failed.** The dialog stays; an amber line with an icon above the buttons ("Couldn't stop Codex.
-  Your HQ can't be reached. Try again soon."); the action keeps its label.
+  Your HQ can't be reached. Try again when it's back."); the action keeps its label.
 - **D7 · A third choice that loses nothing** sits above the pair, full width: "Save your changes?" /
   "You edited Mobile-First-Roadmap and did not save. Your text stays in this browser unless you discard
   it." / [Save changes] above, then [Keep editing] [Discard changes].
 - At 390 and 320: the same dialog, `100% - 48px` wide; the pair stacks when it does not fit. At 200%
-  zoom: the phone layout; stacked when the labels do not fit (`../README.md` OD-W1). 768 to 2200: 420
-  px, centred.
+  zoom: the phone layout; stacked when the labels do not fit (`../../decisions.md` WR27: layout
+  decides, not a zoom reading). 768 to 2200: 420 px, centred.
 
 ### The approval card (`.a-card.needs`)
 
@@ -140,20 +144,22 @@ around the same component.
 |--------|-------------|------|---------------------------|
 | Stop a helper | `SessionActions.tsx` `StopButton` (inline "Yes, stop it") | Red | Keep it running · Stop Codex · "Codex stopped." |
 | Stop every helper | `EmergencyStop.tsx` | Red | Keep them running · Stop every helper (stacked) · result card per computer |
-| Sign out a device | `DevicesSection.tsx:128` `confirm()` | Red | Keep signed in · Sign out device · "Safari on a MacBook Air signed out." |
+| Sign out a device | `DevicesSection.tsx:128` `confirm()` | Red | Keep signed in · Sign out device · "Safari on macOS is signed out." (B3) |
 | Sign out this browser | none today | Red | Keep signed in · Sign out this browser (stacked) · Sign in shows |
-| Sign out everywhere | `DevicesSection.tsx:179-209` | Red | Keep them signed in · Sign out everywhere (stacked) |
+| Sign out everywhere | `DevicesSection.tsx:179-209` | Red | Keep everyone signed in · Sign out everywhere (stacked, B2) |
 | Disconnect Telegram or Discord | `ChatAppsSection.tsx:314` `confirm()` | Red | Keep Telegram · Disconnect Telegram (stacked) · "Telegram is disconnected. HQ is restarting." |
 | Link a different account | `ChatAppsSection.tsx:318` `confirm()` ("Continue?") | Red | "Unlink your Telegram account?" · Keep my account · Unlink account |
 | Disconnect Claude connections | `settings.tsx:271` `confirm()` | Red | Keep them connected · Disconnect all |
 | Revoke a folder | `settings.tsx:334` `confirm()` | Red | "Revoke the shop-site folder?" · Keep it approved · Revoke folder |
 | Delete a task | `TaskDetailDrawer.tsx:108` (none, or a rose strip) | Red, only on an archived task (W29) | "Delete this task for good?" · Keep it · Delete for good |
 | Discard note changes | `NoteEditor` leave | Red with a third choice | Save changes above · Keep editing · Discard changes |
-| Remove a paired device (HQ Hub) | `apps/desktop/ui/src/main.ts:324` "Confirm revoke" | Red | Keep it paired · Remove device |
-| Stop HQ (HQ Hub) | `host-stop` button | Red | Keep it running · Stop HQ |
+| Remove a paired device (HQ Hub) | `apps/desktop/ui/src/main.ts:324` "Confirm revoke" | Red | Keep it paired · Remove device · "{Pixel 8} removed." (B18) |
+| Stop HQ (HQ Hub), helpers working | `host-stop` button | Red (B9) | Keep it running · Stop HQ; the body names the helpers |
+| Stop HQ (HQ Hub), no helper working | `host-stop` button | Ask, green (B9) | Keep it running · Stop HQ |
 | Approve a losing request | `NotificationCard.tsx:164` "Approve" | Red | Decline · Allow {verb} |
 | Approve a harmless request | `DialogAnswer.tsx:59`, `BlockedCallout.tsx:79` | Green | Decline · Allow once |
-| Mark several tasks done | `BulkActionBar.tsx` | Ask | Not now · Mark 3 done |
+| Mark several tasks done | `BulkActionBar.tsx` | Ask (B8) | Keep them as they are · Mark 3 tasks done · "3 tasks done · Undo" |
+| Mark one task done that others wait on, or with a check pending | task row, task page | Ask (B8) | Not now · Mark done (or Wait for the check · Mark done) · "Done: {title} · Undo" (`../wave-4/06-tasks.md` P3, P4) |
 | Allow helpers again (HQ Hub) | none today | Ask (green, WR25) | Keep them stopped · Allow helpers |
 | Archive a chat, clear updates, archive a task, delete a limit | various | Undo (`03-undo.md`) | toast with Undo |
 
@@ -161,12 +167,15 @@ around the same component.
 
 | Element | String |
 |---------|--------|
-| Stop a helper | "Stop {Codex}?" / "It stops now. Its work so far is kept." (Helpers adds "Resume starts it again later.") / "Keep it running" · "Stop {Codex}" |
+| Stop a helper | "Stop {Codex}?" / "It stops now. Its work so far is kept." / "Keep it running" · "Stop {Codex}" (word for word everywhere, `../../resolutions.md` B18) |
 | Stop every helper | "Stop every helper?" / "Every helper on the computers you pick stops now. Their work so far is kept. New helpers can't start there until you allow them again in HQ Hub on that computer." / "Keep them running" · "Stop every helper" |
-| Sign out a device | "Sign out {Safari on a MacBook Air}?" / "It stops reaching HQ at once. To use it again, sign it in with a new code." / "Keep signed in" · "Sign out device" |
+| Sign out a device | 'Sign out "{Safari on macOS}"?' / "It can no longer open HQ until it signs in again." / "Keep signed in" · "Sign out device"; done "{Safari on macOS} is signed out." (`../../resolutions.md` B3; devices are named by browser and system, "Chrome on Windows") |
 | Sign out this browser | "Sign out this browser?" / "HQ wipes what this browser saved: notes, lists, drafts and messages waiting to send. Notifications stop here too." / "Keep signed in" · "Sign out this browser" |
-| Sign out everywhere | "Sign out everywhere?" / "Every other device is signed out, and so is any sign-in link you made earlier. Claude connections end too. HQ restarts for a moment." / "Keep them signed in" · "Sign out everywhere" |
-| Disconnect a chat app | "Disconnect Telegram?" / "HQ stops answering on Telegram and forgets the bot token. HQ restarts for a moment." / "Keep Telegram" · "Disconnect Telegram" |
+| Sign out everywhere | "Sign out everywhere?" / "Every other device is signed out. This one stays signed in." / "Keep everyone signed in" · "Sign out everywhere" (`../../resolutions.md` B2) |
+| Disconnect a messaging app | "Disconnect Telegram?" / "HQ stops answering on Telegram and forgets the bot token. To use Telegram again, you set it up from the start. HQ restarts for a moment." / "Keep Telegram" · "Disconnect Telegram" (B18) |
+| Mark several tasks done | "Mark {N} tasks done?" / "Tasks that wait on them are told they can start. Undo puts all {N} back." / "Keep them as they are" · "Mark {N} tasks done"; done "{N} tasks done · Undo" (B8) |
+| Remove a paired device (HQ Hub) | done "{Pixel 8} removed." (B18) |
+| Stop HQ (HQ Hub) | Helpers working, red: "Stop HQ?" / "Chats and scheduled tasks pause. {Codex and Claude} are working here and stop too. Their work so far is kept." / "Keep it running" · "Stop HQ". None working, Ask: "Stop HQ?" / "Chats and scheduled tasks pause until you start it again." / "Keep it running" · green "Stop HQ" (B9) |
 | Revoke a folder | "Revoke the {shop-site} folder?" / "Helpers on the {Mac mini} must ask again before they work in {~/code/shop-site}. A helper already working there keeps going." / "Keep it approved" · "Revoke folder" |
 | Delete for good | "Delete this task for good?" / "“{Old relay notes}” and its comments are removed. This can't be undone. Leave it archived to keep it out of the way." / "Keep it" · "Delete for good" |
 | Discard note changes | "Save your changes?" / "You edited {Mobile-First-Roadmap} and did not save. Your text stays in this browser unless you discard it." / "Save changes" · "Keep editing" · "Discard changes" |
@@ -183,9 +192,10 @@ label of a stop), "Confirm revoke", "Continue?", "Not now" or a bare "Allow" on 
 
 ## 6. Behaviour rules
 
-1. **Order.** Safe on the left, the action on the right, side by side, equal width. Stacked when a label
-   passes 18 characters, when the pair does not fit, or when the root font is 24 px or more (OD-W1);
-   stacked puts the safe choice on top and the action at the bottom, both full width.
+1. **Order.** Safe on the left, the action on the right, side by side, equal width. Stacked when the
+   two buttons do not fit side by side on one line: layout decides, not a zoom reading
+   (`../../decisions.md` WR27, which closes OD-W1). Stacked puts the safe choice on top and the action
+   at the bottom, both full width.
 2. **Dismiss.** Esc, a click on the scrim and the browser's Back choose the safe side. They never act.
    Focus starts on the dialog's title (`tabindex="-1"`), never on the action; Tab cycles inside; closing
    returns focus to the trigger.
@@ -255,9 +265,9 @@ label of a stop), "Confirm revoke", "Continue?", "Not now" or a bare "Allow" on 
 
 ## 10. Acceptance checks (each fails on today's build)
 
-1. A component test over every red dialog: the action is to the right of the safe button with labels of
-   18 characters or fewer, and below it with a longer label. Today `StopButton` puts "Yes, stop it" on
-   the left.
+1. A component test over every red dialog: the action is to the right of the safe button when both fit
+   on one line at the dialog's width, and below it when they do not (WR27). Today `StopButton` puts
+   "Yes, stop it" on the left.
 2. No dialog or approval renders a green action when `loses` is true; the action reads "Allow delete" for
    a `vault_delete` fixture. Today the card says "Approve" in green.
 3. A test fails when a red action label is "Yes", "OK", "Continue" or "Confirm", or lacks the title's
@@ -268,6 +278,9 @@ label of a stop), "Confirm revoke", "Continue?", "Not now" or a bare "Allow" on 
    above "In HQ's words". Today only the notice's prose shows.
 7. `cargo test -p hq-agent`: an approval for a delete-category tool has `loses = true`; "Let HQ say yes"
    refuses it. Today neither exists.
+8. The Stop HQ dialog in HQ Hub is red with the helpers named when one is working, and the Ask kind with
+   a green "Stop HQ" and "Chats and scheduled tasks pause until you start it again." when none is
+   (`../../resolutions.md` B9). Today it has no dialog.
 
 ## 11. Check on a laptop or phone
 
@@ -278,7 +291,7 @@ label of a stop), "Confirm revoke", "Continue?", "Not now" or a bare "Allow" on 
 ## 12. Open decisions it depends on
 
 - **N17** (Recommended): HQ's runtime marks approvals as losing from the tool's category.
-- **D2 revised, D3, W32, W39, WR25.**
-- **OD-W1** (`../README.md`): how "text at 200%" is detected.
+- **D2 revised, D3, W32, W39 (as B9 settles it), WR25, WR27.**
+- `../../resolutions.md` B1, B2, B3, B8, B9, B18.
 - Depends on: `03-undo.md` (what acts at once instead of asking), `../wave-0/02-shared-parts.md`
   (failure lines), `../wave-4/05-inbox.md`, `../wave-4/07-helpers.md`, `../wave-4/01-chat.md`.

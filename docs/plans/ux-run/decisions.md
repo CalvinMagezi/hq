@@ -92,7 +92,7 @@ status:
 | W20 | "Waiting to send" for messages, notes and tasks, with client ids, capped, cleared on sign-out, off on a shared computer. | Revised |
 | W21 | Move to trash, rename and move appear only once HQ has routes for them, with Undo. | Recommended |
 | W22 | Copy link is a note-id link (`/notes/n/:id`), "Opens only on your signed-in devices". | Revised |
-| W23 | A web Undo toast may stay until closed, but Undo calls a restore on HQ inside a 10-minute window; after that "Couldn't undo. It changed on another device." | Revised |
+| W23 | A web Undo toast may stay until closed, but Undo calls a restore on HQ inside a 10-minute window; after that "Couldn't undo. It changed on another device, or too much time passed." (resolutions A6). | Revised |
 | W24 | Get started has Hide; its steps stay in Settings. | Recommended |
 | W25 | Lifting "Stop every helper" happens only in HQ Hub's This PC, on that computer. The web shows where. | Revised |
 | W26 | Edge-worker runs are "Done by HQ", read from `/api/edge-worker`, open their chat, no Stop or Rename. | Revised |
@@ -108,7 +108,7 @@ status:
 | W36 | Claude in Your accounts; "Folders helpers may use" in How HQ behaves; Safety and limits tabs Time limits, Helpers, Tools. | Recommended |
 | W37 | `/settings` always opens the same section (This browser › Notifications); anything needing a look takes the one card slot. | Revised |
 | W38 | Hub tab "This PC"; "Remove device". | Recommended |
-| W39 | "Stop HQ" in the hub is a red danger dialog ("Stop HQ?" · "Keep it running" · "Stop HQ"). | Recommended |
+| W39 | "Stop HQ" is red only when helpers are working; otherwise the Ask kind with a green "Stop HQ" (resolutions B9). | Revised |
 | W40 | Web push follows the lock-screen rule (see rules-web.md section 1). | Revised |
 | W41 | Spending limits gain a "One model" scope. | Recommended |
 | W42 | Helpers at work move from This PC to the hub's Helpers tab; This PC keeps one summary row. | Recommended |
@@ -129,12 +129,12 @@ status:
 | WR2 | Lite: the gear opens This browser and Other devices only; no Spending; web push off unless the owner allows the outbound connection (`lite.allow_egress`). | Recommended |
 | WR3 | Lite's status line reads "Connected · HQ Lite"; other states replace it. | Recommended |
 | WR4 | A link to Chat or Helpers on Lite opens Notes with "This HQ is HQ Lite. It has no Chat." | Recommended |
-| WR5 | In HQ Hub's HQ window, the web's group is "This window" and its saved line "Saved on this PC at 14:32". | Recommended |
-| WR6 | New web failure reason: "Your HQ can't be reached. It will try again by itself." | Recommended |
+| WR5 | In HQ Hub's HQ window, the web's group is "This window" and its saved line "Saved in HQ Hub at 14:32" (resolutions B11, confirmed). | Revised |
+| WR6 | New web failure reason: "Your HQ can't be reached.", with the outcome sentences of resolutions A2 ("It will try again when HQ is back." / "Try again when it's back."). | Revised |
 | WR7 | Every Undo has a restore on HQ (chat archive, Inbox clear, spending limit, task archive, connection removal). | Recommended |
 | WR8 | Signed out: the shell with an empty view and the Sign in sheet; a full page only for a browser that never signed in. | Recommended |
 | WR9 | `/setup` splits into "Check key" and "Open HQ"; opening without checking is allowed. | Recommended |
-| WR10 | The new sign-in item uses "It was me" and a red "Sign it out". | Recommended |
+| WR10 | The new sign-in item uses "It was me" and "Sign it out" (an ink trigger); only the dialog's "Sign out device" is red (resolutions B3). | Revised |
 | WR11 | "Keep both" saves your text as a new note "{title}, your version". | Recommended |
 | WR12 | Search waits 300 ms after the last key. | Recommended |
 | WR13 | Export in the HQ window is off, with the reason shown, until a save command exists. | Recommended |

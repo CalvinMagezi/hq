@@ -102,7 +102,8 @@ All in today's layout; the full shell of wave 4 uses the same parts.
   C1). No "unauthorized", no Retry.
 - **S5 · Badges.** One badge in the rail and one in the bar, on Inbox, amber (#FFB300) with black text,
   counting Needs you (99+ past 99). The Workbench badge goes (W6); a helper that needs you is counted in
-  the Inbox's Needs you.
+  the Inbox's Needs you. Every other needs-you count (a tab's count, a group's count) is amber too
+  (`../../resolutions.md` A3).
 - **S6 · Helper states.** In the Workbench list, the Watching panel and the details panel, one pill per
   state (`.a-state`): "Needs your OK" amber with a hand icon, "Working on it" blue with the spinner,
   "Ready" ink, "Computer offline" and "Lost contact" amber with the wifi-off icon, "Finished" and
@@ -130,10 +131,11 @@ In addition:
 | Verification marks | "Met." · "Not met." · "Not decided." |
 | More menu name at 320 | "Search, Spending and Settings" |
 | Spending row in the More menu, Connected | "Spending · Copilot 912 left" |
+| Balance chip near and over a limit | "Today 85%" · "Today 104%" (B5) |
 
 Retired: "live", "saved · {age}", "offline" as the dot's word, "Can't reach your HQ", "This device is
 offline", every Tailscale line, "Could not load pinned: unauthorized", "blocked", "done", "idle" as
-shown words, "Overlay".
+shown words, "Overlay", "Over the limit 104%".
 
 ## 6. Behaviour rules
 
@@ -141,7 +143,8 @@ shown words, "Overlay".
 2. **State first.** The status line is `{state}` or `{state} · {place fact}`. A place may add one fact.
 3. **Wrap, never cut.** `.a-status` has `white-space: normal`; the top bar's height follows.
 4. **The chip only in Connected,** and only with a balance or a limit; past a warning point it is amber
-   with the limit's words ("Today 85%"), over a limit amber "Over the limit 104%" (never red).
+   with the limit's words ("Today 85%"), over a limit amber "Today 104%" (never red,
+   `../../resolutions.md` B5).
 5. **No section error while not Connected.** A section shows its own failure line only while Connected
    and only for its own failed call (`fail_load_{section}_no_reply`). In every other state the status
    line and the strip say it.

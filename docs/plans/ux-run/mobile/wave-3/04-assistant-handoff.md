@@ -140,14 +140,16 @@ the round button and "Open in chat". Failure lines amber with an icon.
 12. **The turn waits for an OK (M4)** (pin 12). Shade: "AgentHQ · Needs you · now / HQ needs your OK to
     finish / Open HQ to see what it wants to do. / Open".
 13. **Inbox: the approval quotes what was said** (pin 13). Inbox "Connected", Needs you: card "HQ needs
-    your OK to finish" / "You said, by voice · 9:42" / ""Delete the invoice draft task."" / "HQ wants to
-    delete the task "Invoice draft". This cannot be undone from the phone." / [Decline] [Allow delete]
-    (red).
-14. **Allowed: Keep going** (pin 14). Card "Allowed at 9:44" / "HQ can finish now" / "You said, by voice ·
-    9:42" / ""Delete the invoice draft task."" / "HQ stopped to wait for you. Keep going asks it to finish
+    your OK to finish" / "You said: “Delete the invoice draft task.”" · 9:42 (`../../resolutions.md`
+    B18) / "What it will run" / `task_delete {"id": "T-31"}` (the tool and its arguments verbatim from
+    HQ's runtime, B1) / "In HQ's words: Delete the task "Invoice draft". This cannot be undone from the
+    phone." / [Decline] [Allow delete] (red).
+14. **Allowed: Keep going** (pin 14). Card "Allowed at 9:44" / "HQ can finish now" / "You said: “Delete
+    the invoice draft task.”" · 9:42 / "HQ stopped to wait for you. Keep going asks it to finish
     in the same chat." / [Open in chat] [Keep going].
 15. **Server HQ: can't be reached** (pin 18). Label "Your server HQ, Office" / question / amber "Couldn't
-    send your question. Your server HQ can't be reached. Check your internet." / [Send again] / [Ask].
+    send your question. Your server HQ can't be reached. Try again when it's back." (A2) / [Send again] /
+    [Ask].
 16. **360 dp at font scale 2.0** (pin 19). "Looking it up" / question / "You can close this. The answer
     will be in the chat." / [Stop] centred / [Open in chat] on a full-width row below.
 
@@ -174,14 +176,14 @@ question." with Open in chat.
 | HQ restarting | "Couldn't get the whole answer. HQ is restarting. Try again in a moment." | "The connection to HQ dropped before the answer finished." |
 | Retired | (the sheet re-reads the thread) | "Part of the answer was missed on the way. The full answer is in the chat." |
 | AI service down | "Couldn't get the answer. The AI service isn't answering. HQ is fine. Try again soon." | |
-| Server unreachable | "Couldn't send your question. Your server HQ can't be reached. Check your internet." | |
+| Server unreachable | "Couldn't send your question. Your server HQ can't be reached. Try again when it's back." (A2) | |
 | Signed out of server | "Couldn't send your question. This phone is signed out of your server HQ. Sign in again." | |
 | Still answering | "HQ is still answering the last question." (kept, with Open in chat) | |
 | Notice, answered | "HQ answered" · "Tap to read." | |
 | Notice, details on, unlocked | "HQ answered" · the first 160 characters of the answer | |
 | Notice, failed | "Couldn't get your answer." · the reason sentence from rules section 2 | |
 | Notice, waiting for an OK | "HQ needs your OK to finish" · "Open HQ to see what it wants to do." · "Open" | |
-| Inbox approval | "HQ needs your OK to finish" · "You said, by voice · {time}" · ""{question}"" · "Decline" · "Allow delete" (losing) or "Allow once" | |
+| Inbox approval | "HQ needs your OK to finish" · "You said: “{question}”" · "{time}" (B18) · "What it will run" · the tool and arguments · "In HQ's words" · HQ's description (B1) · "Decline" · "Allow delete" (losing) or "Allow once" | |
 | After the OK | "Allowed at {time}" · "HQ can finish now" · "HQ stopped to wait for you. Keep going asks it to finish in the same chat." · "Open in chat" · "Keep going" | |
 | Follow-up sent | "It is approved. Keep going." | |
 | Next open | "Your last question was answered after you closed this." | |
@@ -190,8 +192,8 @@ question." with Open in chat.
 | Server label | "Your server HQ, {name}" | |
 
 The board's own note: "Notice words match FixLockScreen. "HQ is fine. Try again soon." is rules section
-2 verbatim, though section 7 bans semicolons; flagged for FixRules." (The sentence holds no semicolon, so
-the flag looks spurious; see "Open conflicts" in `../README.md`.)
+2 verbatim, though section 7 bans semicolons; flagged for FixRules." The sentence holds no semicolon, and
+`../../resolutions.md` A2 keeps it as the AI service's outcome, so nothing changes.
 
 ## 6. Behaviour rules
 
@@ -239,7 +241,7 @@ the flag looks spurious; see "Open conflicts" in `../README.md`.)
 |---------|---------------------------|
 | 8 and 9 | Notices post without a permission. Needs you shows Open only. The sheet opens with `startActivity` (as built). |
 | 10 and 11 | Needs you still shows Open only; Allow on notices is 12+ (rules section 9). |
-| 12 | Allow once · Decline · Open only with "Show details in notifications" on and the phone unlocked. A losing request like a delete stays Open only. |
+| 12 | Decline · Allow once · Open (safe first, `../../resolutions.md` A4) only with "Show details in notifications" on and the phone unlocked. A losing request like a delete stays Open only. |
 | 13+ | Without notification permission nothing posts. The next-open line (After 11) covers "HQ answered"; the Inbox holds the approval. |
 
 Android and HQ constraints, as checked on the board:

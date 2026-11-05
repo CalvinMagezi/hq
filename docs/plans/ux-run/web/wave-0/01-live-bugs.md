@@ -144,7 +144,10 @@ Built with the system's notification; the words come from the server.
 
 - **A1 · A helper or chat needs the owner (details off, the default).** App name as the browser shows it
   (AgentHQ once installed), title "Claude needs your OK" (or "{Helper} needs your OK", "HQ needs your
-  OK"), body "Open HQ to see what it wants to do.", one button "Open". A tap anywhere or Open opens the
+  OK"), body "Open HQ to see what it wants to do.", one button "Open". A task approval is titled "A
+  task needs your OK" (never the task's name, which is content), a stuck helper "A helper is stuck" with
+  body "Open HQ to see which one.", and a question from a server HQ "Your server HQ needs your OK"
+  (`../../resolutions.md` B19). A tap anywhere or Open opens the
   item's page (the Inbox item, the chat, the helper or the task).
 - **A2 · An update (details off).** "HQ answered" / "Tap to read." for a reply; for `notify_owner`, the
   item's title only, body empty; for a new sign-in, "A new sign-in to your HQ" / "Open HQ to see it."
@@ -154,20 +157,27 @@ Built with the system's notification; the words come from the server.
 - **A4 · Test push.** Title "HQ", body "Notifications from HQ are on in this browser."
 - **A5 · Older service worker still installed.** It receives the new payload (no `actions`, no
   `tokens`), so it shows title and body only, with no buttons. A tap opens `url`.
+- **A6 · Folded and replayed (added by resolutions.md C-11).** Past the newest five Needs you
+  notifications, one notification reads "{N} more waiting for you" / "Open HQ to see them." More than
+  three Updates in an hour fold into one, "{N} updates from HQ" / "Tap to read." When notifications come
+  back on in this browser (the permission is granted again, or a switch in This browser is turned back
+  on), the items still waiting post once.
 - At every width, in Lite (if push is allowed), and with the phone as the hub: the same words. The HQ
-  window in HQ Hub has no push (wave 3).
+  window in HQ Hub has no push (wave 3, `../../resolutions.md` B11); Needs you arrives there as HQ Hub's
+  system notice, Open only.
 
 ### B. The hub proxy
 
 Drawn on AlignedHub2 and AlignedHubDevices. Today's control window keeps its look in wave 0; only its
 words and the button state change.
 
-- **B5 · This PC (Host tab today), the forward held by another program.** The status reads "Your HQ
+- **B5 · The This PC tab (Host tab today), the forward held by another program.** The status reads "Your HQ
   can't be reached". The card: title "Couldn't open HQ on your phone", tag "Port in use" (amber), line
   "Another program holds this port. HQ Hub won't send your sign-in there.", then "Often it is another HQ
   pairing started in a terminal. Close it, then look again." Open HQ is off with the why line "Open HQ
   waits until HQ Hub holds the port itself." Under Technical details: "web forward to Pixel 8:
-  127.0.0.1:47480, held by another program" and "gate on this PC: 127.0.0.1:7747, opened by HQ Hub".
+  127.0.0.1:47480, held by another program" and "gate on this computer: 127.0.0.1:7747, opened by HQ
+  Hub" ("This PC" is the tab's name only, `../../resolutions.md` B12).
 - **B6 · Devices, the same.** The web forward row reads the same line, amber with an icon, tag "Port in
   use".
 - **B7 · The forward is free again.** "Look again" (or the next poll) restarts the forward; Open HQ
@@ -195,6 +205,11 @@ guard's reason in the log).
 | Where | String |
 |-------|--------|
 | Push, Needs you, details off | title "{Who} needs your OK" ("Claude needs your OK", "HQ needs your OK"), body "Open HQ to see what it wants to do." |
+| Push, a task approval | "A task needs your OK" · "Open HQ to see what it wants to do." (never the task's name, B19) |
+| Push, a stuck helper | "A helper is stuck" · "Open HQ to see which one." (B19) |
+| Push, a server HQ's question | "Your server HQ needs your OK" · "Open HQ to see what it wants to do." (B19) |
+| Push, folded Needs you | "{N} more waiting for you" · "Open HQ to see them." (C-11) |
+| Push, folded Updates | "{N} updates from HQ" · "Tap to read." (C-11) |
 | Push, reply finished (Updates) | "HQ answered" · "Tap to read." |
 | Push, `notify_owner` | its title only; no body |
 | Push, new sign-in | "A new sign-in to your HQ" · "Open HQ to see it." |
@@ -206,7 +221,7 @@ guard's reason in the log).
 | Hub, tag | "Port in use" |
 | Hub, hint | "Often it is another HQ pairing started in a terminal. Close it, then look again." |
 | Hub, Open HQ off | "Open HQ waits until HQ Hub holds the port itself." |
-| Hub, technical | "web forward to {device}: {addr}, held by another program" · "gate on this PC: {addr}, opened by HQ Hub" |
+| Hub, technical | "web forward to {device}: {addr}, held by another program" · "gate on this computer: {addr}, opened by HQ Hub" |
 | Signed out, empty view | "Sign in to see your {notes, chats, tasks, settings}" or "Sign in to see what needs you" · "HQ no longer accepts this browser's sign-in, so nothing from it is kept here." · "Sign in" |
 
 Retired: "HQ push works", "Notifications from HQ and its agents will show up here.", "Allowed once",
@@ -220,7 +235,9 @@ own text in an alert, "Running elsewhere" for the hub's own forward.
    (`ActionNeeded`, `Proposal`, a blocked session's alert) gives "{Who} needs your OK" and "Open HQ to
    see what it wants to do."; a `notify_owner` item gives its title with an empty body; a device sign-in
    gives "A new sign-in to your HQ". `{Who}` is the helper's display name when the item names one, else
-   "HQ".
+   "HQ". A task's approval gives "A task needs your OK", a stuck helper "A helper is stuck" and "Open HQ
+   to see which one.", a server HQ's question "Your server HQ needs your OK" (`../../resolutions.md`
+   B19). A task's own title never reaches a push.
 2. **No answer in a push.** The payload never has `actions`, `tokens` or `item`. `answer_buttons()` and
    its token minting go. `PUSH_ANSWER_PATH` is removed from `lib.rs`; a request to it gets 404 (or 410
    with "This button is retired. Open HQ to answer." for one release, then 404).
@@ -253,6 +270,14 @@ own text in an alert, "Running elsewhere" for the hub's own forward.
 12. **The routes need the header.** `HEADER_GUARDED_ACTIONS` gains `drive`, `goal`, `unwatch` and
     `answer`; `missing_client_header()` also guards `/api/notifications/{id}/answer` and
     `/api/notifications/{id}/action`.
+13. **Folding (added by resolutions.md C-11).** The service worker counts what is showing with
+    `registration.getNotifications()`. The newest five Needs you pushes show on their own; every one
+    past five folds into one notification tagged `hq-needs-more`, "{N} more waiting for you" / "Open HQ
+    to see them.", which opens the Inbox. A fourth Updates push within an hour replaces the shown Updates with one tagged
+    `hq-updates-fold`, "{N} updates from HQ" / "Tap to read.". The counts are plural catalogue keys.
+14. **Replay (added by resolutions.md C-11).** When a subscription is made again, or its `kinds` regains
+    `needs` or `updates`, the dispatcher posts each item still waiting of that kind once, tagged by item
+    id so a repeat replaces rather than adds, then folds by rule 13.
 
 ## 7. Browser and platform notes
 
@@ -272,12 +297,12 @@ own text in an alert, "Running elsewhere" for the hub's own forward.
 
 | File | Change | Exists |
 |------|--------|--------|
-| `crates/hq-web/src/web_push/mod.rs` | `payload(item, details)` builds the words per kind (rule 1), drops actions, tokens and the item id; delete `AnswerButtons` and `answer_buttons()`; the dispatcher filters by `kinds` (rule 5) and passes `details` per subscription (so one push per subscription, not one `broadcast`). Update the two tests at lines 448 and 486. | yes |
+| `crates/hq-web/src/web_push/mod.rs` | `payload(item, details)` builds the words per kind (rule 1), drops actions, tokens and the item id; delete `AnswerButtons` and `answer_buttons()`; the dispatcher filters by `kinds` (rule 5) and passes `details` per subscription (so one push per subscription, not one `broadcast`); the B19 titles (rule 1); replay of waiting items when a subscription or a kind comes back (rule 14, C-11). Update the two tests at lines 448 and 486. | yes |
 | `crates/hq-web/src/web_push/api.rs` | Test push words (line 119-120); subscribe takes optional `kinds` and `details`. | yes |
 | `crates/hq-web/src/dialog_answer.rs` | Remove `PUSH_ANSWER_PATH` and `push_answer_handler`; keep `TOKEN_TTL_SECS` only if another caller uses it (none outside push today). | yes |
 | `crates/hq-web/src/lib.rs` | Drop the route at line 374. | yes |
 | `crates/hq-db/src/push_subscriptions.rs`, `crates/hq-db/sql/1xx_push_kinds.sql` | `kinds` and `details` columns. | file yes, migration NEW |
-| `apps/hq-web/src/sw.ts` | `push` without actions (lines 159-178); delete `answerFromPush` (181-209) and the action branch (215-218); a `message` handler for the wipe (rule 10). | yes |
+| `apps/hq-web/src/sw.ts` | `push` without actions (lines 159-178); delete `answerFromPush` (181-209) and the action branch (215-218); a `message` handler for the wipe (rule 10); folding by tag (rule 13, added by resolutions.md C-11). | yes |
 | `apps/hq-web/src/lib/replyAlerts.ts` | Fixed words (rule 6); no reply text. | yes |
 | `apps/hq-web/src/lib/hqAuth.ts` | `noteAuth()` calls `wipeBrowser()` on a non-cached 401 (line 129). | yes |
 | `apps/hq-web/src/lib/wipe.ts` | `wipeBrowser()`: every store in rule 9, plus the channel. | NEW |
@@ -291,7 +316,8 @@ own text in an alert, "Running elsewhere" for the hub's own forward.
 
 ## 9. Server, desktop or release changes
 
-- Server: the payload, the kinds filter, the migration, retiring the push-answer route (all here).
+- Server: the payload, the kinds filter, the migration, retiring the push-answer route, the B19 titles
+  and the C-11 replay (all here).
 - Desktop: the proxy refusal and its words. No new command; `host_status` and `pairing_snapshot` already
   carry what the window needs (`running_elsewhere` per forward).
 - Release: the next web build ships the new worker. `docs/WEB_PUSH.md` says pushes carry no content and
@@ -322,6 +348,13 @@ own text in an alert, "Running elsewhere" for the hub's own forward.
 9. `cargo test -p hq-web origin`: `missing_client_header(POST, "/api/harness-sessions/hs-1/drive",
    false)` is true, and the same for `goal`, `unwatch`, `answer` and `/api/notifications/v1/answer`.
    Today the test at line 311 asserts the opposite.
+10. `cargo test -p hq-web web_push`: a task approval's push for a task titled "Pay rent" has the title
+    "A task needs your OK" and no "Pay rent" in the bytes; a server HQ's question has "Your server HQ
+    needs your OK". Today the title is the item's own (B19).
+11. `bun test sw`: with five Needs you notifications showing, a sixth push leaves at most six, the last
+    "1 more waiting for you"; four Updates in an hour show as one "4 updates from HQ". Turning the
+    Needs you switch back on makes the dispatcher post each waiting item once (`cargo test -p hq-web
+    web_push`). Today nothing folds or replays (added by resolutions.md C-11).
 
 ## 11. Check on a laptop or phone
 

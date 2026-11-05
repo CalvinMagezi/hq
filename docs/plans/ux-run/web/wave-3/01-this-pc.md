@@ -70,8 +70,10 @@ and stops it by progress, opens the log in a sheet, and is the only place that l
 helper".**
 
 - **Names (rules-web 5):** the app is AgentHQ where the system shows its name (the Dock, Finder, the
-  taskbar, the app list); its windows are **HQ Hub** (this one) and **HQ** (the web app). This PC on
-  every system, a Mac too (W44, owner to confirm; reviewers suggested "This computer").
+  taskbar, the app list); its windows are **HQ Hub** (this one) and **HQ** (the web app). The first tab
+  is named This PC on every system, a Mac too (W44, owner to confirm; reviewers suggested "This
+  computer"). "This PC" is the tab's name only (`../../resolutions.md` B12): every line inside the
+  tab says the machine's own name or "this computer".
 - **Status line (rules-web 2):** the state first, then one fact: "Connected · 1 helper needs you". Grey
   when fine, blue while starting, amber for "HQ has stopped" (with a stop icon) or "Your HQ can't be
   reached". "You stopped HQ" and "HQ is off" are grey. No balance chip: Spending lives in HQ.
@@ -97,16 +99,16 @@ need you (`.a-tab em.hub-need`). Content one column, 760 px wide at most, centre
 
 ### This PC: HQ in every real state
 
-- **P1 · HQ is off (first open).** Status "HQ is off" (grey). Card "HQ on this PC" / "Off" / "HQ Hub
+- **P1 · HQ is off (first open).** Status "HQ is off" (grey). Card "HQ on this computer" / "Off" / "HQ Hub
   starts nothing by itself. Start HQ when you want to use it." [Start HQ] (green, the one primary) and
-  [Open HQ] off with the why line "Open HQ needs HQ running. Start it first." Rows: "On this PC · Start HQ
+  [Open HQ] off with the why line "Open HQ needs HQ running. Start it first." Rows: "On this computer · Start HQ
   when HQ Hub opens" (a switch, off) with "HQ Hub never starts anything when you log in."; "The HQ
   program · ~/bin/hq · version 0.9.2" [Change…]; "What HQ printed · Nothing yet. HQ Hub keeps a log once
   it starts HQ." [Open the log] off.
 - **P2 · Starting.** Status "Starting HQ · 12 s" (blue). Card "Starting" / "Step 3 of 4 · 12 s · Opening
   your notes and tasks"; one blue bar (4 px); the four steps the hub can see for itself: the process
   started, it is alive, its port answers, its health check passes, with the phone's names ("Starting on
-  this PC", "Loading HQ", "Opening your notes and tasks", "Almost ready"). "Usually about 20 s on this
+  this computer", "Loading HQ", "Opening your notes and tasks", "Almost ready"). "Usually about 20 s on this
   PC." (learned from the last starts here). Open HQ off: "You can open HQ once it has started."
 - **P3 · Slow but alive.** "HQ is still opening your notes. Restarting starts over." with [Restart] as the
   second button.
@@ -114,13 +116,14 @@ need you (`.a-tab em.hub-need`). Content one column, 760 px wide at most, centre
   "Helpers 1" in amber. Card "On" / "HQ Hub started HQ. It stops when you quit HQ Hub." [Stop HQ]
   (secondary) [Open HQ]. Row "4 helpers at work here · 1 needs your OK · open the Helpers tab" with the
   amber pill "Needs your OK". Log row "The log of the HQ that HQ Hub started" [Open the log].
-- **P5 · The system notice** for Needs you on this PC: "AgentHQ · HQ Hub" / "Claude needs your OK" /
+- **P5 · The system notice** for Needs you on this computer: "AgentHQ · HQ Hub" / "Claude needs your OK" /
   "Open HQ to see what it wants to do." / [Open]. Open goes to that helper in the HQ window
   (`open_main_window("/helpers/{id}")`). The HQ window has no web push, so this is the only notice here.
-- **P6 · Stop HQ asks first.** "Stop HQ?" / "Chats and scheduled tasks pause. The 3 helpers working here
-  stop too. Their work so far is kept." / [Keep it running] [Stop HQ] (red). With no helper working, the
-  middle sentence drops; the action stays red. Esc, the close button and a click outside mean Keep it
-  running.
+- **P6 · Stop HQ asks first** (`../../resolutions.md` B9). With helpers working it is red: "Stop HQ?"
+  / "Chats and scheduled tasks pause. {Codex and Claude} are working here and stop too. Their work so
+  far is kept." / [Keep it running] [Stop HQ] (red). With no helper working it is the Ask kind:
+  "Stop HQ?" / "Chats and scheduled tasks pause until you start it again." / [Keep it running] [Stop
+  HQ] (green). Esc, the close button and a click outside mean Keep it running.
 - **P7 · You stopped HQ.** Status "You stopped HQ" (grey). "You stopped HQ at 14:40. Start it again when
   you want." [Start HQ] (green). Open HQ off: "Open HQ needs HQ running. Start it first." Log row "Last
   run today, 14:02 to 14:40". The Helpers tab still checks which helpers are installed.
@@ -135,14 +138,14 @@ need you (`.a-tab em.hub-need`). Content one column, 760 px wide at most, centre
   line "To stop it, stop it where it was started." No Stop button at all. The helpers row still shows.
   Log row "HQ Hub keeps a log only for an HQ it started".
 - **P10 · The HQ program not found, and a refused choice.** Status "HQ is off". Amber card "Couldn't find
-  HQ on this PC" / tag "Not found" / "HQ Hub runs the HQ program, and it isn't in any place HQ Hub looks.
+  HQ on this computer" / tag "Not found" / "HQ Hub runs the HQ program, and it isn't in any place HQ Hub looks.
   Choose it, or install HQ first." [Choose the HQ program…] [Look again] [How to install HQ]. A refused
-  choice stays under the buttons: "Couldn't use that program. Anyone on this PC can change its folder.
+  choice stays under the buttons: "Couldn't use that program. Anyone on this computer can change its folder.
   Choose one that only you can change." Technical details: "Looked in: next to HQ Hub, ~/bin,
   /usr/local/bin, each folder on PATH, then your login shell's PATH." Once chosen, the full path shows
   once ("/Users/alex/bin/hq"), then the short form.
 - **P11 · The phone as the hub, helpers here off.** Status "Connected · HQ on your phone". Card "Helpers
-  here, for HQ on your phone" / "Off" / "HQ runs on your phone, Pixel 8. This PC runs only the helpers it
+  here, for HQ on your phone" / "Off" / "HQ runs on your phone, Pixel 8. This computer runs only the helpers it
   starts." [Start helpers here] [Open HQ]. A note that closes by hand: "First time in the HQ window? Sign
   in there with a code from your phone. On your phone, open Settings, then Other devices, then Sign in
   another device." (HQ Hub cannot learn that the HQ window signed in, so it does not guess.) Open HQ is
@@ -152,30 +155,37 @@ need you (`.a-tab em.hub-need`). Content one column, 760 px wide at most, centre
   here · 2 working · open the Helpers tab" with "Working on it".
 - **P13 · Stop helpers here asks first.** "Stop helpers here?" / "The 2 helpers working here stop now.
   Their work so far is kept. HQ on your phone keeps running." / [Keep them running] [Stop helpers here]
-  (red). Different from Stop every helper: it stops only what runs on this PC, and helpers can start
+  (red). Different from Stop every helper: it stops only what runs on this computer, and helpers can start
   again here at once.
 - **P14 · Another program holds the port (WB3).** Status "Your HQ can't be reached". Amber card "Couldn't
   open HQ on your phone" / "Port in use" / "Another program holds this port. HQ Hub won't send your sign-in
   there." / "Often it is another HQ pairing started in a terminal. Close it, then look again." Why line
   "Open HQ waits until HQ Hub holds the port itself." Technical details: "web forward to Pixel 8:
-  127.0.0.1:47480, held by another program" and "gate on this PC: 127.0.0.1:7747, opened by HQ Hub". The
+  127.0.0.1:47480, held by another program" and "gate on this computer: 127.0.0.1:7747, opened by HQ Hub". The
   Devices tab shows the same line on that row.
-- **P15 · A lockdown on this PC (WB5).** Status "Connected · helpers here are stopped". Amber card "Every
+- **P15 · A lockdown on this computer (WB5).** Status "Connected · helpers here are stopped". Amber card "Every
   helper here is stopped" / tag "Stopped for safety" / "Stop every helper was used at 14:20, from Pixel
   8." / "Reason given: It keeps editing the wrong folder." (quoted as typed, from `lockdown.json`) / "No
-  helper can start on this PC until you allow them again. Only HQ Hub on this PC can do that." [Allow
+  helper can start on this computer until you allow them again. Only HQ Hub on this computer can do that." [Allow
   helpers again] (green). The Helpers tab shows the same card on top, and Try it there says why it is
   off.
-- **P16 · Allow helpers again?** "Allow helpers again?" / "Helpers can start on this PC again. The ones
+- **P16 · Allow helpers again?** "Allow helpers again?" / "Helpers can start on this computer again. The ones
   that were stopped stay stopped." / [Keep them stopped] [Allow helpers] (green, WR25). Done: a toast
-  "Helpers allowed again on this PC." that stays until closed. No Undo: lock again with Stop every
+  "Helpers allowed again on this computer." that stays until closed. No Undo: lock again with Stop every
   helper. Stopped helpers do not come back by themselves; resume each in HQ.
 - **P17 · Windows: helpers in Ubuntu (future scope, W50).** Card "Helpers here, in Ubuntu" / "On
-  Windows, helpers run inside Ubuntu (WSL2) on this PC. HQ itself runs on your phone." / "Ubuntu:
+  Windows, helpers run inside Ubuntu (WSL2) on this computer. HQ itself runs on your phone." / "Ubuntu:
   Ubuntu-24.04 (WSL2)" / "Started with: C:\Windows\System32\wsl.exe -d Ubuntu-24.04 -- ~/bin/hq host
   serve" / "All of HQ in Ubuntu instead: ~/bin/hq start all" / "HQ Hub never starts anything when you
   sign in to Windows." / "In Ubuntu · ~/bin/hq · version 0.9.2". With all of HQ in Ubuntu the card reads
-  "HQ on this PC, in Ubuntu" and HQ Hub runs `hq start all` (`docs/WINDOWS.md`).
+  "HQ on this computer, in Ubuntu" and HQ Hub runs `hq start all` (`docs/WINDOWS.md`).
+- **P18 · Restarting HQ (added by resolutions.md C-12).** Status "Restarting HQ" (blue). Card
+  "Restarting" / "Step {1} of {4} · {Starting on this computer}" with the one blue bar; Open HQ off with
+  "You can open HQ once it has started." If the start step stops moving, P8 by A7's rule.
+- **P19 · The Connection sheet (added by resolutions.md C-12).** Choosing the status line opens a sheet
+  with the four start steps, "Usually about {20} s", "Stopped at: {step}" when it stopped, and "This
+  computer is almost full" (under 200 MB free on the disk that holds `~/.hq`, N15) with "Free up {size}
+  and try again." The sheet opens by itself at most once a day, only for HQ has stopped or almost full.
 
 ### Sizes (AlignedHub3)
 
@@ -194,36 +204,39 @@ need you (`.a-tab em.hub-need`). Content one column, 760 px wide at most, centre
 |-----|--------|
 | `hub_title` | "HQ Hub" |
 | `hub_tabs` | "This PC" · "Devices" · "Helpers" |
-| `hub_off` | "HQ is off" · "HQ on this PC" · "Off" · "HQ Hub starts nothing by itself. Start HQ when you want to use it." |
+| `hub_off` | "HQ is off" · "HQ on this computer" · "Off" · "HQ Hub starts nothing by itself. Start HQ when you want to use it." |
 | `hub_start` | "Start HQ" |
 | `hub_open` | "Open HQ" |
 | `hub_open_why_off` | "Open HQ needs HQ running. Start it first." |
 | `hub_open_why_starting` | "You can open HQ once it has started." |
 | `hub_open_why_phone` | "Start HQ first" · "Switch on Devices to reach your phone" |
-| `hub_launch_row` | "On this PC" · "Start HQ when HQ Hub opens" · "HQ Hub never starts anything when you log in." |
+| `hub_launch_row` | "On this computer" · "Start HQ when HQ Hub opens" · "HQ Hub never starts anything when you log in." |
 | `hub_program_row` | "The HQ program" · "{~/bin/hq} · version {0.9.2}" · "Change…" |
 | `hub_log_row` | "What HQ printed" · "Nothing yet. HQ Hub keeps a log once it starts HQ." / "The log of the HQ that HQ Hub started" / "HQ Hub keeps a log only for an HQ it started" / "Last run today, {14:02} to {14:40}" · "Open the log" |
-| `hub_starting` | "Starting HQ · {12} s" · "Starting" · "Step {3} of {4} · {12} s · {Opening your notes and tasks}" · "Usually about {20} s on this PC." |
+| `hub_starting` | "Starting HQ · {12} s" · "Starting" · "Step {3} of {4} · {12} s · {Opening your notes and tasks}" · "Usually about {20} s on this computer." |
 | `hub_slow` | "HQ is still opening your notes. Restarting starts over." · "Restart" |
 | `hub_on` | "On" · "HQ Hub started HQ. It stops when you quit HQ Hub." |
 | `hub_helpers_row` | "{4} helpers at work here" · "{1} needs your OK · open the Helpers tab" |
-| `hub_stop_dialog` | "Stop HQ?" · "Chats and scheduled tasks pause. The {3} helpers working here stop too. Their work so far is kept." · "Keep it running" · "Stop HQ" |
+| `hub_stop_dialog_working` | "Stop HQ?" · "Chats and scheduled tasks pause. {Codex and Claude} are working here and stop too. Their work so far is kept." · "Keep it running" · red "Stop HQ" (B9) |
+| `hub_stop_dialog_idle` | "Stop HQ?" · "Chats and scheduled tasks pause until you start it again." · "Keep it running" · green "Stop HQ" (B9) |
+| `hub_restarting` | "Restarting HQ" · "Restarting" (C-12) |
+| `hub_almost_full` | "This computer is almost full." · "Free up {size} and try again." (C-12) |
 | `hub_you_stopped` | "You stopped HQ" · "You stopped HQ at {14:40}. Start it again when you want." |
 | `hub_stopped` | "HQ has stopped" · "Stopped" · "HQ stopped by itself at {14:02}, {3} minutes after it started. Start HQ to try again." · "Copy details" · "Exit code {1} at {14:02}" · "Log: ~/.hq/desktop/host.log" · "Stopped at: {step}" |
 | `hub_external` | "HQ was started outside HQ Hub, for example in a terminal or as a service. HQ Hub won't stop it." · "To stop it, stop it where it was started." |
-| `hub_not_found` | "Couldn't find HQ on this PC" · "Not found" · "HQ Hub runs the HQ program, and it isn't in any place HQ Hub looks. Choose it, or install HQ first." · "Choose the HQ program…" · "Look again" · "How to install HQ" |
-| `hub_refused_program` | "Couldn't use that program. Anyone on this PC can change its folder. Choose one that only you can change." |
+| `hub_not_found` | "Couldn't find HQ on this computer" · "Not found" · "HQ Hub runs the HQ program, and it isn't in any place HQ Hub looks. Choose it, or install HQ first." · "Choose the HQ program…" · "Look again" · "How to install HQ" |
+| `hub_refused_program` | "Couldn't use that program. Anyone on this computer can change its folder. Choose one that only you can change." |
 | `hub_looked_in` | "Looked in: next to HQ Hub, ~/bin, /usr/local/bin, each folder on PATH, then your login shell's PATH." |
-| `hub_phone_off` | "Helpers here, for HQ on your phone" · "Off" · "HQ runs on your phone, {Pixel 8}. This PC runs only the helpers it starts." · "Start helpers here" |
+| `hub_phone_off` | "Helpers here, for HQ on your phone" · "Off" · "HQ runs on your phone, {Pixel 8}. This computer runs only the helpers it starts." · "Start helpers here" |
 | `hub_phone_on` | "{2} helpers are working here for HQ on your phone." · "Stop helpers here" |
 | `hub_first_signin` | "First time in the HQ window?" · "Sign in there with a code from your phone. On your phone, open Settings, then Other devices, then Sign in another device." |
 | `hub_stop_here_dialog` | "Stop helpers here?" · "The {2} helpers working here stop now. Their work so far is kept. HQ on your phone keeps running." · "Keep them running" · "Stop helpers here" |
 | `hub_port_held` | "Couldn't open HQ on your phone" · "Port in use" · "Another program holds this port. HQ Hub won't send your sign-in there." · "Often it is another HQ pairing started in a terminal. Close it, then look again." · "Open HQ waits until HQ Hub holds the port itself." |
-| `hub_lockdown` | "Every helper here is stopped" · "Stopped for safety" · "Stop every helper was used at {14:20}, from {Pixel 8}." · "Reason given: {text}" · "No helper can start on this PC until you allow them again. Only HQ Hub on this PC can do that." · "Allow helpers again" |
-| `hub_allow_dialog` | "Allow helpers again?" · "Helpers can start on this PC again. The ones that were stopped stay stopped." · "Keep them stopped" · "Allow helpers" |
-| `hub_allowed_done` | "Helpers allowed again on this PC." |
+| `hub_lockdown` | "Every helper here is stopped" · "Stopped for safety" · "Stop every helper was used at {14:20}, from {Pixel 8}." · "Reason given: {text}" · "No helper can start on this computer until you allow them again. Only HQ Hub on this computer can do that." · "Allow helpers again" |
+| `hub_allow_dialog` | "Allow helpers again?" · "Helpers can start on this computer again. The ones that were stopped stay stopped." · "Keep them stopped" · "Allow helpers" |
+| `hub_allowed_done` | "Helpers allowed again on this computer." |
 | `hub_notice` | "AgentHQ · HQ Hub" · "{Claude} needs your OK" · "Open HQ to see what it wants to do." · "Open" |
-| `hub_ubuntu` | "Helpers here, in Ubuntu" · "On Windows, helpers run inside Ubuntu (WSL2) on this PC. HQ itself runs on your phone." · "Ubuntu: {Ubuntu-24.04} (WSL2)" · "Started with: {cmd}" · "All of HQ in Ubuntu instead: ~/bin/hq start all" · "HQ Hub never starts anything when you sign in to Windows." |
+| `hub_ubuntu` | "Helpers here, in Ubuntu" · "On Windows, helpers run inside Ubuntu (WSL2) on this computer. HQ itself runs on your phone." · "Ubuntu: {Ubuntu-24.04} (WSL2)" · "Started with: {cmd}" · "All of HQ in Ubuntu instead: ~/bin/hq start all" · "HQ Hub never starts anything when you sign in to Windows." |
 
 Retired: "Start host", "Stop host", "Running", "Running elsewhere", "Exited", "Stopped" (as a status
 word), "Ended by itself (code {n}). See ~/.hq/desktop/host.log.", "Started by this app (process {pid}).",
@@ -236,12 +249,13 @@ Settings.", "No host answers on this Mac.", the titles "HQ" for the control wind
    the status line from it: off › starting › stopped (by progress) › you stopped › connected (with the
    first true fact: helpers that need you, then helpers at work, then "started outside HQ Hub", then "HQ
    on your phone").
-2. **Stopped by progress.** "HQ has stopped" only when the process ended, or its start step has not moved
-   for the longer of 60 s and twice the usual start time. While the process is alive and slow, P3.
+2. **Stopped by progress** (`../../resolutions.md` A7). "HQ has stopped" only when the process ended,
+   or its start step has not moved for the longer of 60 s and twice its usual start time. No fixed
+   timer, the same rule as the phone. While the process is alive and slow, P3.
 3. **Usual start time** is learned from the last starts on this computer and saved in settings
    (Recommended: the median of the last five; the board says only "learned from the last starts here").
 4. **Hub mode is named.** When `config.bridge.serves_hub()`, the card, the buttons and the status line
-   say what this PC does (P11, P12); `HostSpec::for_agents_only` runs `hq host serve`.
+   say what this computer does (P11, P12); `HostSpec::for_agents_only` runs `hq host serve`.
 5. **Open HQ is off only with a reason** next to it: "Open HQ needs HQ running. Start it first.", "You
    can open HQ once it has started.", "Start HQ first", "Switch on Devices to reach your phone", or the
    held-port line.
@@ -250,7 +264,7 @@ Settings.", "No host answers on this Mac.", the titles "HQ" for the control wind
 7. **Needs you is amber.** Every "Needs your OK" pill and the tab count are amber (`.a-state.needs`,
    `.a-tab em.hub-need`); errors are amber with an icon.
 8. **Lockdown is lifted here only.** [Allow helpers again] runs `host_unlock`, which runs `hq host unlock`
-   on this PC; no web page can call it (the HQ window has no capability).
+   on this computer; no web page can call it (the HQ window has no capability).
 9. **The system notice** is posted from Rust when a helper on this computer starts needing the owner;
    words are rules-web 1; Open is the only action; it opens `/helpers/{id}` in the HQ window.
 10. **The log** opens in a sheet with the last lines (Recommended: 200), keys blanked (anything matching the secret
@@ -260,6 +274,12 @@ Settings.", "No host answers on this Mac.", the titles "HQ" for the control wind
     when it shows the phone's HQ.
 12. **One look.** The control window loads `aligned-ui.css` and bundled Clear Sans (the CSP allows
     `style-src 'self'` and `font-src 'self'`); it is dark like the HQ window.
+13. **Stop HQ's kind follows the helpers (B9).** `host_status` reports the helpers working on this
+    computer; with one or more the dialog is red and names them, with none it is the Ask kind with a
+    green "Stop HQ".
+14. **Restarting and the sheet (added by resolutions.md C-12).** A restart HQ Hub started shows
+    "Restarting HQ" until the health check passes. The Connection sheet opens by itself at most once a
+    day (the day kept in `settings.json`); "almost full" uses N15's 200 MB, measured where `~/.hq` lives.
 
 ## 7. Browser and platform notes
 
@@ -277,9 +297,9 @@ Settings.", "No host answers on this Mac.", the titles "HQ" for the control wind
 |------|--------|--------|
 | `apps/desktop/src-tauri/tauri.conf.json` | `productName` "AgentHQ"; `shortDescription` "HQ on this computer". | yes |
 | `apps/desktop/src-tauri/src/main.rs` | Titles "HQ Hub" (90) and "HQ" (174); the HQ window title fact. | yes |
-| `apps/desktop/ui/index.html`, `ui/src/main.ts`, `ui/style.css` | Rebuild with `aligned-ui.css`: tabs This PC, Devices, Helpers; P1 to P17; toasts with close (113-117); labels (156-188). | yes |
+| `apps/desktop/ui/index.html`, `ui/src/main.ts`, `ui/style.css` | Rebuild with `aligned-ui.css`: tabs This PC, Devices, Helpers; P1 to P19; toasts with close (113-117); labels (156-188). | yes |
 | `apps/desktop/scripts/build-ui.ts` | Copy `aligned-ui.css` and the fonts into `ui/dist`. | yes |
-| `crates/hq-desktop/src/host.rs` | Start steps, usual start time, stopped by progress, the last run's times (151-245). | yes |
+| `crates/hq-desktop/src/host.rs` | Start steps, usual start time, stopped by progress, the last run's times (151-245); the restarting state and free space under `~/.hq` (C-12). | yes |
 | `crates/hq-desktop/src/desktop.rs` | `hq_problem` words (166-167); `host_log`; `host_unlock`; the notice; the rename rewrite of Claude entries. | yes |
 | `crates/hq-desktop/src/settings.rs` | `usual_start_secs`, `look_for_helper_updates` (off), `try_it_dir`. | yes |
 | `crates/hq-desktop/src/agents.rs` | Helper display names and states for the summary row. | yes |
@@ -303,10 +323,15 @@ Settings.", "No host answers on this Mac.", the titles "HQ" for the control wind
    the last lines. Today it shows "Exited" and a file path.
 4. A start that has not moved for twice the usual time shows "Stopped at: {step}"; a slow alive one shows
    "HQ is still opening your notes. Restarting starts over." Today there are no steps.
-5. Stop HQ opens the red dialog; Esc keeps it running. Today Stop host acts at once.
+5. Stop HQ with a helper working opens the red dialog naming it; with none working it opens the Ask
+   dialog with a green "Stop HQ" and "Chats and scheduled tasks pause until you start it again."; Esc
+   keeps it running (B9). Today Stop host acts at once.
 6. A lockdown shows the card with who, when and the reason, and Allow helpers again runs `hq host unlock`
    (a test with a fake `hq`). Today the window has no lockdown state.
 7. The pairing result toast stays after 3 s. Today it clears at 3000 ms.
+8. A restart started from HQ Hub shows "Restarting HQ" in blue; with under 200 MB free the sheet says
+   "This computer is almost full."; the sheet opens by itself once, not again the same day (added by
+   resolutions.md C-12). Today none of these exist.
 
 ## 11. Check on a laptop or phone
 
@@ -320,6 +345,7 @@ Settings.", "No host answers on this Mac.", the titles "HQ" for the control wind
 ## 12. Open decisions it depends on
 
 - **W44** ("This PC" on Macs), **W50** (Windows and Linux builds), **WR22** (the rename): owner to confirm.
-- **W4, W5, W38, W39, W43, WR19, WR20, WR21, WR25** (Recommended).
+- **W4, W5, W38, W39 (as `../../resolutions.md` B9 settles it), W43, WR19, WR20, WR21, WR25**
+  (Recommended), and `../../resolutions.md` A7, B12, C-12.
 - Depends on: `../wave-0/01-live-bugs.md` (the proxy), `05-commands-and-platforms.md`,
   `../wave-1/02-dialogs-approvals.md`, `../wave-0/02-shared-parts.md` (status words).

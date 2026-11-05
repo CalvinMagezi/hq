@@ -66,7 +66,7 @@ details from "What HQ noticed" (`wave-0/04-measure.md`) for each phone you used.
 | Large text on the A32 | FixPlan wave 1; FixPlainWords | One UI's largest font and display zoom: every dialog stacks at 1.5, status lines wrap, nothing ends in "…". |
 | Every dialog stacks at font scale 1.5 | FixDestructive | A32 and an Android 14 emulator at 1.5: Stop Codex, Remove device, Sign out device, Disconnect server, Remove key. Safe choice on top. |
 | Undo on Android 8 and 9 | FixDestructive | 8.1 emulator and the Go phone: archive a task; the snackbar stays 10 s. |
-| Undo across an HQ stop | FixDestructive | Clear 3 updates; within the Undo window kill hq. The change shows "Waiting for HQ" and reaches HQ after Start HQ. |
+| Undo across an HQ stop | FixDestructive | Clear 3 updates; within the Undo window kill hq. The change shows "Waiting to send" and reaches HQ after Start HQ. |
 | Where a copy was saved (provider names) | FixBackup | Save a copy to: One UI My Files, Files by Google, an SD card, a cloud drive. Log each document's provider authority. Only off-phone places may clear amber; Downloads, internal storage, media and (until checked) a memory card count as "on this phone too". |
 | The save screen on 8 and 9 | FixBackup | The Go phone with Files by Google and the 8.1 emulator: Save a copy now works and cloud places show only when their app offers one. |
 | Line length on old phones | FixPlainWords | 8.1 emulator and the Go phone at their default font: no owner line is cut. |

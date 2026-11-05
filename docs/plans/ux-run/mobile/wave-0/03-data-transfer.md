@@ -161,8 +161,9 @@ Rejected:
    5) "Your old phone used OpenRouter. Paste that key again, or a new one." Fields Service, Key; buttons
    Next, Back, Skip.
 5. **Ready to start, moved.** Top to bottom (rules section 5): card "Notifications are off / Questions
-   will wait in the Inbox." [Turn on]; option "Use HQ as your phone's assistant / Optional. Hold Home to
-   ask HQ."; amber warning (pin 6) "Is HQ still running on your old phone? / Stop it there first. Two
+   will wait in the Inbox." [Turn on]; option "Optional / Use HQ as your phone's assistant / Hold Home on any
+   screen and ask by voice. Understands English. You can also do this later in Settings." [Set up]
+   (FixAssistantSetup's card body, `../../resolutions.md` D-6); amber warning (pin 6) "Is HQ still running on your old phone? / Stop it there first. Two
    copies would answer the same chats twice."; "Start HQ" (green); "Back".
 6. **Other devices, after the move** (pin 7). "No other devices yet / Sign-ins did not move with your
    notes. Sign in again from each computer or browser." Group "Paired devices": "None paired / Pair each

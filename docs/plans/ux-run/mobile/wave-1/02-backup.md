@@ -144,14 +144,14 @@ amber cards use a green "Save a copy now" button.
   "Keys on this phone · Add, replace or remove". Your accounts: "AI service and keys · GitHub Copilot · 3
   services", "Messaging apps · Telegram on · Discord on", "Other devices · 1 signed in". How HQ behaves:
   "Spending limits · $2.10 of $5.00 today", "Safety and limits · Read only". Your data: "Backup and about ·
-  On · last one 3 h ago" (grey, no icon; pin 1).
+  Last backup 3 h ago" (grey, no icon; pin 1).
 - **A2 · Home, backups only on this phone.** Card slot (amber, warning icon; pin 2): "Check your backups"
   / "Backups are only on this phone. If you lose it, you lose them." Rows as A1; Your data "Backup and
-  about · On · only on this phone" (amber).
+  about · Last backup 3 h ago · only on this phone" (amber).
 - **A3 · Home, overdue, HQ can't be reached.** Card slot "Check your backups" / "The last backup is 3
   days old. A new one should be made every 24 hours." "Background work · Only when I open the app". Above
   Your accounts, the strip "Saved on this phone at 14:32" (pin 3); the HQ rows keep their saved values.
-  Your data "Backup and about · Overdue · last one 3 d ago" (amber).
+  Your data "Backup and about · Overdue · last backup 3 d ago" (amber).
 - **A4 · Home, server HQ, Background work paused.** "Background work · Only when I open the app", "Keep
   running · Good". Your accounts adds "Server HQ · Connected · hq.example.ts.net". Your data "Backup and
   about · Backups run on your server HQ" (grey; pin 4).
@@ -203,20 +203,20 @@ amber cards use a green "Save a copy now" button.
   "Never amber, never "Overdue": a paused phone makes no backups, and that is expected here."
 - **A16 · 360 dp, font scale 2.0, only on this phone.** Amber card "Backups are only on this phone" / "If
   you lose it, you lose them. Last backup 3 h ago, 412 files." / [Save a copy now] full width (pin 16).
-  Home row "Backup and about · On · only on this phone" wraps to a second line.
+  Home row "Backup and about · Last backup 3 h ago · only on this phone" wraps to a second line.
 
 ## 5. Exact copy
 
 | State | Home row | Card title | Card body |
 |-------|----------|------------|-----------|
-| Recent, copy off | "On · last one 3 h ago" | "Backup is on" | "Last backup 3 h ago, 412 files. A new one is made every 24 hours. The newest 7 are kept." Then, smaller: "Copy saved off this phone 2 d ago." |
-| Recent, only here | "On · only on this phone" | "Backups are only on this phone" | "If you lose it, you lose them. Last backup 3 h ago, 412 files. Save a copy to a computer or a cloud drive." |
+| Recent, copy off | "Last backup 3 h ago" (`../../resolutions.md` B10) | "Backup is on" | "Last backup 3 h ago, 412 files. A new one is made every 24 hours. The newest 7 are kept." Then, smaller: "Copy saved off this phone 2 d ago." |
+| Recent, only here | "Last backup 3 h ago · only on this phone" | "Backups are only on this phone" | "If you lose it, you lose them. Last backup 3 h ago, 412 files. Save a copy to a computer or a cloud drive." |
 | Waiting | "On · first one not made yet" | "Backup is on" | "No backup has finished yet. A new one is made every 24 hours." |
 | Failed | "Last backup did not finish" | "The last backup did not finish" | "Your newest changes are not in a backup. The newest good one is from 26 h ago." (None: "No backup has finished yet.") Then, smaller: "HQ said: …", 160 characters at most. |
-| Overdue | "Overdue · last one 3 d ago" | "The last backup is old" | "Last backup 3 d ago. A new one should be made every 24 hours." Paused: "Backups run only while Background work is on. It is paused." plus "Open Background work". On: "Something is stopping it. Restart HQ, or copy details for whoever set up HQ." |
+| Overdue | "Overdue · last backup 3 d ago" | "The last backup is old" | "Last backup 3 d ago. A new one should be made every 24 hours." Paused: "Backups run only while Background work is on. It is paused." plus "Open Background work". On: "Something is stopping it. Restart HQ, or copy details for whoever set up HQ." |
 | Overdue, none | "Overdue · none made yet" | "No backup has been made" | "Backups are on, but none was made in 2 days." With no `dir` or `key_file` in the block: "The backup settings have no folder or no key file." Then "Copy details for whoever set up HQ." |
 | Not set up | "Not set up · only on this phone" | "Backup is not set up" | "Your notes are only on this phone. If you lose it, you lose them. The app cannot set up backups yet. Save a copy somewhere else to keep your notes safe." |
-| Not set up, copy off | "Not set up · copy saved 3 d ago" | "Backup is not set up" | "The app cannot set up backups yet. Your last copy off this phone is from 3 d ago." |
+| Not set up, copy off | "Not set up · copy saved 3 d ago" | "Backup is not set up" | "The app cannot set up backups yet. Your newest copy off this phone is from 3 d ago." |
 | Not set up, no action | "Not set up" | "Backup is not set up" | "HQ can make backups by itself. The app cannot turn that on yet. When it can, this page will offer it." (Once, with "Got it".) |
 | Could not check | "Could not check" | "Backup could not be checked" | Folder outside the app: "Backups go to a folder this app cannot open. It cannot say if they work." Unreadable: "The app could not read the backup settings. It cannot say if backups are on. Try again in a minute. If this stays, restart HQ." |
 | Server HQ | "Backups run on your server HQ" | "Backups run on your server HQ" | "Your notes live on your server HQ, {name}. This phone cannot see its backups yet." |
@@ -225,7 +225,7 @@ amber cards use a green "Save a copy now" button.
 |---------|--------|
 | Card slot | "Check your backups" (amber, warning icon), then the card body's first two sentences. Shown only when no Update ready or Notifications off card claims the slot. |
 | Button | "Save a copy now" |
-| File | "HQ notes {yyyy-mm-dd hhmm}.zip", as on FixSafeMode |
+| File | "HQ notes {yyyy-MM-dd HHmm}.zip", FixSafeMode's pattern (`../../resolutions.md` D-4) |
 | Busy | "Saving a copy · {pct}% · {done} of {total} MB" · "Cancel" |
 | Done | "Copy saved" / "Your notes are off this phone now. Saved at {time}." |
 | On the phone | "This copy is on this phone too" / "Move it to a computer or a cloud drive. Or save it again somewhere else." |
@@ -267,7 +267,8 @@ setting. TalkBack reads the row as title, status, then "Check this" when amber.
     task does not run, so the card says so and links to Background work.
 12. **Not set up:** no `backup:` block, or `enabled` is not true, or no config file. Amber while no copy
     left the phone in 7 days.
-13. **Nothing to tap:** when the signed channel file switches Save a copy off, Not set up is grey. The
+13. **Nothing to tap:** when the signed channel file sets `switches.save_copy` to false
+    (`../../resolutions.md` D-3), Not set up is grey. The
     explanation shows once, then stays dismissed (a saved value).
 14. **Could not check:** the config exists but cannot be read (any error other than file not found), or
     `backup.dir` is outside `filesDir`. Grey, never "Not set up", never "first one not made yet".
@@ -295,7 +296,7 @@ as a backup lands or a copy is saved.
 | `ui/settings/SettingsViewModel.kt` | `backupFacts()` (lines 300-306): a `FileNotFoundException` means absent, any other read error sets `readable = false` (today `runCatching { … }.getOrNull()`, line 302). A `dir` outside `filesDir` sets `dirOutside` instead of the silent swap (line 303). | yes |
 | `ui/settings/SettingsWords.kt` | `home()`: take the backup row as a parameter (built from `homeLine`) and delete `NO_BACKUP` (line 160). `withChecking()` (line 156) is replaced by saved values and the strip. | yes |
 | `ui/settings/SettingsScreens.kt` | `BackupCard` (line 1029) drops `Mts.BrandGreen` for the good title and the disabled "Set up backup" pill, adds Save a copy now. Home row status (line 229) loses `maxLines = 1` and `Ellipsis`. | yes |
-| `data/SaveCopy.kt` | Shared with safe mode: the zip writer, the provider check, progress, and the saved time. | NEW (FixSafeMode names `safe/NotesCopy.kt` for the pure plan; the two must be one implementation, see `../README.md` "Open conflicts") |
+| `safe/NotesCopy.kt` | The one copy implementation, shared with safe mode (`../../resolutions.md` D-4): the plan, the zip writer, the provider check, progress, and the saved time. Loads without Compose, so the `:safe` process uses it too. The file name is FixSafeMode's "HQ notes {yyyy-MM-dd HHmm}.zip". Built in `../wave-0/02-safe-mode.md`; this board calls it. | NEW (wave 0) |
 | `app/src/test/.../ui/settings/BackgroundWorkTest.kt` | Line 96 asserts "No backup yet". Change it. | yes |
 | `app/src/test/.../ui/settings/BackupFactsTest.kt` | One case per state, the 2 × boundary, the missing-key case, the outside folder, the off-phone fact, and "row warns exactly when the card warns" over every fixture. | yes |
 
@@ -303,12 +304,12 @@ as a backup lands or a copy is saved.
 
 - None required. Open question 4 proposes a read-only `/api/backup/status` behind the web token later
   (no HQ route reports backup status today; none in `crates/hq-web/src`).
-- The signed channel file needs a switch for Save a copy (rule 13: "when the signed channel file switches
-  Save a copy off"). It is not in FixSafeMode's `switches` example; see "Open conflicts".
+- The signed channel file's `switches.save_copy` (a boolean, `../../resolutions.md` D-3, added to the
+  file in `../wave-0/02-safe-mode.md`) turns Save a copy off (rule 13).
 
 ## 10. Acceptance checks (each fails on today's build)
 
-1. Fixture: on, newest 3 h ago, copy off the phone 2 d ago. Home reads "On · last one 3 h ago" in grey
+1. Fixture: on, newest 3 h ago, copy off the phone 2 d ago. Home reads "Last backup 3 h ago" in grey
    with no icon. Today it reads "No backup yet" in amber.
 2. For every fixture, the home row is amber if and only if the card is amber. Today the row is amber for
    all of them.
@@ -326,7 +327,7 @@ as a backup lands or a copy is saved.
    Overdue.
 9. Every 24 h, a backup 47 h 59 min old is Recent and one 48 h old is Overdue, on the row as well as the
    card.
-10. At 360 dp and font scale 2.0, "On · only on this phone" wraps to a second line and is never cut.
+10. At 360 dp and font scale 2.0, "Last backup 3 h ago · only on this phone" wraps to a second line and is never cut.
     Today line 229 cuts it with "…". Amber on Surface 100 is 9.1:1, grey 10.7:1.
 11. The good card title is not `Mts.BrandGreen` (a screenshot test with a colour probe). Today it is.
 

@@ -65,8 +65,9 @@ by every place.**
 - The **Connection** module computes the seven browser states of rules-web 2 from what a browser can
   see, first true row wins, and exposes the words, the colour, a sheet model and the actions that are
   off.
-- The **saved copy** lives in one IndexedDB database per HQ id, capped at 5 MB, with one "saved at" per
-  place, wiped on the rules' three events.
+- The **saved copy** lives in one IndexedDB database per HQ id, capped at 256 KB a place and 2 MB in
+  all (`../../resolutions.md` B16, the same cap as the phone), with one "saved at" per place, wiped on
+  the rules' three events.
 - The **outbox** holds messages, new notes and new tasks with a client id each; HQ drops repeats.
 - **"What HQ noticed"** counts the rules' list in this browser only.
 - **One catalogue** of whole sentences builds the web's strings (and, with N19, the phone's).
@@ -95,17 +96,22 @@ sheet. The balance chip shows only in Connected.
 | # | State | Words | Dot | Saved strip | Actions | Connection sheet |
 |---|-------|-------|-----|-------------|---------|------------------|
 | 1 | Signed out | "Signed out of this HQ" | amber | none: every store is wiped (query cache, the worker's cache, drafts, the outbox, push) | Sign in only | The Sign in sheet: Use a code, and "This is a shared computer" |
-| 2 | Offline | "You're offline" | amber | "Saved in this browser at 14:32" | Reading works. New messages, notes and tasks wait to send. | "Couldn't send your message. You're offline. It will send when you're back online." |
+| 2 | Offline | "You're offline" | amber | "Saved in this browser at 14:32" | Reading works. New messages, notes and tasks wait to send. | "Couldn't send your message. You're offline. It will try again when you're back online." |
 | 3 | Can't be reached | "Your HQ can't be reached" | amber | "Saved in this browser at 14:32" | Off, with "These wait until your HQ can be reached." | Last answer, next try, this browser online or not, Try again now. Never "stopped". |
 | 4 | Starting | "Starting HQ · 12 s" | blue | "Saved in this browser at 14:32" | Off, with "You can answer once HQ has started." | "HQ is still starting. It will try again by itself." The start steps, from HQ's starting flag. No 60 s "did not start". |
 | 5 | Reconnecting | "Reconnecting" | blue | current | Send queues as "Waiting to send". Stop is also sent over HTTP. | The socket's next try. A dropped reply resumes by message id. |
 | 6 | AI service down | "The AI service isn't answering" | amber | current | Send stays on. A failed reply says "The AI service isn't answering. HQ is fine. Try again soon." | Which service, from the signed-in AI status route. Open AI service and keys. |
 | 7 | Connected | "Connected" then the balance chip | grey | current | All on | Nothing to fix. The sheet lists the HQ's name and address. |
 | hub | HQ has stopped | "HQ has stopped" (stop icon) | amber | saved, as row 3 | Off, with "HQ has stopped. Start HQ to try again." | "Stopped at: {step}". Start HQ, Copy details. |
+| hub | Restarting HQ | "Restarting HQ" | blue | saved, as row 3 | Off, with "HQ is restarting. Try again in a moment." | The start steps, as row 4 (`../../resolutions.md` C-12). |
 | hub | You stopped HQ | "You stopped HQ" | grey | saved, as row 3 | Off, with "Start HQ to use this." | Start HQ. |
 
+HQ Hub's "HQ has stopped" follows `../../resolutions.md` A7: the process is dead, or its start step has
+not moved for the longer of 60 s and twice its usual start time. No fixed timer.
+
 Lite in Connected reads "Connected · HQ Lite" (WR3). The HQ window showing the phone's HQ reads
-"Connected · HQ on your phone" and its strip "Saved on this PC at 14:32" (WR5).
+"Connected · HQ on your phone" and its strip "Saved in HQ Hub at 14:32" (`../../resolutions.md` B11,
+confirmed by the owner on 5 Nov 2026; it replaces WR5's saved line).
 
 ### The connection sheet, state 3 (AlignedShell 5)
 
@@ -119,7 +125,7 @@ the strip goes.
 ### The saved strip (`.a-stale`)
 
 One per place, under the status line, warn icon, `--surface-100`: "Saved in this browser at 14:32".
-A copy from before today names the day: "Saved in this browser at Tue 3 Nov". With a state, the strip
+A copy from before today names the day: "Saved in this browser on Tue 3 Nov" (B16). With a state, the strip
 leads with it as one sentence where a board draws that: "Your HQ can't be reached. Saved in this
 browser at 14:32." or "HQ is starting. Saved in this browser at 14:32." Nothing saved yet: the place's
 own empty state ("Nothing saved in this browser yet") with the reason and "Try again now".
@@ -150,81 +156,96 @@ Drawn on AlignedSettingsMore 2:
 320 px: the status line sits under the title and wraps to two lines; Search, the chip and the gear
 move into the More menu. 768 to 1023, 1440 and 2200: the same line in the top bar. 200% zoom: the
 phone layout. Lite: rows 1 to 4 and 7 apply, row 6 never (no AI service), "Connected · HQ Lite". The
-phone as the hub, in the HQ window: rows 1 to 7, with "Saved on this PC at 14:32" and "· HQ on your
+phone as the hub, in the HQ window: rows 1 to 7, with "Saved in HQ Hub at 14:32" and "· HQ on your
 phone" as the fact.
 
 ## 5. Exact copy
 
-### The catalogue's web reasons (second sentences)
+### The catalogue's web reasons
 
-Rules-shared section 2 gives the phone's reasons. The web adds or changes these (WR6):
+The catalogue is `../../resolutions.md` A2 (copied into `../../rules-shared.md` section 2). Every line
+is "Couldn't {action}." + the reason sentence + the outcome sentence; the outcome depends only on
+whether the action waits and retries by itself (it is in the outbox or HQ retries it) or not. The web
+uses these rows:
 
-| Reason key | Second sentence | When |
-|------------|-----------------|------|
-| `starting` | "HQ is still starting. It will try again by itself." (send: "It will send by itself.") | State 4 |
-| `unreachable_auto` | "Your HQ can't be reached. It will try again by itself." | A read HQ retries |
-| `unreachable_queued` | "Your HQ can't be reached. It will send when HQ is back." | Something in the outbox |
-| `unreachable_manual` | "Your HQ can't be reached. Try again soon." (Tasks, Helpers) or "Try again when it is back." (Chat archive) or "Try again in a moment." (Stop) | A change the owner must repeat |
-| `offline` | "You're offline. It will send when you're back online." (send) / "It will try again when you're back online." (read) / "Try again when you're back online." (change) / "It stops when you're back online." (Stop) | State 2 |
-| `no_reply` | "HQ didn't answer in time. Try again." | Any call that timed out while Connected |
-| `ai_down` | "The AI service isn't answering. HQ is fine. Try again soon." | State 6 |
-| `changed_elsewhere` | "It changed on another device." | Undo past the window, or a conflict |
+| Reason key | Reason sentence | If it waits and retries | If it does not | When |
+|------------|-----------------|-------------------------|----------------|------|
+| `starting` | "HQ is still starting." | "It will try again by itself." | "Try again in a moment." | State 4 |
+| `restarting` (hub) | "HQ is restarting." | "It will try again by itself." | "Try again in a moment." | HQ Hub, which owns the process |
+| `stopped` (hub) | "HQ has stopped." | "It will try again when HQ is back." | "Start HQ to try again." | HQ Hub only; a browser never says stopped |
+| `no_reply` | "HQ didn't answer in time." | (none) | "Try again." | Any call that timed out while Connected |
+| `unreachable` | "Your HQ can't be reached." | "It will try again when HQ is back." | "Try again when it's back." | State 3 (WR6, as A2 words it) |
+| `signed_out` | "You're signed out of this HQ." | (none) | "Sign in again." | Only where a place still shows a line; state 1 shows the Sign in sheet |
+| `offline` | "You're offline." | "It will try again when you're back online." | "Try again when you're back online." | State 2 |
+| `ai_down` | "The AI service isn't answering." | (none) | "HQ is fine. Try again soon." | State 6 |
+| `pairing_off` (hub) | "Pairing is off." | (none) | "Switch it on and try again." | HQ Hub Devices |
+| `undo_too_late` | "It changed on another device, or too much time passed." | (none) | (none) | Undo past the window, an Undo that waited in the outbox, or a conflict |
+| `almost_full` (hub) | "This computer is almost full." | (none) | "Free up {size} and try again." | HQ Hub (C-12) |
+
+Web-only reasons that keep their own whole sentences (no outcome sentence is added to them):
+
+| Reason key | Sentence | When |
+|------------|----------|------|
 | `waited_too_long` | "It waited 24 h, so it was not sent." | The outbox's limit |
+| `outbox_full` | "Couldn't add this. 100 things are already waiting to send." (whole line, WR30) | The 101st item |
 | `shared_computer` | "Notes can't wait here on a shared computer." / "On a shared computer nothing waits to send." | Shared computer |
 | `question_changed` | "The question changed on the helper's screen. Nothing was done." | An answer to a moved dialog |
-| `pairing_off` (hub) | "Pairing is off. Switch it on and try again." | HQ Hub Devices |
 | `port_held` (hub) | "Another program holds this port. HQ Hub won't send your sign-in there." | HQ Hub |
-| `world_writable` (hub) | "Anyone on this PC can change its folder. Choose one that only you can change." | HQ Hub, Choose the program |
+| `world_writable` (hub) | "Anyone on this computer can change its folder. Choose one that only you can change." | HQ Hub, Choose the program |
 | `bad_settings_file` (hub) | "Its settings file has a mistake." / "Claude Desktop's settings file has a mistake in it. Fix or remove it, then try again." | HQ Hub, Connect to HQ |
-| `signed_out` | none: signed out never shows a failure line; the place shows Sign in only | State 1 |
 
 ### Failure lines, by key (every one the web boards draw)
 
+Which ones wait: a chat message, a new note and a new task wait in the outbox; a read HQ repeats by
+itself (lists, search) waits; every change the owner made by hand (archive, stop, answer, delete, add
+a list, plan a check) does not.
+
 | Key | String |
 |-----|--------|
-| `fail_send_message_starting` | "Couldn't send your message yet. HQ is still starting. It will send by itself." |
-| `fail_send_message_unreachable` | "Couldn't send your message yet. Your HQ can't be reached. It will send when HQ is back." |
-| `fail_send_message_offline` | "Couldn't send your message yet. You're offline. It will send when you're back online." |
+| `fail_send_message_starting` | "Couldn't send your message. HQ is still starting. It will try again by itself." |
+| `fail_send_message_unreachable` | "Couldn't send your message. Your HQ can't be reached. It will try again when HQ is back." |
+| `fail_send_message_offline` | "Couldn't send your message. You're offline. It will try again when you're back online." |
 | `fail_send_message_no_reply` | "Couldn't send your message. HQ didn't answer in time. Try again." |
 | `fail_send_message_waited` | "Couldn't send your message. It waited 24 h, so it was not sent." |
-| `fail_finish_reply_unreachable` | "Couldn't finish this reply. Your HQ can't be reached." (Retry once back) |
+| `fail_finish_reply_unreachable` | "Couldn't finish this reply. Your HQ can't be reached. Try again when it's back." (Retry once back) |
 | `fail_finish_reply_ai_down` | "Couldn't finish this reply. The AI service isn't answering. HQ is fine. Try again soon." |
 | `fail_stop_reply_starting` | "Couldn't stop the reply. HQ is still starting. Try again in a moment." |
-| `fail_stop_reply_unreachable` | "Couldn't stop the reply. Your HQ can't be reached. Try again in a moment." |
-| `fail_stop_reply_offline` | "Couldn't stop the reply. You're offline. It stops when you're back online." |
+| `fail_stop_reply_unreachable` | "Couldn't stop the reply. Your HQ can't be reached. Try again when it's back." |
+| `fail_stop_reply_offline` | "Couldn't stop the reply. You're offline. Try again when you're back online." |
 | `fail_stop_reply_no_reply` | "Couldn't stop the reply. HQ didn't answer in time. Try again." |
 | `fail_archive_chat_starting` | "Couldn't archive this chat. HQ is still starting. Try again in a moment." |
-| `fail_archive_chat_unreachable` | "Couldn't archive this chat. Your HQ can't be reached. Try again when it is back." |
+| `fail_archive_chat_unreachable` | "Couldn't archive this chat. Your HQ can't be reached. Try again when it's back." |
 | `fail_archive_chat_offline` | "Couldn't archive this chat. You're offline. Try again when you're back online." |
 | `fail_archive_chat_no_reply` | "Couldn't archive this chat. HQ didn't answer in time. Try again." |
-| `fail_undo_changed` | "Couldn't undo. It changed on another device." |
+| `fail_undo_too_late` | "Couldn't undo. It changed on another device, or too much time passed." |
 | `fail_load_recent_no_reply` | "Couldn't load Recent. HQ didn't answer in time. Try again." |
 | `fail_save_note_no_reply` | "Couldn't save the note. HQ didn't answer in time. Try again." |
 | `fail_save_changes_no_reply` | "Couldn't save your changes. HQ didn't answer in time. Try again." |
 | `fail_make_pdf_no_reply` | "Couldn't make the PDF. HQ didn't answer in time. Try again." (and "the Word document", "the picture" and so on per format) |
-| `fail_search_{reason}` | "Couldn't search your notes and chats." plus the reason (`starting`, `unreachable_auto`, `offline` read form, `no_reply`); Lite: "Couldn't search your notes." |
+| `fail_search_{reason}` | "Couldn't search your notes and chats." plus the reason and its waiting outcome (`starting`, `unreachable`, `offline`), or `no_reply` with "Try again."; Lite: "Couldn't search your notes." |
 | `fail_send_answer_no_reply` | "Couldn't send your answer. HQ didn't answer in time. Try again." |
-| `fail_send_answer_unreachable` | "Couldn't send your answer. Your HQ can't be reached. Try again soon." |
+| `fail_send_answer_unreachable` | "Couldn't send your answer. Your HQ can't be reached. Try again when it's back." |
 | `fail_send_answer_changed` | "Couldn't send your answer. The question changed on the helper's screen. Nothing was done." |
-| `fail_load_tasks_unreachable` | "Couldn't load your tasks. Your HQ can't be reached. Try again soon." |
-| `fail_load_lists_unreachable` | "Couldn't load your lists. Your HQ can't be reached. Try again soon." |
-| `fail_add_list_unreachable` | "Couldn't add the list. Your HQ can't be reached. Try again soon." |
-| `fail_plan_check_unreachable` | "Couldn't plan the check. Your HQ can't be reached. Try again soon." |
-| `fail_delete_task_unreachable` | "Couldn't delete the task. Your HQ can't be reached. Try again soon." |
-| `fail_change_some_tasks` | "{N} tasks marked done. Couldn't change {T-4}. It changed on another device." |
-| `fail_stop_helper_unreachable` | "Couldn't stop {Codex}. Your HQ can't be reached. Try again soon." |
-| `fail_resume_helper_{reason}` | "Couldn't resume {Codex}." plus the reason |
-| `fail_start_helper_{reason}` | "Couldn't start {Claude}." plus the reason |
-| `fail_load_section_{reason}` | "Couldn't load {your messaging apps, Safety and limits}." plus the reason |
+| `fail_load_tasks_unreachable` | "Couldn't load your tasks. Your HQ can't be reached. It will try again when HQ is back." |
+| `fail_load_lists_unreachable` | "Couldn't load your lists. Your HQ can't be reached. It will try again when HQ is back." |
+| `fail_add_list_unreachable` | "Couldn't add the list. Your HQ can't be reached. Try again when it's back." |
+| `fail_plan_check_unreachable` | "Couldn't plan the check. Your HQ can't be reached. Try again when it's back." |
+| `fail_delete_task_unreachable` | "Couldn't delete the task. Your HQ can't be reached. Try again when it's back." |
+| `fail_change_some_tasks` | "{N} tasks done. Couldn't change {T-4}. It changed on another device, or too much time passed." |
+| `fail_stop_helper_unreachable` | "Couldn't stop {Codex}. Your HQ can't be reached. Try again when it's back." |
+| `fail_resume_helper_{reason}` | "Couldn't resume {Codex}." plus the reason and its outcome |
+| `fail_start_helper_{reason}` | "Couldn't start {Claude}." plus the reason and its outcome |
+| `fail_load_section_{reason}` | "Couldn't load {your messaging apps, Safety and limits}." plus the reason and its outcome |
 | `fail_draw_chart` | "Couldn't draw this chart." plus the reader's own reason ("Series 1 needs 3 values, one for each label.") |
-| `fail_open_hq_phone_port` (hub) | "Couldn't open HQ on your phone" plus `port_held` |
-| `fail_find_hq` (hub) | "Couldn't find HQ on this PC" |
+| `fail_add_outbox_full` | "Couldn't add this. 100 things are already waiting to send." |
+| `fail_open_hq_phone_port` (hub) | "Couldn't open HQ on your phone." plus `port_held` |
+| `fail_find_hq` (hub) | "Couldn't find HQ on this computer." |
 | `fail_use_program` (hub) | "Couldn't use that program." plus `world_writable` |
 | `fail_switch_on_pairing` (hub) | "Couldn't switch on pairing. Another program uses its port. Close it and try again." |
 | `fail_remove_device_pairing_off` (hub) | "Couldn't remove “{Pixel 8}”. Pairing is off. Switch it on and try again." |
-| `fail_remove_claude_entry` (hub) | "“{Pixel 8}” removed. Couldn't take HQ out of Claude Desktop. Its settings file has a mistake." |
+| `fail_remove_claude_entry` (hub) | "{Pixel 8} removed. Couldn't take HQ out of Claude Desktop. Its settings file has a mistake." |
 | `fail_connect_bad_file` (hub) | "Couldn't connect. Claude Desktop's settings file has a mistake in it. Fix or remove it, then try again." |
-| `fail_read_version` (hub) | "Couldn't read its version in 2 s" |
+| `fail_read_version` (hub) | "Couldn't read its version in 2 s." |
 
 ### State words and lines
 
@@ -239,23 +260,25 @@ Rules-shared section 2 gives the phone's reasons. The web adds or changes these 
 | `state_connected` | "Connected" |
 | `state_lite` | "Connected · HQ Lite" |
 | `state_hub_stopped` | "HQ has stopped" |
+| `state_hub_restarting` | "Restarting HQ" |
 | `state_hub_you_stopped` | "You stopped HQ" |
-| `saved_at` | "Saved in this browser at {time}" ("at {weekday} {day} {month}" before today) |
-| `saved_at_window` | "Saved on this PC at {time}" |
+| `saved_at` | "Saved in this browser at {time}" ("on {weekday} {day} {month}" before today: "Saved in this browser on Tue 3 Nov") |
+| `saved_at_window` | "Saved in HQ Hub at {time}" (`../../resolutions.md` B11) |
 | `off_until_reached` | "These wait until your HQ can be reached." |
 | `off_until_started` | "You can answer once HQ has started." |
 | `off_hub_stopped` | "HQ has stopped. Start HQ to try again." |
 | `off_hub_you_stopped` | "Start HQ to use this." |
 | `back` | "HQ is back. Lists are up to date." |
 | `outbox_heading` | "Waiting to send" |
-| `outbox_line_{state}` | "Saved in this browser. It will send when HQ is up." / "…when HQ is back." / "…when you are back online." / "Saved in this browser. It is next." |
+| `outbox_line_{state}` | "Saved in this browser. It will try again by itself." (starting) / "Saved in this browser. It will try again when HQ is back." (can't be reached) / "Saved in this browser. It will try again when you're back online." (offline) / "Saved in this browser. It is next." In the HQ window "Saved in HQ Hub." replaces "Saved in this browser." |
 | `outbox_sending` | "Sending {n} of {m}" |
 
 Retired everywhere on the web: "Live", "live", "saved", "offline" (as the dot's word), "Saved · 3 min",
 "Can't reach HQ", "Can't reach your HQ", "This device is offline", "HQ is stopped", "HQ did not start",
 "HQ is not answering", "HQ didn't reply", "HQ did not answer", "HQ is not running", "Not answering",
-"Checking…", "Live · AI service not answering", "Signed out · Saved · 2 h", every Tailscale step, any
-HTTP or exit code outside Copy details.
+"Checking…", "Live · AI service not answering", "Signed out · Saved · 2 h", "Try again soon" after
+"Your HQ can't be reached", "Saved on this PC", every Tailscale step, any HTTP or exit code outside
+Copy details.
 
 ## 6. Behaviour rules
 
@@ -284,8 +307,10 @@ HTTP or exit code outside Copy details.
    and `hq-thread-store:{hq_id}`, drafts `hq-drafts:{hq_id}`, the outbox `hq-outbox:{hq_id}`, the
    worker's cache `hq-api:{hq_id}` (the page posts the id to the worker). A different id never reads
    another's store.
-8. **5 MB in all, per HQ, kept until replaced.** Lists and notes already opened. When a write would pass
-   5 MB, the oldest place's copy is dropped first (by its saved time). Each place keeps its own "saved
+8. **256 KB a place, 2 MB in all, per HQ, kept until replaced** (`../../resolutions.md` B16, one cap on
+   phone and web). Lists and notes already opened. A place's copy past 256 KB keeps its newest items
+   up to the cap. When a write would pass 2 MB, the oldest place's copy is dropped first (by its saved
+   time). Each place keeps its own "saved
    at"; the strip shows that place's time, never an app-wide one. Today's 7-day `gcTime` becomes "until
    replaced" (no age limit), with the age always shown.
 9. **Wipe, at once.** On a non-cached 401 (rules-web 3), on Sign out this browser, and on Sign out
@@ -306,8 +331,8 @@ HTTP or exit code outside Copy details.
     never on retry.
 12. **Order and limits.** One at a time, oldest first, per HQ. A chat message waits up to 24 h, then
     stays in the thread unsent with Send now and Remove. Notes and tasks wait until sent or removed.
-    The outbox holds at most 100 entries (Recommended, OD-W4); the 101st is refused with "Couldn't keep
-    this in Waiting to send. It already holds 100 items. Send or remove some first."
+    The outbox holds at most 100 entries (`../../decisions.md` WR30); the 101st is refused with
+    "Couldn't add this. 100 things are already waiting to send."
 13. **Never twice.** HQ drops a repeat `client_id` (new on the server: messages through the socket and
     `POST /api/threads/{id}/messages`, `POST /api/note/create`, `POST /api/tasks`) and answers with the
     item it already made. A repeat dropped counts in "What HQ noticed".
@@ -365,7 +390,7 @@ HTTP or exit code outside Copy details.
 | `apps/hq-web/src/lib/connection.ts` | The state model (rules 1 to 6): inputs, order, words, sheet model, `useConnection()`. Replaces `reachability()`. | NEW |
 | `apps/hq-web/src/lib/reachability.ts` | Kept for `UNREACHABLE_GRACE_MS` and `useDeviceOnline()`; `reachability()` retired. | yes |
 | `apps/hq-web/src/components/ReachabilityBanner.tsx` | Removed; the connection sheet replaces it (`components/ConnectionSheet.tsx`, NEW). | yes |
-| `apps/hq-web/src/lib/savedCopy.ts` | Stores keyed by HQ id, the 5 MB cap, per-place saved times, `wipe(hqId)`. | NEW |
+| `apps/hq-web/src/lib/savedCopy.ts` | Stores keyed by HQ id, the 256 KB a place and 2 MB in all cap, per-place saved times, `wipe(hqId)`. | NEW |
 | `apps/hq-web/src/lib/offlineCache.ts` | The persister key and `gcTime` per rule 8; `markSynced(place)` per place. | yes |
 | `apps/hq-web/src/store/hqStore.ts`, `threadStore.ts` | Store names with the HQ id. | yes |
 | `apps/hq-web/src/components/chat/draftStore.ts` | Keyed by HQ id; off on a shared computer. | yes |
@@ -397,11 +422,12 @@ HTTP or exit code outside Copy details.
    answering `starting` the words are "Starting HQ · 12 s" with 12 from `started_at`. Today there is no
    such module and `reachability()` returns three values.
 2. No string in `apps/hq-web/src` matches `/\blive\b|Saved · |Can't reach HQ|HQ is not answering|HQ
-   didn't reply|Checking…|Tailscale/` outside tests and `docs`. Today `__root.tsx:369`,
+   didn't reply|Checking…|Saved on this PC|Tailscale/` outside tests and `docs`. Today `__root.tsx:369`,
    `ReachabilityBanner.tsx:45-56` and others match.
 3. Two HQ ids in one browser: writing a note copy under id A, then switching to id B, reads nothing;
    `wipe('A')` leaves B's stores intact. Today there is one unkeyed store.
-4. The saved copy passing 5 MB drops the oldest place's entry first. Today there is no cap.
+4. The saved copy passing 2 MB drops the oldest place's entry first, and one place never holds more
+   than 256 KB. Today there is no cap.
 5. A message sent with the socket closed is in `hq-outbox:{id}` with a `client_id`; sending it twice to
    HQ makes one message (`cargo test -p hq-web` on the socket and the messages route). Today it is not
    queued, and HQ would store two.
@@ -425,7 +451,7 @@ HTTP or exit code outside Copy details.
 
 - **N19** (owner to confirm): one catalogue for phone and web. Until then, rule 21's fallback.
 - **N8**: counters on by default, one previous version kept. Recommended.
-- **OD-W4** (new): the outbox's cap, Recommended 100 entries. The boards say "capped" (W20) without a
-  number.
+- **WR30** (settled, was OD-W4): the outbox holds at most 100 items.
 - Depends on: `01-live-bugs.md` (the first wipe), `../../changes.md` (`/api/status/ai`, the starting
-  flag, client-id dedup), D16, D17 (the phone's saved-copy rule), N1, W20, WR5, WR6, WR26.
+  flag, client-id dedup), D16, D17 (the phone's saved-copy rule), N1, W20, WR5, WR6, WR26, and
+  `../../resolutions.md` A2, A6, A7, B11, B16, C-12.

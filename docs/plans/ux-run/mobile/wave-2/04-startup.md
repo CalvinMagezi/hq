@@ -8,9 +8,11 @@ Connection sheet (`../wave-4/01-offline.md`). `../../rules-shared.md` sections 1
 Headline: **Show the start as the steps the app can see, in the Connection sheet after the first launch,
 and call HQ stopped only when it is.**
 
-Note on order: FixPlan puts this board in wave 2 ("start steps inside the Connection sheet") while the
-Connection sheet itself is drawn on FixOffline (wave 4). Wave 2 must build the sheet's start part
-(`ui/shell/ConnectionSheet.kt`); wave 4 adds the rest. See "Open conflicts" in `../README.md`.
+Note on order (`../../resolutions.md` D-5): the Connection sheet's data model and words are wave 0
+(`data/Connection`, `ConnectionWords`); its UI is built once, in `ui/connection/`, here in wave 2 with
+Startup (the start steps, "usually about", "Stopped at", "almost full"); wave 4 (FixOffline) extends it
+with saved copies and server rows. There is one "almost full" formula: under 200 MB free for the app's
+files (N15).
 
 ## 1. Finding and the review items it closes
 
@@ -110,7 +112,8 @@ Four steps the app can observe for itself; no change in HQ is needed. One cover,
    is one 48 dp button that opens the Connection sheet (frame 3). The place keeps working on its saved
    copy."
 3. **The Connection sheet: HQ starting.** Behind: "Notes · Starting HQ · 19 s". Sheet "HQ is starting" /
-   "HQ runs on this phone. After a reboot it can take up to a minute." Facts: "HQ on this phone · Step 3
+   "HQ runs on this phone. After a reboot it can take up to a minute. You can read and write while you
+   wait." (one body for this board and FixOffline; `../README.md` "Still open") Facts: "HQ on this phone · Step 3
    of 4 · 19 s"; the checklist with the bar (pin 6); "Usually about 25 s" (pin 7); "Internet · Wi-Fi";
    "Saved on this phone at · 14:32".
 4. **Slow, but HQ is alive and moving.** Behind "Starting HQ · 72 s". Sheet "HQ is starting": "HQ on this
@@ -125,11 +128,11 @@ Four steps the app can observe for itself; no change in HQ is needed. One cover,
    "Saved on this phone at · 14:32" (pin 11). Buttons: [Start HQ] (green), [Save a copy of my notes] (pin
    14), [Open Android settings] with "Then set Battery to Unrestricted.", "Technical details: Health check
    timed out after 60 s. · Last start 09:14 · exit code none" (pin 13), [Copy details] (pin 12).
-6. **The running notice: rules section 1 words** (generic shade).
-   - Active, tap opens the app (pin 15): "AgentHQ / HQ is running / Answering your chats and running
-     scheduled tasks."
-   - Standby, one action (pin 16): "HQ is running / Only the app is on. Chats and scheduled tasks are
-     paused." / action [Background work].
+6. **The running notice: rules section 1 words** (generic shade). It has no buttons on any version; a
+   tap opens the app (`../../resolutions.md` D-2: FixOffline wins over this board's Standby action).
+   - Active (pin 15): "AgentHQ / HQ is running / Answering your chats and running scheduled tasks."
+   - Standby (pin 16): "HQ is running / Only the app is on. Chats and scheduled tasks are paused." No
+     action.
    - Starting, or restarting (pin 17): "HQ is starting / Step 3 of 4 · Opening your notes and tasks";
      "HQ is restarting / A setting changed. It is back in a few seconds."
    - Stopped (pin 18): "HQ has stopped / Tap to see why."
@@ -137,7 +140,7 @@ Four steps the app can observe for itself; no change in HQ is needed. One cover,
    chats. HQ on this phone is starting after a reboot." Facts: "Your server HQ · hq.example.ts.net ·
    Connected" (first), "HQ on this phone · Step 2 of 4 · Only the app is on", "Saved on this phone at ·
    14:32". Its running notice (pin 19): "HQ is running / Only the app is on. Your server HQ answers your
-   chats. / Background work".
+   chats." No action (D-2).
 8. **Android 8 to 11.** "Android 8.0 and 8.1: the notice may show at Low" (pin 20): "HQ is starting /
    Step 2 of 4 · Loading HQ". "Check on device: does 8.0 or 8.1 raise a Min channel to Low for a
    foreground service?" What else differs: "Android 8 and 9 have no Active apps panel. Without the notice,
@@ -192,12 +195,12 @@ The running notice, channel HQ is running (Min):
 | State | String |
 |-------|--------|
 | Active | "HQ is running" · "Answering your chats and running scheduled tasks." |
-| Standby | "HQ is running" · "Only the app is on. Chats and scheduled tasks are paused." · action "Background work" |
-| Standby, server | "HQ is running" · "Only the app is on. Your server HQ answers your chats." · "Background work" |
+| Standby | "HQ is running" · "Only the app is on. Chats and scheduled tasks are paused." (no action, D-2) |
+| Standby, server | "HQ is running" · "Only the app is on. Your server HQ answers your chats." (no action, D-2) |
 | Starting | "HQ is starting" · "Step {n} of 4 · {step}" |
 | Restarting | "HQ is restarting" · "A setting changed. It is back in a few seconds." |
 | Stopped | "HQ has stopped" · "Tap to see why." |
-| Retired | "HQ is not answering" · "Tap to see why and try again." · "HQ did not start" (as a cover) · "Try again" · "Battery settings" |
+| Retired | "HQ is not answering" · "Tap to see why and try again." · "HQ did not start" (as a cover) · "Try again" · "Battery settings" · the Standby action "Background work" |
 
 Strings move to resources with the rules section 2 keys (`fail_start_phone_full` and the rest).
 
@@ -230,7 +233,8 @@ Strings move to resources with the rules section 2 keys (`fail_start_phone_full`
     details includes it and "Stopped at".
 14. **Save a copy of my notes** opens safe mode, which needs no HQ (FixSafeMode).
 15. **Every notice's tap** opens the app where Android's launcher would; Stopped opens the sheet.
-16. **Standby** adds one action, Background work, through `hq://settings/background`.
+16. **No buttons on the running notice** in any state or version (`../../resolutions.md` D-2). A tap opens
+    the app; Background work stays in Settings (`hq://settings/background`).
 17. **Starting and Restarting** replace the running text while HQ has not answered; they change only when
     the step does, with no sound and no seconds. Restarting only after the app asked for it.
 18. **Stopped** follows rule 11, also with the app closed. Back to "HQ is running" at the next good answer.
@@ -273,8 +277,8 @@ Android constraints, as checked on the board:
 | `K/ui/startup/Startup.kt` | `decide()` (lines 24 to 28) returns the cover only while `first_done` is false, and never `DidNotStart` after that; `GIVE_UP_SECONDS` (line 22) gives way to the stuck rule; `failedLines()` (line 39) moves into Technical details; a `StartStep` enum, `usual()`, the slow rule. | yes |
 | `K/ui/startup/StartupScreens.kt` | `StartingScreen` (line 41) drops `PROGRESS_FILL` (line 36) for the 4 dp bar and the checklist; `DidNotStartScreen` (line 68) is retired for later launches. | yes |
 | `K/data/HqServices.kt` | `HqStatus.Starting(seconds)` (line 18) gains the step; new `Restarting` and `Stopped` from the stuck rule; records start durations (last five). | yes |
-| `K/ui/shell/ConnectionSheet.kt` (FixOffline) | The steps, usual, Stopped at, the almost-full line, Save a copy of my notes. | NEW |
-| `java/example/hq/spike/HubService.java` | Expose the step (service up, child alive, port probe); `notification()` (lines 193 to 197) gains the content intent, the Standby action and the state words, posted on changes only; the channel moves to Min under a new id (line 173). | yes |
+| `K/ui/connection/ConnectionSheet.kt` | Built here in wave 2 (`../../resolutions.md` D-5): the steps, usual, Stopped at, the almost-full line, Save a copy of my notes. Reads `data/Connection` and `ConnectionWords` from wave 0. Wave 4 adds saved copies and server rows. | NEW |
+| `java/example/hq/spike/HubService.java` | Expose the step (service up, child alive, port probe); `notification()` (lines 193 to 197) gains the content intent and the state words, with no action (D-2), posted on changes only; the channel moves to Min under a new id (line 173). | yes |
 | `res/values/strings.xml` | Strings with the rules section 2 keys (`fail_start_phone_full` and the rest). | yes |
 
 ## 9. Server, release or desktop changes
@@ -298,6 +302,8 @@ climbs (`../wave-0/04-measure.md`).
 6. Fresh install: the cover shows the four steps on one 4 dp blue bar that never goes back.
 7. From the second start, the sheet shows "Usually about {N} s", the median of the last five.
 8. Android's page for the app shows the "HQ is running" category as Min (Silent, folded away).
+9. The running notice has no action button in Active, Standby, Starting, Restarting or Stopped, on
+   Android 8.1, 10, 12 and 14; a tap opens the app (D-2).
 9. The stopped sheet has no health check or exit code outside Technical details, and its buttons read
    Start HQ, Save a copy of my notes, Open Android settings.
 10. 360 dp emulator at font scale 2.0: the status line wraps and the state is never cut; the sheet
@@ -322,6 +328,6 @@ climbs (`../wave-0/04-measure.md`).
   counters. (Decided: N15.)
 - **Decided (rules section 6):** the stopped sheet opens by itself at most once a day.
 
-Depends on: D15, N15, rules sections 1, 2, 6; `../wave-4/01-offline.md` (the Connection sheet and status
+Depends on: D15, N15, `../../resolutions.md` A7, D-2, D-5, rules sections 1, 2, 6; `../wave-4/01-offline.md` (the Connection sheet and status
 line); `../wave-0/02-safe-mode.md` (Save a copy of my notes); `../wave-0/04-measure.md`
 (`start_hq.while_running`).

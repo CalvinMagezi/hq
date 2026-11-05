@@ -110,11 +110,12 @@ Rejected:
   wait on you. They are on Today." [Go to Today]. Footer: "From HQ's checks of finished work. Spot checks
   and holds are on the web app."
 - **A3 · Tasks All: Board and Timeline at the top** (pin 4). "Connected · 9 active"; chips Active, Stuck
-  1, Ready to check 1, Done; row "See all tasks as · [Board] [Timeline]" right under the chips; then "In
+  1, Ready to check 1, Done; row "Show all tasks as · [Board] [Timeline]" right under the chips; then "In
   progress 2" (T-3 "1 of 3 sub-tasks done", T-4 "HQ is working on it · due Sunday"), "Stuck 1" ("T-1 ·
   Stuck 2d · Soak, reboot test, cleanup of old copies · Waiting on you · needs a reboot window").
 - **A4 · Board, marked as a web page** (pin 5). Bar "Board" with the second line "Web page · all tasks".
-  "The web app's Board page. Loaded as today, with host=android. Not drawn here. The filter on All does
+  "The web app's Board page. Loaded with `?embed=1` (`../../resolutions.md` C-9; the web accepts
+  `?host=android` too). Not drawn here. The filter on All does
   not carry over: the line says "all tasks". A link inside the page to /vault does not load: the app opens
   Notes instead."
 - **A5 · A web page while HQ is starting** (pin 6). Bar "Timeline / Web page · all tasks by date". The
@@ -128,7 +129,7 @@ Rejected:
   finished 6 tasks.", "2 went back to Codex to finish."
 - **A8 · The page, server HQ can't be reached** (pin 9). "While you were away / Last 24 hours · checked at
   14:32". "On this phone": "Checked and finished · 4 tasks", "Went back to you to finish · 1 task". "On
-  your server HQ": amber strip "Your server HQ can't be reached. Check your internet." / "Saved on this
+  your server HQ": amber strip "Your server HQ can't be reached. It will try again when HQ is back." (A2) / "Saved on this
   phone at 14:18."; "Checked and finished · 6 tasks · hq.example.ts.net", "Went back to Codex to finish ·
   2 tasks". Footer as A2.
 - **A9 · Today card at 360 dp, font scale 2.0** (pin 10). The heading "While you were away" and "last 24
@@ -142,7 +143,7 @@ Rejected:
 | Card lines (zero parts left out) | "HQ checked and finished 4 tasks." · "1 went back to you to finish." · "1 finishes at 18:00." |
 | Went back, a helper's task | "2 went back to Codex to finish." |
 | Server part (heading, lines) | "On your server HQ" · then the same lines from that server |
-| Server can't be reached | "Your server HQ can't be reached. Check your internet." · "Saved on this phone at 14:18." |
+| Server can't be reached | "Your server HQ can't be reached. It will try again when HQ is back." (A2) · "Saved on this phone at 14:18." |
 | One task | "HQ checked and finished 1 task." |
 | Page title, line | "While you were away" · "Last 24 hours · checked at 14:32" |
 | Section labels | "Finishing soon" · "Checked and finished" · "Went back to you to finish" · "Waiting on you" |
@@ -152,7 +153,7 @@ Rejected:
 | Waiting on you | "2 tasks wait on you. They are on Today." Button: "Go to Today" |
 | Footer | "From HQ's checks of finished work. Spot checks and holds are on the web app." |
 | Page, HQ not answering | From rules section 2: "Couldn't load While you were away. HQ is still starting. It will try again by itself." (or: "HQ has stopped. Start HQ to try again.") |
-| All row | "See all tasks as" · "Board" · "Timeline" |
+| All row | "Show all tasks as" · "Board" · "Timeline" |
 | Web page line | Board: "Web page · all tasks" · Timeline: "Web page · all tasks by date" · Usage: "Web page · spend and forecast" |
 | Web page, waiting | "Timeline opens when HQ is up" · "HQ is still starting. It will try again by itself." |
 | Web page, stopped | "Timeline opens when HQ is up" · "HQ has stopped. Start HQ to try again." Button: "Start HQ" |
@@ -189,7 +190,14 @@ All counts use plural resources ("1 task", "4 tasks").
 - **"Went back to you"** only when the task has no helper assigned; a helper's task names the helper. Never
   "fixed".
 - **Links that change:** `hq://web/home` and `hq://web/vault` open Notes (they opened the web Home).
-  `hq://web/usage`, `board` and `timeline` are unchanged.
+  `hq://web/usage`, `board` and `timeline` are unchanged as links.
+11. **`hq://tasks/away`** opens this page (rules section 8; `../../resolutions.md` D-9).
+12. **The phone's web pages use `?embed=1` (added by resolutions.md C-9).** Usage, Board and Timeline load
+    `/settings/spending?embed=1`, `/tasks?view=board&embed=1` and `/tasks?view=timeline&embed=1`. The web
+    accepts both `?embed=1` and `?host=android`, so a phone on today's build keeps working
+    (`../../web/wave-2/02-embed-and-lite.md`).
+13. **Note links by id (added by resolutions.md C-10).** `hq://notes/n/{id}` opens a note by its id, beside
+    the web's `/notes/n/:id` (the "Copy link" form). An unknown id opens Notes with the note-gone page.
 - **Reading the briefing:** once when Today opens, then at most every 2 minutes while it is on screen, and
   when HQ turns Connected. On patchy data a failed read keeps the copy saved on the phone and shows its
   time.
@@ -214,19 +222,21 @@ phone like the task list and cleared on server sign-out, Disconnect or a refused
 |------|--------|--------|
 | `ui/webhost/WebHost.kt` | Drop `WebPage.Home` (line 10); add `subtitle` per page; `allows()` (lines 35-38, today any path on 127.0.0.1 and the hub port) also refuses the path `/vault` and anything under it, and the screen opens Notes for it; failure words are the string resources of rules section 2. | yes |
 | `ui/webhost/WebHostScreen.kt` | The second line in the bar; the not-answering state is the shared `NothingYet`; reload by itself when the connection turns Connected. | yes |
-| `ui/shell/Links.kt` | `webPage()` (line 54) maps "home" and "vault" to `LinkTarget(Place.Notes)`. | yes |
+| `ui/shell/Links.kt` | `webPage()` (line 54) maps "home" and "vault" to `LinkTarget(Place.Notes)`; parse `hq://tasks/away` (D-9) and `hq://notes/n/{id}` (C-10). | yes |
+| `ui/webhost/WebHost.kt` `WebPage` URLs | `?embed=1` in place of `?host=android` (C-9). | yes |
 | `data/HqClient.kt` | `verificationBriefing(hours = 24)` on `GET /api/verification/briefing`; a 404 means this HQ has no verification. For a server HQ, the same route through `ServerHq.call()` (line 125) with the phone's device token, which the web auth middleware accepts like the web token (`crates/hq-web/src/auth.rs:386-420`). No server change is needed. | yes (function NEW) |
 | `ui/tasks/Away.kt` | `AwayWords`, the parsed briefing: `completed_total`, `reworked` with each task's id, `veto_windows`. | NEW |
 | `ui/tasks/AwayPage.kt` | The page. | NEW |
 | `ui/tasks/TasksViewModel.kt` | Reads the briefing when Today opens and when HQ turns Connected, and saves it on the phone like the task list. The "went back" line names the helper from the task's assignee, else "you". | yes |
 | `ui/tasks/TasksScreen.kt` | `WebViews()` (line 156) becomes `SeeAsRow` under the All chips; `AwayCard` at the top of Today. | yes |
-| Tests | `LinksTest` (home and vault go to Notes), `AwayWordsTest` (zero parts left out, plurals, "you" or the helper, times past midnight), `WebHostTest` on `allows()` for `/vault`, `/vault/x` and `/tasks`. | `LinksTest`, `WebHostTest` yes; `AwayWordsTest` NEW |
+| Tests | `LinksTest` (home and vault go to Notes; `hq://tasks/away` opens this page; `hq://notes/n/{id}` opens that note), `AwayWordsTest` (zero parts left out, plurals, "you" or the helper, times past midnight), `WebHostTest` on `allows()` for `/vault`, `/vault/x` and `/tasks`. | `LinksTest`, `WebHostTest` yes; `AwayWordsTest` NEW |
 
 ## 9. Server, release or desktop changes
 
-None, per the board. Check before building: CLAUDE.md describes the verification REST routes as
-owner-only (`crates/hq-web/src/verification_api.rs`); confirm the phone's web token and a server's device
-token both pass that gate for `GET /api/verification/briefing`.
+None, per the board. `../../resolutions.md` D-10: `/api/verification/briefing` is owner-only and the phone
+signs in as the owner, so it may read it. Confirm in `crates/hq-web/src/verification_api.rs` before
+building that the phone's web token and a server's device token both pass that gate, and stop and ask
+the owner if the route is limited further.
 
 ## 10. Acceptance checks (each fails on today's build)
 
@@ -245,6 +255,10 @@ token both pass that gate for `GET /api/verification/briefing`.
 7. On All with 40 tasks, Board and Timeline are visible without scrolling.
 8. Board, Timeline and Usage show their web page line; with hq stopped they show the shared state and load
    by themselves after Start HQ.
+9. `LinksTest`: `hq://tasks/away` opens While you were away (D-9); `hq://notes/n/abc123` opens that note
+   (added by resolutions.md C-10).
+10. The WebView's URL for Board ends in `embed=1`, and the web page shows no bars of its own (added by
+    resolutions.md C-9).
 
 ## 11. Check on device
 
@@ -260,5 +274,5 @@ token both pass that gate for `GET /api/verification/briefing`.
 - **Make Timeline native later?** Recommendation: yes, after Board, if owners use it; Board stays web.
   (Decided: D21, "Native Timeline: Later.")
 
-Depends on: D18, D21, rules sections 2, 6, 8; `01-offline.md` (shared states, saved copies, server
+Depends on: D18, D21, `../../resolutions.md` A2, B7, C-9, C-10, D-9, D-10, rules sections 2, 6, 8; `01-offline.md` (shared states, saved copies, server
 parts); `../wave-1/05-progress.md` (counts).

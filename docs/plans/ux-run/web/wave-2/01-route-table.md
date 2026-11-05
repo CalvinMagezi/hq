@@ -69,18 +69,19 @@ No new screens: the table decides which place opens.
 | `/chat`, `/chat/:id` | `hq://chat`, `chat/{id}` | `/chat?thread={id}` (reply alerts, helper reports) | Chat, or that chat. Watching in the details panel. |
 | `/chat?compose=1` | `hq://chat?compose=1` | new | Chat with the composer focused, never the microphone. |
 | `/notes`, `/notes/$path` | `hq://notes/{path}`, and `hq://web/home` and `web/vault` open Notes too | `/vault`, `/vault/$path` | Notes home (Pinned, Recent), or that note. |
-| `/notes/n/:id` | none yet | new | A note by its id, the "Copy link" form. Opens only on your signed-in devices. |
+| `/notes/n/:id` | `hq://notes/n/{id}` (`../../resolutions.md` C-10) | new | A note by its id, the "Copy link" form. Opens only on your signed-in devices. |
 | `/tasks`, `/tasks/:id` | `hq://tasks`, `tasks/{id}` | `/tasks?task={id}` (task reports, verification) | Tasks on Today, Upcoming or All, or that task in the detail pane. |
 | `/tasks/away` | `hq://tasks/away` | the briefing on `/vault` and on `/tasks` | While you were away. |
 | `/tasks?view=board`, `?view=timeline` | `hq://web/board`, `web/timeline`, opened with `?embed=1` | same | Board or Timeline, the view switch from 768. |
 | `/helpers`, `/helpers/:id` | `hq://helpers`, `helpers/{id}` | `/sessions`, `/sessions?id={id}` (helper alerts in the Inbox) | Helpers, or that helper. |
 | `/helpers?task=T-13` | `hq://helpers` | `/sessions?task=` | Helpers filtered to that task. |
 | `/inbox`, `/inbox/:id`, `?tab=updates` | `hq://inbox`, `inbox/{id}` | `/notifications` (the default push link and a manifest shortcut today) | Inbox on Needs you, Updates or Done, or that item. |
-| `?q=` on any place | `hq://search`, `search/notes` | the Search overlay | The one Search over notes, tasks, chats and helpers. |
+| `?q=` on any place | `hq://search`, `search/notes` (never with a query) | the Search overlay | The one Search over notes, tasks, chats and helpers. The web address keeps `?q=` for back and forward only; no `hq://` link carries a query (`../../resolutions.md` B6). |
 | `/settings/:section` | `hq://settings/{screen}` | `/settings#{section}` | Always the same section for the same address. The card slot sits on top of the Settings home. |
 | `/settings/browser` | none: the web only | the install prompt, the header clock | This browser: Notifications, Sign out this browser, Time zone, Install and version, Data used. |
 | `/settings/spending` | `hq://web/usage`, opened with `?embed=1` | `/usage` | Spending limits, under How HQ behaves. The balance chip opens it. |
 | `/settings/devices` | `hq://settings/devices` | the device sign-in dialog | Other devices, and Sign in another device. |
+| (phone only) | `hq://settings/assistant`, `settings/update`, `settings/speech` | none | Phone-only Settings screens (added by resolutions.md C-14). The web has no address for them; `/settings/assistant`, `/settings/update` and `/settings/speech` open the Settings home. |
 | `/setup`, `/connect` | none | same | Full-screen covers with no shell. |
 | `/signin` | none | the Sign in banner | Sign in, under "Signed out of this HQ". Nothing saved shows. |
 | `/vault#code=…` | the phone scans the same QR | kept as is | Signs this browser in with the one-time code, then opens Chat. `apps/hq-web/src/lib/deviceSignIn.ts` builds it today. |
@@ -133,8 +134,7 @@ stays lit on every address under it (`/notes/...` lights Notes, Drift 12).
 | `manifest_shortcuts` | "Chat", "Notes", "Inbox" |
 | `document_title` | "{Place} · HQ" ("Chat · HQ", "Notes · HQ"); Recommended, the board says only that the title changes |
 | `newer_hq` | "A newer HQ is running. Reload to keep going." |
-| `lite_no_chat` | "This HQ is HQ Lite. It has no Chat." |
-| `lite_no_helpers` | "This HQ is HQ Lite. It has no Helpers." |
+| `lite_no_place` | "This HQ is HQ Lite. It has no {place}." (`../../resolutions.md` B13): "It has no Chat.", "It has no Helpers.", and on `/settings/spending` "It has no Spending limits." (WR28) |
 
 ## 6. Behaviour rules
 
@@ -156,8 +156,15 @@ stays lit on every address under it (`/notes/...` lights Notes, Drift 12).
 6. **`is_app_path`** (`web_push/mod.rs:263`) still refuses another origin; redirects never leave the app.
 7. **The manifest** is AgentHQ with three shortcuts; `start_url` `/` (Chat), `scope` `/`. Theme and
    background `#000000` (surface-000).
-8. **Lite** redirects `/chat*` and `/helpers*` to `/notes` with the toast (`02-embed-and-lite.md`).
+8. **Lite** redirects `/chat*` and `/helpers*` to `/notes` with the toast, and `/settings/spending` to
+   `/settings/browser` with "This HQ is HQ Lite. It has no Spending limits." (`02-embed-and-lite.md`,
+   B13, WR28).
 9. **Every redirect has a test** (section 10).
+10. **Phone-only screens are marked (added by resolutions.md C-14).** `lib/routes.ts` carries a
+    `phoneOnly: true` flag on `settings/assistant`, `settings/update` and `settings/speech`, so the
+    phone's link table and the web's stay one table. The web never draws a row for them.
+11. **No query in a phone link (B6).** `routes.ts` maps `?q=` to `hq://search` without the query; a
+    test fails if any `hq://` value in the table has a `?q=`.
 
 ## 7. Browser and platform notes
 
@@ -214,6 +221,10 @@ stays lit on every address under it (`/notes/...` lights Notes, Drift 12).
    on a note.
 6. `cargo test`: the session alert link is `/helpers/{id}`; the push default link is `/inbox`. Today
    `/sessions?id=` and `/notifications`.
+7. `bun test lib/routes.test.ts`: `settings/assistant`, `settings/update` and `settings/speech` are
+   `phoneOnly`, and `/settings/assistant` lands on the Settings home (added by resolutions.md C-14);
+   `/notes/n/:id` pairs with `hq://notes/n/{id}` (C-10); no phone link carries `?q=` (B6). Today the
+   table does not exist.
 
 ## 11. Check on a laptop or phone
 
@@ -223,6 +234,7 @@ stays lit on every address under it (`/notes/...` lights Notes, Drift 12).
 
 ## 12. Open decisions it depends on
 
-- **Decision N**, **W1**, **W2**, **WR1** to **WR4** (Recommended or Revised).
+- **Decision N**, **W1**, **W2**, **WR1** to **WR4**, **WR28** (Recommended or Revised), and
+  `../../resolutions.md` B6, B13, C-10, C-14.
 - Depends on: rules-shared 8 (the phone's link table, kept in step), `02-embed-and-lite.md`,
   `../wave-1/06-settings-groups.md` (section paths), `../wave-4/*` (the places these routes open).

@@ -177,12 +177,13 @@ pattern.
     - "Check for updates · Couldn't check for updates. Couldn't reach the download server. Check your
       internet and try again."
     - "Check for updates · Version 1.5.0 needs Android 10 or newer"
-12. **A version is withdrawn.** "Found, not installed yet": "Check for updates · Version 1.5.0 was
-    withdrawn. You stay on 1.4.0." (pin 20). "The dot, the card and the notice go. A downloaded file is
-    deleted." "Already installed: the card slot on Settings home": "This version has a known problem / A
-    fixed version is coming. Save a copy of your notes now, to be safe. / [Save a copy now]" (pin 21).
-    "And once, on App updates": "AgentHQ · App updates / AgentHQ 1.5.0 has a known problem. / Open HQ to
-    see what to do."
+12. **A version is withdrawn.** The words are FixSafeMode's (`../wave-0/02-safe-mode.md` frame 15), one
+    wording on both boards (recommended in `../README.md` "Still open"). "Found, not installed yet":
+    "Check for updates · Up to date · 1.5.0 was withdrawn. Nothing was installed." (pin 20). "The dot,
+    the card and the notice go. A downloaded file is deleted." "Already installed: the card slot on
+    Settings home": "AgentHQ 1.5.0 has a problem / A fix is coming. Save a copy of your notes now, to be
+    safe. / [Save a copy of my notes]" (pin 21). "And once, on App updates": "AgentHQ · App updates /
+    AgentHQ 1.5.0 has a problem / Open HQ to see what to do."
 13. **Backup and about: server owner, test versions on.** About: "AgentHQ · Build 47", "Background work ·
     Only when I open the app", "HQ version · 1.5.0". "Your server HQ · hq.example.ts.net · HQ version 1.5.0
     · up to date" (grey, pin 22). "A week behind:" "hq.example.ts.net · Still on 1.4.0, a week after 1.5.0
@@ -240,7 +241,7 @@ Notifications, channel App updates:
 | Reminder, day 7 | "A new version of AgentHQ is ready." · "AgentHQ {version} is still waiting. Tap to see what is new." |
 | Downloaded | "AgentHQ {version} is downloaded." · "Checked and ready. Android will ask you to confirm." · "Install" |
 | Installed | "Updated to {version}" · "AgentHQ is running the new version." |
-| Withdrawn, installed | "AgentHQ {version} has a known problem." · "Open HQ to see what to do." |
+| Withdrawn, installed | "AgentHQ {version} has a problem" · "Open HQ to see what to do." (FixSafeMode's words) |
 
 In the app:
 
@@ -248,7 +249,7 @@ In the app:
 |---------|--------|
 | Gear, for TalkBack | "Settings, update ready" |
 | Home card | "Update ready" · "AgentHQ {version} · {size} download" · "See update" |
-| Home card, withdrawn | "This version has a known problem" · "A fixed version is coming. Save a copy of your notes now, to be safe." · "Save a copy now" |
+| Home card, withdrawn | "AgentHQ {version} has a problem" · "A fix is coming. Save a copy of your notes now, to be safe." · "Save a copy of my notes" (FixSafeMode's words) |
 | Page title | "Update AgentHQ" |
 | Facts | "On this phone" · "New version" · "Android on this phone" · "{version} · Build {n}" |
 | Notes heading | "What is new" |
@@ -281,15 +282,15 @@ Backup and about (FixPlainWords):
 | Not verified | "Android could not check who made this version. It cannot install yet." |
 | Not allowed yet | "AgentHQ is not allowed to install apps yet. Tap to allow it." |
 | Check failed | "Couldn't check for updates. Couldn't reach the download server. Check your internet and try again." |
-| Withdrawn, found | "Version {version} was withdrawn. You stay on {installed}." |
+| Withdrawn, found | "Up to date" · "{version} was withdrawn. Nothing was installed." (FixSafeMode's words) |
 | Too old | "Version {version} needs Android {name} or newer" |
 | Test versions | "Get test versions" · off: "You get versions marked ready" · on: "New versions before they are marked ready. Some may have problems. You can go back only when a regular version is newer." |
 | Server HQ | "Your server HQ" · "{address}" · "HQ version {version} · up to date" / "Still on {old}, a week after {new} came out. On the server, run hq update." |
 | Cancel a download | Acts at once, then "Download cancelled · Undo" for the accessibility timeout (rules section 4) |
 | Kept as shipped | "Not checked yet" · "Waiting for you to confirm the install" · the signature, hash, size and format failures, reworded to the rules section 2 form |
 
-The withdrawn wording here differs from `../wave-0/02-safe-mode.md`; see "Open conflicts" in
-`../README.md`.
+The withdrawn wording is `../wave-0/02-safe-mode.md`'s, so both boards say the same thing; the owner may
+still choose the other wording (`../README.md` "Still open").
 
 ## 6. Behaviour rules
 
@@ -307,8 +308,9 @@ The withdrawn wording here differs from `../wave-0/02-safe-mode.md`; see "Open c
 5. **The gear's dot** (blue) shows while an update is ready and its page has not been opened.
 6. **The card** sits in the one Settings home slot and stays until it is installed; Not now on the page
    hides card and dot for 7 days.
-7. **What is new** is the channel file's notes field: up to three plain lines of 120 characters, written
-   at release and signed with the rest. Left out when missing.
+7. **What is new** is the channel file's notes field, a map from language to up to three plain lines of
+   120 characters (`{"en": ["…", "…"]}`, `../../resolutions.md` D-3, D12), written at release and signed
+   with the rest. The phone shows its own language, else `en`. Left out when missing.
 8. **The size** is the channel file's size field, in bytes, signed. The download must match it as well as
    the SHA-256. A channel file with no size shows no size and no notice; the row says "Version {version}
    is ready".
@@ -388,9 +390,9 @@ Android constraints, as checked on the board:
 
 | File | Change | Exists |
 |------|--------|--------|
-| `scripts/release/android-channel.sh` (lines 32 to 34) | Add `size` (the APK's bytes), `notes`, `withdrawn: false`, `rollout` and `urgent` to the jq object. `release.yml:539` signs it as today. (FixSafeMode also adds `seq`, `issued_at`, `switches` and a `withdrawn` list.) | yes |
-| `.github/workflows/promote.yml` (lines 84 to 100) | Today it verifies and copies `android-channel.json` unchanged. It must set the rollout share, re-sign with `sign.sh` (the job already has `MINISIGN_KEY`, line 70, and signs `channel-stable.json` at line 76), and upload both. A withdraw input does the same with `withdrawn: true`. | yes |
-| `kotlin/.../update/UpdateLogic.kt` | `ChannelManifest` (line 8) gains `size`, `notes`, `withdrawn`, `rollout`, `urgent`, all optional for older files; `androidName(sdk)`; `words()` rewritten; `STOPPED` and `BLOCKED` (lines 52, 53) shortened; failures in the rules section 2 form. Also move `RELEASES_URL` (line 40) behind config. | yes |
+| `scripts/release/android-channel.sh` (lines 32 to 34) | Add `size` (the APK's bytes), `notes` (a map from language to up to three lines), `withdrawn` (a list of versionCodes, empty at release), `rollout` and `urgent` to the jq object, plus FixSafeMode's `seq`, `issued_at` and `switches` (with `save_copy` and `lock_screen_assist_off_models`), all as `../../resolutions.md` D-3 shapes them. `release.yml:539` signs it as today. | yes |
+| `.github/workflows/promote.yml` (lines 84 to 100) | Today it verifies and copies `android-channel.json` unchanged. It must set the rollout share, re-sign with `sign.sh` (the job already has `MINISIGN_KEY`, line 70, and signs `channel-stable.json` at line 76), and upload both. A withdraw input adds the version's versionCode to the `withdrawn` list and re-signs (D-3). | yes |
+| `kotlin/.../update/UpdateLogic.kt` | `ChannelManifest` (line 8) gains `size`, `notes` (a language map), `withdrawn` (a list of versionCodes), `rollout`, `urgent`, all optional for older files (D-3); `androidName(sdk)`; `words()` rewritten; `STOPPED` and `BLOCKED` (lines 52, 53) shortened; failures in the rules section 2 form. Also move `RELEASES_URL` (line 40) behind config. | yes |
 | `kotlin/.../update/Updater.kt` | The state (line 41) is rebuilt from the saved channel file at start; the bucket is drawn once into prefs; the idle gate before `commit()` (line 200); the checked APK moves from `cacheDir` (line 169) to `noBackupFilesDir` and is kept after an abort. | yes |
 | Idle gate | HQ's busy state (chat turn, backup, outbox send) from a signed-in route, plus `LargeDownload`'s own state. Shared with FixSafeMode. | NEW route |
 | `kotlin/.../update/InstallResultReceiver.kt` | Start the confirm only while visible, else notify; map Auto Blocker and verification. | yes |
@@ -402,8 +404,10 @@ Android constraints, as checked on the board:
 
 ## 9. Server, release or desktop changes
 
-- **The channel file** gains `size`, `notes`, `withdrawn`, `rollout`, `urgent` (and, per FixSafeMode,
-  `seq`, `issued_at`, `switches`); **promote re-signs instead of copying**; **a withdraw workflow**.
+- **The channel file** gains `size`, `notes` (a map from language to up to three lines), `withdrawn` (a
+  list of versionCodes), `rollout`, `urgent` (and, per FixSafeMode, `seq`, `issued_at`, `switches` with
+  `save_copy` and `lock_screen_assist_off_models`), as `../../resolutions.md` D-3 shapes them;
+  **promote re-signs instead of copying**; **a withdraw workflow**.
 - **A signed-in busy route** in `crates/hq-web` for the idle gate.
 - **`UpdateLogic.kt` hardcodes a real GitHub owner** (`RELEASES_URL`): move it behind config (FixPlan).
 - The server HQ version reads `/health`'s `version`, which exists today.
@@ -421,7 +425,7 @@ Android constraints, as checked on the board:
    "Installs when HQ is free · Waiting for 1 chat to finish", and Android's confirm shows only after the
    turn ends.
 5. A test channel marks the found version withdrawn: the dot, card and notice go, the downloaded file is
-   deleted, the row reads "Version 1.5.0 was withdrawn. You stay on 1.4.0."
+   deleted, the row reads "Up to date · 1.5.0 was withdrawn. Nothing was installed."
 6. Rollout share 0: no notice, no dot. Share 100: the notice. The bucket is the same after an app update.
 7. Without urgent: one reminder after 7 days, then nothing. With urgent: one a day.
 8. Backup and about reads AgentHQ · Build {n}, Background work, HQ version; no "Run mode", no "hub", no
@@ -456,6 +460,6 @@ Android constraints, as checked on the board:
 - **New: the gear's dot colour.** Green is never a status and amber means "needs you now".
   Recommendation: blue. (Decided: N13.)
 
-Depends on: D4, D8, D10, D11, D12, N12, N13, N14, rules sections 1, 4, 5, 8, 10;
+Depends on: D4, D8, D10, D11, D12, N12, N13, N14, `../../resolutions.md` D-3, rules sections 1, 4, 5, 8, 10;
 `../wave-0/02-safe-mode.md` (idle gate, withdrawn, seq, switches); `01-downloads.md`;
 `../wave-1/04-plain-words.md` (About words, "Get test versions").

@@ -20,7 +20,8 @@ the rules differ, the rules win.
   be reached, so its helpers were not stopped." Stopping one helper no longer says "start a new helper":
   Resume exists.
 - **M12.** Resume a stopped helper, Lost contact and Stopped, Show archived and Restore, the per-task
-  filter, HQ's own runs ("Done by HQ"), the purpose picker, the name field and Advanced (its own branch).
+  filter, HQ's own runs ("HQ is working on it", then "Done by HQ", `../../resolutions.md` B4), the
+  purpose picker, the name field and Advanced (its own branch).
 - **W26.** Edge-worker runs are "Done by HQ", read from `/api/edge-worker`, open their chat, no Stop or
   Rename.
 - **WR17.** "For a task" is gone from Start a helper: the start route takes no task (owner decision 5).
@@ -122,17 +123,20 @@ Rejected:
   pick stops now. Their work so far is kept. New helpers can't start there until you allow them again in HQ
   Hub on that computer." / "Where": "Every computer HQ can reach · 3 helpers on your Mac mini", "Your Mac
   mini · 3 helpers", "Your Studio laptop · Can't be reached right now. Its helpers can't be stopped from
-  here." / "Why (optional)" / [Keep them running] [Stop every helper] (red, stacked by length).
-- **S2 · Stop one helper.** "Stop Codex?" / "It stops now. Its work so far is kept. Resume starts it again
-  later." / [Keep it running] [Stop Codex]. While it runs: "Stopping…", both buttons off. Failed: "Couldn't
-  stop Codex. Your HQ can't be reached. Try again soon." The dialog stays.
-- **S3 · After Stop every helper.** "Helpers can't start on your Mac mini. You stopped every helper at
-  14:02. To allow them again, open HQ Hub on your Mac mini." On Helpers and in Start a helper until lifted.
-  No button. Technical details: "or run hq host unlock on that computer".
+  here." / "Why (optional)" / [Keep them running] [Stop every helper] (red, stacked when the pair does not
+  fit on one line, `../../decisions.md` WR27).
+- **S2 · Stop one helper.** Word for word (`../../resolutions.md` B18): "Stop Codex?" / "It stops now. Its
+  work so far is kept." / [Keep it running] [Stop Codex]. While it runs: "Stopping…", both buttons off.
+  Failed: "Couldn't stop Codex. Your HQ can't be reached. Try again when it's back." The dialog stays.
+- **S3 · After Stop every helper.** The lockdown banner (`../../resolutions.md` C-5, the same words on the
+  phone): "All helpers are stopped. Allow them again in HQ Hub on that computer." Under it, the fact:
+  "Your Mac mini · you stopped every helper at 14:02". On Helpers and in Start a helper until lifted. No
+  button. Technical details: "or run hq host unlock on that computer".
 - **S4 · A computer that can't be reached.** "That computer can't be reached, so its helpers were not
   stopped." [Try again], kept until closed.
-- **S5 · Stopped by HQ itself.** "Helpers can't start on your Mac mini. Too many started at once, so HQ
-  stopped them at 09:12. To allow them again, open HQ Hub on your Mac mini." (source "breaker").
+- **S5 · Stopped by HQ itself.** The same banner, "All helpers are stopped. Allow them again in HQ Hub on
+  that computer.", with the fact "Your Mac mini · too many started at once, so HQ stopped them at 09:12"
+  (source "breaker").
 
 ### 4.4 Stopped, lost, archived, one task's helpers, HQ's own work (Helpers 4)
 
@@ -147,9 +151,10 @@ Rejected:
 - **O4 · Archived.** "First try at the Android build · Codex · on your Mac mini · Finished 4 days ago"
   [Restore] beside the title link. "Archive finished and stopped" acts at once: "3 helpers archived · Undo".
   Only a helper that is not running can be archived.
-- **O5 · Done by HQ.** "Android build: bump the target version · Working · HQ · on your phone · 6 min ·
-  Working on T-13. Opens its chat." No screen, no Stop, no Rename; a card opens its chat. Recommended:
-  this group, and "Done by HQ, on your phone" on the task.
+- **O5 · HQ's own work** (`../../resolutions.md` B4). The group is "HQ's own work". While working:
+  "Android build: bump the target version · HQ is working on it · on your phone · 6 min · Working on
+  T-13. Opens its chat." Finished: "… · Done by HQ · on your phone · finished 12 min ago". No screen, no
+  Stop, no Rename; a card opens its chat. On the task: "HQ is working on it", then "Done by HQ".
 - **O6 · Resume.** "Codex stopped 2 h ago" / "Resume starts it again in the same folder. It keeps its
   earlier conversation when Codex can." / "What should it do next? (optional)" [Resume] [Archive]. "Last
   thing it said · Stopped by you at 12:40. The debug build had finished." Failed: "Couldn't resume Codex."
@@ -189,7 +194,7 @@ Rejected:
   Ctrl C asks for a second tap within 4 s. Start on a phone: the job, the helper and where; the name, the
   purpose and the branch fold under one row ("Name and Advanced"). Answered from a card: "Allowed. Claude is
   working again." or "Declined. Claude is waiting." as a toast; failed, on the card in amber with the
-  buttons live: "Couldn't send your answer. Your HQ can't be reached. Try again soon."
+  buttons live: "Couldn't send your answer. Your HQ can't be reached. Try again when it's back."
 - **Saved helpers.** "Your HQ can't be reached", amber, no chip, one strip "Saved in this browser at
   14:02." "Claude · on your Mac mini · 40 min" / "Answers wait until your HQ can be reached." Answers, Start
   and Stop off with why; Technical details shows the saved screen, marked with the same time, keys off.
@@ -203,13 +208,13 @@ Rejected:
 - **2200 (60%).** The list keeps 360, the helper's page 760 and centred, the details panel 320. A wider
   screen never makes the terminal wider than its text.
 - **320 and 200%.** At 320 the top bar holds the title and the state; Search, the balance and Settings in
-  one menu. At 200% a 1040 window lays out at 520. The answer buttons stack only when a label passes 18
-  characters (`../README.md` Open conflict 7).
+  one menu. At 200% a 1040 window lays out at 520. The answer buttons stack only when they do not fit side by side
+  on one line (`../../decisions.md` WR27).
 - **The phone as the hub (HQ window).** "HQ on your phone · Pixel 8"; "Connected · HQ on your phone". The
   helpers still run on your computers; the phone's HQ reaches them as any HQ does. "Helpers from your
-  phone's HQ · Pick one to see what it is doing." No web push; HQ Hub posts a system notice for Needs you
-  items, Open only; a Needs you item for a helper on this computer says so. Saved copies keyed by the HQ's
-  id.
+  phone's HQ · Pick one to see what it is doing." No web push; Needs you arrives as HQ Hub's system
+  notice, Open only; a Needs you item for a helper on this computer says so. Saved copies and the outbox
+  keyed by the HQ's id, labelled "Saved in HQ Hub at 14:32" (`../../resolutions.md` B11).
 - **Lite.** No Helpers place (Lite does not serve helpers, the Workbench or hosts). The rail has Notes,
   Tasks and Inbox. A stored link to `/helpers` opens Notes with "This HQ is HQ Lite. It has no Helpers."
 
@@ -218,8 +223,9 @@ Rejected:
 Every string quoted in section 4 is exact. Keys `helpers_*`. Retired: "Workbench", "New agent", "Stop all",
 "Stop every agent", "This agent is waiting for you", "Approve", "Yes, stop it", "Keep going" (as the safe
 choice of a stop), "Run hq host unlock on it to start agents again.", "HQ is not running. These are the
-last helpers it had.", "carries on", "Live", "HQ didn't reply", "For a task (optional)", "start a new
-helper".
+last helpers it had.", "carries on", "For a task (optional)", "start a new helper", "Resume starts it
+again later." in the Stop dialog, "Helpers can't start on your Mac mini" as the banner, "Done by HQ" on a
+run still working.
 
 ## 6. Behaviour rules
 
@@ -238,7 +244,9 @@ helper".
 8. **Resume** reuses the same folder and resume token in a new process, or starts fresh when the helper
    cannot resume; an optional next instruction.
 9. **Archive** only what is not running; "Archive finished and stopped" with Undo.
-10. **Done by HQ** rows come from `/api/edge-worker`; they open their chat; no Stop or Rename.
+10. **HQ's own work** rows come from `/api/edge-worker`, in the group "HQ's own work", reading "HQ is
+    working on it" while working and "Done by HQ" when finished (B4); they open their chat; no Stop or
+    Rename.
 11. **The details panel** docks from 1400 (W9), not 1536.
 12. **The task filter** is `/helpers?task=`.
 
@@ -283,6 +291,10 @@ route (wave 0), an optional task field on the start route later (WR17). Desktop:
    were not stopped." Today the words differ.
 6. The details panel docks at 1400. Today at 1536.
 7. "Started" reads "40 min ago" once. Today "ago ago".
+8. The Stop dialog reads exactly "Stop Codex?" · "It stops now. Its work so far is kept." · "Keep it
+   running" · "Stop Codex"; the lock banner reads "All helpers are stopped. Allow them again in HQ Hub on
+   that computer."; an edge-worker run reads "HQ is working on it" in the group "HQ's own work" and "Done
+   by HQ" once finished (B4, B18, C-5).
 
 ## 11. Check on a laptop or phone
 
@@ -291,6 +303,7 @@ route (wave 0), an optional task field on the start route later (WR17). Desktop:
 
 ## 12. Open decisions it depends on
 
-- **WR18** (owner to confirm). **W8, W9, W11, W25, W26, WR17** (Recommended or Revised).
+- **WR18** (owner to confirm). **W8, W9, W11, W25, W26, WR17, WR27** (Recommended or Revised),
+  `../../resolutions.md` B4, B11, B18, C-5.
 - Depends on: `../wave-1/02-dialogs-approvals.md`, `../wave-3/01-this-pc.md` (lifting the lock),
   `06-tasks.md` (Helpers on a task), `04-search.md` (helpers in Search).

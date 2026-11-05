@@ -69,11 +69,12 @@ editor, the composer).
 - **T1 · Done with Undo.** "Chat archived" · Undo · close.
 - **T2 · Undo pressed.** The item comes back in place and the toast closes. (Recommended, not drawn on the boards: a short "Chat restored" with no action, read by screen readers.)
 - **T3 · Too late.** Undo after the window, or when the item changed on another device: "Couldn't undo.
-  It changed on another device." Kept until closed.
+  It changed on another device, or too much time passed." (`../../resolutions.md` A2, A6). Kept until
+  closed.
 - **T4 · Undo while HQ is away.** The restore waits in the outbox ("Waiting to send") if the window is
-  still open when it is sent; if the window passed by then, T3.
-- **T5 · Several at once.** "3 tasks archived" · Undo; a partial result "2 tasks marked done. Couldn't
-  change T-4. It changed on another device." kept until closed.
+  still open when it is sent; if it reaches HQ after the window, T3 (A6).
+- **T5 · Several at once.** "3 tasks archived" · Undo, "3 tasks done" · Undo; a partial result "2 tasks
+  done. Couldn't change T-4. It changed on another device, or too much time passed." kept until closed.
 
 Widths: 320 and 390 full width above the bottom bar; 768, 1440, 2200 bottom right; 200% zoom the phone
 placement. Lite: tasks and Inbox Undo work the same; no chat. HQ window: the same.
@@ -86,8 +87,9 @@ placement. Lite: tasks and Inbox Undo work the same; no chat. HQ window: the sam
 | Clear one update | `NotificationCard` Dismiss | "Update cleared" | `POST /api/notifications/{id}/restore` (NEW) |
 | Clear all updates | `notifications.tsx:164` "Mark all read" | "{N} updates cleared" | `POST /api/notifications/restore` with the ids (NEW) |
 | Archive a task | task drawer, bulk bar | "Task archived", "{N} tasks archived" | `POST /api/tasks/{id}/restore` (exists) |
-| Mark a task done (one, no dependents, no check pending) | task card, drawer | "Task marked done" | `PATCH /api/tasks/{id}` back to its status, guarded by the version (NEW guard) |
-| Move a card into Done | board | "Task moved to Done" | as above |
+| Mark a task done (one, no dependents, no check pending) | task card, drawer | "Done: {title}" (`../../resolutions.md` B8) | `PATCH /api/tasks/{id}` back to its status, guarded by the version (NEW guard) |
+| Mark several tasks done (after the Ask dialog, `02-dialogs-approvals.md` D3) | bulk bar | "{N} tasks done" (B8) | as above, per task |
+| Move a card into Done | board | "Done: {title}" (B8) | as above |
 | Delete a spending limit | `routes/usage.tsx` | "“OpenRouter only” deleted" | `POST /api/budgets/{name}/restore` (NEW) |
 | Archive finished and stopped helpers | Workbench | "3 helpers archived" | `POST /api/harness-sessions/{id}/archive` with `archived: false` (exists as Restore) |
 | Remove a helper's connection (HQ Hub) | Claude tab "Remove" | "Connection removed" | `helper_restore` command, local (wave 3) |
@@ -103,8 +105,8 @@ placement. Lite: tasks and Inbox Undo work the same; no chat. HQ window: the sam
 | `done_updates_cleared` | "{N} updates cleared" (plural) |
 | `done_task_archived` | "Task archived" |
 | `done_tasks_archived` | "{N} tasks archived" (plural) |
-| `done_task_marked_done` | "Task marked done" |
-| `done_task_moved_done` | "Task moved to Done" |
+| `done_task_marked_done` | "Done: {title}" (B8) |
+| `done_tasks_marked_done` | "{N} tasks done" (plural, B8) |
 | `done_task_moved` | "Task moved to {In progress}" |
 | `done_task_added` | "Task added" |
 | `done_limit_deleted` | "“{OpenRouter only}” deleted" |
@@ -113,8 +115,8 @@ placement. Lite: tasks and Inbox Undo work the same; no chat. HQ window: the sam
 | `done_recent_cleared` | "Recent searches cleared" |
 | `undo` | "Undo" |
 | `restored_{kind}` | Recommended, not on the boards: "Chat restored", "Updates restored", "Task restored", "Limit restored", "Connection restored" |
-| `fail_undo_changed` | "Couldn't undo. It changed on another device." |
-| `fail_change_some_tasks` | "{N} tasks marked done. Couldn't change {T-4}. It changed on another device." |
+| `fail_undo_too_late` | "Couldn't undo. It changed on another device, or too much time passed." |
+| `fail_change_some_tasks` | "{N} tasks done. Couldn't change {T-4}. It changed on another device, or too much time passed." |
 
 Retired: "Mark all read" (replaced by "Clear all updates", which clears only Updates), "Removed." in HQ
 Hub, any "successfully".
@@ -124,8 +126,10 @@ Hub, any "successfully".
 1. **Act at once.** The change is sent at once and shows at once. The toast offers Undo.
 2. **The window is 10 minutes, on HQ.** The restore route accepts a restore only within 600 s of the
    change and only when the item has not changed since (a version or `updated_at` match). Otherwise it
-   answers 409 and the toast says "Couldn't undo. It changed on another device."
-3. **The toast may stay.** A toast that carries Undo stays until it is used or closed (W23). It is not
+   answers 409 and the toast says "Couldn't undo. It changed on another device, or too much time
+   passed."
+3. **The toast may stay.** A toast that carries Undo stays until it is used or closed (W23,
+   `../../resolutions.md` A6; the phone's toast lasts the accessibility timeout instead). It is not
    timed. The Undo button greys out at 10 minutes and the toast then reads the too-late line.
 4. **Soft delete on HQ.** Archive, clear and delete keep the item with a timestamp; restore clears it.
    Today's retention of archived and dismissed items is unchanged.
@@ -177,8 +181,12 @@ for every Undo"). Desktop: `helper_restore` in wave 3.
 3. "Clear all updates" leaves every Needs you item pending. Today `mark_all_read` dismisses approvals.
 4. Delete a limit, restore it within the window: it is back in `GET /api/budgets`. Today it is gone.
 5. `bun test`: archiving a chat shows the toast "Chat archived" with Undo; Undo calls the unarchive
-   route; a 409 shows "Couldn't undo. It changed on another device." Today there is no toast.
+   route; a 409 shows "Couldn't undo. It changed on another device, or too much time passed." Today
+   there is no toast.
 6. With a field focused, a toast's box does not intersect the field's box.
+7. Marking one task done with no dependents and no check pending shows "Done: {title}" with Undo and no
+   dialog; marking three shows the Ask dialog first, then "3 tasks done" with Undo (B8). Today the done
+   line is "Task marked done".
 
 ## 11. Check on a laptop or phone
 
@@ -188,7 +196,7 @@ for every Undo"). Desktop: `helper_restore` in wave 3.
 
 ## 12. Open decisions it depends on
 
-- **W23, WR7, N18** (Recommended).
+- **W23, WR7, N18** (Recommended), as `../../resolutions.md` A6 and B8 settle them.
 - **W29**: archive with Undo is everyday; Delete for good only on an archived task.
 - Depends on: `../wave-0/02-shared-parts.md` (outbox, counters), `02-dialogs-approvals.md`,
   `../wave-3/04-helper-detail.md` (`helper_restore`).

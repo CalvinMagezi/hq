@@ -35,7 +35,7 @@ Closes finding **#1** and, in this revision ("What changed in this revision"):
 - **Claims corrected:** a dismissed dialog is not a refusal; channels are made in `Alerts.java:51` and
   `HubService.java:173`, not `ShellActivity` line 367 (the `sampleAlerts` debug fixture); the running
   notice coming back after a grant is unverified and now a device check.
-- **Words:** Allow once · Decline · Open everywhere; "Open Android settings"; Settings line "Needs you on ·
+- **Words:** Decline · Allow once · Open everywhere, safe first (`../../resolutions.md` A4); "Open Android settings"; Settings line "Needs you on ·
   Updates on · App updates on".
 
 ## 2. Before (as built, verified at `c04a100`)
@@ -119,7 +119,8 @@ Rejected:
 
 ## 4. Screens and states (After)
 
-First run: Welcome, AI key, Chat apps, Notifications, Ready to start. No step counter. Skipped when
+First run: Welcome, AI key, Messaging apps (was "Chat apps", `../../resolutions.md` B15), Notifications,
+Ready to start. No step counter. Skipped when
 notifications are already allowed. Restore: Welcome, Restore, Notifications, Ready to start.
 
 Shared layout of the first-run frames: a full-height column, title 24-ish bold ink centred under a 72 dp
@@ -154,9 +155,10 @@ width pill, line border, ink text), and text buttons in blue (`#00ADEE`).
 6. **Ready to start, still off** (rules section 5). Title "Ready to start". Card 1 (surface-100,
    hairline border, 12 dp radius, pin 11): "Notifications are off" / "Questions will wait in the Inbox."
    / green pill [Turn on]. Card 2 (pin 12): small label "Optional", "Use HQ as your phone's assistant",
-   "Hold Home on any screen and ask HQ a question by voice. You can set this up later in Settings." /
-   outlined pill [Set up]. Hint: "HQ runs all the time on this phone. Run it on one machine only. A
-   second copy would answer the same chats twice." Spacer, "Start HQ" (green), "Back" (text).
+   "Hold Home on any screen and ask by voice. Understands English. You can also do this later in
+   Settings." / outlined pill [Set up]. Hint: "Run HQ on one machine only. A second copy would answer the
+   same chats twice." (the card body and the one-machine line are FixAssistantSetup's,
+   `../../resolutions.md` D-6) Spacer, "Start HQ" (green), "Back" (text).
 
 ### Later: the Inbox, Settings, and what happens when they come back on
 
@@ -171,18 +173,18 @@ width pill, line border, ink text), and text buttons in blue (`#00ADEE`).
 
    Bottom bar Notes, Tasks, Chat (raised), Helpers, Inbox with badge 3.
 8. **Settings, Notifications: app off.** Card "Notifications are off for AgentHQ / Approvals wait in the
-   Inbox until they are on again." [Turn on] (pin 16). "Channels": every line "Off in Android" (Needs
+   Inbox until they are on again." [Turn on] (pin 16). "Channels": every line "Off in Android settings" (Needs
    you, Updates, App updates, Downloads, HQ is running). "What notifications show": "Show details in
-   notifications / Off: they say who needs you, not what. You answer in the app." (pin 17).
+   notifications / Off: they say who and what kind" (pin 17; FixPlainWords' line, D-1).
 9. **Needs you off, or only quieter.** Amber card "Needs you is off / Questions wait in the Inbox
-   without telling you." [Turn on] (pin 18). Channels: "Needs you · Off in Android" (amber with the
-   mark), "Updates · Silent", "App updates · Silent", "Downloads · Silent", "HQ is running · Silent,
-   folded away". Variant "Or, when Needs you is only quieter": "Needs you · Silent" (pin 19) and the plain
+   without telling you." [Turn on] (pin 18). Channels: "Needs you · Off in Android settings" (amber with
+   the mark), "Updates · Silent", "App updates · Silent", "Downloads · Silent · shows progress", "HQ is
+   running · Silent, folded away · Android needs it while HQ runs". Variant "Or, when Needs you is only quieter": "Needs you · Silent" (pin 19) and the plain
    note "Needs you arrives silently, without a pop-up." Settings home, This phone: "Notifications · Needs
    you off · Updates on · App updates on" (amber with the warning mark).
 10. **Turned back on: what was waiting.** Label "Posted once, newest on top, details off" (pin 20):
-    "AgentHQ · now / Claude needs your OK / Open HQ to see what it wants to do. / Open", "The backup task
-    needs your OK / Open HQ to see what it wants to do. / Open", "A helper is stuck / Open HQ to see which
+    "AgentHQ · now / Claude needs your OK / Open HQ to see what it wants to do. / Open", "A task needs
+    your OK / Open HQ to see what it wants to do. / Open" (never the task's name, B19), "A helper is stuck / Open HQ to see which
     one. / Open". "The running notice, if Android shows it again" (pin 21): "AgentHQ / HQ is running /
     Answering your chats and running scheduled tasks." Caption: "Check on device: does it come back
     without a restart?"
@@ -195,7 +197,7 @@ width pill, line border, ink text), and text buttons in blue (`#00ADEE`).
 12. **Show details: on, and a phone with no lock.** "What notifications show": "Show details in
     notifications" on, line "Details show only while the phone is unlocked. Allow asks you to unlock
     first." (pin 23). "The same question, unlocked, Android 12 and newer": "Claude needs your OK / Run
-    this command? / `cargo build --release` / Allow once · Decline · Open". "On a phone with no screen
+    this command? / `cargo build --release` / Decline · Allow once · Open". "On a phone with no screen
     lock": the switch greyed, "Set a screen lock to use this. Without one, anyone holding this phone can
     answer." (pin 24), [Open Android settings], "Then tap Screen lock."
 13. **Owners with a server HQ.** Shade, details off (pin 25): "AgentHQ · Server HQ · now / Claude needs
@@ -222,7 +224,7 @@ width pill, line border, ink text), and text buttons in blue (`#00ADEE`).
 | Android 13+, updated from a build that never asked | The same screen once, as a sheet, on the first open (frame 11) | Android's dialog |
 | Android 13+, denied, and Android would show a reason | No path; the second button is Allow notifications (frame 3) | Android's dialog, its last time |
 | Android 13+, denied, and no reason to show | No path with Open Android settings and Ask again (frame 4) | AgentHQ's page in Android (frame 5) |
-| Android 8 to 12, notifications on, Needs you on | The step is skipped; Chat apps goes straight to Ready to start | Nothing to turn on |
+| Android 8 to 12, notifications on, Needs you on | The step is skipped; Messaging apps goes straight to Ready to start | Nothing to turn on |
 | Android 8 to 12, notifications off | The step with Open Android settings in place of Allow | AgentHQ's page in Android |
 | Any version, app on, Needs you blocked | The step, button Turn on Needs you | The Needs you channel's own page |
 | Any version, Needs you only quieter | Nothing; it is the owner's choice | A plain note in Settings (frame 9) |
@@ -243,7 +245,7 @@ frame 4 keeps Ask again; if Android then shows nothing, the screen stays as it i
   name as the Inbox tab. App updates is the channel for new versions of AgentHQ, and the group in Backup
   and about.
 - **Ready to start** is drawn as rules section 5. The assistant card itself belongs to FixAssistantSetup;
-  when chosen it shows a check and a grey border.
+  when chosen it shows a check and an ink border (`../../resolutions.md` A3).
 - **The lock screen, watches and notification history** for every notification kind are drawn on
   FixLockScreen. This board draws the switch and the default words.
 - **Restore** now ends at the Notifications step, not at Ready to start, so a restored phone is asked
@@ -285,21 +287,21 @@ Ready to start (frame 6):
 | Element | String |
 |---------|--------|
 | Card | "Notifications are off" · "Questions will wait in the Inbox." · "Turn on" |
-| Assistant card | "Optional" · "Use HQ as your phone's assistant" · "Hold Home on any screen and ask HQ a question by voice. You can set this up later in Settings." · "Set up" |
-| One machine | "HQ runs all the time on this phone. Run it on one machine only. A second copy would answer the same chats twice." |
+| Assistant card | "Optional" · "Use HQ as your phone's assistant" · "Hold Home on any screen and ask by voice. Understands English. You can also do this later in Settings." · "Set up" (FixAssistantSetup's, D-6) |
+| One machine | "Run HQ on one machine only. A second copy would answer the same chats twice." (FixAssistantSetup's, D-6) |
 
 Notifications, details off (rules section 1; as worded on this board):
 
 | Kind | String |
 |------|--------|
 | Helper question | "{Helper} needs your OK" · "Open HQ to see what it wants to do." · "Open" |
-| Task approval | "The {task} needs your OK" · "Open HQ to see what it wants to do." · "Open" |
+| Task approval | "A task needs your OK" · "Open HQ to see what it wants to do." · "Open" (B19) |
 | Stuck helper | "A helper is stuck" · "Open HQ to see which one." · "Open" |
-| Server HQ | "{Helper} needs your OK on your server HQ" · "Open it to see what it wants to do." · "Open" |
+| Server HQ | "Your server HQ needs your OK" · "Open HQ to see what it wants to do." · "Open" (B19) |
 | Folded | "{N} more waiting for you" |
-| Buttons, details on, 12+ | "Allow once" · "Decline" · "Open" (a losing request keeps Open only) |
+| Buttons, details on, 12+ | "Decline" · "Allow once" · "Open", in that order (A4; a losing request keeps Open only) |
 
-The task, stuck and server wordings differ from FixLockScreen; see "Open conflicts" in `../README.md`.
+The task, stuck and server wordings are `../../resolutions.md` B19, the same as `../wave-0/01-lock-screen.md`.
 
 Inbox (frames 7, 13):
 
@@ -317,13 +319,13 @@ Settings (frames 8, 9, 12):
 | Element | String |
 |---------|--------|
 | App off card | "Notifications are off for AgentHQ" · "Approvals wait in the Inbox until they are on again." · "Turn on" |
-| Channel lines | "Sound and pop-up" · "Sound" · "Silent" · "Silent, folded away" · "Off in Android" (FixPlainWords) |
+| Channel lines | "Sound and pop-up" · "Sound" · "Silent" · "Silent · shows progress" · "Silent, folded away · Android needs it while HQ runs" · "Off in Android settings" (FixPlainWords, D-1) |
 | Needs you off card | "Needs you is off" · "Questions wait in the Inbox without telling you." · "Turn on" |
 | Quieter, Default | "Needs you makes a sound but no longer pops up on screen." |
 | Quieter, Low or Min | "Needs you arrives silently, without a pop-up." |
 | Home row | "Needs you on · Updates on · App updates on" (amber with the warning mark when one is off) |
 | Switch | "Show details in notifications" |
-| Switch, off | "Off: they say who needs you, not what. You answer in the app." |
+| Switch, off | "Off: they say who and what kind" (FixPlainWords, D-1) |
 | Switch, on | "Details show only while the phone is unlocked. Allow asks you to unlock first." |
 | No screen lock | "Set a screen lock to use this. Without one, anyone holding this phone can answer." · "Open Android settings" · "Then tap Screen lock." |
 | New channels (name · description) | "App updates" · "A new version of AgentHQ." "Downloads" · "Big downloads and how far they are." "HQ is running" · "Shows while HQ runs." |
@@ -332,8 +334,8 @@ Settings (frames 8, 9, 12):
 
 ## 6. Behaviour rules
 
-1. **The Notifications step** sits between Chat apps and Ready to start, with no step counter. It shows
-   when `NotifAccess` says anything is missing; otherwise Chat apps' Next goes straight to Ready to
+1. **The Notifications step** sits between Messaging apps and Ready to start, with no step counter. It
+   shows when `NotifAccess` says anything is missing; otherwise Messaging apps' Next goes straight to Ready to
    start. A kill on this step reopens it (the saved step).
 2. **The example is drawn by the app,** not posted, so it can show before the permission exists. It
    shows the default words and Open only, on every Android version. It is read as one image, "Example
@@ -365,8 +367,8 @@ Settings (frames 8, 9, 12):
     dialog while allowed, else the app's page, else the channel's page.
 15. **A losing request in the app** gets a red "Allow delete" on the right and Decline on the left (rules
     section 4). In the shade it has Open only, even with details on.
-16. **Settings, app off:** same card words, button Turn on. Every channel line reads "Off in Android"
-    while the app switch is off.
+16. **Settings, app off:** same card words, button Turn on. Every channel line reads "Off in Android
+    settings" while the app switch is off (D-1).
 17. **Show details in notifications** is off on every install and upgrade. Off: titles say who and what
     kind, bodies stay general, the shade has Open only. It replaces "Allow answers from notifications".
 18. **Needs you blocked** (importance none) with the app on: the amber card, an amber channel line with
@@ -400,7 +402,7 @@ Settings (frames 8, 9, 12):
 |---------|--------------------------|
 | 8 and 9 | No runtime permission and no notification history. The step and the upgrader sheet show only when notifications or Needs you are off, with Open Android settings. Shade buttons: Open only. The hub's channel goes to Min with a new id (frame 5). Undo lasts 10 s. |
 | 10 and 11 | As 8 and 9, plus notification history on 11, which keeps what was posted. Shade buttons: Open only, details on or off. The accessibility timeout sets Undo. |
-| 12 | No runtime permission. With details on and a secure screen lock: Allow once · Decline · Open, and Allow asks for the unlock (`setAuthenticationRequired`). Details off, or no secure lock: Open only. |
+| 12 | No runtime permission. With details on and a secure screen lock: Decline · Allow once · Open, and Allow asks for the unlock (`setAuthenticationRequired`). Details off, or no secure lock: Open only. |
 | 13+ | `POST_NOTIFICATIONS`: the Notifications step, the upgrader sheet once, frames 3 and 4. Buttons as on 12. Android 14+ lets the owner swipe the running notice away; it comes back at the next state change. |
 
 Open question N11 (decided "Android 13+ only") settles the upgrader sheet on 8 to 12: not shown there.
@@ -439,7 +441,8 @@ Android constraints, as checked on the board:
 |------|--------|--------|
 | `K/ui/firstrun/FirstRun.kt` | `Step` gains `Notify`; `next(Chat) = Notify`, `next(Notify) = Start`, `next(Restore) = Notify`; `back(Start) = Notify`, `back(Notify) = Chat`. `FirstRunStore` (line 42) keeps "asked" and the last seen version code. | yes |
 | `K/ui/firstrun/FirstRunScreens.kt`, `FirstRunViewModel.kt` | `NotifyScreen`, the No path, Ask again, Ready to start in rules section 5 order. Words move to string resources (FixPlainWords). | yes |
-| `K/NotifAccess.kt` (package not fixed by the board) | Read (sdk, granted, enabled, channel importances, rationale, asked) and the pure `next()` that returns `Done`, `AskAndroid`, `OpenApp` or `OpenChannel`. Unit-tested over the table. | NEW |
+| `K/ui/firstrun/FirstRunWords.kt` | The third step's title (`CHAT_TITLE`, line 29, "Chat apps (optional)") becomes "Messaging apps (optional)" (`../../resolutions.md` B15); the Ready to start card body and one-machine line are FixAssistantSetup's (D-6). | yes |
+| `K/NotifAccess.kt` (NEW, `../../resolutions.md` D-12; package not fixed by the board) | Read (sdk, granted, enabled, channel importances, rationale, asked) and the pure `next()` that returns `Done`, `AskAndroid`, `OpenApp` or `OpenChannel`. Unit-tested over the table. | NEW |
 | `K/ShellActivity.kt` | The permission launcher, a re-read in `onResume`, and the upgrader sheet. Line 367 is inside `sampleAlerts` (line 357), a debug fixture; it is not where channels are made. | yes |
 | `java/example/hq/spike/Alerts.java` | Today line 51 makes Needs you and Updates from `AlertPoster.channels()`. Wave 0 makes all five in one place at the hub's start. Count what would have been posted while off, this HQ and the server apart (`ServerHq.isServer`); after it turns on, post what still waits, once. | yes |
 | `java/example/hq/spike/HubService.java` | Line 173 makes "HQ is running" (Low); moves to Min under a new id. | yes |
@@ -447,7 +450,7 @@ Android constraints, as checked on the board:
 | `K/ui/inbox/InboxScreen.kt`, `InboxViewModel.kt` | The banner, its server line and its 7-day snooze; Decline and the red Allow delete. | yes |
 | `K/ui/settings/SettingsScreens.kt` | `Notifications()`: five channels, Show details replaces the switch at line 778. | yes |
 | `K/ui/settings/SettingsViewModel.kt:281` | The home line gains App updates and warns when Needs you is off. | yes |
-| `K/ui/settings/PhoneWords.kt:127` `channelLine` | FixPlainWords' words; "Off in Android" while the app switch is off. | yes |
+| `K/ui/settings/PhoneWords.kt:127` `channelLine` | FixPlainWords' words; "Off in Android settings" while the app switch is off (D-1). | yes |
 
 ## 9. Server, release or desktop changes
 
@@ -455,16 +458,17 @@ None for this board.
 
 ## 10. Acceptance checks (each fails on today's build)
 
-1. Android 13, fresh install: after Chat apps, the Notifications step shows. Allow notifications, then
+1. Android 13, fresh install: after Messaging apps, the Notifications step shows. Allow notifications, then
    Allow: Ready to start, no card.
+   The third step's title reads "Messaging apps", never "Chat apps" (B15).
 2. Upgrader on Android 13: install today's build, never grant, install the new build over it, open: the
    sheet shows once. Not now, reopen: no sheet. Android's dialog was not shown.
 3. At Android's dialog, tap outside it: frame 4 with Ask again. Tap Ask again: Android's dialog shows
    again, so the dismissal was not counted.
 4. Default settings, a helper asks to run a command: the shade, the lock screen and notification history
    show "Claude needs your OK · Open HQ to see what it wants to do." with Open only, and no command text.
-5. Show details on, Android 12+, secure lock: unlocked shows the command with Allow once · Decline ·
-   Open; locked shows the general words. On an Android 11 emulator: Open only.
+5. Show details on, Android 12+, secure lock: unlocked shows the command with Decline · Allow once ·
+   Open, in that order; locked shows the general words. On an Android 11 emulator: Open only.
 6. A phone with no screen lock: the switch is greyed with "Set a screen lock to use this." and the shade
    never shows Allow.
 7. Fresh install, Android's app page lists exactly five categories: Needs you, Updates, App updates,

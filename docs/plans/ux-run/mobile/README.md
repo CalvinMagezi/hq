@@ -6,14 +6,17 @@ the user journey), written so a coding agent with only this repository can build
 
 How to read it:
 
-1. `../rules-shared.md` first. It is the single rules reference for phone and web, and it wins over every
-   spec here. (Web additions live in `rules-web.md`.)
+1. `../resolutions.md` first: the last word on every conflict between the phone, web and hub boards. Then
+   `../decisions.md`, then `../rules-shared.md` (with `../rules-web.md` one set of rules; `rules-shared.md`
+   wins where they differ and `resolutions.md` is silent). All three win over every spec here.
 2. Then the wave you are building, in order. Each spec has the same sections: finding and review items,
    Before (with file:line at `c04a100`), Decision, Screens and states, Exact copy, Behaviour rules,
    Android versions, Code touchpoints, server changes, Acceptance checks, Check on device, open
    questions.
-3. Where two boards disagree, the rules win, then the revised board. The ones still open are listed under
-   "Open conflicts" at the end of this file. Settle each one before you build the screen it touches.
+3. Where two boards disagree, `../resolutions.md` wins, then `../decisions.md`, then the rules, then the
+   revised board. Section 5 at the end of this file lists every conflict found while carrying the boards
+   over, with the resolution that settles it; the few that no resolution covers are under "Still open",
+   each with a recommendation the specs already follow.
 4. `device-checks.md` lists every item that must be tried on a real phone, by wave, with how.
 
 Writing rules for any string you add come from `CLAUDE.md` and rules section 7: "HQ" not "hq", no em
@@ -141,57 +144,57 @@ interaction service, widgets, file paths, network security). Tests: `app/src/tes
 
 ## 2. Build, install and test
 
-From `apps/android/README.md`, `docs/HQ_MOBILE.md` and `.github/workflows/android-app.yml`.
+From `../testing.md` (which wins if this section and it ever differ), `apps/android/README.md`,
+`docs/HQ_MOBILE.md` and `.github/workflows/android-app.yml`.
 
 **Prerequisites:** a JDK 17 or newer (CI uses 21), the Android SDK with platform `android-36`. Gradle
 wraps itself (8.14.3).
 
-```bash
-export JAVA_HOME=<a JDK 17 or newer> ANDROID_HOME=<the Android SDK>
-cd apps/android
-```
-
-**What CI runs** (no hq inside the APK; this is the gate for every PR that touches `apps/android/**`):
+**Before every hand-over** (exactly as `../testing.md`):
 
 ```bash
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace            # read the totals: a partial run is not a green run
+cd apps/hq-web && bun install && bun run build && bun test
+cd apps/android && ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+cd apps/desktop && bun install && bun run typecheck     # when the hub changed
+cargo test -p hq-desktop          # includes shell_config.rs (commands, capabilities, no plugins)
 ```
 
+Then write the wave's "Try this now" note in `../progress.md`.
+
+- CI runs the same Gradle line with `--no-daemon --console=plain` on every PR that touches
+  `apps/android/**` (no hq inside the APK).
 - `:app:testDebugUnitTest` runs the JUnit tests under `app/src/test`.
 - `:app:lintDebug` runs Android Lint's `NewApi` check against `minSdk` 26: any call to an API newer than
   Android 8 that is not behind a version check fails the build. Every fix here has Android 8 paths, so run
   it.
 - One test class: `./gradlew :app:testDebugUnitTest --tests 'example.hq.spike.ui.shell.LinksTest'`.
 
-**An APK for a phone** (with hq, Caddy and the web app inside). All four `-P` paths must be absolute and
-exist:
+**A test copy for a phone,** installed beside the real app with its own data (`../testing.md`, "The
+phone"):
 
 ```bash
-# 1. hq for Android (the CI recipe in .github/workflows/android.yml; needs the NDK, API 26 clang wrappers)
-cargo build -p hq-cli --profile release-small --target aarch64-linux-android --features tunnel,bridge --locked
-# 2. the web app
-(cd apps/hq-web && bun install && bun run build)          # gives apps/hq-web/dist/client
-# 3. the APK
+export JAVA_HOME=<a JDK 17 or newer> ANDROID_HOME=<the Android SDK>
 cd apps/android
 ./gradlew :app:assembleDebug \
-  -Phq.bin=<target/aarch64-linux-android/release-small/hq> -Phq.caddy=<caddy linux arm64> \
-  -Phq.web=<apps/hq-web/dist/client> -Phq.keystore=<the signing key>
-```
-
-The APK is `app/build/outputs/apk/debug/app-debug.apk`. It is a debug build on purpose (`run-as` works).
-A debug build only updates a phone that runs a debug build signed with the same `-Phq.keystore`.
-
-**A copy beside the real app** for phone tests with its own data (never a release id):
-
-```bash
-./gradlew :app:assembleDebug -Phq.appId=online.agenthq.<name> <the -P paths above>
-adb install -r -g app/build/outputs/apk/debug/app-debug.apk
-```
-
-**Install and drive:**
-
-```bash
+  -Phq.bin=<hq aarch64-linux-android> -Phq.caddy=<caddy linux arm64> \
+  -Phq.web=<apps/hq-web/dist/client> -Phq.keystore=<the signing key> \
+  -Phq.appId=<a test id>
 adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Build `hq` for Android with `--features tunnel,bridge` (the recipe in `.github/workflows/android.yml`:
+`cargo build -p hq-cli --profile release-small --target aarch64-linux-android --features tunnel,bridge
+--locked`, which needs the NDK and the API 26 clang wrappers; the web app comes from `cd apps/hq-web &&
+bun install && bun run build`, giving `apps/hq-web/dist/client`). All four `-P` paths must be absolute and
+exist; keep them in `~/.gradle/gradle.properties`, never in the repository. The APK is a debug build on
+purpose (`run-as` works), and it only updates a phone that runs a debug build signed with the same
+`-Phq.keystore`. Never use a release id as the test id.
+
+**Drive it:**
+
+```bash
 adb shell am start -n online.agenthq.app/.ShellActivity --es place chat     # no -S: it force-stops hq
 adb logcat -s HQHUB            # hub: names imported and the run mode, never a value
 adb logcat -s HqVoice          # assistant phases with a clock, never the words
@@ -199,19 +202,27 @@ adb shell cmd role add-role-holder android.app.role.ASSISTANT online.agenthq.app
 adb shell input keyevent 219   # the assist key
 ```
 
-**Release builds:** do not build one locally. CI's `.github/workflows/release.yml` builds and signs the
-release APK and `android-channel.json`; `.github/workflows/promote.yml` moves it to `channel-stable`. Owners
-install `agent-hq-android.apk` from the GitHub Releases page, then the app updates itself.
+(With `-Phq.appId`, use that id in place of `online.agenthq.app`.)
 
-**Test infrastructure the specs need that does not exist yet** (add it in wave 0):
+**Phone as the hub:** pair the laptop with `hq bridge` or HQ Hub's Devices tab (`docs/PAIRING.md`), then
+open HQ in HQ Hub and sign in once with a code from the phone (Settings › Other devices).
 
-- Compose UI tests (FixDestructive, FixSearch, FixPlainWords' word check), screenshot tests with a colour
-  probe (FixBackup, FixOffline's `x-` fixtures at 360 dp and font scale 2.0): `app/build.gradle.kts` has
-  only `junit:junit` and `org.json`. A JVM route (for example Robolectric with Compose UI test) keeps them
-  inside `testDebugUnitTest` so CI runs them.
+**Release builds:** never build one locally. CI's `.github/workflows/release.yml` builds and signs the
+release APK and `android-channel.json`; `.github/workflows/promote.yml` moves it to `channel-stable`
+(`docs/UPDATE_SYSTEM.md`). Owners install `agent-hq-android.apk` from the GitHub Releases page, then the
+app updates itself.
+
+**Test setup wave 0 adds** (`../resolutions.md` D-11; acceptance checks that need it are written in the
+specs that use it):
+
+- Compose UI tests on the JVM (Robolectric with Compose UI test, so they run inside `testDebugUnitTest` and
+  CI runs them; instrumented tests where a check needs a real device), for FixDestructive, FixSearch and
+  FixPlainWords' word check. `app/build.gradle.kts` has only `junit:junit` and `org.json` today.
+- A screenshot test with a colour probe (FixBackup, FixOffline's `x-` fixtures at 360 dp and font scale
+  2.0).
+- An Android lint-checks module for the string rules (FixPlainWords' `TextLiteralDetector`); none exists.
 - Instrumentation tests (FixLockScreen check 2, a test `NotificationListenerService`): there is no
-  `app/src/androidTest`, and CI runs no emulator. Either add an emulator job or mark these as device checks.
-- The custom lint detector `TextLiteralDetector` (FixPlainWords) needs a lint-checks module; none exists.
+  `app/src/androidTest`, and CI runs no emulator. Add an emulator job, or run these as device checks.
 
 ---
 
@@ -230,11 +241,14 @@ week, L more. Device checks run before each wave (`device-checks.md`).
 | 4 | One app, one way | #14 · #5 · #6 | The connection UI in every place with saved copies and server HQ rows; one Search with a folder filter on HQ and a Helpers scope; the web Home retired and While you were away made native. |
 
 Wave 0 shared parts with no board of their own (build them from `../rules-shared.md`): the five channels,
-created once at the hub's start (section 1); the failure-line catalogue as string resources (section 2);
-the `Connection` state type, no UI yet (section 6, shaped in `wave-4/01-offline.md`); strings moved to
-resources with the literal lint and its 172-entry baseline reaching zero (section 7, N20,
-`wave-1/04-plain-words.md`); the kill switches and new signed fields in the channel file (section 10,
-`wave-0/02-safe-mode.md`).
+created once at the hub's start (section 1); the failure-line catalogue as string resources (section 2,
+which is `../resolutions.md` A2); the Connection data model and words, no UI yet (`data/Connection`,
+`ConnectionWords`, section 6, shaped in `wave-4/01-offline.md`; the sheet's UI comes in wave 2,
+`../resolutions.md` D-5); strings moved to resources with the literal lint and its 172-entry baseline
+reaching zero (section 7, N20, `wave-1/04-plain-words.md`; the rewritten words land in wave 1, D-8); the
+kill switches and new signed fields in the channel file in D-3's shapes (section 10,
+`wave-0/02-safe-mode.md`); the test setup of section 2 (D-11); the saved-copy size measured on a
+2,000-note vault (N2).
 
 ### Each finding and review blocker, its board and where it stands
 
@@ -270,64 +284,41 @@ R5 (the shared failure words, broken on nine boards) is closed by rules section 
   backslashes. (`wave-4/02-search.md`)
 - **Chat messages** carry a runtime-set source ("voice") and client id in their meta; `turn_end` gains
   `waiting_for_owner`; voice approvals quote "You said". (`wave-3/04-assistant-handoff.md`)
-- **Approvals** carry a `loses` flag set by the runtime from the tool's category, never the model.
-  (`wave-1/03-destructive.md`)
-- **A restore route** for a cleared update, so Undo is shared with the web. (`wave-1/03-destructive.md`)
+- **Approvals** carry a `loses` flag set by the runtime from the tool's category, never the model, and
+  the tool and its arguments for the card's quote (`../resolutions.md` B1); they lapse after 24 hours
+  (C-7). (`wave-1/03-destructive.md`)
+- **Restore routes** for a cleared update and every other Undo, accepted for 10 minutes, shared with the
+  web (A6, C-1). (`wave-1/03-destructive.md`)
+- **Client ids** on new notes and tasks, and a version on note saves, shared with the web (C-2, C-3).
+  (`wave-4/01-offline.md`)
+- **Device sign-ins** write a Needs you item and expire after 90 days without use, on the phone hub too
+  (C-4). (`wave-1/03-destructive.md`)
 - **A signed-in busy route** for the idle gate before an install. (`wave-0/02-safe-mode.md`,
   `wave-2/02-updates.md`)
 - **`hq vault moved`** clears sign-ins, paired devices, connector tokens and push subscriptions on a moved
   phone. (`wave-0/03-data-transfer.md`)
-- **The channel file** gains seq, withdrawn, rollout, switches, size and notes; promote re-signs instead of
-  copying; a withdraw workflow. (`wave-0/02-safe-mode.md`, `wave-2/02-updates.md`)
+- **The channel file** gains seq, withdrawn (a list of versionCodes), rollout, switches (with `save_copy`
+  and `lock_screen_assist_off_models`), size and notes (a map from language to up to three lines), as D-3
+  shapes them; promote re-signs instead of copying; a withdraw workflow. (`wave-0/02-safe-mode.md`,
+  `wave-2/02-updates.md`)
 - **`UpdateLogic.kt` hardcodes a real GitHub owner** (`RELEASES_URL`, line 40); move it behind config.
 
-### Decisions (green is the recommendation; "Revised" marks the seven changed after review; N are new from the correction pass)
+### Decisions
 
-| Id | Decision | Chosen |
-|----|----------|--------|
-| D1 | Backup row colour | Amber only when it can be cleared (Save a copy now); grey otherwise. Revised |
-| D2 | Dialog buttons | Side by side, safe left, red action right; stack for long labels or big text. Revised |
-| D3 | Sign out everywhere | One red dialog. |
-| D4 | Early builds switch | "Get test versions", with the can-go-back line. |
-| D5 | Pairing relay line | Yes, in plain words. |
-| D6 | Telling upgraders about the assistant | Settings row and release notes. |
-| D7 | Spoken mark | A runtime-set source field in HQ, shown on the web too. Revised |
-| D8 | Paid-data question | Two equal buttons, Wait for Wi-Fi first. Revised |
-| D9 | Answers while locked | No. |
-| D10 | Update notices | Once per version, a reminder at 7 days, daily when urgent. |
-| D11 | Install without confirm | Off until safe mode, the idle gate and a kill switch; never on test versions. Revised |
-| D12 | Release notes | Three short lines, signed, by language. |
-| D13 | Inbox notifications banner | Not now hides it 7 days. |
-| D14 | Paid data | No "don't ask again"; "Used about {N} MB of mobile data". |
-| D15 | Start steps from hq | Later; Stopped by progress now. |
-| D16 | AI service status | A signed-in route, never `/health`. Revised |
-| D17 | Saved copy lifetime | Until replaced, age shown; server data cleared on sign-out. Revised |
-| D18 | Stop a task while it finishes | Next round. |
-| D19 | Folders by last edited | Once the listing has times. |
-| D20 | Search finds helpers | Yes; Inbox stays out. |
-| D21 | Native Timeline | Later. |
-| N1 | Messages sent offline | Held in the chat up to 24 h, in order, removable, never sent twice. |
-| N2 | Saved copy size | 256 KB a place, 2 MB in all, measured first. |
-| N3 | Search a server HQ's notes | Wave 4, its own group. |
-| N4 | The vault in phone-to-phone copy | Yes, with the moved-phone flow; keys, config and the bridge key stay behind. |
-| N5 | Upgraders and details | Details off, a one-time note. |
-| N6 | Safe-mode copy | A plain zip, no password, for now. |
-| N7 | "Save a copy first" before updates | Only with no backup or copy under 7 days old. |
-| N8 | Counters | On by default, one previous version kept. |
-| N9 | Knowing a Wi-Fi network | A fingerprint; never ask for location. |
-| N10 | "Ask before big downloads" | Spending limits, Mobile data. |
-| N11 | Upgrader sheet | Android 13+ only. |
-| N12 | A withdrawn version installed | Takes the top Settings card. |
-| N13 | Gear dot for an update | Blue. |
-| N14 | Rollout | 10% for 2 days, 50% for 2 days, then all; a crash report sets 0. |
-| N15 | Almost full | Under 200 MB, tuned by the counters. |
-| N16 | A copy off the phone keeps the backup row grey | 7 days; a copy in Downloads does not count. |
-| N17 | Who marks an approval as losing | HQ's runtime, from the tool. |
-| N18 | Restore a cleared update on HQ | Yes. |
-| N19 | Strings | One catalogue that builds both phone and web. |
-| N20 | The literal check | Fails on new ones; today's 172 reach zero in wave 0. |
-| N21 | If the locked hold fails outright | Ship the unlocked assistant; lock-screen switch off on that model. |
-| N22 | Keep the screen on | 30 s while thinking only. |
+Decisions live in `../decisions.md` (D, N, W, WR) and the cross-platform settlements in
+`../resolutions.md`; this file does not repeat them. The ids each wave depends on:
+
+| Wave | `decisions.md` | `resolutions.md` |
+|------|----------------|------------------|
+| 0 | D11, D12, D17, N2, N4, N5, N6, N8, N12, N14, N19, N20, N21 | A1, A2, A4, A5, B19, D-1, D-3, D-4, D-5, D-8, D-11 |
+| 1 | D1, D2, D3, D4, D5, D13, N5, N11, N16, N17, N18, N19, N20, N23 | A2, A3, A4, A6, B1 to B5, B8, B10, B14, B15, B18, B19, C-1, C-4 to C-8, D-1, D-4, D-6, D-7, D-8, D-12 |
+| 2 | D8, D10, D11, D12, D14, D15, N7, N9, N10, N12, N13, N14, N15 | A2, A7, B17, D-2, D-3, D-5 |
+| 3 | D6, D7, D9, N21, N22 | A2, A4, B1, B18, D-3, D-6 |
+| 4 | D16, D17, D18, D19, D20, D21, N1, N2, N3, N15, N24, N25 | A2, A3, A7, B6, B7, B16, C-2, C-3, C-9, C-10, D-5, D-9, D-10, D-12 |
+
+Owner to confirm before the part that depends on it: N4, N6, N19, N22, N25 (the full list is in
+`../decisions.md`). Later, after this run: resume a stopped helper and archived helpers on the phone, and
+a server HQ running Lite (`../resolutions.md` C-15).
 
 ### The adversarial review in one table (FixReview)
 
@@ -389,124 +380,101 @@ model's size and resume already existed, so #7 is mainly paid data and Cancel.
 
 ---
 
-## 5. Open conflicts
+## 5. Conflicts found while carrying the boards over
 
-Found while carrying the boards over. None was settled silently: each spec quotes its own board, and the
-list below says which way the rules point. Decide each before building the screen it touches, then update
-both specs.
+Each one is now settled, and the specs say what the settlement says. "Still open" at the end lists the
+few that no resolution covers, each with the recommendation the specs already follow.
 
-### Notification words (rules section 1 owns the defaults)
+### Notification words
 
-1. **Task approval title.** FixLockScreen: "A task needs your OK". FixNotifications (frame 10 and its copy
-   table): "The {task} needs your OK" ("The backup task needs your OK"). FixLockScreen rule 2 says a
-   task's own words are never a notification title, and the rules say titles give "who and what kind", so
-   "A task needs your OK" fits the rules.
-2. **Stuck helper.** FixLockScreen: "{Helper} is stuck · Open HQ to see where it stopped." FixNotifications:
-   "A helper is stuck · Open HQ to see which one."
-3. **Server question.** Three wordings: FixLockScreen "{Helper} needs your OK · On your server HQ. Open it
-   to see what it wants."; FixNotifications "{Helper} needs your OK on your server HQ · Open it to see what
-   it wants to do."; FixDestructive A16 header "AgentHQ · your server HQ" with "Open HQ to see what it wants
-   to do."
-4. **The details switch lines.** FixLockScreen "Off. Notifications say who needs you, not what." / "On
-   while the phone is unlocked."; FixNotifications "Off: they say who needs you, not what. You answer in
-   the app." / "Details show only while the phone is unlocked. Allow asks you to unlock first.";
-   FixPlainWords A4 "Off: they say who and what kind". No-lock line: FixLockScreen "Needs a screen lock" +
-   note; FixNotifications "Set a screen lock to use this. Without one, anyone holding this phone can
-   answer."
-5. **Channel rows in Settings › Notifications.** FixLockScreen draws importance words ("High · sound and
-   pop-up", "Min · required while HQ runs", "Low · silent"); FixPlainWords and FixNotifications use
-   alert words ("Sound and pop-up", "Silent", "Silent, folded away · Android needs it while HQ runs",
-   "Silent · shows progress"); off reads "Off in Android" (FixNotifications) or "Off in Android settings"
-   (FixPlainWords). FixPlainWords is the words board and the glossary maps importance to alert words, so
-   its lines look right; the "off" phrase still needs one choice.
-6. **The running notice.** FixStartup gives Standby a "Background work" action and bodies ("Step {n} of 4 ·
-   {step}", "A setting changed. It is back in a few seconds."). FixOffline W1 says "no buttons on any
-   version" and draws titles only. Rules section 1 lists the titles and "Tap opens the app"; it is silent
-   on actions.
+1. **Task approval title.** Settled: resolutions.md B19 ("A task needs your OK", never the task's name).
+2. **Stuck helper.** Settled: resolutions.md B19 ("A helper is stuck · Open HQ to see which one.").
+3. **Server question.** Settled: resolutions.md B19 (title "Your server HQ needs your OK"; both specs use
+   the body "Open HQ to see what it wants to do.").
+4. **The details switch lines.** Settled: resolutions.md D-1 for the off line, FixPlainWords' "Off: they
+   say who and what kind". The on line and the no-lock lines are not FixPlainWords' (Still open 1).
+5. **Channel rows in Settings › Notifications.** Settled: resolutions.md D-1 (FixPlainWords' lines; off
+   reads "Off in Android settings").
+6. **The running notice.** Settled: resolutions.md D-2 (no buttons on any version; a tap opens the app).
 
 ### First run and Settings
 
-7. **The assistant card on Ready to start.** FixAssistantSetup: "Hold Home on any screen and ask by voice.
-   Understands English. You can also do this later in Settings." FixNotifications: "Hold Home on any screen
-   and ask HQ a question by voice. You can set this up later in Settings." FixDataTransfer: "Optional. Hold
-   Home to ask HQ." FixNotifications says the card belongs to FixAssistantSetup, so use its words.
-8. **The one-machine line.** FixAssistantSetup "Run HQ on one machine only. A second copy would answer the
-   same chats twice." vs FixNotifications "HQ runs all the time on this phone. Run it on one machine only. A
-   second copy would answer the same chats twice." (The moved phone has its own amber question, which is
-   not in conflict.)
+7. **The assistant card on Ready to start.** Settled: resolutions.md D-6 (FixAssistantSetup's body).
+8. **The one-machine line.** Settled: resolutions.md D-6 (FixAssistantSetup's line).
 
 ### Safe mode, backup and updates
 
-9. **Where the copy code lives.** FixSafeMode: `safe/SafeModeActivity.kt` (process `:safe`, plain views)
-   and `safe/NotesCopy.kt`. FixBackup: `data/SaveCopy.kt`, "shared with safe mode". It must be one
-   implementation that the `:safe` process can load without Compose; FixBackup itself says FixSafeMode
-   wins.
-10. **File name pattern.** FixSafeMode "HQ notes {yyyy-MM-dd HHmm}.zip" vs FixBackup "{yyyy-mm-dd hhmm}".
-    In Java patterns `mm` is minutes and `hh` is 12-hour, so use FixSafeMode's.
-11. **A switch for Save a copy.** FixBackup rule 13 depends on "the signed channel file switches Save a copy
-    off"; FixSafeMode's `switches` example and rules section 10's switch list have no such key.
-12. **Withdrawn version words.** FixSafeMode: card "AgentHQ {version} has a problem" / "A fix is coming.
-    Save a copy of your notes now, to be safe." / "Save a copy of my notes"; notice "AgentHQ {version} has a
-    problem · Open HQ to see what to do."; found then pulled "Up to date · {version} was withdrawn. Nothing
-    was installed." FixUpdates: card "This version has a known problem" / "A fixed version is coming. Save a
-    copy of your notes now, to be safe." / "Save a copy now"; notice "AgentHQ {version} has a known
-    problem."; row "Version {version} was withdrawn. You stay on {installed}."
-13. **The channel file's `withdrawn` and `notes`.** FixSafeMode: `withdrawn` is a list of version codes in
-    every file (`[92]`), `notes` one string. FixUpdates: `android-channel.sh` writes `withdrawn: false` per
-    version and promote's withdraw input sets it `true`; notes are "up to three plain lines of 120
-    characters". D12 adds "by language". The list shape is the one that lets a newer file withdraw an older
-    installed version (FixSafeMode rules 18 to 20); pick it, and define how notes carry three lines and
-    languages.
-14. **The lock-screen assistant switch.** FixSafeMode has `switches.lock_screen_assistant` as one boolean;
-    FixAssistantLocked rule 10 needs "models listed as failing in the signed channel file". The per-model
-    shape is not drawn anywhere.
-15. **The install-now dialog layout.** FixUpdates rule 14 says "Wait on the left"; FixSafeMode frame 13
-    draws it stacked, which rules section 4 requires because "Stop the chat and install" is over 18
-    characters. Stacked wins.
+9. **Where the copy code lives.** Settled: resolutions.md D-4 (`safe/NotesCopy.kt`, used by safe mode's
+   `:safe` process and Backup's Save a copy now).
+10. **File name pattern.** Settled: resolutions.md D-4 (FixSafeMode's "HQ notes {yyyy-MM-dd HHmm}.zip").
+11. **A switch for Save a copy.** Settled: resolutions.md D-3 (`switches.save_copy`, a boolean).
+12. **Withdrawn version words.** Still open 2.
+13. **The channel file's `withdrawn` and `notes`.** Settled: resolutions.md D-3 (`withdrawn` a list of
+    versionCodes; `notes` a map from language to up to three lines).
+14. **The lock-screen assistant switch.** Settled: resolutions.md D-3 (`lock_screen_assist_off_models`, a
+    list of model names, for N21).
+15. **The install-now dialog layout.** Settled: decisions.md D2 and rules-shared section 4 (a label over
+    18 characters stacks, so "Stop the chat and install" stacks). No resolution was needed.
 
 ### Connection, startup and offline
 
-16. **Order of building the Connection sheet.** FixStartup (wave 2) puts the start steps "in the Connection
-    sheet"; the sheet, the status line and saved copies are FixOffline (wave 4); FixPlan wave 0 builds the
-    Connection state with no UI. Build the sheet's start part in wave 2.
-17. **The sheet's file.** FixStartup `ui/shell/ConnectionSheet.kt` vs FixOffline
-    `ui/connection/ConnectionSheet.kt` (with the strip and banner beside it).
-18. **Sheet words that differ.** Starting body: FixStartup "HQ runs on this phone. After a reboot it can
-    take up to a minute." vs FixOffline "HQ runs on this phone. You can read and write while you wait."
-    Battery line: "Then set Battery to Unrestricted." vs "In Battery, choose Unrestricted for AgentHQ."
-19. **"Almost full".** FixStartup (and N15): under 200 MB free for the app's files, {size} up to 200 MB.
-    FixOffline rule 6: {size} = the database file's size + 100 MB, less what is free. N15 decides the
-    threshold; the {size} formula is still two.
-20. **Saved-copy size measurement timing.** FixOffline asks to measure "before wave 0 ends"; FixPlan lists
-    it as a wave 4 device check.
-21. **Data-extraction rules shape.** FixOffline's Android 12 row describes excluding `savedcopy/`, the
-    outbox and spoken ids; FixDataTransfer's file is an include list of `hqhome/.vault` only, which already
-    leaves them out. Build FixDataTransfer's file; FixOffline's check (they are absent on the new phone)
-    still applies.
-22. **Tap-to-top hooks.** FixOffline says `LocalReselect` and `ReselectEffect` stay "as before"; neither
-    exists in the code. Re-tapping the selected tab does nothing today, so this is new work.
+16. **Order of building the Connection sheet.** Settled: resolutions.md D-5 (data model and words in wave
+    0, the UI in wave 2 with Startup, extended in wave 4).
+17. **The sheet's file.** Settled: resolutions.md D-5 (`ui/connection/`).
+18. **Sheet words that differ.** Still open 3.
+19. **"Almost full".** Settled: resolutions.md D-5 (one formula: under 200 MB free for the app's files,
+    N15; {size} is 200 MB less what is free).
+20. **Saved-copy size measurement timing.** Settled: decisions.md N2 (measured on a 2,000-note vault in
+    wave 0) and resolutions.md B16 (one cap on phone and web, 256 KB a place, 2 MB in all).
+21. **Data-extraction rules shape.** Still open 4.
+22. **Tap-to-top hooks.** Settled: resolutions.md D-12 (`LocalReselect` and `ReselectEffect` are NEW).
 
 ### Words and strings
 
-23. **The `subtasks_done` plural example.** Its `one` item renders "1 of 3 sub-task done". Choose the plural
-    by the total `{M}` (FixProgress says "chosen by the total") and fix the example.
-24. **Strings to resources, wave 0 or 1.** FixPlan wave 0 lists "strings moved to resources" and N20 makes
-    the 172 literals reach zero in wave 0; the FixPlainWords board is filed under wave 1. Do the move and the
-    lint in wave 0, the rewritten words in wave 1.
-25. **A failure reason not in the catalogue.** FixDestructive's `fail_remove_device_pairing` ("Pairing is not
-    running. Try again in a moment.") and FixSafeMode's "That place is full" and "The place you chose stopped
-    answering" are reasons rules section 2 does not list. Add them to the catalogue.
-26. **FixAssistantHandoff's flag.** It flags "HQ is fine. Try again soon." because "section 7 bans
-    semicolons", but the sentence has none. Nothing to change.
+23. **The `subtasks_done` plural example.** Settled: resolutions.md D-7 (plural keyed on the total).
+24. **Strings to resources, wave 0 or 1.** Settled: resolutions.md D-8 (the move, the catalogue and the
+    lint in wave 0; the rewrites in wave 1).
+25. **A failure reason not in the catalogue.** Settled for pairing: resolutions.md A2 ("Pairing is off.
+    Switch it on and try again."). Safe mode's two place reasons: Still open 5.
+26. **FixAssistantHandoff's flag.** Settled: resolutions.md A2 keeps "HQ is fine. Try again soon." as the
+    AI service's outcome; nothing to change.
 
 ### Links and gaps
 
-27. **`hq://tasks/away`.** Rules section 8 adds it for While you were away; FixWebPages does not list it in
-    its touchpoints or tests. Add it to `Links.kt` and `LinksTest` with the page.
-28. **"No helpers match that."** FixSearch adds a Helpers scope but gives the no-match line only for notes,
-    tasks and chats.
-29. **Server HQ notes in Search (N3).** Decided for wave 4 as its own group, but FixSearch draws no frame or
-    words for it.
-30. **Verification briefing from the phone.** FixWebPages says no server change is needed because the device
-    token passes the web auth middleware; the verification routes are described in `CLAUDE.md` as
-    owner-only. Confirm the phone's token passes before relying on it.
+27. **`hq://tasks/away`.** Settled: resolutions.md D-9 (in `Links.kt` and `LinksTest` with the page).
+28. **"No helpers match that."** Settled: resolutions.md D-9.
+29. **Server HQ notes in Search (N3).** Settled: resolutions.md D-9 (a frame is drawn when wave 4 starts).
+30. **Verification briefing from the phone.** Settled: resolutions.md D-10 (owner-only, and the phone
+    signs in as the owner; confirm in `crates/hq-web/src/verification_api.rs` before building and stop if
+    it is limited further).
+
+### Still open
+
+All of these are now settled in `resolutions.md` section E (5 Nov 2026); build what section E says. The notes below explain how each was reached.
+
+1. **The details switch's on line and the no-lock lines** (FixLockScreen against FixNotifications; D-1
+   names FixPlainWords, which draws only the off line). Recommendation, now in both specs: on "Details
+   show only while the phone is unlocked. Allow asks you to unlock first."; no lock, the row's line
+   "Needs a screen lock" and the note "Set a screen lock to use this. Without one, anyone holding this
+   phone can answer." with Open Android settings and "Then tap Screen lock."
+2. **Withdrawn version words** (FixSafeMode against FixUpdates). Recommendation, now in both specs:
+   FixSafeMode's, since safe mode owns the action: card "AgentHQ {version} has a problem" / "A fix is
+   coming. Save a copy of your notes now, to be safe." / "Save a copy of my notes"; notice "AgentHQ
+   {version} has a problem · Open HQ to see what to do."; found then pulled "Up to date · {version} was
+   withdrawn. Nothing was installed."
+3. **The Connection sheet's starting body and battery line** (FixStartup against FixOffline; D-5 places
+   the UI but not these words). Recommendation, now in both specs: "HQ runs on this phone. After a reboot
+   it can take up to a minute. You can read and write while you wait." and, under Open Android settings,
+   "Then set Battery to Unrestricted."
+4. **Data-extraction rules shape.** Recommendation, already in both specs: build FixDataTransfer's file
+   (an include list of `hqhome/.vault` only), which leaves `savedcopy/`, the outbox and spoken ids out;
+   FixOffline's check that they are absent on the new phone still applies.
+5. **Safe mode's two save-copy reasons**, "That place is full." and "The place you chose stopped
+   answering.", which A2 does not list. Recommendation: add them to the catalogue as reasons that do not
+   retry, with the outcomes FixSafeMode already wrote ("Choose another place, or free up {size}." and
+   "Choose another place and try again."); until then `wave-0/02-safe-mode.md` keeps them as written.
+6. **The running notice's bodies.** D-2 settles the buttons only. Recommendation, applied in
+   `wave-2/04-startup.md`: keep FixStartup's body per state ("Answering your chats and running scheduled
+   tasks.", "Step {n} of 4 · {step}", "A setting changed. It is back in a few seconds.", "Tap to see why.").
+7. **"See all tasks as" on Tasks › All.** Not a search list, so B6 does not name it. Recommendation,
+   applied in `wave-4/03-web-pages.md`: "Show all tasks as", so the app has one "Show all" wording.

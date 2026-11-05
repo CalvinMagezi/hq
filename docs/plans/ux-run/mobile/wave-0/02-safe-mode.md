@@ -124,7 +124,7 @@ Rejected:
    paused for a moment to copy the database. It starts again when the copy is done." Button "Stop
    copying" (outlined).
 6. **Done** (pin 8). Title "Your notes are saved". Key/value rows: "File · HQ notes 2026-11-05
-   1432.zip", "Size · 338 MB · 2,860 files", "Saved · In Downloads at 14:36". Lines: "Move it off this
+   1432.zip", "Size · 338 MB · 2,860 files", "Saved to · Downloads at 14:36". Lines: "Move it off this
    phone, to a computer or a USB stick. A copy on this phone is lost with the phone." and "Restore on
    this phone or a new one opens this file too." Button "Done".
 
@@ -138,8 +138,8 @@ Rejected:
    chose stopped answering. Choose another place and try again." Note: "The unfinished file was
    removed. Nothing on the phone changed." Buttons "Choose another place", "Not now".
 9. **Back from the picker.** Frame 3 with the line "Nothing was saved." (pin 11) under the body. Variant
-   "Or, after the app was closed during a copy:" "The last copy did not finish. The unfinished file was
-   removed." Buttons "Choose where to save", "Not now".
+   "Or, after the app was closed during a copy:" "A copy stopped when the app closed. The unfinished file
+   was removed." Buttons "Choose where to save", "Not now".
 10. **Stop copying.** Over frame 5, dialog "Stop copying?" / "The part saved so far is removed." /
     [Keep copying] (left) [Stop copying] (right, red `#FF6B6B`, black text; pin 12).
 11. **Server HQ owner** (pin 13). Title "Your notes are on your server HQ"; body "This phone keeps no
@@ -187,7 +187,7 @@ Rejected:
   "sha256": "<64 hex>",
   "minSdk": 26,
   "size": 42991616,
-  "notes": "Fixes a crash when opening a large vault.",
+  "notes": {"en": ["Fixes a crash when opening a large vault."]},
   "seq": 412003,
   "issued_at": "2026-11-05T09:12:00Z",
   "rollout": 20,
@@ -196,14 +196,26 @@ Rejected:
   "switches": {
     "install_without_confirm": false,
     "lock_screen_assistant": false,
+    "lock_screen_assist_off_models": ["SM-A325F"],
     "task_outbox": true,
-    "start_cover_removal": true
+    "start_cover_removal": true,
+    "save_copy": true
   }
 }
 ```
 
+The shape is `../../resolutions.md` D-3: `withdrawn` is a list of versionCodes in every file, so a newer
+file can withdraw an older installed version; `notes` is a map from language to up to three lines of at
+most 120 characters (`{"en": ["…", "…"]}`, D12), the phone showing its own language and falling back to
+`en`; `switches` gains `save_copy` (a boolean; false hides Save a copy now and this screen's button, as
+`../wave-1/02-backup.md` rule 13 needs) and `lock_screen_assist_off_models` (a list of `Build.MODEL`
+names on which the lock-screen assistant stays off, for N21 and `../wave-3/02-assistant-locked.md` rule
+10).
+
 - New fields (from `size` down) are all inside the signed bytes. A file without them still parses:
-  rollout 100, nothing withdrawn, every switch as built, install without confirm off.
+  rollout 100, nothing withdrawn, every switch as built (`save_copy` true, no model in
+  `lock_screen_assist_off_models`), install without confirm off. A `notes` that is a plain string (an
+  older file) reads as `{"en": [that string]}`.
 - `seq` must rise. The phone keeps the highest it has seen and refuses an older file, so a replayed file
   cannot hide a withdrawal.
 - **Promote** builds a new file from the release's verified one, sets rollout and seq, and signs it with
@@ -246,10 +258,12 @@ before every install:
 | Saving lines | "Keep this screen open until it is done." · "HQ paused for a moment to copy the database. It starts again when the copy is done." |
 | No pause | "HQ did not pause, so the last minute of changes may be missing." |
 | Stop | "Stop copying?" · "The part saved so far is removed." · "Keep copying" · "Stop copying" |
-| Done | "Your notes are saved" · "File" · "Size" · "Saved: In {place} at {time}" · "Move it off this phone, to a computer or a USB stick. A copy on this phone is lost with the phone." · "Restore on this phone or a new one opens this file too." · "Done" |
+| Done | "Your notes are saved" · "File" · "Size" · "Saved to" · "{place} at {time}" · "Move it off this phone, to a computer or a USB stick. A copy on this phone is lost with the phone." · "Restore on this phone or a new one opens this file too." · "Done" |
 | Left out | "{N} files could not be read and were left out. Their names are in left-out.txt in the copy." |
 
-Failure lines (new keys in the rules section 2 catalogue):
+Failure lines (new keys in the rules section 2 catalogue, which is `../../resolutions.md` A2; "Place
+full" and "Place gone" are reasons A2 does not list, kept as written until the owner adds them, see
+`../README.md` "Still open"):
 
 | Reason | String |
 |--------|--------|
@@ -258,7 +272,7 @@ Failure lines (new keys in the rules section 2 catalogue):
 | Place gone | "Couldn't save a copy of your notes. The place you chose stopped answering. Choose another place and try again." |
 | Under it | "The copy needs about {size}. {Place} has {free} free. A USB stick or memory card works too." · "The unfinished file was removed. Nothing on the phone changed." |
 | Cancelled | "Nothing was saved." |
-| Interrupted | "The last copy did not finish. The unfinished file was removed." |
+| Interrupted | "A copy stopped when the app closed. The unfinished file was removed." |
 
 Server HQ:
 
@@ -358,17 +372,17 @@ Android constraints, as checked on the board:
 | File | Change | Exists |
 |------|--------|--------|
 | `kotlin/.../safe/SafeModeActivity.kt` | Views only, process `:safe`, ignores extras. | NEW (the `safe/` package is new) |
-| `kotlin/.../safe/NotesCopy.kt` | Pure: plan, exclusions, sizes, entry names (`plan()` is unit-tested). | NEW |
+| `kotlin/.../safe/NotesCopy.kt` | Pure: plan, exclusions, sizes, entry names (`plan()` is unit-tested). The one copy implementation, loaded without Compose, used by both this screen (its `:safe` process) and Backup's "Save a copy now" (`../../resolutions.md` D-4). The file name uses this spec's pattern. | NEW |
 | `safe/CopyWords` | In string resources, not a Kotlin object. | NEW |
 | `AndroidManifest.xml` | The activity with `android:process=":safe"`, extras ignored; `android:hasFragileUserData="true"` if chosen. | yes |
 | `res/xml/shortcuts.xml` | Static shortcut `save_notes` ("Save notes"). | yes |
 | `kotlin/.../ShellActivity.kt` | Crash markers in `onCreate` (cleared after the first frame); the sheet button. | yes |
 | `java/example/hq/spike/HubService.java` | A hold for the copy over `holdHq()` and `releaseHq()` (lines 142 to 162), at most 25 s. | yes |
 | `kotlin/.../ui/firstrun/Restore.kt` | Accept a notes .zip as well as .hqbak, same swap (lines 124 to 136). | yes |
-| `kotlin/.../update/UpdateLogic.kt` | `ChannelManifest` (line 8) gains the new fields with safe defaults; `verdict()` (line 92) takes bucket and withdrawn. | yes |
+| `kotlin/.../update/UpdateLogic.kt` | `ChannelManifest` (line 8) gains the new fields with safe defaults, in D-3's shapes (`withdrawn` a list, `notes` a language map, `switches.save_copy`, `switches.lock_screen_assist_off_models`); `verdict()` (line 92) takes bucket and withdrawn. | yes |
 | `kotlin/.../update/Updater.kt` | The idle gate before `commit()` (line 200); seq and bucket in prefs; withdrawn handling. | yes |
 | `crates/hq-web` | A signed-in busy route (turns, backup). | NEW route |
-| `scripts/release/android-channel.sh` | `--seq --rollout --notes --size --withdrawn --urgent`. | yes |
+| `scripts/release/android-channel.sh` | `--seq --rollout --notes --size --withdrawn --urgent`; `--notes` takes a language and up to three lines, `--withdrawn` a list of versionCodes (D-3). | yes |
 | `.github/workflows/promote.yml` (88 to 100) | Build and sign, never copy. | yes |
 | `.github/workflows/android-withdraw.yml` | The manual withdraw workflow. | NEW |
 
@@ -376,8 +390,10 @@ Android constraints, as checked on the board:
 
 - HQ: a **signed-in busy route** for the idle gate (is a chat turn or a backup running). FixPlan lists
   it as "A signed-in busy route for the idle gate before an install."
-- Release: the channel file gains `seq`, `issued_at`, `rollout`, `urgent`, `withdrawn`, `switches`,
-  `size`, `notes`; promote re-signs instead of copying; a withdraw workflow.
+- Release: the channel file gains `seq`, `issued_at`, `rollout`, `urgent`, `withdrawn` (a list of
+  versionCodes), `switches` (with `save_copy` and `lock_screen_assist_off_models`), `size`, `notes` (a
+  map from language to up to three lines); promote re-signs instead of copying; a withdraw workflow
+  (`../../resolutions.md` D-3).
 - FixPlan also names: `UpdateLogic.kt` hardcodes a real GitHub owner (`RELEASES_URL` at
   `UpdateLogic.kt:40`); move it behind config (see `wave-2/02-updates.md`).
 
@@ -404,6 +420,10 @@ Android constraints, as checked on the board:
 11. A test channel file withdrawing the installed code: the card shows after one check. Serve an older
     seq after it: refused, the card stays.
 12. Rollout 0: no automatic offer on any of 20 phone profiles. A manual check shows the update.
+13. `UpdateLogicTest`: a file with `"notes": {"en": ["a", "b", "c"], "fr": ["x"]}` shows the phone's
+    language and falls back to `en`; a fourth line is refused; `"save_copy": false` hides "Save a copy of
+    my notes"; a phone whose `Build.MODEL` is in `lock_screen_assist_off_models` keeps the lock-screen
+    switch off (`../../resolutions.md` D-3). Today none of these fields parse.
 
 ## 11. Check on device
 
@@ -427,7 +447,7 @@ Open questions for the owner, with the board's recommendation:
 - **Manual check during a rollout.** Recommendation: show the update, as frame 16 does. Rollout slows
   automatic offers only.
 
-Depends on: D11, N6, N7, N12 (a withdrawn version takes the top Settings card), N14 (rollout 10% for 2
+Depends on: `../../resolutions.md` D-3, D-4; D11, N6, N7, N12 (a withdrawn version takes the top Settings card), N14 (rollout 10% for 2
 days, 50% for 2 days, then all; a crash report sets 0), rules section 10 (kill switches). Feeds
 `wave-1/02-backup.md` (Save a copy now, the copy time) and `wave-2/02-updates.md` (idle gate, rollout,
 withdrawn).

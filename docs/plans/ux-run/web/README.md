@@ -6,10 +6,12 @@ access to the design canvases, how to build every change to the web app (`apps/h
 
 Read first, in this order:
 
-1. `../decisions.md`: every decision and its status. It wins over everything below.
-2. `../rules-web.md`: the web rules (AlignedWebRules) and the colour and component rules as
-   `aligned-ui.css` applies them.
-3. `../rules-shared.md`: the phone's shared rules, which apply to the web in full.
+1. `../resolutions.md`: the last word on every conflict between the phone, web and hub boards. It wins
+   over everything below.
+2. `../decisions.md`: every decision and its status.
+3. `../rules-shared.md` and `../rules-web.md`: one set of rules (`resolutions.md` A1). `rules-web.md`
+   adds only what a browser or the hub needs; where the two differ and `resolutions.md` is silent,
+   `rules-shared.md` wins.
 4. `../changes.md`: the server, desktop and release work each wave depends on.
 5. This file, then the specs in wave order.
 
@@ -88,7 +90,8 @@ Routes in `crates/hq-web/src/lib.rs`. Relevant modules: `web_push/` (push), `dia
 
 ## 2. Running them on a laptop
 
-Commands from `CLAUDE.md`, `apps/hq-web/README.md`, `docs/DESKTOP.md` and `../testing.md`.
+Commands from `CLAUDE.md`, `apps/hq-web/README.md`, `docs/DESKTOP.md` and `../testing.md`. Where they
+differ, `../testing.md` is the one to follow.
 
 ### HQ itself
 
@@ -121,13 +124,13 @@ on the same network, add its address to `web_allowed_origins` in `~/.hq/config.y
 ### The desktop hub
 
 ```bash
-cd apps/desktop
-bun install --frozen-lockfile
-bun run typecheck
-bun run build:ui && cd src-tauri && cargo run     # try it without bundling (docs/DESKTOP.md)
-bun run build                                     # tauri build --bundles app; unsigned HQ.app
-cargo test -p hq-desktop                          # logic, proxy, pairing end to end, shell config guards
+cd apps/desktop && bun install && bun run build:ui && bun run tauri dev   # a dev window
+cd apps/desktop && bun run build          # the app: tauri build --bundles app; unsigned HQ.app
+cd apps/desktop && bun install && bun run typecheck
+cargo test -p hq-desktop                  # includes shell_config.rs (commands, capabilities, no plugins)
 ```
+
+See `docs/DESKTOP.md` for pairing and the HQ window.
 
 `bun run build` writes `target/release/bundle/macos/HQ.app` under the Cargo target directory. On a
 tight disk build with `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0`. The real `hq bridge join` test
@@ -136,13 +139,19 @@ cli_join -- --ignored`. The hub builds for macOS only today (W50: Windows and Li
 
 ### The gates before a PR
 
+Exactly as `../testing.md` "Before every hand-over":
+
 ```bash
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace            # read the totals: a partial run is not a green run
 cd apps/hq-web && bun install && bun run build && bun test
+cd apps/android && ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 cd apps/desktop && bun install && bun run typecheck     # when the hub changed
-cargo test -p hq-desktop
+cargo test -p hq-desktop          # includes shell_config.rs (commands, capabilities, no plugins)
 ```
+
+Then write the wave's "Try this now" note in `../progress.md`. Shared-computer and signed-out checks use
+a second browser profile, signed in with a one-time code from Settings › Other devices.
 
 ## 3. Design system reference (from `aligned-ui.css`)
 
@@ -334,78 +343,72 @@ Every spec follows the mobile spec format: the finding and review ids it closes;
 Screens and states; Exact copy; Behaviour rules; Browser and platform notes; Code touchpoints; Server,
 desktop or release changes; Acceptance checks; Check on a laptop or phone; Open decisions.
 
-## 5. Open conflicts
+## 5. Decisions and conflicts
 
-Where boards disagree, `../decisions.md` wins, then `../rules-web.md`, then `../rules-shared.md`, then the later
-board. Each conflict, and how the specs resolve it:
+Decisions live in `../decisions.md` and the cross-platform settlements in `../resolutions.md`; this file
+does not repeat them. The ids each wave depends on:
 
-1. **Lite's gear.** Flow and Shell 2: This browser and Other devices. Notes 2: This browser only.
-   Settings 2: This browser only, without Notifications. Tasks 2: no gear at all. **Resolved by WR2:**
-   This browser and Other devices; Notifications hidden in Lite unless `lite.allow_egress` lists the
-   push service.
-2. **A link to Chat or Helpers on Lite.** Chat 2 draws a page, "Chat needs the full HQ" with Open
-   Notes. Flow and Shell 2: Notes with a toast "This HQ is HQ Lite. It has no Chat." Tasks 2: "HQ Lite
-   has no Chat." Helpers 2: "HQ Lite has no Helpers." **Resolved by WR4:** Notes with the toast "This
-   HQ is HQ Lite. It has no Chat." For Helpers the specs use "This HQ is HQ Lite. It has no Helpers."
-   (derived, same shape).
-3. **The top bar at 320 px.** Chat 2 says Search and Settings stay as icons and only the chip moves.
-   Rules-web 8, Shell 2 and the stylesheet: title and state only, Search, the chip and the gear in one
-   More menu. **The rule wins.**
-4. **The HQ window's saved copy and outbox.** Search 2: "The HQ window keeps no saved copy." Notes 2:
-   "No web push and no Waiting to send" there. HQ Hub Devices 2: a saved copy "Saved on this PC at
-   14:32" and "New notes wait to send." Rules-web 3: the saved copy is keyed by HQ id because the HQ
-   window serves two HQs. **Resolved by rules-web 3 and WR5:** the HQ window keeps a saved copy keyed by
-   the HQ's id, labelled "Saved on this PC at 14:32", and Waiting to send works there (only a shared
-   computer turns it off). Search therefore matches tasks and helpers from that copy when the phone is
-   away, as in a browser.
-5. **Chosen chips, switches and check boxes.** Foundations: green for "chosen chips and switches".
-   `aligned-ui.css`'s alignment block: ink. **The stylesheet wins** (it is the later file and follows
-   rules-shared 3, "never on a status"). Foundations 2's open item "error field border red" is already
-   folded into the stylesheet (amber).
-6. **Dialog geometry.** Rules-shared 4 describes the phone's card (surface-100, hairline, 20 dp padding,
-   330 dp). The stylesheet's `.a-dlg` is surface-200, line border, 24 px padding, up to 420 px. **The web
-   uses the stylesheet;** order, colours and words follow the rules.
-7. **When a dialog pair stacks on the web.** Rules-shared: a label over 18 characters or font scale 1.5.
-   Foundations 2 and Shell 2: "or text at 200%"; Inbox 2 stacks the pair at 200% zoom; Helpers 2 says
-   at 200% the answer buttons stack only past 18 characters. A browser cannot read its zoom level
-   reliably. **Specs use:** stack when a label passes 18 characters, when the two buttons do not fit
-   side by side at the dialog's width (measured), or when the browser's own text size makes the root
-   font 24 px or more. Open decision OD-W1 below.
-8. **Get started steps on the Chat start screen.** Shell: "Turn on notifications", "Open HQ on your
-   phone", "Connect an AI service · Done. GitHub Copilot." Chat (later revision, M16): "Let HQ reach
-   you", "Open HQ on your phone", "Chat apps (optional)", and "Connect an AI service was never a step".
-   **Chat wins.**
-9. **The balance chip near a limit.** Shell: "Daily limit 85%", "Over the limit 104%". Spending: "Today
-   85%"; its phone frame shows "104%". **Specs use** the limit's own period word, "Today 85%" or "This
-   week 61%", and "Over the limit 104%" past 100%.
-10. **The saved copy's size.** The phone: 256 KB per place, 2 MB in all (N2). The web: 5 MB in all
-    (rules-web 3). Not a conflict (different devices); both stay.
-11. **Undo timing.** The phone: the accessibility timeout (10 s on Android 8 and 9). The web: a toast
-    may stay until closed, Undo works on HQ for 10 minutes (W23). Not a conflict; the restore window on
-    HQ is 10 minutes for both.
-12. **"Saved on this PC" against "Saved in this browser".** Rules-web 3 says "Saved in this browser";
-    HQ Hub Devices 2 and WR5 say "Saved on this PC" inside the HQ window. **WR5 wins** for the HQ window
-    only.
-13. **The sign-in code warning.** The Sign in sheet says "Use a code only from your own signed-in
-    device. HQ never asks for it in a chat or a call." The code screen says rules-web 3's "Type this
-    only into HQ on your own device. HQ never asks for it in a chat or a call." Both stay, each in its
-    place.
-14. **A pairing failure reason not in the catalogue.** HQ Hub Devices: "Couldn't remove “Pixel 8”.
-    Pairing is off. Switch it on and try again." The phone's spec has the same gap
-    ("Pairing is not running. Try again in a moment."). Added to the web catalogue in wave 0 as a hub
-    reason.
+| Wave | `decisions.md` | `resolutions.md` |
+|------|----------------|------------------|
+| 0 | N1, N8, N19, D16, D17, W16, W20, W40, WR5, WR6, WR26, WR30 | A2, A4, A5, A6, A7, B11, B16, B19, C-11, C-12 |
+| 1 | D2, D3, N17, N18, N19, W6, W16, W23, W29, W31 to W37, W39, W40, W44, WR2, WR5, WR7, WR8, WR10, WR14, WR25, WR27, WR28 | A3, A6, B1 to B5, B8 to B12, B14, B17, B18, C-4, C-13 |
+| 2 | Decision N, W1, W2, WR1 to WR4, WR12, WR28 | B6, B13, B17, C-9, C-10, C-14 |
+| 3 | W4, W5, W38, W39, W42 to W50, WR13, WR19 to WR25, WR29, WR31 | A7, B4, B9, B11, B12, B18, C-12 |
+| 4 | D7, D13, D20, N3, N17, N18, W1, W2, W6 to W17, W19, W21 to W34, W36, W41, WR2, WR4, WR8, WR9, WR11 to WR18, WR26 to WR30 | A2, A3, A6, B1 to B8, B10, B11, B13 to B18, C-5, C-7 |
 
-### Open decisions this folder adds
+Owner to confirm before the part that depends on it: N19, W34, W44, W50, WR18, WR22 (the full list is
+in `../decisions.md`). B11 was confirmed on 5 Nov 2026.
 
-| Id | Question | Recommendation |
-|----|----------|----------------|
-| OD-W1 | How the web detects "text at 200%" for stacking | Measure fit, and stack when the root font is 24 px or more; do not try to read browser zoom. |
-| OD-W2 | Lite's `/settings/spending` | Open `/settings/browser` (Spending 2 says "opens Settings"; Lite's Settings is This browser). |
-| OD-W3 | Where the HQ window's Copy link and Share go | Copy link stays (it is text); Share hides (no share sheet in the web view). |
+### The conflicts found while carrying the boards over
 
-Owner decisions still open from `../decisions.md` that web specs depend on: N19 (one string catalogue),
-W34 (the claude.ai connector on the web), W44 ("This PC" on Macs), W50 (Windows and Linux hub builds),
-WR18 ("Typing to the helper"), WR22 (the bundle rename).
+1. **Lite's gear.** Settled: resolutions.md B13 (This browser and Other devices; Notifications hidden in
+   Lite unless `lite.allow_egress` lists the push service, WR2).
+2. **A link to Chat or Helpers on Lite.** Settled: resolutions.md B13 (Notes with "This HQ is HQ Lite.
+   It has no {place}.").
+3. **The top bar at 320 px.** Settled: `../rules-web.md` sections 8 and 11 (title and state only;
+   Search, the chip and the gear in one More menu). No resolution was needed.
+4. **The HQ window's saved copy and outbox.** Settled: resolutions.md B11, confirmed by the owner (group
+   "This window", saved copy and outbox keyed by the HQ's id, "Saved in HQ Hub at 14:32", no web push,
+   HQ Hub system notices).
+5. **Chosen chips, switches and check boxes.** Settled: resolutions.md A3 (ink, never green).
+6. **Dialog geometry.** Settled: `../rules-web.md` section 11 (the web uses the stylesheet's `.a-dlg`;
+   order, colours and words follow the rules). No resolution was needed.
+7. **When a dialog pair stacks on the web.** Settled: decisions.md WR27 (stack when the two buttons do
+   not fit side by side on one line; layout decides, not a zoom reading).
+8. **Get started steps on the Chat start screen.** Settled: resolutions.md B15 ("Let HQ reach you",
+   "Open HQ on your phone", "Messaging apps (optional)").
+9. **The balance chip near a limit.** Settled: resolutions.md B5 ("Today 85%"; over the limit "Today
+   104%" in amber).
+10. **The saved copy's size.** Settled: resolutions.md B16 (one cap on both: 256 KB a place, 2 MB in
+    all, per HQ).
+11. **Undo timing.** Settled: resolutions.md A6.
+12. **The HQ window's saved line.** Settled: resolutions.md B11 ("Saved in HQ Hub at 14:32", which
+    replaces WR5's saved line).
+13. **The sign-in code warning.** Settled: resolutions.md C-4 for the code screen ("Type this only into
+    HQ on your own device. HQ never asks for it in a chat or a call."); the Sign in sheet keeps its own
+    line ("Use a code only from your own signed-in device. HQ never asks for it in a chat or a call.").
+14. **A pairing failure reason not in the catalogue.** Settled: resolutions.md A2 ("Pairing is off.
+    Switch it on and try again.").
+15. **How the web detects "text at 200%" (was OD-W1).** Settled: decisions.md WR27.
+16. **Lite's `/settings/spending` (was OD-W2).** Settled: decisions.md WR28.
+17. **The HQ window's Copy link and Share (was OD-W3).** Settled: decisions.md WR29.
+18. **The outbox's cap (was OD-W4).** Settled: decisions.md WR30.
+
+### Still open
+
+All of these are now settled in `resolutions.md` section E (5 Nov 2026); build what section E says. The notes below explain how each was reached.
+
+1. **The Stop HQ body that names the helpers.** B9 says the red dialog's body
+   "names the helpers" but gives no sentence. Recommendation, used in `wave-3/01-this-pc.md` P6 and
+   `wave-1/02-dialogs-approvals.md`: "Chats and scheduled tasks pause. {Codex and Claude} are working
+   here and stop too. Their work so far is kept."
+2. **"Open it to see." as a button.** B18 replaces "Take a look", which on the web is a button on the
+   stuck-helper card. Recommendation: the button label "Open it to see" (no full stop on a button),
+   used in `wave-4/05-inbox.md` N6.
+3. **Claude's own menu names on Claude on the web.** B14 keeps "connector" to Technical details, but the
+   setup steps quote Claude's own Settings, Connectors menu. Recommendation: quote Claude's menu names
+   as Claude shows them and use HQ's own words ("Address for Claude") everywhere else, as
+   `wave-4/08-settings.md` C1 does.
 
 ## 6. Code paths the boards name that do not exist
 

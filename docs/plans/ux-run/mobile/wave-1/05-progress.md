@@ -80,7 +80,7 @@ so people with sight tap and nothing happens.
 | Upcoming folds | Later · 1 task | kept |
 | Top bar on All | 9 active | kept |
 | Briefing | 2 in progress, 1 to do (3 tasks) | kept |
-| Inbox badge | 3, 99+ past 99 | kept |
+| Inbox badge | 3, 99+ past 99 | kept; amber, like every needs-you count (`../../resolutions.md` A3) |
 
 ## 3. Decision
 

@@ -79,8 +79,8 @@ Rejected:
   before. Sign it in once and it stays signed in, unless it is a shared computer."
 - **Widths.** 320: the sheet fills the width, the code field and Use code stack, the state wraps under
   the title; a 640 px window at 200% zoom looks the same. 768 to 1023 and 2200: centred, 640 wide; at
-  2200 the rest stays empty. Lite: the same; once signed in the status line says "HQ Lite" and HQ opens
-  on Notes. HQ window: sign-ins are kept by the HQ's id, so the computer's HQ and the phone's never mix;
+  2200 the rest stays empty. Lite: the same; once signed in the status line says "Connected · HQ Lite"
+  and HQ opens on Notes. HQ window: sign-ins are kept by the HQ's id, so the computer's HQ and the phone's never mix;
   its sheet says "Sign in to HQ on your phone" / "On your phone, open Settings, then Other devices, then
   Sign in another device. Type the code it shows." with "Code from your phone", "This is a shared
   computer · Signed in for this window only. Nothing is saved.", "HQ never asks for this code in a chat
@@ -94,20 +94,21 @@ Rejected:
   "A device signed in this way is signed out after 90 days without use." [New code] [Copy code]. At zero:
   "The code ran out. Get a new one." with New code.
 - **D2 · Signed in.** One row per device: "Firefox on Windows" / "New · signed in today at 14:20" (amber
-  tag "New" with an icon) / [Sign it out]; "Chrome on macOS" / "Signed in 3 Nov · used just now"; "Safari
-  on a MacBook Air" / "Signed in 1 Nov · used 3 h ago" / [Sign out]; "HQ on Pixel 8" / "Signed in 28 Oct
-  · used 2 min ago · kept signed in". This browser's own row has no Sign out: "Sign out this browser" is
+  tag "New" with an icon) / [Sign it out] (ink); "Chrome on macOS" / "Signed in 3 Nov · used just now";
+  "Safari on macOS" / "Signed in 1 Nov · used 3 h ago" / [Sign out] (ink); "HQ on Pixel 8" / "Signed
+  in 28 Oct · used 2 min ago · kept signed in". This browser's own row has no Sign out: "Sign out this browser" is
   its own row in This browser (it also wipes).
 - **D3 · The rule line.** "A sign-in not used for 90 days signs out by itself. To keep one longer, open
   its menu and choose Keep signed in."
 - **D4 · Operator link.** Only while `operator_link_active`: "The first sign-in link from whoever set up
   your HQ still works. Sign out everywhere turns it off."
-- **D5 · Sign out everywhere.** "Every other device is signed out, and so is any sign-in link you made
-  earlier. Claude connections end too. HQ restarts for a moment." Then "Pair a device by QR code on your
-  phone or in HQ Hub. A paired device reaches HQ directly."
-- **D6 · Sign out a device.** The red dialog: "Sign out {Safari on a MacBook Air}?" / "It stops reaching
-  HQ at once. To use it again, sign it in with a new code." / [Keep signed in] [Sign out device]. Done:
-  "{Safari on a MacBook Air} signed out." (a toast kept until closed, no Undo).
+- **D5 · Sign out everywhere.** The red dialog (`../../resolutions.md` B2): "Sign out everywhere?" /
+  "Every other device is signed out. This one stays signed in." / [Keep everyone signed in] on top, [Sign
+  out everywhere] below when they do not fit side by side. Under the row: "Pair a device by QR code on
+  your phone or in HQ Hub. A paired device reaches HQ directly."
+- **D6 · Sign out a device.** The red dialog (`../../resolutions.md` B3): 'Sign out "{Safari on
+  macOS}"?' / "It can no longer open HQ until it signs in again." / [Keep signed in] [Sign out
+  device]. Done: "{Safari on macOS} is signed out." (a toast kept until closed, no Undo).
 - **D7 · Sign out this browser** (Settings › This browser): row "Sign out this browser" / "Wipes what
   this browser saved". The red dialog, stacked (label over 18 characters): "Sign out this browser?" /
   "HQ wipes what this browser saved: notes, lists, drafts and messages waiting to send. Notifications
@@ -117,11 +118,12 @@ Rejected:
 
 - **N1 · The card** (`.a-card.needs`): title "A new sign-in to your HQ", pill "Needs you". "Chrome on
   Windows signed in with a one-time code at 14:32 today." "If it was not you, sign it out now. Then make
-  a new code only on your own device." [It was me] (left, secondary) [Sign it out] (right, red).
-- **N2 · Sign it out asks once.** "Sign out Chrome on Windows?" / "It loses access at once. Anything it
-  saved is wiped the next time it opens HQ." / [Keep it signed in] [Sign it out]. "Keep it signed in" is
-  17 characters, so side by side. Back, Esc and a click outside keep it signed in.
-- **N3 · After.** "Edge on Windows is signed out." HQ also lists it under Other devices as signed out.
+  a new code only on your own device." [It was me] (left, secondary) [Sign it out] (right, ink: a
+  trigger that opens a red dialog is ink; only the dialog's action is red, `../../resolutions.md` B3).
+- **N2 · Sign it out asks once.** The same dialog as D6: 'Sign out "Chrome on Windows"?' / "It can no
+  longer open HQ until it signs in again." / [Keep signed in] [Sign out device] (red). Side by side
+  when they fit. Back, Esc and a click outside keep it signed in.
+- **N3 · After.** "Chrome on Windows is signed out." HQ also lists it under Other devices as signed out.
 - **N4 · It was me.** The card clears and the device row loses its "New" tag.
 - **Lite.** The same card (Lite serves `/api/auth/devices` and the Inbox).
 
@@ -150,7 +152,7 @@ Rejected:
 | `code_warning` | "Type this only into HQ on your own device. HQ never asks for it in a chat or a call." |
 | `code_expiry` | "A device signed in this way is signed out after 90 days without use." |
 | `code_ran_out` | "The code ran out. Get a new one." |
-| `device_name` | "{Browser} on {System}" ("Firefox on Windows", "Safari on a MacBook Air", "HQ on Pixel 8") |
+| `device_name` | "{Browser} on {System}" ("Firefox on Windows", "Safari on macOS", "HQ on Pixel 8") |
 | `device_line_new` | "New · signed in today at {14:20}" |
 | `device_line` | "Signed in {3 Nov} · used {just now}" (· "kept signed in") |
 | `device_rule` | "A sign-in not used for 90 days signs out by itself. To keep one longer, open its menu and choose Keep signed in." |
@@ -159,9 +161,10 @@ Rejected:
 | `new_signin_body` | "{Chrome on Windows} signed in with a one-time code at {14:32 today}." · "If it was not you, sign it out now. Then make a new code only on your own device." |
 | `new_signin_push` | "A new sign-in to your HQ" · "Open HQ to see it." |
 | `it_was_me` | "It was me" |
-| `sign_it_out` | "Sign it out" |
-| `sign_it_out_dialog` | "Sign out {Chrome on Windows}?" · "It loses access at once. Anything it saved is wiped the next time it opens HQ." · "Keep it signed in" · "Sign it out" |
-| `signed_out_done` | "{Edge on Windows} is signed out." |
+| `sign_it_out` | "Sign it out" (ink trigger) |
+| `sign_out_device_dialog` | 'Sign out "{Chrome on Windows}"?' · "It can no longer open HQ until it signs in again." · "Keep signed in" · red "Sign out device" (B3; used by D6 and N2) |
+| `signed_out_done` | "{Chrome on Windows} is signed out." |
+| `sign_out_everywhere_dialog` | "Sign out everywhere?" · "Every other device is signed out. This one stays signed in." · "Keep everyone signed in" · red "Sign out everywhere" (B2) |
 | `sign_out_browser_row` | "Sign out this browser" · "Wipes what this browser saved" |
 | `sign_out_browser_dialog` | "Sign out this browser?" · "HQ wipes what this browser saved: notes, lists, drafts and messages waiting to send. Notifications stop here too." · "Keep signed in" · "Sign out this browser" |
 | `export_shared_warn` | "The file stays in this computer's Downloads" (full dialog in `../wave-4/03-notes.md`) |
@@ -170,13 +173,16 @@ Retired: "Signed in with a code" (as a device's name), "A new device signed in t
 … open Settings, Devices in HQ and sign it out.", "That code is wrong, already used or expired. Get a
 new one on the signed-in device.", "Could not sign in (error {status}). Try again.", "This device was
 signed out, or the server no longer accepts its sign-in.", "Sign this device out? You will need a code,
-a login link or /login to get back in."
+a login link or /login to get back in.", "It stops reaching HQ at once. To use it again, sign it in
+with a new code.", "It loses access at once. Anything it saved is wiped the next time it opens HQ.",
+"Keep them signed in", "Keep it signed in".
 
 ## 6. Behaviour rules
 
 1. **Names.** At exchange, HQ stores the browser and the system from the `User-Agent` (parsed on the
    server into a short name: Chrome, Edge, Firefox, Safari, Samsung Internet, the HQ app; Windows,
-   macOS, a MacBook Air where the platform says so, Linux, Android, iPhone, iPad) and the time. The
+   macOS, Linux, Android, iPhone, iPad) and the time. Devices are named by browser and system ("Chrome
+   on Windows", `../../resolutions.md` B3). The
    phone app's own sign-in is "HQ on {its device name}". Never the raw user agent on screen.
 2. **Expiry without use.** A code sign-in gets `idle_expires_after = 90 days`; `verify()` refuses a
    token whose `last_used_at` (or `created_at`) is older than that and deletes it. "Keep signed in" sets
@@ -243,6 +249,10 @@ words in wave 3. Release: `docs/security/WEB_AUTH.md` gains the expiry.
 5. A 401 from the exchange route leaves the stores in place. (Guards rule 7; passes today, must keep
    passing after wave 0.)
 6. The code card contains "Type this only into HQ on your own device." Today it does not.
+7. The new sign-in card's "Sign it out" renders ink; its dialog's action is red "Sign out device" with
+   'Sign out "Chrome on Windows"?' and "It can no longer open HQ until it signs in again."; done reads
+   "Chrome on Windows is signed out." Sign out everywhere's safe button reads "Keep everyone signed in"
+   (B2, B3). Today the dialog is the browser's own `confirm()`.
 
 ## 11. Check on a laptop or phone
 
@@ -253,7 +263,7 @@ words in wave 3. Release: `docs/security/WEB_AUTH.md` gains the expiry.
 
 ## 12. Open decisions it depends on
 
-- **WR8, WR10** (Recommended). **M7**, rules-web 3.
+- **WR8, WR10** (Recommended). **M7**, rules-web 3. `../../resolutions.md` B2, B3, C-4.
 - Depends on: `../wave-0/01-live-bugs.md` and `../wave-0/02-shared-parts.md` (the wipe),
   `02-dialogs-approvals.md` (dialogs), `06-settings-groups.md` (This browser group),
   `../wave-4/02-first-run-sign-in.md` (the covers and the status line state).

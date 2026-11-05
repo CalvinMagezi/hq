@@ -2,7 +2,8 @@
 
 Board: **FixLockScreen** ("Fix R1: lock screen privacy"), wave 0, added after the review, 5 Nov 2026.
 Area: notifications (`AlertPoster`, `AnswerReceiver`, `Alerts`, `HubService`, Settings › Notifications).
-Shared rules: `../../rules-shared.md` sections 1, 2, 4, 7, 8, 9 win over anything here.
+Shared rules: `../../rules-shared.md` sections 1, 2, 4, 7, 8, 9 win over anything here, and
+`../../resolutions.md` wins over the rules (here above all A4, A5, B19 and D-1).
 
 ## 1. Finding and the review items it closes
 
@@ -116,7 +117,8 @@ page header (back arrow, title "Notifications"), group labels in small caps, row
 1. **Locked, details off (the default).** Group "Needs you":
    - "AgentHQ · now" / "Claude needs your OK" / "Open HQ to see what it wants to do." / [Open] (pin 1)
    - "AgentHQ · 2 min" / "A task needs your OK" / "Open HQ to see what it wants to do." / [Open] (pin 2)
-   - "AgentHQ · 6 min" / "Codex is stuck" / "Open HQ to see where it stopped." / [Open] (pin 3)
+   - "AgentHQ · 6 min" / "A helper is stuck" / "Open HQ to see which one." / [Open] (pin 3;
+     `../../resolutions.md` B19)
 
    Group "Updates" (no buttons):
    - "AgentHQ · 8 min" / "HQ answered" / "Tap to read."
@@ -125,8 +127,8 @@ page header (back arrow, title "Notifications"), group labels in small caps, row
    see what." (twice, pin 4 on the second), "1 new update" / "Unlock to read it.". Running notice
    unchanged: "AgentHQ" / "HQ is running" / "Answering your chats and running scheduled tasks."
 3. **Unlocked, details on, Android 12+** (shade):
-   - (5) "Claude needs your OK" / "Run this command?" / `cargo build --release` / [Allow once]
-     [Decline] [Open]
+   - (5) "Claude needs your OK" / "Run this command?" / `cargo build --release` / [Decline] [Allow
+     once] [Open] (safe first, `../../resolutions.md` A4)
    - (6) "A task needs your OK" / "Delete 3 old backups from before Sep 21." / [Open] only (losing
      request)
    - (7) "HQ answered" / "Your flight to the conference leaves at 07:40 from gate B12."
@@ -149,28 +151,31 @@ page header (back arrow, title "Notifications"), group labels in small caps, row
    - Top info card (info icon in ink-muted, pin 12): bold "Notifications now hide details", line "They
      say who needs you, not what. You can show details below." Shown to upgraders once.
    - Group label "What notifications show"; one row (pin 13): bold "Show details in notifications",
-     secondary "Off. Notifications say who needs you, not what.", switch off at the right.
+     secondary "Off: they say who and what kind" (FixPlainWords' line, `../../resolutions.md` D-1),
+     switch off at the right.
    - Note under the group (13/18): "Details are commands, answers and task names. With this on, they
      show only while the phone is unlocked. They also reach your watch and notification history."
    - Group label "Channels"; five rows, each with an external-link icon that opens Android's channel
-     settings: "Needs you · High · sound and pop-up", "Updates · Default · silent", "App updates · Low ·
-     silent", "Downloads · Low · silent", "HQ is running · Min · required while HQ runs".
+     settings, in FixPlainWords' words (D-1): "Needs you · Sound and pop-up", "Updates · Silent", "App
+     updates · Silent", "Downloads · Silent · shows progress", "HQ is running · Silent, folded away ·
+     Android needs it while HQ runs". A channel turned off reads "Off in Android settings".
 9. **Turning details on.** Same page with a scrim and a dialog (pin 14): title "Show details in
    notifications?", two paragraphs "Details show only while the phone is unlocked. Your watch and
    notification history get them too." and "On Android 12 and newer, Allow appears on questions. It
    asks you to unlock first.", buttons side by side [Keep hidden] (left, outlined) [Show details]
    (right, outlined; not a losing action, so not red).
 10. **Settings, no secure screen lock.** The row is dimmed: "Show details in notifications" /
-    secondary "Needs a screen lock" / switch drawn off and not available (pin 15). Note: "This phone
-    has no screen lock. Anyone holding it could read details and answer. Set a PIN, pattern or password
-    to use this." Text button (link style, blue) "Open Android settings", then the line "Then tap
-    Screen lock." Channels group follows (Needs you, Updates shown).
-11. **Server HQ, locked.** "Claude needs your OK / On your server HQ. Open it to see what it wants. /
-    [Open]" (pin 16); "Your server HQ signed this phone out / Its questions stop arriving here. Sign in
+    secondary "Needs a screen lock" / switch drawn off and not available (pin 15). Note: "Set a screen
+    lock to use this. Without one, anyone holding this phone can answer." Text button (link style,
+    blue) "Open Android settings", then the line "Then tap Screen lock." Channels group follows (Needs
+    you, Updates shown). (The same words as `../wave-1/01-notifications.md` frame 12; see
+    `../README.md` "Still open".)
+11. **Server HQ, locked.** "Your server HQ needs your OK / Open HQ to see what it wants to do. /
+    [Open]" (pin 16; `../../resolutions.md` B19); "Your server HQ signed this phone out / Its questions stop arriving here. Sign in
     again in Settings." (pin 17, no address); "Backup finished. / On your server HQ.".
 12. **360 dp, font scale 2.0.** Settings › Notifications: the switch line wraps and the switch moves to
     the top of the row (pin 18); the note shortens to its first sentence on this frame; Channels show
-    "Needs you · High · sound and pop-up". Nothing is cut off.
+    "Needs you · Sound and pop-up". Nothing is cut off.
 
 ## 5. Exact copy
 
@@ -185,9 +190,9 @@ names; suggested keys are in the last column.
 | Helper asks | "{Helper} needs your OK" · "Open HQ to see what it wants to do." | Open | `notice_helper_ok_title`, `notice_open_to_see_body` |
 | Task or action | "A task needs your OK" · "Open HQ to see what it wants to do." | Open | `notice_task_ok_title` |
 | Losing request | "A task needs your OK" · "Open HQ to see what it wants to do." | Open only, details on or off | |
-| Helper stuck | "{Helper} is stuck" · "Open HQ to see where it stopped." | Open | `notice_helper_stuck_title`, `notice_stuck_body` |
+| Helper stuck | "A helper is stuck" · "Open HQ to see which one." (B19) | Open | `notice_helper_stuck_title`, `notice_stuck_body` |
 | Voice turn waits | "HQ needs your OK to finish" · "Open HQ to see what it wants to do." | Open | `notice_voice_ok_title` |
-| Server question | "{Helper} needs your OK" · "On your server HQ. Open it to see what it wants." | Open | `notice_server_ok_body` |
+| Server question | "Your server HQ needs your OK" · "Open HQ to see what it wants to do." (B19) | Open | `notice_server_ok_title` |
 | More than five | "{N} more waiting for you" · "Open HQ to see them." | | plural resource |
 | Server sign-out | "Your server HQ signed this phone out" · "Its questions stop arriving here. Sign in again in Settings." | | |
 | Answer ready (Updates) | "HQ answered" · "Tap to read." | none | |
@@ -215,14 +220,14 @@ names; suggested keys are in the last column.
 |---------|-------|
 | Group label | "What notifications show" |
 | Switch | "Show details in notifications" |
-| Line, off | "Off. Notifications say who needs you, not what." |
-| Line, on | "On while the phone is unlocked." |
+| Line, off | "Off: they say who and what kind" (FixPlainWords, D-1) |
+| Line, on | "Details show only while the phone is unlocked. Allow asks you to unlock first." |
 | Note | "Details are commands, answers and task names. With this on, they show only while the phone is unlocked. They also reach your watch and notification history." |
 | No lock, line | "Needs a screen lock" |
-| No lock, note | "This phone has no screen lock. Anyone holding it could read details and answer. Set a PIN, pattern or password to use this." · button "Open Android settings" · "Then tap Screen lock." |
+| No lock, note | "Set a screen lock to use this. Without one, anyone holding this phone can answer." · button "Open Android settings" · "Then tap Screen lock." |
 | Dialog | "Show details in notifications?" · "Details show only while the phone is unlocked. Your watch and notification history get them too." · "On Android 12 and newer, Allow appears on questions. It asks you to unlock first." · "Keep hidden" · "Show details" |
 | Upgrader card | "Notifications now hide details" · "They say who needs you, not what. You can show details below." |
-| Channel rows | "Needs you" · "High · sound and pop-up"; "Updates" · "Default · silent"; "App updates" · "Low · silent"; "Downloads" · "Low · silent"; "HQ is running" · "Min · required while HQ runs" |
+| Channel rows | FixPlainWords' lines (D-1): "Needs you" · "Sound and pop-up"; "Updates" · "Silent"; "App updates" · "Silent"; "Downloads" · "Silent · shows progress"; "HQ is running" · "Silent, folded away · Android needs it while HQ runs"; any channel turned off · "Off in Android settings" |
 | Running notice | "HQ is running" · "Answering your chats and running scheduled tasks." (unchanged) |
 | Watch action | "Open on phone" (Android's own label on a watch) |
 
@@ -238,10 +243,12 @@ names; suggested keys are in the last column.
 4. **The public version stays** for owners who hide sensitive content, and is added to every notice,
    `simple()` and the answer results included.
 5. **Details are posted only when** the switch is on, `isDeviceSecure()` is true and
-   `isKeyguardLocked()` is false at the moment of posting.
-6. **Allow once and Decline** appear only under rule 5, on Android 12+, with
-   `setAuthenticationRequired(true)` on Allow. The words are the shipped ones: Allow once · Decline ·
-   Open.
+   `isKeyguardLocked()` is false at the moment of posting. On the phone, details may include the
+   request's text, the command included, only while unlocked and never on the lock screen; the web
+   shows only an item's first line and never a command (`../../resolutions.md` A5, on purpose).
+6. **Decline and Allow once** appear only under rule 5, on Android 12+, with
+   `setAuthenticationRequired(true)` on Allow. The order is safe first on every surface
+   (`../../resolutions.md` A4): Decline · Allow once · Open.
 7. **A losing request** (delete, remove, stop, sign out) shows its details under rule 5 but keeps Open
    only (rules section 4).
 8. **At lock,** the hub hears `ACTION_SCREEN_OFF` and posts the general text over every detailed
@@ -258,7 +265,8 @@ names; suggested keys are in the last column.
 14. **Turning it on** asks once with the dialog. Keep hidden and Back leave it off. Turning it off
     needs no dialog and re-posts every shown notice general at once.
 15. **Open Android settings** opens `ACTION_SECURITY_SETTINGS`. On return the page reads the lock again.
-16. **Server questions** say "On your server HQ" and open the server's web app, as today.
+16. **Server questions** are titled "Your server HQ needs your OK" (B19) and open the server's web app,
+    as today.
 17. **No address** in any notification, the server's included.
 18. **At 360 dp and font scale 2.0** the switch line wraps and the switch moves to the top of the row.
     Nothing is cut off.
@@ -269,7 +277,7 @@ names; suggested keys are in the last column.
 |---------|-----------|
 | 8 and 9 | General text by default. Details under rule 5, Open only. Lock read by `KeyguardManager` (API 26 has both `isDeviceSecure` and `isKeyguardLocked`). No notification history. |
 | 10 and 11 | As 8 and 9. Android 11 adds notification history, off unless the owner turns it on. It then keeps exactly what was posted. |
-| 12 | Allow once · Decline · Open under rule 5; Allow asks for the unlock. Losing requests keep Open only. |
+| 12 | Decline · Allow once · Open under rule 5 (A4); Allow asks for the unlock. Losing requests keep Open only. |
 | 13+ | As 12, once the notification permission is granted (`wave-1/01-notifications.md`). Android 15's own redaction covers one-time codes only and changes nothing here. |
 
 Android constraints, as checked on the board:
@@ -328,6 +336,9 @@ None for this board. The server sign-out notice stops naming the address on the 
    Notifications and once in Inbox › Updates.
 10. A failed answer from the shade reads "Couldn't send your answer." and "HQ didn't answer in time. Try
     again." Never "HQ didn't reply".
+11. With details on, Android 12+, the buttons read Decline · Allow once · Open, left to right (A4). A
+    stuck helper's notice reads "A helper is stuck · Open HQ to see which one." and a server question's
+    title is "Your server HQ needs your OK" (B19).
 
 ## 11. Check on device
 
@@ -349,6 +360,7 @@ Open questions for the owner, with the board's recommendation:
 - **`setLocalOnly` on detailed notices,** so details never reach a watch. Recommendation: no. The switch
   says the watch gets them. Revisit if an owner asks.
 
-Depends on: N5; rules sections 1, 4 (losing requests Open only), 8 (links); FixNotifications (the five
+Depends on: N5; `../../resolutions.md` A4, A5, B19, D-1; rules sections 1, 4 (losing requests Open
+only), 8 (links); FixNotifications (the five
 channels and the permission, `wave-1/01-notifications.md`); FixAssistantHandoff ("HQ answered" and "HQ
 needs your OK to finish").

@@ -13,7 +13,7 @@ not green). Where this spec and the rules differ, the rules win.
 - **M2.** Over the limit and past the warning point are amber with an icon; within the limit a grey bar with
   ink words; no green or red status, no inline hex colours; the chart in the rules-web 8 palette.
 - **M5.** Spending under How HQ behaves; Undo on deleting a limit restores on HQ, with "Couldn't undo. It
-  changed on another device." after the window.
+  changed on another device, or too much time passed." after the window (`../../resolutions.md` A6).
 - **M11.** The reset zone is named: midnight UTC, 03:00 in Nairobi, weeks from Monday.
 - **M12.** Rate-limit readings and "Key limit left" kept from `usage.tsx`, with HQ's own record beside what
   the service says.
@@ -95,13 +95,12 @@ Rejected: a scope typed as `provider:x`; green for within a limit; a red over-li
 
 - **S1 · Filled.** Limits first, then the forecast, what used the most and each service. The chip is in the
   top bar on every place while Connected, so a phone owner reaches Spending in one tap (Drift 02).
-- **S2 · Over a limit.** Chip "104%" amber ("Over the limit 104%" where there is room, `../README.md` Open
-  conflict 9). "HQ stopped using AI" / "All AI spending reached $5.20 of $5.00 today. Chats and helpers wait
+- **S2 · Over a limit.** Chip "Today 104%" amber (`../../resolutions.md` B5). "HQ stopped using AI" / "All AI spending reached $5.20 of $5.00 today. Chats and helpers wait
   until it resets at 03:00, or until you raise the limit." [Raise the limit] (outlined, not green: it spends
   money). The limit "$5.20 of $5.00 · 104%", "Over the limit · resets at 03:00, in 12 h".
 - **S3 · Deleted, with Undo.** ""OpenRouter only" deleted · Undo". Undo puts the limit back on HQ within 10
   minutes (needs a restore route).
-- **S4 · Too late.** "Couldn't undo. It changed on another device."
+- **S4 · Too late.** "Couldn't undo. It changed on another device, or too much time passed."
 - **S5 · No limits.** "No spending limits" / "No limits are set, so nothing is limited. Add a limit to cap a
   day, a week or a month." [Add a limit]. The chip then shows the first service's balance.
 - **S6 · Can't be reached.** The status line says so and the chip hides. "Your HQ can't be reached. Saved in
@@ -123,15 +122,17 @@ Rejected: a scope typed as `provider:x`; green for within a limit; a red over-li
   $3.00 today · of $3.00 · 37%", "$9.80 left", "Today $0.22 · This week $0.90 · This month $3.10". The chip
   is the phone's. The phone's HQ resets at midnight UTC too.
 - **Lite:** no Spending limits. Lite does not serve usage or budget routes (`docs/HQ_LITE.md`): no balance
-  chip, no Spending row, and `/settings/spending` opens This browser (OD-W2). Recommended: no Spending at all
+  chip, no Spending row, and `/settings/spending` opens This browser with "This HQ is HQ Lite. It has no
+  Spending limits." (`../../decisions.md` WR28, which closes OD-W2). Recommended: no Spending at all
   in Lite, rather than an empty page, since Lite makes no AI calls of its own.
 
 ## 5. Exact copy
 
 Every string quoted in section 4 is exact. Keys `spend_*`. The chip: "Copilot 912 left" (normal, line
-border, ink); "Today 85%" (past a warning point, amber); "Over the limit 104%" (amber); left out when not
+border, ink); "Today 85%" (past a warning point, amber); "Today 104%" (over the limit, amber; B5); left out when not
 known or not Connected. Retired: "Usage", "OpenRouter spend", "Burn rate now", "global, provider:x,
-model:x, origin:x", "block", "downgrade", "notify", "Checking", green within-limit bars, red over-limit.
+model:x, origin:x", "block", "downgrade", "notify", "Checking", "Over the limit 104%" on the chip, green
+within-limit bars, red over-limit.
 
 ## 6. Behaviour rules
 
@@ -178,6 +179,7 @@ routes exist.
 4. The page names "midnight UTC" and the local time. Today it does not.
 5. Deleting a limit shows ""OpenRouter only" deleted · Undo" and Undo restores it. Today it is gone.
 6. "Warn me at" writes `soft_pct`. Today it is fixed at 80.
+7. Over a limit the chip reads "Today 104%" in amber, past the warning point "Today 85%" (B5).
 
 ## 11. Check on a laptop or phone
 
@@ -186,6 +188,6 @@ routes exist.
 
 ## 12. Open decisions it depends on
 
-- **W2, W41, WR2** (Recommended). **OD-W2.**
+- **W2, W41, WR2, WR28** (Recommended), `../../resolutions.md` A6, B5.
 - Depends on: `../wave-1/06-settings-groups.md`, `../wave-1/03-undo.md`, `../wave-2/04-time-zones.md`,
   `../wave-2/02-embed-and-lite.md`.

@@ -18,8 +18,8 @@ drop, and keyboard sending.
   Decline left, Allow once right, red "Allow delete" when it loses something. "Let HQ answer it" becomes
   "Let HQ say yes to its requests": off, explained once, logged, never a losing request.
 - **WB2, W16, W40.** The per-chat reply alert switch goes; alerts are one Updates switch per browser.
-- **D7.** Spoken chats carry "Spoken" in the thread and the list; their requests quote "You said, by
-  voice".
+- **D7.** Spoken chats carry "Spoken" in the thread and the list; their requests quote "You said: …"
+  (`../../resolutions.md` B18).
 - **M1, M2.** "Connected" in grey, never "Live". Done ink, working blue, needs you amber.
 - **M9, WB4, W23.** Stop goes over HTTP too; a dropped link resumes by message id; HQ drops a resent
   message by client id. "Chat archived · Undo" restores on HQ within 10 minutes.
@@ -77,14 +77,14 @@ Rejected:
 ### 4.1 The start screen and your chats (Chat 1)
 
 - **C1 · 1440, first run.** Rail with Chat lit (the HQ mark's green ring). Top bar "Chat" / "Connected" /
-  Search "Search notes, tasks and chats" with Ctrl K / chip "Copilot 912 left". List pane "Chats" [New
+  Search "Search notes, tasks, chats and helpers" with Ctrl K (B18) / chip "Copilot 912 left". List pane "Chats" [New
   chat]; empty: "Your chats will show up here" / "Ask anything in the box on the right. HQ names the chat
   after your first message." Detail pane "New chat": heading (h1) "What would you like to do?", line "HQ
   can read your notes and tasks, write to them, and send helpers to do work.", three suggestions:
   "Summarise this note", "What needs me today?", "Save a thought as a note" (the phone's icons). Card "Get
   started" / "1 of 3 done" [Hide]: "Let HQ reach you · Get a notification in this browser when HQ needs
-  you." [Turn on]; "Open HQ on your phone · Sign it in with a code from Other devices." [Get a code]; "Chat
-  apps (optional) · Done. Telegram is connected." [Done]. The composer "Message HQ".
+  you." [Turn on]; "Open HQ on your phone · Sign it in with a code from Other devices." [Get a code]; "Messaging
+  apps (optional) · Done. Telegram is connected." [Done] (`../../resolutions.md` B15). The composer "Message HQ".
 - **C2 · 390, first run.** Top bar "Chat" with [Chats] and [New chat]; only the next Get started step
   shows ("Let HQ reach you · Get a notification when HQ needs you").
 - **C3 · 390, Get started done.** The card goes for good and the three latest chats take its place:
@@ -137,7 +137,7 @@ Rejected:
   steps fold into "What I did · N steps"; raw tool names and timings move under Technical details in the
   steps list. Stop: Send turns into Stop; Esc does the same while the box has focus; Stop goes over the
   socket and over HTTP. If neither reaches HQ: "Couldn't stop the reply. Your HQ can't be reached. Try
-  again in a moment." Watching: each helper as its card in the Helpers words and colours, never "blocked"
+  again when it's back." (`../../resolutions.md` A2) Watching: each helper as its card in the Helpers words and colours, never "blocked"
   in rose or "claude-code" and "native".
 
 ### 4.3 When HQ needs your OK in a chat (Chat 3)
@@ -153,14 +153,14 @@ Rejected:
   something." "What HQ said yes to · 2": "14:12 · "Use Gradle 8.7?" HQ answered Yes." and "14:18 · Allowed
   once: edit app/build.gradle.kts".
 - **A3 · A request from a spoken chat (390).** You: "Check what changed in the repo." with "Spoken". Card
-  "HQ needs your OK to finish · Needs your OK" / "You said, by voice · 9:42" / ""Check what changed in the
-  repo."" / "What HQ wants to run" / `bash` / `{ "command": "git status --short" }` / "In HQ's words" /
+  "HQ needs your OK to finish · Needs your OK" / "You said: “Check what changed in the repo.”" · 9:42
+  (B18) / "What HQ wants to run" / `bash` / `{ "command": "git status --short" }` / "In HQ's words" /
   "Show which files changed in the repository. It only reads." / [Decline] [Allow once] (green: it loses
   nothing).
 - **A4 · The first time it is turned on.** "Let HQ say yes to its requests?" / "HQ answers this helper's
   questions and allows its steps, toward the task's goal. It never says yes to deleting or stopping
   something. Those wait for you. Every answer it gives is listed under Watching." / [Keep asking me] [Let
-  HQ say yes]. Both labels are short, so side by side.
+  HQ say yes]. They fit on one line, so side by side (`../../decisions.md` WR27).
 - **A5 · Answered after HQ stopped waiting.** "Deleting a task needs your OK, so I asked. I will finish
   once you answer." Card "Allowed at 14:24 · Answered", the same quote; "HQ stopped to wait for you. Keep
   going asks it to finish in this chat." [Keep going].
@@ -172,8 +172,8 @@ Rejected:
   then tells the owner what it wants; an unanswered item ends after 24 h, and at most 5 wait per chat;
   (12) Let HQ say yes: off by default, one explainer the first time, every answer listed under Watching
   with its time, never a losing request, and its routes need the HQ client header (`origin.rs`); (13)
-  spoken chats show "Spoken" on the message and in the list; requests quote "You said, by voice · 9:42" and
-  the words heard; the mark comes from a source field the runtime sets, never the model (D7); the chat
+  spoken chats show "Spoken" on the message and in the list; requests quote "You said: …" with the words
+  heard and the time (B18); the mark comes from a source field the runtime sets, never the model (D7); the chat
   socket takes no source today, so it is new.
 
 ### 4.4 The composer (Chat 4)
@@ -212,19 +212,23 @@ but Connected, because a draft is at stake.
 | Connected | Grey, balance chip shown | None | On | Streams |
 | Starting HQ · 12 s | Blue | "HQ is starting. What you send waits here until HQ is up." | On, into Waiting to send | Goes on once HQ is up |
 | Reconnecting | Blue, Chat only | "Reconnecting. The reply goes on when the link is back." | On, into Waiting to send | Goes on from the last part, by message id ("Paused at the dropped link") |
-| Your HQ can't be reached | Amber | "Your HQ can't be reached. What you send waits here until it is back." [Details] | On, into Waiting to send | "Couldn't finish this reply. Your HQ can't be reached." Retry once back |
-| You're offline | Amber | "You're offline. What you send waits here until you're back online." | On, into Waiting to send | As above, with the offline reason |
+| Your HQ can't be reached | Amber | "Your HQ can't be reached. What you send waits here until it is back." [Details] | On, into Waiting to send | "Couldn't finish this reply. Your HQ can't be reached. Try again when it's back." Retry once back |
+| You're offline | Amber | "You're offline. What you send waits here until you're back online." | On, into Waiting to send | "Couldn't finish this reply. You're offline. Try again when you're back online." |
 | The AI service isn't answering | Amber | "The AI service isn't answering. HQ is fine. Notes and tasks work." [AI service and keys] | On | "Couldn't finish this reply. The AI service isn't answering. HQ is fine. Try again soon." Retry |
 | Signed out of this HQ | Amber | None. Only Sign in is shown ("Sign in to see your chats" / "HQ no longer accepts this browser's sign-in, so nothing from it is kept here.") | None | None |
-| HQ Lite | Grey | No Chat: a link to `/chat` opens Notes with "This HQ is HQ Lite. It has no Chat." (WR4) | None | None |
+| HQ Lite | Grey | No Chat: a link to `/chat` opens Notes with "This HQ is HQ Lite. It has no Chat." (WR4, B13) | None | None |
 
-Under the banner in states 3 and 5: "Saved in this browser at 14:32." The status for the AI comes from the
+Under the banner in states 3 and 5: "Saved in this browser at 14:32." (in the HQ window "Saved in HQ Hub
+at 14:32.", B11) The status for the AI comes from the
 signed-in AI status route, never `/health`.
 
 ### 4.6 Waiting to send, a dropped link, the failure lines (Chat 2, section 2)
 
 - **W1 · In the thread.** "Waiting to send 1 · Check the backup status · Saved in this browser. It will
-  send when HQ is up." (or "…when HQ is back.", "…when you are back online.").
+  try again by itself." (or "Saved in this browser. It will try again when HQ is back.", "Saved in this
+  browser. It will try again when you're back online.", `../wave-0/02-shared-parts.md`
+  `outbox_line_{state}`). The outbox holds at most 100 items; the 101st: "Couldn't add this. 100 things
+  are already waiting to send." (WR30).
 - **W2 · Back, sending in order.** "Check the backup status · Sending 1 of 2"; "Waiting to send 1 · And the
   phone one? · Saved in this browser. It is next." One at a time, oldest first; each carries a client id,
   so HQ drops a repeat.
@@ -235,7 +239,8 @@ signed-in AI status route, never `/health`.
   text stays in the box."
 - The failure lines per reason and action are the catalogue rows in `../wave-0/02-shared-parts.md`
   (send, stop, archive × starting, can't be reached, offline, no reply in time, AI down; "Not needed:
-  nothing is running." for Stop when the AI is down, "Archives as usual." for archive).
+  nothing is running." for Stop when the AI is down, "Archives as usual." for archive). Each is
+  "Couldn't {action}." + the reason + the outcome of `../../resolutions.md` A2.
 - Retired: "Not connected, so the message was not sent", "Picks up where it was", "Live", "Saved · 3 min",
   "Can't reach HQ", "Signed out · Saved · 2 h", "HQ did not finish a reply", "HQ is not answering", the
   Checking balance chip.
@@ -248,13 +253,14 @@ signed-in AI status route, never `/health`.
 - **2200 (drawn at 64%):** list, conversation and the docked details panel; the thread stays 760 wide and
   centred; the list pane and the panel keep their widths; the extra space is margin.
 - **320:** the top bar holds the title and the state, which wraps; Search, the chip and the gear in the
-  More menu (`../README.md` Open conflict 3). Nothing scrolls sideways.
+  More menu (`../../rules-web.md` sections 8 and 11). Nothing scrolls sideways.
 - **200% (a 1024 window lays out at 512):** the phone layout. The toast moves above the box while the box
   has focus, never over it. Browser zoom keys stay the browser's.
 - **Lite:** no Chat (4.5).
-- **HQ window, the phone as the hub:** title "HQ · HQ on your phone"; the same Chat; saved copies keyed by
-  the HQ's id. No downloads, no web push and no install in this window; HQ Hub posts a system notice for
-  Needs you items instead. What this window sends and receives travels to the phone and counts as its
+- **HQ window, the phone as the hub:** title "HQ · HQ on your phone"; the same Chat; saved copies and the
+  outbox keyed by the HQ's id, labelled "Saved in HQ Hub at 14:32" (`../../resolutions.md` B11). No
+  downloads, no web push and no install in this window; Needs you arrives as HQ Hub's system notice
+  instead. Copy link works there (the clipboard, on a click) and Share is hidden (WR29). What this window sends and receives travels to the phone and counts as its
   data.
 
 ### 4.8 What a reply can hold (Chat blocks)
@@ -348,10 +354,10 @@ Every string quoted in section 4 is exact. Keys `chat_*`. The ones most often bu
 | `chat_start_title` | "What would you like to do?" |
 | `chat_start_line` | "HQ can read your notes and tasks, write to them, and send helpers to do work." |
 | `chat_suggest` | "Summarise this note" (only with a note attached; else "Summarise this week's notes") · "What needs me today?" · "Save a thought as a note" |
-| `chat_get_started` | "Get started" · "{1} of {3} done" · "Hide" · "Let HQ reach you" · "Get a notification in this browser when HQ needs you." · "Turn on" · "Open HQ on your phone" · "Sign it in with a code from Other devices." · "Get a code" · "Chat apps (optional)" · "Done. {Telegram} is connected." · "Done" |
+| `chat_get_started` | "Get started" · "{1} of {3} done" · "Hide" · "Let HQ reach you" · "Get a notification in this browser when HQ needs you." · "Turn on" · "Open HQ on your phone" · "Sign it in with a code from Other devices." · "Get a code" · "Messaging apps (optional)" · "Done. {Telegram} is connected." · "Done" (B15) |
 | `chat_list_empty` | "Your chats will show up here" · "Ask anything in the box on the right. HQ names the chat after your first message." |
 | `chat_groups` | "Today" · "Yesterday" · "Previous 7 days" · "Older" |
-| `chat_spoken` | "Spoken" · "You said, by voice · {9:42}" |
+| `chat_spoken` | "Spoken" · "You said: “{words}”" · "{9:42}" (B18) |
 | `chat_did` | "What I did · {N} steps" |
 | `chat_stopped` | "Stopped. What I had so far is kept." |
 | `chat_watching` | "Watching" · "Answer it" · "Stop watching" · "Its updates stop coming here. It keeps working." · "Answer it in Helpers" · "from the helper you watch" |
@@ -368,6 +374,7 @@ Every string quoted in section 4 is exact. Keys `chat_*`. The ones most often bu
 | `chat_table_copied` | "Copied the table" |
 | `note_sheet_long` | "This note is long. Open it in Notes to read all of it." |
 | `copy_link` | "Copy link" · "Opens only on your signed-in devices" |
+| `search_placeholder` | "Search notes, tasks, chats and helpers" (B18) |
 | `export_*` | as S3 and S4 |
 
 ## 6. Behaviour rules
@@ -446,6 +453,8 @@ the losing flag and Let HQ say yes rules, owner approval item with the tool and 
 7. Chat rows are `<a>` elements reachable by Tab; archive is an archive icon with "Chat archived · Undo".
 8. A failed chart reads "Couldn't draw this chart." plus the reason. Today "chart (not rendered: …)".
 9. Charts use only the five palette colours (a test over `lib/chart.ts` output).
+10. Get started's third step reads "Messaging apps (optional)"; a spoken request's card reads "You
+    said: …"; the top bar's Search reads "Search notes, tasks, chats and helpers" (B15, B18).
 
 ## 11. Check on a laptop or phone
 
@@ -455,6 +464,7 @@ the losing flag and Let HQ say yes rules, owner approval item with the tool and 
 
 ## 12. Open decisions it depends on
 
-- **W1, W10, W13 to W17, W22, W23, WR26, D7, N17** (Recommended or Revised).
+- **W1, W10, W13 to W17, W22, W23, WR26, WR27, WR29, WR30, D7, N17** (Recommended or Revised), and
+  `../../resolutions.md` A2, B11, B13, B15, B18.
 - Depends on: `../wave-0/*`, `../wave-1/02-dialogs-approvals.md`, `../wave-1/03-undo.md`,
   `03-notes.md` (the note sheet's Notes side), `07-helpers.md` (Answer it in Helpers).

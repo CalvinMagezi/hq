@@ -78,7 +78,7 @@ Rejected:
 - **H4 · Inside a folder (1440 full width until a note opens).** Trail "Agent-HQ › Projects" (goes up one
   level at a time; Back on a phone does the same) [New note here] (saves into this folder). "Folders 2":
   "Android spikes · 7 notes", "Evidence · 12 notes". "Notes, A to Z 26": rows with the trail and age;
-  past 25 the list ends in "See all 26". "Folders" and "Notes, A to Z" are list headings, not controls.
+  past 25 the list ends in "Show all 26" (`../../resolutions.md` B6). "Folders" and "Notes, A to Z" are list headings, not controls.
 - **H5 · Rows** are real links; the trail is the folder in blue; a note HQ wrote says "by HQ"; ages are
   short: now, 3h, 1d, 2w. Notes stays lit in the rail and the bar on every `/notes` address.
 - **H6 · Not on the web yet.** Rename, Move and Move to trash are not drawn: HQ has no route for them yet.
@@ -86,7 +86,7 @@ Rejected:
 ### When HQ is not connected (Notes 3)
 
 - **N1 · Can't be reached.** Strip "Your HQ can't be reached. Saved in this browser at 14:32." "Waiting to
-  send · Check the backup status · Saved in this browser. It will be sent when HQ is back." Pin and Keep
+  send · Check the backup status · Saved in this browser. It will try again when HQ is back." Pin and Keep
   pin are off. A new note waits in this browser, listed, each removable.
 - **N2 · Signed out.** "Signed out of this HQ" / "Sign in to see your notes. Nothing from this HQ stays in
   this browser." [Sign in].
@@ -100,8 +100,9 @@ Rejected:
 - **N7 · Offline.** "You're offline. Saved in this browser at 14:32." New notes wait to send.
 - **N8 · The AI service isn't answering.** Only the status line changes; notes work; Ask HQ still opens
   Chat, which says why.
-- **N9 · One saved copy.** "Your HQ can't be reached. Saved in this browser at Tue 3 Nov." (a copy from
-  before today names the day). At most 5 MB in all, kept until replaced, keyed by the HQ's id.
+- **N9 · One saved copy.** "Your HQ can't be reached. Saved in this browser on Tue 3 Nov." (a copy from
+  before today names the day). At most 256 KB a place and 2 MB in all, per HQ, the same cap as the phone
+  (`../../resolutions.md` B16), kept until replaced, keyed by the HQ's id.
 
 ### New note, Ctrl Alt N from anywhere (Notes 4)
 
@@ -227,15 +228,17 @@ lists every recorded version, newest first, who and when, and its state.
   and never replaces it.
 - **Forced colours and print:** cards and chips keep their borders; a printed note is black on white,
   without the shell or the action bar; links print their note title.
-- **Lite:** three places, starting on Notes, "HQ Lite" in the status line. No Ask HQ, suggested pins or "by
+- **Lite:** three places, starting on Notes, "Connected · HQ Lite" in the status line. No Ask HQ, suggested pins or "by
   HQ" trails; folders starting with _ or . not shown; search by keyword ("Search your notes"); no notes:
   "Your notes will show up here · Write your first one." A note keeps Edit, Make a task and Pin; no Ask HQ
   and no Export; who wrote it only You or Not known; Copy note text stays ("It is the way to take a note
   out of Lite. "hq lite export" copies the whole folder."); Looks right still records through
   `note_review`.
-- **The phone as the hub (HQ window):** "Connected · HQ on your phone"; saved copies keyed by the HQ's id;
-  the phone pays for every read (Notes loads on demand, pauses when the window is hidden); no web push.
-  Export is off: "The HQ window can't save files. Open HQ in your browser to export." (WR13). Conflicts:
+- **The phone as the hub (HQ window):** "Connected · HQ on your phone"; saved copies and the outbox keyed
+  by the HQ's id, labelled "Saved in HQ Hub at 14:32" (`../../resolutions.md` B11); the phone pays for
+  every read (Notes loads on demand, pauses when the window is hidden); no web push. Export is off: "The
+  HQ window can't save files. Open HQ in your browser to export." (WR13). Copy link works (the
+  clipboard, on a click); Share is hidden (WR29). Conflicts:
   edits on the phone and in this window meet the same "changed" check; "Your phone" is named as where it
   changed.
 
@@ -248,7 +251,7 @@ Every string in section 4 is exact. Keys `notes_*`, `note_*`. Notable:
 | `notes_title` | "Your notes" · "New note" · "Ctrl Alt N" · "Search your notes" |
 | `notes_pinned_suggested` | "A helper suggested this pin. HQ does not use it until you keep it." · "Keep pin" · "Not now" |
 | `notes_empty` | "Your notes will show up here" · "Write one yourself, or ask HQ to write one for you." · "Ask HQ to write one" (Chat prefill "Write me a note about ") |
-| `notes_folder` | "New note here" · "Folders" · "Notes, A to Z" · "See all {26}" · "Nothing in this folder yet." |
+| `notes_folder` | "New note here" · "Folders" · "Notes, A to Z" · "Show all {26}" · "Nothing in this folder yet." |
 | `notes_nothing_saved` | "Nothing saved in this browser yet" · "Your notes show here once HQ has started." |
 | `notes_new_sheet` | "New note" · "Title" · "Save to" · "Note" · "Ctrl Enter saves · Esc closes" · "Cancel" · "Save" · "Find a folder" · "Where new notes go unless you pick another" |
 | `notes_new_away` | "Your HQ can't be reached. Save keeps the note in this browser. It will be sent when HQ is back." |
@@ -285,7 +288,8 @@ Every string in section 4 is exact. Keys `notes_*`, `note_*`. Notable:
 9. **Looks right** records through `note_review` and only for text typed in this editor; a paste or an
    import starts as Not checked yet.
 10. **Rename, Move, Move to trash** are not drawn until HQ has routes (W21).
-11. **Exports on a shared computer** ask first; in the HQ window Export is off with the reason.
+11. **Exports on a shared computer** ask first; in the HQ window Export is off with the reason, Copy link
+    works and Share is hidden (WR13, WR29).
 12. **Notes stays lit** in the rail and bar on every `/notes` address.
 
 ## 7. Browser and platform notes
@@ -337,6 +341,7 @@ the HQ window later (WR13).
 
 ## 12. Open decisions it depends on
 
-- **W12, W19, W21, W22, WR11, WR13** (Recommended or Revised).
+- **W12, W19, W21, W22, WR11, WR13, WR29** (Recommended or Revised), `../../resolutions.md` B6, B11,
+  B16.
 - Depends on: `04-search.md`, `01-chat.md` (the note sheet, Ask HQ), `../wave-0/02-shared-parts.md`
   (outbox, saved copy), `../wave-1/02-dialogs-approvals.md`.

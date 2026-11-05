@@ -53,13 +53,14 @@ is in the spec; the device check proves the browser does what the test assumes.
 |-------|------|-------------------|
 | A push shows no content and only Open | `wave-0/01-live-bugs.md` A | Chrome on Android, installed, push on, screen locked: have a helper ask to run a command. The lock screen shows "Claude needs your OK" / "Open HQ to see what it wants to do." and no Allow or Decline. Expand the notification and the history: no command. Repeat on desktop Chrome and Firefox. |
 | An old service worker gets no buttons | 01 A5 | Before updating the web build, keep a tab with the old worker; send a push from the new server: no buttons appear. |
+| Pushes fold and replay | 01 A6 (added by `../resolutions.md` C-11) | Chrome on Android, installed: make seven helpers ask at once: five notices and one "2 more waiting for you". Five Updates in an hour: one "5 updates from HQ". Turn Needs you off, let two items arrive, turn it on: each posts once. |
 | Reply alerts say only "HQ answered" | 01 rule 6 | Ask a question, switch tabs before it finishes: "HQ answered" / "Tap to read." |
 | The hub proxy refuses a held port | 01 B | macOS: run `hq bridge serve` in a terminal so it holds the web forward, open HQ Hub: Open HQ is off with "Another program holds this port. HQ Hub won't send your sign-in there." Confirm with `lsof -i :47480` that no request from the HQ window reached the other process. |
 | A refused sign-in wipes everything | 01 C | Sign a laptop out from another device's Other devices. Reload the laptop with DevTools Offline: only Sign in, and Application shows no `hq-*` store or `hq-api` cache. Repeat in Safari (WKWebView) and in the HQ window. |
 | Another tab follows the wipe | 01 C3 | Two tabs open; sign out from the first: the second shows Sign in within a second. |
 | Unguarded routes refuse | 01 D | From a page on another origin (a local `python3 -m http.server` page with a `fetch` POST to `/api/harness-sessions/{id}/drive`): refused. The web app's own Drive or answer still works. |
 | The seven connection states in words | `wave-0/02-shared-parts.md` | Stop HQ, start it, block `/ws`, go offline, stop the AI service's key: each state's words appear in order, wrap at 320 px, never "stopped". |
-| Two HQs never mix | 02 rule 7 | In the HQ window, open this computer's HQ, then the phone's: each shows only its own saved notes after going offline. |
+| Two HQs never mix | 02 rule 7 | In the HQ window, open this computer's HQ, then the phone's: each shows only its own saved notes after going offline, under "Saved in HQ Hub at {time}" (`../resolutions.md` B11). |
 | The outbox never sends twice | 02 rules 11 to 13 | Airplane mode, send two messages, flip back: "Sending 1 of 2", and HQ's thread has exactly two messages. Kill the tab mid-send, reopen: still exactly two. |
 | Safari keeps the saved copy | 02 notes | Safari, installed to the Dock or not: leave HQ unopened for a week (or clear website data): the place shows "Nothing saved in this browser yet", not an error. |
 
@@ -73,7 +74,7 @@ is in the spec; the device check proves the browser does what the test assumes.
 | Dialog order and Esc | `wave-1/02-dialogs-approvals.md` | Keyboard only, every red dialog: safe left, action right, Esc keeps, Tab cycles inside; VoiceOver and NVDA read the title first. |
 | Stacking at 200% and with large text | 02 rule 1 | Chrome at 200% zoom and with Settings › Appearance › Font size "Very large" (root 24 px): long-label dialogs stack, safe on top. |
 | A losing approval is red on the right | 02 | A helper asks to delete a file: the Inbox card shows `vault_delete` and its arguments, Decline left, red "Allow delete" right. |
-| Undo across devices | `wave-1/03-undo.md` | Archive a chat on the laptop; within 10 minutes press Undo on the phone (or the other way): restored on both. After 11 minutes: "Couldn't undo. It changed on another device." |
+| Undo across devices | `wave-1/03-undo.md` | Archive a chat on the laptop; within 10 minutes press Undo on the phone (or the other way): restored on both. After 11 minutes: "Couldn't undo. It changed on another device, or too much time passed." |
 | Toasts never cover the field | 03 rule 8 | 200% zoom, composer focused, archive a chat from the list: the toast sits above the composer. |
 | Plain words | `wave-1/04-plain-words.md` | Read every place once with a fresh vault: no "agent", "session", "native", "claude-code", "ago ago". 12-hour locale: "2:32 PM". |
 | Shared computer | `wave-1/05-sign-in-safety.md` | Second profile, sign in with "This is a shared computer": sessionStorage holds the token, IndexedDB is empty, push is not offered; close the tab: signed out; idle 30 minutes: signed out. |
@@ -92,23 +93,24 @@ is in the spec; the device check proves the browser does what the test assumes.
 | Lite | 02 | Windows without WSL, Lite installed (`docs/WINDOWS.md`), Edge: three places, Notes first, "Connected · HQ Lite"; `/chat` opens Notes with "This HQ is HQ Lite. It has no Chat."; the gear shows This browser and Other devices only. |
 | A newer HQ | `wave-2/03-version-and-data.md` | Keep a tab open with a draft, update HQ: "A newer HQ is running. Reload to keep going."; Reload keeps the draft. |
 | The data budget | 03 | Chat idle for one hour with DevTools Network open (preserve log): under 1 MB. Chat first load (cache disabled): under 300 KB transferred. A hidden tab for an hour: no requests. Record the numbers in the PR. |
-| The phone pays | 03 rule 10 | Phone as the hub, the HQ window idle for an hour: the phone's data counter and This window's "Counted on your phone" agree within 10%. |
+| The phone pays | 03 rule 10 | Phone as the hub, the HQ window idle for an hour: the phone's data counter and This window's "Counted on your phone this month" agree within 10% (`../resolutions.md` B17). |
 | Time zones | `wave-2/04-time-zones.md` | DevTools › Sensors › Location to another zone (or change the laptop's zone): times move, Spending names UTC and the local time, a scheduled task names HQ's city. |
 
 ## Wave 3 · HQ Hub
 
 | Check | Spec | How to perform it |
 |-------|------|-------------------|
-| First open and a missing program | `wave-3/01-this-pc.md` P1, P10 | Open AgentHQ from the Dock with no `hq` installed: "Couldn't find HQ on this PC". Choose a program in `/tmp`: refused. Install HQ, Look again: "HQ is off". |
-| Starting, stopped by progress | 01 P2, P3, P8 | Start HQ on a large vault: the steps and "Usually about {n} s on this PC". `kill -STOP` the process during start: after twice the usual time, "Stopped at: {step}". `kill` it: "HQ has stopped" and Open the log shows the last lines, keys blanked. |
-| Stop HQ asks | 01 P6 | Stop HQ: the dialog; Esc keeps it running. |
+| First open and a missing program | `wave-3/01-this-pc.md` P1, P10 | Open AgentHQ from the Dock with no `hq` installed: "Couldn't find HQ on this computer.". Choose a program in `/tmp`: refused. Install HQ, Look again: "HQ is off". |
+| Starting, stopped by progress | 01 P2, P3, P8 | Start HQ on a large vault: the steps and "Usually about {n} s on this computer". `kill -STOP` the process during start: after twice the usual time, "Stopped at: {step}". `kill` it: "HQ has stopped" and Open the log shows the last lines, keys blanked. |
+| Stop HQ asks | 01 P6 | Stop HQ with a helper working: the red dialog naming it; with none working: the Ask dialog with a green "Stop HQ" and "Chats and scheduled tasks pause until you start it again." Esc keeps it running (`../resolutions.md` B9). |
+| Restarting and almost full | 01 P18, P19 | Restart HQ from HQ Hub: "Restarting HQ" in blue. Fill the disk under `~/.hq` to under 200 MB free: the sheet says "This computer is almost full." and opens by itself once that day only (`../resolutions.md` C-12). |
 | Started outside HQ Hub | 01 P9 | `hq start all` in a terminal, then open HQ Hub: no Stop button, the why line. |
 | The phone as the hub | 01 P11 to P14 | Pair the phone: "Start helpers here"; the first-sign-in note; a held port. |
 | Lockdown and lifting it | 01 P15, P16 | From the phone, Stop every helper on this computer with a reason: the card quotes it; Allow helpers again runs `hq host unlock` (check `~/.hq` lockdown file gone); the web shows no lift button. |
 | The system notice | 01 P5 | A helper on this computer asks: a macOS notice "Claude needs your OK" with Open only; Open lands on that helper in the HQ window. |
 | Devices outcomes stay | `wave-3/02-devices.md` | Pair with wrong digits twice, look away for 10 s: the line is still there. Remove: the dialog; Claude Code's entry is gone (`claude mcp list`). |
-| Helper checks are safe | `wave-3/03-helpers-tab.md` | With Claude Code, Codex and Cursor installed: first open asks; Check this PC; Activity Monitor never shows more than two helper processes; a second open runs none. Turn the network off: checks still pass (no network needed). |
-| Try it never answers a trust prompt | `wave-3/04-helper-detail.md` D3 | Cursor installed, no trust given: Try it reports "Needs you on this PC" and offers the line to copy; Antigravity: Try it answers its trust prompt (spec.rs) and says so. |
+| Helper checks are safe | `wave-3/03-helpers-tab.md` | With Claude Code, Codex and Cursor installed: first open asks; Check this computer; Activity Monitor never shows more than two helper processes; a second open runs none. Turn the network off: checks still pass (no network needed). |
+| Try it never answers a trust prompt | `wave-3/04-helper-detail.md` D3 | Cursor installed, no trust given: Try it reports "Needs you on this computer" and offers the line to copy; Antigravity: Try it answers its trust prompt (spec.rs) and says so. |
 | Remove a connection with Undo | 04 D6 | Remove Claude Code's HQ entry, Undo within 10 minutes: `~/.claude.json` is byte for byte as before. |
 | Window names and look | 01, `wave-3/05-commands-and-platforms.md` | The Window menu lists "HQ Hub" and "HQ"; the Dock shows AgentHQ; both windows are dark with Clear Sans. |
 | Sizes | 01 sizes | 320 px wide window (minimum allowed is 640 by 480 today: resize the content with the Tauri dev tools zoom), 200% text (macOS display scaling "Larger Text"), maximised on a 2200 px screen. |
@@ -131,7 +133,7 @@ is in the spec; the device check proves the browser does what the test assumes.
 | Tasks | `wave-4/06-tasks.md` | Keyboard only: pick three with Shift and click, mark done, Undo; Board: move a card with M and the arrows; Timeline: Month remembers. On a phone, the list shows before verification. |
 | Helpers | `wave-4/07-helpers.md` | Opening a helper streams nothing until Technical details opens (Network panel). Typing to the helper: Esc reaches the helper, Ctrl ] leaves. Stop every helper with one computer asleep: "That computer can't be reached, so its helpers were not stopped." |
 | Settings | `wave-4/08-settings.md` | Every page at 320, 900 and 1440; with HQ stopped (saved values, buttons off with why); signed out (Sign in only). |
-| Spending | `wave-4/09-spending.md` | The chip from every place on a phone; a test limit past 100%: "HQ stopped using AI"; delete a limit and Undo. |
+| Spending | `wave-4/09-spending.md` | The chip from every place on a phone; a test limit past 100%: the chip "Today 104%" and "HQ stopped using AI"; delete a limit and Undo. |
 
 ## A shared computer, every wave
 

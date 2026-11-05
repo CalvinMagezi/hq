@@ -162,8 +162,9 @@ words; the answer lives on the server's thread.
    dismiss a swipe lock at once. The press is not kept. The bar goes after 4 s or a touch.
 9. **Fallback A:** no HQ window over the lock screen. The press asks Android for the unlock directly, then
    the fresh sheet listens.
-10. **The Settings card** sits in FixAssistantSetup's card slot, and only on models listed as failing in
-    the signed channel file, beside the lock-screen assistant kill switch. Card A or B, by the logged
+10. **The Settings card** sits in FixAssistantSetup's card slot, and only on models listed in the signed
+    channel file's `switches.lock_screen_assist_off_models` (a list of `Build.MODEL` names,
+    `../../resolutions.md` D-3), beside the lock-screen assistant kill switch. Card A or B, by the logged
     result.
 11. **360 dp at font scale 2.0:** the bar wraps to two lines and the icon stays at the start of the first.
 
@@ -206,15 +207,15 @@ Android constraints, as checked against the platform APIs:
 | `voice/VoiceActivity.kt` | On a locked intent, a new `VoiceSession` and `unlocked = false` before the first frame, in `onCreate` and `onNewIntent` (line 77). Show-when-locked by version; the `UnlockBar`; the `isDeviceSecure` branch; `micPressed` (line 102) guarded until unlocked. | yes |
 | `voice/VoiceSession.kt` | No carried `reply` into `Preparing` for a new sheet (line 131). | yes |
 | `res/values/strings.xml` | The bar, the no-lock bar and both cards. | yes |
-| The channel file (FixUpdates, FixSafeMode) | The lock-screen assistant switch with its list of failing models. | NEW field (`switches.lock_screen_assistant` exists in FixSafeMode's example as a boolean; the per-model list is not drawn there) |
+| The channel file (FixUpdates, FixSafeMode) | `switches.lock_screen_assistant` (the boolean for every phone) and `switches.lock_screen_assist_off_models` (the list of failing models, D-3), both in `../wave-0/02-safe-mode.md`'s example. | NEW fields (wave 0) |
 | `apps/android/README.md` | "It does not open over the lock screen" becomes the unlock-first behaviour. | yes |
 | Debug logging | The `HqVoice` line `assist while locked: onShow=… window=… prompt=…` for the precondition. | NEW |
 
 ## 9. Server, release or desktop changes
 
-- The signed channel file's `lock_screen_assistant` switch, with a list of failing phone models (rule 10).
-  FixSafeMode's example has the switch as a single boolean; the model list is not shaped anywhere yet. See
-  "Open conflicts" in `../README.md`.
+- The signed channel file's `lock_screen_assistant` switch and its `lock_screen_assist_off_models` list of
+  failing phone models (rule 10), shaped by `../../resolutions.md` D-3 and added in
+  `../wave-0/02-safe-mode.md`.
 
 ## 10. Acceptance checks (each fails on today's build)
 

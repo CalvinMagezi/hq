@@ -35,6 +35,8 @@ whether the action waits and retries by itself (it is in the outbox or retried) 
 | Download did not match | The download did not match. | (none) | Nothing was kept. Try again. |
 | Phone almost full | The phone is almost full. | (none) | Free up {size} and try again. |
 | Pairing off | Pairing is off. | (none) | Switch it on and try again. |
+| Save place full (safe mode) | That place is full. | (none) | Choose another place and try again. |
+| Save place gone (safe mode) | The place you chose stopped answering. | (none) | Choose another place and try again. |
 | Undo too late | It changed on another device, or too much time passed. | (none) | (none) |
 
 The outbox strip keeps its own words ("Waiting to send"). Each row is a whole-sentence key per action
@@ -123,7 +125,23 @@ or too much time passed."
 | D-11 | Test setup: wave 0 adds Compose UI tests (Robolectric or instrumented), a screenshot test, and an Android lint-checks module for the string rules. Acceptance checks that need them are written there. |
 | D-12 | Code names the boards got wrong are corrected in the specs (`SectionLabel` in `ui/notes/NotesHome.kt`, `PhoneFix` in `ui/settings/PhoneWords.kt`; `LocalReselect` and `NotifAccess` are NEW). |
 
-## E. Still owner to confirm
+## E. Defaults settled during the consolidation pass
+
+These answers were filled in while bringing the specs in line. They are Recommended; build them as written.
+
+| Id | Resolution |
+|---|---|
+| E-1 | The red Stop HQ body: "Chats and scheduled tasks pause. {Codex and Claude} are working here and stop too. Their work so far is kept." |
+| E-2 | Button labels drop the full stop: "Open it to see". |
+| E-3 | Claude's own menu names ("Connectors") are quoted as Claude shows them; HQ's own words say "Address for Claude". |
+| E-4 | "Show details in notifications", on: "Details show only while the phone is unlocked. Allow asks you to unlock first." With no screen lock: "Needs a screen lock" and "Set a screen lock to use this. Without one, anyone holding this phone can answer." |
+| E-5 | Withdrawn-version words are FixSafeMode's, on every screen. |
+| E-6 | The Connection sheet while starting: "HQ runs on this phone. After a reboot it can take up to a minute. You can read and write while you wait." Battery line: "Then set Battery to Unrestricted." |
+| E-7 | The running notice keeps FixStartup's bodies; it has no buttons (D-2). |
+| E-8 | Wording changes to avoid retired words: "Saved to · Downloads"; "A copy stopped when the app closed."; "Your newest copy off this phone"; "Show all tasks as". |
+| E-9 | Safe mode's two save failures join the A2 catalogue (rows above). |
+
+## F. Still owner to confirm
 
 B12 with W44 ("This PC"), and the list in
 `decisions.md`.

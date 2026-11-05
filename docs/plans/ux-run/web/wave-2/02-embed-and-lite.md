@@ -7,7 +7,7 @@ gear", "A link to a place Lite lacks"), **AlignedShell2** section 5, **AlignedNo
 **AlignedSettings2** section 4, **AlignedSpending2** section 2, **AlignedChat2** section 1,
 **AlignedFirstRun** note 6, AlignedReview ("Not drawn at all": Lite and the phone's web pages).
 Follows `../../rules-web.md` section 7 and `../../decisions.md` WR1 to WR4. Where this spec and the
-rules differ, the rules win; where boards disagree, see `../README.md` Open conflicts 1 and 2.
+rules differ, the rules win; where boards disagreed, `../../resolutions.md` B13 settles it.
 
 ## 1. Finding and the review items it closes
 
@@ -84,12 +84,14 @@ Rejected:
   (`crates/hq-cli/src/commands/lite.rs:260`).
 - **L4 · Search.** Scopes All, Notes and Tasks; the field "Search notes and tasks"; "Lite finds the words
   you type. It does not search by meaning."; no Ask HQ; folders starting with `_` or `.` never searched.
-  Failure: "Couldn't search your notes. Your HQ can't be reached. It will try again by itself."
-- **L5 · Tasks.** "HQ Lite · 9 active". The same lists, without "Working on it now" and without Check it
+  Failure: "Couldn't search your notes. Your HQ can't be reached. It will try again when HQ is back."
+  (`../../resolutions.md` A2: search retries by itself).
+- **L5 · Tasks.** "Connected · HQ Lite · 9 active". The same lists, without "Working on it now" and without Check it
   from HQ (Lite runs housekeeping only, not the checking of finished work, `docs/HQ_LITE.md`). A task
   moved to Ready to check by hand still shows there. Board and Timeline work, without "Codex is
   working".
-- **L6 · Inbox.** Needs you holds tasks to check and new sign-ins only. Left out: helper questions, chat
+- **L6 · Inbox.** Needs you holds new sign-ins and tasks the owner moved to Ready to check by hand
+  only. It never holds HQ's checks: Lite refuses the verification routes (`../../resolutions.md` B13). Left out: helper questions, chat
   approvals and the stuck-helper card. Updates are HQ's own housekeeping. No notifications card unless
   `lite.allow_egress` lists the push service ("A web push goes through the browser maker's push service,
   and Lite sends nothing to another service unless it is listed (HQ_LITE.md). Listing it in
@@ -98,9 +100,10 @@ Rejected:
   Notifications (unless allowed), Time zone, Install and version, Data used, Sign out this browser; Other
   devices with the code card. One line: "HQ Lite has no other settings here. Keys, spending, messaging
   apps and helpers are not part of HQ Lite." No Spending: no chip, no Spending row, and
-  `/settings/spending` opens `/settings/browser` (OD-W2).
+  `/settings/spending` opens `/settings/browser` with "This HQ is HQ Lite. It has no Spending limits."
+  (`../../decisions.md` WR28, which closes OD-W2).
 - **L8 · A link to a place Lite lacks.** `/chat`, `/chat/:id`, `/helpers*`: Notes opens with the toast
-  "This HQ is HQ Lite. It has no Chat." (or "… It has no Helpers."). The address is not an error page.
+  "This HQ is HQ Lite. It has no {place}." ("It has no Chat.", "It has no Helpers.", B13). The address is not an error page.
 - **L9 · First run.** Lite serves no `/setup` (`docs/HQ_LITE.md`), so that page never shows there.
 - **L10 · Other states.** Every other status line state reads as on the full edition (Starting HQ · 12 s,
   Your HQ can't be reached, You're offline, Signed out of this HQ). "The AI service isn't answering"
@@ -116,14 +119,14 @@ Rejected:
 | Key | String |
 |-----|--------|
 | `state_lite` | "Connected · HQ Lite" |
-| `lite_no_chat` | "This HQ is HQ Lite. It has no Chat." |
-| `lite_no_helpers` | "This HQ is HQ Lite. It has no Helpers." |
+| `lite_no_place` | "This HQ is HQ Lite. It has no {place}." (B13): "Chat", "Helpers" |
+| `lite_no_spending` | "This HQ is HQ Lite. It has no Spending limits." (WR28) |
 | `lite_settings_line` | "HQ Lite has no other settings here. Keys, spending, messaging apps and helpers are not part of HQ Lite." |
 | `lite_search_field` | "Search notes and tasks" |
 | `lite_search_note` | "Lite finds the words you type. It does not search by meaning." |
 | `lite_notes_empty` | "Your notes will show up here" · "Write your first one." · "New note" |
 | `lite_copy_text_note` | "It is the way to take a note out of Lite. "hq lite export" copies the whole folder." |
-| `fail_search_lite_unreachable` | "Couldn't search your notes. Your HQ can't be reached. It will try again by itself." |
+| `fail_search_lite_unreachable` | "Couldn't search your notes. Your HQ can't be reached. It will try again when HQ is back." |
 | `embed_signed_out` | Recommended: "Sign in to HQ on your phone first." |
 
 ## 6. Behaviour rules
@@ -142,7 +145,7 @@ Rejected:
 5. **Lite's places.** The rail and bar show Notes, Tasks, Inbox; `/` opens Notes; Back ends at Notes.
 6. **Lite's redirects.** `/chat*` and `/helpers*` (and the old `/sessions*`) go to `/notes` with the
    toast; `/settings/*` other than `browser`, `time`, `version`, `data` and `devices` go to
-   `/settings/browser`.
+   `/settings/browser`; `/settings/spending` shows `lite_no_spending` there (WR28).
 7. **Lite hides what it cannot serve,** never shows it disabled: Ask HQ, Export, suggested pins, "by HQ",
    Working on it now, Check it from HQ, Spending, helper questions, the chip.
 8. **Lite never asks for notifications** unless HQ reports that `lite.allow_egress` lists the push
@@ -184,6 +187,8 @@ web page links use `?embed=1` from its next release (`../../mobile/wave-4/03-web
    the chat and fails.
 4. On Lite the status line in Connected reads "Connected · HQ Lite" and there is no chip.
 5. On Lite a note has no Ask HQ and no Export. Today both show and fail.
+6. On Lite, `/settings/spending` lands on `/settings/browser` with "This HQ is HQ Lite. It has no
+   Spending limits."; Needs you never lists an item from the verification routes (B13, WR28).
 
 ## 11. Check on a laptop or phone
 
@@ -193,6 +198,6 @@ web page links use `?embed=1` from its next release (`../../mobile/wave-4/03-web
 
 ## 12. Open decisions it depends on
 
-- **WR1, WR2, WR3, WR4** (Recommended). **OD-W2** (`../README.md`): Lite's `/settings/spending`.
+- **WR1, WR2, WR3, WR4, WR28** (Recommended), `../../resolutions.md` B13.
 - Depends on: `../wave-0/02-shared-parts.md` (`/api/hello`), `01-route-table.md`, the place specs in
   wave 4 (each lists its Lite frame).

@@ -69,11 +69,12 @@ Rejected:
 
 ### Data used (This browser)
 
-- **D1.** "Today · 6 MB", "This week · 38 MB", "An hour with HQ open and idle · HQ aims for under 1 MB an
+- **D1.** Data used is monthly on every surface (`../../resolutions.md` B17): "Data used by HQ this
+  month · 120 MB", "An hour with HQ open and idle · HQ aims for under 1 MB an
   hour. · 0.4 MB", "Opening Chat · 240 KB". "HQ gets changes over one link and pauses while this tab is
   hidden. It follows your browser's data saver. Big readers, like PDF and spreadsheets, load only when
   opened." Technical details: What HQ noticed.
-- **D2 · The HQ window with the phone as the hub:** "Counted on your phone · 4 MB today".
+- **D2 · The HQ window with the phone as the hub:** "Counted on your phone this month · 96 MB" (B17).
 - **D3 · Over the target:** the idle row "1.6 MB" with an amber warn icon and "More than HQ aims for."
   (Recommended; the board draws only the in-target state.)
 
@@ -86,13 +87,14 @@ Rejected:
 | `version_browser` | "HQ in this browser" · "{0.9.1}" |
 | `version_hq` | "HQ" · "Updated by itself from a signed release at {14:20}." · "{0.9.2}" |
 | `fail_{action}_newer` | "Couldn't {action}. A newer HQ is running. Reload to keep going." |
-| `data_today`, `data_week` | "Today" · "This week" |
+| `data_month` | "Data used by HQ this month" · "{120 MB}" (B17) |
 | `data_idle` | "An hour with HQ open and idle" · "HQ aims for under 1 MB an hour." |
 | `data_chat_first` | "Opening Chat" |
 | `data_note` | "HQ gets changes over one link and pauses while this tab is hidden. It follows your browser's data saver. Big readers, like PDF and spreadsheets, load only when opened." |
-| `data_phone` | "Counted on your phone · {4 MB} today" |
+| `data_phone` | "Counted on your phone this month · {96 MB}" (B17) |
 
-Retired: "A new vault app version is available", "Update now".
+Retired: "A new vault app version is available", "Update now", a daily or weekly data total ("Today ·
+6 MB", "This week · 38 MB").
 
 ## 6. Behaviour rules
 
@@ -122,10 +124,10 @@ Retired: "A new vault app version is available", "Update now".
 8. **Data saver.** With `navigator.connection.saveData` true (or the phone hub), pictures in replies do
    not preload, the screen stream is off until asked, and Search waits 300 ms after the last key (WR12).
 9. **Measure.** Count bytes from `PerformanceResourceTiming.transferSize` (and the socket's frames) per
-   hour, per day and per week, in this browser only; first load is the Chat route's transfer size and
+   hour and per calendar month (reset on the 1st, in the display zone, B17), in this browser only; first load is the Chat route's transfer size and
    `loadEventEnd`. Kept with "What HQ noticed".
 10. **The phone pays.** In the HQ window with the phone as the hub, the counter is labelled "Counted on
-    your phone"; the same budget applies.
+    your phone this month"; the same budget applies.
 
 ## 7. Browser and platform notes
 
@@ -165,7 +167,7 @@ its version.
    or a 60-minute run counting requests). Today timers keep running.
 4. The Chat first load transfers under 300 KB (Lighthouse or `transferSize` sum). Measure today's as the
    baseline; record it in the PR.
-5. Data used shows the four rows. Today there is no page.
+5. Data used shows three rows, the first "Data used by HQ this month" (B17). Today there is no page.
 
 ## 11. Check on a laptop or phone
 

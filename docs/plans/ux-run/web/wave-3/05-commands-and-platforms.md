@@ -52,13 +52,13 @@ window gets them. The HQ window keeps no capability, and the app stays plugin-fr
 | `open_main_window(path)` | Open the HQ window at a helper, an Inbox item or Settings › Other devices (D07) | Same permission, `allow-open-main-window`. The path is checked against a short list in `window.rs`: `/helpers/{id}`, `/inbox/{id}`, `/settings/devices`, `/chat`, `/`. |
 | `host_log` | Open the log: the last lines in a sheet, keys blanked (D08) | New: `allow-host-log` |
 | `pick_program` | Choose the HQ program, or a helper's, in a native chooser (D03) | New: `allow-pick-program`. Made in Rust, no plugin. Refuses world-writable places. Pasting a path is the fallback (WR21). |
-| `host_unlock` | Allow helpers again, on this PC only (WB5) | New: `allow-host-unlock`. Runs `hq host unlock` locally. |
-| `host_status` | Start step, usual start time, stopped by progress, the lockdown's who, when and why | Existing permission, more fields |
+| `host_unlock` | Allow helpers again, on this computer only (WB5) | New: `allow-host-unlock`. Runs `hq host unlock` locally. |
+| `host_status` | Start step, usual start time, stopped by progress (`../../resolutions.md` A7), the lockdown's who, when and why; the helpers working now, so Stop HQ is red only when there are some (B9); a restarting state and free space where `~/.hq` lives (added by resolutions.md C-12) | Existing permission, more fields |
 | `helpers_check`, `helpers_list` | The Helpers tab: package-file versions, sandboxed checks, two at a time, cached | New: `allow-helpers-check`, `allow-helpers-list` |
 | `helper_try`, `helper_try_stop` | Try it, through the host, in one fixed folder | New: `allow-helper-try`, `allow-helper-try-stop` |
 | `helper_connect`, `helper_disconnect`, `helper_restore` | Connect to HQ for any helper `hq mcp install` knows. Remove with Undo for 10 minutes. | New, and `claude_status` and `claude_change` fold into them |
 | `helper_signin` | Copy sign-in link, and open it only on that helper's own sign-in site | New: `allow-helper-signin`. `open_in_browser` keeps its own-address rule. |
-| (event) notice | A system notice for Needs you on this PC, Open only | No command. A native notice from Rust, since no plugin is allowed. |
+| (event) notice | A system notice for Needs you on this computer, Open only | No command. A native notice from Rust, since no plugin is allowed. |
 
 ### Also changes
 
@@ -103,7 +103,7 @@ No screens of their own: each command serves a screen in `01-this-pc.md` to `04-
 ### Windows and Linux (future scope, W50, owner to confirm)
 
 - **One control window for macOS, Windows (helpers inside Ubuntu on WSL2) and Linux,** drawn the same.
-  "This PC" on every system.
+  "This PC" on every system, as the tab's name only (`../../resolutions.md` B12).
 - **Windows:** helpers run inside Ubuntu (WSL2); HQ itself on the phone, or all of HQ in Ubuntu with
   `hq start all` (`docs/WINDOWS.md`). `wsl.exe` is called by its full path
   (`C:\Windows\System32\wsl.exe -d Ubuntu-24.04 -- ~/bin/hq host serve`). Helper checks inside Ubuntu skip
@@ -183,5 +183,5 @@ workflow (`.github/workflows/desktop-release.yml`) builds `AgentHQ.dmg` once ren
 
 ## 12. Open decisions it depends on
 
-- **W50, WR22** (owner to confirm). **WR13, WR20, WR21** (Recommended). **OD-W3**.
+- **W50, WR22** (owner to confirm). **WR13, WR20, WR21, WR29, WR31** (Recommended). `../../resolutions.md` A7, B9, B12, C-12.
 - Depends on: `01-this-pc.md` to `04-helper-detail.md`, `../wave-0/01-live-bugs.md` (the proxy).
