@@ -13,7 +13,7 @@ import { SignalCard } from '~/components/SignalCard'
 import { useVaultSearch } from '~/components/useVaultSearch'
 import { Plus } from 'lucide-react'
 
-export const Route = createFileRoute('/vault/')({
+export const Route = createFileRoute('/notes/')({
     component: VaultHome,
     // Data comes from the saved copy first, then the Rust API, so render client-side.
     ssr: false,

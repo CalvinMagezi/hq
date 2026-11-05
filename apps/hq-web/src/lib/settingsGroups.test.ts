@@ -111,7 +111,7 @@ describe('the shell (check 5)', () => {
 
   test('the Inbox has no push button and the chat header no bell', () => {
     expect(existsSync(join(src, 'components/notifications/PushToggle.tsx'))).toBe(false)
-    expect(read('routes/notifications.tsx')).not.toContain('PushToggle')
+    expect(read('routes/inbox.tsx')).not.toContain('PushToggle')
     expect(read('components/chat/ChatHeader.tsx')).not.toMatch(/replyAlerts|BellOff/)
   })
 

@@ -138,7 +138,7 @@ function TokenForm() {
 
 /** The empty view's title for the place at `pathname`. */
 export function signedOutTitle(pathname: string): string {
-  if (pathname.startsWith('/notifications')) return 'Sign in to see what needs you'
+  if (pathname.startsWith('/inbox')) return 'Sign in to see what needs you'
   const places: [string, string][] = [
     ['/chat', 'your chats'],
     ['/tasks', 'your tasks'],
@@ -151,6 +151,16 @@ export function signedOutTitle(pathname: string): string {
 /** Stands in for every place while HQ refuses this browser: the wipe left nothing to show. */
 export function SignedOutView({ pathname, embedded }: { pathname: string; embedded: boolean }) {
   const focusSignIn = () => document.getElementById('hq-sign-in-code')?.focus()
+  // The phone's own sign-in is the one to use, so the page shows one line and no shell.
+  if (embedded) {
+    return (
+      <div className="h-full flex items-center justify-center p-6 text-center">
+        <p className="text-sm" style={{ color: 'var(--text-dim)' }}>
+          {t('embed_signed_out')}
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
       <KeyRound className="w-6 h-6" style={{ color: 'var(--text-dim)' }} />
@@ -160,11 +170,9 @@ export function SignedOutView({ pathname, embedded }: { pathname: string; embedd
       <p className="text-sm max-w-sm" style={{ color: 'var(--text-dim)' }}>
         {t(hasWebToken() || wasSignedOut() ? 'signin_signed_out_by_hq' : 'signin_first_time')}
       </p>
-      {!embedded && (
-        <button type="button" onClick={focusSignIn} className={BUTTON_CLASS}>
-          {t('signin_title')}
-        </button>
-      )}
+      <button type="button" onClick={focusSignIn} className={BUTTON_CLASS}>
+        {t('signin_title')}
+      </button>
     </div>
   )
 }

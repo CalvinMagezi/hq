@@ -22,7 +22,7 @@ export function SignalCard({ note, lane = 'note' }: { note: RecentFile; lane?: '
 
   return (
     <Link
-      to="/vault/$"
+      to="/notes/$"
       params={{ _splat: note.path }}
       className="block glass-card rounded-xl p-3.5 group"
     >

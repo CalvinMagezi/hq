@@ -87,7 +87,7 @@ export function MessageAttachments({ attachments }: { attachments: ChatAttachmen
       {attachments.map((a) => (
         <Link
           key={a.path}
-          to="/vault/$"
+          to="/notes/$"
           params={{ _splat: a.path }}
           onClick={() => closeOverlay(false)}
           className="flex items-center gap-2 pl-1.5 pr-3 py-1.5 rounded-xl border border-white/10 bg-black/20 hover:bg-white/5 max-w-full min-w-0"

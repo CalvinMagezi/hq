@@ -42,12 +42,12 @@ function LinkRow({ link }: { link: TaskLinkItem }) {
   )
   switch (target.kind) {
     case 'app':
-      if (target.route === 'vault') return <Link to="/vault/$" params={{ _splat: target.value }} className={ROW_CLASS}>{body}</Link>
-      if (target.route === 'sessions') return <Link to="/sessions" search={{ id: target.value }} className={ROW_CLASS}>{body}</Link>
-      return <Link to="/tasks" search={{ task: target.value }} className={ROW_CLASS}>{body}</Link>
+      if (target.route === 'vault') return <Link to="/notes/$" params={{ _splat: target.value }} className={ROW_CLASS}>{body}</Link>
+      if (target.route === 'sessions') return <Link to="/helpers/$id" params={{ id: target.value }} className={ROW_CLASS}>{body}</Link>
+      return <Link to="/tasks/$id" params={{ id: target.value }} className={ROW_CLASS}>{body}</Link>
     case 'chat':
       // The chat opens the thread named in the address when it mounts.
-      return <a href={`/chat?thread=${encodeURIComponent(target.thread)}`} className={ROW_CLASS}>{body}</a>
+      return <a href={`/chat/${encodeURIComponent(target.thread)}`} className={ROW_CLASS}>{body}</a>
     case 'web':
       return <a href={target.href} target="_blank" rel="noopener noreferrer" className={ROW_CLASS}>{body}</a>
     case 'none':

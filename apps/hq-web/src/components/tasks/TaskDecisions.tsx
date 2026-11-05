@@ -53,7 +53,7 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
   return (
     <li className="px-2.5 py-2 rounded-lg border border-amber-500/20 bg-amber-500/5 space-y-1.5">
       <p className="text-xs text-neutral-300">
-        <Link to="/sessions" search={{ id: d.session_id }} className="underline decoration-dotted">
+        <Link to="/helpers/$id" params={{ id: d.session_id }} className="underline decoration-dotted">
           {d.session_id}
         </Link>{' '}
         {ASKS[d.kind] ?? 'needs an answer'}
@@ -70,7 +70,7 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
         onDecline={() => void answer('decline')}
         onAllow={() => void answer('approve')}
         more={
-          <Link to="/sessions" search={{ id: d.session_id }} className="a-btn secondary">
+          <Link to="/helpers/$id" params={{ id: d.session_id }} className="a-btn secondary">
             {t('approval_other_answers')}
           </Link>
         }

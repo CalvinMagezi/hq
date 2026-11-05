@@ -40,7 +40,7 @@ export const NEEDS_SHOWN_MAX = 5
 /** Updates within the window that show on their own; the next one folds them all. */
 export const UPDATES_SHOWN_MAX = 3
 export const UPDATES_WINDOW_MS = 60 * 60 * 1000
-const INBOX_URL = '/notifications'
+const INBOX_URL = '/inbox'
 
 const needsFold = (n: number): ToShow => ({
   title: t('needs_folded', { n }),

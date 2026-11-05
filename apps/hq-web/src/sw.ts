@@ -181,7 +181,7 @@ async function showPush(data: PushData): Promise<void> {
   const incoming = {
     title: data.title || 'HQ',
     body: data.body ?? '',
-    url: appUrl(data.url, '/notifications'),
+    url: appUrl(data.url, '/inbox'),
     // An older server sent no tag or kind; a unique tag keeps such pushes apart.
     tag: data.tag || `hq-push-${now}`,
     kind: data.kind ?? 'needs',

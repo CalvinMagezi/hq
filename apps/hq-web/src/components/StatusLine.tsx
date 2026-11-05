@@ -32,17 +32,15 @@ export function placeTitle(pathname: string): string {
   const first = pathname.split('/')[1] ?? ''
   switch (first) {
     case '':
-    case 'vault':
-      return t('place_home')
     case 'chat':
       return t('place_chat')
     case 'tasks':
       return t('place_tasks')
-    case 'sessions':
+    case 'notes':
+      return t('place_notes')
+    case 'helpers':
       return t('place_helpers')
-    case 'usage':
-      return t('place_usage')
-    case 'notifications':
+    case 'inbox':
       return t('place_inbox')
     case 'settings':
       return t('place_settings')
@@ -55,7 +53,7 @@ export function placeTitle(pathname: string): string {
 export function placeFact(pathname: string, counts: { activeTasks: number; workingHelpers: number }): string | null {
   const first = pathname.split('/')[1] ?? ''
   if (first === 'tasks' && counts.activeTasks > 0) return t('fact_active', { n: counts.activeTasks })
-  if (first === 'sessions' && counts.workingHelpers > 0) return t('fact_working', { n: counts.workingHelpers })
+  if (first === 'helpers' && counts.workingHelpers > 0) return t('fact_working', { n: counts.workingHelpers })
   return null
 }
 

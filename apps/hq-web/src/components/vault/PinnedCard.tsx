@@ -8,7 +8,7 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin, onKeepPin }: { 
     return (
         <div className="relative group w-full">
             <Link
-                to="/vault/$"
+                to="/notes/$"
                 params={{ _splat: note.path }}
                 onClick={onClick}
                 className="flex flex-col gap-1.5 px-3 py-2.5 rounded-xl transition-all w-full glass-card"

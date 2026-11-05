@@ -53,8 +53,8 @@ export function DialogAnswer({
         onAllow={() => void answer('approve')}
         more={
           <Link
-            to="/sessions"
-            search={{ id: dialog.session_id }}
+            to="/helpers/$id"
+            params={{ id: dialog.session_id }}
             className="a-btn secondary"
           >
             {dialog.approve ? t('approval_other_answers') : t('approval_answer_on_page')}

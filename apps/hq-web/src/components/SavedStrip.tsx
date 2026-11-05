@@ -7,9 +7,8 @@ import { t } from '~/strings'
 /** The first query-key parts each place saves; a place missing here keeps no strip. */
 const PLACE_KEYS: Record<string, string[]> = {
   '': ['vault'],
-  vault: ['vault'],
-  usage: ['usage-budgets', 'usage-forecast', 'usage-providers'],
-  settings: ['settings', 'copilot-usage', 'openrouter-usage'],
+  notes: ['vault'],
+  settings: ['settings', 'copilot-usage', 'openrouter-usage', 'usage-budgets', 'usage-forecast', 'usage-providers'],
 }
 
 export const savedKeysFor = (pathname: string): string[] | null => PLACE_KEYS[pathname.split('/')[1] ?? ''] ?? null

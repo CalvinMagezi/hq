@@ -1,5 +1,5 @@
 import { HqHttpError } from '~/lib/hqAuth'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useParams } from '@tanstack/react-router'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { CheckSquare, ClipboardList, ListChecks, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
 import {
@@ -198,7 +198,9 @@ function TasksPage() {
   useRefreshOn(['task:sync'], recentWork.refresh)
   const archivedTasks = archived.data ?? []
 
-  const { task: linkedTaskId } = Route.useSearch()
+  const { task: linkedSearchId } = Route.useSearch()
+  const linkedParam = useParams({ strict: false }).id
+  const linkedTaskId = linkedParam ?? linkedSearchId
   useEffect(() => {
     if (linkedTaskId) setSelectedTaskId(linkedTaskId)
   }, [linkedTaskId, setSelectedTaskId])

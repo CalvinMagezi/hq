@@ -22,7 +22,7 @@ export function useVaultSearch(onClose: () => void) {
     const openResult = useCallback((hit: SearchHit) => {
         reset()
         onClose()
-        navigate({ to: '/vault/$', params: { _splat: hit.notePath } })
+        navigate({ to: '/notes/$', params: { _splat: hit.notePath } })
     }, [reset, onClose, navigate])
 
     const onKeyDown = useCallback((e: KeyboardEvent) => {

@@ -113,7 +113,7 @@ export function TreeNode({
     const isSelected = selected === node.path
     return (
         <Link
-            to="/vault/$"
+            to="/notes/$"
             params={{ _splat: node.path }}
             onClick={onFileClick}
             className="w-full text-left py-1.5 px-2 text-xs flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group tree-node-transition"

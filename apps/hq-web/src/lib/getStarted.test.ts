@@ -40,7 +40,7 @@ test('items start undone and link to their settings sections', () => {
   expect(items.map((i) => [i.id, i.to, i.hash, i.done])).toEqual([
     ['phone', '/settings', 'devices', false],
     ['chat', '/settings', 'chat-apps', false],
-    ['notifications', '/notifications', undefined, false],
+    ['notifications', '/inbox', undefined, false],
   ])
 })
 

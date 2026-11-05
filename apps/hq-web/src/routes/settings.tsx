@@ -20,6 +20,7 @@ import { HqHttpError } from '~/lib/hqAuth'
 import { ChatAppsSection } from '~/components/settings/ChatAppsSection'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import { forecastQuery } from '~/lib/usageApi'
+import { UsagePage } from '~/components/settings/UsageLimits'
 import { DevicesSection } from '~/components/settings/DevicesSection'
 import { ProviderKeysSection } from '~/components/settings/ProviderKeysSection'
 import {
@@ -342,9 +343,7 @@ export function SpendingPage() {
     <div className="flex flex-col gap-6">
       <CopilotCreditsSection />
       <OpenRouterSpendSection />
-      <Link to="/usage" className="a-link">
-        {t('row_spending')}
-      </Link>
+      <UsagePage />
     </div>
   )
 }

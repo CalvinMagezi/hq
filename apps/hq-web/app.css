@@ -1000,17 +1000,17 @@ textarea:focus {
   }
 }
 
-/* Inside the Android app's own screen (see lib/embedHost.ts): no header or bottom bar, so no room kept for them.
-   The head script sets data-host before first paint, so the chrome never shows even for a frame. */
-html[data-host="android"] .hq-header,
-html[data-host="android"] .hq-bottom-nav,
-html[data-host="android"] .hq-rail {
+/* Inside the phone app's screen or any `?embed=1` page (see lib/embedHost.ts): no header or bottom bar, so no room kept for them.
+   The head script sets data-embed before first paint, so the chrome never shows even for a frame. */
+html[data-embed="1"] .hq-header,
+html[data-embed="1"] .hq-bottom-nav,
+html[data-embed="1"] .hq-rail {
   display: none !important;
 }
-html[data-host="android"] .main-content {
+html[data-embed="1"] .main-content {
   padding-bottom: var(--safe-bottom);
 }
-html[data-host="android"] .vault-sidebar {
+html[data-embed="1"] .vault-sidebar {
   bottom: var(--safe-bottom);
 }
 

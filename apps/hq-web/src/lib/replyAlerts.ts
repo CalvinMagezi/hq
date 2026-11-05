@@ -46,7 +46,7 @@ export function replyAlert(threadId: string): { title: string; options: Notifica
       body: 'Tap to read.',
       icon: ICON_URL,
       tag: `hq-chat-${threadId}`,
-      data: { url: `/chat?thread=${encodeURIComponent(threadId)}`, kind: 'updates', at: Date.now() },
+      data: { url: `/chat/${encodeURIComponent(threadId)}`, kind: 'updates', at: Date.now() },
     },
   }
 }

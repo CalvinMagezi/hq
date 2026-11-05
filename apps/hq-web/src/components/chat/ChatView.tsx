@@ -48,10 +48,12 @@ interface Props {
   active: boolean
   /** Shown as a close button in the header when set (the overlay). */
   onClose?: () => void
+  /** The chat an address names (`/chat/:id`); it opens that chat. */
+  threadId?: string
 }
 
 /** The whole chat UI: thread list, messages and composer. The /chat route and the global overlay both render it. */
-export function ChatView({ active, onClose }: Props) {
+export function ChatView({ active, onClose, threadId }: Props) {
   const chatDraft = useHQStore((s) => s.chatDraft)
   const setChatDraft = useHQStore((s) => s.setChatDraft)
   const clearChatUnread = useHQStore((s) => s.clearChatUnread)
@@ -80,9 +82,9 @@ export function ChatView({ active, onClose }: Props) {
 
   useEffect(() => {
     if (!active) return
-    const linked = new URLSearchParams(window.location.search).get(THREAD_PARAM)
-    if (linked) {
-      setActiveThread(linked)
+    const linked = threadId ?? new URLSearchParams(window.location.search).get(THREAD_PARAM)
+    if (linked) setActiveThread(linked)
+    if (linked && !threadId) {
       const url = new URL(window.location.href)
       url.searchParams.delete(THREAD_PARAM)
       window.history.replaceState(null, '', url.toString())
@@ -97,7 +99,7 @@ export function ChatView({ active, onClose }: Props) {
       .catch((err) => console.warn('ChatView: failed to list threads', err))
       .finally(() => setLoadingThreads(false))
     focusInput()
-  }, [active, setActiveThread])
+  }, [active, setActiveThread, threadId])
 
   useEffect(() => {
     if (!active || !activeThreadId) return

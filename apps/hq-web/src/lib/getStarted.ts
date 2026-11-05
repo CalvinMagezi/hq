@@ -27,7 +27,7 @@ export interface GetStartedItem {
   title: string
   detail: string
   linkLabel: string
-  to: '/settings' | '/notifications'
+  to: '/settings' | '/inbox'
   hash?: string
   done: boolean
 }
@@ -79,7 +79,7 @@ export function getStartedItems(s: GetStartedSignals): GetStartedItem[] {
       title: 'Turn on notifications',
       detail: 'Get a notification on this device when HQ needs you, even while the app is closed.',
       linkLabel: 'Notifications',
-      to: '/notifications',
+      to: '/inbox',
       done: s.push === 'on',
     })
   }

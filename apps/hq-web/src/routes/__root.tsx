@@ -6,12 +6,13 @@ import {
   useRouterState,
   Scripts,
   createRootRoute,
+  redirect,
 } from '@tanstack/react-router'
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import { CACHE_BUSTER, CACHE_MAX_AGE_MS, queryClient, queryPersister } from '~/lib/offlineCache'
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { MessageSquare, MoreHorizontal, Search, Settings } from 'lucide-react'
+import { MoreHorizontal, Search, Settings } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
 import { SearchOverlay } from '~/components/SearchOverlay'
@@ -34,7 +35,11 @@ import { t } from '~/strings'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
-import { hqJson, needsSignIn, onSignInChange, refuseSignIn, signedOutElsewhere } from '~/lib/hqAuth'
+import { hqJson, needsSignIn, onSignInChange, refuseSignIn, signedOutElsewhere, takeSignInArrival } from '~/lib/hqAuth'
+import { lastKnownEdition, setEdition, useEdition } from '~/lib/edition'
+import { fetchHello } from '~/lib/hello'
+import { legacyRedirect, liteRedirect } from '~/lib/routes'
+import { toastNotice } from '~/lib/toast'
 import { isSharedComputer, watchIdle } from '~/lib/sharedComputer'
 import { listenForWipe } from '~/lib/wipe'
 import { syncPushSubscription } from '~/lib/webPush'
@@ -43,6 +48,14 @@ import { EMBED_HEAD_SCRIPT, readEmbedFlag } from '~/lib/embedHost'
 
 
 export const Route = createRootRoute({
+  // Every old address (and `/`) goes to its new home before anything draws, keeping the item and the fragment.
+  beforeLoad: ({ location }) => {
+    const target = legacyRedirect(
+      { pathname: location.pathname, search: location.searchStr ?? '', hash: location.hash ?? '' },
+      { edition: lastKnownEdition(), signInLink: takeSignInArrival() },
+    )
+    if (target) throw redirect({ to: target.to as '/', search: target.search as never, hash: target.hash, replace: true })
+  },
   head: () => ({
     scripts: [{ children: EMBED_HEAD_SCRIPT }],
     meta: [
@@ -149,7 +162,7 @@ function useChip() {
   const budgetLabel = budgetChipLabel(budgets)
   const label = budgetLabel ?? copilotLabel ?? openrouterChipLabel(openrouter)
   const title = budgetLabel ? budgetChipTitle(budgets) : copilotLabel ? chipTitle(data) : openrouterChipTitle(openrouter)
-  return { label, title, limit: Boolean(budgetLabel), to: budgetLabel ? ('/usage' as const) : ('/settings' as const) }
+  return { label, title, limit: Boolean(budgetLabel), to: '/settings/spending' as const }
 }
 
 function CopilotChip({ state, chip }: { state: ConnectionState; chip: ReturnType<typeof useChip> }) {
@@ -161,7 +174,7 @@ function CopilotChip({ state, chip }: { state: ConnectionState; chip: ReturnType
 }
 
 /** Search, the balance and Settings in one menu on the narrowest phones. */
-function MoreMenu({ state, chip }: { state: ConnectionState; chip: ReturnType<typeof useChip> }) {
+function MoreMenu({ state, chip, lite }: { state: ConnectionState; chip: ReturnType<typeof useChip>; lite: boolean }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="hq-more">
@@ -173,7 +186,7 @@ function MoreMenu({ state, chip }: { state: ConnectionState; chip: ReturnType<ty
           <button type="button" role="menuitem" className="a-menu-item" onClick={() => { setOpen(false); window.dispatchEvent(new Event('hq:open-search')) }}>
             {t('more_search')}
           </button>
-          {state === 'connected' && chip.label && (
+          {!lite && state === 'connected' && chip.label && (
             <Link to={chip.to} role="menuitem" className="a-menu-item" onClick={() => setOpen(false)}>
               {t('more_spending', { balance: chip.label })}
             </Link>
@@ -190,16 +203,41 @@ function MoreMenu({ state, chip }: { state: ConnectionState; chip: ReturnType<ty
 function VaultShell({ embedded }: { embedded: boolean }) {
   const wsConnected = useHQStore((s) => s.wsConnected)
   const setGlobalChatOpen = useHQStore((s) => s.setGlobalChatOpen)
-  const chatUnreadCount = useHQStore((s) => s.chatUnreadCount)
   useNeedsYouCount()
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const pathname = useRouterState({ select: (r) => r.location.pathname })
   const [sheetOpen, setSheetOpen] = useState(false)
   const connection = useConnection()
   const chip = useChip()
+  const edition = useEdition()
+  const lite = edition === 'lite'
+  const navigate = useNavigate()
   const activeTasks = useHQStore((s) => s.tasks.filter((x) => x.status === 'in_progress').length)
   const statusLineRef = useRef<HTMLButtonElement>(null)
   const [swUpdateAvailable, setSwUpdateAvailable] = useState(false)
+
+  // HQ says which edition it is; the rail and bar draw the places that edition serves.
+  useEffect(() => {
+    let alive = true
+    void fetchHello().then((h) => alive && h && setEdition(h.edition))
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // Lite has no Chat, Helpers or Spending: a stored link opens Notes (or This browser) with a line saying so.
+  useEffect(() => {
+    if (!lite) return
+    const hit = liteRedirect(pathname)
+    if (!hit) return
+    void navigate({ to: hit.target.to as '/', replace: true })
+    if (hit.notice?.key === 'lite_no_place') toastNotice(t('lite_no_place', { place: t(hit.notice.place === 'chat' ? 'place_chat' : 'place_helpers') }))
+    if (hit.notice?.key === 'lite_no_spending') toastNotice(t('lite_no_spending'))
+  }, [lite, pathname, navigate])
+
+  useEffect(() => {
+    document.title = t('document_title', { place: placeTitle(pathname) })
+  }, [pathname])
 
   // Another tab of this HQ was refused and wiped the browser: this one shows nothing either.
   useEffect(() => listenForWipe(signedOutElsewhere), [])
@@ -209,13 +247,14 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'h')) {
+        if (lite) return
         e.preventDefault()
         setGlobalChatOpen(true)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setGlobalChatOpen])
+  }, [setGlobalChatOpen, lite])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
@@ -317,7 +356,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
         style={{ minHeight: '48px' }}
       >
         <Link
-          to="/vault"
+          to="/"
           className="flex md:hidden items-center gap-2 flex-shrink-0 transition-opacity active:opacity-60"
         >
           <img src="/icons/hq-mark-96.png" alt="Agent HQ" width="28" height="28" className="flex-shrink-0 object-contain" />
@@ -345,22 +384,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
           <Search className="w-4 h-4" />
         </button>
 
-        <button
-          type="button"
-          onClick={() => setGlobalChatOpen(true)}
-          className="relative p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-all flex items-center gap-1.5 text-xs"
-          title="Open chat (Cmd+K)"
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span className="hidden sm:inline">{t('place_chat')}</span>
-          {chatUnreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full text-black font-bold text-xs flex items-center justify-center" style={{ background: 'var(--warn)' }}>
-              {chatUnreadCount}
-            </span>
-          )}
-        </button>
-
-        <CopilotChip state={connection.state} chip={chip} />
+        {!lite && <CopilotChip state={connection.state} chip={chip} />}
 
         <Link
           to="/settings"
@@ -372,7 +396,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
           <Settings className="w-4 h-4" />
         </Link>
 
-        <MoreMenu state={connection.state} chip={chip} />
+        <MoreMenu state={connection.state} chip={chip} lite={lite} />
       </header>}
 
       {!embedded && <SavedStrip state={connection.state} pathname={pathname} />}

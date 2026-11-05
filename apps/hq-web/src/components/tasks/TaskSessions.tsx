@@ -32,8 +32,8 @@ export function TaskSessions({ taskId }: { taskId: string }) {
           {sessions.data.map((s) => (
             <li key={s.id}>
               <Link
-                to="/sessions"
-                search={{ id: s.id }}
+                to="/helpers/$id"
+                params={{ id: s.id }}
                 className="block px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 space-y-0.5"
               >
                 <span className="flex items-center gap-2 min-w-0 text-xs text-neutral-200">

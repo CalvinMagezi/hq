@@ -12,16 +12,22 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as VaultRouteImport } from './routes/vault'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as SigninRouteImport } from './routes/signin'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as NotificationsRouteImport } from './routes/notifications'
+import { Route as NotesRouteImport } from './routes/notes'
+import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as HelpersRouteImport } from './routes/helpers'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as VaultIndexRouteImport } from './routes/vault/index'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
+import { Route as NotesIndexRouteImport } from './routes/notes/index'
 import { Route as VaultSplatRouteImport } from './routes/vault/$'
+import { Route as TasksAwayRouteImport } from './routes/tasks/away'
+import { Route as TasksIdRouteImport } from './routes/tasks/$id'
 import { Route as SettingsVersionRouteImport } from './routes/settings/version'
 import { Route as SettingsTimeRouteImport } from './routes/settings/time'
 import { Route as SettingsSpendingRouteImport } from './routes/settings/spending'
@@ -33,6 +39,11 @@ import { Route as SettingsDevicesRouteImport } from './routes/settings/devices'
 import { Route as SettingsDataRouteImport } from './routes/settings/data'
 import { Route as SettingsBrowserRouteImport } from './routes/settings/browser'
 import { Route as SettingsBackupRouteImport } from './routes/settings/backup'
+import { Route as NotesSplatRouteImport } from './routes/notes/$'
+import { Route as InboxIdRouteImport } from './routes/inbox/$id'
+import { Route as HelpersIdRouteImport } from './routes/helpers/$id'
+import { Route as ChatIdRouteImport } from './routes/chat/$id'
+import { Route as NotesNIdRouteImport } from './routes/notes/n.$id'
 
 const VaultRoute = VaultRouteImport.update({
   id: '/vault',
@@ -47,6 +58,11 @@ const UsageRoute = UsageRouteImport.update({
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SigninRoute = SigninRouteImport.update({
+  id: '/signin',
+  path: '/signin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SetupRoute = SetupRouteImport.update({
@@ -69,6 +85,21 @@ const NotificationsRoute = NotificationsRouteImport.update({
   path: '/notifications',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NotesRoute = NotesRouteImport.update({
+  id: '/notes',
+  path: '/notes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InboxRoute = InboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HelpersRoute = HelpersRouteImport.update({
+  id: '/helpers',
+  path: '/helpers',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectRoute = ConnectRouteImport.update({
   id: '/connect',
   path: '/connect',
@@ -84,20 +115,30 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const VaultIndexRoute = VaultIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => VaultRoute,
-} as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => SettingsRoute,
 } as any)
+const NotesIndexRoute = NotesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => NotesRoute,
+} as any)
 const VaultSplatRoute = VaultSplatRouteImport.update({
   id: '/$',
   path: '/$',
   getParentRoute: () => VaultRoute,
+} as any)
+const TasksAwayRoute = TasksAwayRouteImport.update({
+  id: '/away',
+  path: '/away',
+  getParentRoute: () => TasksRoute,
+} as any)
+const TasksIdRoute = TasksIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => TasksRoute,
 } as any)
 const SettingsVersionRoute = SettingsVersionRouteImport.update({
   id: '/version',
@@ -154,18 +195,51 @@ const SettingsBackupRoute = SettingsBackupRouteImport.update({
   path: '/backup',
   getParentRoute: () => SettingsRoute,
 } as any)
+const NotesSplatRoute = NotesSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => NotesRoute,
+} as any)
+const InboxIdRoute = InboxIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => InboxRoute,
+} as any)
+const HelpersIdRoute = HelpersIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => HelpersRoute,
+} as any)
+const ChatIdRoute = ChatIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ChatRoute,
+} as any)
+const NotesNIdRoute = NotesNIdRouteImport.update({
+  id: '/n/$id',
+  path: '/n/$id',
+  getParentRoute: () => NotesRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/chat': typeof ChatRoute
+  '/chat': typeof ChatRouteWithChildren
   '/connect': typeof ConnectRoute
+  '/helpers': typeof HelpersRouteWithChildren
+  '/inbox': typeof InboxRouteWithChildren
+  '/notes': typeof NotesRouteWithChildren
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
-  '/tasks': typeof TasksRoute
+  '/signin': typeof SigninRoute
+  '/tasks': typeof TasksRouteWithChildren
   '/usage': typeof UsageRoute
   '/vault': typeof VaultRouteWithChildren
+  '/chat/$id': typeof ChatIdRoute
+  '/helpers/$id': typeof HelpersIdRoute
+  '/inbox/$id': typeof InboxIdRoute
+  '/notes/$': typeof NotesSplatRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/data': typeof SettingsDataRoute
@@ -177,19 +251,30 @@ export interface FileRoutesByFullPath {
   '/settings/spending': typeof SettingsSpendingRoute
   '/settings/time': typeof SettingsTimeRoute
   '/settings/version': typeof SettingsVersionRoute
+  '/tasks/$id': typeof TasksIdRoute
+  '/tasks/away': typeof TasksAwayRoute
   '/vault/$': typeof VaultSplatRoute
+  '/notes/': typeof NotesIndexRoute
   '/settings/': typeof SettingsIndexRoute
-  '/vault/': typeof VaultIndexRoute
+  '/notes/n/$id': typeof NotesNIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/chat': typeof ChatRoute
+  '/chat': typeof ChatRouteWithChildren
   '/connect': typeof ConnectRoute
+  '/helpers': typeof HelpersRouteWithChildren
+  '/inbox': typeof InboxRouteWithChildren
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
   '/setup': typeof SetupRoute
-  '/tasks': typeof TasksRoute
+  '/signin': typeof SigninRoute
+  '/tasks': typeof TasksRouteWithChildren
   '/usage': typeof UsageRoute
+  '/vault': typeof VaultRouteWithChildren
+  '/chat/$id': typeof ChatIdRoute
+  '/helpers/$id': typeof HelpersIdRoute
+  '/inbox/$id': typeof InboxIdRoute
+  '/notes/$': typeof NotesSplatRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/data': typeof SettingsDataRoute
@@ -201,22 +286,33 @@ export interface FileRoutesByTo {
   '/settings/spending': typeof SettingsSpendingRoute
   '/settings/time': typeof SettingsTimeRoute
   '/settings/version': typeof SettingsVersionRoute
+  '/tasks/$id': typeof TasksIdRoute
+  '/tasks/away': typeof TasksAwayRoute
   '/vault/$': typeof VaultSplatRoute
+  '/notes': typeof NotesIndexRoute
   '/settings': typeof SettingsIndexRoute
-  '/vault': typeof VaultIndexRoute
+  '/notes/n/$id': typeof NotesNIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/chat': typeof ChatRoute
+  '/chat': typeof ChatRouteWithChildren
   '/connect': typeof ConnectRoute
+  '/helpers': typeof HelpersRouteWithChildren
+  '/inbox': typeof InboxRouteWithChildren
+  '/notes': typeof NotesRouteWithChildren
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
-  '/tasks': typeof TasksRoute
+  '/signin': typeof SigninRoute
+  '/tasks': typeof TasksRouteWithChildren
   '/usage': typeof UsageRoute
   '/vault': typeof VaultRouteWithChildren
+  '/chat/$id': typeof ChatIdRoute
+  '/helpers/$id': typeof HelpersIdRoute
+  '/inbox/$id': typeof InboxIdRoute
+  '/notes/$': typeof NotesSplatRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/data': typeof SettingsDataRoute
@@ -228,9 +324,12 @@ export interface FileRoutesById {
   '/settings/spending': typeof SettingsSpendingRoute
   '/settings/time': typeof SettingsTimeRoute
   '/settings/version': typeof SettingsVersionRoute
+  '/tasks/$id': typeof TasksIdRoute
+  '/tasks/away': typeof TasksAwayRoute
   '/vault/$': typeof VaultSplatRoute
+  '/notes/': typeof NotesIndexRoute
   '/settings/': typeof SettingsIndexRoute
-  '/vault/': typeof VaultIndexRoute
+  '/notes/n/$id': typeof NotesNIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -238,13 +337,21 @@ export interface FileRouteTypes {
     | '/'
     | '/chat'
     | '/connect'
+    | '/helpers'
+    | '/inbox'
+    | '/notes'
     | '/notifications'
     | '/sessions'
     | '/settings'
     | '/setup'
+    | '/signin'
     | '/tasks'
     | '/usage'
     | '/vault'
+    | '/chat/$id'
+    | '/helpers/$id'
+    | '/inbox/$id'
+    | '/notes/$'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/data'
@@ -256,19 +363,30 @@ export interface FileRouteTypes {
     | '/settings/spending'
     | '/settings/time'
     | '/settings/version'
+    | '/tasks/$id'
+    | '/tasks/away'
     | '/vault/$'
+    | '/notes/'
     | '/settings/'
-    | '/vault/'
+    | '/notes/n/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/chat'
     | '/connect'
+    | '/helpers'
+    | '/inbox'
     | '/notifications'
     | '/sessions'
     | '/setup'
+    | '/signin'
     | '/tasks'
     | '/usage'
+    | '/vault'
+    | '/chat/$id'
+    | '/helpers/$id'
+    | '/inbox/$id'
+    | '/notes/$'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/data'
@@ -280,21 +398,32 @@ export interface FileRouteTypes {
     | '/settings/spending'
     | '/settings/time'
     | '/settings/version'
+    | '/tasks/$id'
+    | '/tasks/away'
     | '/vault/$'
+    | '/notes'
     | '/settings'
-    | '/vault'
+    | '/notes/n/$id'
   id:
     | '__root__'
     | '/'
     | '/chat'
     | '/connect'
+    | '/helpers'
+    | '/inbox'
+    | '/notes'
     | '/notifications'
     | '/sessions'
     | '/settings'
     | '/setup'
+    | '/signin'
     | '/tasks'
     | '/usage'
     | '/vault'
+    | '/chat/$id'
+    | '/helpers/$id'
+    | '/inbox/$id'
+    | '/notes/$'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/data'
@@ -306,20 +435,27 @@ export interface FileRouteTypes {
     | '/settings/spending'
     | '/settings/time'
     | '/settings/version'
+    | '/tasks/$id'
+    | '/tasks/away'
     | '/vault/$'
+    | '/notes/'
     | '/settings/'
-    | '/vault/'
+    | '/notes/n/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ChatRoute: typeof ChatRoute
+  ChatRoute: typeof ChatRouteWithChildren
   ConnectRoute: typeof ConnectRoute
+  HelpersRoute: typeof HelpersRouteWithChildren
+  InboxRoute: typeof InboxRouteWithChildren
+  NotesRoute: typeof NotesRouteWithChildren
   NotificationsRoute: typeof NotificationsRoute
   SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRouteWithChildren
   SetupRoute: typeof SetupRoute
-  TasksRoute: typeof TasksRoute
+  SigninRoute: typeof SigninRoute
+  TasksRoute: typeof TasksRouteWithChildren
   UsageRoute: typeof UsageRoute
   VaultRoute: typeof VaultRouteWithChildren
 }
@@ -345,6 +481,13 @@ declare module '@tanstack/react-router' {
       path: '/tasks'
       fullPath: '/tasks'
       preLoaderRoute: typeof TasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/signin': {
+      id: '/signin'
+      path: '/signin'
+      fullPath: '/signin'
+      preLoaderRoute: typeof SigninRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup': {
@@ -375,6 +518,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotificationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/notes': {
+      id: '/notes'
+      path: '/notes'
+      fullPath: '/notes'
+      preLoaderRoute: typeof NotesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inbox': {
+      id: '/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/helpers': {
+      id: '/helpers'
+      path: '/helpers'
+      fullPath: '/helpers'
+      preLoaderRoute: typeof HelpersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect': {
       id: '/connect'
       path: '/connect'
@@ -396,13 +560,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/vault/': {
-      id: '/vault/'
-      path: '/'
-      fullPath: '/vault/'
-      preLoaderRoute: typeof VaultIndexRouteImport
-      parentRoute: typeof VaultRoute
-    }
     '/settings/': {
       id: '/settings/'
       path: '/'
@@ -410,12 +567,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsIndexRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/notes/': {
+      id: '/notes/'
+      path: '/'
+      fullPath: '/notes/'
+      preLoaderRoute: typeof NotesIndexRouteImport
+      parentRoute: typeof NotesRoute
+    }
     '/vault/$': {
       id: '/vault/$'
       path: '/$'
       fullPath: '/vault/$'
       preLoaderRoute: typeof VaultSplatRouteImport
       parentRoute: typeof VaultRoute
+    }
+    '/tasks/away': {
+      id: '/tasks/away'
+      path: '/away'
+      fullPath: '/tasks/away'
+      preLoaderRoute: typeof TasksAwayRouteImport
+      parentRoute: typeof TasksRoute
+    }
+    '/tasks/$id': {
+      id: '/tasks/$id'
+      path: '/$id'
+      fullPath: '/tasks/$id'
+      preLoaderRoute: typeof TasksIdRouteImport
+      parentRoute: typeof TasksRoute
     }
     '/settings/version': {
       id: '/settings/version'
@@ -494,8 +672,88 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsBackupRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/notes/$': {
+      id: '/notes/$'
+      path: '/$'
+      fullPath: '/notes/$'
+      preLoaderRoute: typeof NotesSplatRouteImport
+      parentRoute: typeof NotesRoute
+    }
+    '/inbox/$id': {
+      id: '/inbox/$id'
+      path: '/$id'
+      fullPath: '/inbox/$id'
+      preLoaderRoute: typeof InboxIdRouteImport
+      parentRoute: typeof InboxRoute
+    }
+    '/helpers/$id': {
+      id: '/helpers/$id'
+      path: '/$id'
+      fullPath: '/helpers/$id'
+      preLoaderRoute: typeof HelpersIdRouteImport
+      parentRoute: typeof HelpersRoute
+    }
+    '/chat/$id': {
+      id: '/chat/$id'
+      path: '/$id'
+      fullPath: '/chat/$id'
+      preLoaderRoute: typeof ChatIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/notes/n/$id': {
+      id: '/notes/n/$id'
+      path: '/n/$id'
+      fullPath: '/notes/n/$id'
+      preLoaderRoute: typeof NotesNIdRouteImport
+      parentRoute: typeof NotesRoute
+    }
   }
 }
+
+interface ChatRouteChildren {
+  ChatIdRoute: typeof ChatIdRoute
+}
+
+const ChatRouteChildren: ChatRouteChildren = {
+  ChatIdRoute: ChatIdRoute,
+}
+
+const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
+
+interface HelpersRouteChildren {
+  HelpersIdRoute: typeof HelpersIdRoute
+}
+
+const HelpersRouteChildren: HelpersRouteChildren = {
+  HelpersIdRoute: HelpersIdRoute,
+}
+
+const HelpersRouteWithChildren =
+  HelpersRoute._addFileChildren(HelpersRouteChildren)
+
+interface InboxRouteChildren {
+  InboxIdRoute: typeof InboxIdRoute
+}
+
+const InboxRouteChildren: InboxRouteChildren = {
+  InboxIdRoute: InboxIdRoute,
+}
+
+const InboxRouteWithChildren = InboxRoute._addFileChildren(InboxRouteChildren)
+
+interface NotesRouteChildren {
+  NotesSplatRoute: typeof NotesSplatRoute
+  NotesIndexRoute: typeof NotesIndexRoute
+  NotesNIdRoute: typeof NotesNIdRoute
+}
+
+const NotesRouteChildren: NotesRouteChildren = {
+  NotesSplatRoute: NotesSplatRoute,
+  NotesIndexRoute: NotesIndexRoute,
+  NotesNIdRoute: NotesNIdRoute,
+}
+
+const NotesRouteWithChildren = NotesRoute._addFileChildren(NotesRouteChildren)
 
 interface SettingsRouteChildren {
   SettingsBackupRoute: typeof SettingsBackupRoute
@@ -531,27 +789,41 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
   SettingsRouteChildren,
 )
 
+interface TasksRouteChildren {
+  TasksIdRoute: typeof TasksIdRoute
+  TasksAwayRoute: typeof TasksAwayRoute
+}
+
+const TasksRouteChildren: TasksRouteChildren = {
+  TasksIdRoute: TasksIdRoute,
+  TasksAwayRoute: TasksAwayRoute,
+}
+
+const TasksRouteWithChildren = TasksRoute._addFileChildren(TasksRouteChildren)
+
 interface VaultRouteChildren {
   VaultSplatRoute: typeof VaultSplatRoute
-  VaultIndexRoute: typeof VaultIndexRoute
 }
 
 const VaultRouteChildren: VaultRouteChildren = {
   VaultSplatRoute: VaultSplatRoute,
-  VaultIndexRoute: VaultIndexRoute,
 }
 
 const VaultRouteWithChildren = VaultRoute._addFileChildren(VaultRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ChatRoute: ChatRoute,
+  ChatRoute: ChatRouteWithChildren,
   ConnectRoute: ConnectRoute,
+  HelpersRoute: HelpersRouteWithChildren,
+  InboxRoute: InboxRouteWithChildren,
+  NotesRoute: NotesRouteWithChildren,
   NotificationsRoute: NotificationsRoute,
   SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRouteWithChildren,
   SetupRoute: SetupRoute,
-  TasksRoute: TasksRoute,
+  SigninRoute: SigninRoute,
+  TasksRoute: TasksRouteWithChildren,
   UsageRoute: UsageRoute,
   VaultRoute: VaultRouteWithChildren,
 }

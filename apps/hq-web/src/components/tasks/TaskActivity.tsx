@@ -28,7 +28,7 @@ export type NoteRenderer = (path: string) => ReactNode
 const plainPath: NoteRenderer = (path) => <span className="break-all">{path}</span>
 
 const vaultLink: NoteRenderer = (path) => (
-  <Link to="/vault/$" params={{ _splat: path }} className="break-all text-neutral-200 hover:underline">
+  <Link to="/notes/$" params={{ _splat: path }} className="break-all text-neutral-200 hover:underline">
     {path}
   </Link>
 )

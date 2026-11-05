@@ -28,6 +28,7 @@ function browserToken(): string | null {
   try {
     const fromLink = tokenFromLink(new URL(window.location.href))
     if (fromLink) {
+      signInArrival = true
       tokenStorage()?.setItem(STORAGE_KEY, fromLink)
       return fromLink
     }
@@ -64,6 +65,15 @@ function codeFromLink(url: URL): string | null {
 
 // A code from the link, held until the sign-in banner trades it.
 let linkCode: string | null = null
+// Set once a login link or a QR code brought this page, so the old address it carried opens Chat.
+let signInArrival = false
+
+/** Whether this page was opened by a login link or a one-time code; read once by the router. */
+export function takeSignInArrival(): boolean {
+  const was = signInArrival
+  signInArrival = false
+  return was
+}
 
 /**
  * Store the token from a `#token=` link, and hold the code from a `#code=` link, right away. The
@@ -74,7 +84,9 @@ export function adoptLinkToken(): void {
   hqToken()
   if (typeof window === 'undefined') return
   try {
-    linkCode = codeFromLink(new URL(window.location.href)) ?? linkCode
+    const code = codeFromLink(new URL(window.location.href))
+    if (code) signInArrival = true
+    linkCode = code ?? linkCode
   } catch {
     // An unparseable address carries no code.
   }

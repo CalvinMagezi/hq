@@ -74,13 +74,13 @@
   "components/DocxViewer.tsx": 3,
   "routes/settings.tsx": 21,
   "routes/__root.tsx": 8,
-  "routes/sessions.tsx": 19,
+  "routes/helpers.tsx": 19,
   "routes/connect.tsx": 14,
   "routes/tasks.tsx": 18,
-  "routes/vault.tsx": 5,
-  "routes/notifications.tsx": 6,
+  "routes/notes.tsx": 5,
+  "routes/inbox.tsx": 6,
   "routes/setup.tsx": 4,
-  "routes/usage.tsx": 26,
-  "routes/vault/index.tsx": 10,
-  "routes/vault/$.tsx": 8
+  "components/settings/UsageLimits.tsx": 26,
+  "routes/notes/index.tsx": 10,
+  "routes/notes/$.tsx": 8
 }

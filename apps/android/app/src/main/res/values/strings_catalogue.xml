@@ -928,6 +928,10 @@
     <string name="helpers_seen">seen %1$s</string>
     <string name="helpers_driven">answered %1$s</string>
     <string name="doc_title">HQ</string>
+    <string name="document_title">%1$s · HQ</string>
+    <string name="place_notes">Notes</string>
+    <string name="lite_no_place">This HQ is HQ Lite. It has no %1$s.</string>
+    <string name="embed_signed_out">Sign in to HQ on your phone first.</string>
     <string name="inbox_title">Inbox</string>
     <string name="inbox_tab_needs">Needs you</string>
     <string name="inbox_tab_updates">Updates</string>
