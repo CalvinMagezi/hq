@@ -19,6 +19,7 @@ pub mod limits;
 pub mod qr;
 pub mod services;
 pub mod setup;
+pub mod share;
 pub mod ticket;
 pub mod wire;
 

@@ -34,7 +34,10 @@ pub use agent_host::{
     SandboxMode, SandboxProfile, TEAM_MAX_LIVE_CHILDREN_CEILING, TeamsConfig, detect_overrides_dir,
     native_host_dir,
 };
-pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
+pub use backends::{
+    BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, SHARED_MODEL_ENDPOINT,
+    SHARED_MODEL_KEY_ENV, SHARED_MODELS_FILE, SharedBackend, WireApi, read_shared_backends,
+};
 pub use backup::BackupConfig;
 pub use bridge::{
     BridgeForward, BridgeServicesConfig, CheckedForward, CheckedService, DEFAULT_MODEL_SERVER,
@@ -827,6 +830,17 @@ impl HqConfig {
         )
     }
 
+    /// The backends turns run on: `backends` with the models paired machines lend this hub in
+    /// front (the hub's bridge keeps them in `~/.hq/bridge/shared-models.json`). Every builder of
+    /// a chain reads this; nothing saves it, so a lent model never lands in `config.yaml`.
+    pub fn backends_in_force(&self) -> BackendsConfig {
+        let path = Self::hq_dir()
+            .join("bridge")
+            .join(backends::SHARED_MODELS_FILE);
+        self.backends
+            .with_shared(&backends::read_shared_backends(&path))
+    }
+
     /// HQ data directory: ~/.hq/
     pub fn hq_dir() -> PathBuf {
         dirs::home_dir()
@@ -1019,25 +1033,28 @@ pub fn runtime_identity_block(config: &HqConfig) -> String {
 /// One sentence telling an agent which model and provider it is running on,
 /// from the same chain `resolve_session_model` reads, so the two never differ.
 pub fn runtime_identity(config: &HqConfig) -> String {
-    let model = resolve_session_model(config);
-    let primary = config
-        .backends
+    // The chain in force: a model a paired machine lends comes first while it is listed.
+    let backends = config.backends_in_force();
+    let primary = backends
         .is_configured()
-        .then(|| config.backends.backend(&config.backends.primary))
+        .then(|| backends.backend(&backends.primary))
         .flatten();
     let Some(primary) = primary else {
-        return format!("`{model}`");
+        return format!("`{}`", resolve_session_model(config));
     };
+    let model = primary
+        .model
+        .clone()
+        .unwrap_or_else(|| resolve_session_model(config));
     let mut line = format!(
         "`{model}` through {} (backend `{}`)",
         provider_label(primary),
         primary.name
     );
-    let fallbacks: Vec<String> = config
-        .backends
+    let fallbacks: Vec<String> = backends
         .fallbacks
         .iter()
-        .filter_map(|n| config.backends.backend(n))
+        .filter_map(|n| backends.backend(n))
         .map(|b| {
             format!(
                 "`{}` through {}",

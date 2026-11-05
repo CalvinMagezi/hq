@@ -26,6 +26,7 @@ pub struct BackendInfo {
 /// The ordered chain (primary first, then fallbacks) as display records.
 /// Unknown names referenced by the chain are included but flagged with no kind.
 pub fn chain_listing(config: &HqConfig) -> Vec<BackendInfo> {
+    // The configured chain, which `/model` changes; a lent model is shown by the session info.
     config
         .backends
         .chain_order()
@@ -107,10 +108,11 @@ fn pick_tip() -> &'static str {
 /// Returns e.g. `copilot → kimi-k3-256k → deepseek → ollama` when an explicit
 /// chain is configured, or `None` when running on the legacy provider list.
 fn fallback_chain_display(config: &HqConfig) -> Option<String> {
-    if !config.backends.is_configured() {
+    let backends = config.backends_in_force();
+    if !backends.is_configured() {
         return None;
     }
-    let chain = config.backends.chain_order();
+    let chain = backends.chain_order();
     if chain.is_empty() {
         return None;
     }

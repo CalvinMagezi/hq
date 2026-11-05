@@ -23,6 +23,10 @@ use std::{
 const DEFAULT_BIND: &str = "0.0.0.0:0";
 const KEY_FILE: &str = "bridge.key";
 const BRIDGE_SUBDIR: &str = "bridge";
+/// How long one question to the lent model server may take: it is on this machine.
+const MODEL_SERVER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How often the lent model server is asked again.
+const MODEL_SERVER_RECHECK: std::time::Duration = std::time::Duration::from_secs(60);
 const DEFAULT_NAME: &str = "hq";
 const DEFAULT_PINGS: usize = 5;
 const SHOWN_CHARS: usize = 120;
@@ -695,6 +699,19 @@ async fn start_set_up(bridge: &Bridge, role: Role) -> Result<()> {
     let config = HqConfig::load().ok();
     start_forwards(bridge, config.as_ref()).await?;
     bridge.keep_setup()?;
+    // HQ reads the models machines lend from here (`HqConfig::backends_in_force`).
+    if role == Role::Hub {
+        bridge.keep_shared_models(HqConfig::hq_dir().join(BRIDGE_SUBDIR))?;
+    }
+    // A machine always keeps its hubs told, "nothing" included, so dropping
+    // `bridge.share_model` from the config takes the model off them too.
+    if role == Role::Machine
+        || config
+            .as_ref()
+            .is_some_and(|c| c.bridge.share_model.is_some())
+    {
+        lend_model(bridge, config.as_ref());
+    }
     gate_hint(config.as_ref(), role);
     if role != Role::Machine {
         return Ok(());
@@ -706,6 +723,103 @@ async fn start_set_up(bridge: &Bridge, role: Role) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Tells this machine's hubs about `bridge.share_model`: the model named there, or the first
+/// one the model server lists, with what the server says about it. The server is asked again
+/// every [`MODEL_SERVER_RECHECK`], so a server that was down at start, or a model pulled later,
+/// is picked up; while it cannot answer, hubs are told nothing is lent.
+fn lend_model(bridge: &Bridge, config: Option<&HqConfig>) {
+    let share = config.and_then(|c| c.bridge.share_model.clone());
+    let also = config
+        .map(|c| c.bridge.configured_hubs())
+        .unwrap_or_default();
+    let lent: Arc<std::sync::Mutex<Option<hq_bridge::share::Offered>>> = Arc::default();
+    if let Some(share) = share {
+        let fill = lent.clone();
+        tokio::spawn(async move {
+            let mut said: Option<String> = None;
+            loop {
+                let offer = share_offer(&share).await;
+                let now = match &offer {
+                    Ok(o) => format!("Lending {} to this machine's hubs.", o.model),
+                    Err(e) => format!("bridge.share_model: {e:#}; hubs are told nothing is lent"),
+                };
+                if said.as_deref() != Some(now.as_str()) {
+                    tracing::info!("{now}");
+                    said = Some(now);
+                }
+                *fill.lock().unwrap() = offer.ok();
+                tokio::time::sleep(MODEL_SERVER_RECHECK).await;
+            }
+        });
+    }
+    bridge.announce_shared_model(Arc::new(move || lent.lock().unwrap().clone()), also);
+}
+
+/// What `share` lends, as the model server says now.
+async fn share_offer(share: &hq_core::config::ShareModel) -> Result<hq_bridge::share::Offered> {
+    #[derive(serde::Deserialize)]
+    struct Named {
+        name: String,
+        #[serde(default)]
+        context_length: Option<u64>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Models {
+        #[serde(default)]
+        models: Vec<Named>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Show {
+        #[serde(default)]
+        capabilities: Vec<String>,
+    }
+    let base = format!("http://{}", share.to);
+    let client = reqwest::Client::builder()
+        .timeout(MODEL_SERVER_TIMEOUT)
+        .no_proxy()
+        .build()?;
+    let model = match &share.model {
+        Some(model) => model.clone(),
+        None => {
+            let tags: Models = client
+                .get(format!("{base}/api/tags"))
+                .send()
+                .await?
+                .json()
+                .await?;
+            tags.models
+                .into_iter()
+                .next()
+                .map(|m| m.name)
+                .ok_or_else(|| anyhow!("the model server at {} has no models", share.to))?
+        }
+    };
+    if !hq_bridge::share::valid_model(&model) {
+        bail!("{model:?} is not a model name");
+    }
+    let show: Option<Show> = match client
+        .post(format!("{base}/api/show"))
+        .json(&serde_json::json!({ "model": model }))
+        .send()
+        .await
+    {
+        Ok(resp) => resp.json().await.ok(),
+        Err(_) => None,
+    };
+    let loaded: Option<Models> = match client.get(format!("{base}/api/ps")).send().await {
+        Ok(resp) => resp.json().await.ok(),
+        Err(_) => None,
+    };
+    let context = loaded
+        .and_then(|ps| ps.models.into_iter().find(|m| m.name == model))
+        .and_then(|m| m.context_length);
+    Ok(hq_bridge::share::Offered {
+        tools: show.map(|s| s.capabilities.iter().any(|c| c == "tools")),
+        context,
+        model,
+    })
 }
 
 async fn run_control(net: &NetArgs, db: Database) -> Result<()> {
