@@ -108,7 +108,7 @@ pub struct RouteEntry {
     pub model_id: String,
     /// Cost tier for this route
     pub cost_tier: CostTier,
-    /// Whether this is a local inference provider (Ollama, TurboQuant).
+    /// Whether this is a local inference provider (Ollama).
     /// Local providers are "free" but slow; cloud free providers are preferred.
     pub is_local: bool,
 }
