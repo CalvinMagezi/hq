@@ -1,27 +1,26 @@
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { Link, Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, type ReactNode } from 'react'
-import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { ChevronLeft, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
 import { relTime } from '~/lib/time'
+import { t, type StringKey } from '~/strings'
+import { CardSlot, useBackupStatus, useNotificationsOff } from '~/components/settings/CardSlot'
+import { NotificationsPage } from '~/components/settings/NotificationsPage'
+import { SettingsHome } from '~/components/settings/SettingsHome'
+import { SignOutDialog } from '~/components/settings/BrowserSections'
+import { deviceTimeZone, useClockZone, zoneCity } from '~/lib/clock'
+import { readDataUsed, startDataCounter } from '~/lib/dataUsed'
+import { fetchHello } from '~/lib/hello'
+import { useInHub } from '~/lib/hubWindow'
+import { DEFAULT_PUSH_PREFS, readPushPrefs } from '~/lib/webPush'
+import { LANDING_PATH, WIDE_MIN_PX, ageWords, backupNeedsLook, formatSize, hashRedirect, liteNotice, type BackupStatus } from '~/lib/settingsGroups'
 import { HqHttpError } from '~/lib/hqAuth'
 import { ChatAppsSection } from '~/components/settings/ChatAppsSection'
-import { availableTimeZones, deviceTimeZone, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import { forecastQuery } from '~/lib/usageApi'
 import { DevicesSection } from '~/components/settings/DevicesSection'
 import { ProviderKeysSection } from '~/components/settings/ProviderKeysSection'
-import {
-  SCOPE_CHOICES,
-  armConnector,
-  clockTime,
-  connectorOff,
-  disarmConnector,
-  fetchConnector,
-  revokeGrant,
-  unixToMs,
-  type ConnectorGrant,
-} from '~/lib/connectorApi'
 import {
   copilotUsageQuery,
   exhaustionText,
@@ -40,10 +39,10 @@ import {
 } from '~/lib/sessionFoldersApi'
 
 export const Route = createFileRoute('/settings')({
-  component: SettingsPage,
+  component: SettingsLayout,
 })
 
-function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+export function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-4">
       <h2 id={`${id}-title`} className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
@@ -218,92 +217,12 @@ function CodingAgentsSection({ host: h }: { host: HqSettings['agent_host'] }) {
   )
 }
 
-const CONNECTOR_QUERY_KEY = ['oauth-connector']
-const ARMED_REFRESH_MS = 15_000
-const scopeTitle = (id: string) => SCOPE_CHOICES.find((s) => s.id === id)?.title ?? id
-
-/** Small text button that runs one connector action. */
+/** Small text button that runs one action. */
 function ActionButton({ busy, onClick, children }: { busy: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button type="button" onClick={onClick} disabled={busy} className="hq-btn-ghost disabled:opacity-40">
       {children}
     </button>
-  )
-}
-
-function GrantRow({ grant, onRevoke, busy }: { grant: ConnectorGrant; onRevoke: () => void; busy: boolean }) {
-  const used = grant.last_used_at === null ? 'never used' : `used ${relTime(unixToMs(grant.last_used_at))}`
-  return (
-    <Row label={`${grant.label} (${grant.client_name})`}>
-      <span className="inline-flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
-        <span>{scopeTitle(grant.grant_scope)} · {used}</span>
-        <ActionButton busy={busy} onClick={onRevoke}>Disconnect</ActionButton>
-      </span>
-    </Row>
-  )
-}
-
-/** The claude.ai connector: where Claude reaches HQ, the window for a new connection, and who is connected. */
-function ConnectorSection() {
-  const client = useQueryClient()
-  const { data } = useQuery({
-    queryKey: CONNECTOR_QUERY_KEY,
-    queryFn: fetchConnector,
-    // While a window is open, look again so its closing shows without a reload.
-    refetchInterval: (q) => (q.state.data?.enabled && q.state.data.armed_until !== null ? ARMED_REFRESH_MS : false),
-  })
-  const act = useMutation({
-    mutationFn: (run: () => Promise<unknown>) => run(),
-    onSettled: () => client.invalidateQueries({ queryKey: CONNECTOR_QUERY_KEY }),
-  })
-  if (!data) return null
-  if (!data.enabled) {
-    return (
-      <Section id="connector" title="Claude connector">
-        <Row label="Status"><Flag on={false} /></Row>
-        <Row label="Turn on" block>Set mcp_connector.enabled and mcp_connector.public_url in the config, then restart HQ.</Row>
-      </Section>
-    )
-  }
-  const busy = act.isPending
-  const armedUntil = data.armed_until !== null && unixToMs(data.armed_until) > Date.now() ? data.armed_until : null
-  const disconnectAll = () => {
-    if (window.confirm('Disconnect every Claude client from this HQ?')) act.mutate(connectorOff)
-  }
-  return (
-    <Section id="connector" title="Claude connector">
-      <Row label="Connector URL"><span className="font-mono text-xs select-all">{data.url}</span></Row>
-      <Row label="New connections">
-        {armedUntil === null ? (
-          <ActionButton busy={busy} onClick={() => act.mutate(() => armConnector())}>Allow a new connection</ActionButton>
-        ) : (
-          <span className="inline-flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
-            <span>Open until {clockTime(armedUntil)}</span>
-            <ActionButton busy={busy} onClick={() => act.mutate(disarmConnector)}>Close</ActionButton>
-          </span>
-        )}
-      </Row>
-      {armedUntil !== null && (
-        <Row label="Next step" block>In Claude, open Settings, then Connectors, add a custom connector with the URL above and press Connect. Approve it on the page that opens.</Row>
-      )}
-      {data.grants.length === 0 && <Row label="Connected">nobody</Row>}
-      {data.grants.map((g) => (
-        <GrantRow key={g.id} grant={g} busy={busy} onRevoke={() => act.mutate(() => revokeGrant(g.id))} />
-      ))}
-      {data.grants.length > 0 && (
-        <Row label="Disconnect everything"><ActionButton busy={busy} onClick={disconnectAll}>Disconnect all</ActionButton></Row>
-      )}
-      {data.recent_calls.length > 0 && (
-        <Row label="Recent calls" block>
-          <ul className="flex flex-col gap-1 font-mono text-xs">
-            {data.recent_calls.map((c, i) => (
-              <li key={`${c.at}-${i}`}>{c.tool} · {c.outcome.replace('_', ' ')} · {relTime(unixToMs(c.at))}</li>
-            ))}
-          </ul>
-        </Row>
-      )}
-      {act.error && <Row label="Error" block>{act.error instanceof Error ? act.error.message : 'That did not work.'}</Row>}
-    </Section>
   )
 }
 
@@ -314,7 +233,7 @@ function isMissingRoute(err: unknown): boolean {
   return err instanceof HqHttpError && err.status === HTTP_NOT_FOUND
 }
 
-function SessionFoldersSection() {
+export function SessionFoldersSection() {
   const client = useQueryClient()
   const { data, error } = useQuery({
     queryKey: SESSION_FOLDERS_QUERY_KEY,
@@ -337,7 +256,7 @@ function SessionFoldersSection() {
   }
 
   return (
-    <Section id="session-folders" title="Session folders">
+    <Section id="session-folders" title={t('row_folders')}>
       <p className="py-3.5 text-sm text-neutral-300 leading-relaxed">
         Folders you approved for coding sessions that Claude starts. Each covers the folder and everything under it on that host.
       </p>
@@ -367,43 +286,57 @@ function SessionFoldersSection() {
   )
 }
 
-/** The header clock's zone. Kept on this device, so a phone and a laptop can each have their own. */
-function ClockSection() {
-  const pinned = useClockZone()
-  const device = deviceTimeZone()
-  const zones = useMemo(availableTimeZones, [])
+
+/** The settings HQ reports, for the pages that show them; an unreachable HQ shows the line and the saved values. */
+function useSettingsData() {
+  return useQuery({ queryKey: ['settings'], queryFn: fetchSettings })
+}
+
+function LoadFailed() {
   return (
-    <Section id="clock" title="Clock">
-      <Row label="Time zone">
-        <select
-          value={pinned}
-          onChange={(e) => setClockZone(e.target.value)}
-          aria-label="Clock time zone"
-          style={{ colorScheme: 'dark' }}
-          className="max-w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-sm text-neutral-50"
-        >
-          <option value="">This device ({zoneCity(device)})</option>
-          {zones.map((z) => (
-            <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>
-          ))}
-        </select>
-      </Row>
-      <Row label="Saved on">this device only</Row>
-    </Section>
+    <p className="a-muted a-body-sm" role="status">
+      {t('settings_load_failed')}
+    </p>
   )
 }
 
-function SettingsBody({ s }: { s: HqSettings }) {
+export function KeysPage() {
+  const { data } = useSettingsData()
+  if (!data) return <LoadFailed />
   return (
-    <div className="flex flex-col gap-6 min-w-0 flex-1 max-w-[760px]">
-      <ClockSection />
-      <DevicesSection />
-      <ChatAppsSection />
+    <div className="flex flex-col gap-6">
+      <ProviderKeysSection rows={data.provider_keys} />
+      <ModelSection s={data} />
+      <BackendsSection s={data} />
+    </div>
+  )
+}
+
+export function MessagingPage() {
+  return <ChatAppsSection />
+}
+
+export function DevicesPage() {
+  return <DevicesSection />
+}
+
+export function SpendingPage() {
+  return (
+    <div className="flex flex-col gap-6">
       <CopilotCreditsSection />
       <OpenRouterSpendSection />
-      <ModelSection s={s} />
-      <BackendsSection s={s} />
-      <ProviderKeysSection rows={s.provider_keys} />
+      <Link to="/usage" className="a-link">
+        {t('row_spending')}
+      </Link>
+    </div>
+  )
+}
+
+export function SafetyPage() {
+  const { data: s } = useSettingsData()
+  if (!s) return <LoadFailed />
+  return (
+    <div className="flex flex-col gap-6">
       <Section id="limits" title="Limits">
         <Row label="Chat turn timeout">{formatSeconds(s.limits.chat_turn_timeout_secs)}</Row>
         <Row label="Relay ack window">{formatSeconds(s.limits.turn_ack_timeout_secs)}</Row>
@@ -419,8 +352,6 @@ function SettingsBody({ s }: { s: HqSettings }) {
         <Row label="Allowed web origins">{s.safety.web_allowed_origins.length ? s.safety.web_allowed_origins.join(', ') : 'none'}</Row>
       </Section>
       <CodingAgentsSection host={s.agent_host} />
-      <ConnectorSection />
-      <SessionFoldersSection />
       <Section id="integrations" title="Integrations">
         {s.integrations.remote_mcp.length === 0 && <Row label="Remote MCP servers">none</Row>}
         {s.integrations.remote_mcp.map((m) => (
@@ -434,88 +365,135 @@ function SettingsBody({ s }: { s: HqSettings }) {
   )
 }
 
-const NAV = [
-  ['clock', 'Clock'],
-  ['devices', 'Devices'],
-  ['chat-apps', 'Chat apps'],
-  ['model', 'Model'],
-  ['backends', 'Backend chain'],
-  ['keys', 'Provider keys'],
-  ['limits', 'Limits'],
-  ['safety', 'Safety'],
-  ['agents', 'Coding agents'],
-  ['connector', 'Claude connector'],
-  ['integrations', 'Integrations'],
-] as const
-
-const HASH_SCROLL_WAIT_MS = 10_000
-
-/** Scrolls to `#section` once it renders. Sections wait for their data, so the router's own scroll can run before they exist. */
-function useScrollToHash() {
-  const { hash } = useLocation()
-  useEffect(() => {
-    const id = hash.replace(/^#/, '')
-    if (!id) return
-    const scroll = () => {
-      const el = document.getElementById(id)
-      el?.scrollIntoView({ block: 'start' })
-      return el !== null
-    }
-    if (scroll()) return
-    const observer = new MutationObserver(() => {
-      if (scroll()) observer.disconnect()
-    })
-    observer.observe(document.body, { childList: true, subtree: true })
-    const timer = window.setTimeout(() => observer.disconnect(), HASH_SCROLL_WAIT_MS)
-    return () => {
-      observer.disconnect()
-      window.clearTimeout(timer)
-    }
-  }, [hash])
+export function FoldersPage() {
+  return <SessionFoldersSection />
 }
 
-function SettingsPage() {
-  const { data, error, isLoading, isFetching, refetch } = useQuery({ queryKey: ['settings'], queryFn: fetchSettings })
-  useScrollToHash()
+export function BackupPage() {
+  const status = useBackupStatus()
+  const hello = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data
   return (
-    <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
-      <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-8 sm:py-8">
-        <header className="flex items-start justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-neutral-50" style={{ fontFamily: 'var(--font-heading)' }}>Settings</h1>
-            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone, devices, chat apps, model keys and the Claude connector can be managed here. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
-          </div>
-          <button type="button" onClick={() => refetch()} className="hq-icon-btn" aria-label="Reload settings" title="Reload settings">
-            <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
-          </button>
-        </header>
-        {!data && (
-          // The clock lives on this device, so it stays settable while the gateway is loading or unreachable.
-          <div className="flex flex-col gap-6 max-w-[760px]">
-            <ClockSection />
-            {isLoading && (
-              <div className="flex items-center gap-2 text-sm text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading settings</div>
-            )}
-            {error && (
-              <div className="flex items-center gap-2 text-sm text-red-400" role="alert">
-                <AlertCircle className="w-4 h-4" /> Could not load settings. {error instanceof Error ? error.message : ''}
-              </div>
-            )}
-          </div>
-        )}
-        {data && (
-          <div className="flex gap-10 items-start">
-            <nav aria-label="Settings sections" className="hidden lg:flex flex-col gap-1 w-48 shrink-0 sticky top-2">
-              {NAV.map(([id, label]) => (
-                <a key={id} href={`#${id}`} className="px-3 py-2 rounded-xl text-sm text-neutral-300 hover:bg-white/5 hover:text-white">
-                  {label}
-                </a>
-              ))}
-            </nav>
-            <SettingsBody s={data} />
-          </div>
-        )}
+    <div className="flex flex-col gap-4">
+      <div className="a-card">
+        <b>{t('row_backup')}</b>
+        <span className={backupNeedsLook(status) ? 'a-warn-t' : 'a-muted'}>{backupRowWords(status)}</span>
+        {hello && <span className="a-muted">{t('ver_hq_line', { version: hello.version })}</span>}
       </div>
+    </div>
+  )
+}
+
+function backupRowWords(status: BackupStatus | null): string {
+  return status?.configured && status.last_ok_at ? t('backup_row', { age: ageWords(status.last_ok_at) }) : t('backup_not_reported')
+}
+
+const TITLES: Record<string, StringKey> = {
+  '/settings/browser': 'row_notifications',
+  '/settings/time': 'row_time_zone',
+  '/settings/version': 'row_install_version',
+  '/settings/data': 'row_data_used',
+  '/settings/keys': 'row_ai_keys',
+  '/settings/messaging': 'row_messaging',
+  '/settings/devices': 'row_other_devices',
+  '/settings/spending': 'row_spending',
+  '/settings/safety': 'row_safety',
+  '/settings/folders': 'row_folders',
+  '/settings/backup': 'row_backup',
+}
+
+function useWide(): boolean {
+  const [wide, setWide] = useState(false)
+  useEffect(() => {
+    const q = window.matchMedia(`(min-width: ${WIDE_MIN_PX}px)`)
+    const sync = () => setWide(q.matches)
+    sync()
+    q.addEventListener('change', sync)
+    return () => q.removeEventListener('change', sync)
+  }, [])
+  return wide
+}
+
+/** Words at the right of each home row, from what this browser already knows. */
+function useTrailing(hub: boolean, backup: BackupStatus | null): Record<string, string> {
+  const prefs = useStoredPrefs()
+  const zone = useClockZone() || deviceTimeZone()
+  const [used, setUsed] = useState<number | null>(null)
+  useEffect(() => {
+    startDataCounter()
+    setUsed(readDataUsed())
+  }, [])
+  const notif = prefs.needs ? (prefs.updates ? 'trail_notif_both' : 'trail_notif_needs') : prefs.updates ? 'trail_notif_updates' : 'trail_notif_none'
+  const hello = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data
+  return {
+    notifications: hub ? '' : t(notif),
+    time: zoneCity(zone),
+    version: hello ? t('trail_version', { version: hello.version }) : '',
+    data: hub ? t('data_used_row_window') : used === null ? '' : t('data_used_row', { size: formatSize(used) }),
+    signout: t(hub ? 'trail_sign_out_window' : 'trail_sign_out_browser'),
+    backup: backupRowWords(backup),
+  }
+}
+
+function useStoredPrefs() {
+  const [prefs, setPrefs] = useState(DEFAULT_PUSH_PREFS)
+  useEffect(() => setPrefs(readPushPrefs()), [])
+  return prefs
+}
+
+/** The list pane (the four groups and the card slot) beside the open section; one pane on a phone. */
+function SettingsLayout() {
+  const { pathname, hash } = useLocation()
+  const navigate = useNavigate()
+  const wide = useWide()
+  const lite = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data?.edition === 'lite'
+  const hub = useInHub()
+  const backup = useBackupStatus()
+  const notificationsOff = useNotificationsOff()
+  const [signingOut, setSigningOut] = useState(false)
+  const home = pathname === '/settings' || pathname === '/settings/'
+
+  useEffect(() => {
+    const to = hashRedirect(hash)
+    if (to) void navigate({ to, replace: true })
+    else if (home && wide) void navigate({ to: LANDING_PATH, replace: true })
+  }, [hash, home, wide, navigate])
+
+  const trailing = useTrailing(hub, backup)
+  const needsLook = [
+    ...(backupNeedsLook(backup) ? ['backup'] : []),
+    ...(notificationsOff && !wide ? ['notifications'] : []),
+  ]
+  const notice = liteNotice(pathname, lite)
+  const titleKey = notice ? 'row_notifications' : TITLES[pathname]
+  const list = (
+    <aside className={`min-w-0 lg:w-[360px] lg:shrink-0 lg:overflow-y-auto ${home ? 'block flex-1 lg:flex-none' : 'hidden lg:block'}`}>
+      <h1 className="a-h1 px-4 py-3 lg:hidden">{t('settings_title')}</h1>
+      <CardSlot notificationsOff={notificationsOff} />
+      <SettingsHome lite={lite} hub={hub} trailing={{ ...trailing, notifications: notificationsOff && !wide ? t('trail_notif_none') : trailing.notifications }} needsLook={needsLook} onSignOut={() => setSigningOut(true)} />
+    </aside>
+  )
+  return (
+    <div className="h-full min-h-0 flex overflow-hidden">
+      {list}
+      <main className={`min-w-0 flex-1 overflow-y-auto ${home ? 'hidden lg:block' : 'block'}`}>
+        <div className="mx-auto w-full max-w-[760px] px-4 py-5 flex flex-col gap-4">
+          {titleKey && (
+            <header className="flex items-center gap-2">
+              <Link to="/settings" className="a-ib lg:hidden" aria-label={t('settings_back')}>
+                <ChevronLeft className="w-4 h-4" />
+              </Link>
+              <h1 className="a-h1">{t(titleKey)}</h1>
+            </header>
+          )}
+          {notice && (
+            <p className="a-body" role="status">
+              {t(notice)}
+            </p>
+          )}
+          {notice ? <NotificationsPage /> : <Outlet />}
+        </div>
+      </main>
+      {signingOut && <SignOutDialog onClose={() => setSigningOut(false)} />}
     </div>
   )
 }

@@ -21,7 +21,6 @@ import {
 } from '~/lib/notificationsApi'
 import { NotificationCard } from '~/components/notifications/NotificationCard'
 import { NotificationDetailDrawer } from '~/components/notifications/NotificationDetailDrawer'
-import { PushToggle } from '~/components/notifications/PushToggle'
 
 export const Route = createFileRoute('/notifications')({
   component: NotificationsPage,
@@ -166,8 +165,6 @@ function NotificationsPage() {
           )}
         </div>
       </div>
-
-      <PushToggle />
 
       {/* Filter Tabs & Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">

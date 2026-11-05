@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Bell, BookOpen, CheckSquare, Gauge, MessageSquare, SlidersHorizontal, Terminal } from 'lucide-react'
+import { Bell, BookOpen, CheckSquare, MessageSquare, SlidersHorizontal, Terminal } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { inboxBadge } from '~/lib/inboxBadge'
 import { needsYouAria } from '~/lib/workbench'
@@ -8,7 +8,7 @@ import { needsYouAria } from '~/lib/workbench'
 export const inboxNeedsYou = (pending: number, helpers: number) => pending + helpers
 
 interface RailLinkProps {
-  to: '/vault' | '/chat' | '/tasks' | '/sessions' | '/usage' | '/notifications' | '/settings'
+  to: '/vault' | '/chat' | '/tasks' | '/sessions' | '/notifications' | '/settings'
   label: string
   exact?: boolean
   children: React.ReactNode
@@ -43,9 +43,6 @@ export function AppRail() {
       </RailLink>
       <RailLink to="/sessions" label="Workbench">
         <Terminal className="w-5 h-5" />
-      </RailLink>
-      <RailLink to="/usage" label="Usage">
-        <Gauge className="w-5 h-5" />
       </RailLink>
       <RailLink to="/notifications" label={needsYou ? `Inbox, ${needsYouAria(inboxNeedsYou(pending, helpers))}` : 'Inbox'} exact>
         <Bell className="w-5 h-5" />
