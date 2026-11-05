@@ -26,12 +26,20 @@ export interface Hello {
 export const HELLO_URL = '/api/hello'
 /** HQ Hub's proxy marks its own 502 when the HQ behind it is gone (crates/hq-desktop/src/proxy.rs). */
 const UPSTREAM_GONE = { header: 'x-hq-proxy', value: 'upstream-gone' }
+/** The same 502 when the person stopped HQ from HQ Hub on purpose. */
+const YOU_STOPPED = 'stopped'
 
 let upstreamGone = false
+let youStopped = false
 
 /** Whether the last hello came back from HQ Hub saying the HQ behind it is gone. */
 export function helloUpstreamGone(): boolean {
   return upstreamGone
+}
+
+/** Whether the last hello came back from HQ Hub saying the person stopped HQ themselves. */
+export function helloYouStopped(): boolean {
+  return youStopped
 }
 
 export function isHello(v: unknown): v is Hello {
@@ -43,7 +51,9 @@ export function isHello(v: unknown): v is Hello {
 export async function fetchHello(signal?: AbortSignal): Promise<Hello | null> {
   try {
     const res = await fetch(HELLO_URL, { signal, cache: 'no-store' })
-    upstreamGone = res.headers.get(UPSTREAM_GONE.header) === UPSTREAM_GONE.value
+    const mark = res.headers.get(UPSTREAM_GONE.header)
+    youStopped = mark === YOU_STOPPED
+    upstreamGone = mark === UPSTREAM_GONE.value || youStopped
     if (!res.ok) return null
     const body: unknown = await res.json()
     if (!isHello(body)) return null

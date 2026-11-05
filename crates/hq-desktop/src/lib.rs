@@ -19,5 +19,6 @@ pub mod qr;
 pub mod rename;
 pub mod settings;
 pub mod window;
+pub mod words;
 
 pub use desktop::{Desktop, DesktopInit, Revoked};

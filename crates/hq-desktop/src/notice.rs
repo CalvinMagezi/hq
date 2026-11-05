@@ -5,14 +5,18 @@
 
 use crate::agents::{AgentView, Need};
 use crate::window::main_path_allowed;
+use crate::words::word;
 use std::collections::HashSet;
 
-/// The notice's title. The text of every string below is also in `apps/strings/en.yaml`.
-pub const TITLE: &str = "AgentHQ · HQ Hub";
+/// The notice's title.
+pub fn title() -> String {
+    word("hub_notice_title")
+}
+
 /// The notice's one action.
-pub const OPEN_ACTION: &str = "Open";
-/// The line under the title when the helper has no name the person would know.
-pub const BODY_DETAIL: &str = "Open HQ to see what it wants to do.";
+pub fn open_action() -> String {
+    word("hub_notice_open")
+}
 
 /// A notice to show.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,8 +55,8 @@ pub fn notice_for(agent: &AgentView) -> Notice {
         _ => agent.name.clone(),
     };
     Notice {
-        title: TITLE.to_string(),
-        body: format!("{who} needs your OK. {BODY_DETAIL}"),
+        title: title(),
+        body: word("hub_notice_body").replace("{who}", &who),
         path: main_path_allowed(&format!("/helpers/{}", agent.name)).unwrap_or_else(|| "/".into()),
     }
 }
@@ -69,6 +73,7 @@ mod tests {
             title: String::new(),
             cwd: String::new(),
             quiet_secs: 0,
+            age_secs: 0,
         }
     }
 
@@ -102,6 +107,15 @@ mod tests {
             "Claude needs your OK. Open HQ to see what it wants to do."
         );
         assert_eq!(n.path, "/helpers/fix-7");
+    }
+
+    #[test]
+    fn the_notice_words_come_from_the_catalogue() {
+        assert_eq!(title(), "AgentHQ · HQ Hub");
+        assert_eq!(open_action(), "Open");
+        let n = notice_for(&agent("a", Some("codex"), Need::Blocked));
+        assert!(n.body.starts_with("Codex needs your OK."));
+        assert!(!n.body.contains('{'));
     }
 
     #[test]

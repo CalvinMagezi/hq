@@ -134,7 +134,6 @@
     <string name="signin_from_qr_title">Signing you in</string>
     <string name="signin_from_qr_body">Using the code from the QR code. This takes a moment.</string>
     <string name="code_title">Sign in another device</string>
-    <string name="code_intro">Enter the code on the other device, or scan the QR code with its camera.</string>
     <string name="code_label">One-time code</string>
     <string name="code_left">%1$s left</string>
     <string name="code_works_once">Works once, for %1$s. Enter the code on the other device.</string>
@@ -1328,7 +1327,6 @@
     <string name="hub_not_found_note">HQ Hub runs the HQ program, and it isn\'t in any place HQ Hub looks. Choose it, or install HQ first.</string>
     <string name="hub_choose_program">Choose the HQ program…</string>
     <string name="hub_look_again">Look again</string>
-    <string name="hub_how_to_install">How to install HQ</string>
     <string name="hub_refused_program">Couldn\'t use that program. Anyone on this computer can change its folder. Choose one that only you can change.</string>
     <string name="hub_not_hq_program">That program doesn\'t answer like HQ. Choose the one named hq.</string>
     <string name="hub_missing_program">Nothing is at that path.</string>
@@ -1368,7 +1366,6 @@
     <string name="hub_notice_title">AgentHQ · HQ Hub</string>
     <string name="hub_notice_body">%1$s needs your OK. Open HQ to see what it wants to do.</string>
     <string name="hub_notice_open">Open</string>
-    <string name="hub_connection_title">How HQ Hub reaches your phone</string>
     <string name="hub_claude_moved">Claude\'s entries for HQ now point to the renamed app: %1$s.</string>
     <string name="dev_off_title">Pair a phone or another computer</string>
     <string name="dev_off_state">Off</string>
@@ -1435,7 +1432,6 @@
     <string name="hh_group_apps">Apps that use HQ</string>
     <string name="hh_group_apps_note">Apps you open yourself that can use HQ. HQ does not start them.</string>
     <string name="hh_started">%1$s · started %2$s</string>
-    <string name="hh_opens_in_hq">Opens in HQ</string>
     <string name="hh_state_checking">Checking</string>
     <string name="hh_state_waiting">Waiting</string>
     <string name="hh_state_not_installed">Not installed</string>
@@ -1448,7 +1444,6 @@
     <string name="hh_state_ready">Ready</string>
     <string name="hh_state_unchecked">Not checked yet</string>
     <string name="hh_state_trying">Trying it</string>
-    <string name="hh_state_stopped">Stopped</string>
     <string name="hh_line_not_connected">%1$s · not connected to HQ yet</string>
     <string name="hh_line_not_connected_nov">Not connected to HQ yet</string>
     <string name="hh_line_signin">%1$s · its sign-in screen showed</string>
@@ -1482,17 +1477,12 @@
     <string name="hh_lock_state">Stopped for safety</string>
     <string name="hh_lock_body">Helpers are stopped on this computer. Allow them again on This computer.</string>
     <string name="hh_lock_go">Go to This computer</string>
-    <string name="hh_lock_try">Try it waits until helpers are allowed again on This computer.</string>
     <string name="hh_none_title">No helpers on this computer yet</string>
     <string name="hh_none_body">Coding work needs a helper. Most people start with Claude Code. Copy this line into a terminal, sign in once, then check again.</string>
     <string name="hh_none_note">It needs Node.js. Every helper\'s own install line is in its row below.</string>
     <string name="hh_copy">Copy</string>
     <string name="hh_copied">Copied</string>
     <string name="hh_none_work">Nothing is at work here.</string>
-    <string name="hh_apps_row">App</string>
-    <string name="hh_win_title">On Windows, helpers run in Ubuntu</string>
-    <string name="hh_win_body">Helpers run inside Ubuntu (WSL2) here, so HQ uses only helpers installed there. Install each one in Ubuntu, and sign in there.</string>
-    <string name="hh_win_link">How helpers work on Windows</string>
     <string name="hh_phone_title">Helpers here work for HQ on your phone</string>
     <string name="hh_phone_body">HQ runs on %1$s. It starts these helpers here once you press Start helpers here on This computer. Connect to HQ connects a helper to your phone\'s HQ.</string>
     <string name="hh_phone_try">Try it needs helpers on here. Start them on This computer first.</string>
@@ -1506,7 +1496,6 @@
     <string name="hd_kind_plain">%1$s</string>
     <string name="hd_fact_version">Version</string>
     <string name="hd_fact_program">Program</string>
-    <string name="hd_fact_looked">Looked for</string>
     <string name="hd_ver_package">%1$s, from its package file</string>
     <string name="hd_ver_run">%1$s, from a sandboxed check</string>
     <string name="hd_ver_none">Not known</string>
@@ -1540,7 +1529,6 @@
     <string name="hd_try_asked_cmd">cd %1$s &amp;&amp; %2$s</string>
     <string name="hd_try_antigravity">It may ask whether to trust the folder. HQ answers yes for Antigravity, as it does for real work.</string>
     <string name="hd_try_no_prompt">No prompt is sent. %1$s may contact its own service to check your sign-in.</string>
-    <string name="hd_try_gave_up">%1$s did not get ready within %2$s s, so HQ stopped it.</string>
     <string name="hd_try_failed">%1$s closed before it was ready.</string>
     <string name="hd_try_general_note">%1$s has no ready screen, so Try it asks it one short question.</string>
     <string name="hd_try_general_title">Try %1$s\?</string>
@@ -1567,14 +1555,11 @@
     <string name="hd_notfound_body">HQ starts %1$s\'s program, and it isn\'t in any place HQ looks. If you installed it somewhere else, choose it.</string>
     <string name="hd_choose">Choose the program…</string>
     <string name="hd_refused">Couldn\'t use that program. Anyone on this computer can change its folder. Choose one that only you can change.</string>
-    <string name="hd_not_this">That file did not answer as %1$s.</string>
-    <string name="hd_chosen">Program chosen: %1$s</string>
     <string name="hd_check_again">Check again</string>
     <string name="hd_app_note">An app you open yourself. HQ does not start it, so there is no Try it. Connecting adds HQ to it. Restart it to see HQ.</string>
     <string name="hd_tech">Technical details</string>
     <string name="hd_tech_program">Program: %1$s, at %2$s</string>
     <string name="hd_tech_looked">Looked in: PATH, ~/.local/bin, ~/.bun/bin, ~/.cargo/bin, ~/.npm-global/bin, ~/bin, /usr/local/bin and /opt/homebrew/bin</string>
-    <string name="hd_tech_files">Connection files: %1$s</string>
     <string name="hd_try_rule">Starts the helper through HQ\'s host, with the sandbox and launch command real work uses, in one fixed folder (~/.hq/desktop/try-it, emptied after each try).</string>
     <string name="hd_check_rule">Version from the program\'s package file first. Otherwise one sandboxed run of its version line: no network, nothing typed into it, 2 s, two at a time, cached by path, size and date.</string>
     <string name="hd_connect_rule">For HQ on this computer, what hq mcp install writes for that helper. For a paired HQ, what hq claude add writes (Claude Code and Claude Desktop only).</string>
@@ -2316,7 +2301,6 @@
     <string name="check_keep_open">Keep it open</string>
     <string name="check_second_look">Ask for a second look</string>
     <string name="check_second_look_asked">Second look asked</string>
-    <string name="check_second_look_line">Second look</string>
     <string name="check_second_look_pending">asked, waiting for another checker.</string>
     <string name="check_second_look_agreed">Another checker agreed.</string>
     <string name="check_second_look_disagreed">Another checker disagreed. %1$s</string>
@@ -2337,12 +2321,6 @@
     <string name="check_watching_only_line">HQ is only watching. It writes down what it would do and moves nothing.</string>
     <string name="check_needs_you_count">%1$s need you</string>
     <string name="check_plan_sweep">Plan a sweep</string>
-    <string name="check_open_window">Waiting to be marked done</string>
-    <string name="check_completes_in">marks it done in %1$s</string>
-    <plurals name="check_finished_count">
-        <item quantity="one">HQ checked and finished %1$s</item>
-        <item quantity="other">HQ checked and finished %1$s</item>
-    </plurals>
     <string name="check_rework_head">Went back to be finished (%1$s)</string>
     <string name="check_needs_you_head">Needs you (%1$s)</string>
     <string name="check_sweep_title">Check them now</string>
@@ -2447,7 +2425,6 @@
     <string name="helpers_act_offline">HQ cannot reach %1$s right now</string>
     <string name="helpers_act_finished">Finished</string>
     <string name="helpers_act_stopped">Stopped</string>
-    <string name="helpers_own_pending_line">HQ is working on it</string>
     <string name="helpers_own_open_chat">Open the chat</string>
     <string name="helpers_own_none">Nothing yet.</string>
     <string name="helpers_allowed_toast">Allowed. %1$s is working again.</string>

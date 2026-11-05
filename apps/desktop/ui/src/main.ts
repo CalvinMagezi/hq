@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { t, tn, type StringKey } from '../../../hq-web/src/strings'
-import { clock as clockOf, describe, sizeText, stopIsRisky, type Report } from './thisComputer'
+import { agoText, clock as clockOf, describe, sizeText, stopIsRisky, type Report } from './thisComputer'
 import { ACTION_KEY, afterTry, grouped, minutesLeft, nothingFound, rowAction, rowLine, shortHome, stateLabel, tone as stateTone, type HelperView } from './helpers'
 
 interface Settings {
@@ -88,6 +88,7 @@ interface Agent {
   title: string
   cwd: string
   quiet_secs: number
+  age_secs: number
 }
 interface Agents {
   reachable: boolean
@@ -153,9 +154,9 @@ function clock(seconds: number): string {
   return new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-async function copy(text: string) {
+async function copy(text: string, said: string = t('copy_details_copied')) {
   await navigator.clipboard.writeText(text)
-  toast(t('copy_details_copied'))
+  toast(said)
 }
 
 // Tabs
@@ -257,8 +258,8 @@ async function refreshHost() {
       : t('hub_program_value_unknown', { path: shortPath(r.program.path) })
     : t('hub_not_found_state')
   $('change-program').textContent = t('hub_change')
-  $('log-title').textContent = t('hub_log_title')
-  $('log-value').textContent = r.last_run
+  $('log-title').textContent = r.state === 'running' ? t('hub_log_started') : t('hub_log_title')
+  $('log-value').textContent = r.state === 'external' ? t('hub_log_elsewhere') : r.last_run
     ? t('hub_log_last_run', { from: clockOf(r.last_run.started_at), to: clockOf(r.last_run.ended_at) })
     : t('hub_log_none')
   $('open-log').textContent = t('hub_log_open')
@@ -287,12 +288,20 @@ async function refreshAgents() {
     $('hh-work').append(el('p', t('hh_hq_off'), 'hub-why'))
     return
   }
-  if (view.agents.length === 0) return
+  if (report?.serves_hub) {
+    const phone = card(t('hh_phone_title'))
+    phone.append(el('p', t('hh_phone_body', { who: (await hubName()) ?? t('hub_lockdown_who_phone') }), 'hub-why'))
+    box.append(phone)
+  }
+  if (view.agents.length === 0) {
+    box.append(el('p', t('hh_none_work'), 'hub-why'))
+    return
+  }
   const set = el('div', '', 'a-set hub-set')
   for (const a of view.agents) {
     const row = el('div', '', 'a-row')
     const main = el('div', '', 'a-row-main')
-    main.append(el('b', a.name), el('span', `${a.agent ?? ''} ${a.title || shortPath(a.cwd)}`.trim()))
+    main.append(el('b', a.name), el('span', `${a.agent ?? ''} ${a.title || shortPath(a.cwd)}`.trim()), el('span', t('hh_started', { name: a.agent ?? a.name, ago: agoText(a.age_secs) }), 'muted'))
     row.append(main, el('span', NEED_LABEL[a.need], a.need === 'blocked' ? 'a-state needs' : 'a-state'))
     set.append(row)
   }
@@ -822,7 +831,7 @@ function closeDetail() {
 
 function copyLine(line: string): HTMLElement {
   const row = el('p', '', 'row')
-  const copyBtn = button(t('hh_copy'), () => void copy(line))
+  const copyBtn = button(t('hh_copy'), () => void copy(line, t('hh_copied')))
   copyBtn.className = 'a-btn compact secondary'
   row.append(el('code', line), copyBtn)
   return row
@@ -882,7 +891,7 @@ function connectCard(h: HelperView, r: HelpersReport): HTMLElement {
     for (const hub of r.hubs) {
       const line = el('p', '', 'row')
       const label = el('span')
-      label.append(el('b', t('hd_conn_paired', { hub: hub.name })), el('br'), el('span', hub.lines.join(' · '), 'muted'))
+      label.append(el('b', t('hd_conn_paired', { hub: hub.name })), el('br'), el('span', t('hd_conn_paired_note'), 'muted'), el('br'), el('span', hub.lines.join(' · '), 'muted'))
       const b = button(hub.added ? t('hd_conn_remove') : t('hh_act_connect'), () =>
         void guarded('helpers-error', async () => {
           await invoke(hub.added ? 'helper_disconnect' : 'helper_connect', { id: h.id, hub: hub.name })
@@ -911,7 +920,8 @@ function tryCard(h: HelperView, r: HelpersReport): HTMLElement {
   const time = last ? clockOf(Math.floor(last.at / 1000)) : ''
   const trying = h.state === 'trying'
   let line = t('hd_try_nothing', { name: h.name })
-  if (r.locked) line = t('hd_try_locked')
+  if (report && report.state !== 'running' && report.state !== 'external') line = t('hh_try_needs_host')
+  else if (r.locked) line = report?.serves_hub ? t('hh_phone_try') : t('hd_try_locked')
   else if (trying) line = t('hd_try_trying', { name: h.name })
   else if (last) {
     const s = afterTry(last.outcome)
@@ -925,6 +935,7 @@ function tryCard(h: HelperView, r: HelpersReport): HTMLElement {
             : t('hd_try_worked', { time, name: h.name })
   }
   c.append(el('p', line, 'hub-why'))
+  c.append(el('p', `${t('hd_try_last')}: ${last ? time : t('hd_try_never')}`, 'hub-why'))
   if (h.group === 'general') c.append(el('p', t('hd_try_general_note', { name: h.name }), 'hub-why'))
   if (h.id === 'antigravity') c.append(el('p', t('hd_try_antigravity'), 'hub-why'))
   c.append(el('p', t('hd_try_no_prompt', { name: h.name }), 'hub-why'))
@@ -1055,6 +1066,7 @@ function renderDetail(r: HelpersReport) {
   box.append(again)
   const tech = el('details')
   tech.append(el('summary', t('hd_tech')), el('p', t('hd_tech_looked'), 'hub-why'))
+  if (h.path) tech.append(el('p', t('hd_tech_program', { program: h.name, path: shortHome(h.path, home) }), 'hub-why'))
   for (const key of ['hd_try_rule', 'hd_check_rule', 'hd_connect_rule', 'hd_signin_rule'] as const) tech.append(el('p', t(key), 'hub-why'))
   box.append(tech)
 }
@@ -1071,13 +1083,14 @@ async function refresh() {
   try {
     await work()
   } catch (e) {
-    toast(message(e))
+    toast(visible === 'helpers' ? t('hh_error', { error: message(e) }) : message(e))
   }
 }
 
 const POLL_MS = 3000
 window.setInterval(() => void refresh(), POLL_MS)
 void listen('state-changed', () => void refresh())
+void listen<string[]>('claude-entries-moved', (e) => toast(t('hub_claude_moved', { names: e.payload.join(', ') })))
 void invoke<string | null>('startup_warning').then((w) => {
   if (w) $('host-error').textContent = w
 })

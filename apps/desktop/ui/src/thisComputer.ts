@@ -53,6 +53,17 @@ export function stepName(step: number): string {
   return t(STEP_KEYS[Math.min(Math.max(step, 1), 4) - 1])
 }
 
+/** How long ago, in the catalogue's relative-time words. */
+export function agoText(secs: number): string {
+  const mins = Math.floor(secs / 60)
+  if (mins < 1) return t('time_just_now')
+  if (mins < 60) return t('time_min_ago', { n: mins })
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return t('time_hour_ago', { n: hours })
+  const days = Math.floor(hours / 24)
+  return days === 1 ? t('time_yesterday') : tn('time_days_ago', days)
+}
+
 export function clock(seconds: number): string {
   return new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
@@ -122,7 +133,7 @@ export function describe(r: Report, portHeld: boolean, hub: string | null): View
         }),
       ]
       if (r.usual_secs) lines.push(t('hub_starting_usual', { secs: r.usual_secs }))
-      if (kind === 'slow') lines.push(t('hub_slow_note'))
+      if (kind === 'slow') lines.push(t('hub_slow_note'), t('hub_stopped_at', { step: stepName(starting?.step ?? 1) }))
       return {
         ...base,
         title: t('state_starting', { seconds: starting?.elapsed_secs ?? 0 }),
@@ -177,7 +188,7 @@ export function describe(r: Report, portHeld: boolean, hub: string | null): View
         openWhy: t('hub_open_why_phone'),
       }
     default:
-      return { ...base, title: t('hub_off_title'), state: t('hub_off_state'), tone: 'offline', lines: [t('hub_off_note')] }
+      return { ...base, title: t('hub_off_title'), state: t('hub_off_state'), tone: 'offline', lines: [t('hub_off_note'), t('hub_off_sub')] }
   }
 }
 

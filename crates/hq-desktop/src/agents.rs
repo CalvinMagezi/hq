@@ -37,6 +37,8 @@ pub struct AgentView {
     pub title: String,
     pub cwd: String,
     pub quiet_secs: u64,
+    /// Seconds since the host started this agent.
+    pub age_secs: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -87,6 +89,7 @@ fn view(entry: &Value) -> Option<AgentView> {
         title: text("title").unwrap_or_default().to_string(),
         cwd: text("cwd").unwrap_or_default().to_string(),
         quiet_secs: entry.get("quiet_ms").and_then(Value::as_u64).unwrap_or(0) / MS_PER_SEC,
+        age_secs: entry.get("age_ms").and_then(Value::as_u64).unwrap_or(0) / MS_PER_SEC,
     })
 }
 
@@ -142,6 +145,10 @@ mod tests {
             ]
         );
         assert_eq!(from_list(&reply)[0].quiet_secs, 61);
+        assert_eq!(
+            from_list(&json!({"agents":[{"name":"a","age_ms":125000}]}))[0].age_secs,
+            125
+        );
         assert!(from_list(&json!({})).is_empty());
     }
 

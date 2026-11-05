@@ -1,5 +1,5 @@
 import type { ConnectionState } from '~/lib/connection'
-import { helloUpstreamGone } from '~/lib/hello'
+import { helloUpstreamGone, helloYouStopped } from '~/lib/hello'
 import { knownInHub } from '~/lib/hubWindow'
 import { t } from '~/strings'
 
@@ -27,6 +27,7 @@ export function unreachableOr(state: ConnectionState, unreachable: Key, otherwis
 }
 
 /** Why actions are off while HQ is out of reach: the HQ window says HQ stopped, a browser says it can't be reached. */
-export function offWhyUnreachable(inHub: boolean = knownInHub(), upstreamGone: boolean = helloUpstreamGone()): string {
-  return t(inHub && upstreamGone ? 'off_hub_stopped' : 'off_until_reached')
+export function offWhyUnreachable(inHub: boolean = knownInHub(), upstreamGone: boolean = helloUpstreamGone(), youStopped: boolean = helloYouStopped()): string {
+  if (inHub && upstreamGone) return t(youStopped ? 'off_hub_you_stopped' : 'off_hub_stopped')
+  return t('off_until_reached')
 }

@@ -16,6 +16,8 @@ describe('failure words', () => {
   })
   test('off why in the hub', () => {
     expect(offWhyUnreachable(true, true)).toBe(t('off_hub_stopped'))
+    expect(offWhyUnreachable(true, true, true)).toBe(t('off_hub_you_stopped'))
+    expect(offWhyUnreachable(false, true, true)).toBe(t('off_until_reached'))
     expect(offWhyUnreachable(false, true)).toBe(t('off_until_reached'))
   })
   test('saved banner line', () => {
