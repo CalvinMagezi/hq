@@ -379,6 +379,7 @@ pub(crate) async fn admin_broadcast_handler(
 mod search_tests {
     use super::search_folder;
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn under_lite_a_folder_linked_into_a_hidden_one_finds_nothing() {
         use std::sync::Arc;

@@ -194,7 +194,7 @@ bun run typecheck
 bun run build            # tauri build --bundles app; unsigned
 ```
 
-The result is `target/release/bundle/macos/HQ.app` under the Cargo target directory (set
+The result is `target/release/bundle/macos/AgentHQ.app` under the Cargo target directory (set
 `CARGO_TARGET_DIR` to share one with the main workspace). The Tauri CLI is the pinned npm
 package, so there is nothing to `cargo install`. Build with `CARGO_PROFILE_DEV_DEBUG=0
 CARGO_INCREMENTAL=0` on a tight disk, and delete the target directory when done.
@@ -221,9 +221,9 @@ HQ_BRIDGE_BIN=target/debug/hq cargo test -p hq-desktop --test cli_join -- --igno
 ## Signing and the DMG
 
 The **Desktop release** workflow (`.github/workflows/desktop-release.yml`, run by hand or by a
-`desktop-v*` tag) makes `HQ.dmg` in two jobs, split the way `release.yml` splits its own:
+`desktop-v*` tag) makes `AgentHQ.dmg` in two jobs, split the way `release.yml` splits its own:
 
-1. **Build** compiles `HQ.app` unsigned. It runs the repository's build code (and every
+1. **Build** compiles `AgentHQ.app` unsigned. It runs the repository's build code (and every
    dependency's build script), so it has no environment and no secret.
 2. **Sign** downloads that bundle and runs only `scripts/desktop/sign-macos.sh` on it, in the
    `desktop-release` environment that holds the Apple secrets. The certificate and the notary key
@@ -244,7 +244,7 @@ entitlements: the app is not sandboxed and uses none of the JIT or library-valid
 If the sandbox is ever turned on, it needs only `com.apple.security.network.client` and `.server`.
 
 To try the script locally on a built app: `bash scripts/desktop/sign-macos.sh
-<target>/release/bundle/macos/HQ.app /tmp/HQ.dmg` (ad hoc unless the variables above are set).
+<target>/release/bundle/macos/AgentHQ.app /tmp/AgentHQ.dmg` (ad hoc unless the variables above are set).
 
 The bundle identifier is `online.agenthq.desktop`. WebKit keeps the HQ window's sign-in per
 identifier, so a build with the earlier placeholder (`dev.hq-oss.desktop`) asks you to sign in

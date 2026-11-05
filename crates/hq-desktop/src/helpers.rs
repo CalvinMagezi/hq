@@ -1057,7 +1057,7 @@ mod tests {
 
     #[test]
     fn a_program_in_a_shared_folder_is_not_found() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::chooser::private_test_dir();
         let safe = dir.path().join("safe");
         std::fs::create_dir(&safe).unwrap();
         std::fs::set_permissions(&safe, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1074,7 +1074,7 @@ mod tests {
 
     #[test]
     fn listing_runs_nothing_and_says_unchecked() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::chooser::private_test_dir();
         let bin = dir.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();

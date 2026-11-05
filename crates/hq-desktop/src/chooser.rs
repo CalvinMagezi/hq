@@ -73,6 +73,19 @@ pub fn check_program_within(path: &Path, limit: Duration) -> Result<Picked, Refu
     }
 }
 
+/// A folder for a test that no other user can write to, nor any folder above it. The system's
+/// temp folder will not do on Linux: `/tmp` is writable by everyone, so the chooser refuses it.
+#[cfg(test)]
+pub(crate) fn private_test_dir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::Builder::new()
+        .prefix(".hq-test-")
+        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    dir
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,9 +99,7 @@ mod tests {
     }
 
     fn private_dir() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        dir
+        crate::chooser::private_test_dir()
     }
 
     #[test]

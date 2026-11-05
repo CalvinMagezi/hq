@@ -1148,7 +1148,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_picked_program_is_checked_then_remembered() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::chooser::private_test_dir();
         let desktop = plain_desktop(dir.path(), None);
         assert_eq!(
             desktop

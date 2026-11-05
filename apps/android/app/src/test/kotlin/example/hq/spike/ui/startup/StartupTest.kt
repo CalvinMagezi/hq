@@ -82,6 +82,8 @@ class StartupTest {
     }
 
     @Test fun theBoxSaysWhenHqLastStartedAndHowItEnded() {
+        // A phone set to the 12-hour clock: the words follow the phone, never the test machine.
+        val testWords = { example.hq.spike.ui.shell.Words(androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>().resources, is24Hour = false) }
         val at = java.time.Instant.parse("2026-10-22T14:31:00Z").toEpochMilli()
         assertEquals(listOf("Health check timed out after 60 s.", "Last start 2:31 PM \u00b7 exit code none"), StartupWords.failedLines(testWords(), at, null, 60, ZoneOffset.UTC))
         assertEquals("Last start 2:31 PM \u00b7 exit code 137", StartupWords.failedLines(testWords(), at, 137, 60, ZoneOffset.UTC)[1])

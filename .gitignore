@@ -78,3 +78,6 @@ autoresearch-results.tsv
 
 # Output of the tunnel harness (deploy/net/tunnel-test/run.sh)
 deploy/net/tunnel-test/results/
+
+# Private temp folders the desktop tests make inside the crate (a world-writable /tmp would be refused).
+crates/hq-desktop/.hq-test-*
