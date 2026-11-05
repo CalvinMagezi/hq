@@ -74,4 +74,5 @@ governance policy (see `docs/security/`).
 - `docs/security/SELF_UPDATE.md`: the self-update tools, off by default, owner approval for install.
 - `docs/security/SQL_AUDIT.md`: every string-built SQL statement and why it is safe.
 - `docs/security/AGENT_ENV_EXPOSURE.md`: provider credentials that host panes inherit, and how to narrow them.
+- `docs/security/ADOPTION_DATA.md`: how HQ's picture of the person's use stays on the device.
 - `docs/security/RELEASE_CHECKLIST.md`: what must pass before a public release.

@@ -16,6 +16,9 @@ pub(super) struct PromptInputs<'a> {
     pub(super) tool_count: usize,
     pub(super) tool_notes: Option<&'a str>,
     pub(super) weak_catalog: Option<&'a str>,
+    /// Capabilities the model may offer (`hq_tools::capabilities::prompt_block`). Built from the
+    /// install alone: no adoption data reaches the model.
+    pub(super) capability_block: Option<String>,
     pub(super) context_window: usize,
     pub(super) identity: String,
 }
@@ -86,6 +89,11 @@ impl SessionBuilder {
                 )
             {
                 soul_with_user.push_str(&note);
+            }
+
+            if let Some(block) = &inputs.capability_block {
+                soul_with_user.push_str("\n\n");
+                soul_with_user.push_str(block);
             }
 
             // Dynamic memory from MemoryQuerier (merged with static MEMORY.md)
@@ -273,6 +281,19 @@ pub(super) fn concept_search_results(
     }
 
     hits
+}
+
+/// The block of capabilities the model may offer, for the person's own sessions. `tools` are the
+/// names this session can call (eager or deferred). It reads no database on purpose: what the
+/// person has used is adoption data and stays on the device (`docs/security/ADOPTION_DATA.md`).
+pub(super) fn capability_block(
+    config: &hq_core::config::HqConfig,
+    tools: &std::collections::HashSet<&str>,
+) -> Option<String> {
+    use hq_tools::capabilities::{Install, catalog, prompt_block};
+    prompt_block(catalog(), &Install::detect(config), &|t: &str| {
+        tools.contains(t)
+    })
 }
 
 /// Build memory context: static MEMORY.md + dynamic MemoryQuerier results.

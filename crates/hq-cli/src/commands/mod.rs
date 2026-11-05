@@ -1,3 +1,4 @@
+pub mod adoption;
 pub mod agents;
 pub mod chat;
 pub mod clean;
