@@ -98,7 +98,7 @@ the safer side.
 ### Phone wave 2
 
 - [x] 01-downloads.md and 02-updates.md: the download engine (paid data and paid Wi-Fi asks, resume, hash check, Undo), the updater on it, installed only when idle, staged and withdrawn versions, the Update page. The releases repo comes from `-Phq.releasesRepo` (no owner name in the source).
-- [ ] 03-assistant-model.md and 04-startup.md: in progress.
+- [x] 03-assistant-model.md and 04-startup.md: the speech model on the download engine, the Connection sheet's screen in `ui/connection/`.
 
 ### HQ Hub (web wave 3)
 
@@ -108,7 +108,27 @@ the safer side.
 
 ### Phone wave 3
 
-- [ ] Proceeding without the locked hold log (owner, 2026-11-05): N21's path, the lock-screen switch off.
+- [x] 01-assistant-setup.md, 03-assistant-mic.md, 04-assistant-handoff.md: the Phone assistant row and page, the first-run card, the mic asks, Stop, 30 s screen on while thinking (N22), the voice hand-off (notices, Waiting for HQ, resume after a dropped socket, You said and Keep going on approvals, the spoken mark).
+- [x] 02-assistant-locked.md on N21's path (no locked hold log, owner 2026-11-05): no HQ code runs at a locked press, the lock-screen switch stays off, Settings says why. The Pass path is not built.
+
+### Web wave 4
+
+- [x] 01-chat.md: start screen, Get started, Stop over HTTP, resume, banners by state, the Enter rule, grouped sidebar links, the spoken mark, approval cards in the chat, Let HQ say yes with its explainer and the list of what HQ said yes to (server: `GET /api/harness-sessions/{id}/answers`, approvals name their chat).
+- [x] 02-first-run-sign-in.md and 03-notes.md: covers, `/signin`, notes that never overwrite silently (409, See their version, Keep both), Quick note, Export, About this note and Looks right (server: `GET /api/note/versions`, `POST /api/note/review`), the leave dialog. Copy link stays Copy path (no note ids).
+- [x] 04-search.md and 05-inbox.md: one Search (Ctrl K, folder filter from HQ, Back reopens it), the Inbox redesign, Done by day.
+- [x] 06-tasks.md and 07-helpers.md: Today and Upcoming, checking in plain words, Board and Timeline, HQ's own work, Start a helper (no task field, WR17 later), typing to a helper (WR18), the helper page.
+- [x] 08-settings.md and 09-spending.md: Settings in plain words, the key sheet, Support and Updates, Spending limits by card with origins HQ records (chat, harness, background, verification).
+
+### Phone wave 4
+
+- [x] 01-offline.md, 02-search.md, 03-web-pages.md: the Connection pattern in every place, outbox sends HQ never runs twice, note conflicts, one search with helpers and folders, web pages reduced to Usage, Board and Timeline with `embed=1`, While you were away native.
+
+### Closing passes
+
+- Every quoted sentence in every spec's Exact copy section is in the catalogue (checked by script). Strings no screen used were wired in or, where they duplicated others or named Windows (W50), deleted.
+- The web carries only its share of the catalogue: Chat first load about 301 kB gzipped (from 322), the worker 31 kB.
+- Reviews: the approval and sign-in seams (fail-open losing check fixed), then the hub and later server work (Try it folder could empty any folder: fixed with an ownership marker; the rename retry; inbox change events; Lite search through a link).
+- Workspace: clippy clean, 5574 passed, 0 failed, 44 ignored (94 binaries). Web 685, hub UI 20, Android green, HQ Hub shell compiles.
 
 ### Server parts for wave 4 (built ahead)
 
