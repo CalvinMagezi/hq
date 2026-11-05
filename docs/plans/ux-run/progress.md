@@ -57,6 +57,33 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 
 Add one line per spec file as the wave starts (see `plan.md` for the order).
 
+### Owner to confirm (raised in wave 1)
+
+These are rules about what HQ may do on its own, so they wait for a yes. What is built until then is
+the safer side.
+
+| Id | Question | Built until answered |
+|---|---|---|
+| L1 | Which calls count as losing (red "Allow {verb}", never an automatic yes). Built: a tool or action named delete, remove, stop, revoke, disconnect, drop, overwrite, logout, trash, purge, uninstall or kill; for `bash` and helper command dialogs `rm`, `rmdir`, `unlink`, `shred`, `git rm`, `git clean`, `git branch -d/-D`, `git push --force/-f/--force-with-lease/--mirror/--delete`, `git reset --hard`, `git checkout --`, `git restore`, `git stash drop/clear`, `kill`, `pkill`, `killall`, `dropdb`, `gh repo delete`, `gh auth logout` (`crates/hq-core/src/losing.rs`, `command_policy.rs` `LOSING_COMMANDS`). Add or drop any? | as listed |
+| L2 | Should a session's command policy (the owner's own allow rules) still say yes by itself to a losing command it allows? The built-in builder and reviewer policies allow none. | yes, the policy keeps deciding |
+| L3 | A command dialog cut too short to read whole is treated as losing for Drive and other automatic answers (they may decline it, not say yes). Keep? | yes |
+
+### Web wave 1
+
+- [x] 01-shell-status.md: header with the place's title and the status line, the saved strip per place, state pills for helpers, one amber Inbox badge, colours by the rules (A3). Copilot (Sonnet 5.5), reviewed.
+- [x] 06-settings-groups.md: the phone's four groups, This browser (Needs you, Updates, Show details), one card slot, `/settings` opens This browser › Notifications, "This window" inside HQ Hub (its proxy now sends `x-hq-window: hub`). The claude.ai connector row and every line about it are gone (W34). Server: `GET /api/backup/status`.
+- [x] 02-dialogs-approvals.md: one red `<dialog>` for every confirm, approval cards that quote the tool and its arguments, red "Allow {verb}" for a losing request. Server: `owner_approvals`, `metadata.approval`, `loses` and `verb` on dialogs, no automatic yes to a losing dialog (N17, W15; see L1 to L3).
+- [x] 03-undo.md: Undo toasts for archive, clear and done, ten minutes on HQ; Clear all updates never touches Needs you (server fixed: it used to dismiss approvals too); Undo never brings back a declined approval.
+- [x] 04-plain-words.md: Helpers, Inbox with Needs you, Updates and Done, Messaging apps, Let HQ say yes to its requests, whole relative times.
+- [ ] 05-sign-in-safety.md: server built (names from the user agent, 90 days unused then signed out unless kept, Needs you item per new sign-in, `shared`, `DELETE /api/auth/devices/current`, WEB_AUTH.md); screens in progress.
+
+### Phone wave 1
+
+- [x] 03-destructive.md: red dialogs through `ui/shell/Confirm.kt`, Undo through `ui/shell/Undo.kt`, server restore routes for chats, updates and tasks (ten minutes, 409 "changed" after).
+- [x] 01-notifications.md: the first-run Notifications step, the upgrader sheet once, Turn on in three places, folding, the replay when notifications come back (C-11), "Messaging apps" (B15).
+- [ ] 02-backup.md and 05-progress.md: in progress, with the Inbox reading `loses` and `verb` from HQ instead of the card's words.
+- [ ] 04-plain-words.md: next.
+
 ## Try this now
 
 ### Web wave 0, the four live bugs (2026-11-05)
