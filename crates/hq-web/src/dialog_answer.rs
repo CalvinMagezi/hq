@@ -44,6 +44,7 @@ impl Choice {
 /// The dialog as a notification shows it: what it asks, the buttons it may have, whether it is
 /// already answered. `approve` is null when no option may be picked from a button.
 pub(crate) fn dialog_view(alert: &DialogAlert) -> Value {
+    let verb = alert.losing_verb();
     json!({
         "session_id": alert.session_id,
         "seq": alert.pending_seq,
@@ -53,6 +54,8 @@ pub(crate) fn dialog_view(alert: &DialogAlert) -> Value {
         "options": alert.options,
         "approve": alert.approve_option.map(|id| json!({ "id": id, "label": alert.approve_label() })),
         "answered": alert.answered,
+        "loses": verb.is_some(),
+        "verb": verb,
     })
 }
 

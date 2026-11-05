@@ -506,7 +506,7 @@ pub fn restore_dismissed(db: &Database, id: &str, window_secs: i64) -> Result<bo
     db.with_conn(|c| {
         let n = c.execute(
             "UPDATE value_items SET state='delivered', engagement=NULL, engaged_at=NULL \
-             WHERE id = ?1 AND state = 'dismissed' \
+             WHERE id = ?1 AND state = 'dismissed' AND kind NOT IN ('action_needed', 'proposal') \
                AND julianday(engaged_at) >= julianday('now', ?2)",
             params![id, format!("-{window_secs} seconds")],
         )?;
@@ -642,6 +642,15 @@ mod tests {
         })
         .unwrap();
         assert!(!restore_dismissed(&db, &item.id, 600).unwrap(), "too late");
+    }
+
+    #[test]
+    fn a_declined_approval_never_comes_back_through_undo() {
+        let db = Database::open_memory().unwrap();
+        let item = ValueItem::new("owner-approval", ValueKind::ActionNeeded, "t", "b");
+        emit(&db, &item).unwrap();
+        assert!(dismiss_by_id(&db, &item.id).unwrap());
+        assert!(!restore_dismissed(&db, &item.id, 600).unwrap());
     }
     use hq_core::types::ValueKind;
 

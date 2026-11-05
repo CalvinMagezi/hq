@@ -51,6 +51,12 @@ task history. This list is narrower than the claude.ai connector's (`CONNECTOR_C
 - One chat may have at most 5 requests waiting. A web chat that has no thread yet shares the scope
   `web:new` with other new chats until its first turn creates one. Arguments too long to review in a message are refused.
 - A store that cannot be read stops the call.
+- The call itself (the tool and its arguments without the `_hq_*` keys) is kept beside the item
+  (`owner_approvals`), so every app quotes it verbatim. Whether it loses something, and the verb
+  the red "Allow {verb}" names, comes from the tool and its arguments through
+  `hq_core::losing::tool_verb` (a tool or action named delete, remove, stop and the like; for
+  `bash`, the commands it runs, `sudo` and `sh -c` included), never from the model's words.
+- Clearing all updates never touches a request, and Undo never brings back a declined one.
 
 ## Not covered yet
 

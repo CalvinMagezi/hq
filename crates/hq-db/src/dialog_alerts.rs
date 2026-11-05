@@ -40,6 +40,11 @@ pub struct DialogAlert {
 }
 
 impl DialogAlert {
+    /// The verb of what the dialog would lose, from its command (N17); `None` when it loses nothing.
+    pub fn losing_verb(&self) -> Option<&'static str> {
+        hq_core::losing::dialog_verb(&self.kind, self.command.as_deref())
+    }
+
     /// The label of the option a button may pick.
     pub fn approve_label(&self) -> Option<&str> {
         let id = self.approve_option?;

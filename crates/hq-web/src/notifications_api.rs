@@ -48,6 +48,27 @@ pub(crate) struct NotificationMetadata {
     /// answered through `/api/notifications/{id}/answer`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) dialog: Option<serde_json::Value>,
+    /// For an owner approval: the call verbatim, and whether it loses something (N17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) approval: Option<serde_json::Value>,
+}
+
+/// The approval columns of a joined row: `{tool, args, loses, verb}`, the verb from the tool.
+fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<serde_json::Value>> {
+    let Some(tool) = row.get::<_, Option<String>>(19)? else {
+        return Ok(None);
+    };
+    let args: serde_json::Value = row
+        .get::<_, Option<String>>(20)?
+        .and_then(|a| serde_json::from_str(&a).ok())
+        .unwrap_or_default();
+    let verb = hq_core::losing::tool_verb(&tool, &args);
+    Ok(Some(serde_json::json!({
+        "tool": tool,
+        "args": args,
+        "loses": verb.is_some(),
+        "verb": verb,
+    })))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -92,8 +113,9 @@ pub(crate) struct NotificationActionResponse {
 /// Each item with the dialog it is about, when it is a blocked session's alert (`dialog_alerts`).
 const VALUE_ITEM_COLUMNS: &str = "SELECT v.id, v.source_task, v.kind, v.title, v.body, v.artifact_path, v.score, v.state, v.created_at, v.link, \
      d.session_id, d.pending_seq, d.kind, d.question, d.command, d.options, d.approve_option, d.answered_at IS NOT NULL, \
-     v.dedup_key \
-     FROM value_items v LEFT JOIN dialog_alerts d ON d.item_id = v.id";
+     v.dedup_key, o.tool, o.args \
+     FROM value_items v LEFT JOIN dialog_alerts d ON d.item_id = v.id \
+     LEFT JOIN owner_approvals o ON o.item_id = v.id";
 
 /// Action-needed items that ask the owner to look, not to decide: approving one would mean
 /// nothing, so they offer only Dismiss. Matched on the dedup key's prefix.
@@ -200,6 +222,7 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
                 .get::<_, Option<String>>(9)?
                 .filter(|l| crate::web_push::is_app_path(l)),
             dialog,
+            approval: approval_from_row(row)?,
         },
         actions: actions.iter().map(|a| a.to_string()).collect(),
     })
@@ -413,22 +436,32 @@ pub(crate) async fn notification_action_handler(
     .into_response()
 }
 
+/// Clears every update. A Needs you item waits for its answer: clearing all never declines one.
 pub(crate) async fn mark_all_read_handler(State(state): State<Arc<WsState>>) -> Response {
-    let dismissed = state.db.with_conn(|conn| {
-        Ok(conn.execute(
-            "UPDATE value_items SET state='dismissed', engagement='dismissed', engaged_at=datetime('now') WHERE state IN ('pending', 'delivered', 'routed')",
+    let waiting = state.db.with_conn(|conn| {
+        conn.execute(
+            "UPDATE value_items SET state='dismissed', engagement='dismissed', engaged_at=datetime('now') \
+             WHERE state IN ('pending', 'delivered', 'routed') AND kind NOT IN ('action_needed', 'proposal')",
             [],
+        )?;
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM value_items WHERE state IN ('pending', 'delivered', 'routed')",
+            [],
+            |r| r.get::<_, i64>(0),
         )?)
     });
-    if let Err(e) = dismissed {
-        warn!(error = %e, "mark_all_read_handler failed");
-        return ApiError::internal(e).into_response();
-    }
+    let waiting = match waiting {
+        Ok(n) => n,
+        Err(e) => {
+            warn!(error = %e, "mark_all_read_handler failed");
+            return ApiError::internal(e).into_response();
+        }
+    };
     state.broadcast(
         &serde_json::json!({
             "type": "notification:badge_count",
-            "unread_count": 0,
-            "pending_approvals_count": 0,
+            "unread_count": waiting,
+            "pending_approvals_count": waiting,
         })
         .to_string(),
     );
@@ -627,6 +660,106 @@ mod tests {
         let changed = list(Some(tag.clone())).await;
         assert_eq!(changed.status(), 200, "a new item is a new list");
         assert_ne!(changed.headers()[header::ETAG].to_str().unwrap(), tag);
+    }
+
+    #[test]
+    fn an_owner_approval_quotes_its_call_and_marks_a_losing_one() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let ask = |tool: &str, args: serde_json::Value| {
+            let item = hq_core::types::ValueItem::new(
+                "owner-approval",
+                hq_core::types::ValueKind::ActionNeeded,
+                format!("HQ wants to run {tool}"),
+                "Approve to let it run once.",
+            );
+            hq_db::owner_approvals::record(&db, &item.id, tool, &args).unwrap();
+            hq_db::value_items::insert(&db, &item).unwrap();
+            format!("val_{}", item.id)
+        };
+        let delete = ask("task_delete", serde_json::json!({"id": "t-1"}));
+        let list = ask("bash", serde_json::json!({"command": "ls -la"}));
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        let approval = |id: &str| {
+            items
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap()
+                .metadata
+                .approval
+                .clone()
+                .unwrap()
+        };
+        let d = approval(&delete);
+        assert_eq!(d["tool"], "task_delete");
+        assert_eq!(d["args"]["id"], "t-1");
+        assert_eq!(d["loses"], true);
+        assert_eq!(d["verb"], "delete");
+        let l = approval(&list);
+        assert_eq!(l["loses"], false);
+        assert!(l["verb"].is_null());
+    }
+
+    #[test]
+    fn a_helpers_dialog_that_deletes_is_marked_losing() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let item = hq_core::types::ValueItem::new(
+            "session-supervisor",
+            hq_core::types::ValueKind::ActionNeeded,
+            "waiting",
+            "blocked",
+        );
+        hq_db::value_items::insert(&db, &item).unwrap();
+        let options = vec![hq_db::dialog_alerts::DialogOption {
+            id: 1,
+            label: "Yes".into(),
+            remember: false,
+            typed: false,
+        }];
+        hq_db::dialog_alerts::record(
+            &db,
+            &hq_db::dialog_alerts::NewDialogAlert {
+                item_id: &item.id,
+                session_id: "hs-1",
+                pending_seq: 3,
+                kind: "command",
+                question: Some("Run this?"),
+                command: Some("git clean -fdx"),
+                options: &options,
+            },
+        )
+        .unwrap();
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        let dialog = items[0].metadata.dialog.clone().unwrap();
+        assert_eq!(dialog["loses"], true);
+        assert_eq!(dialog["verb"], "delete");
+        assert!(items[0].metadata.approval.is_none());
+    }
+
+    #[tokio::test]
+    async fn clearing_all_updates_leaves_every_needs_you_item_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let ask = hq_core::types::ValueItem::new(
+            "owner-approval",
+            hq_core::types::ValueKind::ActionNeeded,
+            "HQ wants to run bash",
+            "b",
+        );
+        let news = hq_core::types::ValueItem::new(
+            "notify_owner",
+            hq_core::types::ValueKind::Fyi,
+            "Deploy finished",
+            "b",
+        );
+        hq_db::value_items::insert(&state.db, &ask).unwrap();
+        hq_db::value_items::insert(&state.db, &news).unwrap();
+        assert_eq!(
+            mark_all_read_handler(State(state.clone())).await.status(),
+            200
+        );
+        let pending = scan_value_items(&state.db, Some("pending")).unwrap();
+        let ids: Vec<&str> = pending.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, [format!("val_{}", ask.id)]);
     }
 
     #[tokio::test]

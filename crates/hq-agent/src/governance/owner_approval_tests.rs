@@ -21,6 +21,25 @@ fn request_id(db: &Database, tool: &str) -> String {
 }
 
 #[tokio::test]
+async fn a_request_keeps_its_call_without_the_runtime_keys() {
+    let (db, approval) = approval();
+    let args = json!({"id": "t-1", "_hq_caller_session": "s-9"});
+    approval.check("task_delete", &args).await;
+    let id = request_id(&db, "task_delete");
+    let (tool, held): (String, String) = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT tool, args FROM owner_approvals WHERE item_id = ?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(tool, "task_delete");
+    assert_eq!(held, r#"{"id":"t-1"}"#);
+}
+
+#[tokio::test]
 async fn an_approved_call_runs_once_with_exactly_its_arguments() {
     let (db, approval) = approval();
     let args = json!({"command": "rm -rf build"});

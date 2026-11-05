@@ -630,6 +630,72 @@ fn parse_line(text: &str) -> Option<Line> {
     Some(Line { commands, hidden })
 }
 
+/// Commands that lose something, with the verb an approval names for them (N17). The first
+/// match in a line wins.
+const LOSING_COMMANDS: &[(&str, &str)] = &[
+    ("rm", "delete"),
+    ("rmdir", "delete"),
+    ("unlink", "delete"),
+    ("shred", "delete"),
+    ("git rm", "remove"),
+    ("git clean", "delete"),
+    ("git branch -D", "delete"),
+    ("git branch -d", "delete"),
+    ("git branch --delete", "delete"),
+    ("git push --delete", "delete"),
+    ("git push --force", "overwrite"),
+    ("git push -f", "overwrite"),
+    ("git push --force-with-lease", "overwrite"),
+    ("git push --mirror", "overwrite"),
+    ("git reset --hard", "overwrite"),
+    ("git checkout --", "overwrite"),
+    ("git restore", "overwrite"),
+    ("git stash drop", "drop"),
+    ("git stash clear", "drop"),
+    ("kill", "stop"),
+    ("pkill", "stop"),
+    ("killall", "stop"),
+    ("dropdb", "drop"),
+    ("gh repo delete", "delete"),
+    ("gh auth logout", "sign out"),
+];
+
+/// How deep `sh -c '...'` is opened to find the command inside.
+const MAX_SCRIPT_DEPTH: usize = 2;
+
+/// The verb of the first command in `command` that loses something, or `None`. Inline shell code
+/// (`sh -c '...'`) is read too; code it cannot see (substitution, a heredoc) is not judged.
+pub fn losing_verb(command: &str) -> Option<&'static str> {
+    losing_verb_at(command, 0)
+}
+
+fn losing_verb_at(command: &str, depth: usize) -> Option<&'static str> {
+    let text = command.trim();
+    if text.is_empty() || text.len() > MAX_COMMAND {
+        return None;
+    }
+    let line = parse_line(text)?;
+    let table: Vec<(Pattern, &'static str)> = LOSING_COMMANDS
+        .iter()
+        .filter_map(|(p, verb)| Pattern::parse(p).map(|pat| (pat, *verb)))
+        .collect();
+    line.commands.iter().find_map(|cmd| {
+        if let Some((_, verb)) = table.iter().find(|(p, _)| p.matches(cmd)) {
+            return Some(*verb);
+        }
+        let inline =
+            (cmd.script && depth < MAX_SCRIPT_DEPTH && SHELLS.contains(&cmd.words[0].as_str()))
+                .then(|| {
+                    cmd.rest
+                        .iter()
+                        .skip_while(|t| !flag_matches("-c", t))
+                        .nth(1)
+                })
+                .flatten()?;
+        losing_verb_at(inline, depth + 1)
+    })
+}
+
 impl Policy {
     fn patterns(list: &[String]) -> Vec<(String, Pattern)> {
         list.iter()

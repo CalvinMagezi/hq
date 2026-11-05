@@ -15,7 +15,13 @@ pub enum Answerer {
     Owner,
     /// Something acting on its own; the text names it for the refusal.
     Automated(&'static str),
+    /// The session's command policy: rules the owner chose, applied by the supervisor. Never
+    /// picks a "remember" option; whether it may say yes to a losing command is the owner's call.
+    Policy,
 }
+
+/// How the command policy is named in a refusal and in the session's record.
+const POLICY_LABEL: &str = "the command policy";
 
 impl Answerer {
     /// Who a tool call answers as: a Drive turn, an agent session, a claude.ai connection, an
@@ -86,6 +92,8 @@ fn pending_view(session_id: &str, cwd: &str, read: &PendingRead) -> Value {
         "options": d.options,
         "truncated": d.truncated,
         "text": d.text,
+        "loses": d.losing_verb().is_some(),
+        "verb": d.losing_verb(),
     })
 }
 
@@ -108,9 +116,20 @@ pub fn refusal(dialog: &PendingDialog, choice: &Choice, who: Answerer) -> Option
         ));
     }
     match who {
+        Answerer::Policy if option.remember => Some(format!(
+            "option {id} ({}) lets the agent do more from now on without asking, so only the owner may pick it. {POLICY_LABEL} may pick a one-time answer or decline.",
+            option.label
+        )),
         Answerer::Automated(by) if option.remember => Some(format!(
             "option {id} ({}) lets the agent do more from now on without asking, so only the owner may pick it (from the web Sessions panel or their phone). {by} may pick a one-time answer or decline.",
             option.label
+        )),
+        // The owner's command policy keeps deciding what its rules say (owner to confirm).
+        Answerer::Automated(by) if dialog.may_lose() => Some(format!(
+            "this dialog asks to {} something, so only the owner may say yes to it (from their Inbox or phone). {by} may decline it or leave it for the owner.",
+            dialog
+                .losing_verb()
+                .unwrap_or("run code HQ cannot read for")
         )),
         _ => None,
     }
@@ -173,6 +192,7 @@ pub(super) fn answer_with(
     let by = match who {
         Answerer::Owner => "owner",
         Answerer::Automated(label) => label,
+        Answerer::Policy => POLICY_LABEL,
     };
     let picked = match &choice {
         Choice::Option(id) => json!({ "option": id }),
@@ -269,6 +289,29 @@ mod tests {
             text: None,
             cwd: None,
         }
+    }
+
+    #[test]
+    fn no_automatic_yes_to_a_dialog_that_loses_something() {
+        let mut d = dialog();
+        d.kind = "command".into();
+        d.command = Some("rm -rf target".into());
+        let yes = Choice::Option(1);
+        for by in ["a Drive turn", "an agent session", "an hq_ask reply"] {
+            let why = refusal(&d, &yes, Answerer::Automated(by)).unwrap();
+            assert!(
+                why.contains("delete") && why.contains("only the owner"),
+                "{why}"
+            );
+            assert!(refusal(&d, &Choice::Decline(None), Answerer::Automated(by)).is_none());
+        }
+        assert!(refusal(&d, &yes, Answerer::Owner).is_none());
+        assert!(refusal(&d, &yes, Answerer::Policy).is_none());
+        d.command = Some("cargo test".into());
+        assert!(refusal(&d, &yes, Answerer::Automated("a Drive turn")).is_none());
+        // A command cut short may hide the part that loses something.
+        d.truncated = true;
+        assert!(refusal(&d, &yes, Answerer::Automated("a Drive turn")).is_some());
     }
 
     #[test]

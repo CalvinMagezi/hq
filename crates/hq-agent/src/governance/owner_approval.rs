@@ -144,7 +144,8 @@ impl OwnerApproval {
                  the owner. Wait for them to answer before asking for more."
             ));
         }
-        let shown = serde_json::to_string_pretty(&without_runtime_keys(args)).unwrap_or_default();
+        let held = without_runtime_keys(args);
+        let shown = serde_json::to_string_pretty(&held).unwrap_or_default();
         if shown.chars().count() > MAX_APPROVAL_ARGS_CHARS {
             return Err(format!(
                 "This {tool} call is too large for the owner to review in a message, so it cannot \
@@ -162,6 +163,9 @@ impl OwnerApproval {
         )
         .with_dedup_key(key.to_string());
         item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(APPROVAL_TTL_HOURS));
+        // The call first: an item the apps can see always has its call to quote.
+        hq_db::owner_approvals::record(&self.db, &item.id, tool, &held)
+            .map_err(|_| lookup_failed())?;
         value_items::insert(&self.db, &item).map_err(|_| lookup_failed())
     }
 

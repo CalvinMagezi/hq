@@ -78,6 +78,11 @@ app, and list every agent on a machine with `hq host status`.
   never widens an agent's permissions: the owner does that from the web Sessions panel, which
   shows one button per option. An option that opens a text field is never picked: decline with a
   `message` instead.
+- **A yes that loses something is the owner's call too.** A command dialog whose command deletes,
+  stops, drops or overwrites (`hq_core::losing::dialog_verb`), or one cut too short to judge, is
+  refused to the same automatic answerers; they may still decline it. `harness_session_pending`
+  and the inbox show such a dialog with `loses: true` and its `verb`. A session's command policy
+  still applies its own rules, which the owner chose.
 - **Following output without rereading it.** `harness_session_logs` with `since: ""` starts a
   cursor; each reply's `next` is the `since` for the next call, and the reply holds only the
   lines that scrolled off the screen since then, plus the screen now. An agent that redraws a
