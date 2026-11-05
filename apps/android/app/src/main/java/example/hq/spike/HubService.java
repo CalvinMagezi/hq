@@ -169,8 +169,8 @@ public class HubService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        getSystemService(NotificationManager.class)
-                .createNotificationChannel(new NotificationChannel(CHANNEL, "HQ is running", NotificationManager.IMPORTANCE_LOW));
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        for (NotificationChannel ch : AlertPoster.channels(this)) nm.createNotificationChannel(ch);
         Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
         try {
             if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
@@ -185,9 +185,30 @@ public class HubService extends Service {
             new Thread(() -> Alerts.watch(getApplicationContext(), () -> gen == generation.get()), "alerts").start();
             new Thread(() -> Updater.INSTANCE.watch(getApplicationContext(), () -> gen == generation.get()), "update-check").start();
         }
+        registerLockReceiver();
         // Does nothing until the owner has turned paired devices on (the pairing screen).
         BridgeSupervisor.INSTANCE.start(getApplicationContext());
         return START_STICKY;
+    }
+
+    private android.content.BroadcastReceiver lockReceiver;
+
+    /** The phone locking and unlocking reach only a receiver registered while the service runs. */
+    private void registerLockReceiver() {
+        if (lockReceiver != null) return;
+        lockReceiver = new android.content.BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent i) {
+                String action = i.getAction();
+                Context app = context.getApplicationContext();
+                if (Intent.ACTION_SCREEN_OFF.equals(action)) new Thread(() -> Alerts.onLocked(app), "alerts-lock").start();
+                else if (Intent.ACTION_USER_PRESENT.equals(action)) new Thread(() -> Alerts.refresh(app), "alerts-unlock").start();
+            }
+        };
+        android.content.IntentFilter filter = new android.content.IntentFilter(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_USER_PRESENT);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(lockReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(lockReceiver, filter);
     }
 
     private Notification notification(boolean active) {
@@ -359,6 +380,10 @@ public class HubService extends Service {
             if (caddyProc != null) caddyProc.destroy();
         }
         BridgeSupervisor.INSTANCE.stop();
+        if (lockReceiver != null) {
+            unregisterReceiver(lockReceiver);
+            lockReceiver = null;
+        }
         super.onDestroy();
     }
 

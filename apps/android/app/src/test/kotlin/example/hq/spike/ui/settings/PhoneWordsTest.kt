@@ -2,6 +2,7 @@ package example.hq.spike.ui.settings
 
 import android.app.ApplicationExitInfo
 import java.time.Instant
+import example.hq.spike.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -62,12 +63,16 @@ class PhoneWordsTest {
         assertFalse(PhoneWords.androidStopped(ApplicationExitInfo.REASON_CRASH))
     }
 
-    @Test fun channelsReadTheirRealLoudness() {
-        assertEquals("High · sound on · heads-up", PhoneWords.channelLine(ChannelFacts("needs", "Needs you", 4, true)))
-        assertEquals("Default · silent", PhoneWords.channelLine(ChannelFacts("updates", "Updates", 3, false)))
-        assertEquals("Low · required while HQ runs", PhoneWords.channelLine(ChannelFacts("hub", "HQ is running", 2, false)))
-        assertEquals("Off in Android", PhoneWords.channelLine(ChannelFacts("needs", "Needs you", 0, false)))
-        assertEquals("Low", PhoneWords.channelLine(ChannelFacts("x", "X", 2, false)))
+    @Test fun channelsReadTheBoardsLines() {
+        assertEquals(R.string.channel_needs_line, PhoneWords.channelLineRes(ChannelFacts("needs", "Needs you", 4, true)))
+        assertEquals(R.string.channel_updates_line, PhoneWords.channelLineRes(ChannelFacts("updates", "Updates", 3, false)))
+        assertEquals(R.string.channel_app_updates_line, PhoneWords.channelLineRes(ChannelFacts("app_updates", "App updates", 2, false)))
+        assertEquals(R.string.channel_downloads_line, PhoneWords.channelLineRes(ChannelFacts("downloads", "Downloads", 2, false)))
+        assertEquals(R.string.channel_hub_line, PhoneWords.channelLineRes(ChannelFacts("hub", "HQ is running", 1, false)))
+    }
+
+    @Test fun aChannelTurnedOffSaysSo() {
+        assertEquals(R.string.channel_off_line, PhoneWords.channelLineRes(ChannelFacts("needs", "Needs you", 0, false)))
     }
 
     @Test fun anUnknownExitReasonIsStillWorded() {

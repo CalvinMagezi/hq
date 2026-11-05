@@ -118,7 +118,8 @@ class SettingsActions(
     val onRestartConfirm: () -> Unit = {},
     val onFix: (PhoneFix) -> Unit = {},
     val onChannel: (String) -> Unit = {},
-    val onAnswers: (Boolean) -> Unit = {},
+    val onDetails: (Boolean) -> Unit = {},
+    val onUpgraderNoteSeen: () -> Unit = {},
     val onServerConnect: (String, String) -> Unit = { _, _ -> },
     val onServerDisconnect: () -> Unit = {},
     val onShareOpens: (String) -> Unit = {},
@@ -189,7 +190,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onShareOpens = { v -> CapturePrefs.setShareOpens(ctx(), v); _state.update { it.copy(capture = it.capture.copy(shareOpens = v)) } },
         onShowTitles = { on -> CapturePrefs.setShowTitles(ctx(), on); Widgets.renderAll(ctx()); _state.update { it.copy(capture = it.capture.copy(showTitles = on)) } },
         onAddWidget = ::addWidget, onSendNow = ::sendNow, onDiscard = { id -> Outbox.of(ctx()).remove(id); _state.update { it.copy(capture = captureFacts(), phone = phoneRows()) } },
-        onAnswers = { on -> AlertPoster.setAnswersAllowed(ctx(), on); _state.update { it.copy(notif = it.notif.copy(answers = on)) } },
+        onDetails = { on -> AlertPoster.setShowDetails(ctx(), on); _state.update { it.copy(notif = it.notif.copy(showDetails = on)) } },
+        onUpgraderNoteSeen = { AlertPoster.clearUpgraderNote(ctx()) },
         onServerConnect = ::connectServer,
         onServerDisconnect = ::disconnectServer,
         onRefresh = ::refreshNow,
@@ -506,12 +508,17 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var upgraderShown = false
+
     private fun notifFacts(): NotifFacts {
         val nm = ctx().getSystemService(NotificationManager::class.java)
-        val channels = listOf(AlertPoster.NEEDS, AlertPoster.UPDATES, HUB_CHANNEL).mapNotNull { nm.getNotificationChannel(it) }
+        val channels = listOf(AlertPoster.NEEDS, AlertPoster.UPDATES, AlertPoster.APP_UPDATES, AlertPoster.DOWNLOADS, AlertPoster.HUB).mapNotNull { nm.getNotificationChannel(it) }
             .map { ChannelFacts(it.id, it.name.toString(), it.importance, it.sound != null) }
+        // Kept for as long as this screen lives, because the page lets the stored note go once it has been shown.
+        val note = upgraderShown || AlertPoster.upgraderNote(ctx())
+        upgraderShown = note
         return NotifFacts(
-            nm.areNotificationsEnabled(), channels, AlertPoster.answersAllowed(ctx()), buttonsSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+            nm.areNotificationsEnabled(), channels, AlertPoster.showDetails(ctx()), AlertPoster.deviceSecure(ctx()), note,
             server = ServerFacts(ServerHq.address(ctx()), ServerHq.signedOut(ctx())),
         )
     }

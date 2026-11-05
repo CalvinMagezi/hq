@@ -49,6 +49,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -746,48 +748,118 @@ private fun KeepRunning(ui: SettingsUi, actions: SettingsActions) {
 }
 
 @Composable
-private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
+internal fun Notifications(ui: SettingsUi, actions: SettingsActions) {
     val n = ui.notif
+    var asking by remember { androidx.compose.runtime.mutableStateOf(false) }
+    // The one-time card is shown on the first visit; the stored note goes once it has been on screen.
+    LaunchedEffect(n.upgraderNote) { if (n.upgraderNote) actions.onUpgraderNoteSeen() }
     Page {
+        if (n.upgraderNote) {
+            Box(Modifier.padding(top = 4.dp)) { InfoCard(stringResource(R.string.notif_upgrader_title), stringResource(R.string.notif_upgrader_body)) }
+        }
         Box(Modifier.padding(top = 4.dp)) {
             if (n.allowed) NoticeCard("Allowed.", "AgentHQ can post notifications.", false)
             else NoticeCard("Notifications are off for AgentHQ", "Approvals wait in the Inbox until they are on again.", true)
         }
         if (!n.allowed) Box(Modifier.padding(start = 16.dp, top = 8.dp)) { DialogButton("Open settings") { actions.onFix(PhoneFix.Notifications) } }
-        Label("Channels")
+        Label(stringResource(R.string.notif_group_show))
+        DetailsRow(n, onChange = { on -> if (on) asking = true else actions.onDetails(false) })
+        if (n.secure) {
+            val compact = LocalConfiguration.current.let { it.fontScale >= 2f && it.screenWidthDp <= 360 }
+            Text(stringResource(if (compact) R.string.notif_details_note_short else R.string.notif_details_note), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+        } else {
+            Text(stringResource(R.string.notif_no_lock_note), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+            Box(Modifier.padding(start = 8.dp, top = 4.dp)) { DialogButton(stringResource(R.string.notif_open_android_settings)) { actions.onFix(PhoneFix.ScreenLock) } }
+            Text(stringResource(R.string.notif_then_screen_lock), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, end = 20.dp))
+        }
+        Label(stringResource(R.string.notif_group_channels))
         Group {
             n.channels.forEachIndexed { i, c ->
                 if (i > 0) Divider()
                 Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button) { actions.onChannel(c.id) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(c.name, style = HqType.BodyBold, color = Mts.Ink)
-                        Text(PhoneWords.channelLine(c), style = HqType.BodySm, color = Mts.InkMuted)
+                        Text(stringResource(PhoneWords.channelNameRes(c.id)), style = HqType.BodyBold, color = Mts.Ink)
+                        Text(stringResource(PhoneWords.channelLineRes(c)), style = HqType.BodySm, color = Mts.InkMuted)
                     }
                     Icon(HqIcons.External, null, Modifier.size(20.dp), tint = Mts.InkMuted)
                 }
             }
         }
-        Text("Each opens that channel in Android settings. Turning Needs you off means approvals only wait in the Inbox.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
         ServerHqSection(n.server, ui, actions)
-        Label("Buttons on notifications")
-        if (!n.buttonsSupported) {
-            Text("Buttons on notifications need Android 12 or newer. On this phone approvals wait in the Inbox.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp))
-            return@Page
+    }
+    if (asking) DetailsDialog(onKeep = { asking = false }, onShow = { asking = false; actions.onDetails(true) })
+}
+
+/** The details switch. With no secure screen lock it is dimmed, drawn off and cannot be turned on. */
+@Composable
+private fun DetailsRow(n: NotifFacts, onChange: (Boolean) -> Unit) {
+    val config = LocalConfiguration.current
+    val stacked = config.fontScale >= 2f && config.screenWidthDp <= 360
+    val on = n.showDetails && n.secure
+    val line = stringResource(if (!n.secure) R.string.notif_no_lock_line else if (on) R.string.notif_details_on_line else R.string.notif_details_off_line)
+    val toggle: @Composable () -> Unit = {
+        Switch(
+            checked = on, onCheckedChange = onChange, enabled = n.secure,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen,
+                uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line,
+            ),
+        )
+    }
+    val words: @Composable (Modifier) -> Unit = { m ->
+        Column(m) {
+            Text(stringResource(R.string.notif_details_title), style = HqType.BodyBold, color = Mts.Ink)
+            Text(line, style = HqType.BodySm, color = Mts.InkMuted)
         }
-        Group {
-            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Allow answers from notifications", style = HqType.BodyBold, color = Mts.Ink)
-                    Text("Allow and Not now on the notification. Allow asks you to unlock first.", style = HqType.BodySm, color = Mts.InkMuted)
+    }
+    Group {
+        Box(Modifier.alpha(if (n.secure) 1f else 0.5f)) {
+            if (stacked) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { toggle(); words(Modifier) }
+            } else {
+                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    words(Modifier.weight(1f)); toggle()
                 }
-                Switch(
-                    checked = n.answers, onCheckedChange = actions.onAnswers,
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen,
-                        uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line,
-                    ),
-                )
             }
+        }
+    }
+}
+
+/** Asked once when details are turned on. Keep hidden, Back and a tap outside leave them off. */
+@Composable
+private fun DetailsDialog(onKeep: () -> Unit, onShow: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onKeep) {
+        Column(Modifier.clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.notif_dialog_title), style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.notif_dialog_body_unlocked), style = HqType.BodySm, color = Mts.InkMuted)
+            Text(stringResource(R.string.notif_dialog_body_allow), style = HqType.BodySm, color = Mts.InkMuted)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedChoice(stringResource(R.string.notif_keep_hidden), Modifier.weight(1f), onKeep)
+                OutlinedChoice(stringResource(R.string.notif_show_details), Modifier.weight(1f), onShow)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OutlinedChoice(label: String, modifier: Modifier, onClick: () -> Unit) {
+    Box(modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+        Text(label, style = HqType.BodySmBold, color = Mts.Ink)
+    }
+}
+
+/** A quiet card with an info icon, for a note that is not a warning. */
+@Composable
+private fun InfoCard(title: String, text: String) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top,
+    ) {
+        Icon(HqIcons.Info, null, Modifier.padding(top = 1.dp).size(24.dp), tint = Mts.InkMuted)
+        Column {
+            Text(title, style = HqType.BodyBold, color = Mts.Ink)
+            Text(text, style = HqType.BodySm, color = Mts.Ink)
         }
     }
 }

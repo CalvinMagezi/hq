@@ -8,8 +8,6 @@ object AnswerWords {
     private const val SOMEONE = "The helper"
 
     val sending = Say("Sending your answer…", null)
-    val failed = Say("Couldn't send your answer", "HQ didn't reply. It may be restarting.")
-    val answersOff = Say("Answers from notifications are off", "Open the app to answer.")
     val sentNotRecorded = Say("Answer sent", "HQ did not record it. Open the app to check.")
     val alreadyAnswered = Say("Already answered", "Someone answered this somewhere else.")
     val movedOn = Say("Already answered", "It was answered somewhere else, or the helper has moved on.")

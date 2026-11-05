@@ -43,12 +43,15 @@ final class Alerts {
     private static final long SERVER_POLL_MS = 60_000;
     private static final String SEP = "\n";
     private static long lastServerPoll;
+    // What is on the shade with its own notice, so a lock or an unlock can post the same items again in other words.
+    private static final Map<String, JSONObject> SHOWN = new LinkedHashMap<>();
 
     private Alerts() { }
 
     static void watch(Context c, BooleanSupplier alive) {
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
-        for (NotificationChannel ch : AlertPoster.channels()) nm.createNotificationChannel(ch);
+        AlertPoster.migrate(c);
+        for (NotificationChannel ch : AlertPoster.channels(c)) nm.createNotificationChannel(ch);
         nm.deleteNotificationChannel("alerts");
         String lastProblem = "";
         while (alive.getAsBoolean()) {
@@ -105,10 +108,47 @@ final class Alerts {
         List<String> seen = stored == null || stored.isEmpty() ? new ArrayList<String>() : Arrays.asList(stored.split(SEP));
         List<String> fresh = HubConfig.unseen(new ArrayList<>(items.keySet()), seen);
         if (stored != null) AlertPoster.cancelGone(c, seen, items.keySet());
+        synchronized (SHOWN) {
+            for (String id : seen) if (!items.containsKey(id)) SHOWN.remove(id);
+        }
         if (fresh.isEmpty() && stored != null) return;
-        if (stored != null) AlertPoster.post(c, items, fresh, MAX_PER_POLL);
+        if (stored != null) {
+            List<String> shown = AlertPoster.post(c, items, fresh, MAX_PER_POLL);
+            Map<String, JSONObject> mine = new LinkedHashMap<>();
+            for (String id : shown) mine.put(id, items.get(id));
+            track(mine);
+        }
         String joined = String.join(SEP, HubConfig.remember(seen, fresh, HubConfig.SEEN_CAP));
         prefs.edit().putString(seenKey, joined).apply();
+    }
+
+    /** Remembers items that now have their own notice, so a lock, an unlock or the details switch can post them again. */
+    static void track(Map<String, JSONObject> shown) {
+        synchronized (SHOWN) {
+            SHOWN.putAll(shown);
+        }
+    }
+
+    /** The phone is locking: every detailed notice is posted again in general words, without sound. */
+    static void onLocked(Context c) {
+        repost(c, true);
+    }
+
+    /** The phone is unlocked, or the details switch changed: notices are posted again in the words that now apply, without sound. */
+    static void refresh(Context c) {
+        repost(c, false);
+    }
+
+    private static void repost(Context c, boolean forceGeneral) {
+        Map<String, JSONObject> copy;
+        synchronized (SHOWN) {
+            copy = new LinkedHashMap<>(SHOWN);
+        }
+        try {
+            AlertPoster.repost(c, copy, forceGeneral);
+        } catch (RuntimeException e) {
+            Log.w(HubService.TAG, "re-post failed: " + e.getClass().getSimpleName());
+        }
     }
 
     /**
@@ -136,7 +176,7 @@ final class Alerts {
         if (reply.status == 401) {
             ServerHq.markSignedOut(c);
             prefs.edit().remove(SERVER_ETAG).remove(SERVER_SEEN).apply();
-            AlertPoster.serverSignedOut(c, server.getAddress());
+            AlertPoster.serverSignedOut(c);
             return;
         }
         if (reply.status != 200) throw new IOException("server status " + reply.status);

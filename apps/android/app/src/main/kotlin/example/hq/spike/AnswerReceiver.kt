@@ -34,9 +34,9 @@ class AnswerReceiver : BroadcastReceiver() {
         val dialog = intent.getBooleanExtra(DIALOG, false)
         val title = intent.getStringExtra(TITLE).orEmpty()
         val excerpt = intent.getStringExtra(EXCERPT).orEmpty().lines()
-        // Cards posted before the owner turned answers off still carry their buttons.
-        if (!AlertPoster.answersAllowed(context)) {
-            context.getSystemService(NotificationManager::class.java).notify(AlertPoster.notificationId(id), say(context, AnswerWords.answersOff, null))
+        // A card posted before the owner turned details off, or before the phone locked, may still carry its buttons: nothing is sent for it.
+        if (!AlertPoster.detailsNow(context)) {
+            Alerts.refresh(context)
             return
         }
         // A question from the server HQ is answered there, under the id the server uses for it.
@@ -97,13 +97,19 @@ class AnswerReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 // Once the key is in, a retry must not send it again: it would land on whatever the helper asks next.
                 if (keySent) nm.notify(nid, say(context, AnswerWords.sentNotRecorded, null))
-                else nm.notify(nid, say(context, AnswerWords.failed, intent))
+                else nm.notify(nid, say(context, failure(context, e), intent))
             } finally {
                 AlertPoster.answeredNow(id)
                 inFlight.remove(id)
                 pending.finish()
             }
         }.start()
+    }
+
+    /** Couldn't send your answer, with the reason from the failure catalogue: no reply in time, or a server HQ that cannot be reached. */
+    private fun failure(c: Context, e: Exception): AnswerWords.Say {
+        val unreachable = e is java.net.ConnectException || e is java.net.UnknownHostException
+        return AnswerWords.Say(c.getString(R.string.fail_send_answer_title), c.getString(if (unreachable) R.string.fail_send_answer_unreachable_body else R.string.fail_send_answer_no_reply_body))
     }
 
     private fun answeredElsewhere(id: String, target: Hq, deadline: Long): Boolean = try {
@@ -184,16 +190,16 @@ class AnswerReceiver : BroadcastReceiver() {
     private fun say(c: Context, words: AnswerWords.Say, retry: Intent?): Notification {
         val icon = android.graphics.drawable.Icon.createWithResource(c, HubService.statIcon(c))
         val b = Notification.Builder(c, AlertPoster.NEEDS).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setAutoCancel(true).setOnlyAlertOnce(true)
-            .setContentIntent(AlertPoster.open(c))
+            .setContentIntent(AlertPoster.open(c)).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(AlertPoster.publicVersion(c, AlertPoster.NEEDS))
         words.body?.let { b.setContentText(it) }
         if (words === AnswerWords.sending) b.setProgress(0, 0, true).setTimeoutAfter(SENDING_STUCK_MS)
         else if (retry == null) b.setTimeoutAfter(CLEAR_AFTER_MS)
         else {
-            val again = Notification.Action.Builder(icon, "Try again", PendingIntent.getBroadcast(c, retry.getStringExtra(ID).hashCode(), Intent(retry), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            val again = Notification.Action.Builder(icon, c.getString(R.string.notice_action_try_again), PendingIntent.getBroadcast(c, retry.getStringExtra(ID).hashCode(), Intent(retry), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             // Allowing asks for the phone to be unlocked, so trying it again does too.
             if (retry.getStringExtra(ANSWER) == "approve" && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION) again.setAuthenticationRequired(true)
             b.addAction(again.build())
-            b.addAction(Notification.Action.Builder(icon, "Open", AlertPoster.open(c)).build())
+            b.addAction(Notification.Action.Builder(icon, c.getString(R.string.notice_action_open), AlertPoster.open(c)).build())
         }
         return b.build()
     }

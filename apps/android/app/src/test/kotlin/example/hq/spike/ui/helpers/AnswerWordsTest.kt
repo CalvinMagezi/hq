@@ -34,10 +34,6 @@ class AnswerWordsTest {
         assertNull(AnswerWords.sending.body)
     }
 
-    @Test fun answersTurnedOffSayWhereToAnswer() {
-        assertEquals(AnswerWords.Say("Answers from notifications are off", "Open the app to answer."), AnswerWords.answersOff)
-    }
-
     @Test fun anItemIsAnsweredElsewhereOnlyWhenTheHistoryPositivelySaysSo() {
         val history = listOf("a" to "approved", "b" to "dismissed", "c" to "pending")
         assertEquals(true, AnswerWords.answeredElsewhere("a", history))

@@ -1,6 +1,8 @@
 package example.hq.spike.ui.settings
 
 import android.app.ApplicationExitInfo
+import example.hq.spike.AlertPoster
+import example.hq.spike.R
 import java.time.Instant
 
 /** What Android says about how it treats this app, read on the phone. A null means this Android version has no such setting. */
@@ -15,7 +17,7 @@ data class KeepFacts(
 
 data class LastStop(val reason: Int, val at: Instant)
 
-enum class PhoneFix { Battery, AutoRevoke, Notifications, SleepingApps }
+enum class PhoneFix { Battery, AutoRevoke, Notifications, SleepingApps, ScreenLock }
 
 /** One setting Android can report on. [fix] is the Android page that changes it, offered only when it is not as wanted. */
 data class CheckRow(val title: String, val value: String, val ok: Boolean, val fix: PhoneFix?)
@@ -24,8 +26,15 @@ data class KeepPage(val noticeTitle: String, val notice: String, val warn: Boole
 
 data class ChannelFacts(val id: String, val name: String, val importance: Int, val sound: Boolean)
 
-/** [buttonsSupported] is false where Android cannot ask for an unlock on a notification button (before Android 12), so the switch would do nothing. */
-data class NotifFacts(val allowed: Boolean = true, val channels: List<ChannelFacts> = emptyList(), val answers: Boolean = true, val buttonsSupported: Boolean = true, val server: ServerFacts = ServerFacts())
+/** [showDetails] is the owner's stored choice; [secure] is whether the phone has a screen lock, without which details are never posted; [upgraderNote] shows the one-time card. */
+data class NotifFacts(
+    val allowed: Boolean = true,
+    val channels: List<ChannelFacts> = emptyList(),
+    val showDetails: Boolean = false,
+    val secure: Boolean = true,
+    val upgraderNote: Boolean = false,
+    val server: ServerFacts = ServerFacts(),
+)
 
 /** The owner's HQ on a server this phone is signed in to for its questions: its address, and whether it signed the phone out. */
 data class ServerFacts(val address: String? = null, val signedOut: Boolean = false) {
@@ -123,13 +132,22 @@ object PhoneWords {
         else -> "Off"
     }
 
-    /** "High · sound on · heads-up": how loud a channel is, from what Android says about it. The service channel is required while HQ runs. */
-    fun channelLine(c: ChannelFacts): String {
-        if (c.importance <= 0) return "Off in Android"
-        if (c.id == HUB_CHANNEL) return "${importanceWords(c.importance)} · required while HQ runs"
-        val parts = mutableListOf(importanceWords(c.importance))
-        if (c.importance >= IMPORTANCE_DEFAULT) parts += if (c.sound) "sound on" else "silent"
-        if (c.importance >= IMPORTANCE_HIGH) parts += "heads-up"
-        return parts.joinToString(" · ")
+    /** The line under a channel's name, from the catalogue; a channel turned off in Android says so. */
+    @androidx.annotation.StringRes
+    fun channelLineRes(c: ChannelFacts): Int = if (c.importance <= 0) R.string.channel_off_line else when (c.id) {
+        AlertPoster.NEEDS -> R.string.channel_needs_line
+        AlertPoster.UPDATES -> R.string.channel_updates_line
+        AlertPoster.APP_UPDATES -> R.string.channel_app_updates_line
+        AlertPoster.DOWNLOADS -> R.string.channel_downloads_line
+        else -> R.string.channel_hub_line
+    }
+
+    @androidx.annotation.StringRes
+    fun channelNameRes(id: String): Int = when (id) {
+        AlertPoster.NEEDS -> R.string.channel_needs_name
+        AlertPoster.UPDATES -> R.string.channel_updates_name
+        AlertPoster.APP_UPDATES -> R.string.channel_app_updates_name
+        AlertPoster.DOWNLOADS -> R.string.channel_downloads_name
+        else -> R.string.channel_hub_name
     }
 }
