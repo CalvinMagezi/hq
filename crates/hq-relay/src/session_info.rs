@@ -26,14 +26,14 @@ pub struct BackendInfo {
 /// The ordered chain (primary first, then fallbacks) as display records.
 /// Unknown names referenced by the chain are included but flagged with no kind.
 pub fn chain_listing(config: &HqConfig) -> Vec<BackendInfo> {
-    config
-        .backends
+    let backends = config.backends_in_force();
+    backends
         .chain_order()
         .into_iter()
         .map(|name| {
-            let entry = config.backends.backend(&name);
+            let entry = backends.backend(&name);
             BackendInfo {
-                is_primary: name == config.backends.primary,
+                is_primary: name == backends.primary,
                 kind: entry
                     .map(|e| format!("{:?}", e.kind))
                     .unwrap_or_else(|| "unknown".to_string()),
@@ -107,10 +107,11 @@ fn pick_tip() -> &'static str {
 /// Returns e.g. `copilot → kimi-k3-256k → deepseek → ollama` when an explicit
 /// chain is configured, or `None` when running on the legacy provider list.
 fn fallback_chain_display(config: &HqConfig) -> Option<String> {
-    if !config.backends.is_configured() {
+    let backends = config.backends_in_force();
+    if !backends.is_configured() {
         return None;
     }
-    let chain = config.backends.chain_order();
+    let chain = backends.chain_order();
     if chain.is_empty() {
         return None;
     }
@@ -147,8 +148,9 @@ pub async fn reset_banner_from_config() -> String {
 pub async fn reset_banner(model: &str, config: &HqConfig) -> String {
     // The provider label is the configured primary backend when an explicit
     // chain exists, else the flat default (matching how turns are routed).
-    let provider = if config.backends.is_configured() {
-        config.backends.primary.clone()
+    let backends = config.backends_in_force();
+    let provider = if backends.is_configured() {
+        backends.primary
     } else {
         "default".to_string()
     };

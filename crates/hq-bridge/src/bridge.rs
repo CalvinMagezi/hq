@@ -13,6 +13,7 @@ use crate::setup::{
     Role, SETUP_ALPN, SetupConfig, SetupOutcome, SetupProtocol, SetupState, machine_setup,
     peers_without_setup, prune_gate_lines, remove_machine_gate_key, spawn_forwards,
 };
+use crate::share::{SHARE_ALPN, ShareProtocol};
 use crate::ticket::{Purpose, Ticket};
 use crate::wire::{Card, MAX_DIAL_ITEMS};
 use anyhow::{Context, Result, anyhow, bail};
@@ -248,7 +249,7 @@ impl EndpointHooks for ServiceGate {
         }
         // Two protocols, two lists: a paired peer may not open the edge protocol and the edge may
         // not open the service protocol, so neither can borrow the other's door.
-        let paired_only = [SERVICE_ALPN, SVC_ALPN, SETUP_ALPN];
+        let paired_only = [SERVICE_ALPN, SVC_ALPN, SETUP_ALPN, SHARE_ALPN];
         let refused = if paired_only.contains(&conn.alpn()) {
             refusal(&standing(&self.db, conn.remote_id()).await)
         } else if conn.alpn() == EDGE_ALPN {
@@ -529,6 +530,8 @@ pub struct Bridge {
     pub service_over_cap: Arc<AtomicU64>,
     /// What pairing sets up with peers (`setup.rs`), when this bridge takes part.
     setup: Option<Arc<SetupState>>,
+    /// The tasks that lend or receive a shared model (`share.rs`), stopped with the bridge.
+    share_tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     _router: Option<Router>,
     revoker: Revoker,
 }
@@ -660,6 +663,13 @@ impl Bridge {
                         revoker: revoker.clone(),
                     },
                 );
+                builder = builder.accept(
+                    SHARE_ALPN,
+                    ShareProtocol {
+                        db: db.clone(),
+                        live: live.clone(),
+                    },
+                );
             }
             if let Some(door) = edge_door {
                 builder = builder.accept(
@@ -691,6 +701,7 @@ impl Bridge {
             edge_over_cap,
             service_over_cap,
             setup,
+            share_tasks: Mutex::default(),
             _router: router,
             revoker,
         })
@@ -908,6 +919,24 @@ impl Bridge {
         Ok(())
     }
 
+    /// On a hub, opens a forward to every machine that lends it a model and keeps
+    /// `shared-models.json` in `bridge_dir` listing them, until shutdown (`share.rs`).
+    pub fn keep_shared_models(&self, bridge_dir: PathBuf) -> Result<()> {
+        if self.setup_state()?.cfg.role != Role::Hub {
+            bail!("only a hub takes models from its machines");
+        }
+        let task = crate::share::spawn_shared_forwards(self.dialer(), bridge_dir);
+        self.share_tasks.lock().unwrap().push(task);
+        Ok(())
+    }
+
+    /// Keeps this machine's hubs told what model it lends (`source`, asked every few seconds),
+    /// until shutdown. `also` lists hubs set up by hand rather than by pairing.
+    pub fn announce_shared_model(&self, source: crate::share::ShareSource, also: Vec<String>) {
+        let task = crate::share::spawn_announcer(self.dialer(), source, also);
+        self.share_tasks.lock().unwrap().push(task);
+    }
+
     /// Waits until `peer` has a setup row here, for a hub that just paired: the machine starts
     /// setup, so the hub only waits for it.
     pub async fn wait_setup(
@@ -933,6 +962,9 @@ impl Bridge {
     pub async fn shutdown(self) {
         if let Some(state) = &self.setup {
             state.stop();
+        }
+        for task in self.share_tasks.lock().unwrap().drain(..) {
+            task.abort();
         }
         if let Some(router) = &self._router {
             let _ = router.shutdown().await;

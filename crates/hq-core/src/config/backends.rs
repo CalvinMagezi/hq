@@ -209,6 +209,56 @@ pub struct BackendsConfig {
     pub backends: Vec<BackendEntry>,
 }
 
+/// The variable a shared model's backend names for its key. Never set: a model lent over the
+/// bridge needs none, and naming one keeps the generic `openai_api_key` away from it.
+pub const SHARED_MODEL_KEY_ENV: &str = "HQ_SHARED_MODEL_KEY";
+/// The file the hub's bridge keeps the shared models in, beside its key.
+pub const SHARED_MODELS_FILE: &str = "shared-models.json";
+/// The endpoint a backend reached through a socket uses: the host is only sent as `Host`.
+pub const SHARED_MODEL_ENDPOINT: &str = "http://localhost/v1";
+
+/// A model a paired machine lends this hub, as the hub's bridge set it up: a forward on
+/// `socket` to the machine's `llm` service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SharedBackend {
+    /// The backend's name: the machine's setup name.
+    pub name: String,
+    pub model: String,
+    pub socket: std::path::PathBuf,
+    /// The machine said the model takes no tool calls.
+    #[serde(default)]
+    pub prompted_tools: bool,
+}
+
+impl SharedBackend {
+    pub fn entry(&self, name: String) -> BackendEntry {
+        BackendEntry {
+            name,
+            kind: BackendKind::OpenaiCompatible,
+            endpoint: Some(SHARED_MODEL_ENDPOINT.to_string()),
+            credential_env: Some(SHARED_MODEL_KEY_ENV.to_string()),
+            model: Some(self.model.clone()),
+            effort: None,
+            wire: WireApi::ChatCompletions,
+            enabled: true,
+            unix_socket: Some(self.socket.clone()),
+            prompted_tools: self.prompted_tools,
+        }
+    }
+}
+
+/// The shared models the hub's bridge wrote, none when there is no file or it cannot be read.
+pub fn read_shared_backends(path: &std::path::Path) -> Vec<SharedBackend> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    serde_json::from_str(&text).unwrap_or_else(|e| {
+        tracing::warn!(path = %path.display(), "shared models file ignored: {e}");
+        Vec::new()
+    })
+}
+
 impl Default for BackendsConfig {
     fn default() -> Self {
         Self {
@@ -225,6 +275,31 @@ impl BackendsConfig {
     /// at least one declared backend).
     pub fn is_configured(&self) -> bool {
         !self.primary.trim().is_empty() && !self.backends.is_empty()
+    }
+
+    /// This chain with the models paired machines lend it in front: each becomes a backend, the
+    /// first the primary, and the configured primary the first fallback, so a turn moves to it
+    /// when the machine is away. A chain that is not configured stays as it is: lending a model
+    /// never switches an install from the legacy router to a chain.
+    pub fn with_shared(&self, shared: &[SharedBackend]) -> Self {
+        // A lent model is reached through a unix socket, which this machine may not have.
+        if !self.is_configured() || shared.is_empty() || !cfg!(unix) {
+            return self.clone();
+        }
+        let mut out = self.clone();
+        let mut lent = Vec::new();
+        for model in shared {
+            let mut name = model.name.clone();
+            while out.backends.iter().any(|b| b.name == name) {
+                name.push_str("-shared");
+            }
+            out.backends.push(model.entry(name.clone()));
+            lent.push(name);
+        }
+        let configured = std::iter::once(self.primary.clone()).chain(self.fallbacks.clone());
+        out.primary = lent.remove(0);
+        out.fallbacks = lent.into_iter().chain(configured).collect();
+        out
     }
 
     /// Look up a declared backend by name.
@@ -515,6 +590,63 @@ mod tests {
                 .any(|p| p.contains("prompted_tools works only")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn a_shared_model_goes_in_front_and_the_configured_primary_becomes_its_fallback() {
+        let shared = SharedBackend {
+            name: "laptop".into(),
+            model: "qwen3:8b".into(),
+            socket: "/data/hq/.hq/bridge/laptop-llm.sock".into(),
+            prompted_tools: false,
+        };
+        let mut chain = BackendsConfig {
+            primary: "luna".into(),
+            fallbacks: vec!["deep".into()],
+            backends: vec![
+                openai_entry("luna"),
+                openai_entry("deep"),
+                openai_entry("laptop"),
+            ],
+            ..Default::default()
+        };
+        let with = chain.with_shared(std::slice::from_ref(&shared));
+        assert_eq!(
+            with.primary, "laptop-shared",
+            "a configured name is never replaced"
+        );
+        assert_eq!(with.chain_order(), ["laptop-shared", "luna", "deep"]);
+        let entry = with.backend("laptop-shared").unwrap();
+        assert_eq!(entry.credential_env.as_deref(), Some(SHARED_MODEL_KEY_ENV));
+        assert!(
+            !entry.may_use_config_key(),
+            "the generic key never goes to a lent model"
+        );
+        assert!(with.validate().is_ok(), "{:?}", with.validate());
+
+        chain.backends.pop();
+        assert_eq!(
+            chain.with_shared(std::slice::from_ref(&shared)).primary,
+            "laptop"
+        );
+        assert_eq!(chain.with_shared(&[]).primary, "luna");
+        let unconfigured = BackendsConfig::default();
+        assert!(!unconfigured.with_shared(&[shared]).is_configured());
+    }
+
+    #[test]
+    fn a_missing_or_broken_shared_models_file_lends_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(SHARED_MODELS_FILE);
+        assert!(read_shared_backends(&path).is_empty());
+        std::fs::write(&path, "{ not json").unwrap();
+        assert!(read_shared_backends(&path).is_empty());
+        std::fs::write(
+            &path,
+            r#"[{"name":"laptop","model":"m","socket":"/s.sock","prompted_tools":true}]"#,
+        )
+        .unwrap();
+        assert!(read_shared_backends(&path)[0].prompted_tools);
     }
 
     #[test]

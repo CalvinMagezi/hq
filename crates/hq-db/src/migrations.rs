@@ -403,6 +403,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/108_session_subscriptions.sql"),
     ),
     ("109_offer_log", include_str!("../sql/109_offer_log.sql")),
+    (
+        "110_bridge_shared_model",
+        include_str!("../sql/110_bridge_shared_model.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

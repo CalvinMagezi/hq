@@ -109,6 +109,8 @@ model is loaded; until then the app says what to check. The model list is read w
 on **Check again**, not on the three-second refresh, because asking Ollama about every model takes a
 moment. On a Mac whose bridge is `hq bridge serve` (a launchd service) rather than the app, the same
 service comes from `bridge.share_model` in `~/.hq/config.yaml` ([PAIRING.md](PAIRING.md)).
+Either way the hub is told: turning the switch on or off, or picking another model, reaches each hub
+within a few seconds, and the phone then uses the model with no setting of its own.
 
 ## Using HQ in Claude
 

@@ -34,7 +34,10 @@ pub use agent_host::{
     SandboxMode, SandboxProfile, TEAM_MAX_LIVE_CHILDREN_CEILING, TeamsConfig, detect_overrides_dir,
     native_host_dir,
 };
-pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
+pub use backends::{
+    BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, SHARED_MODEL_ENDPOINT,
+    SHARED_MODEL_KEY_ENV, SHARED_MODELS_FILE, SharedBackend, WireApi, read_shared_backends,
+};
 pub use backup::BackupConfig;
 pub use bridge::{
     BridgeForward, BridgeServicesConfig, CheckedForward, CheckedService, DEFAULT_MODEL_SERVER,
@@ -825,6 +828,17 @@ impl HqConfig {
             Self::hq_dir().join("config.yaml"),
             std::path::Path::new(SERVER_CONFIG_PATH),
         )
+    }
+
+    /// The backends turns run on: `backends` with the models paired machines lend this hub in
+    /// front (the hub's bridge keeps them in `~/.hq/bridge/shared-models.json`). Every builder of
+    /// a chain reads this; nothing saves it, so a lent model never lands in `config.yaml`.
+    pub fn backends_in_force(&self) -> BackendsConfig {
+        let path = Self::hq_dir()
+            .join("bridge")
+            .join(backends::SHARED_MODELS_FILE);
+        self.backends
+            .with_shared(&backends::read_shared_backends(&path))
     }
 
     /// HQ data directory: ~/.hq/

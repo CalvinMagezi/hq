@@ -358,6 +358,17 @@ bridge:
     model: qwen3:8b          # optional: the model hubs are told to use
 ```
 
+With `share_model` (or the desktop app's switch) nothing needs setting on the phone either. The
+laptop tells each hub pairing set up with it which model it lends (`hq/share/1`), and the hub's
+bridge opens a forward to it on a socket only HQ can open, with `fail_fast_secs: 3`, and lists it in
+`~/.hq/bridge/shared-models.json`. HQ then puts that model in front of the configured `backends:`
+chain: it becomes the primary under the laptop's setup name, and the configured primary its first
+fallback, so a chat turn moves to the cloud within about 3 s of the laptop closing. Nothing is
+written to `config.yaml`, and an install with no `backends:` chain is left on the router it uses.
+When the laptop stops sharing, or is revoked, the forward and the listing go within a few seconds.
+A model the laptop's server says takes no tool calls gets `prompted_tools`. The phone's own
+`backends:` entries and forwards for the same laptop, set up by hand, keep working beside it.
+
 Give the forward `fail_fast_secs` when the service has a fallback. Without it, a request through a
 forward to a device that is away waits for the dial (up to 20 s) or for the service's answer (10 s
 when the device stopped answering, such as a laptop whose lid closed), and every request waits

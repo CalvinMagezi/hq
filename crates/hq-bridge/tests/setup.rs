@@ -4,11 +4,13 @@
 //! server standing in for the paired-devices door or the host gate.
 #![cfg(unix)]
 
+use hq_bridge::share::{Offered, announce, shared_socket};
 use hq_bridge::{
     Bridge, BridgeConfig, DoorTarget, JoinResult, Role, SETUP_ALPN, Services, SetupConfig, Ticket,
     Tuning,
     setup::{MAX_SETUP_BYTES, SVC_GATE, SVC_WEB, gate_label},
 };
+use hq_core::config::{SHARED_MODEL_SERVICE, SHARED_MODELS_FILE, read_shared_backends};
 use hq_db::{Database, bridge as peers, bridge_setup as rows};
 use iroh::{EndpointAddr, RelayMode};
 use std::{
@@ -62,10 +64,19 @@ impl Node {
             ),
         };
         let svc = if role == Role::Hub { SVC_WEB } else { SVC_GATE };
-        let services = Services::new(BTreeMap::from([(
+        let mut services = Services::new(BTreeMap::from([(
             svc.to_string(),
             DoorTarget::Tcp(service),
         )]));
+        // A machine also lends a "model": the same echo, to its hubs only.
+        if role == Role::Machine {
+            services
+                .targets
+                .insert(SHARED_MODEL_SERVICE.into(), DoorTarget::Tcp(service));
+            services
+                .hubs_only
+                .insert(SHARED_MODEL_SERVICE.into(), Default::default());
+        }
         let mut setup = SetupConfig::new(role, authorized(dir.path()), dir.path().join("gate"));
         setup.web = role == Role::Hub && offers;
         setup.gate = role == Role::Machine && offers;
@@ -462,4 +473,110 @@ async fn raw_setup(from: &Node, to: &Node, body: &[u8]) -> Option<Vec<u8>> {
     };
     conn.close(0u32.into(), b"done");
     answer
+}
+
+fn offered(model: &str) -> Offered {
+    Offered {
+        model: model.into(),
+        tools: Some(true),
+        context: Some(32_768),
+    }
+}
+
+/// Polls `check` until it holds or [`SETTLE`] passes.
+async fn eventually(mut check: impl FnMut() -> bool) -> bool {
+    let end = tokio::time::Instant::now() + SETTLE;
+    while tokio::time::Instant::now() < end {
+        if check() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    check()
+}
+
+async fn echoes_on(socket: &Path) -> bool {
+    let Ok(mut unix) = tokio::net::UnixStream::connect(socket).await else {
+        return false;
+    };
+    if unix.write_all(b"ping").await.is_err() {
+        return false;
+    }
+    let mut got = [0u8; 4];
+    let read = tokio::time::timeout(Duration::from_secs(5), unix.read_exact(&mut got)).await;
+    matches!(read, Ok(Ok(_))) && &got == b"ping"
+}
+
+#[tokio::test]
+async fn a_machine_that_shares_its_model_appears_on_the_hub_and_goes_when_it_stops() {
+    let (hub, machine, _) = paired_and_set_up().await;
+    let bridge_dir = hub.dir.path().join("bridge");
+    hub.bridge.keep_shared_models(bridge_dir.clone()).unwrap();
+    let lending = Arc::new(std::sync::Mutex::new(Some(offered("qwen3:8b"))));
+    let source = lending.clone();
+    machine
+        .bridge
+        .announce_shared_model(Arc::new(move || source.lock().unwrap().clone()), vec![]);
+
+    let listing = bridge_dir.join(SHARED_MODELS_FILE);
+    assert!(
+        eventually(|| read_shared_backends(&listing).len() == 1).await,
+        "the hub lists the lent model"
+    );
+    let lent = read_shared_backends(&listing).remove(0);
+    let name = hub.row(&machine).unwrap().peer_name;
+    assert_eq!(lent.name, name);
+    assert_eq!(lent.model, "qwen3:8b");
+    assert_eq!(lent.socket, shared_socket(&bridge_dir, &name));
+    assert!(
+        !lent.prompted_tools,
+        "the machine said the model takes tool calls"
+    );
+    assert!(
+        echoes_on(&lent.socket).await,
+        "the hub's socket reaches the machine's model"
+    );
+
+    *lending.lock().unwrap() = None;
+    assert!(
+        eventually(|| !listing.exists()).await,
+        "stopping removes the listing"
+    );
+    assert!(!echoes_on(&lent.socket).await, "and the forward");
+}
+
+#[tokio::test]
+async fn only_a_machine_the_hub_set_up_can_lend_it_a_model() {
+    let (hub, machine) = (Node::hub().await, Node::machine().await);
+    pair(&hub, &machine).await;
+    // Paired, but never set up: any paired device could be this.
+    let refused = with_timeout(announce(
+        &machine.bridge.dialer(),
+        &hub.id(),
+        Some(&offered("qwen3:8b")),
+    ))
+    .await;
+    assert!(refused.is_err(), "{refused:?}");
+    assert!(rows::shared(&hub.db).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn revoking_the_machine_takes_its_model_off_the_hub() {
+    let (hub, machine, _) = paired_and_set_up().await;
+    let bridge_dir = hub.dir.path().join("bridge");
+    hub.bridge.keep_shared_models(bridge_dir.clone()).unwrap();
+    with_timeout(announce(
+        &machine.bridge.dialer(),
+        &hub.id(),
+        Some(&offered("qwen3:8b")),
+    ))
+    .await
+    .unwrap();
+    let listing = bridge_dir.join(SHARED_MODELS_FILE);
+    assert!(eventually(|| listing.exists()).await);
+    hub.bridge.revoke(&machine.bridge.id()).await.unwrap();
+    assert!(
+        eventually(|| !listing.exists()).await,
+        "revoking removes the row, then the listing"
+    );
 }

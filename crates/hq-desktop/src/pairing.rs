@@ -68,7 +68,7 @@ pub struct PairingController {
     /// Whether the bridge lends this computer's model to its hubs; flipped while it runs.
     share: hq_bridge::ServiceSwitch,
     /// The model hubs are told to use. Unset: the first one the server lists.
-    shared_model: Mutex<Option<String>>,
+    shared_model: Arc<Mutex<Option<String>>>,
     session: Arc<Mutex<Session>>,
     changed: watch::Sender<u64>,
     on_revoked: Mutex<Option<hq_bridge::RevokeCallback>>,
@@ -208,7 +208,7 @@ impl PairingController {
             forward_views: Mutex::new(Vec::new()),
             offered: Mutex::new(Vec::new()),
             share: hq_bridge::ServiceSwitch::new(false),
-            shared_model: Mutex::new(None),
+            shared_model: Arc::default(),
             session: Arc::default(),
             changed: watch::channel(0).0,
             on_revoked: Mutex::new(None),
@@ -255,6 +255,34 @@ impl PairingController {
             .as_ref()
             .map(|s| s.to.clone())
             .unwrap_or_else(|| hq_core::config::DEFAULT_MODEL_SERVER.to_string())
+    }
+
+    /// Keeps this computer's hubs told what it lends, as the switch and the chosen model change.
+    /// With no model chosen, the first one the model server lists is named, once it is known.
+    fn announce_sharing(&self, bridge: &Bridge) {
+        let (switch, chosen) = (self.share.clone(), self.shared_model.clone());
+        let first: Arc<Mutex<Option<String>>> = Arc::default();
+        let (server, fill) = (self.model_server(), first.clone());
+        tokio::spawn(async move {
+            let view = crate::share::probe(&server, true, None).await;
+            *fill.lock().unwrap() = view.models.first().map(|m| m.name.clone());
+        });
+        let source = Arc::new(move || {
+            if !switch.is_on() {
+                return None;
+            }
+            let model = chosen
+                .lock()
+                .unwrap()
+                .clone()
+                .or_else(|| first.lock().unwrap().clone())?;
+            Some(hq_bridge::share::Offered {
+                model,
+                tools: None,
+                context: None,
+            })
+        });
+        bridge.announce_shared_model(source, self.hub.config.configured_hubs());
     }
 
     /// The owner offers `llm` by hand in `bridge.services`: the switch does not govern it.
@@ -357,6 +385,9 @@ impl PairingController {
             *self.forward_views.lock().unwrap() =
                 forwards.status.iter().map(forward_view).collect();
             *self.forwards.lock().unwrap() = Some(forwards);
+            if !self.shared_by_hand() {
+                self.announce_sharing(&bridge);
+            }
             *self.offered.lock().unwrap() = offered;
             let card = bridge.card();
             *self.host.lock().unwrap() = Some(HostCard {

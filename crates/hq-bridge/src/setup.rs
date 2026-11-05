@@ -271,7 +271,7 @@ fn taken_names(db: &Database, cfg: &SetupConfig, peer: &str) -> Result<Vec<Strin
 
 // ---- the wire
 
-async fn write_msg<T: Serialize>(send: &mut SendStream, msg: &T) -> Result<()> {
+pub(crate) async fn write_msg<T: Serialize>(send: &mut SendStream, msg: &T) -> Result<()> {
     let body = serde_json::to_vec(msg)?;
     let len = u16::try_from(body.len())
         .ok()
@@ -282,7 +282,7 @@ async fn write_msg<T: Serialize>(send: &mut SendStream, msg: &T) -> Result<()> {
     Ok(())
 }
 
-async fn read_msg<T: DeserializeOwned>(recv: &mut RecvStream) -> Result<T> {
+pub(crate) async fn read_msg<T: DeserializeOwned>(recv: &mut RecvStream) -> Result<T> {
     let mut len = [0u8; 2];
     recv.read_exact(&mut len).await?;
     parse_msg(&read_body(recv, usize::from(u16::from_be_bytes(len))).await?)
