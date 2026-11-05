@@ -483,6 +483,7 @@ fn runtime_identity_names_primary_provider_and_fallbacks() {
         effort: None,
         wire: Default::default(),
         enabled: true,
+        unix_socket: None,
     };
     config.backends.primary = "haiku".into();
     config.backends.fallbacks = vec!["deepseek".into()];

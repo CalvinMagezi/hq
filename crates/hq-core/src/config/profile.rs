@@ -587,6 +587,7 @@ mod tests {
             effort: None,
             wire: WireApi::default(),
             enabled: true,
+            unix_socket: None,
         }
     }
 

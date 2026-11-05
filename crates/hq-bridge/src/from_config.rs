@@ -2,12 +2,11 @@
 //! `hq bridge serve` and the desktop app both start a bridge from the same config, so the checks
 //! live here once.
 
-use crate::{Bridge, DoorTarget, Services, run_forward};
+use crate::{Bridge, DoorTarget, ForwardListener, Services, run_forward};
 use anyhow::{Context, Result, anyhow, bail};
 use hq_core::config::{BridgeServicesConfig, DoorTarget as ConfigTarget};
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
 use tokio::task::JoinHandle;
 
 /// The services in `bridge.services`, checked, or `None` when there are none. A service may not
@@ -40,9 +39,9 @@ pub fn services_from_config(
 pub struct ForwardStatus {
     pub peer: String,
     pub service: String,
-    pub listen: SocketAddr,
-    /// The port is already taken by something else, typically a `hq bridge serve` on this machine
-    /// that opened the same forward. Nothing was started for it here.
+    pub listen: ConfigTarget,
+    /// The port or socket is already taken by something else, typically a `hq bridge serve` on
+    /// this machine that opened the same forward. Nothing was started for it here.
     pub running_elsewhere: bool,
 }
 
@@ -61,8 +60,23 @@ impl Forwards {
     }
 }
 
-/// Opens every forward in `bridge.forwards` on `bridge`. A port that is taken is reported as
-/// running elsewhere; any other bind failure is an error.
+/// Binds a forward's local end. A socket's directory is made private when it is missing.
+async fn bind_forward(listen: &ConfigTarget) -> std::io::Result<ForwardListener> {
+    match listen {
+        ConfigTarget::Tcp(addr) => Ok(tokio::net::TcpListener::bind(addr).await?.into()),
+        #[cfg(unix)]
+        ConfigTarget::Unix(path) => {
+            Ok(hq_core::fs_private::bind_private_socket(path, true)?.into())
+        }
+        #[cfg(not(unix))]
+        ConfigTarget::Unix(_) => Err(std::io::Error::other(
+            "a socket forward needs a unix machine; listen on a loopback ip:port",
+        )),
+    }
+}
+
+/// Opens every forward in `bridge.forwards` on `bridge`. A port or socket that is taken is
+/// reported as running elsewhere; any other bind failure is an error.
 pub async fn start_forwards(bridge: &Bridge, config: &BridgeServicesConfig) -> Result<Forwards> {
     let mut forwards = Forwards {
         status: Vec::new(),
@@ -72,10 +86,10 @@ pub async fn start_forwards(bridge: &Bridge, config: &BridgeServicesConfig) -> R
         let mut status = ForwardStatus {
             peer: f.peer.clone(),
             service: f.service.clone(),
-            listen: f.listen,
+            listen: f.listen.clone(),
             running_elsewhere: false,
         };
-        match tokio::net::TcpListener::bind(f.listen).await {
+        match bind_forward(&f.listen).await {
             Ok(listener) => forwards.tasks.push(tokio::spawn(run_forward(
                 bridge.dialer(),
                 f.peer,

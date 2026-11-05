@@ -130,6 +130,13 @@ pub struct BackendEntry {
     /// chain is resolved.
     #[serde(default = "default_true")]
     pub enabled: bool,
+
+    /// Reach `endpoint` through this unix socket instead of the network, for an
+    /// `openai-compatible` backend. Used with a bridge forward that listens on a socket, so no
+    /// other process on the machine can reach the model; `endpoint` then keeps only the path
+    /// (`http://localhost/v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unix_socket: Option<std::path::PathBuf>,
 }
 
 impl BackendEntry {
@@ -255,6 +262,24 @@ impl BackendsConfig {
             if !seen.insert(entry.name.clone()) {
                 problems.push(format!("duplicate backend name '{}'", entry.name));
             }
+            if let Some(path) = &entry.unix_socket {
+                if entry.kind != BackendKind::OpenaiCompatible {
+                    problems.push(format!(
+                        "backend '{}': unix_socket works only with kind openai-compatible",
+                        entry.name
+                    ));
+                } else if !path.is_absolute() {
+                    problems.push(format!(
+                        "backend '{}': unix_socket must be an absolute path",
+                        entry.name
+                    ));
+                } else if !cfg!(unix) {
+                    problems.push(format!(
+                        "backend '{}': unix_socket needs a unix machine",
+                        entry.name
+                    ));
+                }
+            }
             if entry.kind.is_api() && entry.resolved_endpoint().is_none() {
                 problems.push(format!(
                     "backend '{}' ({:?}) requires an endpoint",
@@ -311,6 +336,7 @@ mod tests {
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
         }
     }
 
@@ -420,6 +446,7 @@ mod tests {
                 effort: None,
                 wire: Default::default(),
                 enabled: true,
+                unix_socket: None,
             }],
             ..Default::default()
         };
@@ -499,6 +526,7 @@ mod tests {
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
         };
         assert_eq!(
             entry.resolved_endpoint().as_deref(),
@@ -537,6 +565,7 @@ mod tests {
                 effort: None,
                 wire: Default::default(),
                 enabled: true,
+                unix_socket: None,
             }],
             ..Default::default()
         };

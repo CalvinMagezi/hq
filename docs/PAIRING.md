@@ -286,9 +286,57 @@ number or an absolute socket path, chosen by the machine that offers it: the oth
 it and never chooses an address. A service may not lead to the web server's own port; give paired
 devices the web app through `bridge.web_listen`, a second listener the web server opens only when
 the web token is set, which serves the web app, `/api`, `/ws` and `/mcp` with an API key or a launched agent's session token, and never
-the claude.ai connector's OAuth paths. A forward listens on loopback only. The services use their
+the claude.ai connector's OAuth paths. A forward listens on a loopback port or on a unix socket
+(below). The services use their
 own protocol name (`hq/svc/1`), offered only by a machine that has services, and admitted only from
 paired peers; revoking a peer closes its open streams.
+
+### A forward only HQ can use
+
+Every process on a machine can open a loopback port, and on a phone that means every app. A forward
+can listen on a unix socket instead: give `listen` an absolute path (or `unix:<path>`). The bridge
+makes the socket's directory `0700` when it is missing, refuses a directory anyone else can write or
+that is a link, makes the socket `0600`, and leaves a socket that another running bridge still
+answers on alone. Only this user's processes can connect, which on Android means only the HQ app.
+The path must fit the OS limit (103 bytes on macOS, 107 on Linux and Android). Windows has no such
+forward.
+
+An `openai-compatible` backend reaches a model through such a forward with `unix_socket`. Its
+`endpoint` keeps only the path; the host part is not used for the connection but is sent as `Host`,
+and `localhost` is what Ollama accepts.
+
+```yaml
+# On the phone: use the laptop's model, and the cloud when the laptop is away.
+bridge:
+  forwards:
+    - peer: <laptop id>
+      service: llm
+      listen: /data/data/<app id>/files/hqhome/.hq/bridge/llm.sock
+
+backends:
+  primary: laptop
+  fallbacks: [cloud]
+  backends:
+    - name: laptop
+      kind: openai-compatible
+      endpoint: http://localhost/v1
+      unix_socket: /data/data/<app id>/files/hqhome/.hq/bridge/llm.sock
+      model: qwen3:8b
+    - name: cloud
+      kind: openrouter
+      model: <model>
+
+# On the laptop: offer the local model.
+bridge:
+  services:
+    llm: 127.0.0.1:11434
+```
+
+Ollama's default context (4096 tokens on smaller machines) is shorter than HQ's prompt, and Ollama
+cuts the prompt without an error; set `OLLAMA_CONTEXT_LENGTH` (or the Ollama app's context length) to
+at least 32768. `hq doctor` dials the socket when the primary backend has one.
+
+### Signing in at a forward
 
 The web app keeps its sign-in per address, so open it at the forward's address and sign in there
 once: on the phone, Settings, Devices, **Sign in another device**, then type the code into the
@@ -306,7 +354,7 @@ List that origin in the phone's `web_allowed_origins` if the browser shows it as
 | Connection to the connector door | One per stream the edge opens, made by the bridge, to the door's socket (or opted-in loopback port) only |
 | The service protocol on the long-term endpoint | Whenever a serving bridge has `bridge.services`, or offers `gate` or `web` for setup; the gate admits only paired peers |
 | The setup protocol on the long-term endpoint | On a hub, whenever its bridge runs (`hq bridge run`, or `--as hub`); the gate admits only paired peers. A machine never accepts it |
-| One TCP port per forward, on loopback | While `hq bridge serve` or `hq bridge run` runs with `bridge.forwards`, and one per setup row |
+| One TCP port per forward on loopback, or one unix socket in a private directory | While `hq bridge serve` or `hq bridge run` runs with `bridge.forwards`, and one port per setup row |
 | The web server's paired-devices door, on loopback | While the web server runs with `bridge.web_listen` and the web token set |
 
 `hq bridge run` is both: the long-term endpoint for as long as it runs, and one throwaway endpoint while

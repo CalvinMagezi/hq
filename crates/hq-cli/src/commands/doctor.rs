@@ -819,6 +819,22 @@ fn report_install() -> usize {
 }
 
 /// The `host:port` a plain TCP probe should dial for an endpoint URL.
+type Dial = std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>;
+
+/// What the probe dials for `entry`, as shown, and the dial.
+fn probe_dial(entry: &hq_core::config::BackendEntry) -> Option<(String, Dial)> {
+    #[cfg(unix)]
+    if let Some(path) = entry.unix_socket.clone() {
+        let shown = format!("unix:{}", path.display());
+        let dial = async move { tokio::net::UnixStream::connect(path).await.map(drop) };
+        return Some((shown, Box::pin(dial)));
+    }
+    let target = probe_target(&entry.resolved_endpoint()?)?;
+    let addr = target.clone();
+    let dial = async move { tokio::net::TcpStream::connect(addr).await.map(drop) };
+    Some((target, Box::pin(dial)))
+}
+
 fn probe_target(endpoint: &str) -> Option<String> {
     let url = reqwest::Url::parse(endpoint).ok()?;
     let port = url.port_or_known_default()?;
@@ -856,11 +872,10 @@ async fn copilot_credential_line(copilot_in_use: bool) -> Line {
     }
 }
 
-/// Dial the primary backend's endpoint (TCP only, no credentials sent).
+/// Dial the primary backend's endpoint, or its unix socket when it has one (no credentials sent).
 async fn probe_primary(config: &HqConfig) -> Option<Line> {
     let entry = config.backends.backend(&config.backends.primary)?;
-    let target = probe_target(&entry.resolved_endpoint()?)?;
-    let dial = tokio::net::TcpStream::connect(&target);
+    let (target, dial) = probe_dial(entry)?;
     let name = &entry.name;
     Some(match tokio::time::timeout(PROBE_TIMEOUT, dial).await {
         Ok(Ok(_)) => Line(
@@ -998,6 +1013,30 @@ mod tests {
         let lines = describe_backend(&config, Path::new("/c.yaml"), true, false);
         assert_eq!(labels(&lines), ["ok", "FAIL", "ok"]);
         assert!(lines.iter().all(|l| !l.1.contains("sk-test")));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_probe_dials_a_backends_unix_socket_when_it_has_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("llm.sock");
+        let entry = hq_core::config::BackendEntry {
+            name: "laptop".into(),
+            kind: hq_core::config::BackendKind::OpenaiCompatible,
+            endpoint: Some("http://localhost/v1".into()),
+            credential_env: None,
+            model: None,
+            effort: None,
+            wire: Default::default(),
+            enabled: true,
+            unix_socket: Some(socket.clone()),
+        };
+        let (shown, dial) = probe_dial(&entry).unwrap();
+        assert_eq!(shown, format!("unix:{}", socket.display()));
+        assert!(dial.await.is_err(), "nothing listens yet");
+        let _listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        let (_, dial) = probe_dial(&entry).unwrap();
+        assert!(dial.await.is_ok());
     }
 
     #[test]
