@@ -54,6 +54,30 @@ impl Detector {
         }
     }
 
+    /// Tools whose use means HQ already did what the offer would: the capability's own, and the
+    /// other ways to the same result (a list made into tasks one `task_create` at a time).
+    pub fn done_by(self) -> Vec<String> {
+        let also: &[&str] = match self {
+            Detector::PastedList | Detector::DatedTodo => &["task_create", "task_create_many"],
+            Detector::PhotoArrived => &["vault_import", "convert_to_markdown"],
+            Detector::DocumentArrived => &["convert_to_markdown"],
+            Detector::SendOrPrint => &["vault_export_pdf", "convert_from_markdown"],
+            Detector::RepeatedQuestion => &["web_fetch"],
+        };
+        let own = super::catalog()
+            .iter()
+            .find(|c| c.id == self.capability())
+            .map(|c| c.tools.clone())
+            .unwrap_or_default();
+        let mut tools: Vec<String> = own
+            .into_iter()
+            .chain(also.iter().map(|t| t.to_string()))
+            .collect();
+        tools.sort_unstable();
+        tools.dedup();
+        tools
+    }
+
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|d| d.as_str() == s)
     }
@@ -534,12 +558,7 @@ pub fn for_turn(conn: &Connection, input: &TurnInput) -> Result<Option<TurnOffer
         .filter(|d| !muted.contains(d.as_str()))
         .collect();
     let pacing = Pacing::from_last_shown(&hq_db::offers::last_shown(conn)?);
-    let done = |d: Detector| {
-        super::catalog()
-            .iter()
-            .find(|c| c.id == d.capability())
-            .is_some_and(|c| c.tools.iter().any(|t| input.turn_tools.contains(t)))
-    };
+    let done = |d: Detector| d.done_by().iter().any(|t| input.turn_tools.contains(t));
     let chosen = judge(&found, &done, &ready, &pacing, input.now)
         .into_iter()
         .find(|(_, o)| *o == Outcome::Offered)
@@ -734,11 +753,7 @@ pub fn replay(
     let messages = user_messages_since(conn, from - REPEAT_WINDOW_SECS)?;
     let mut times: HashMap<Detector, Vec<i64>> = HashMap::new();
     for d in Detector::ALL {
-        let tools: Vec<String> = super::catalog()
-            .iter()
-            .find(|c| c.id == d.capability())
-            .map(|c| c.tools.clone())
-            .unwrap_or_default();
+        let tools = d.done_by();
         times.insert(
             d,
             tool_times(conn, &tools, from, now + ALREADY_DONE_SECS + 1)?,
@@ -1066,6 +1081,12 @@ mod tests {
                 for_turn(c, &input(text, &made))?,
                 None,
                 "HQ already made the task"
+            );
+            let list = "Things for Saturday:\n- buy cement\n- pay the fundi\n- call the landlord";
+            assert_eq!(
+                for_turn(c, &input(list, &made))?,
+                None,
+                "a list made into tasks one at a time is done too"
             );
             assert_eq!(for_turn(c, &input("hello there", &[]))?, None);
             hq_db::offers::record_shown(c, "m1", "dated_todo", NOW - DAY_SECS)?;
