@@ -16,6 +16,8 @@ interface Props {
   compact?: boolean
   /** Set while picking tasks for a bulk action: a click ticks the card instead of opening it. */
   select?: { ticked: boolean; onToggle: (task: TaskItem) => void }
+  /** The whole card is a link to the task, so it opens in a new tab and works from the keyboard. */
+  asLink?: boolean
 }
 
 export const STATUS_BADGE_CLASS: Record<TaskStatus, string> = {
@@ -56,7 +58,13 @@ function formatTime(iso: string) {
   return relTime(parseSqliteUtc(iso)) || iso
 }
 
-export function TaskCard({ task, onSelect, parentLabel, compact = false, select }: Props) {
+const DAY_MS = 86_400_000
+
+function idleDays(task: TaskItem): number {
+  return Math.max(1, Math.floor((Date.now() - parseSqliteUtc(task.updated_at).getTime()) / DAY_MS))
+}
+
+export function TaskCard({ task, onSelect, parentLabel, compact = false, select, asLink = false }: Props) {
   const isDone = task.status === 'complete'
   const schedule = scheduleLabel(task)
   const stale = useIsStale(task.id)
@@ -76,10 +84,22 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false, select 
 
   const onClick = select ? () => select.onToggle(task) : onSelect ? () => onSelect(task) : undefined
 
+  const Root = asLink ? 'a' : 'div'
+  const rootProps = asLink
+    ? {
+        href: `/tasks/${encodeURIComponent(task.id)}`,
+        onClick: (e: React.MouseEvent) => {
+          if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+          e.preventDefault()
+          onClick?.()
+        },
+      }
+    : { onClick }
+
   return (
-    <div
-      onClick={onClick}
-      className={`group relative rounded-2xl border transition-all duration-200 cursor-pointer w-full max-w-full min-w-0 overflow-hidden ${compact ? 'p-3' : 'p-4'} ${
+    <Root
+      {...rootProps}
+      className={`group relative block rounded-2xl border transition-all duration-200 cursor-pointer w-full max-w-full min-w-0 overflow-hidden ${compact ? 'p-3' : 'p-4'} ${
         isDone
           ? 'hq-card opacity-60 hover:opacity-100'
           : 'hq-card hq-card-live'
@@ -93,14 +113,14 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false, select 
               type="checkbox"
               checked={select.ticked}
               onChange={() => {}}
-              aria-label={`Select ${task.display_id}`}
+              aria-label={t('task_select', { id: task.display_id })}
               className="w-4 h-4 shrink-0 cursor-pointer accent-white"
             />
           )}
           {task.priority && (
             <span
               className={`w-1.5 h-1.5 rounded-full shrink-0 ${PRIORITY_DOT_CLASS[task.priority]}`}
-              title={`Priority: ${task.priority}`}
+              title={t('task_priority_hint', { priority: task.priority })}
             />
           )}
           <span className="text-xs font-bold text-neutral-500 shrink-0">{task.display_id}</span>
@@ -136,42 +156,42 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false, select 
       {hasChips && (
         <div className="flex items-center gap-2 flex-wrap mt-3 min-w-0">
           {task.status === 'blocked' && task.blocked_reason && (
-            <span className={`${CHIP_CLASS} ${BLOCKED_CHIP_CLASS}`} title={task.waiting_on ? `Waiting on ${task.waiting_on}` : undefined}>
+            <span className={`${CHIP_CLASS} ${BLOCKED_CHIP_CLASS}`} title={task.waiting_on ? t('task_waiting_on', { ids: task.waiting_on }) : undefined}>
               <span className="truncate">{task.blocked_reason}</span>
             </span>
           )}
           {task.assignees.length > 0 && (
             <span className={`${CHIP_CLASS} bg-white/5 text-neutral-200 border-white/10 max-w-[240px]`} title="Assigned to">
-              <span className="truncate">for {task.assignees.join(', ')}</span>
+              <span className="truncate">{t('task_for', { who: task.assignees.join(', ') })}</span>
             </span>
           )}
           {workingNow && (
             <span className={`${CHIP_CLASS} bg-white/5 text-neutral-100 border-white/10 max-w-[220px]`} title="A session holds a work lease on this task">
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse shrink-0" />
-              <span className="truncate">{workingNow} is working</span>
+              <span className="truncate">{t('task_is_working', { who: workingNow })}</span>
             </span>
           )}
           {stale && (
             <span className={`${CHIP_CLASS} bg-white/5 text-neutral-300 border-white/10 shrink-0`} title="In progress, but nobody holds it and nothing has changed for a while">
               <Clock className="w-2.5 h-2.5 shrink-0" />
-              <span>stale</span>
+              <span>{tn('task_no_change', idleDays(task))}</span>
             </span>
           )}
           {task.long_horizon && (
-            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-400 border-white/10 shrink-0`} title="Long running work: a session ending does not move it">
-              <span>long running</span>
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-400 border-white/10 shrink-0`} title={t('task_long_running_hint')}>
+              <span>{t('task_long_running')}</span>
             </span>
           )}
           {task.blocked_by.length > 0 && (
-            <span className={`${CHIP_CLASS} ${BLOCKED_CHIP_CLASS}`} title={`Waiting on: ${task.blocked_by.join(', ')}`}>
+            <span className={`${CHIP_CLASS} ${BLOCKED_CHIP_CLASS}`} title={t('task_waiting_on', { ids: task.blocked_by.join(', ') })}>
               <Link2 className="w-2.5 h-2.5 shrink-0" />
-              <span className="truncate">blocked by {task.blocked_by.join(', ')}</span>
+              <span className="truncate">{t('task_waiting_on', { ids: task.blocked_by.join(', ') })}</span>
             </span>
           )}
           {task.subtask_count > 0 && (
-            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-300 border-white/10 shrink-0`} title="Sub-tasks complete">
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-300 border-white/10 shrink-0`} title={t('task_subtasks_done', { done: task.subtask_done, total: task.subtask_count })}>
               <ListChecks className="w-2.5 h-2.5 shrink-0" />
-              <span>{task.subtask_done}/{task.subtask_count}</span>
+              <span>{t('task_subtasks_done', { done: task.subtask_done, total: task.subtask_count })}</span>
             </span>
           )}
           {task.tags.map((tag) => (
@@ -194,6 +214,6 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false, select 
           )}
         </div>
       )}
-    </div>
+    </Root>
   )
 }

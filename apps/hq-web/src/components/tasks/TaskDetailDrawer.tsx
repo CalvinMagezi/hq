@@ -132,7 +132,7 @@ export function TaskDetailDrawer({
                   {task.priority}
                 </span>
               )}
-              {task.long_horizon && <span className="text-xs text-neutral-400">long running</span>}
+              {task.long_horizon && <span className="text-xs text-neutral-400">{t('task_long_running')}</span>}
               {stale && <span className="text-xs text-neutral-400" title="Nobody holds it and nothing has changed for a while">stale</span>}
             </div>
             {editing ? (

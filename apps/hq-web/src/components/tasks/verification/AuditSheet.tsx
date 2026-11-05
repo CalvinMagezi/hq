@@ -4,7 +4,7 @@ import { t } from '~/strings'
 import { answerAudit, fetchAudits, type AuditCard, type AuditStack } from '~/lib/verificationApi'
 import { usePolled } from '../../sessions/usePolled'
 import { SHEET_DANGER, SHEET_PRIMARY, SHEET_QUIET, Sheet } from './Sheet'
-import { auditEstimate, criteriaSummary, levelLabel } from './verification'
+import { auditEstimate, criteriaSummary, kindLabel, levelLabel } from './verification'
 
 /** Facts shown on a card; the rest are one tap away in the task. */
 const FACTS_SHOWN = 8
@@ -47,8 +47,12 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
         </p>
         {v && (
           <p className="text-xs text-neutral-400 mt-0.5">
-            Completed on {levelLabel(v.level)}, tier {v.tier}, by {v.verifier}
-            {v.independence !== 'none' ? ` (${v.independence.replaceAll('_', ' ')})` : ''}. Artifact: {v.artifact}.
+            {t('check_audit_done_line', {
+              level: levelLabel(v.level),
+              kind: kindLabel(v.tier),
+              verifier: v.verifier,
+              how: v.independence !== 'none' ? ` (${v.independence.replaceAll('_', ' ')})` : '',
+            })}
           </p>
         )}
       </div>

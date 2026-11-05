@@ -1,5 +1,5 @@
 import { HqHttpError } from '~/lib/hqAuth'
-import { createFileRoute, useParams } from '@tanstack/react-router'
+import { createFileRoute, useParams, useRouterState } from '@tanstack/react-router'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { CheckSquare, ClipboardList, ListChecks, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
 import {
@@ -24,13 +24,19 @@ import {
 import { toastUndo, toastAlert } from '~/lib/toast'
 import { Dialog } from '~/components/ui/Dialog'
 import { t, tn } from '~/strings'
-import { asksBeforeDone, dependentsOf } from '~/lib/doneAsk'
+import { dependentsOf, doneQuestion, type DoneQuestion } from '~/lib/doneAsk'
+import { fetchTaskVerification } from '~/lib/verificationApi'
 import { TaskListView, type ListSections } from '~/components/tasks/TaskListView'
 import { BulkActionBar } from '~/components/tasks/BulkActionBar'
 import { bulkMessage, failureNotice, runBulk, splitUnchanged, uniqueWarnings } from '~/components/tasks/bulk'
 import { useTaskSelection } from '~/components/tasks/useTaskSelection'
 import { withoutSections } from '~/components/tasks/hierarchy'
+import { OutboxGroup } from '~/components/chat/OutboxGroup'
+import { titleOf, useTaskOutbox } from '~/components/tasks/useTaskOutbox'
+import { newClientId } from '~/lib/outbox'
 import { usePersistedState } from '~/lib/usePersistedState'
+import { CHIPS, TABS, chipStatus, matchesTab, type TaskChip, type TaskTab } from '~/lib/tasksFilters'
+import { formatDay, todayDay } from '~/components/tasks/dates'
 import { TaskBoardView } from '~/components/tasks/TaskBoardView'
 import { TaskGanttView } from '~/components/tasks/TaskGanttView'
 import { TaskDetailDrawer } from '~/components/tasks/TaskDetailDrawer'
@@ -44,11 +50,14 @@ import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext
 import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { InitiativeBriefing } from '~/components/tasks/InitiativeBriefing'
 import { VerificationBar } from '~/components/tasks/verification/VerificationBar'
-import { BriefingCard } from '~/components/tasks/verification/BriefingCard'
+import { AwayPage } from '~/components/tasks/AwayPage'
+import { AwayLinkRow, TasksBody } from '~/components/tasks/TasksBody'
 import { SweepSheet } from '~/components/tasks/verification/SweepSheet'
 import { AuditSheet } from '~/components/tasks/verification/AuditSheet'
 
 type TasksView = 'list' | 'board' | 'timeline'
+const VIEW_KEY = 'hq.tasks.view'
+const isTasksView = (v: unknown): v is TasksView => v === 'list' || v === 'board' || v === 'timeline'
 
 const VIEWS: { id: TasksView; label: string; icon: typeof List }[] = [
   { id: 'list', label: 'List', icon: List },
@@ -88,6 +97,7 @@ const errorMessage = (e: unknown, fallback: string) => (e instanceof Error ? e.m
 interface TaskFilters {
   statusTab: StatusTab
   statusFilter: TaskStatus | 'all'
+  tab: TaskTab
   tagFilter: string
   selection: TaskSelection
   searchQuery: string
@@ -123,6 +133,7 @@ function filterTasks(tasks: TaskItem[], f: TaskFilters, initiativeById: Map<stri
       // The board shows every status as a column, so the coarse tab is ignored there.
       if (f.statusTab === 'active' && t.status === 'complete') return false
       if (f.statusTab === 'complete' && t.status !== 'complete') return false
+      if (!matchesTab(t, f.tab, formatDay(todayDay()))) return false
     }
     if (f.tagFilter !== 'all' && !t.tags.includes(f.tagFilter)) return false
     if (!matchesSelection(t, f.selection, initiativeById)) return false
@@ -131,11 +142,15 @@ function filterTasks(tasks: TaskItem[], f: TaskFilters, initiativeById: Map<stri
 }
 
 function TasksPage() {
-  const view: TasksView = Route.useSearch().view ?? 'list'
+  const [rememberedView, setRememberedView] = usePersistedState<TasksView>(VIEW_KEY, 'list', isTasksView)
+  const view: TasksView = Route.useSearch().view ?? rememberedView
   const navigate = Route.useNavigate()
   const [notice, setNotice] = useState<string | null>(null)
-  const [statusTab, setStatusTab] = useState<StatusTab>('active')
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all')
+  const [tab, setTab] = useState<TaskTab>('all')
+  const [chip, setChip] = useState<TaskChip>('active')
+  const onAll = tab === 'all' && view !== 'board'
+  const statusTab: StatusTab = onAll && chip === 'archived' ? 'archived' : onAll && chip === 'done' ? 'complete' : 'active'
+  const statusFilter: TaskStatus | 'all' = (onAll && chipStatus(chip)) || 'all'
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [selection, setSelection] = useState<TaskSelection>(ALL_SELECTION)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -205,6 +220,7 @@ function TasksPage() {
   const archivedTasks = archived.data ?? []
 
   const { task: linkedSearchId } = Route.useSearch()
+  const away = useRouterState({ select: (s) => s.location.pathname }) === '/tasks/away'
   const linkedParam = useParams({ strict: false }).id
   const linkedTaskId = linkedParam ?? linkedSearchId
   useEffect(() => {
@@ -236,10 +252,10 @@ function TasksPage() {
     () =>
       filterTasks(
         statusTab === 'archived' ? archivedTasks : tasks,
-        { statusTab, statusFilter, tagFilter, selection, searchQuery, view },
+        { statusTab, statusFilter, tab, tagFilter, selection, searchQuery, view },
         initiativeById
       ),
-    [tasks, archivedTasks, statusTab, statusFilter, tagFilter, selection, initiativeById, searchQuery, view]
+    [tasks, archivedTasks, statusTab, statusFilter, tab, tagFilter, selection, initiativeById, searchQuery, view]
   )
 
   // Initiative sections the list folds away. Kept in the browser, so a section skipped once stays skipped.
@@ -266,21 +282,33 @@ function TasksPage() {
   const [bulkProgress, setBulkProgress] = useState<{ settled: number; total: number } | null>(null)
   const [bulkResult, setBulkResult] = useState<string | null>(null)
 
-  const setView = (next: TasksView) =>
-    navigate({ search: next === 'list' ? {} : { view: next }, replace: true })
+  const setView = (next: TasksView) => {
+    setRememberedView(next)
+    navigate({ search: { view: next }, replace: true })
+  }
 
   const showWarnings = (result: TaskUpdateResult) => {
     if (result.warnings?.length) setNotice(result.warnings.join(' '))
   }
 
+  const taskOutbox = useTaskOutbox(upsertTask)
+
   const handleCreate = async (input: Parameters<typeof createTaskClient>[0]) => {
-    const task = await createTaskClient(input)
-    upsertTask(task)
+    const withId = { ...input, client_id: newClientId() }
+    try {
+      upsertTask(await createTaskClient(withId))
+    } catch (e) {
+      // Only a lost connection is kept for later; a refusal from HQ is shown to the person.
+      if (!(e instanceof TypeError) || !taskOutbox.enabled) throw e
+      const refusal = await taskOutbox.queue(withId)
+      if (refusal) throw new Error(refusal)
+      return
+    }
     await loadTaxonomy()
   }
 
   const [bulkDonePending, setBulkDonePending] = useState<TaskItem[] | null>(null)
-  const [doneAsk, setDoneAsk] = useState<{ id: string; patch: Record<string, unknown> } | null>(null)
+  const [doneAsk, setDoneAsk] = useState<{ id: string; patch: Record<string, unknown>; why: Exclude<DoneQuestion, null> } | null>(null)
 
   const withBusy = async (fn: () => Promise<void>, fallback: string) => {
     setBusy(true)
@@ -294,11 +322,17 @@ function TasksPage() {
     }
   }
 
-  const handleUpdate = (id: string, patch: Record<string, unknown>) => {
+  const handleUpdate = async (id: string, patch: Record<string, unknown>) => {
     const previous = taskById.get(id)
-    if (asksBeforeDone(previous, patch, taskById.values()) > 0) {
-      setDoneAsk({ id, patch })
-      return Promise.resolve()
+    let checkPending = false
+    if (patch.status === 'complete' && previous && previous.status !== 'complete') {
+      // A check that cannot be looked up does not block the person from marking it done.
+      checkPending = await fetchTaskVerification(id).then((v) => v.waiting_for?.who === 'verifier', () => false)
+    }
+    const why = doneQuestion(previous, patch, taskById.values(), checkPending)
+    if (why) {
+      setDoneAsk({ id, patch, why })
+      return
     }
     return applyUpdate(id, patch)
   }
@@ -470,6 +504,52 @@ function TasksPage() {
     fn(...args)
   }
 
+  const listNode =
+    isRefreshing && tasks.length === 0 ? (
+          <div className="py-16 flex items-center justify-center text-neutral-500">
+            <Loader2 className="w-5 h-5 animate-spin" />
+          </div>
+        ) : filtered.length === 0 && view === 'list' ? (
+          <div className="py-16 flex flex-col items-center justify-center text-center p-8 rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
+            <div className="p-4 rounded-2xl bg-white/5 text-neutral-500 mb-3">
+              <CheckSquare className="w-8 h-8" />
+            </div>
+            <h3 className="text-sm font-bold text-neutral-300">No tasks found</h3>
+            <p className="text-xs text-neutral-500 max-w-sm mt-1">
+              {statusTab === 'active' ? 'Nothing active right now.' : 'No tasks match the current filters.'}
+            </p>
+          </div>
+        ) : view === 'board' ? (
+          <TaskBoardView tasks={filtered} allById={taskById} onSelect={(t) => setSelectedTaskId(t.id)} onMove={handleStatusMove} />
+        ) : view === 'timeline' ? (
+          <TaskGanttView
+            tasks={filtered}
+            allById={taskById}
+            initiativeById={initiativeById}
+            onSelect={(t) => setSelectedTaskId(t.id)}
+            onReschedule={handleReschedule}
+            sessions={recentWork.data ?? undefined}
+          />
+        ) : (
+          <TaskListView
+            tasks={filtered}
+            allById={taskById}
+            initiativeById={initiativeById}
+            onSelect={(t) => setSelectedTaskId(t.id)}
+            sections={sections}
+            selection={
+              picking.active
+                ? {
+                    ticked: picking.selectedIds,
+                    onToggle: afterPick(picking.toggle),
+                    onToggleMany: afterPick(picking.setMany),
+                  }
+                : undefined
+            }
+          />
+        
+    )
+
   const activeCount = tasks.filter((t) => t.status !== 'complete').length
 
   return (
@@ -497,21 +577,13 @@ function TasksPage() {
           onOpenSidebar={() => setMobileSidebarOpen(true)}
         />
 
-        <VerificationBar onVerifyNow={() => setSweepOpen(true)} onAudit={() => setAuditOpen(true)} />
-        <BriefingCard
-          variant="tasks"
-          onOpenTask={setSelectedTaskId}
-          onPlanSweep={() => setSweepOpen(true)}
-          onAudit={() => setAuditOpen(true)}
-        />
-
         <TasksFilterBar
           view={view}
           setView={setView}
-          statusTab={statusTab}
-          setStatusTab={setStatusTab}
-          statusFilter={statusFilter}
-          setStatusFilter={setStatusFilter}
+          tab={tab}
+          setTab={setTab}
+          chip={chip}
+          setChip={setChip}
           tagFilter={tagFilter}
           setTagFilter={setTagFilter}
           allTags={allTags}
@@ -558,56 +630,29 @@ function TasksPage() {
           </div>
         )}
 
-        {isRefreshing && tasks.length === 0 ? (
-          <div className="py-16 flex items-center justify-center text-neutral-500">
-            <Loader2 className="w-5 h-5 animate-spin" />
-          </div>
-        ) : filtered.length === 0 && view === 'list' ? (
-          <div className="py-16 flex flex-col items-center justify-center text-center p-8 rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
-            <div className="p-4 rounded-2xl bg-white/5 text-neutral-500 mb-3">
-              <CheckSquare className="w-8 h-8" />
-            </div>
-            <h3 className="text-sm font-bold text-neutral-300">No tasks found</h3>
-            <p className="text-xs text-neutral-500 max-w-sm mt-1">
-              {statusTab === 'active' ? 'Nothing active right now.' : 'No tasks match the current filters.'}
-            </p>
-          </div>
-        ) : view === 'board' ? (
-          <TaskBoardView tasks={filtered} allById={taskById} onSelect={(t) => setSelectedTaskId(t.id)} onMove={handleStatusMove} />
-        ) : view === 'timeline' ? (
-          <TaskGanttView
-            tasks={filtered}
-            allById={taskById}
-            initiativeById={initiativeById}
-            onSelect={(t) => setSelectedTaskId(t.id)}
-            onReschedule={handleReschedule}
-            sessions={recentWork.data ?? undefined}
-          />
+        {away ? (
+          <AwayPage owner onOpenTask={setSelectedTaskId} onAudit={() => setAuditOpen(true)} />
         ) : (
-          <TaskListView
-            tasks={filtered}
-            allById={taskById}
-            initiativeById={initiativeById}
-            onSelect={(t) => setSelectedTaskId(t.id)}
-            sections={sections}
-            selection={
-              picking.active
-                ? {
-                    ticked: picking.selectedIds,
-                    onToggle: afterPick(picking.toggle),
-                    onToggleMany: afterPick(picking.setMany),
-                  }
-                : undefined
+          <TasksBody
+            list={listNode}
+            checking={
+              <>
+                <AwayLinkRow />
+                <VerificationBar onVerifyNow={() => setSweepOpen(true)} onAudit={() => setAuditOpen(true)} />
+              </>
             }
           />
         )}
-
         {doneAsk && taskById.get(doneAsk.id) && (
           <Dialog
             kind="ask"
             title={t('tasks_done_one_title')}
-            body={tn('tasks_done_one_body', dependentsOf({ id: doneAsk.id }, taskById.values()).length, { title: taskById.get(doneAsk.id)?.title ?? '' })}
-            keepLabel={t('tasks_done_one_keep')}
+            body={
+              doneAsk.why === 'check'
+                ? t('tasks_done_check_body')
+                : tn('tasks_done_one_body', dependentsOf({ id: doneAsk.id }, taskById.values()).length, { title: taskById.get(doneAsk.id)?.title ?? '' })
+            }
+            keepLabel={doneAsk.why === 'check' ? t('tasks_done_check_keep') : t('tasks_done_one_keep')}
             actLabel={t('tasks_mark_done')}
             onKeep={() => setDoneAsk(null)}
             onAct={() => {
@@ -664,6 +709,15 @@ function TasksPage() {
           initiativeName={selection.initiativeId ? initiativeById.get(selection.initiativeId)?.name : undefined}
         />
         <AuditSheet open={auditOpen} onClose={() => setAuditOpen(false)} />
+
+        <OutboxGroup
+          entries={taskOutbox.entries}
+          state={taskOutbox.state}
+          inHub={false}
+          textOf={titleOf}
+          onRemove={(id) => void taskOutbox.remove(id)}
+          onSendNow={() => void taskOutbox.sendNow()}
+        />
 
         <TaskFormModal
           open={formOpen}
@@ -738,10 +792,10 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
 interface TasksFilterBarProps {
   view: TasksView
   setView: (v: TasksView) => void
-  statusTab: StatusTab
-  setStatusTab: (t: StatusTab) => void
-  statusFilter: TaskStatus | 'all'
-  setStatusFilter: (s: TaskStatus | 'all') => void
+  tab: TaskTab
+  setTab: (t: TaskTab) => void
+  chip: TaskChip
+  setChip: (c: TaskChip) => void
   tagFilter: string
   setTagFilter: (t: string) => void
   allTags: string[]
@@ -752,8 +806,14 @@ interface TasksFilterBarProps {
   onToggleSelecting: () => void
 }
 
+function chipLabel(id: TaskChip): string {
+  const status = chipStatus(id)
+  if (status) return STATUS_LABELS[status]
+  return id === 'archived' ? t('tasks_chip_archived') : t('tasks_chip_active')
+}
+
 function TasksFilterBar(p: TasksFilterBarProps) {
-  const { view, setView, statusTab, setStatusTab, statusFilter, setStatusFilter } = p
+  const { view, setView, tab, setTab, chip, setChip } = p
   const { tagFilter, setTagFilter, allTags, searchQuery, setSearchQuery } = p
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5 w-full max-w-full">
@@ -777,16 +837,17 @@ function TasksFilterBar(p: TasksFilterBarProps) {
 
         {view !== 'board' && (
           <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start max-w-full overflow-x-auto no-scrollbar shrink-0">
-            {(['active', 'all', 'complete', 'archived'] as StatusTab[]).map((tab) => (
+            {TABS.map((id) => (
               <button
-                key={tab}
+                key={id}
                 type="button"
-                onClick={() => setStatusTab(tab)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all shrink-0 ${
-                  statusTab === tab ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
+                onClick={() => setTab(id)}
+                aria-pressed={tab === id}
+                className={`px-3 py-1.5 min-h-9 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+                  tab === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
-                {tab}
+                {t(`tasks_tab_${id}` as const)}
               </button>
             ))}
           </div>
@@ -794,24 +855,12 @@ function TasksFilterBar(p: TasksFilterBarProps) {
 
         <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
           <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as TaskStatus | 'all')}
-            title="Filter by status"
-            className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
-          >
-            <option value="all">All statuses</option>
-            {STATUS_ORDER.map((status) => (
-              <option key={status} value={status}>{STATUS_LABELS[status]}</option>
-            ))}
-          </select>
-
-          <select
             value={tagFilter}
             onChange={(e) => setTagFilter(e.target.value)}
-            title="Filter by tag"
+            title={t('tasks_filter_by_tag')}
             className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
           >
-            <option value="all">All tags</option>
+            <option value="all">{t('tasks_all_tags')}</option>
             {allTags.map((tag) => (
               <option key={tag} value={tag}>{tag}</option>
             ))}
@@ -822,17 +871,35 @@ function TasksFilterBar(p: TasksFilterBarProps) {
               type="button"
               onClick={p.onToggleSelecting}
               aria-pressed={p.selecting}
-              title="Pick several tasks to change at once"
+              title={t('tasks_pick_several_title')}
               className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-all ${
                 p.selecting ? 'hq-seg-on' : 'hq-field text-neutral-300 hover:text-white'
               }`}
             >
               <ListChecks className="w-3.5 h-3.5 shrink-0" />
-              Select
+              {t('tasks_pick_several')}
             </button>
           )}
         </div>
       </div>
+
+      {view !== 'board' && tab === 'all' && (
+        <div role="group" aria-label={t('tasks_tab_all')} className="flex items-center gap-1.5 flex-wrap w-full order-last sm:basis-full">
+          {CHIPS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setChip(id)}
+              aria-pressed={chip === id}
+              className={`px-3 py-1.5 min-h-9 rounded-full text-xs font-semibold border border-white/10 ${
+                chip === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
+              }`}
+            >
+              {chipLabel(id)}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="relative w-full sm:w-auto sm:max-w-xs sm:flex-1 min-w-0">
         <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
@@ -840,7 +907,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search tasks..."
+          placeholder={t('tasks_find')}
           className="w-full box-border pl-8 pr-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
         />
       </div>

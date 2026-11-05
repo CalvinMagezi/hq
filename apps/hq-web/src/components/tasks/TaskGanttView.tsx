@@ -3,6 +3,9 @@ import { CalendarDays } from 'lucide-react'
 import type { Initiative, TaskItem, UpdateTaskInput, WorkSession } from '~/lib/tasksApi'
 import { BLOCKED_CHIP_CLASS, STATUS_BADGE_CLASS } from './TaskCard'
 import { groupByInitiative, nestRows, type TaskRow } from './hierarchy'
+import { t } from '~/strings'
+import { usePersistedState } from '~/lib/usePersistedState'
+import { ZOOM_KEY, isZoom } from './gantt'
 import { dayOfMonth, dayOfWeek, isWeekend, monthLabel, todayDay } from './dates'
 import {
   BAR_INSET,
@@ -49,7 +52,7 @@ const TIMELINE_ATTR = 'data-gantt-timeline'
 const EDGE_HANDLE_CLASS = 'absolute top-0 bottom-0 w-2 cursor-ew-resize'
 
 export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onReschedule, sessions = [] }: Props) {
-  const [zoom, setZoom] = useState<Zoom>('week')
+  const [zoom, setZoom] = usePersistedState<Zoom>(ZOOM_KEY, 'week', isZoom)
   const [drag, setDrag] = useState<DragState | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -142,7 +145,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
               className="relative"
               style={{ height: Math.max(lines.length, 1) * ROW_HEIGHT }}
             >
-              <GanttBackground rangeStart={range.start} dayCount={dayCount} dayPx={dayPx} today={today} />
+              <GanttBackground rangeStart={range.start} dayCount={dayCount} dayPx={dayPx} today={today} zoom={zoom} />
               <DependencyArrows
                 lines={lines}
                 rowIndex={rowIndex}
@@ -226,7 +229,7 @@ function GanttToolbar({ zoom, onZoom, onToday }: { zoom: Zoom; onZoom: (z: Zoom)
               zoom === z ? 'bg-white/10 text-emerald-400' : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            {z}
+            {t(z === 'week' ? 'timeline_week' : 'timeline_month')}
           </button>
         ))}
       </div>
@@ -236,7 +239,7 @@ function GanttToolbar({ zoom, onZoom, onToday }: { zoom: Zoom; onZoom: (z: Zoom)
         className="px-3 py-1.5 rounded-xl border border-white/10 text-xs text-neutral-300 hover:text-white hover:bg-white/5 flex items-center gap-1.5"
       >
         <CalendarDays className="w-3.5 h-3.5" />
-        Today
+        {t('timeline_this_week')}
       </button>
     </div>
   )
@@ -293,7 +296,7 @@ function GanttHeader({ rangeStart, dayCount, dayPx, zoom }: { rangeStart: number
                 className="absolute bottom-1 text-[11px] text-neutral-500 text-center"
                 style={{ left: i * dayPx, width: zoom === 'week' ? dayPx : undefined }}
               >
-                {dayOfMonth(day)}
+                {zoom === 'week' ? dayOfMonth(day) : t('timeline_monday', { day: dayOfMonth(day) })}
               </span>
             )}
           </div>
@@ -303,8 +306,9 @@ function GanttHeader({ rangeStart, dayCount, dayPx, zoom }: { rangeStart: number
   )
 }
 
-function GanttBackground({ rangeStart, dayCount, dayPx, today }: { rangeStart: number; dayCount: number; dayPx: number; today: number }) {
-  const weekends = Array.from({ length: dayCount }, (_, i) => rangeStart + i).filter(isWeekend)
+function GanttBackground({ rangeStart, dayCount, dayPx, today, zoom }: { rangeStart: number; dayCount: number; dayPx: number; today: number; zoom: Zoom }) {
+  // At Month a day is a few pixels wide, so shading weekends only adds noise.
+  const weekends = zoom === 'month' ? [] : Array.from({ length: dayCount }, (_, i) => rangeStart + i).filter(isWeekend)
   return (
     <div className="absolute inset-0 pointer-events-none">
       {weekends.map((day) => (

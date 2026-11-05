@@ -1,4 +1,5 @@
 import { hqFetch, readJson } from './hqAuth'
+import { t } from '~/strings'
 
 export type TaskStatus = 'to_do' | 'in_progress' | 'blocked' | 'ready_for_review' | 'complete'
 export type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -179,7 +180,9 @@ export async function createInitiativeClient(spaceId: string, name: string, fold
   )
 }
 
-interface CreateTaskInput {
+export interface CreateTaskInput {
+  /** HQ drops a repeat of this id, so a create whose answer was lost is never made twice. */
+  client_id?: string
   title: string
   description?: string
   initiative_id?: string
@@ -262,11 +265,11 @@ export async function addCommentClient(taskId: string, body: string, author = 'o
 }
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
-  to_do: 'To Do',
-  in_progress: 'In Progress',
-  blocked: 'Blocked',
-  ready_for_review: 'Ready for Review',
-  complete: 'Complete',
+  to_do: t('board_col_todo'),
+  in_progress: t('board_col_working'),
+  blocked: t('board_col_stuck'),
+  ready_for_review: t('board_col_ready'),
+  complete: t('board_col_done'),
 }
 
 export const STATUS_ORDER: TaskStatus[] = ['to_do', 'in_progress', 'blocked', 'ready_for_review', 'complete']

@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useState } from 'react'
 import { ChevronDown, Loader2, Pause, Play, RotateCcw, X } from 'lucide-react'
 import {
@@ -47,7 +48,7 @@ interface PickerProps {
 
 const CHOICES: { id: ScopeChoice; label: string }[] = [
   { id: 'all', label: 'Everything waiting' },
-  { id: 'initiative', label: 'This initiative' },
+  { id: 'initiative', label: t('tasks_this_list') },
   { id: 'since', label: 'Since a date' },
   { id: 'selected', label: 'The tasks I picked' },
 ]
@@ -56,7 +57,7 @@ export function ScopePickerView({ inputs, initiativeName, choice, onChoice, onSi
   const scope = pickScope(choice, inputs)
   const missing =
     choice === 'initiative' && !inputs.initiativeId
-      ? 'Pick an initiative in the sidebar first.'
+      ? t('tasks_pick_list_first')
       : choice === 'selected' && inputs.selectedIds.length === 0
         ? 'Tick some tasks with Select first.'
         : choice === 'since' && !scope
@@ -211,7 +212,7 @@ export function SweepBodyView({ detail, initiativeName, busy, error, confirmed, 
       )}
 
       {sweep.plan.would_wait_on_you !== undefined && sweep.plan.would_wait_on_you > 0 && (
-        <p className="text-xs text-neutral-400">{sweep.plan.would_wait_on_you} would wait on you, including tier 2 tasks, which get a veto window.</p>
+        <p className="text-xs text-neutral-400">{sweep.plan.would_wait_on_you} would wait on you, including risky ones, which wait a while before HQ marks them done.</p>
       )}
       {estimate && <p className="text-xs text-neutral-400">{estimate}</p>}
 
@@ -312,7 +313,7 @@ export function SweepSheet({ open, onClose, inputs, initiativeName, initialSweep
   }
 
   return (
-    <Sheet title={sweepId ? 'Sweep' : 'Verify now'} onClose={close}>
+    <Sheet title={sweepId ? 'Sweep' : t('check_sweep_title')} onClose={close}>
       {sweepId === null ? (
         <ScopePickerView
           inputs={{ ...inputs, since }}
