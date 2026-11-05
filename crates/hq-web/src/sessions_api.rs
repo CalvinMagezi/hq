@@ -360,6 +360,49 @@ pub(crate) async fn get_session_handler(
     }
 }
 
+/// How many of a session's newest records the answers list looks through.
+const ANSWER_EVENTS_LIMIT: usize = 200;
+
+/// `GET /api/harness-sessions/{id}/answers`: every dialog answer HQ gave on its own (Drive, a command
+/// policy, an agent session), newest last, so the owner can see what HQ said yes to (W15). The
+/// owner's own answers are left out. HQ wrote each record; no agent text is in it.
+pub(crate) async fn answers_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    if let Err(e) = require_row(&state, &id) {
+        return e.into_response();
+    }
+    let events = state
+        .db
+        .with_conn(|c| registry::list_events(c, &id, ANSWER_EVENTS_LIMIT));
+    match events {
+        Ok(events) => Json(json!({ "answers": automatic_answers(&events) })).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+fn automatic_answers(events: &[registry::SessionEvent]) -> Vec<Value> {
+    events
+        .iter()
+        .filter(|e| e.kind == "answered" && e.actor != "owner")
+        .map(|e| {
+            let detail: Value = e
+                .detail
+                .as_deref()
+                .and_then(|d| serde_json::from_str(d).ok())
+                .unwrap_or_default();
+            json!({
+                "by": e.actor,
+                "at": hq_db::wire_time::to_instant(&e.created_at),
+                "kind": detail["kind"],
+                "choice": detail["choice"],
+                "registered": detail["registered"],
+            })
+        })
+        .collect()
+}
+
 #[derive(Deserialize)]
 pub(crate) struct ScreenQuery {
     lines: Option<usize>,
@@ -847,6 +890,42 @@ fn adopt(conn: &Connection, id: &str, wanted: Option<&str>) -> anyhow::Result<Ad
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_answers_list_holds_only_what_hq_said_yes_to_on_its_own() {
+        let ev = |kind: &str, actor: &str, detail: &str| registry::SessionEvent {
+            kind: kind.into(),
+            actor: actor.into(),
+            goal: None,
+            done_criteria: None,
+            detail: Some(detail.into()),
+            created_at: "2026-11-05 10:00:00".into(),
+        };
+        let events = [
+            ev(
+                "answered",
+                "a Drive turn",
+                r#"{"kind":"command","choice":{"option":1},"registered":true}"#,
+            ),
+            ev(
+                "answered",
+                "owner",
+                r#"{"kind":"command","choice":"decline"}"#,
+            ),
+            ev("policy_decision", "supervisor", "{}"),
+            ev(
+                "answered",
+                "the command policy",
+                r#"{"kind":"edit","choice":{"option":1}}"#,
+            ),
+        ];
+        let answers = automatic_answers(&events);
+        assert_eq!(answers.len(), 2);
+        assert_eq!(answers[0]["by"], "a Drive turn");
+        assert_eq!(answers[0]["choice"]["option"], 1);
+        assert_eq!(answers[0]["at"], "2026-11-05T10:00:00Z");
+        assert_eq!(answers[1]["by"], "the command policy");
+    }
+
     use super::*;
     use axum::http::StatusCode;
     use hq_db::harness_sessions_registry::{NewSession, Placement};
