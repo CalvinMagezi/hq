@@ -13,7 +13,7 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tools::capabilities::adoption::{AdoptionReport, report};
 use hq_tools::capabilities::offers::{
-    Comparison, DEFAULT_REPLAY_DAYS, ReplayReport, ready_detectors, replay,
+    Comparison, DEFAULT_REPLAY_DAYS, ReplayReport, offer_says, ready_detectors, replay,
 };
 use hq_tools::capabilities::{Install, catalog, resolve, used_tools};
 
@@ -128,6 +128,22 @@ fn render_adoption(r: &AdoptionReport, out: &mut dyn Write) -> Result<()> {
     }
     writeln!(
         out,
+        "\nOffers under replies this week ({}):",
+        r.offers_this_week.len()
+    )?;
+    for o in &r.offers_this_week {
+        writeln!(
+            out,
+            "  - {}: shown {}, yes {}, not now {}{}",
+            offer_says(&o.offer),
+            o.shown,
+            o.accepted,
+            o.declined,
+            if o.muted { ", muted" } else { "" }
+        )?;
+    }
+    writeln!(
+        out,
         "\nCounts only, read on this machine. Nothing was sent anywhere."
     )?;
     Ok(())
@@ -223,6 +239,13 @@ mod tests {
             active_days_7: 4,
             active_days_28: 15,
             returned_week_four: Some(true),
+            offers_this_week: vec![hq_db::offers::OfferStats {
+                offer: "dated_todo".into(),
+                shown: 2,
+                accepted: 1,
+                declined: 1,
+                muted: false,
+            }],
         };
         let mut out = Vec::new();
         render_adoption(&r, &mut out).unwrap();
@@ -234,6 +257,9 @@ mod tests {
         assert!(text.contains("Used this week (1 of 10 ready; last week 2)"));
         assert!(text.contains("- Read the text in a photo"));
         assert!(text.contains("Nothing was sent anywhere"));
+        assert!(text.contains(
+            "- Keep a list of things to do, with the day each one is due: shown 2, yes 1, not now 1"
+        ));
         let json = r.to_json();
         assert_eq!(json["first_value"]["after_secs"], 300);
         assert_eq!(json["returned_week_four"], true);

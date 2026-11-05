@@ -30,6 +30,16 @@ export interface Thread {
   unreadCount: number
 }
 
+/** One thing HQ offers to do under a reply, chosen on this device; the model never sees it. */
+export interface ChatOffer {
+  kind: string
+  /** The line under the reply, in the catalog's words. */
+  line: string
+  /** What Yes sends, or puts in the composer when `send` is false. */
+  reply: string
+  send: boolean
+}
+
 export interface ThreadMessage {
   messageId: string
   threadId: string
@@ -46,6 +56,7 @@ export interface ThreadMessage {
   driver?: DriverMeta
   /** Asked by an outside MCP client (hq_ask) rather than typed here: the name it gave itself. */
   viaMcp?: string
+  offer?: ChatOffer
 }
 
 /** A reply still streaming in one chat. Every chat has its own, so several run at once. */

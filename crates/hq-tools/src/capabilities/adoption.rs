@@ -11,6 +11,7 @@ use hq_db::adoption::{
     DAY_SECS, ToolUse, UserMessage, WEEK_SECS, active_days, first_user_message_at, is_correction,
     owner_tool_use, persons_own, user_messages_since,
 };
+use hq_db::offers::OfferStats;
 use rusqlite::Connection;
 
 use super::Offer;
@@ -42,6 +43,8 @@ pub struct AdoptionReport {
     pub active_days_28: usize,
     /// Whether the person wrote in week four; `None` until week four is over.
     pub returned_week_four: Option<bool>,
+    /// Offers under replies in the last 7 days, per kind: shown, accepted, declined, muted.
+    pub offers_this_week: Vec<OfferStats>,
 }
 
 impl AdoptionReport {
@@ -63,6 +66,10 @@ impl AdoptionReport {
             "active_days_7": self.active_days_7,
             "active_days_28": self.active_days_28,
             "returned_week_four": self.returned_week_four,
+            "offers_this_week": self.offers_this_week.iter().map(|o| serde_json::json!({
+                "offer": o.offer, "shown": o.shown, "accepted": o.accepted,
+                "declined": o.declined, "muted": o.muted,
+            })).collect::<Vec<_>>(),
         })
     }
 }
@@ -138,6 +145,7 @@ pub fn report(conn: &Connection, now: i64, offers: &[Offer]) -> Result<AdoptionR
         messages_this_week: messages.iter().filter(|m| m.at >= week_ago).count(),
         corrections_this_week: count_corrections(&messages, week_ago, now + 1),
         corrections_last_week: count_corrections(&messages, now - 2 * WEEK_SECS, week_ago),
+        offers_this_week: hq_db::offers::stats(conn, week_ago, now + 1)?,
         active_days_7: active_days(&messages, now, 7),
         active_days_28: active_days(&messages, now, 28),
         returned_week_four,

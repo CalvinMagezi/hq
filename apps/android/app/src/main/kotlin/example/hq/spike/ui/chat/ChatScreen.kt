@@ -191,7 +191,11 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
                         interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = null,
                         onLongClickLabel = "Message actions", onClick = {}, onLongClick = { if (!m.sending) actions.onLongPress(m.id) },
                     ),
-                ) { if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile) else ReplyBubble(m, blocks) }
+                ) {
+                    // Only the newest reply carries its offer: one written to since has moved on.
+                    val answer = if (m === newestFirst.firstOrNull() && state.live == null) { yes: Boolean -> actions.onOffer(m.id, yes) } else null
+                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile) else ReplyBubble(m, blocks, onOffer = answer)
+                }
             }
         }
         if (away) LatestPill(Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)) { scope.launch { list.animateScrollToItem(0) } }

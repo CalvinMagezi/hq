@@ -8,7 +8,8 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
-use hq_db::adoption::{DAY_SECS, OWNER_AGENT, UserMessage, user_messages_since};
+use chrono::{Datelike, Duration, NaiveDate, Weekday};
+use hq_db::adoption::{DAY_SECS, OWNER_AGENT, UserMessage, persons_own, user_messages_since};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
@@ -51,6 +52,27 @@ impl Detector {
             Detector::SendOrPrint => "note-to-file",
             Detector::RepeatedQuestion => "look-up",
         }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|d| d.as_str() == s)
+    }
+
+    /// What Yes asks for, in the person's words, and whether it can be sent as it is. Only the
+    /// file request needs the person to say which note, so it goes to the composer.
+    fn reply(self, due: Option<NaiveDate>) -> (String, bool) {
+        let words = match self {
+            Detector::PhotoArrived => "Read the text in that photo.".to_string(),
+            Detector::DocumentArrived => "Keep that file as a note I can search later.".to_string(),
+            Detector::PastedList => "Turn that list into separate tasks.".to_string(),
+            Detector::DatedTodo => match due {
+                Some(d) => format!("Make that a task due on {}.", d.format("%A %-d %B %Y")),
+                None => "Make that a task with its due date.".to_string(),
+            },
+            Detector::SendOrPrint => "Make that into a PDF I can send.".to_string(),
+            Detector::RepeatedQuestion => "Look that up on the internet for me.".to_string(),
+        };
+        (words, self != Detector::SendOrPrint)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -403,6 +425,146 @@ pub fn judge(
             (*d, outcome)
         })
         .collect()
+}
+
+impl Pacing {
+    /// From when each kind of offer was last shown (`hq_db::offers::last_shown`).
+    pub fn from_last_shown(last: &HashMap<String, i64>) -> Self {
+        let mut p = Self::default();
+        for (kind, at) in last {
+            if let Some(d) = Detector::parse(kind) {
+                p.shown(d, *at);
+            }
+        }
+        p
+    }
+}
+
+/// The day a dated to-do names, as of `today`: tomorrow, the next such weekday (today when it is
+/// that day), or the end of the month. `None` for "next week", which names no day.
+pub fn due_day(text: &str, today: NaiveDate) -> Option<NaiveDate> {
+    let words = word_text(split_attachments(text).0);
+    if words.contains(" tomorrow ") {
+        return today.succ_opt();
+    }
+    const WEEKDAYS: [(&str, Weekday); 7] = [
+        ("monday", Weekday::Mon),
+        ("tuesday", Weekday::Tue),
+        ("wednesday", Weekday::Wed),
+        ("thursday", Weekday::Thu),
+        ("friday", Weekday::Fri),
+        ("saturday", Weekday::Sat),
+        ("sunday", Weekday::Sun),
+    ];
+    if let Some((_, day)) = WEEKDAYS
+        .iter()
+        .find(|(w, _)| words.contains(&format!(" {w} ")))
+    {
+        let ahead = (day.num_days_from_monday() + 7 - today.weekday().num_days_from_monday()) % 7;
+        return Some(today + Duration::days(i64::from(ahead)));
+    }
+    if words.contains(" end of the month ") || words.contains(" end of month ") {
+        let first_next = if today.month() == 12 {
+            NaiveDate::from_ymd_opt(today.year() + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1)
+        };
+        return first_next.and_then(|d| d.pred_opt());
+    }
+    None
+}
+
+/// The offer under one reply, as the apps draw it. Only what was shown: the person's answer is
+/// kept in `offer_log`, never here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TurnOffer {
+    pub kind: &'static str,
+    /// The line under the reply, from the catalog's `says`.
+    pub line: String,
+    /// What Yes asks HQ for.
+    pub reply: String,
+    /// Yes sends `reply` at once; otherwise it goes to the composer to be finished.
+    pub send: bool,
+}
+
+/// Everything a finished owner turn hands the chooser.
+pub struct TurnInput<'a> {
+    /// The person's message as saved, with its attachment marker.
+    pub text: &'a str,
+    /// Just before that message was saved: earlier messages are its history.
+    pub asked_at: i64,
+    pub now: i64,
+    /// Tools this turn called: an offer for something HQ just did is pointless.
+    pub turn_tools: &'a [String],
+    pub ready: HashSet<Detector>,
+    /// The person's local date, for the day a dated to-do names.
+    pub today: NaiveDate,
+}
+
+fn line_for(says: &str) -> String {
+    let mut chars = says.chars();
+    let lowered: String = chars
+        .next()
+        .map(|c| c.to_lowercase().chain(chars).collect())
+        .unwrap_or_default();
+    format!("I can also {lowered}.")
+}
+
+/// Chooses the offer for a reply, deterministically: the detectors on the person's message and
+/// their two weeks of questions, less what is muted, not ready, too soon or already done this
+/// turn. The model takes no part, and no part of this reaches it.
+pub fn for_turn(conn: &Connection, input: &TurnInput) -> Result<Option<TurnOffer>> {
+    let mut found = detect_one(input.text);
+    let mut repeats = Repeats::default();
+    let history = persons_own(user_messages_since(conn, input.now - REPEAT_WINDOW_SECS)?);
+    for m in history.iter().filter(|m| m.at < input.asked_at) {
+        repeats.observe(&m.text, m.at);
+    }
+    if repeats.observe(input.text, input.now) {
+        found.push(Detector::RepeatedQuestion);
+    }
+    if found.is_empty() {
+        return Ok(None);
+    }
+    let muted = hq_db::offers::muted(conn, input.now)?;
+    let ready: HashSet<Detector> = input
+        .ready
+        .iter()
+        .copied()
+        .filter(|d| !muted.contains(d.as_str()))
+        .collect();
+    let pacing = Pacing::from_last_shown(&hq_db::offers::last_shown(conn)?);
+    let done = |d: Detector| {
+        super::catalog()
+            .iter()
+            .find(|c| c.id == d.capability())
+            .is_some_and(|c| c.tools.iter().any(|t| input.turn_tools.contains(t)))
+    };
+    let chosen = judge(&found, &done, &ready, &pacing, input.now)
+        .into_iter()
+        .find(|(_, o)| *o == Outcome::Offered)
+        .map(|(d, _)| d);
+    let Some(d) = chosen else {
+        return Ok(None);
+    };
+    let Some(cap) = super::catalog().iter().find(|c| c.id == d.capability()) else {
+        return Ok(None);
+    };
+    let (reply, send) = d.reply(due_day(input.text, input.today));
+    Ok(Some(TurnOffer {
+        kind: d.as_str(),
+        line: line_for(&cap.says),
+        reply,
+        send,
+    }))
+}
+
+/// How a report names a kind of offer: its capability in the catalog's words.
+pub fn offer_says(kind: &str) -> String {
+    Detector::parse(kind)
+        .and_then(|d| super::catalog().iter().find(|c| c.id == d.capability()))
+        .map(|c| c.says.clone())
+        .unwrap_or_else(|| kind.to_string())
 }
 
 /// The detectors whose capability is ready on this install.
@@ -838,6 +1000,109 @@ mod tests {
             "the list took that reply"
         );
         assert!((r.offers_per_week() - 0.5).abs() < f64::EPSILON);
+    }
+
+    fn day(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn a_dated_to_do_names_its_day() {
+        // 2026-11-05 is a Thursday.
+        let today = day("2026-11-05");
+        assert_eq!(
+            due_day("Remind me tomorrow", today),
+            Some(day("2026-11-06"))
+        );
+        assert_eq!(
+            due_day("pay rent on Friday", today),
+            Some(day("2026-11-06"))
+        );
+        assert_eq!(
+            due_day("call them on Monday", today),
+            Some(day("2026-11-09"))
+        );
+        assert_eq!(
+            due_day("submit it Thursday", today),
+            Some(day("2026-11-05"))
+        );
+        assert_eq!(
+            due_day("pay by the end of the month", today),
+            Some(day("2026-11-30"))
+        );
+        assert_eq!(
+            due_day("pay by end of month", day("2026-12-10")),
+            Some(day("2026-12-31"))
+        );
+        assert_eq!(due_day("sometime next week", today), None);
+    }
+
+    fn input<'a>(text: &'a str, tools: &'a [String]) -> TurnInput<'a> {
+        TurnInput {
+            text,
+            asked_at: NOW,
+            now: NOW,
+            turn_tools: tools,
+            ready: every(),
+            today: day("2026-11-05"),
+        }
+    }
+
+    #[test]
+    fn a_turn_gets_one_offer_in_the_catalogs_words_unless_muted_soon_or_done() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            let text = "Remind me to pay rent on Friday";
+            let o = for_turn(c, &input(text, &[]))?.expect("an offer");
+            assert_eq!(o.kind, "dated_todo");
+            assert_eq!(
+                o.line,
+                "I can also keep a list of things to do, with the day each one is due."
+            );
+            assert_eq!(o.reply, "Make that a task due on Friday 6 November 2026.");
+            assert!(o.send);
+            let made = ["task_create".to_string()];
+            assert_eq!(
+                for_turn(c, &input(text, &made))?,
+                None,
+                "HQ already made the task"
+            );
+            assert_eq!(for_turn(c, &input("hello there", &[]))?, None);
+            hq_db::offers::record_shown(c, "m1", "dated_todo", NOW - DAY_SECS)?;
+            assert_eq!(
+                for_turn(c, &input(text, &[]))?,
+                None,
+                "the same offer too soon"
+            );
+            let print = for_turn(c, &input("Can you make it a PDF to print?", &[]))?.unwrap();
+            assert!(!print.send, "which note to export is the person's to say");
+            hq_db::offers::record_shown(c, "m2", "send_or_print", NOW - 10 * DAY_SECS)?;
+            hq_db::offers::record_shown(c, "m3", "send_or_print", NOW - 9 * DAY_SECS)?;
+            hq_db::offers::answer(c, "m2", hq_db::offers::Answer::NotNow, NOW - 10 * DAY_SECS)?;
+            hq_db::offers::answer(c, "m3", hq_db::offers::Answer::NotNow, NOW - 9 * DAY_SECS)?;
+            assert_eq!(
+                for_turn(c, &input("Can you make it a PDF to print?", &[]))?,
+                None,
+                "Not now twice mutes it"
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn the_third_asking_of_a_question_is_offered_a_look_up() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            let q = "What is the price of cement today?";
+            say(c, NOW - 2 * DAY_SECS, q);
+            say(c, NOW - DAY_SECS, q);
+            say(c, NOW, q);
+            let o = for_turn(c, &input(q, &[]))?.expect("a look-up offer");
+            assert_eq!(o.kind, "repeated_question");
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]

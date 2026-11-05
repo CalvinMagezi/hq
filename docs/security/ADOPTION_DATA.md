@@ -16,7 +16,10 @@ Anything derived from the person's own activity that describes how they use HQ:
   `hq_tools::capabilities::Offer`);
 - the weekly numbers in `hq_tools::capabilities::adoption::AdoptionReport`: time to first useful
   result, capabilities used, corrections, active days, return in week four;
-- the weekly digest item built from them (source `adoption_digest`).
+- the weekly digest item built from them (source `adoption_digest`);
+- the offers shown under replies and how the person answered them (`offer_log`, migration 109:
+  the offer's kind, when it was shown, Yes or Not now, never any message text), and the 30-day
+  mute that two "Not now" answers in a row set.
 
 It is computed on the device from records HQ already keeps there (chat messages and the tool-call
 log in `.vault/_data/vault.db`), with no model.
@@ -27,6 +30,7 @@ log in `.vault/_data/vault.db`), with no model.
 |---|---|---|
 | Ordering the empty chat's chips, untried capabilities first (`GET /api/capabilities`) | the owner's web app and phone app | no |
 | The weekly digest in the inbox | the owner's web inbox and phone app | no |
+| The offer under a reply, and its answer | the owner's web and phone chats; `offer_log` | no |
 | `hq adoption` and `hq offers replay`, the same numbers on the command line | the terminal of the machine HQ runs on | no |
 | `GET /api/adoption` and `GET /api/offers/replay`, the same numbers for `scripts/phone-hq.sh` | a computer the owner signed in as a device | counts only, to that computer |
 
@@ -67,9 +71,13 @@ Telling the person about something they have not tried is the reason this data e
 done on the device:
 
 - the empty chat already puts untried capabilities first;
-- the offers planned for phase 2 (`docs/plans/simple-hq.md`) are chosen by HQ from this data and
-  drawn by the apps under a reply. The model never decides them and is never told what the
-  person has or has not used.
+- after a reply to the person's own message, HQ runs deterministic detectors on that message
+  (`hq_tools::capabilities::offers::for_turn`) and may attach one offer to the reply's saved meta
+  (`chat_messages.meta.offer`: its kind, the line, and what Yes sends). The web and phone apps
+  draw it under the reply with Yes and Not now (`POST /api/offers/answer`). The model never
+  decides an offer and is never told about one: the chat history it is sent holds message text
+  only (`an_offer_under_a_reply_never_reaches_the_models_history`). An answer removes the offer
+  from the reply and is kept only in `offer_log`.
 
 A model may still offer a capability on its own, from the usage-free block, when the conversation
 calls for it.

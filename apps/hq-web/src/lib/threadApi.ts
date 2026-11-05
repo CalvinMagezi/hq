@@ -3,6 +3,7 @@ import { useThreadStore, type Thread, type ThreadMessage, type ToolStep } from '
 import { splitAttachments } from './chatUploads'
 import type { DriverMeta } from './sessionsApi'
 import { parseStepCredits } from './stepCredits'
+import { toOffer, type ApiOffer } from './offersApi'
 
 /** A list preview without the attachment marker; a files-only message reads as its file count. */
 function cleanPreview(preview: string | undefined): string | undefined {
@@ -66,6 +67,7 @@ interface ApiMessageMeta {
   stopped?: boolean
   driver?: ApiDriverMeta | null
   source?: ApiSourceMeta | null
+  offer?: ApiOffer | null
 }
 
 export interface ApiMessage {
@@ -127,6 +129,7 @@ export function toThreadMessage(m: ApiMessage): ThreadMessage {
     stopped: m.meta?.stopped || undefined,
     driver: toDriver(m.meta?.driver),
     viaMcp: toViaMcp(m.meta?.source),
+    offer: toOffer(m.meta?.offer),
   }
 }
 
