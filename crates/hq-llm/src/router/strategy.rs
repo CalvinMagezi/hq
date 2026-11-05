@@ -55,56 +55,7 @@ pub fn seed_health_entry(
     }
 }
 
-/// Convert a non-streaming `ChatResponse` into a synthetic stream.
-pub(super) fn response_to_stream(
-    resp: ChatResponse,
-) -> Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>> {
-    let mut chunks: Vec<Result<StreamChunk>> = Vec::new();
-
-    if !resp.model.is_empty() {
-        chunks.push(Ok(StreamChunk::ModelInfo(resp.model)));
-    }
-
-    if !resp.message.content.is_empty() {
-        chunks.push(Ok(StreamChunk::Text(resp.message.content.clone())));
-    }
-
-    for (i, tc) in resp.message.tool_calls.iter().enumerate() {
-        chunks.push(Ok(StreamChunk::ToolCallDelta {
-            index: i,
-            id: Some(tc.id.clone()),
-            name: Some(tc.name.clone()),
-            arguments_delta: String::new(),
-        }));
-        let args_str = match &tc.arguments {
-            serde_json::Value::String(s) => s.clone(),
-            other => other.to_string(),
-        };
-        chunks.push(Ok(StreamChunk::ToolCallDelta {
-            index: i,
-            id: None,
-            name: None,
-            arguments_delta: args_str,
-        }));
-    }
-
-    chunks.push(Ok(StreamChunk::Usage {
-        input_tokens: resp.input_tokens,
-        output_tokens: resp.output_tokens,
-        cache_read_tokens: resp.cache_read_tokens,
-        cache_write_tokens: resp.cache_write_tokens,
-    }));
-    if resp.provider_cost_usd.is_some() || resp.reasoning_tokens > 0 {
-        chunks.push(Ok(StreamChunk::Billing {
-            cost_usd: resp.provider_cost_usd,
-            reasoning_tokens: resp.reasoning_tokens,
-        }));
-    }
-
-    chunks.push(Ok(StreamChunk::Done));
-
-    Box::pin(futures::stream::iter(chunks))
-}
+pub(super) use crate::provider::response_to_stream;
 
 /// Quick sync TCP probe to check if Ollama is reachable.
 pub(super) fn ollama_is_available_sync() -> bool {

@@ -15,6 +15,7 @@ Constraints established from the code (no live Copilot calls were made):
 |---|---|---|
 | `github-copilot-api` | Anthropic Messages at `<api base>/v1/messages` | Claude and Gemini family models. The raw GitHub token is exchanged for a session token first (`copilot.rs`), otherwise about 45% of calls fail as `model_not_available_for_integrator`. Business and enterprise seats get a different API base from the exchange. |
 | `openai-compatible` pointed at a Copilot host | `chat_completions` or `responses` | GPT-family models such as `gpt-6-luna` are served only over the Responses API, so the entry needs `wire: responses`. |
+| `openai-compatible` with `prompted_tools: true` | `chat_completions`, buffered when tools are sent | For a model or server that ignores the `tools` field. The tools are described in the system prompt and `<tool_call name="..."><args>{...}</args></tool_call>` tags in the reply become tool calls (`prompted_tools.rs`, the same shim `OllamaProvider` uses for Gemma and Phi ids). Leave it off for a model with native tool calls: the shim is less reliable and turns off streaming for turns with tools. |
 | `github-copilot-cli` | buffered subprocess | No tool loop, so it cannot serve a delegated child agent. Rejected for overrides. |
 | `openrouter`, `kimi-code`, `anthropic-compatible` | their own APIs | Model ids are whatever the entry declares. |
 

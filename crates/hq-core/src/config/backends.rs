@@ -149,6 +149,12 @@ pub struct BackendEntry {
     /// (`http://localhost/v1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unix_socket: Option<std::path::PathBuf>,
+
+    /// Describe the tools in the system prompt and read `<tool_call>` tags back from the reply,
+    /// for an `openai-compatible` model or server that ignores the `tools` field. Replies to
+    /// requests with tools are buffered, not streamed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prompted_tools: bool,
 }
 
 impl BackendEntry {
@@ -318,6 +324,12 @@ impl BackendsConfig {
                     ));
                 }
             }
+            if entry.prompted_tools && entry.kind != BackendKind::OpenaiCompatible {
+                problems.push(format!(
+                    "backend '{}': prompted_tools works only with kind openai-compatible",
+                    entry.name
+                ));
+            }
             if entry.kind.is_api() && entry.resolved_endpoint().is_none() {
                 problems.push(format!(
                     "backend '{}' ({:?}) requires an endpoint",
@@ -375,6 +387,7 @@ mod tests {
             wire: Default::default(),
             enabled: true,
             unix_socket: None,
+            prompted_tools: false,
         }
     }
 
@@ -481,6 +494,30 @@ mod tests {
     }
 
     #[test]
+    fn prompted_tools_is_off_by_default_and_only_for_openai_compatible() {
+        let yaml = "primary: a\nbackends:\n  - name: a\n    kind: openai-compatible\n    endpoint: http://127.0.0.1:47600/v1\n";
+        let cfg: BackendsConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.backends[0].prompted_tools);
+        assert!(
+            !serde_yaml::to_string(&cfg)
+                .unwrap()
+                .contains("prompted_tools")
+        );
+        let on: BackendsConfig =
+            serde_yaml::from_str(&format!("{yaml}    prompted_tools: true\n")).unwrap();
+        assert!(on.backends[0].prompted_tools && on.validate().is_ok());
+        let mut wrong = on.clone();
+        wrong.backends[0].kind = BackendKind::AnthropicCompatible;
+        let problems = wrong.validate().unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("prompted_tools works only")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
     fn validate_flags_missing_primary_and_fallback() {
         let cfg = BackendsConfig {
             primary: "ghost".to_string(),
@@ -516,6 +553,7 @@ mod tests {
                 wire: Default::default(),
                 enabled: true,
                 unix_socket: None,
+                prompted_tools: false,
             }],
             ..Default::default()
         };
@@ -596,6 +634,7 @@ mod tests {
             wire: Default::default(),
             enabled: true,
             unix_socket: None,
+            prompted_tools: false,
         };
         assert_eq!(
             entry.resolved_endpoint().as_deref(),
@@ -635,6 +674,7 @@ mod tests {
                 wire: Default::default(),
                 enabled: true,
                 unix_socket: None,
+                prompted_tools: false,
             }],
             ..Default::default()
         };

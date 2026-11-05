@@ -1030,6 +1030,7 @@ mod tests {
             wire: Default::default(),
             enabled: true,
             unix_socket: Some(socket.clone()),
+            prompted_tools: false,
         };
         let (shown, dial) = probe_dial(&entry).unwrap();
         assert_eq!(shown, format!("unix:{}", socket.display()));
