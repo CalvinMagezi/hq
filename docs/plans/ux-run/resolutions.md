@@ -76,7 +76,7 @@ or too much time passed."
 | B8 | Marking done (C10) | W33 on both: one task acts at once with "Done: {title} · Undo", unless other tasks wait on it or a check is pending (then it asks). Several: an Ask dialog ("Keep them as they are" · "Mark {N} tasks done"), then "{N} tasks done · Undo". |
 | B9 | Stop HQ (C11) | Red only when helpers are working ("Stop HQ?" · "Keep it running" · red "Stop HQ", body names the helpers). With none working it is the Ask kind: "Stop HQ?" · "Keep it running" · green "Stop HQ", body "Chats and scheduled tasks pause until you start it again." |
 | B10 | Backup (C12) | D1 and the phone's words: row "Last backup 3 h ago"; card "Last backup 3 d ago. A new one should be made every 24 hours." The web shows amber only when HQ's backup status route reports failed or overdue and the page can start a backup; otherwise grey "Backups are set up where HQ runs." |
-| B11 | The HQ window in HQ Hub (C13) | Its web group is "This window". It keeps a saved copy and an outbox, keyed by the HQ's id, labelled "Saved in HQ Hub at 14:32". No web push; Needs you arrives as HQ Hub's system notice. **Owner to confirm.** |
+| B11 | The HQ window in HQ Hub (C13) | Its web group is "This window". It keeps a saved copy and an outbox, keyed by the HQ's id, labelled "Saved in HQ Hub at 14:32". No web push; Needs you arrives as HQ Hub's system notice. **Confirmed by the owner, 5 Nov 2026.** |
 | B12 | The word for a computer (C14) | "This PC" is the hub's tab name only (W44, owner to confirm). Everywhere else: the machine's own name, or "this computer". |
 | B13 | Lite (C15) | The gear shows This browser and Other devices. Status line "Connected · HQ Lite". A link to a place Lite lacks opens Notes with "This HQ is HQ Lite. It has no {place}." Lite's Needs you never holds HQ's checks (Lite refuses the verification routes). |
 | B14 | The Claude connector (C16) | Row name "Claude on the web"; "connector" only in Technical details. |
@@ -125,5 +125,5 @@ or too much time passed."
 
 ## E. Still owner to confirm
 
-B11 (what the HQ window keeps and what it is called), B12 with W44 ("This PC"), and the list in
+B12 with W44 ("This PC"), and the list in
 `decisions.md`.

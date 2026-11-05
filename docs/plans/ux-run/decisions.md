@@ -154,4 +154,4 @@ status:
 
 ## Owner to confirm, in one list
 
-N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22, and resolutions.md B11 (what the HQ window keeps and what it is called).
+N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22. (resolutions.md B11 was confirmed on 5 Nov 2026.)

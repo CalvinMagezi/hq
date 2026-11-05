@@ -5,11 +5,12 @@ the wave's "Try this now" note, and record what the owner found. One line per it
 
 ## Owner decisions to collect
 
-From `decisions.md` "Owner to confirm": N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22, B11 (resolutions.md).
+From `decisions.md` "Owner to confirm": N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22.
 Ask for them in one batch before the wave that needs each. Record the answer and the date here.
 
 | Id | Answer | Date |
 |---|---|---|
+| B11 (resolutions.md) | Approved as recommended: "This window", saved copy and outbox keyed by HQ id, "Saved in HQ Hub at 14:32", no web push, HQ Hub system notices | 2026-11-05 |
 
 ## Web wave 0 (live bugs and shared parts)
 
