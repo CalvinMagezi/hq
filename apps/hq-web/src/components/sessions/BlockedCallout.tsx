@@ -90,6 +90,7 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
       ) : (
         <>
           <p className="text-xs text-neutral-400">{t('helpers_unreadable')}</p>
+          {kind !== 'approval' && <p className="text-xs text-neutral-400">{t('helpers_answer_in_terminal')}</p>}
           {tail && (
             <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-xs leading-snug text-neutral-200 whitespace-pre-wrap break-words">
               {tail}

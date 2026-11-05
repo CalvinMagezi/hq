@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { currentHqId, hqIdReady, keyFor } from '~/lib/savedCopy'
 import { onBeforeReload } from '~/lib/version'
 import { isSharedComputer } from '~/lib/sharedComputer'
+import { t } from '~/strings'
 import { MAX_ATTACHMENTS, isPreviewableImage, rejectReason, uploadChatFile, type ChatAttachment } from '~/lib/chatUploads'
 import type { PendingAttachment } from './AttachmentChips'
 
@@ -98,7 +99,7 @@ export function useDraft(threadId: string | null | undefined) {
     } catch (err) {
       store().patchAttachment(key, item.id, {
         status: 'error',
-        error: err instanceof Error ? err.message : 'upload failed',
+        error: t('chat_file_failed'),
         retryable: true,
       })
     }

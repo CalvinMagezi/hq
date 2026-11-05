@@ -23,6 +23,8 @@ import { ErrorText } from '~/components/sessions/ErrorText'
 import { useSharedConnection } from '~/lib/connection'
 import { helpersAway, readSavedHelpers, saveHelpers, type HelpersAway } from '~/lib/helpersSaved'
 import { savedLine } from '~/components/SavedStrip'
+import { useInHub } from '~/lib/hubWindow'
+import { offWhyUnreachable } from '~/lib/failureWords'
 
 const HELPER_EVENTS = ['helpers:change', 'sessions:sync'] as const
 const LIST_POLL_MS = 8_000
@@ -60,7 +62,8 @@ function WorkbenchPage() {
   const list = usePolled(JSON.stringify(filters), () => globalSessionsApi.list(filters), LIST_POLL_MS, true, true, HELPER_EVENTS)
   const detail = usePolled(selectedId ?? '', () => globalSessionsApi.get(selectedId ?? ''), DETAIL_POLL_MS, Boolean(selectedId), true, HELPER_EVENTS)
   const away = helpersAway(useSharedConnection())
-  const offWhy = away ? t(away === 'starting' ? 'off_until_started' : 'off_until_reached') : null
+  const inHub = useInHub()
+  const offWhy = away ? (away === 'starting' ? t('off_until_started') : offWhyUnreachable(inHub)) : null
   const hosts = usePolled('hosts', () => workbenchApi.hosts(), HOSTS_POLL_MS, true, true, HELPER_EVENTS)
   const afterStop = () => void Promise.all([list.refresh(), hosts.refresh()])
 
@@ -202,6 +205,7 @@ function SectionTitle({ children, count }: { children: string; count: number }) 
 }
 
 function AgentList({ away, offWhy, list, selectedId, showArchived, onShowArchived, onNew, task, onShowAll }: ListProps) {
+  const inHub = useInHub()
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [chip, setChip] = useState<HelperChip>('all')
@@ -259,13 +263,14 @@ function AgentList({ away, offWhy, list, selectedId, showArchived, onShowArchive
   }
 
   const ownRuns = own.data ?? []
+  const showOwn = ownRuns.length > 0 || (own.data !== undefined && sessions.length > 0)
   const empty = sessions.filter((s) => !s.archived).length === 0 && ownRuns.length === 0
 
   return (
     <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 pb-4 px-2">
       {away && saved && (
         <p className="px-3 py-2 text-xs text-neutral-400" role="status">
-          {savedLine(saved.at)} {offWhy}
+          {savedLine(saved.at, Date.now(), undefined, inHub)} {offWhy}
         </p>
       )}
       {banner && (
@@ -324,7 +329,7 @@ function AgentList({ away, offWhy, list, selectedId, showArchived, onShowArchive
           </ul>
         </section>
       ))}
-      {chip === 'all' && ownRuns.length > 0 && <OwnWork runs={ownRuns} />}
+      {chip === 'all' && showOwn && <OwnWork runs={ownRuns} />}
       <label className="flex items-center gap-2 px-3 min-h-11 text-xs text-neutral-400 cursor-pointer">
         <input type="checkbox" checked={showArchived} onChange={(e) => onShowArchived(e.target.checked)} className="h-4 w-4" style={{ accentColor: 'var(--accent-green)' }} />
         {t('helpers_show_archived')}
@@ -339,6 +344,7 @@ function OwnWork({ runs }: { runs: EdgeRun[] }) {
   return (
     <section aria-label={t('helpers_own_work')} data-group="own">
       <SectionTitle count={runs.length}>{t('helpers_own_work')}</SectionTitle>
+      {runs.length === 0 && <p className="px-3 py-2 text-xs text-neutral-400">{t('helpers_own_none')}</p>}
       <ul>
         {runs.map((run) => (
           <li key={ownCardId(run)} className="hq-row mb-1.5">

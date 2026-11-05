@@ -7,6 +7,8 @@ import { useThreadStore } from '~/store/threadStore'
 import { refreshThreads } from '~/lib/threadApi'
 import { globalSessionsApi, type HarnessSession } from '~/lib/sessionsApi'
 import { sessionTitle } from '~/lib/workbench'
+import { sharedConnectionNow } from '~/lib/connection'
+import { unreachableOr } from '~/lib/failureWords'
 import { ErrorText } from './ErrorText'
 
 export const ACTION_BUTTON_CLASS =
@@ -16,14 +18,14 @@ export interface ActionState {
   busy: boolean
   error: string | null
   /** Resolves true on success. Stays busy until the follow-up refresh has settled. */
-  run: (action: () => Promise<unknown>, fallback: string) => Promise<boolean>
+  run: (action: () => Promise<unknown>, fallback: string | (() => string)) => Promise<boolean>
 }
 
 /** One action area: only one request at a time, and no new one until the refresh after it lands. */
 export function useAction(onDone: () => void | Promise<void>): ActionState {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const run = async (action: () => Promise<unknown>, fallback: string) => {
+  const run = async (action: () => Promise<unknown>, fallback: string | (() => string)) => {
     if (busy) return false
     setBusy(true)
     setError(null)
@@ -32,7 +34,7 @@ export function useAction(onDone: () => void | Promise<void>): ActionState {
       await onDone()
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : fallback)
+      setError(err instanceof Error && !(err instanceof TypeError) ? err.message : typeof fallback === 'function' ? fallback() : fallback)
       return false
     } finally {
       setBusy(false)
@@ -108,7 +110,7 @@ export function StopButton({ session: s, action }: ActionProps) {
   const helper = s.label || s.id
   return (
     <>
-      <button type="button" disabled={action.busy} onClick={() => setConfirming(true)} className={ACTION_BUTTON_CLASS}>
+      <button type="button" disabled={action.busy} onClick={() => setConfirming(true)} aria-label={t('helpers_stop_named', { helper })} className={ACTION_BUTTON_CLASS}>
         <Square className="w-3.5 h-3.5" />
         {t('helpers_stop')}
       </button>
@@ -123,7 +125,7 @@ export function StopButton({ session: s, action }: ActionProps) {
           busy={action.busy}
           onKeep={() => setConfirming(false)}
           onAct={async () => {
-            if (await action.run(() => globalSessionsApi.stop(s.id), t('fail_stop_helper_no_reply', { helper }))) setConfirming(false)
+            if (await action.run(() => globalSessionsApi.stop(s.id), () => unreachableOr(sharedConnectionNow(), 'fail_stop_helper_unreachable', t('fail_stop_helper_no_reply', { helper }), { helper }))) setConfirming(false)
           }}
         />
       )}

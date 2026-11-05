@@ -7,9 +7,11 @@ import { useWS } from '~/context/WebSocketContext'
 import { toastUndo, toastAlert, toastNotice } from '~/lib/toast'
 import { failureLine } from '~/lib/version'
 import { t } from '~/strings'
-import { useSharedConnection } from '~/lib/connection'
+import { sharedConnectionNow, useSharedConnection } from '~/lib/connection'
 import { isSharedComputer } from '~/lib/sharedComputer'
-import { bannerKey, sendFailureKey, stopFailureKey, stopReply } from '~/lib/chatConnection'
+import { archiveChatKey } from '~/lib/failureWords'
+import { useInHub } from '~/lib/hubWindow'
+import { bannerKey, savedBannerLine, sendFailureKey, stopFailureKey, stopReply } from '~/lib/chatConnection'
 import { threadApi, refreshThreads, loadMessages, newThread } from '~/lib/threadApi'
 import { rejectSend } from '~/lib/chatEvents'
 import { MAX_ATTACHMENTS, type ChatAttachment } from '~/lib/chatUploads'
@@ -68,6 +70,8 @@ export function ChatView({ active, onClose, threadId }: Props) {
   const { send, connected } = useWS()
   const connState = useSharedConnection()
   const banner = bannerKey(connState, isSharedComputer())
+  const inHub = useInHub()
+  const savedLine = savedBannerLine(connState, isSharedComputer(), inHub, messages.reduce<number | null>((m, x) => (m === null || x.createdAt > m ? x.createdAt : m), null))
   const outboxChat = useChatOutbox(activeThreadId)
   const waitingForOwner = useThreadStore((s) => (activeThreadId ? s.waiting[activeThreadId] === true : false))
 
@@ -171,7 +175,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
       )
     } catch (err) {
       console.error('ChatView: failed to archive chat', err)
-      toastAlert(failureLine(err, 'fail_archive_chat_newer', t('fail_archive_chat_no_reply')))
+      toastAlert(failureLine(err, 'fail_archive_chat_newer', t(archiveChatKey(sharedConnectionNow()))))
     }
   }, [setActiveThread])
 
@@ -340,7 +344,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
         <OutboxGroup
           entries={outboxChat.entries}
           state={outboxChat.state}
-          inHub={false}
+          inHub={inHub}
           sending={outboxChat.sending}
           textOf={(e) => (e.payload as { content: string }).content}
           onRemove={(id) => void outboxChat.remove(id)}
@@ -350,6 +354,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
         {banner && (
           <div role="status" className="px-4 py-1.5 border-t border-amber-500/30 text-[11px] text-amber-400 bg-neutral-900/60">
             {t(banner)}
+            {savedLine && <span className="block">{savedLine}</span>}
           </div>
         )}
 

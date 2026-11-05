@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { Mic, Copy, Check, Pencil, Plug, RotateCw, Terminal, User } from 'lucide-react'
 import type { ToolStep } from '~/store/threadStore'
@@ -174,6 +175,11 @@ function DriverLabel({ driver }: { driver: DriverMeta }) {
         {driver.reason && ` · ${driver.reason}`}
       </span>
       {drove && <span className="shrink-0" style={{ color: 'var(--accent-amber)' }}>{t('chat_acted_for_you')}</span>}
+      {!drove && (
+        <Link to="/helpers/$id" params={{ id: driver.sessionId }} className="shrink-0 underline">
+          {t('chat_answer_in_helpers')}
+        </Link>
+      )}
     </div>
   )
 }

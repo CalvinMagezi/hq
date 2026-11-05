@@ -3,6 +3,7 @@ import { t } from '~/strings'
 import { Paperclip, Send, Square, WifiOff } from 'lucide-react'
 import { SlashCommandPalette, SLASH_COMMANDS, matchingSlashCommands, isSlashInput } from './SlashCommandPalette'
 import { enterSendsMessage, readEnterSends, writeEnterSends } from '~/lib/enterRule'
+import { tooBig } from '~/lib/chatUploads'
 import { ComposerAttachments, type PendingAttachment } from './AttachmentChips'
 
 // The box grows with its text up to this height, then scrolls.
@@ -50,7 +51,8 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   const hasReady = attachments.some((a) => a.status === 'ready')
   // One reply at a time per chat: while one runs the button stops it, and Enter waits.
   const queueing = !connected && canQueue && attachments.length === 0 && !hasKeptFiles
-  const canSend = (connected || queueing) && !running && !uploading && (!!value.trim() || hasReady || hasKeptFiles)
+  const hasBigFile = attachments.some((a) => tooBig(a.file))
+  const canSend = (connected || queueing) && !running && !uploading && !hasBigFile && (!!value.trim() || hasReady || hasKeptFiles)
 
   const pickCommand = (cmd: string) => {
     const def = SLASH_COMMANDS.find((c) => c.name === cmd)
@@ -101,6 +103,11 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
         </div>
       )}
 
+      {hasBigFile && (
+        <p role="status" className="pb-2 text-[11px] text-center" style={{ color: 'var(--accent-amber)' }}>
+          {t('chat_remove_big')}
+        </p>
+      )}
       <ComposerAttachments items={attachments} onRemove={onRemoveAttachment} onRetry={onRetryAttachment} />
 
       <div className="flex items-end gap-2 sm:gap-3 max-w-4xl mx-auto">

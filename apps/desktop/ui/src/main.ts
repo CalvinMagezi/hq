@@ -403,6 +403,9 @@ $('host-restart').addEventListener('click', () =>
     await refreshHost()
   }),
 )
+$('choose-program').textContent = t('hub_choose_program')
+$('look-again').textContent = t('hub_look_again')
+$('allow-helpers').textContent = t('hub_allow_act')
 $('look-again').addEventListener('click', () =>
   guarded('host-error', async () => {
     // Forwards are opened when pairing starts, so a restart tries the port again.

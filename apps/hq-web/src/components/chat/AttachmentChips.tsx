@@ -53,7 +53,7 @@ export function ComposerAttachments({
             <div className="flex items-center gap-1 text-neutral-500">
               {item.status === 'uploading' && <Loader2 className="w-3 h-3 animate-spin" />}
               {item.status === 'error' && <AlertCircle className="w-3 h-3 text-red-400" />}
-              <span className="truncate">{item.status === 'error' ? item.error : formatBytes(item.file.size)}</span>
+              <span className="truncate">{item.status === 'error' ? item.error : item.status === 'uploading' ? t('chat_file_uploading') : formatBytes(item.file.size)}</span>
             </div>
             {item.retryable && (
               <button

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useInHub } from '~/lib/hubWindow'
 import { fetchHello, type Hello, helloUpstreamGone, startingSeconds } from '~/lib/hello'
 import { UNREACHABLE_GRACE_MS, useDeviceOnline } from '~/lib/reachability'
 import { hqJson, needsSignIn, onSignInChange } from '~/lib/hqAuth'
@@ -113,7 +114,7 @@ export function connectionState(
       state: 'unreachable',
       words: t('state_unreachable'),
       dot: 'warn',
-      actionsOff: t('off_until_reached'),
+      actionsOff: inputs.inHub && inputs.proxyUpstreamGone ? t('off_hub_stopped') : t('off_until_reached'),
     }
   }
 
@@ -210,7 +211,8 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
   const polledAiDown = useAiDown(!status401 && hello !== null && hello.edition !== 'lite')
   const aiDown = options?.aiDown ?? polledAiDown
   const proxyUpstreamGone = options?.proxyUpstreamGone ?? helloUpstreamGone()
-  const inHub = options?.inHub ?? false
+  const hubWindow = useInHub()
+  const inHub = options?.inHub ?? hubWindow
 
   const inputs: ConnectionInputs = {
     status401,
@@ -348,6 +350,11 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
 }
 
 let shared: ConnectionState = 'reconnecting'
+
+/** The state the shell last published, for code that runs outside a render (a failed request). */
+export function sharedConnectionNow(): ConnectionState {
+  return shared
+}
 const sharedListeners = new Set<() => void>()
 
 function publish(state: ConnectionState) {

@@ -10,6 +10,7 @@ import {
   computerName,
   computerUnavailableReason,
   harnessesIn,
+  plainPath,
 } from '~/lib/workbench'
 import { ErrorText } from './ErrorText'
 import { FolderPicker } from './FolderPicker'
@@ -63,6 +64,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   const [report, setReport] = useState<LaunchReport | null>(null)
   const phone = useIsPhone()
   const [foldOpen, setFoldOpen] = useState(false)
+  const [changingFolder, setChangingFolder] = useState(false)
 
   useEffect(() => {
     workbenchApi
@@ -221,7 +223,16 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
               {selected?.workspace && (
                 <div>
                   <span className={LABEL_CLASS}>{t('helpers_new_folder')}</span>
-                  <FolderPicker host={host} workspace={selected.workspace} value={folder} onChange={setFolder} />
+                  {changingFolder ? (
+                    <FolderPicker host={host} workspace={selected.workspace} value={folder} onChange={setFolder} />
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 break-all text-xs text-neutral-300">{plainPath(folder || selected.workspace.root)}</span>
+                      <button type="button" onClick={() => setChangingFolder(true)} className="a-btn secondary shrink-0">
+                        {t('helpers_new_change')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -247,6 +258,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
 
         <div className="px-4 py-3 border-t border-white/10 space-y-2">
           {error && <ErrorText>{error}</ErrorText>}
+          {selected?.lockdown && !report && <p role="status" className="text-[11px] text-neutral-400">{t('helpers_new_locked')}</p>}
           {report ? (
             <button type="button" onClick={() => onStarted(report.session_id)} className={`${PRIMARY_CLASS} disabled:opacity-40`}>
               {t('helpers_new_open')}
@@ -263,7 +275,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
             className={`${PRIMARY_CLASS} flex-1 disabled:opacity-40 disabled:hover:bg-white/10`}
           >
             {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            {t('helpers_new_start')}
+            {busy ? t('helpers_new_starting') : t('helpers_new_start')}
           </button>
           </div>
           )}

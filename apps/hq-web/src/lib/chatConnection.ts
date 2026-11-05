@@ -21,6 +21,13 @@ export function bannerKey(state: ConnectionState, sharedComputer: boolean): Key 
   }
 }
 
+/** The line under the banner naming the copy on screen; only for HQ out of reach, and never on a shared computer. */
+export function savedBannerLine(state: ConnectionState, sharedComputer: boolean, inHub: boolean, newestMessageAt: number | null, locale?: string): string | null {
+  if ((state !== 'unreachable' && state !== 'offline') || sharedComputer || newestMessageAt === null) return null
+  const time = new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(newestMessageAt))
+  return t(inHub ? 'chat_banner_saved_window' : 'chat_banner_saved', { time })
+}
+
 /** The failure line for a Stop that reached HQ by neither the socket nor HTTP. */
 export function stopFailureKey(state: ConnectionState): Key {
   if (state === 'starting') return 'fail_stop_reply_starting'

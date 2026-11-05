@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useReducer } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import type { ConnectionState } from '~/lib/connection'
+import { useInHub } from '~/lib/hubWindow'
 import { placeSavedAt } from '~/lib/savedCopy'
 import { t } from '~/strings'
 
@@ -20,13 +21,13 @@ export const stripShown = (state: ConnectionState): boolean => state !== 'connec
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString()
 
 /** "Saved in this browser at 14:32", or "on Tue 3 Nov" for a copy from before today. Uses the browser's own clock setting. */
-export function savedLine(savedAt: number | null, now: number = Date.now(), locale?: string): string {
+export function savedLine(savedAt: number | null, now: number = Date.now(), locale?: string, inHub = false): string {
   if (savedAt === null) return t('saved_nothing')
   const when = new Date(savedAt)
   if (sameDay(when, new Date(now))) {
-    return t('saved_at', { time: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(when) })
+    return t(inHub ? 'saved_at_window' : 'saved_at', { time: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(when) })
   }
-  return t('saved_on', { date: new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' }).format(when) })
+  return t(inHub ? 'saved_on_window' : 'saved_on', { date: new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' }).format(when) })
 }
 
 /** The newest save across the place's query keys. */
@@ -41,13 +42,14 @@ export function SavedStrip({ state, pathname }: { state: ConnectionState; pathna
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   // The restored copy lands after first paint; without this the strip kept saying nothing was saved.
   useEffect(() => client.getQueryCache().subscribe(redraw), [client])
+  const inHub = useInHub()
   const keys = savedKeysFor(pathname)
   if (!keys || !stripShown(state)) return null
   const savedAt = placeSavedTime(client.getQueryCache().getAll(), keys)
   return (
     <div className="a-stale" role="status">
       <TriangleAlert className="a-ic" aria-hidden="true" />
-      <span>{savedLine(savedAt)}</span>
+      <span>{savedLine(savedAt, Date.now(), undefined, inHub)}</span>
     </div>
   )
 }

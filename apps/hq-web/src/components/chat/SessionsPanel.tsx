@@ -129,6 +129,11 @@ function SessionRow({ session: s, busy, onDrive, onUnwatch }: RowProps) {
       {s.task && <TaskLine task={s.task} />}
       <GoalLines session={s} />
       <StatusLine session={s} />
+      {s.agent_status === 'blocked' && (
+        <a href={`/helpers/${encodeURIComponent(s.id)}`} className="a-btn mt-1.5 inline-flex">
+          {t('chat_answer_it')}
+        </a>
+      )}
       <DriveSwitch drive={s.drive} busy={busy} onChange={onDrive} />
       <AnswerLog sessionId={s.id} />
       {!s.drive && s.drive_off_reason && (

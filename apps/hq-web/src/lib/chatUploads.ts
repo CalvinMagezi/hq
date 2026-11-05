@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { hqFetch, readJson } from './hqAuth'
 
 /** A file saved in the vault for a chat message. `path` is vault-relative. */
@@ -30,10 +31,13 @@ export function formatBytes(bytes: number) {
 
 /** Why a file can't be attached, or null when it can. */
 export function rejectReason(file: File): string | null {
-  if (file.size === 0) return 'empty file'
-  if (file.size > MAX_UPLOAD_BYTES) return `over ${MAX_UPLOAD_BYTES / BYTES_PER_MB} MB`
+  if (file.size === 0) return t('chat_file_empty')
+  if (tooBig(file)) return t('chat_file_too_big')
   return null
 }
+
+/** Whether the file is over the upload cap, so it has to be removed before the message can go. */
+export const tooBig = (file: Pick<File, 'size'>) => file.size > MAX_UPLOAD_BYTES
 
 /** Save one file for the next message; the reply carries its vault path. */
 export async function uploadChatFile(file: File): Promise<ChatAttachment> {
