@@ -3,10 +3,6 @@ use hq_core::config::HqConfig;
 use hq_core::hardware::{GpuType, detect_hardware, recommend_models};
 use std::process::Command;
 
-/// TurboQuant sits behind an hq-llm feature, so a default build has no local route on CUDA.
-const CUDA_NOTE: &str = "CUDA GPU detected, so no Ollama models are recommended. Local inference \
-here runs through TurboQuant, which needs hq built with `--features hq-llm/turboquant`.";
-
 /// Manage local models for inference.
 pub async fn run(_config: &HqConfig, sub: &str) -> Result<()> {
     match sub {
@@ -35,10 +31,6 @@ async fn status() -> Result<()> {
     println!();
 
     let recommended = recommend_models(&profile);
-    if recommended.is_empty() {
-        println!("{CUDA_NOTE}");
-        return Ok(());
-    }
 
     let installed = get_installed_models();
 
@@ -85,11 +77,6 @@ async fn status() -> Result<()> {
 async fn setup() -> Result<()> {
     let profile = detect_hardware();
     let recommended = recommend_models(&profile);
-
-    if recommended.is_empty() {
-        println!("{CUDA_NOTE}");
-        return Ok(());
-    }
 
     // Check Ollama is running
     if !ollama_is_reachable() {
@@ -153,10 +140,6 @@ fn recommend() -> Result<()> {
     println!();
 
     let recommended = recommend_models(&profile);
-    if recommended.is_empty() {
-        println!("CUDA GPU detected. Use TurboQuant for local inference.");
-        return Ok(());
-    }
 
     println!("Recommended models:");
     println!();

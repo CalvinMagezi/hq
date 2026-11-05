@@ -32,8 +32,6 @@ pub mod reconcile;
 pub mod responses;
 pub mod router;
 mod tap;
-#[cfg(feature = "turboquant")]
-pub mod turboquant;
 
 pub use anthropic::AnthropicProvider;
 pub use cerebras::CerebrasProvider;
@@ -47,5 +45,3 @@ pub use outcome_sink::{
 };
 pub use provider::{ChatRequest, ChatResponse, LlmError, LlmProvider, StreamChunk};
 pub use router::{CostTier, LlmRouter, TaskHint};
-#[cfg(feature = "turboquant")]
-pub use turboquant::TurboQuantProvider;

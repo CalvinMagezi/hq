@@ -20,7 +20,8 @@ pub enum GpuType {
 pub struct HardwareProfile {
     pub total_memory_gb: u64,
     pub gpu_type: GpuType,
-    /// Memory available for model loading (total minus OS overhead).
+    /// Memory available for model loading: the card's VRAM on an NVIDIA machine, else system
+    /// memory minus OS overhead.
     pub usable_for_models_gb: u64,
 }
 
@@ -44,7 +45,7 @@ pub fn detect_hardware() -> HardwareProfile {
 
     // Reserve ~5GB for OS and apps on macOS, ~3GB on Linux
     let os_overhead = if cfg!(target_os = "macos") { 5 } else { 3 };
-    let usable = total_memory_gb.saturating_sub(os_overhead);
+    let usable = usable_for_models(total_memory_gb, &gpu_type, os_overhead);
 
     HardwareProfile {
         total_memory_gb,
@@ -53,13 +54,17 @@ pub fn detect_hardware() -> HardwareProfile {
     }
 }
 
+/// What a model can be loaded into. A discrete NVIDIA card holds the model in its own VRAM, less
+/// about 1GB the driver and a display take; otherwise the model shares system memory.
+fn usable_for_models(total_memory_gb: u64, gpu: &GpuType, os_overhead: u64) -> u64 {
+    match gpu {
+        GpuType::NvidiaCuda { vram_gb } => vram_gb.saturating_sub(1),
+        _ => total_memory_gb.saturating_sub(os_overhead),
+    }
+}
+
 /// Recommend models that fit the detected hardware.
 pub fn recommend_models(profile: &HardwareProfile) -> Vec<RecommendedModel> {
-    // CUDA machines: preserve TurboQuant path, don't recommend Ollama models
-    if matches!(profile.gpu_type, GpuType::NvidiaCuda { .. }) {
-        return vec![];
-    }
-
     let usable = profile.usable_for_models_gb;
 
     if usable >= 26 {
@@ -289,14 +294,41 @@ mod tests {
     }
 
     #[test]
-    fn test_cuda_returns_empty() {
+    fn an_nvidia_card_is_sized_by_its_vram_not_system_memory() {
+        let gpu = GpuType::NvidiaCuda { vram_gb: 12 };
+        assert_eq!(usable_for_models(64, &gpu, 3), 11);
+        assert_eq!(usable_for_models(64, &GpuType::None, 3), 61);
+        assert_eq!(
+            usable_for_models(1, &GpuType::NvidiaCuda { vram_gb: 0 }, 3),
+            0
+        );
+    }
+
+    #[test]
+    fn an_nvidia_card_gets_ollama_models_that_fit_it() {
+        // A 12GB card in a 64GB machine: the 12GB is what limits the model.
+        let gpu = GpuType::NvidiaCuda { vram_gb: 12 };
         let profile = HardwareProfile {
             total_memory_gb: 64,
-            gpu_type: GpuType::NvidiaCuda { vram_gb: 24 },
-            usable_for_models_gb: 61,
+            usable_for_models_gb: usable_for_models(64, &gpu, 3),
+            gpu_type: gpu,
         };
         let models = recommend_models(&profile);
-        assert!(models.is_empty());
+        let mid = models.iter().find(|m| m.alias == "mid").unwrap();
+        assert_eq!(mid.ollama_model, "qwen3:8b");
+        assert!(models.iter().all(|m| m.vram_gb <= 11.0), "{models:?}");
+
+        let small = HardwareProfile {
+            total_memory_gb: 32,
+            usable_for_models_gb: usable_for_models(32, &GpuType::NvidiaCuda { vram_gb: 6 }, 3),
+            gpu_type: GpuType::NvidiaCuda { vram_gb: 6 },
+        };
+        let fast = recommend_models(&small);
+        assert!(!fast.is_empty());
+        assert!(
+            fast.iter().all(|m| m.ollama_model == "qwen3:1.7b"),
+            "{fast:?}"
+        );
     }
 
     #[test]

@@ -636,39 +636,6 @@ static KNOWN_MODELS: &[ModelInfo] = &[
         cache_read_cost_per_million: 0.0,
         cache_write_cost_per_million: 0.0,
     },
-    // TurboQuant local inference (3-bit KV cache compression, ~5x memory reduction)
-    ModelInfo {
-        id: "tq/qwen2.5-3b-turboquant",
-        context_window: 32_000,
-        input_cost_per_million: 0.0,
-        output_cost_per_million: 0.0,
-        cache_read_cost_per_million: 0.0,
-        cache_write_cost_per_million: 0.0,
-    },
-    ModelInfo {
-        id: "tq/qwen2.5-7b-turboquant",
-        context_window: 32_000,
-        input_cost_per_million: 0.0,
-        output_cost_per_million: 0.0,
-        cache_read_cost_per_million: 0.0,
-        cache_write_cost_per_million: 0.0,
-    },
-    ModelInfo {
-        id: "tq/qwen2.5-72b-turboquant",
-        context_window: 48_000,
-        input_cost_per_million: 0.0,
-        output_cost_per_million: 0.0,
-        cache_read_cost_per_million: 0.0,
-        cache_write_cost_per_million: 0.0,
-    },
-    ModelInfo {
-        id: "tq/llama3.3-70b-turboquant",
-        context_window: 48_000,
-        input_cost_per_million: 0.0,
-        output_cost_per_million: 0.0,
-        cache_read_cost_per_million: 0.0,
-        cache_write_cost_per_million: 0.0,
-    },
 ];
 
 #[cfg(test)]
