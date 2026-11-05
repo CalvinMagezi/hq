@@ -231,3 +231,18 @@ test). `:app:lintDebug` runs Android Lint's `NewApi` check against `minSdk` 26, 
 or Java API added after Android 8 fails the build instead of crashing Android 8 to 10 (APIs that D8
 backports, such as `List.of` and `String.repeat`, are fine). CI does both. The service and the Keystore code have no automated
 test; the checks cover the logic moved into `HubConfig`.
+
+## Reading HQ's own reports from the phone
+
+`scripts/phone-hq.sh <hq arguments>` runs one `hq` command on the phone, in the app's sandbox, with
+the phone's binary and vault (through `run-as`, so it needs this debuggable build and a running app).
+It is for reports that print counts only:
+
+```sh
+scripts/phone-hq.sh adoption              # how HQ is used: capabilities, corrections, return visits
+scripts/phone-hq.sh offers replay         # how often the planned offers would have appeared
+scripts/phone-hq.sh adoption --json > adoption.json
+```
+
+Only the command's output crosses the cable. Do not pull `vault.db` or chats off the phone to read
+them elsewhere (`docs/security/ADOPTION_DATA.md`). `HQ_APP_ID` picks a side-by-side test build.

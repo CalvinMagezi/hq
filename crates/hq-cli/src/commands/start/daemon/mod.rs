@@ -490,6 +490,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("task-stale-digest", Duration::from_secs(21600)),
         // Recurring tool failures from local telemetry, once a week; `daemon.tool_failure_digest`.
         DaemonTask::with_default_timeout("tool-failure-digest", Duration::from_secs(604800)),
+        // How HQ was used (capabilities, corrections, return), once a week; `daemon.adoption_digest`.
+        DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
         DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("verify-briefing", Duration::from_secs(3600)),
     ]
@@ -647,6 +649,7 @@ async fn dispatch_task(
         "turn-reconcile" => tasks_periodic::run_turn_reconcile(vault_path, db, config).await,
         "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
         "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
+        "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
 
         unknown => {
             warn!(task = unknown, "daemon: unknown task");

@@ -44,6 +44,11 @@ pub struct DaemonConfig {
     /// A weekly inbox digest of recurring tool failures. Reads local telemetry only.
     #[serde(default = "default_true")]
     pub tool_failure_digest: bool,
+
+    /// A weekly inbox digest of how HQ was used: capabilities, corrections, return visits.
+    /// Reads local chat and tool records only.
+    #[serde(default = "default_true")]
+    pub adoption_digest: bool,
 }
 
 /// How chat turns are turned into memories.
@@ -85,6 +90,7 @@ impl Default for DaemonConfig {
             embedding_provider: EmbeddingProvider::default(),
             memory_extraction: MemoryExtraction::default(),
             tool_failure_digest: true,
+            adoption_digest: true,
         }
     }
 }

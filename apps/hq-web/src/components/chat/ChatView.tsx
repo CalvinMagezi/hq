@@ -281,6 +281,7 @@ export function ChatView({ active, onClose }: Props) {
           followSignal={followSignal}
           onEdit={startEdit}
           onRegenerate={regenerate}
+          onPick={(text) => draft.setText(text)}
         />
 
         {liveTurn && !connected && (
