@@ -20,7 +20,9 @@ pub(crate) fn take_notifications_snapshot(db: &hq_db::Database) -> Notifications
         .with_conn(|conn| {
             let row = conn
                 .query_row(
-                    "SELECT max(created_at) FROM value_items WHERE state IN ('pending', 'delivered')",
+                    // The count too: answering any item that is not the newest changes it.
+                    "SELECT count(*) || '|' || coalesce(max(created_at), '') FROM value_items \
+                     WHERE state IN ('pending', 'delivered')",
                     [],
                     |row| row.get::<_, Option<String>>(0),
                 )
@@ -119,5 +121,28 @@ mod tests {
         let a = take_notifications_snapshot(&db);
         let b = take_notifications_snapshot(&db);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn answering_an_older_item_is_a_change() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let old = hq_core::types::ValueItem::new(
+            "t",
+            hq_core::types::ValueKind::ActionNeeded,
+            "old",
+            "b",
+        );
+        hq_db::value_items::insert(&db, &old).unwrap();
+        let mut new = hq_core::types::ValueItem::new(
+            "t",
+            hq_core::types::ValueKind::ActionNeeded,
+            "new",
+            "b",
+        );
+        new.created_at = old.created_at + chrono::Duration::seconds(5);
+        hq_db::value_items::insert(&db, &new).unwrap();
+        let before = take_notifications_snapshot(&db);
+        assert!(hq_db::value_items::dismiss_by_id(&db, &old.id).unwrap());
+        assert_ne!(take_notifications_snapshot(&db), before);
     }
 }

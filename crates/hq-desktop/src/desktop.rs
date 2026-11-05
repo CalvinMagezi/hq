@@ -174,6 +174,8 @@ pub struct Desktop {
     helpers: Arc<helpers::Helpers>,
     /// The helper being tried and its pane in the host.
     trying: Mutex<Option<(String, String)>>,
+    /// Held across a whole try or stop, so two tries never leave a pane nobody can stop.
+    try_gate: tokio::sync::Mutex<()>,
     latest: Mutex<std::collections::HashMap<&'static str, String>>,
 }
 
@@ -310,6 +312,7 @@ impl Desktop {
             upstream,
             helpers: Arc::new(helpers::Helpers::new()),
             trying: Mutex::new(None),
+            try_gate: tokio::sync::Mutex::new(()),
             latest: Mutex::new(Default::default()),
         })
     }
@@ -438,13 +441,18 @@ impl Desktop {
         if !helpers::safe_try_dir(&dir, &self.home()) {
             bail!("The Try it folder is not a safe place. Choose another in Settings.");
         }
-        self.helper_try_stop().await?;
+        let _gate = self.try_gate.lock().await;
+        self.stop_try_locked().await?;
         let cfg = self.config.agent_host.clone();
         let wait = std::time::Duration::from_secs(cfg.launch_bound_secs.clamp(5, 60));
         let sandbox = helpers::sandbox_plan(spec, &dir, &cfg);
         let host_dir = hq_core::config::native_host_dir();
         let (name, outcome, link) = tokio::task::spawn_blocking(move || {
-            std::fs::create_dir_all(&dir)?;
+            helpers::prepare_try_dir(&dir).map_err(|e| {
+                anyhow::anyhow!(
+                    "The Try it folder cannot be used ({e}). Choose an empty folder in Settings."
+                )
+            })?;
             helpers::empty_dir(&dir)?;
             helpers::try_through_host(&host_dir, spec, &program, &dir, sandbox, wait)
         })
@@ -456,6 +464,11 @@ impl Desktop {
 
     /// Ends the try, removes its pane and empties the Try it folder.
     pub async fn helper_try_stop(&self) -> Result<()> {
+        let _gate = self.try_gate.lock().await;
+        self.stop_try_locked().await
+    }
+
+    async fn stop_try_locked(&self) -> Result<()> {
         let taken = self.trying.lock().unwrap().take();
         self.helpers.set_link(None);
         let dir = self.try_dir();
@@ -465,7 +478,7 @@ impl Desktop {
             if let Some((_, name)) = taken {
                 helpers::stop_through_host(&host_dir, &name);
             }
-            if helpers::safe_try_dir(&dir, &home) && dir.is_dir() {
+            if helpers::safe_try_dir(&dir, &home) && helpers::owns_try_dir(&dir) {
                 let _ = helpers::empty_dir(&dir);
             }
         })
@@ -478,6 +491,10 @@ impl Desktop {
         let Some(link) = self.helpers.link() else {
             bail!("There is no sign-in link yet.");
         };
+        let tried = self.trying.lock().unwrap().as_ref().map(|t| t.0.clone());
+        if tried.as_deref() != Some(id) {
+            bail!("That sign-in link belongs to another helper's try.");
+        }
         let Some(target) = window::signin_target(id, &link) else {
             bail!("That link is not on this helper's own sign-in site, so it was not opened.");
         };
@@ -693,23 +710,29 @@ impl Desktop {
             return Vec::new();
         }
         let program = self.program();
+        // Only a program inside the renamed bundle can tell where the old one was; a dev run or a
+        // picked path tries again on a later open, so entries are never left on the removed app.
+        if rename::old_program(&program).is_none() {
+            return Vec::new();
+        }
         let Some(config) = hq_bridge::claude::desktop_config_path() else {
             return Vec::new();
         };
         let db_path = self.config.db_path();
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let changed = tokio::task::spawn_blocking(move || {
-            let hubs: Vec<String> = Database::open(&db_path)
+            let hubs: Option<Vec<String>> = Database::open(&db_path)
                 .ok()
                 .and_then(|db| hq_bridge::claude::hubs(&db).ok())
-                .map(|h| h.into_iter().map(|h| h.name).collect())
-                .unwrap_or_default();
-            rename::rewrite_claude_desktop(&config, &program, &hubs, &today)
+                .map(|h| h.into_iter().map(|h| h.name).collect());
+            hubs.map(|hubs| rename::rewrite_claude_desktop(&config, &program, &hubs, &today))
         })
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .unwrap_or_default();
+        .await;
+        // Done only when the rewrite ran on a readable list of hubs and a readable config; any
+        // failure (Claude mid-write, the database not open) tries again on the next open.
+        let Ok(Some(Ok(changed))) = changed else {
+            return Vec::new();
+        };
         let mut s = self.settings();
         s.bundle_rename_handled = true;
         let _ = self.save_settings(s);
@@ -996,6 +1019,8 @@ mod tests {
             peer: "phone".into(),
             service: "web".into(),
             listen: listen.to_string(),
+            fail_fast_secs: None,
+            when: Default::default(),
         }];
         let desktop = Desktop::open(DesktopInit {
             dir: dir.path().join("desktop"),
@@ -1115,8 +1140,10 @@ mod tests {
             peer: "phone".into(),
             service: "web".into(),
             listen: "127.0.0.1:47480".into(),
+            fail_fast_secs: None,
+            when: Default::default(),
         }];
-        config.bridge.services = [("gate".to_string(), "127.0.0.1:7747".to_string())].into();
+        config.bridge.services = [("gate".to_string(), "127.0.0.1:7747".into())].into();
         let desktop = Desktop::open(DesktopInit {
             dir: dir.path().join("desktop"),
             bridge_key: dir.path().join("bridge").join("bridge.key"),

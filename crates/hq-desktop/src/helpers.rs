@@ -794,10 +794,61 @@ pub fn safe_try_dir(dir: &Path, home: &Path) -> bool {
     dir.is_absolute() && dir.components().count() >= 3 && dir != home && !home.starts_with(dir)
 }
 
-/// Removes everything inside `dir` and leaves the folder. Links are removed, never followed.
+/// The file that marks a Try it folder as HQ Hub's own. Only a folder holding it is ever emptied.
+pub const TRY_MARKER: &str = ".hq-try-it";
+
+/// Makes `dir` ready for a try and HQ Hub's own: a new folder, or an empty one, gets the marker; a
+/// folder that holds files HQ Hub did not put there, or that is a link, is refused, so a try can
+/// never empty a folder of the person's.
+pub fn prepare_try_dir(dir: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    match std::fs::symlink_metadata(dir) {
+        Ok(m) if m.file_type().is_symlink() || !m.is_dir() => {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "the Try it folder is a link or a file",
+            ));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == ErrorKind::NotFound => std::fs::create_dir_all(dir)?,
+        Err(e) => return Err(e),
+    }
+    let marker = dir.join(TRY_MARKER);
+    if marker.is_file() {
+        return Ok(());
+    }
+    if std::fs::read_dir(dir)?.next().is_some() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "the Try it folder already holds files HQ Hub did not put there",
+        ));
+    }
+    std::fs::write(
+        marker,
+        b"HQ Hub's Try it folder. HQ Hub empties it before and after each try.\n",
+    )
+}
+
+/// Whether `dir` is HQ Hub's own Try it folder: not a link, and holding the marker.
+pub fn owns_try_dir(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+        && dir.join(TRY_MARKER).is_file()
+}
+
+/// Removes everything inside HQ Hub's own `dir` except its marker, and leaves the folder. Links are
+/// removed, never followed. A folder without the marker is refused.
 pub fn empty_dir(dir: &Path) -> std::io::Result<()> {
+    if !owns_try_dir(dir) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "not HQ Hub's Try it folder",
+        ));
+    }
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
+        if path.file_name().is_some_and(|n| n == TRY_MARKER) {
+            continue;
+        }
         if std::fs::symlink_metadata(&path)?.is_dir() {
             std::fs::remove_dir_all(&path)?;
         } else {
@@ -1056,14 +1107,50 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_of_the_persons_is_never_taken_or_emptied() {
+        let docs = tempfile::tempdir().unwrap();
+        std::fs::write(docs.path().join("thesis.md"), "years of work").unwrap();
+        assert!(
+            prepare_try_dir(docs.path()).is_err(),
+            "a folder with files is refused"
+        );
+        assert!(empty_dir(docs.path()).is_err(), "and never emptied");
+        assert!(docs.path().join("thesis.md").exists());
+
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join(TRY_MARKER), "").unwrap();
+        std::fs::write(target.path().join("keep"), "x").unwrap();
+        let link_parent = tempfile::tempdir().unwrap();
+        let link = link_parent.path().join("try");
+        std::os::unix::fs::symlink(target.path(), &link).unwrap();
+        assert!(prepare_try_dir(&link).is_err(), "a link is refused");
+        assert!(empty_dir(&link).is_err());
+        assert!(target.path().join("keep").exists());
+
+        let fresh = tempfile::tempdir().unwrap();
+        let new_dir = fresh.path().join("try-it");
+        prepare_try_dir(&new_dir).unwrap();
+        assert!(owns_try_dir(&new_dir));
+    }
+
+    #[test]
     fn the_try_folder_is_emptied_but_stays_and_a_home_is_never_emptied() {
         let dir = tempfile::tempdir().unwrap();
+        prepare_try_dir(dir.path()).unwrap();
         std::fs::create_dir_all(dir.path().join("a/b")).unwrap();
         std::fs::write(dir.path().join("a/b/c"), "x").unwrap();
         std::fs::write(dir.path().join("f"), "x").unwrap();
         empty_dir(dir.path()).unwrap();
         assert!(dir.path().exists());
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            left,
+            [std::ffi::OsString::from(TRY_MARKER)],
+            "only the marker stays"
+        );
         let home = Path::new("/Users/someone");
         assert!(!safe_try_dir(home, home));
         assert!(!safe_try_dir(Path::new("/Users"), home));
