@@ -31,7 +31,7 @@
   "components/tasks/TaskActivity.tsx": 13,
   "components/chat/SlashCommandPalette.tsx": 1,
   "components/chat/ThreadSidebar.tsx": 7,
-  "components/chat/ChatComposer.tsx": 3,
+  "components/chat/ChatComposer.tsx": 2,
   "components/chat/StreamErrorBoundary.tsx": 2,
   "components/chat/GlobalChatOverlay.tsx": 1,
   "components/chat/ChatHeader.tsx": 5,

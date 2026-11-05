@@ -12,6 +12,8 @@ import { ThreadSidebar } from './ThreadSidebar'
 import { ChatComposer } from './ChatComposer'
 import { ChatHeader } from './ChatHeader'
 import { MessageList, isSaved } from './MessageList'
+import { OutboxGroup } from './OutboxGroup'
+import { useChatOutbox } from './useChatOutbox'
 import { useDraft } from './draftStore'
 import { useFileDrop } from './useFileDrop'
 import { useThreadSessions } from './useThreadSessions'
@@ -57,6 +59,7 @@ export function ChatView({ active, onClose }: Props) {
   const messages = useThreadStore((s) => (activeThreadId ? s.threadMessages[activeThreadId] : undefined)) ?? []
   const liveTurn = useLiveTurn(activeThreadId)
   const { send, connected } = useWS()
+  const outboxChat = useChatOutbox(activeThreadId)
 
   const [loadingThreads, setLoadingThreads] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -183,6 +186,8 @@ export function ChatView({ active, onClose }: Props) {
   }
 
   const handleSend = async (overrideContent?: string) => {
+    // With the socket down a plain message waits in the outbox; anything else waits for the socket.
+    if (!connected && (await queueOffline(overrideContent))) return
     // A send on a closed socket is dropped, which would leave the chat stuck on "working".
     if (!connected || liveTurn || attachments.some((a) => a.status === 'uploading')) return
     const content = overrideContent ?? input.trim()
@@ -203,6 +208,19 @@ export function ChatView({ active, onClose }: Props) {
     }
     if (!replaceFrom && files.length === 0 && isSlashInput(content) && (await runSlashCommand(content, tid))) return
     sendChat(tid, content, files, replaceFrom)
+  }
+
+  /** Puts a typed message in "Waiting to send" while HQ cannot be reached. Returns whether it did. */
+  const queueOffline = async (overrideContent?: string): Promise<boolean> => {
+    const content = overrideContent ?? input.trim()
+    if (!outboxChat.enabled || !content || editing || attachments.length > 0 || !activeThreadId) return false
+    const refused = await outboxChat.queue(activeThreadId, content)
+    if (refused) {
+      useHQStore.getState().setSystemNotice(refused)
+      return true
+    }
+    if (!overrideContent) draft.setText('')
+    return true
   }
 
   const startEdit = (m: ThreadMessage) => {
@@ -286,6 +304,16 @@ export function ChatView({ active, onClose }: Props) {
           onPick={(text) => draft.setText(text)}
         />
 
+        <OutboxGroup
+          entries={outboxChat.entries}
+          state={outboxChat.state}
+          inHub={false}
+          sending={outboxChat.sending}
+          textOf={(e) => (e.payload as { content: string }).content}
+          onRemove={(id) => void outboxChat.remove(id)}
+          onSendNow={(id) => void outboxChat.sendNow(id)}
+        />
+
         {liveTurn && !connected && (
           <div role="status" className="px-4 py-1.5 border-t border-amber-500/30 text-[11px] text-amber-400 bg-neutral-900/60">
             Connection lost. The reply keeps running on the server and shows here once you are back online.
@@ -318,6 +346,7 @@ export function ChatView({ active, onClose }: Props) {
           onSend={(content) => void handleSend(content)}
           onStop={handleStop}
           running={!!liveTurn}
+          canQueue={outboxChat.enabled && !!activeThreadId && !editing}
           attachments={attachments}
           onAddFiles={addFiles}
           onRemoveAttachment={draft.removeAttachment}

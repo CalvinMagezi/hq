@@ -324,6 +324,11 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [poll, clearScheduled])
 
+  // The socket dropping is the first sign HQ may be gone: ask at once instead of at the next poll.
+  useEffect(() => {
+    if (!socketOpen) void poll()
+  }, [socketOpen, poll])
+
   // Retries when online event fires.
   useEffect(() => {
     const onOnline = () => {
@@ -333,8 +338,32 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
     return () => window.removeEventListener('online', onOnline)
   }, [poll])
 
+  // The shell owns the one poller; other places read what it found (useSharedConnection).
+  useEffect(() => publish(view.state), [view.state])
+
   return {
     ...view,
     tryNow,
   }
+}
+
+let shared: ConnectionState = 'reconnecting'
+const sharedListeners = new Set<() => void>()
+
+function publish(state: ConnectionState) {
+  if (shared === state) return
+  shared = state
+  for (const l of sharedListeners) l()
+}
+
+/** The connection state the shell's hook last computed, for places that must not poll HQ again. */
+export function useSharedConnection(): ConnectionState {
+  return useSyncExternalStore(
+    (l) => {
+      sharedListeners.add(l)
+      return () => sharedListeners.delete(l)
+    },
+    () => shared,
+    () => shared,
+  )
 }

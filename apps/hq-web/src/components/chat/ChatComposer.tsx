@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { t } from '~/strings'
 import { Paperclip, Send, Square, WifiOff } from 'lucide-react'
 import { SlashCommandPalette, SLASH_COMMANDS, matchingSlashCommands, isSlashInput } from './SlashCommandPalette'
 import { ComposerAttachments, type PendingAttachment } from './AttachmentChips'
@@ -38,13 +39,15 @@ interface Props {
   onRetryAttachment: (id: string) => void
   /** The socket is up; while it is down the draft is kept and sending waits. */
   connected: boolean
+  /** With the socket down, a plain message can still be sent: it waits in the outbox. */
+  canQueue?: boolean
   /** An edited message keeps its earlier files, so it can be sent with no new text or files. */
   hasKeptFiles?: boolean
 }
 
 /** Message input with attachments, the slash-command palette and the send/stop button. */
 export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function ChatComposer(
-  { value, onChange, onSend, onStop, running, attachments, onAddFiles, onRemoveAttachment, onRetryAttachment, connected, hasKeptFiles = false },
+  { value, onChange, onSend, onStop, running, attachments, onAddFiles, onRemoveAttachment, onRetryAttachment, connected, canQueue = false, hasKeptFiles = false },
   ref,
 ) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -62,7 +65,8 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   const uploading = attachments.some((a) => a.status === 'uploading')
   const hasReady = attachments.some((a) => a.status === 'ready')
   // One reply at a time per chat: while one runs the button stops it, and Enter waits.
-  const canSend = connected && !running && !uploading && (!!value.trim() || hasReady || hasKeptFiles)
+  const queueing = !connected && canQueue && attachments.length === 0 && !hasKeptFiles
+  const canSend = (connected || queueing) && !running && !uploading && (!!value.trim() || hasReady || hasKeptFiles)
 
   const pickCommand = (cmd: string) => {
     const def = SLASH_COMMANDS.find((c) => c.name === cmd)
@@ -96,9 +100,9 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
     <div className="px-3 pt-2 pb-3 sm:px-4 sm:pb-4 hq-composer shrink-0 relative">
       {isSlashInput(value) && <SlashCommandPalette input={value} onSelect={pickCommand} />}
 
-      {!connected && (
+      {!connected && !canQueue && (
         <div className="flex items-center justify-center gap-1.5 pb-2 text-[11px] " style={{ color: 'var(--accent-amber)' }}>
-          <WifiOff className="w-3 h-3" /> Reconnecting. Your draft is kept and can be sent once HQ is back.
+          <WifiOff className="w-3 h-3" /> {t('outbox_shared_send')}
         </div>
       )}
 

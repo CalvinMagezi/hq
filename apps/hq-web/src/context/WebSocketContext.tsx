@@ -6,6 +6,9 @@ import { socketUrl } from '../lib/hqAuth'
 
 type MessageHandler = (msg: Record<string, unknown>) => void
 
+/** Chat events subscribers also hear: a reply ending, and HQ's answer about a sent message (the outbox waits on these). */
+const SHARED_CHAT_EVENTS = new Set(['turn_end', 'turn_start', 'chat_duplicate', 'chat_rejected'])
+
 interface WebSocketContextValue {
   /** False when the socket is not open: nothing was sent, so callers must not wait for a reply. */
   send: (data: object) => boolean
@@ -75,7 +78,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         try {
           const msg = JSON.parse(e.data) as Record<string, unknown>
           if (handleChatEvent(msg)) {
-            if (msg.type === 'turn_end') for (const handler of handlersRef.current) handler(msg)
+            if (SHARED_CHAT_EVENTS.has(String(msg.type))) for (const handler of handlersRef.current) handler(msg)
             return
           }
           if (msg.type === 'notification:badge_count') {
