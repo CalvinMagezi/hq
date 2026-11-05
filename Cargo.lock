@@ -3401,6 +3401,7 @@ dependencies = [
  "hq-db",
  "hq-gate",
  "iroh",
+ "iroh-relay",
  "qrcodegen",
  "rand 0.8.8",
  "serde",

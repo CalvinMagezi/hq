@@ -313,6 +313,7 @@ bridge:
       service: llm
       listen: /data/data/<app id>/files/hqhome/.hq/bridge/llm.sock
       fail_fast_secs: 3                # move to the cloud quickly when the laptop is away
+      when: direct                     # optional: never over mobile data through a relay
 
 backends:
   primary: laptop
@@ -350,6 +351,14 @@ straight away. Each request while the device is unreachable asks for one backgro
 time, nothing on a timer); once a try reaches the service, requests go through again. Leave it
 unset for forwards with no fallback, such as the web app or the host gate, where a slow answer is
 better than none. It takes 1 to 20.
+
+Give the forward `when: direct` to use the device only over a direct path, never through a relay:
+on a metered phone, a long prompt then never crosses mobile data to reach the laptop. A freshly
+dialed connection gets 2 s to move from the relay to a direct path (most do within a second on the
+same network); while only a relay reaches the device, every request through the forward ends at
+once, so the backend chain moves to the next backend. The connection is kept, and requests go
+through again as soon as it finds a direct path. The default, `when: any`, takes whichever path
+there is.
 
 Ollama's default context (4096 tokens on smaller machines) is shorter than HQ's prompt, and Ollama
 cuts the prompt without an error; set `OLLAMA_CONTEXT_LENGTH` (or the Ollama app's context length) to

@@ -2,7 +2,7 @@
 //! `hq bridge serve` and the desktop app both start a bridge from the same config, so the checks
 //! live here once.
 
-use crate::{Bridge, DoorTarget, ForwardListener, Services, run_forward};
+use crate::{Bridge, DoorTarget, ForwardListener, ForwardOptions, Services, run_forward};
 use anyhow::{Context, Result, anyhow, bail};
 use hq_core::config::{BridgeServicesConfig, DoorTarget as ConfigTarget};
 use std::collections::{BTreeMap, BTreeSet};
@@ -108,7 +108,10 @@ pub async fn start_forwards(bridge: &Bridge, config: &BridgeServicesConfig) -> R
                 f.peer,
                 f.service,
                 listener,
-                f.fail_fast,
+                ForwardOptions {
+                    fail_fast: f.fail_fast,
+                    direct_only: f.direct_only,
+                },
             ))),
             Err(e) if e.kind() == ErrorKind::AddrInUse => status.running_elsewhere = true,
             Err(e) => {

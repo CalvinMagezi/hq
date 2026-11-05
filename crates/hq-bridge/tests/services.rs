@@ -2,7 +2,9 @@
 //! migrated database: a forward on one reaches a service on the other, and nobody else does. The
 //! "service" is a plain TCP echo server standing in for the web server's or the gate's port.
 
-use hq_bridge::{Bridge, BridgeConfig, DoorTarget, Services, open_service, run_forward};
+use hq_bridge::{
+    Bridge, BridgeConfig, DoorTarget, ForwardOptions, Services, open_service, run_forward,
+};
 use hq_db::{Database, bridge as peers};
 use iroh::RelayMode;
 use std::{collections::BTreeMap, net::SocketAddr, sync::Arc, time::Duration};
@@ -28,13 +30,29 @@ struct Machine {
 
 impl Machine {
     async fn new(name: &str, services: Option<Services>) -> Self {
+        Self::on(
+            name,
+            services,
+            vec![LOOPBACK.parse().unwrap()],
+            RelayMode::Disabled,
+        )
+        .await
+    }
+
+    /// A machine with the given IP binds (none: reachable through `relay` only).
+    async fn on(
+        name: &str,
+        services: Option<Services>,
+        bind: Vec<SocketAddr>,
+        relay: RelayMode,
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open_memory().unwrap();
         let bridge = Bridge::start_with_services(
             BridgeConfig {
                 key: dir.path().join("bridge.key"),
-                bind: vec![LOOPBACK.parse().unwrap()],
-                relay: RelayMode::Disabled,
+                bind,
+                relay,
                 name: name.into(),
                 with_addrs: true,
                 advertise: vec![],
@@ -107,6 +125,19 @@ async fn forward_failing(
     service: &str,
     fail_fast: Option<Duration>,
 ) -> SocketAddr {
+    let options = ForwardOptions {
+        fail_fast,
+        ..Default::default()
+    };
+    forward_with(mac, peer, service, options).await
+}
+
+async fn forward_with(
+    mac: &Machine,
+    peer: &str,
+    service: &str,
+    options: ForwardOptions,
+) -> SocketAddr {
     let listener = TcpListener::bind(LOOPBACK).await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(run_forward(
@@ -114,9 +145,88 @@ async fn forward_failing(
         peer.to_string(),
         service.to_string(),
         listener,
-        fail_fast,
+        options,
     ));
     addr
+}
+
+/// A relay on loopback that admits anyone, and its URL.
+async fn loopback_relay() -> (iroh_relay::server::Server, iroh::RelayUrl) {
+    let mut config = iroh_relay::server::ServerConfig::default();
+    config.metrics_addr = None;
+    config.relay = Some(iroh_relay::server::RelayConfig::new((
+        std::net::Ipv4Addr::LOCALHOST,
+        0,
+    )));
+    let server = iroh_relay::server::Server::spawn(config).await.unwrap();
+    let url = format!("http://{}", server.http_addr().unwrap())
+        .parse()
+        .unwrap();
+    (server, url)
+}
+
+const DIRECT_ONLY: ForwardOptions = ForwardOptions {
+    fail_fast: None,
+    direct_only: true,
+};
+
+/// The time a local connection through `port` takes to be closed with nothing sent back.
+async fn time_to_refusal(port: SocketAddr) -> Duration {
+    let started = tokio::time::Instant::now();
+    assert_eq!(with_timeout(round_trip(port, b"hello")).await, None);
+    started.elapsed()
+}
+
+#[tokio::test]
+async fn a_direct_only_forward_works_on_a_direct_path() {
+    let (phone, mac) = pair().await;
+    let port = forward_with(&mac, &phone.id(), "web", DIRECT_ONLY).await;
+    assert_eq!(
+        with_timeout(round_trip(port, b"hello")).await.as_deref(),
+        Some(&b"hello"[..])
+    );
+}
+
+#[tokio::test]
+async fn a_direct_only_forward_refuses_a_peer_only_a_relay_reaches() {
+    let (_relay, url) = loopback_relay().await;
+    let llm = echo_server().await;
+    // The laptop has no IP transport at all, so every path to it goes through the relay.
+    let laptop = Machine::on(
+        "laptop",
+        Some(offering("llm", llm)),
+        vec![],
+        RelayMode::custom([url.clone()]),
+    )
+    .await;
+    let phone = Machine::on(
+        "phone",
+        None,
+        vec![LOOPBACK.parse().unwrap()],
+        RelayMode::custom([url]),
+    )
+    .await;
+    laptop.knows(&phone);
+    phone.knows(&laptop);
+
+    let any = forward(&phone, &laptop.id(), "llm").await;
+    assert_eq!(
+        with_timeout(round_trip(any, b"hello")).await.as_deref(),
+        Some(&b"hello"[..]),
+        "the relay carries it for a forward that takes any path"
+    );
+
+    let direct = forward_with(&phone, &laptop.id(), "llm", DIRECT_ONLY).await;
+    let first = time_to_refusal(direct).await;
+    assert!(
+        first < Duration::from_secs(5),
+        "first refusal took {first:?}"
+    );
+    let again = time_to_refusal(direct).await;
+    assert!(
+        again < Duration::from_millis(500),
+        "a kept relayed connection is refused at once, took {again:?}"
+    );
 }
 
 /// Writes `msg` and reads it back, or `None` if the line closed or stayed silent.
@@ -287,6 +397,7 @@ async fn a_forward_on_a_private_socket_reaches_the_service_and_is_not_taken_over
             service: "web".into(),
             listen: socket.display().to_string(),
             fail_fast_secs: None,
+            when: Default::default(),
         }],
         ..BridgeServicesConfig::default()
     };
