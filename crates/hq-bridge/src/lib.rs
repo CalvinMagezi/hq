@@ -32,6 +32,8 @@ pub use from_config::{ForwardStatus, Forwards, services_from_config, start_forwa
 pub use host::{Joiner, OpenTicket, PairRequest, PairingSpec, Registrar, Tuning};
 pub use iroh::{EndpointId, RelayMode, endpoint::Connection};
 pub use join::{JoinOptions, JoinResult, Joined};
-pub use services::{ForwardListener, SVC_ALPN, Services, open_service, run_forward};
+pub use services::{
+    ForwardListener, ForwardOptions, SVC_ALPN, Services, open_service, run_forward,
+};
 pub use setup::{Role, SETUP_ALPN, SetupConfig, SetupOutcome};
 pub use ticket::{LINK_SCHEME, Purpose, Ticket};

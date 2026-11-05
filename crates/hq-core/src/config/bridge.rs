@@ -104,6 +104,28 @@ pub struct BridgeForward {
     /// the device as long as a dial may take.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fail_fast_secs: Option<u64>,
+    /// `direct`: open new connections to the device only over a direct path (the same network,
+    /// or a hole punched through), and end them at once while only a relay reaches it, so a
+    /// prompt does not cross a metered link. The dial's handshake, keepalives and a stream already
+    /// open when the path falls back may still use the relay. `any`, the default, takes whichever
+    /// path there is.
+    #[serde(default, skip_serializing_if = "ForwardWhen::is_any")]
+    pub when: ForwardWhen,
+}
+
+/// Which paths a forward may use to reach its device.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ForwardWhen {
+    #[default]
+    Any,
+    Direct,
+}
+
+impl ForwardWhen {
+    pub fn is_any(&self) -> bool {
+        *self == Self::Any
+    }
 }
 
 /// Longest `fail_fast_secs`: past this a forward already waits that long without the option.
@@ -116,6 +138,7 @@ pub struct CheckedForward {
     pub service: String,
     pub listen: DoorTarget,
     pub fail_fast: Option<std::time::Duration>,
+    pub direct_only: bool,
 }
 
 /// An empty list would shut the service to everyone, which is almost surely a mistake: say so.
@@ -243,6 +266,7 @@ impl BridgeServicesConfig {
             };
             out.push(CheckedForward {
                 fail_fast,
+                direct_only: f.when == ForwardWhen::Direct,
                 peer: f.peer.trim().to_string(),
                 service: f.service.clone(),
                 listen,
@@ -330,6 +354,29 @@ mod tests {
                 "{unparsable}"
             );
         }
+    }
+
+    #[test]
+    fn a_forward_takes_any_path_unless_told_direct() {
+        let with = |when: &str| {
+            parse(&format!(
+                "forwards:\n  - peer: abc\n    service: llm\n    listen: 127.0.0.1:47600\n{when}"
+            ))
+        };
+        assert!(!with("").forwards().unwrap()[0].direct_only);
+        assert!(!with("    when: any\n").forwards().unwrap()[0].direct_only);
+        let direct = with("    when: direct\n");
+        assert!(direct.forwards().unwrap()[0].direct_only);
+        assert!(
+            serde_yaml::to_string(&direct)
+                .unwrap()
+                .contains("when: direct")
+        );
+        assert!(!serde_yaml::to_string(&with("")).unwrap().contains("when"));
+        assert!(serde_yaml::from_str::<BridgeServicesConfig>(
+            "forwards:\n  - peer: abc\n    service: llm\n    listen: 127.0.0.1:47600\n    when: lan\n"
+        )
+        .is_err());
     }
 
     #[test]

@@ -285,18 +285,45 @@ struct Link {
     down: AtomicBool,
     /// A background try is running.
     retrying: AtomicBool,
+    /// When the kept connection was dialed: a direct-only forward gives a connection this young
+    /// time to leave the relay, for every request that reaches it, not only the one that dialed.
+    dialed_at: std::sync::Mutex<Option<tokio::time::Instant>>,
+}
+
+impl Link {
+    fn dialed(&self) {
+        *self.dialed_at.lock().unwrap() = Some(tokio::time::Instant::now());
+    }
+
+    /// How much of [`DIRECT_WAIT`] the kept connection has left.
+    fn direct_grace(&self) -> Duration {
+        self.dialed_at
+            .lock()
+            .unwrap()
+            .map(|at| DIRECT_WAIT.saturating_sub(at.elapsed()))
+            .unwrap_or_default()
+    }
+}
+
+/// How a forward treats a peer that is slow, away or only behind a relay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ForwardOptions {
+    /// A peer that does not answer within this is marked unreachable, and while it is,
+    /// connections end at once, so a caller with a fallback (the backend chain) moves on.
+    pub fail_fast: Option<Duration>,
+    /// Use the peer only over a direct path: while only a relay reaches it, connections end at
+    /// once.
+    pub direct_only: bool,
 }
 
 /// Serves `listener` for as long as the task lives: each connection becomes one stream to
 /// `service` on `peer`. One connection to the peer is kept and opened again when it breaks.
-/// With `fail_fast`, a peer that does not answer within it is marked unreachable, and while it is
-/// connections end at once, so a caller with a fallback (the backend chain) moves on.
 pub async fn run_forward(
     dialer: Dialer,
     peer: String,
     service: String,
     listener: impl Into<ForwardListener>,
-    fail_fast: Option<Duration>,
+    options: ForwardOptions,
 ) {
     let listener = listener.into();
     let link = Arc::new(Link::default());
@@ -317,10 +344,13 @@ pub async fn run_forward(
         let (dialer, peer, service, link) =
             (dialer.clone(), peer.clone(), service.clone(), link.clone());
         tokio::spawn(async move {
-            match open_stream(&dialer, &peer, &service, &link, fail_fast).await {
+            match open_stream(&dialer, &peer, &service, &link, options).await {
                 Ok((send, recv)) => local.pipe(send, recv, SERVICE_IDLE).await,
-                // Expected while the peer is away, and as often as the caller asks: not a warning.
-                Err(e) if e.is::<Unreachable>() => tracing::debug!(%service, "bridge forward: {e}"),
+                // Expected while the peer is away or on a relay, and as often as the caller asks:
+                // not a warning.
+                Err(e) if e.is::<Unreachable>() || e.is::<NotDirect>() => {
+                    tracing::debug!(%service, "bridge forward: {e}")
+                }
                 Err(e) => tracing::warn!(%service, "bridge forward: {e:#}"),
             }
             drop(permit);
@@ -334,23 +364,30 @@ async fn open_stream(
     peer: &str,
     service: &str,
     link: &Arc<Link>,
-    fail_fast: Option<Duration>,
+    options: ForwardOptions,
 ) -> Result<(SendStream, RecvStream)> {
-    let Some(limit) = fail_fast else {
-        return stream_to(dialer, peer, service, &link.conn).await;
+    let direct = options.direct_only;
+    let Some(limit) = options.fail_fast else {
+        return stream_to(dialer, peer, service, link, direct).await;
     };
     if link.down.load(Ordering::SeqCst) {
-        retry_in_background(dialer, peer, service, link);
+        retry_in_background(dialer, peer, service, link, direct);
         return Err(Unreachable.into());
     }
-    let outcome = tokio::time::timeout(limit, stream_to(dialer, peer, service, &link.conn)).await;
-    if let Ok(Ok(stream)) = outcome {
-        return Ok(stream);
+    // A direct-only forward may also spend its grace on a new connection leaving the relay.
+    let budget = if direct { limit + DIRECT_WAIT } else { limit };
+    let outcome =
+        tokio::time::timeout(budget, stream_to(dialer, peer, service, link, direct)).await;
+    match outcome {
+        Ok(Ok(stream)) => return Ok(stream),
+        // The peer answered; it is only on the wrong path, which may change on the next request.
+        Ok(Err(e)) if e.is::<NotDirect>() => return Err(e),
+        _ => {}
     }
     // Only marked: other connections may be streaming over the kept connection, so closing it is
     // left to the background try, which alone uses it while the mark is set.
     link.down.store(true, Ordering::SeqCst);
-    retry_in_background(dialer, peer, service, link);
+    retry_in_background(dialer, peer, service, link, direct);
     match outcome {
         Ok(Err(e)) => Err(e),
         _ => Err(anyhow!("{peer} did not answer within {limit:?}")),
@@ -369,6 +406,42 @@ impl std::fmt::Display for Unreachable {
 
 impl std::error::Error for Unreachable {}
 
+/// A direct-only forward ended a connection because only a relay reaches the peer.
+#[derive(Debug)]
+struct NotDirect;
+
+impl std::fmt::Display for NotDirect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the peer is reachable only through a relay, and this forward is direct-only")
+    }
+}
+
+impl std::error::Error for NotDirect {}
+
+/// How long a freshly dialed connection may take to find a direct path before a direct-only
+/// forward gives up on it. Dials usually start on the relay and move once a hole is punched.
+const DIRECT_WAIT: Duration = Duration::from_secs(2);
+const DIRECT_POLL: Duration = Duration::from_millis(100);
+
+fn is_direct(conn: &Connection) -> bool {
+    crate::bridge::path_kind(conn) == "direct"
+}
+
+/// Whether `conn` is on a direct path, waiting up to `grace` for it to get there.
+async fn reaches_directly(conn: &Connection, grace: Duration) -> bool {
+    if is_direct(conn) || grace.is_zero() {
+        return is_direct(conn);
+    }
+    let deadline = tokio::time::Instant::now() + grace;
+    while tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(DIRECT_POLL).await;
+        if is_direct(conn) {
+            return true;
+        }
+    }
+    false
+}
+
 /// The kept connection's id, if there is one.
 async fn kept_id(link: &Link) -> Option<usize> {
     link.conn.lock().await.as_ref().map(Connection::stable_id)
@@ -377,7 +450,13 @@ async fn kept_id(link: &Link) -> Option<usize> {
 /// Tries the peer's service once in the background, one try at a time, and clears the
 /// unreachable mark when it answers. Tries start only when a local connection asks, so a phone
 /// with nothing to send does not keep dialing.
-fn retry_in_background(dialer: &Dialer, peer: &str, service: &str, link: &Arc<Link>) {
+fn retry_in_background(
+    dialer: &Dialer,
+    peer: &str,
+    service: &str,
+    link: &Arc<Link>,
+    direct_only: bool,
+) {
     if link.retrying.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -390,10 +469,11 @@ fn retry_in_background(dialer: &Dialer, peer: &str, service: &str, link: &Arc<Li
     tokio::spawn(async move {
         let tried = kept_id(&link).await;
         // The stream only proves the service answers; dropping it ends it on the far side.
-        if stream_to(&dialer, &peer, &service, &link.conn)
-            .await
-            .is_ok()
-        {
+        let answered = match stream_to(&dialer, &peer, &service, &link, direct_only).await {
+            Ok(_) => true,
+            Err(e) => e.is::<NotDirect>(),
+        };
+        if answered {
             link.down.store(false, Ordering::SeqCst);
         } else {
             // A kept connection that did not answer (a closed lid looks open) is not tried again:
@@ -417,8 +497,10 @@ async fn stream_to(
     dialer: &Dialer,
     peer: &str,
     service: &str,
-    kept: &tokio::sync::Mutex<Option<Connection>>,
+    link: &Link,
+    direct_only: bool,
 ) -> Result<(SendStream, RecvStream)> {
+    let kept = &link.conn;
     let mut slot = kept.lock().await;
     if let Some((code, reason)) = refusal(&dialer.standing(peer).await) {
         if let Some(conn) = slot.take() {
@@ -438,10 +520,15 @@ async fn stream_to(
                 .await
                 .context("the peer did not answer in time")??;
             *slot = Some(conn.clone());
+            link.dialed();
             conn
         }
     };
     drop(slot);
+    // The relayed connection is kept: it may still move to a direct path.
+    if direct_only && !reaches_directly(&conn, link.direct_grace()).await {
+        return Err(NotDirect.into());
+    }
     match open_service(&conn, service).await {
         // The connection broke under us: one fresh dial. A refusal by the service is final.
         Err(_) if conn.close_reason().is_some() => {
@@ -449,6 +536,10 @@ async fn stream_to(
                 .await
                 .context("the peer did not answer in time")??;
             *kept.lock().await = Some(fresh.clone());
+            link.dialed();
+            if direct_only && !reaches_directly(&fresh, link.direct_grace()).await {
+                return Err(NotDirect.into());
+            }
             open_service(&fresh, service).await
         }
         result => result,
