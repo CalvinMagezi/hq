@@ -25,6 +25,7 @@ import {
 } from '~/lib/notificationsApi'
 import { toastUndo, toastAlert } from '~/lib/toast'
 import { t, tn } from '~/strings'
+import { failureLine } from '~/lib/version'
 import { NotificationCard } from '~/components/notifications/NotificationCard'
 import { NotificationDetailDrawer } from '~/components/notifications/NotificationDetailDrawer'
 
@@ -142,8 +143,8 @@ function NotificationsPage() {
         t('restored_updates'),
         'undo.inbox_cleared',
       )
-    } catch {
-      toastAlert(t('fail_clear_updates_no_reply'))
+    } catch (err) {
+      toastAlert(failureLine(err, 'fail_clear_updates_newer', t('fail_clear_updates_no_reply')))
     }
   }
 

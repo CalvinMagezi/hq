@@ -33,3 +33,16 @@ test('availableTimeZones is sorted, unique and includes UTC', () => {
   expect(new Set(zones).size).toBe(zones.length)
   expect([...zones].sort()).toEqual(zones)
 })
+
+test('the old clock key moves to hq-display-tz on first read', async () => {
+  const store = new Map<string, string>([['hq.clock.timeZone', 'Africa/Kampala']])
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  }
+  const { readClockZone } = await import('./clock')
+  expect(readClockZone()).toBe('Africa/Kampala')
+  expect(store.get('hq-display-tz')).toBe('Africa/Kampala')
+  expect(store.has('hq.clock.timeZone')).toBe(false)
+})

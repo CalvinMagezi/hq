@@ -11,7 +11,9 @@ import { SettingsHome } from '~/components/settings/SettingsHome'
 import { Dialog } from '~/components/ui/Dialog'
 import { SignOutDialog } from '~/components/settings/BrowserSections'
 import { deviceTimeZone, useClockZone, zoneCity } from '~/lib/clock'
-import { readDataUsed, startDataCounter } from '~/lib/dataUsed'
+import { spendResetLine, useHqZone, zonesDiffer } from '~/lib/time'
+import { readDataUsed } from '~/lib/dataUsed'
+import { startDataCounter } from '~/lib/dataUsage'
 import { fetchHello } from '~/lib/hello'
 import { useInHub } from '~/lib/hubWindow'
 import { DEFAULT_PUSH_PREFS, getPushState, readPushPrefs } from '~/lib/webPush'
@@ -341,6 +343,7 @@ export function DevicesPage() {
 export function SpendingPage() {
   return (
     <div className="flex flex-col gap-6">
+      <p className="a-muted a-body-sm">{spendResetLine()}</p>
       <CopilotCreditsSection />
       <OpenRouterSpendSection />
       <UsagePage />
@@ -434,6 +437,7 @@ function useTrailing(hub: boolean, backup: BackupStatus | null): Record<string, 
   const prefs = useStoredPrefs()
   const pushOn = usePushOn()
   const zone = useClockZone() || deviceTimeZone()
+  const hqZone = useHqZone()
   const [used, setUsed] = useState<number | null>(null)
   useEffect(() => {
     startDataCounter()
@@ -443,7 +447,7 @@ function useTrailing(hub: boolean, backup: BackupStatus | null): Record<string, 
   const hello = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data
   return {
     notifications: hub ? '' : t(notif),
-    time: zoneCity(zone),
+    time: !hqZone ? zoneCity(zone) : zonesDiffer(hqZone, zone) ? t('tz_row_differ', { city: zoneCity(zone), hqCity: zoneCity(hqZone) }) : t('tz_row_same', { city: zoneCity(zone) }),
     version: hello ? t('trail_version', { version: hello.version }) : '',
     data: hub ? t('data_used_row_window') : used === null ? '' : t('data_used_row', { size: formatSize(used) }),
     signout: t(hub ? 'trail_sign_out_window' : 'trail_sign_out_browser'),

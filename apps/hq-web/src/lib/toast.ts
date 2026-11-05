@@ -20,6 +20,8 @@ export interface Toast {
   undo?: () => Promise<unknown>
   /** What the toast says once the restore went through. */
   restored?: string
+  /** A plain button on the toast, such as Reload. */
+  action?: { label: string; run: () => void }
   /** The counter an Undo press adds to in "What HQ noticed". */
   counter?: NoticedName
   /** When the change was made; the window runs from here. */

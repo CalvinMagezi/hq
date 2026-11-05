@@ -57,7 +57,7 @@ function LinkRow({ link }: { link: TaskLinkItem }) {
 
 /** What a task came from and produced: notes, chats, sessions, commits, pull requests, links and tasks. */
 export function TaskLinks({ task }: { task: TaskItem }) {
-  const links = usePolled(task.id, async () => (await fetchTaskLinksClient(task.id)).links, LINKS_POLL_MS)
+  const links = usePolled(task.id, async () => (await fetchTaskLinksClient(task.id)).links, LINKS_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], links.refresh)
   const { refresh } = links
   useEffect(() => {

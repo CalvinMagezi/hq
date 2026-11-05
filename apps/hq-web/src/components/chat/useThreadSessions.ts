@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useWS } from '~/context/WebSocketContext'
+import { visibleTimer } from '~/lib/visibleTimer'
 import { useHQStore } from '~/store/hqStore'
 import { sessionsApi, type WatchedSession } from '~/lib/sessionsApi'
 
@@ -45,10 +46,7 @@ export function useThreadSessions(threadId: string | null, active: boolean, poll
 
   useEffect(() => {
     if (!active || !threadId || !polling) return
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void refresh()
-    }, POLL_MS)
-    return () => clearInterval(timer)
+    return visibleTimer(() => void refresh(), POLL_MS)
   }, [active, threadId, polling, refresh])
 
   const sessions = loaded && loaded.threadId === threadId ? loaded.sessions : []

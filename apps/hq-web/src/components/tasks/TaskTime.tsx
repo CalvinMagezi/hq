@@ -92,8 +92,8 @@ function SessionRow({ session }: { session: WorkSession }) {
 
 /** Time on a task: planned against worked, where the time went, and which sessions did it. */
 export function TaskTime({ task }: { task: TaskItem }) {
-  const time = usePolled(task.id, () => fetchTaskTimeClient(task.id), TIME_POLL_MS)
-  const sessions = usePolled(`${task.id}|sessions`, async () => (await fetchTaskWorkSessionsClient(task.id)).work_sessions, TIME_POLL_MS)
+  const time = usePolled(task.id, () => fetchTaskTimeClient(task.id), TIME_POLL_MS, true, true, ['task:sync'])
+  const sessions = usePolled(`${task.id}|sessions`, async () => (await fetchTaskWorkSessionsClient(task.id)).work_sessions, TIME_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], time.refresh)
   useRefreshOn(['task:sync'], sessions.refresh)
   const { refresh: refreshTime } = time

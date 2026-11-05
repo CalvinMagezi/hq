@@ -39,6 +39,11 @@ export function ToastView({ toast, wide, bottom, onUndo, onClose }: { toast: Toa
           {t('undo')}
         </button>
       )}
+      {toast.action && (
+        <button type="button" className="a-snack-act" onClick={toast.action.run}>
+          {toast.action.label}
+        </button>
+      )}
       <button type="button" className="a-ib" aria-label={t('close')} onClick={onClose}>
         <X className="w-5 h-5" aria-hidden="true" />
       </button>
