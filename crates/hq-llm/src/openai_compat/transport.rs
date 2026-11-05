@@ -456,7 +456,10 @@ impl OpenRouterProvider {
                 }
                 return Err(LlmError::ServerError {
                     status,
-                    message: format!("streaming request failed: {}", &text[..text.len().min(300)]),
+                    message: format!(
+                        "streaming request failed: {}",
+                        &text[..text.floor_char_boundary(300)]
+                    ),
                 }
                 .into());
             }
