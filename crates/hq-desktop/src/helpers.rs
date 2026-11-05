@@ -1151,7 +1151,7 @@ mod tests {
             [std::ffi::OsString::from(TRY_MARKER)],
             "only the marker stays"
         );
-        let home = Path::new("/Users/someone");
+        let home = Path::new("/Users/you");
         assert!(!safe_try_dir(home, home));
         assert!(!safe_try_dir(Path::new("/Users"), home));
         assert!(!safe_try_dir(Path::new("/"), home));

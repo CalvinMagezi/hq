@@ -116,7 +116,7 @@ from you." and "Checked at 14:30, when you opened this tab." [Check all again].
 - **H4 · Apps that use HQ 1.** "Apps you open yourself that can use HQ. HQ does not start them." "Claude
   Desktop · App · 1.0.9 · not connected to HQ yet" [Connect to HQ]. No Try it.
 - **H5 · Checking.** "Checking 11 helpers and 1 app · 5 done" / "Two at a time. Most versions come from
-  the program's own files." Rows: "1.4.0 · new here: /Users/alex/.local/bin/agy", "Reading its version ·
+  the program's own files." Rows: "1.4.0 · new here: /Users/you/.local/bin/agy", "Reading its version ·
   Checking" (blue, spinner), "Looking for its program · Waiting its turn · Waiting" (grey).
 - **H6 · First open: ask before running anything.** "Check this computer for helpers" / "HQ Hub looks for each
   helper HQ can use and reads its version. Most versions come from the program's own files." / "Other
@@ -187,7 +187,7 @@ needs setting up is amber in the list but does not raise the count.
    (`crates/hq-sandbox`). Two at a time; a waiting one says so.
 3. **Cached by path, size and date** (modification time): opening the tab again runs nothing that has not
    changed. Check all again clears the cache.
-4. **A program seen for the first time** shows its full path once: "new here: /Users/alex/.local/bin/agy".
+4. **A program seen for the first time** shows its full path once: "new here: /Users/you/.local/bin/agy".
 5. **Refuse world-writable places** for any program HQ Hub would run or keep as a launch command.
 6. **On Windows,** checks run inside Ubuntu through `wsl.exe` by its full path and skip the Windows folders
    WSL adds to PATH (no `/mnt` paths).

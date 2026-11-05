@@ -143,7 +143,7 @@ need you (`.a-tab em.hub-need`). Content one column, 760 px wide at most, centre
   choice stays under the buttons: "Couldn't use that program. Anyone on this computer can change its folder.
   Choose one that only you can change." Technical details: "Looked in: next to HQ Hub, ~/bin,
   /usr/local/bin, each folder on PATH, then your login shell's PATH." Once chosen, the full path shows
-  once ("/Users/alex/bin/hq"), then the short form.
+  once ("/Users/you/bin/hq"), then the short form.
 - **P11 · The phone as the hub, helpers here off.** Status "Connected · HQ on your phone". Card "Helpers
   here, for HQ on your phone" / "Off" / "HQ runs on your phone, Pixel 8. This computer runs only the helpers it
   starts." [Start helpers here] [Open HQ]. A note that closes by hand: "First time in the HQ window? Sign

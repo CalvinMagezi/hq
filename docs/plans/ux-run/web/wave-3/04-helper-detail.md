@@ -61,7 +61,7 @@ Same window and frame. A back link "All helpers", the name as the title, a line 
   (this computer) and hq-pixel-8 (paired)"; "Try it: through HQ's host, the sandbox real work uses, folder
   ~/.hq/desktop/try-it, self-updater off".
 - **D2 · Trying it, where HQ answers the trust prompt (Antigravity).** Pill "Trying it" (blue). "1.4.0,
-  from its package file", "New here: /Users/alex/.local/bin/agy". "Trying Antigravity in the Try it folder
+  from its package file", "New here: /Users/you/.local/bin/agy". "Trying Antigravity in the Try it folder
   · 6 s" / "It asked whether to trust the folder. HQ answers yes for Antigravity, as it does for real
   work." / "No prompt is sent. Antigravity may contact its own service to check your sign-in." [Stop
   trying]. "Antigravity can use your notes, tasks and helpers · Connected. Restart Antigravity to see HQ."
