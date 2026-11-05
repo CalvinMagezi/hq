@@ -197,34 +197,7 @@ impl LlmProvider for OllamaProvider {
         // num_ctx consistently.  Real SSE streaming can be added later once
         // the byte-level parser is in place; for local inference (30-60 s/turn)
         // the buffering latency is negligible.
-        let resp = self.chat(request).await?;
-        let text = resp.message.content.clone();
-        let tool_calls = resp.message.tool_calls.clone();
-        let model = resp.model.clone();
-        let mut chunks: Vec<Result<StreamChunk>> = Vec::new();
-        if !text.is_empty() {
-            chunks.push(Ok(StreamChunk::Text(text)));
-        }
-        for (i, tc) in tool_calls.into_iter().enumerate() {
-            let args_str = serde_json::to_string(&tc.arguments).unwrap_or_default();
-            chunks.push(Ok(StreamChunk::ToolCallDelta {
-                index: i,
-                id: Some(tc.id),
-                name: Some(tc.name),
-                arguments_delta: args_str,
-            }));
-        }
-        chunks.push(Ok(StreamChunk::Usage {
-            input_tokens: resp.input_tokens,
-            output_tokens: resp.output_tokens,
-            cache_read_tokens: 0,
-            cache_write_tokens: 0,
-        }));
-        if !model.is_empty() {
-            chunks.push(Ok(StreamChunk::ModelInfo(model)));
-        }
-        chunks.push(Ok(StreamChunk::Done));
-        Ok(Box::pin(tokio_stream::iter(chunks)))
+        Ok(prompted_tools::buffered_stream(self.chat(request).await?))
     }
 }
 

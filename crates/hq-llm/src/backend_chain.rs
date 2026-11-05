@@ -164,12 +164,14 @@ fn build_api_provider(
             };
             let provider = compat_provider(&endpoint, &key, entry.effort.clone(), entry.wire)
                 .with_http_client(socket_client(entry)?);
-            Ok(Some(Arc::new(provider)))
+            Ok(Some(with_prompted_tools(entry, Arc::new(provider))))
         }
         BackendKind::Openrouter | BackendKind::KimiCode | BackendKind::OpenaiCompatible => {
             let endpoint = endpoint()?;
             Ok(resolve_credential(entry, creds).map(|key| {
-                openai_compat_provider(&endpoint, &key, entry.effort.clone(), entry.wire)
+                let provider =
+                    openai_compat_provider(&endpoint, &key, entry.effort.clone(), entry.wire);
+                with_prompted_tools(entry, provider)
             }))
         }
         BackendKind::AnthropicCompatible => {
@@ -178,6 +180,18 @@ fn build_api_provider(
                 Arc::new(AnthropicProvider::new_with_base(&key, &endpoint)) as Arc<dyn LlmProvider>
             }))
         }
+    }
+}
+
+/// The provider behind the prompted-tools shim when the entry asks for it.
+fn with_prompted_tools(
+    entry: &BackendEntry,
+    provider: Arc<dyn LlmProvider>,
+) -> Arc<dyn LlmProvider> {
+    if entry.prompted_tools {
+        Arc::new(crate::prompted_tools::PromptedToolsProvider::new(provider))
+    } else {
+        provider
     }
 }
 
@@ -365,7 +379,10 @@ mod tests {
                         .find(|l| l.to_ascii_lowercase().starts_with("host:"))
                         .unwrap_or_default()
                         .to_string();
-                    record.lock().unwrap().push(format!("{line} | {host}"));
+                    record
+                        .lock()
+                        .unwrap()
+                        .push(format!("{line} | {host} | {head}"));
                     let resp = format!(
                         "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                         body.len()
@@ -387,6 +404,7 @@ mod tests {
                 wire: WireApi::ChatCompletions,
                 enabled: true,
                 unix_socket: Some(socket.to_path_buf()),
+                prompted_tools: false,
             }
         }
 
@@ -429,6 +447,83 @@ mod tests {
                 seen[0].to_ascii_lowercase().contains("host: localhost"),
                 "{seen:?}"
             );
+        }
+
+        const TOOL_TAG_ANSWER: &str = r#"{"id":"x","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"Checking. <tool_call name=\"task_list\"><args>{\"limit\":3}</args></tool_call>"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
+
+        #[tokio::test]
+        async fn prompted_tools_puts_the_tools_in_the_prompt_and_reads_the_tags_back() {
+            use tokio_stream::StreamExt;
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("llm.sock");
+            let seen = serve(
+                tokio::net::UnixListener::bind(&socket).unwrap(),
+                TOOL_TAG_ANSWER,
+                "application/json",
+            )
+            .await;
+            let mut with_shim = entry(&socket);
+            with_shim.prompted_tools = true;
+            let provider = build_api_provider(&with_shim, &ConfigCredentials::default())
+                .unwrap()
+                .unwrap();
+            let mut asked = request();
+            asked.tools = vec![hq_core::types::ToolDefinition {
+                name: "task_list".into(),
+                description: "List tasks".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }];
+            let mut stream = provider.chat_stream(&asked).await.unwrap();
+            let (mut text, mut calls) = (String::new(), Vec::new());
+            while let Some(chunk) = stream.next().await {
+                match chunk.unwrap() {
+                    StreamChunk::Text(t) => text.push_str(&t),
+                    StreamChunk::ToolCallDelta {
+                        name,
+                        arguments_delta,
+                        ..
+                    } => calls.push((name, arguments_delta)),
+                    _ => {}
+                }
+            }
+            assert_eq!(text, "Checking.");
+            assert_eq!(
+                calls,
+                vec![(Some("task_list".to_string()), r#"{"limit":3}"#.to_string())]
+            );
+            let seen = seen.lock().unwrap().clone();
+            assert_eq!(seen.len(), 1, "{seen:?}");
+            assert!(
+                !seen[0].contains(r#""tools""#),
+                "no native tools field: {seen:?}"
+            );
+            assert!(
+                seen[0].contains("task_list"),
+                "the tool is in the prompt: {seen:?}"
+            );
+        }
+
+        #[tokio::test]
+        async fn without_prompted_tools_the_tools_go_in_the_tools_field() {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("llm.sock");
+            let seen = serve(
+                tokio::net::UnixListener::bind(&socket).unwrap(),
+                ANSWER,
+                "application/json",
+            )
+            .await;
+            let provider = build_api_provider(&entry(&socket), &ConfigCredentials::default())
+                .unwrap()
+                .unwrap();
+            let mut asked = request();
+            asked.tools = vec![hq_core::types::ToolDefinition {
+                name: "task_list".into(),
+                description: "List tasks".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }];
+            provider.chat(&asked).await.unwrap();
+            assert!(seen.lock().unwrap()[0].contains(r#""tools""#));
         }
 
         #[tokio::test]
@@ -580,6 +675,62 @@ mod tests {
         assert!(!should_fail_over(&overflow.into()));
     }
 
+    /// Opt-in check against a real model that ignores `tools`:
+    /// `HQ_TEST_PROMPTED_MODEL=gemma4:e2b cargo test -p hq-llm prompted_tools_live -- --ignored`
+    /// with Ollama on its default port.
+    #[tokio::test]
+    #[ignore = "needs Ollama on 127.0.0.1:11434 and HQ_TEST_PROMPTED_MODEL"]
+    async fn prompted_tools_live() {
+        let model = std::env::var("HQ_TEST_PROMPTED_MODEL").expect("HQ_TEST_PROMPTED_MODEL");
+        let entry = BackendEntry {
+            name: "local".into(),
+            kind: BackendKind::OpenaiCompatible,
+            endpoint: Some("http://127.0.0.1:11434/v1".into()),
+            credential_env: None,
+            model: Some(model.clone()),
+            effort: None,
+            wire: WireApi::ChatCompletions,
+            enabled: true,
+            unix_socket: None,
+            prompted_tools: true,
+        };
+        let provider = build_api_provider(&entry, &ConfigCredentials::default())
+            .unwrap()
+            .unwrap();
+        let request = ChatRequest {
+            model,
+            messages: vec![ChatMessage {
+                image_parts: Vec::new(),
+                role: MessageRole::User,
+                content: "What is the weather in Kampala right now? Use the tool.".into(),
+                tool_calls: vec![],
+                tool_call_id: None,
+                reasoning_content: None,
+            }],
+            tools: vec![hq_core::types::ToolDefinition {
+                name: "get_weather".into(),
+                description: "Current weather for a city".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"]
+                }),
+            }],
+            temperature: Some(0.0),
+            max_tokens: None,
+        };
+        let reply = provider.chat(&request).await.unwrap();
+        let call = reply.message.tool_calls.first().expect("a tool call");
+        assert_eq!(call.name, "get_weather", "{reply:?}");
+        assert!(
+            call.arguments
+                .to_string()
+                .to_lowercase()
+                .contains("kampala"),
+            "{reply:?}"
+        );
+    }
+
     #[test]
     fn a_backend_that_names_its_own_key_never_gets_the_generic_one() {
         let creds = ConfigCredentials {
@@ -597,6 +748,7 @@ mod tests {
             wire: WireApi::default(),
             enabled: true,
             unix_socket: None,
+            prompted_tools: false,
         };
         let unset = Some("HQ_TEST_UNSET_KEY_9C1D");
         let remote = "https://api.example.test/v1";

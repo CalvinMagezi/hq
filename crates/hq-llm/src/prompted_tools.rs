@@ -9,7 +9,9 @@
 //! ## Activation
 //!
 //! Call `needs_prompted_tools(model_id)` to decide whether to route through
-//! the shim. `OllamaProvider` checks this at request time.
+//! the shim. `OllamaProvider` checks this at request time; an
+//! `openai-compatible` backend opts in with `prompted_tools: true`, which
+//! wraps its provider in [`PromptedToolsProvider`].
 //!
 //! ## Format
 //!
@@ -27,9 +29,92 @@
 //! <tool_result name="spawn_subagent">{output}</tool_result>
 //! ```
 
-use hq_core::types::{ChatMessage, MessageRole, ToolCall, ToolDefinition};
+use std::{pin::Pin, sync::Arc};
 
-use crate::provider::ChatRequest;
+use anyhow::Result;
+use async_trait::async_trait;
+use hq_core::types::{ChatMessage, MessageRole, ToolCall, ToolDefinition};
+use tokio_stream::Stream;
+
+use crate::provider::{ChatRequest, ChatResponse, LlmProvider, StreamChunk};
+
+/// A provider whose model ignores the `tools` field: requests with tools carry them in the
+/// system prompt, and `<tool_call>` tags in the reply become native tool calls. Such replies are
+/// buffered, because a tag split across chunks cannot be told apart from text until it closes.
+pub struct PromptedToolsProvider {
+    inner: Arc<dyn LlmProvider>,
+}
+
+impl PromptedToolsProvider {
+    pub fn new(inner: Arc<dyn LlmProvider>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for PromptedToolsProvider {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
+        if request.tools.is_empty() {
+            return self.inner.chat(request).await;
+        }
+        let mut shimmed = request.clone();
+        inject_tool_prompt(&mut shimmed);
+        let mut resp = self.inner.chat(&shimmed).await?;
+        let (cleaned, calls) = promote_calls(&resp.message.content);
+        resp.message.content = cleaned;
+        if !calls.is_empty() {
+            resp.message.tool_calls = calls;
+        }
+        Ok(resp)
+    }
+
+    async fn chat_stream(
+        &self,
+        request: &ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
+        if request.tools.is_empty() {
+            return self.inner.chat_stream(request).await;
+        }
+        Ok(buffered_stream(self.chat(request).await?))
+    }
+
+    fn is_instrumented(&self) -> bool {
+        self.inner.is_instrumented()
+    }
+}
+
+/// A finished reply as the chunks a stream would have carried.
+pub(crate) fn buffered_stream(
+    resp: ChatResponse,
+) -> Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>> {
+    let mut chunks: Vec<Result<StreamChunk>> = Vec::new();
+    if !resp.message.content.is_empty() {
+        chunks.push(Ok(StreamChunk::Text(resp.message.content)));
+    }
+    for (i, tc) in resp.message.tool_calls.into_iter().enumerate() {
+        chunks.push(Ok(StreamChunk::ToolCallDelta {
+            index: i,
+            id: Some(tc.id),
+            name: Some(tc.name),
+            arguments_delta: serde_json::to_string(&tc.arguments).unwrap_or_default(),
+        }));
+    }
+    chunks.push(Ok(StreamChunk::Usage {
+        input_tokens: resp.input_tokens,
+        output_tokens: resp.output_tokens,
+        cache_read_tokens: resp.cache_read_tokens,
+        cache_write_tokens: resp.cache_write_tokens,
+    }));
+    if !resp.model.is_empty() {
+        chunks.push(Ok(StreamChunk::ModelInfo(resp.model)));
+    }
+    chunks.push(Ok(StreamChunk::Done));
+    Box::pin(tokio_stream::iter(chunks))
+}
 
 /// Model-id prefixes that require the shim. Kept small and conservative:
 /// adding a prefix here means "treat this model as lacking native tools".

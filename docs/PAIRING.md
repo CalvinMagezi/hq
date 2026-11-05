@@ -303,7 +303,9 @@ forward.
 
 An `openai-compatible` backend reaches a model through such a forward with `unix_socket`. Its
 `endpoint` keeps only the path; the host part is not used for the connection but is sent as `Host`,
-and `localhost` is what Ollama accepts.
+and `localhost` is what Ollama accepts. If the laptop's model ignores the `tools` field (HQ's chat
+then never calls a tool), add `prompted_tools: true` to the phone's backend entry: HQ describes the
+tools in the prompt and reads the model's `<tool_call>` tags back (`docs/architecture/model-selection.md`).
 
 ```yaml
 # On the phone: use the laptop's model, and the cloud when the laptop is away.
