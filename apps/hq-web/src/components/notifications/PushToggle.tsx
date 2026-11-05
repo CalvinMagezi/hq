@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { isSharedComputer } from '~/lib/sharedComputer'
 import { BellOff, BellRing, Loader2, Send } from 'lucide-react'
 import { disablePush, enablePush, getPushState, sendTestPush, type PushState } from '~/lib/webPush'
 
@@ -46,7 +47,8 @@ export function PushToggle() {
     }
   }
 
-  if (state === null) return null
+  // Push is never offered on a shared computer (rules-web.md 3).
+  if (state === null || isSharedComputer()) return null
   const hint = HINTS[state]
 
   return (

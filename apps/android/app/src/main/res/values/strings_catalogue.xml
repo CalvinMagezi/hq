@@ -108,4 +108,5 @@
     <string name="needs_folded_body">Open HQ to see them.</string>
     <string name="updates_folded">%1$s updates from HQ</string>
     <string name="updates_folded_body">Tap to read.</string>
+    <string name="shared_computer_label">This is a shared computer</string>
 </resources>

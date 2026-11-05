@@ -104,4 +104,5 @@ export const en = {
   needs_folded_body: "Open HQ to see them.",
   updates_folded: "{n} updates from HQ",
   updates_folded_body: "Tap to read.",
+  shared_computer_label: "This is a shared computer",
 } as const

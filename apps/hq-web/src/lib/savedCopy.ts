@@ -3,6 +3,7 @@
 // the HQ's install id from /api/hello and a different id never reads another's copy.
 
 import type { PersistedClient } from '@tanstack/react-query-persist-client'
+import { isSharedComputer } from './sharedComputer'
 
 const LAST_ID_KEY = 'hq-last-id'
 /** How long a first visit waits for /api/hello before it starts with no saved copy. */
@@ -47,7 +48,8 @@ export function hqIdReady(): Promise<string | null> {
 
 /** The worker names its API cache with the page's HQ id, so the page tells it. */
 export function tellWorkerHqId() {
-  if (!current || typeof navigator === 'undefined' || !navigator.serviceWorker) return
+  // On a shared computer the worker never learns the id, so it keeps no API copy.
+  if (!current || isSharedComputer() || typeof navigator === 'undefined' || !navigator.serviceWorker) return
   navigator.serviceWorker.controller?.postMessage({ type: 'hq-id', id: current })
 }
 
@@ -96,10 +98,13 @@ export interface KeyValue {
 export function keyedStorage(kv: KeyValue) {
   return {
     getItem: async (name: string): Promise<string | null> => {
+      if (isSharedComputer()) return null
       const id = await hqIdReady()
       return id ? ((await kv.get(keyFor(name, id))) ?? null) : null
     },
     setItem: async (name: string, value: string): Promise<void> => {
+      // A shared computer keeps nothing from HQ.
+      if (isSharedComputer()) return
       const id = currentHqId()
       if (id) await kv.set(keyFor(name, id), value)
     },

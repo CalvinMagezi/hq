@@ -32,7 +32,8 @@ import appCss from '../../app.css?url'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
-import { hqJson, needsSignIn, onSignInChange, signedOutElsewhere } from '~/lib/hqAuth'
+import { hqJson, needsSignIn, onSignInChange, refuseSignIn, signedOutElsewhere } from '~/lib/hqAuth'
+import { isSharedComputer, watchIdle } from '~/lib/sharedComputer'
 import { listenForWipe } from '~/lib/wipe'
 import { syncPushSubscription } from '~/lib/webPush'
 import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
@@ -174,6 +175,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
 
   // Another tab of this HQ was refused and wiped the browser: this one shows nothing either.
   useEffect(() => listenForWipe(signedOutElsewhere), [])
+  // A shared computer signs out after 30 minutes with no input, wiping what this tab held.
+  useEffect(() => (isSharedComputer() && !signInNeeded ? watchIdle(refuseSignIn) : undefined), [signInNeeded])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

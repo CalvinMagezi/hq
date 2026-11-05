@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } fro
 import { KeyRound } from 'lucide-react'
 import { hasWebToken, needsSignIn, onSignInChange, saveWebToken, takeLinkCode, wasSignedOut } from '~/lib/hqAuth'
 import { exchangeCode } from '~/lib/deviceSignIn'
+import { isSharedComputer, setSharedComputer } from '~/lib/sharedComputer'
+import { t } from '~/strings'
 
 const INPUT_CLASS =
   'flex-1 min-w-0 px-3 py-1.5 rounded-lg text-xs font-mono bg-white/5 border border-white/10 text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-white/30'
@@ -147,6 +149,24 @@ export function SignedOutView({ pathname, embedded }: { pathname: string; embedd
   )
 }
 
+/** Chosen before signing in: the sign-in then lasts for this tab only and nothing is kept here. */
+function SharedComputerChoice() {
+  const [shared, setShared] = useState(isSharedComputer)
+  return (
+    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-primary)' }}>
+      <input
+        type="checkbox"
+        checked={shared}
+        onChange={(e) => {
+          setSharedComputer(e.target.checked)
+          setShared(e.target.checked)
+        }}
+      />
+      {t('shared_computer_label')}
+    </label>
+  )
+}
+
 /**
  * Shown once the server answers 401: this browser has no web token, or one that was rotated.
  * The browser was wiped first (lib/wipe.ts), so nothing saved shows behind it.
@@ -177,6 +197,7 @@ export function SignInPrompt() {
           None of those? Ask whoever set up your HQ server for a new login link. If HQ runs on your own computer, run{' '}
           <code className="font-mono whitespace-nowrap">hq web link</code> there.
         </p>
+        <SharedComputerChoice />
         <CodeForm />
         <TokenForm replacing={replacing} />
       </div>

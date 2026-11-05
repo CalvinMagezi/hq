@@ -3,6 +3,7 @@
 // the server or its logs) and keeps it. With no token configured this is a no-op.
 
 import { markSynced } from './offlineCache'
+import { tokenStorage } from './sharedComputer'
 
 const STORAGE_KEY = 'hq-web-token'
 const LINK_PARAM = 'token'
@@ -27,10 +28,10 @@ function browserToken(): string | null {
   try {
     const fromLink = tokenFromLink(new URL(window.location.href))
     if (fromLink) {
-      localStorage.setItem(STORAGE_KEY, fromLink)
+      tokenStorage()?.setItem(STORAGE_KEY, fromLink)
       return fromLink
     }
-    return localStorage.getItem(STORAGE_KEY)
+    return tokenStorage()?.getItem(STORAGE_KEY) ?? null
   } catch {
     return null
   }
@@ -91,7 +92,9 @@ export function saveWebToken(raw: string): boolean {
   const token = tokenFromPaste(raw)
   if (!token) return false
   try {
-    localStorage.setItem(STORAGE_KEY, token)
+    const store = tokenStorage()
+    if (!store) return false
+    store.setItem(STORAGE_KEY, token)
     return true
   } catch {
     return false
@@ -154,8 +157,9 @@ export function refuseSignIn() {
 /** Removes the refused token right away, before any await, so a token pasted a moment later stays. */
 function dropRefusedToken() {
   try {
-    if (localStorage.getItem(STORAGE_KEY) === null) return
-    localStorage.removeItem(STORAGE_KEY)
+    const store = tokenStorage()
+    if (!store || store.getItem(STORAGE_KEY) === null) return
+    store.removeItem(STORAGE_KEY)
     signedOut = true
   } catch {
     // Blocked storage holds no token.

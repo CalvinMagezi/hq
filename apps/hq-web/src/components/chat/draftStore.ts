@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { currentHqId, keyFor } from '~/lib/savedCopy'
+import { isSharedComputer } from '~/lib/sharedComputer'
 import { MAX_ATTACHMENTS, isPreviewableImage, rejectReason, uploadChatFile, type ChatAttachment } from '~/lib/chatUploads'
 import type { PendingAttachment } from './AttachmentChips'
 
@@ -9,6 +10,7 @@ export const DRAFTS_KEY = 'hq-drafts'
 
 /** Drafts belong to one HQ (shared parts rule 7); with no HQ id yet they are not kept. */
 const textStorageKey = () => {
+  if (isSharedComputer()) return null
   const id = currentHqId()
   return id ? keyFor(DRAFTS_KEY, id) : null
 }
