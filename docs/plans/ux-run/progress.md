@@ -33,6 +33,8 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 
 ## Phone wave 0 (safety and shared parts)
 
+- [x] Test setup (resolutions.md D-11): Compose UI tests and a screenshot test under Robolectric (`app/src/test/.../testing/Screenshots.kt`, goldens in `src/test/resources/screenshots`, `-Phq.recordScreenshots=true` to re-record), and the `:lint-checks` module with `HqInlineText` (words in a composable come from the catalogue). The 137 inline strings found today are in `app/lint-baseline.xml`; new ones fail the build. Try: nothing on the phone.
+
 - [ ] mobile/wave-0/01-lock-screen.md
 - [ ] mobile/wave-0/02-safe-mode.md
 - [ ] mobile/wave-0/03-data-transfer.md

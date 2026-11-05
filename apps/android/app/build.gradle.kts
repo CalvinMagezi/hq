@@ -142,8 +142,20 @@ android {
     lint {
         // android.jar 36 holds APIs newer than minSdk 26. This check stops a call to one of them from
         // compiling and then crashing Android 8 to 10 (D8 backports some, such as List.of; lint knows which).
-        checkOnly += setOf("NewApi")
+        // HqInlineText (lint-checks): words a person reads come from the catalogue. The strings written
+        // inline before it existed are in the baseline, so only new ones fail; moving them shrinks it.
+        checkOnly += setOf("NewApi", "HqInlineText")
         abortOnError = true
+        baseline = file("lint-baseline.xml")
+    }
+
+    // Compose UI and screenshot tests run on the JVM under Robolectric (resolutions.md D-11).
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { test ->
+            // `-Phq.recordScreenshots=true` writes the golden screenshots after an intended change.
+            test.systemProperty("hq.recordScreenshots", project.findProperty("hq.recordScreenshots") ?: "false")
+        }
     }
 
     packaging {
@@ -187,4 +199,11 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // The platform's org.json is a stub in JVM unit tests.
     testImplementation("org.json:json:20250517")
+    testImplementation(platform("androidx.compose:compose-bom:2026.03.01"))
+    debugImplementation(platform("androidx.compose:compose-bom:2026.03.01"))
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    lintChecks(project(":lint-checks"))
 }
