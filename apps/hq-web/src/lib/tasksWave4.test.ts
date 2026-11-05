@@ -20,6 +20,6 @@ describe('tasks wave 4', () => {
   })
   test('board has a Move control that is not drag only', () => {
     const src = readFileSync('src/components/tasks/TaskBoardView.tsx', 'utf8')
-    expect(src).toContain('tasks_move_to')
+    expect(src).toContain('board_move')
   })
 })

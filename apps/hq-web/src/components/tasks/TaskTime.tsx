@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
+import { t } from '~/strings'
 import {
   fetchTaskTimeClient,
   fetchTaskWorkSessionsClient,
@@ -15,10 +16,10 @@ import { useRefreshOn } from '~/lib/useRefreshOn'
 const TIME_POLL_MS = 120_000
 const SESSIONS_SHOWN = 5
 const STATUS_LABEL: Record<string, string> = {
-  to_do: 'To do',
-  in_progress: 'In progress',
-  blocked: 'Blocked',
-  ready_for_review: 'Ready for review',
+  to_do: t('board_col_todo'),
+  in_progress: t('board_col_working'),
+  blocked: t('board_col_stuck'),
+  ready_for_review: t('board_col_ready'),
 }
 
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {

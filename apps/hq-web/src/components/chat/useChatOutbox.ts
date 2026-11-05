@@ -86,6 +86,7 @@ export function useChatOutbox(threadId: string | null) {
         (n, m) => {
           at = { n, m }
         },
+        'message',
       )
     } finally {
       draining.current = false

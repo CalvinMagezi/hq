@@ -81,11 +81,11 @@ test('the bar counts who tasks wait on with the owner first, and offers the thre
     <VerificationBarView status={status()} healthOpen={false} onToggleHealth={noop} onVerifyNow={noop} onAudit={noop} />
   )
   expect(html.indexOf('3 needs you')).toBeGreaterThan(-1)
-  expect(html.indexOf('3 needs you')).toBeLessThan(html.indexOf('12 queued'))
+  expect(html.indexOf('3 needs you')).toBeLessThan(html.indexOf('12 being checked'))
   expect(html).toContain('2 checks running')
-  expect(html).toContain('Verify now')
-  expect(html).toContain('Audit')
-  expect(html).not.toContain('watching only')
+  expect(html).toContain('Check them now')
+  expect(html).toContain('Spot checks')
+  expect(html).not.toContain('Watching only')
   expect(html).not.toContain('Waiting for budget')
 })
 
@@ -99,9 +99,9 @@ test('in shadow mode the bar says it only watches, and an empty queue says so', 
       onAudit={noop}
     />
   )
-  expect(html).toContain('watching only')
+  expect(html).toContain('Watching only')
   expect(html).toContain('Nothing waiting')
-  expect(html).toContain('Audit (4)')
+  expect(html).toContain('Spot checks (4)')
 })
 
 test('the queue panel puts alerts first and says why anything is deferred', () => {
@@ -197,11 +197,11 @@ test('a weekend of completions is a line per initiative and never a pass by pass
       })}
     />
   )
-  expect(html).toContain('Nothing needs you.')
-  expect(html).toContain('HQ verified and completed 200')
+  expect(html).toContain('Nothing happened that needs a decision.')
+  expect(html).toContain('Checked and finished')
   expect(html).toContain('150</span> in Website')
   expect(html).toContain('140 on machine checks and an independent review')
-  expect(html).toContain('3 tier 2')
+  expect(html).toContain('3 risky')
   expect(html).not.toContain('WRK-')
 })
 
@@ -248,10 +248,10 @@ test('a veto window names the task, counts down and offers the veto; shadow mode
     />
   )
   expect(html).toContain('WRK-009')
-  expect(html).toContain('completes in 5h 20m')
-  expect(html).toContain('Veto')
+  expect(html).toContain('Finishes in 5h 20m')
+  expect(html).toContain('Keep it open')
   expect(html).toContain('only watching')
-  expect(html).toContain('Failed and sent back without you (5)')
+  expect(html).toContain('Went back to be finished (5)')
   expect(html).toContain('a required check failed')
   expect(html).toContain('2 finished tasks wait for your look.')
 })
@@ -291,7 +291,7 @@ test('a plan shows the groups with what apply does to each, the estimate, and on
   expect(html).toContain('Plan ready')
   expect(html).toContain('2</span> passed')
   expect(html).toContain('Completed, with the evidence level recorded')
-  expect(html).toContain('Back to to_do with what to link; never completed')
+  expect(html).toContain('Sent back with what to link; never marked done')
   expect(html).toContain('2 reviewer runs, about $0.10 and 1 minute')
   expect(html).toContain('1 would wait on you')
   expect(html).toContain('Run it')
@@ -305,8 +305,8 @@ test('a plan shows the groups with what apply does to each, the estimate, and on
 
 test('while it runs there is progress and pause, and applying waits for the confirmation it needs', () => {
   const running = body(sweepDetail({ status: 'running' }, { progress: { total: 10, buckets: {}, states: { planned: 3, verdict: 7 } } }))
-  expect(running).toContain('Verifying')
-  expect(running).toContain('7 of 10 verified')
+  expect(running).toContain('Checking')
+  expect(running).toContain('7 of 10 done')
   expect(running).toContain('aria-valuenow="70"')
   expect(running).toContain('Pause')
   expect(running).not.toContain('Run it')
@@ -352,7 +352,7 @@ test('the scope picker only lets a choice start when it has what it needs', () =
     )
   expect(picker('all')).not.toMatch(/<button[^>]*\sdisabled=""[^>]*>(?:(?!<\/button>).)*Make the plan/)
   expect(picker('initiative')).toMatch(/<button[^>]*\sdisabled=""[^>]*>(?:(?!<\/button>).)*Make the plan/)
-  expect(picker('initiative')).toContain('Pick an initiative in the sidebar first.')
+  expect(picker('initiative')).toContain('Pick a list in the sidebar first.')
   expect(picker('selected')).toContain('Tick some tasks with Select first.')
   expect(picker('since')).toContain('Give a date as YYYY-MM-DD.')
   expect(picker('all')).toContain('Nothing moves until you read the groups and apply.')
@@ -397,7 +397,7 @@ const cardHtml = (over: Partial<Parameters<typeof AuditCardView>[0]> = {}) =>
 test('an audit card shows the task, how it was decided and each check, with one tap to answer', () => {
   const html = cardHtml()
   expect(html).toContain('WRK-001')
-  expect(html).toContain('Completed on machine checks and an independent review, tier 1')
+  expect(html).toContain('Marked done on machine checks and an independent review, Code changes')
   expect(html).toContain('different model')
   expect(html).toContain('1 of 2 criteria met')
   expect(html).toContain('the diff adds the check')
@@ -484,18 +484,18 @@ test('the drawer section shows who the task waits on, the latest verdict with it
   expect(html).toContain('a required check failed')
   expect(html).toContain('check test failed on abc123')
   expect(html).toContain('0 of 1 criterion met')
-  expect(html).toContain('1 earlier verdict')
-  expect(html).toContain('Second opinion')
-  expect(html).toContain('Complete anyway')
+  expect(html).toContain('1 earlier check')
+  expect(html).toContain('Ask for a second look')
+  expect(html).toContain('Mark done')
   // already in to_do: no pointless "return"
   expect(html).not.toContain('Send back')
   expect(verification(taskVerification(), { taskStatus: 'ready_for_review' })).toContain('Send back')
 })
 
 test('completing anyway is a two step action and a completed task offers neither override', () => {
-  expect(verification(taskVerification(), { confirmingComplete: true })).toContain('Tap again to complete it')
+  expect(verification(taskVerification(), { confirmingComplete: true })).toContain('Tap again to mark it done')
   const done = verification(taskVerification({ waiting_for: null }), { taskStatus: 'complete' })
-  expect(done).not.toContain('Complete anyway')
+  expect(done).not.toContain('Mark done')
   expect(done).toContain('Send back')
 })
 
@@ -509,18 +509,18 @@ test('a tier 2 window shows the countdown and the veto, and a pending second opi
     { taskStatus: 'ready_for_review' }
   )
   expect(html).toContain('Needs you.')
-  expect(html).toContain('it completes in 3h 0m unless you veto it.')
-  expect(html).toContain('Veto')
-  expect(html).toContain('Second opinion asked')
-  expect(html).toContain('asked, waiting for another verifier.')
+  expect(html).toContain('HQ marks it done in 3h 0m unless you keep it open.')
+  expect(html).toContain('Keep it open')
+  expect(html).toContain('Second look asked')
+  expect(html).toContain('asked, waiting for another checker.')
   const disagreed = verification(
     taskVerification({ second_opinion: { task_id: 'tk-1', display_id: 'WRK-001', requested_at: '', state: 'disagreed', detail: 'no test found', answered_at: '2026-10-22 04:00:00' } })
   )
-  expect(disagreed).toContain('it disagreed. no test found')
+  expect(disagreed).toContain('Another checker disagreed. no test found')
 })
 
 test('a task that was never verified says so', () => {
   const html = verification(taskVerification({ verdicts: [], waiting_for: null }))
-  expect(html).toContain('Not verified yet.')
-  expect(html).not.toContain('>Second opinion<')
+  expect(html).toContain('Not checked yet.')
+  expect(html).not.toContain('>Ask for a second look<')
 })

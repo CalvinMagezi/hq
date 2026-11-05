@@ -10,3 +10,17 @@ export function asksBeforeDone(previous: TaskItem | undefined, patch: Record<str
   if (patch.status !== 'complete' || !previous || previous.status === 'complete') return 0
   return dependentsOf(previous, all).length
 }
+
+export type DoneQuestion = 'check' | 'dependents' | null
+
+/** Which question a plain one-task done asks first: a pending check (P4), then waiting tasks (P3). */
+export function doneQuestion(
+  previous: TaskItem | undefined,
+  patch: Record<string, unknown>,
+  all: Iterable<TaskItem>,
+  checkPending: boolean,
+): DoneQuestion {
+  if (patch.status !== 'complete' || !previous || previous.status === 'complete') return null
+  if (checkPending) return 'check'
+  return dependentsOf(previous, all).length > 0 ? 'dependents' : null
+}

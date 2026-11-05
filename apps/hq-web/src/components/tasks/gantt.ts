@@ -4,6 +4,12 @@ import { formatDay, parseDay } from './dates'
 export type Zoom = 'week' | 'month'
 export type DragMode = 'move' | 'start' | 'end'
 
+export const ZOOM_KEY = 'hq.tasks.timeline.zoom'
+
+export function isZoom(v: unknown): v is Zoom {
+  return v === 'week' || v === 'month'
+}
+
 export const DAY_PX: Record<Zoom, number> = { week: 36, month: 12 }
 export const ROW_HEIGHT = 36
 export const BAR_INSET = 7

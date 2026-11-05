@@ -68,8 +68,8 @@ test('a stale task, a long running one and a blocked reason are each named on th
       })
     )
   )
-  expect(html).toContain('stale')
-  expect(html).toContain('long running')
+  expect(html).toContain('No change for')
+  expect(html).toContain('Long-running')
   expect(html).toContain('no staging key')
 })
 

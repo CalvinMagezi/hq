@@ -138,10 +138,11 @@ export function createOutbox(store: OutboxStore, now: () => number = Date.now) {
     hqId: string,
     send: (entry: OutboxEntry) => Promise<SendResult>,
     onProgress?: (n: number, m: number) => void,
+    only?: OutboxKind,
   ): Promise<void> {
     const at = now()
     const entries = await change(hqId, (list) => list.map((e) => (expired(e, at) ? { ...e, waited: true } : e)))
-    const queue = entries.filter((e) => !e.waited)
+    const queue = entries.filter((e) => !e.waited && (only === undefined || e.kind === only))
     for (const [i, entry] of queue.entries()) {
       onProgress?.(i + 1, queue.length)
       const result = await send(entry)

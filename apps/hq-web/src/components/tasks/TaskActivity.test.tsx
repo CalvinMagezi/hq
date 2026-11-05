@@ -198,7 +198,7 @@ const initiative = (over: Partial<InitiativeActivity> = {}): InitiativeActivity 
 
 test('the briefing shows counts, review waits, recorded blockers, contributors and gaps', () => {
   const out = plain(renderToString(<InitiativeBriefingView view={initiative()} nowMs={NOW} />))
-  expect(out).toContain('1 in progress, 1 ready for review')
+  expect(out).toContain('1 in progress, 1 ready to check')
   expect(out).toContain('Waiting for review')
   expect(out).toContain('WRK-002')
   expect(out).toContain('waiting on the bank')
