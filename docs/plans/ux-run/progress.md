@@ -75,14 +75,14 @@ the safer side.
 - [x] 02-dialogs-approvals.md: one red `<dialog>` for every confirm, approval cards that quote the tool and its arguments, red "Allow {verb}" for a losing request. Server: `owner_approvals`, `metadata.approval`, `loses` and `verb` on dialogs, no automatic yes to a losing dialog (N17, W15; see L1 to L3).
 - [x] 03-undo.md: Undo toasts for archive, clear and done, ten minutes on HQ; Clear all updates never touches Needs you (server fixed: it used to dismiss approvals too); Undo never brings back a declined approval.
 - [x] 04-plain-words.md: Helpers, Inbox with Needs you, Updates and Done, Messaging apps, Let HQ say yes to its requests, whole relative times.
-- [ ] 05-sign-in-safety.md: server built (names from the user agent, 90 days unused then signed out unless kept, Needs you item per new sign-in, `shared`, `DELETE /api/auth/devices/current`, WEB_AUTH.md); screens in progress.
+- [x] 05-sign-in-safety.md: names from the user agent, 90 days unused then signed out unless kept (an expired row stays, so sign-in never turns off), a Needs you item per new sign-in with It was me and Sign it out, This is a shared computer, Sign out this browser, WEB_AUTH.md.
 
 ### Phone wave 1
 
 - [x] 03-destructive.md: red dialogs through `ui/shell/Confirm.kt`, Undo through `ui/shell/Undo.kt`, server restore routes for chats, updates and tasks (ten minutes, 409 "changed" after).
 - [x] 01-notifications.md: the first-run Notifications step, the upgrader sheet once, Turn on in three places, folding, the replay when notifications come back (C-11), "Messaging apps" (B15).
-- [ ] 02-backup.md and 05-progress.md: in progress, with the Inbox reading `loses` and `verb` from HQ instead of the card's words.
-- [ ] 04-plain-words.md: next.
+- [x] 02-backup.md and 05-progress.md: the backup row and Home card from facts, Save a copy with its states, `GET /api/backup/status`, progress counts and 99+; the Inbox's red Allow {verb} now comes from HQ (`metadata.approval`), never the card's words.
+- [ ] 04-plain-words.md: first slice merged; the rest and times as instants in progress.
 
 ## Try this now
 
@@ -141,6 +141,24 @@ Gates at hand-over: workspace clippy clean; `cargo test --workspace` 5444 passed
 
 Device checks still to log in `mobile/device-checks.md`: wave 0 rows (lock-screen swap on a real lock,
 Smart Switch or Google copy, a 4 GB zip on 8.1).
+
+### Web wave 1 (2026-11-05)
+
+Build the web app and restart HQ after it (the page's script hashes are read when HQ starts):
+`cd apps/hq-web && bun run build && cd ../.. && ./scripts/install-hq.sh`, then `hq web --json`.
+
+1. Settings: `/settings` opens This browser › Notifications. The list has the phone's four groups and no Claude row. Inside HQ Hub the group reads This window.
+2. A losing request: ask the chat to delete a task. The Inbox card quotes `task_delete` and its arguments, then In HQ's words, with Decline and a red Allow delete. Ask it to list files instead: the button is green Allow once.
+3. Drive never says yes to a losing dialog: let a helper ask to run `rm -rf build` with Drive on. It stays waiting for you; its Watching panel says only the owner may say yes.
+4. Undo: archive a chat, then Undo in the toast; clear one update, then Undo. After ten minutes Undo says it changed or too much time passed.
+5. Clear all updates leaves every Needs you item in place.
+6. A new sign-in: in a second browser profile sign in with a code. The first browser's Inbox shows A new sign-in to your HQ with It was me and Sign it out. Sign it out asks once in a red dialog; the second browser then sees only Sign in.
+7. Other devices: the code card says "Type this only into HQ on your own device." Rows are named like "Firefox on Windows". A row's menu has Keep signed in.
+8. Shared computer: tick This is a shared computer on the sign-in sheet. Close the tab and open HQ again: signed out, nothing stored.
+
+Checked in a browser against a test HQ (`target/debug/hq` from this branch, a throwaway vault and token): items 1, 2 (card and words), 6 and 7, and the sign-in sheet's words. That check found and fixed: the red dialog drawn off screen, updates listed under Needs you, a notice offered as an approval, the Notifications row saying on while push was off, "used not used yet". Not checked in a browser: 3 (needs a real helper), 4 past ten minutes, 8.
+
+Gates: web 521 tests, typecheck and build pass; hq-core 296, hq-db, hq-tools and hq-web suites pass; clippy clean on the touched crates. The review of the approval and sign-in seams found the losing check failing open on shell keywords, wrapper options, `xargs`, `find -delete` and hidden code; fixed and tested (commit d24ca547).
 
 ## Found by the owner
 
