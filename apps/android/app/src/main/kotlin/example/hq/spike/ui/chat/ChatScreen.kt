@@ -137,7 +137,7 @@ private fun StartingBanner() {
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text(example.hq.spike.ui.startup.StartupWords.STARTING_BANNER, style = HqType.BodySm, color = Mts.Ink)
+        Text(androidx.compose.ui.res.stringResource(example.hq.spike.R.string.start_chat_banner), style = HqType.BodySm, color = Mts.Ink)
     }
 }
 

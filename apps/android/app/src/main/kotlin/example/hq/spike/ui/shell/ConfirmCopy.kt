@@ -16,6 +16,8 @@ object ConfirmCopy {
 
     fun signOutAll(c: Context) = red(c, c.getString(R.string.sign_out_all_title), c.getString(R.string.sign_out_all_body), c.getString(R.string.sign_out_all_keep), c.getString(R.string.sign_out_all_act), R.string.confirm_busy_signing_out)
 
+    fun deleteSpeech(c: Context) = red(c, c.getString(R.string.speech_delete_title), c.getString(R.string.speech_delete_body, c.getString(R.string.dl_mb, example.hq.spike.download.DownloadRules.sizeMb(example.hq.spike.voice.VoiceModels.SIZE_BYTES))), c.getString(R.string.speech_delete_keep), c.getString(R.string.speech_delete_act), R.string.confirm_busy_working)
+
     fun disconnectApp(c: Context, app: String) = red(c, c.getString(R.string.disconnect_app_title, app), c.getString(R.string.disconnect_app_body, app), c.getString(R.string.disconnect_app_keep, app), c.getString(R.string.disconnect_app_act, app), R.string.confirm_busy_disconnecting)
 
     fun unlinkAccount(c: Context, app: String) = red(c, c.getString(R.string.unlink_account_title, app), c.getString(R.string.unlink_account_body, app), c.getString(R.string.unlink_account_keep), c.getString(R.string.unlink_account_act), R.string.confirm_busy_unlinking)

@@ -85,7 +85,6 @@ import example.hq.spike.ui.shell.Links
 import androidx.compose.runtime.remember
 import example.hq.spike.ui.settings.PhoneFix
 import example.hq.spike.ui.settings.PhoneIntents
-import example.hq.spike.ui.startup.DidNotStartScreen
 import example.hq.spike.ui.startup.StartingScreen
 import example.hq.spike.ui.startup.StartupWords
 import example.hq.spike.ui.startup.Startup
@@ -97,6 +96,7 @@ import example.hq.spike.ui.firstrun.FirstRunStore
 import example.hq.spike.ui.firstrun.FirstRunViewModel
 import example.hq.spike.ui.firstrun.Step
 import example.hq.spike.ui.startup.FirstLaunch
+import example.hq.spike.ui.startup.StartRules
 import example.hq.spike.ui.usage.ChipTarget
 import example.hq.spike.ui.usage.UsageViewModel
 import example.hq.spike.ui.usage.balanceFixture
@@ -134,6 +134,7 @@ class ShellActivity : ComponentActivity() {
 
     private var notifFacts by mutableStateOf<NotifFactsNow?>(null)
     private var upgraderOpen by mutableStateOf(false)
+    private var connectionOpen by mutableStateOf(false)
     private var turnOnOrigin = NotifOrigin.Later
 
     /** Set while the owner is in Android's settings for a Turn on, so coming back counts a grant. */
@@ -204,6 +205,7 @@ class ShellActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.getStringExtra(EXTRA_SHEET) == "connection") connectionOpen = true
         countNoticeTap(intent)
         val link = linkOf(intent) ?: return
         // Shared text is kept even when the pages cannot be closed: it joins the chat's draft, and nothing typed there is lost.
@@ -284,7 +286,7 @@ class ShellActivity : ComponentActivity() {
         val active = (java.io.File(filesDir, "mode").takeIf { it.length() <= MODE_FILE_MAX }?.readText()?.trim() ?: "") == "active"
         val log = StartupWords.cleanLog(tailOf(java.io.File(filesDir, "hq.log")))
         val build = packageManager.getPackageInfo(packageName, 0).let { "${it.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build ${if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) it.longVersionCode else it.versionCode.toLong()}" }
-        val text = StartupWords.details(build, active, StartupWords.failedLines(example.hq.spike.ui.shell.Words.of(this), HubService.lastStart(this), HubService.lastExit(this)), log)
+        val text = StartupWords.details(build, active, StartupWords.failedLines(example.hq.spike.ui.shell.Words.of(this), HubService.lastStart(this), HubService.lastExit(this), StartRules.STILL_OPENING_S), log)
         (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
         android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
     }
@@ -380,37 +382,38 @@ class ShellActivity : ComponentActivity() {
             }
             // A socket that has only just dropped (or not yet opened) is not worth a "Saved" line.
             val shown = when {
-                status is HqStatus.Starting && fixture == null -> status
+                (status is HqStatus.Starting || status is HqStatus.Restarting || status is HqStatus.Stopped) && fixture == null -> status
                 offlineSince != null && now - offlineSince >= OFFLINE_GRACE_MS -> HqStatus.Saved(ChatTime.short(offlineSince, now))
                 else -> HqStatus.Live
             }
-            val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; "x-failed" -> Startup.DidNotStart; else -> null }
+            val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; else -> null }
             val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
             val firstRunUi by firstRun.ui.collectAsStateWithLifecycle()
-            val startup = startupFixture ?: if (fixture == null) StartupWords.decide(status, firstDone) else Startup.None
+            val coverRemoval = remember { example.hq.spike.update.Updater.startCoverRemoval(this@ShellActivity) }
+            val startup = startupFixture ?: if (fixture == null) StartRules.decide(status, firstDone, coverRemoval) else Startup.None
+            val freeBytes by services.freeBytes.collectAsStateWithLifecycle()
+            val stopped = shown as? HqStatus.Stopped
+            LaunchedEffect(stopped != null) {
+                val now = System.currentTimeMillis()
+                if (stopped != null && StartRules.autoOpenOk(StartRules.lastAutoOpen(this@ShellActivity), now)) { StartRules.markAutoOpen(this@ShellActivity, now); connectionOpen = true }
+            }
             val notifUi = notifFacts?.let { NotifUi(it, ::turnOnNotifications) }
             HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
-                else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
-                else if (startup == Startup.DidNotStart) androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                    DidNotStartScreen(StartupWords.failedLines(example.hq.spike.ui.shell.Words.of(this@ShellActivity), HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
-                    androidx.compose.material3.TextButton(
-                        { example.hq.spike.safe.SafeModeActivity.open(this@ShellActivity) },
-                        Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).size(width = 280.dp, height = 48.dp),
-                    ) { androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(R.string.safe_sheet_button), color = Mts.BrandBlue) }
-                }
+                else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.step ?: 1, (status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
                 else HqShell(
+                    onStatus = { connectionOpen = true },
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
                     subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
                     topActions = { place ->
                         if (place == Place.Tasks && tasksState.tab == TaskTab.All) IconButton({ tasks.actions.onFilter(true) }, Modifier.size(48.dp)) { Icon(HqIcons.Filter, "Filter", Modifier.size(24.dp), tint = if (tasksState.scope == TaskScope.Everything) Mts.Ink else Mts.BrandGreen) }
                     },
-                    balance = if (shown is HqStatus.Starting) null else balance,
+                    balance = if (shown is HqStatus.Starting || shown is HqStatus.Restarting) null else balance,
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (connectionOpen) ConnectionHost(shown, freeBytes); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
@@ -423,6 +426,28 @@ class ShellActivity : ComponentActivity() {
                 }
             } }
         }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun ConnectionHost(status: HqStatus, freeBytes: Long?) {
+        val w = example.hq.spike.ui.shell.Words.of(this)
+        val saved = StartRules.lastAnswer(this).takeIf { it > 0 }
+        val facts = example.hq.spike.ui.connection.ConnectionFacts(
+            freeBytes = freeBytes,
+            savedAt = saved?.let { w.clock(java.time.Instant.ofEpochMilli(it)) },
+            stoppedAtStep = (status as? HqStatus.Stopped)?.step,
+            details = StartupWords.failedLines(w, HubService.lastStart(this), HubService.lastExit(this), (status as? HqStatus.Stopped)?.let { (System.currentTimeMillis() - it.sinceMs) / 1000 } ?: StartRules.STILL_OPENING_S),
+        )
+        example.hq.spike.ui.connection.ConnectionSheet(
+            status, facts,
+            example.hq.spike.ui.connection.ConnectionActions(
+                onStartHq = { connectionOpen = false; tryStartAgain() },
+                onSaveCopy = { connectionOpen = false; example.hq.spike.safe.SafeModeActivity.open(this) },
+                onAndroidSettings = { openBatterySettings() },
+                onRestart = { connectionOpen = false; HubService.restartHq(); HqServices.get(applicationContext).restartWait() },
+                onCopyDetails = ::copyStartDetails,
+            ),
+        ) { connectionOpen = false }
     }
 
     @androidx.compose.runtime.Composable
@@ -510,7 +535,9 @@ class ShellActivity : ComponentActivity() {
         HelperOverlays(helpersState, helpers.actions)
     }
 
-    private companion object {
+    companion object {
+        /** The running notice sets this to "connection" so a tap on a stopped HQ opens the sheet. */
+        const val EXTRA_SHEET = "sheet"
         const val STATE_WEB = "web"
         const val STATUS_TICK_MS = 5_000L
         const val OFFLINE_GRACE_MS = 5_000L

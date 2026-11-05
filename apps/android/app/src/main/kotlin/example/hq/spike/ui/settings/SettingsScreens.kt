@@ -143,6 +143,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Technical -> "Technical details"
     SettingsPage.Noticed -> "What HQ noticed"
     SettingsPage.Update -> "Update AgentHQ"
+    SettingsPage.Speech -> "Speech model"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -161,7 +162,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-                Text(if (ui.page == SettingsPage.Update) stringResource(R.string.upd_page_title) else pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
+                Text(if (ui.page == SettingsPage.Update) stringResource(R.string.upd_page_title) else if (ui.page == SettingsPage.Speech) stringResource(R.string.speech_title) else pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
             }
             when (ui.page) {
                 SettingsPage.Home -> Home(ui, actions)
@@ -180,6 +181,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.StoredKeys -> StoredKeysPage()
                 SettingsPage.Technical -> Technical(ui, actions)
                 SettingsPage.Update -> UpdatePage(ui, actions)
+                SettingsPage.Speech -> SpeechPage(ui, actions)
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
@@ -194,6 +196,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         ui.keySheet?.let { KeySheetView(it, actions) }
         ui.askDisconnect?.let { p -> ConfirmDialog(ConfirmCopy.disconnectApp(context, SettingsWords.appName(p)), { actions.onAskDisconnect(null) }, actions.onDisconnect) }
         ui.askReplace?.let { p -> ConfirmDialog(ConfirmCopy.unlinkAccount(context, SettingsWords.appName(p)), { actions.onAskReplace(null) }, { actions.onPair(p, true) }) }
+        if (ui.askDeleteSpeech) ConfirmDialog(ConfirmCopy.deleteSpeech(context), { actions.onAskDeleteSpeech(false) }, actions.onDeleteSpeech)
         if (ui.askSignOutAll) ConfirmDialog(ConfirmCopy.signOutAll(context), { actions.onSignOutAll(false) }, actions.onSignOutAllConfirm)
         ui.askSignOut?.let { d -> ConfirmDialog(ConfirmCopy.signOutDevice(context, d.label), { actions.onAskSignOut(null) }, actions.onSignOutConfirm, busy = ui.busy == "out:${d.id}", error = ui.signOutError) }
         if (ui.askServerDisconnect) ConfirmDialog(ConfirmCopy.disconnectServer(context, ConfirmCopy.hostOf(ui.notif.server.address)), { actions.onAskServerDisconnect(false) }, actions.onServerDisconnect)

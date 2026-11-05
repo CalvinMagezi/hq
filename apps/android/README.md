@@ -125,9 +125,11 @@ lets in only apps that hold the microphone permission. Before the models are dow
 People open with "Hey HQ" out of habit; the recogniser has never learned "HQ" and writes it as "Ue",
 "Ahq" and so on, so `voice/Invocation.kt` takes that greeting off the start before the question is sent.
 
-The speech model (about 55 MB) is downloaded once, after the owner taps Get under a notice, from the
-sherpa-onnx releases on GitHub. Each archive has a pinned SHA-256 in `voice/VoiceModels.kt`, and only the
-named files are unpacked into `no_backup/voice/`. The download sends nothing about the owner. Logcat gets
+The speech model (57 MB) is downloaded once, after the owner taps Download in the voice sheet, from the
+sherpa-onnx releases on GitHub. It is one job on the shared download engine (`download/`), so it asks before
+using mobile data or a paid Wi-Fi, resumes, and shows in the Downloads notice. The archive has a pinned
+SHA-256 in `voice/VoiceModels.kt`, and only the named files are unpacked into `no_backup/voice/`. When it
+lands the sheet says so and waits for a tap: nothing listens by itself. Settings, Speech model deletes it. The download sends nothing about the owner. Logcat gets
 the sheet's phase changes with a clock (`adb logcat -s HqVoice`), never the words.
 
 Test it beside the real app without touching it: `./gradlew :app:assembleDebug -Phq.appId=online.agenthq.voicetest`,
