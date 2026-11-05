@@ -3,93 +3,124 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HQ</title>
+  <title>HQ Hub</title>
+  <link rel="stylesheet" href="aligned-ui.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>HQ</h1>
-    <nav aria-label="Sections">
-      <button type="button" data-tab="host" aria-selected="true">Host</button>
-      <button type="button" data-tab="devices" aria-selected="false">Devices</button>
-      <button type="button" data-tab="claude" aria-selected="false">Claude</button>
+  <div class="a-app hub-app" id="app">
+    <nav class="a-tabs" aria-label="Sections">
+      <button type="button" class="a-tab" role="tab" data-tab="computer" aria-selected="true">This computer</button>
+      <button type="button" class="a-tab" role="tab" data-tab="devices" aria-selected="false">Devices</button>
+      <button type="button" class="a-tab" role="tab" data-tab="helpers" aria-selected="false">Helpers <em id="tab-need" class="hub-need" hidden></em></button>
     </nav>
-  </header>
 
-  <main>
-    <section id="tab-host">
-      <h2>Host</h2>
-      <p>The Start button runs HQ on this Mac. When this Mac works with the HQ on your phone, it starts only the coding agents here, since HQ itself is on the phone. This app starts it only when you press Start, and stops what it started when you quit. It never starts anything when you log in.</p>
-      <p class="row"><span id="host-state" class="badge">Checking</span><span id="host-detail" class="muted"></span></p>
-      <p class="row">
-        <button type="button" id="host-start">Start host</button>
-        <button type="button" id="host-stop">Stop host</button>
-        <button type="button" id="open-hq">Open HQ</button>
-      </p>
-      <div id="hub-held" class="card" role="status" hidden>
-        <p class="row"><strong>Couldn't open HQ on your phone</strong><span class="badge">Port in use</span></p>
-        <p>Another program holds this port. HQ Hub won't send your sign-in there.</p>
-        <p class="muted">Often it is another HQ pairing started in a terminal. Close it, then look again.</p>
-        <p class="muted">Open HQ waits until HQ Hub holds the port itself.</p>
-        <details><summary>Technical details</summary><p><code id="hub-held-detail"></code></p></details>
-        <p><button type="button" id="hub-look-again">Look again</button></p>
-      </div>
-      <p class="muted">Open HQ shows the HQ on your phone. The first time, it asks you to sign in: on the phone, open Settings, Devices, press Sign in another device, and type the code it shows into the window's Use code box. You stay signed in after that.</p>
-      <p><label><input type="checkbox" id="set-start-on-launch"> Start the host when this app opens</label></p>
-      <p id="host-error" class="error" role="alert"></p>
-
-      <h3>Coding agents</h3>
-      <p class="muted">The agents running on this Mac's host, the ones waiting for you first. Answer them in HQ.</p>
-      <ul id="agents" class="list"></ul>
-      <p id="agents-empty" class="muted"></p>
-    </section>
-
-    <section id="tab-devices" hidden>
-      <h2>Devices</h2>
-      <div id="devices-off">
-        <p>Pair a phone or another computer with a QR code. Switching this on opens a network port for devices you have paired; nobody else is let in. Nothing listens until you do.</p>
-        <p class="row"><button type="button" id="devices-on">Switch on</button></p>
-      </div>
-      <div id="devices-on-block" hidden>
-        <p class="row"><strong id="this-name"></strong><span class="muted">id <code id="this-id"></code></span></p>
-        <p class="row">
-          <button type="button" id="show-code">Show pairing code</button>
-          <button type="button" id="devices-off-btn">Switch off</button>
-        </p>
-
-        <div id="ticket" class="card" hidden>
-          <p>Scan this with the other device's camera, or paste the link into <code>hq bridge join</code>. It works once and expires <span id="ticket-expires"></span>.</p>
-          <canvas id="qr" width="256" height="256" aria-label="Pairing QR code"></canvas>
-          <p class="row"><code id="ticket-link" class="link"></code></p>
-          <p class="row"><button type="button" id="copy-link">Copy link</button><button type="button" id="cancel-ticket">Cancel</button></p>
+    <main class="hub-main">
+      <section id="tab-computer">
+        <div id="hub-card" class="a-card">
+          <div class="a-card-head"><b id="hub-title"></b><span id="hub-state" class="a-state"></span></div>
+          <div id="hub-lines" class="hub-lines"></div>
+          <p id="hub-open-why" class="hub-why"></p>
+          <div class="a-card-actions">
+            <button type="button" id="host-start" class="a-btn" hidden>Start HQ</button>
+            <button type="button" id="open-hq" class="a-btn secondary">Open HQ</button>
+            <button type="button" id="host-restart" class="a-btn secondary" hidden>Restart</button>
+            <button type="button" id="host-stop" class="a-btn secondary" hidden>Stop HQ</button>
+            <button type="button" id="choose-program" class="a-btn" hidden>Choose the HQ program…</button>
+            <button type="button" id="look-again" class="a-btn secondary" hidden>Look again</button>
+            <button type="button" id="allow-helpers" class="a-btn" hidden>Allow helpers again</button>
+            <button type="button" id="copy-details" class="a-btn secondary" hidden>Copy details</button>
+          </div>
+          <div id="paste-row" class="hub-paste" hidden>
+            <label for="paste-path" id="paste-label"></label>
+            <input id="paste-path" class="a-field" type="text" autocomplete="off" spellcheck="false">
+            <button type="button" id="paste-use" class="a-btn compact secondary">Use</button>
+          </div>
+          <p id="program-error" class="hub-why" role="alert"></p>
         </div>
 
-        <div id="pending"></div>
-
-        <div id="forwards-block" hidden>
-          <h3>Shared with paired devices</h3>
-          <ul id="forwards" class="list"></ul>
+        <div id="helpers-row" class="a-card hub-compact" hidden>
+          <div class="a-card-head"><b id="helpers-row-title"></b><span id="helpers-row-state" class="a-state needs" hidden></span></div>
         </div>
 
-        <h3>Paired devices</h3>
-        <ul id="peers" class="list"></ul>
-        <p id="peers-empty" class="muted">No devices paired yet.</p>
+        <div id="first-signin" class="a-card hub-compact" hidden>
+          <div class="a-card-head"><b id="first-signin-title"></b></div>
+          <p id="first-signin-note" class="hub-why"></p>
+        </div>
+
+        <div class="a-set hub-set">
+          <div class="a-row"><div class="a-row-main"><b id="launch-title"></b><span id="launch-note"></span></div>
+            <button type="button" id="set-start-on-launch" class="a-sw" role="switch" aria-checked="false" aria-labelledby="launch-title"></button></div>
+          <div class="a-row"><div class="a-row-main"><b id="program-title"></b><span id="program-value"></span></div>
+            <button type="button" id="change-program" class="a-btn compact quiet"></button></div>
+          <div class="a-row"><div class="a-row-main"><b id="log-title"></b><span id="log-value"></span></div>
+            <button type="button" id="open-log" class="a-btn compact quiet"></button></div>
+        </div>
+        <p id="host-error" class="hub-error" role="alert"></p>
+      </section>
+
+      <section id="tab-devices" hidden>
+        <div id="devices-off">
+          <p>Pair a phone or another computer with a QR code. Switching this on opens a network port for devices you have paired; nobody else is let in. Nothing listens until you do.</p>
+          <p class="row"><button type="button" class="a-btn" id="devices-on">Switch on</button></p>
+        </div>
+        <div id="devices-on-block" hidden>
+          <p class="row"><strong id="this-name"></strong><span class="muted">id <code id="this-id"></code></span></p>
+          <p class="row">
+            <button type="button" class="a-btn secondary" id="show-code">Show pairing code</button>
+            <button type="button" class="a-btn secondary" id="devices-off-btn">Switch off</button>
+          </p>
+
+          <div id="ticket" class="a-card" hidden>
+            <p>Scan this with the other device's camera, or paste the link into <code>hq bridge join</code>. It works once and expires <span id="ticket-expires"></span>.</p>
+            <canvas id="qr" width="256" height="256" aria-label="Pairing QR code"></canvas>
+            <p class="row"><code id="ticket-link" class="link"></code></p>
+            <p class="row"><button type="button" class="a-btn compact secondary" id="copy-link">Copy link</button><button type="button" class="a-btn compact quiet" id="cancel-ticket">Cancel</button></p>
+          </div>
+
+          <div id="pending"></div>
+
+          <div id="forwards-block" hidden>
+            <h3>Shared with paired devices</h3>
+            <ul id="forwards" class="list"></ul>
+          </div>
+
+          <h3>Paired devices</h3>
+          <ul id="peers" class="list"></ul>
+          <p id="peers-empty" class="muted">No devices paired yet.</p>
+        </div>
+        <p id="devices-error" class="hub-error" role="alert"></p>
+      </section>
+
+      <section id="tab-helpers" hidden>
+        <h3 id="helpers-heading">Helpers on this computer</h3>
+        <ul id="agents" class="list"></ul>
+        <p id="agents-empty" class="muted"></p>
+
+        <h3>Use HQ in Claude</h3>
+        <p class="muted">Adds the hub this computer is paired with to Claude Code and Claude Desktop. Remove takes out only what was added here.</p>
+        <p id="claude-moved" class="muted" hidden></p>
+        <ul id="claude-hubs" class="list"></ul>
+        <p id="claude-empty" class="muted">Not paired with a hub yet. Pair from the Devices tab first.</p>
+        <p id="claude-error" class="hub-error" role="alert"></p>
+      </section>
+    </main>
+
+    <div id="scrim" class="a-scrim" hidden></div>
+    <div id="dlg" class="a-dlg" role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" hidden>
+      <h2 id="dlg-title"></h2>
+      <p id="dlg-body"></p>
+      <div class="a-dlg-actions">
+        <button type="button" id="dlg-keep" class="a-btn secondary"></button>
+        <button type="button" id="dlg-act" class="a-btn"></button>
       </div>
-      <p id="devices-error" class="error" role="alert"></p>
-    </section>
-
-    <section id="tab-claude" hidden>
-      <h2>Claude</h2>
-      <p>Claude Code and Claude Desktop on this laptop reach HQ through the app.</p>
-      <h3>Use HQ in Claude</h3>
-      <p class="muted">Adds the hub this computer is paired with to Claude Code and Claude Desktop. Remove takes out only what was added here. This list is read when you open the tab, not on a timer.</p>
-      <ul id="claude-hubs" class="list"></ul>
-      <p id="claude-empty" class="muted">Not paired with a hub yet. Pair from the Devices tab first.</p>
-      <p id="claude-error" class="error" role="alert"></p>
-    </section>
-  </main>
-
-  <p id="toast" role="status"></p>
+    </div>
+    <div id="sheet" class="a-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+      <div class="a-sheet-head"><h2 id="sheet-title" class="a-h2"></h2><button type="button" id="sheet-close" class="a-btn compact quiet"></button></div>
+      <div class="a-sheet-body"><p id="sheet-note" class="hub-why"></p><pre id="sheet-log" class="hub-log"></pre></div>
+    </div>
+    <div id="toast" class="a-snack" role="status" hidden><span id="toast-text"></span><button type="button" id="toast-close" class="a-snack-act"></button></div>
+  </div>
   <script type="module" src="main.js"></script>
 </body>
 </html>

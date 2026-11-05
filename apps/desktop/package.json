@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:ui": "bun run scripts/build-ui.ts",
+    "test": "bun test ui/src",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "build": "tauri build --bundles app"

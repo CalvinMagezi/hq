@@ -7,12 +7,15 @@
 //! `docs/security/DESKTOP.md`.
 
 pub mod agents;
+pub mod chooser;
 pub mod claude;
 pub mod desktop;
 pub mod host;
+pub mod notice;
 pub mod pairing;
 pub mod proxy;
 pub mod qr;
+pub mod rename;
 pub mod settings;
 pub mod window;
 
