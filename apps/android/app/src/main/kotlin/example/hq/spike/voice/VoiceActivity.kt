@@ -110,7 +110,7 @@ class VoiceActivity : ComponentActivity() {
                     window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
                 val item = remember { VoiceModels(applicationContext).item() }
-                if (unlocked.value) VoiceSheet(state, downloads[item.id] ?: DlState.Ready, item, onOp = { op -> session.engine().perform(op) }, engine = { Downloads.get(item.id) }, onMic = ::micPressed, onClose = ::finish, onSettings = ::openAppInfo, onOpenChat = ::openChat, onType = ::typeInstead)
+                if (unlocked.value) VoiceSheet(state, downloads[item.id] ?: DlState.Ready, item, onOp = { op -> session.engine().perform(op) }, engine = { Downloads.get(item.id) }, onMic = ::micPressed, onClose = ::finish, onSettings = ::openAppInfo, onOpenChat = ::openChat, onType = ::typeInstead, onDontSend = session::dontSend, onSendAgain = session::sendAgain)
             }
         }
         askOnResume = true
@@ -159,6 +159,7 @@ class VoiceActivity : ComponentActivity() {
     /** The chat this question is in, in the main app. Closing the sheet does not stop the answer. */
     private fun openChat(id: String) {
         val link = "hq://chat/$id"
+        session.chatOpened()
         startActivity(Intent(this, example.hq.spike.ShellActivity::class.java).setData(Uri.parse(link)).putExtra(Links.EXTRA, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
         finish()
     }
@@ -216,7 +217,7 @@ class VoiceActivity : ComponentActivity() {
 
 /** The sheet. While there is no model on the phone the shared download row and its asks sit where the round button does. */
 @Composable
-internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -> Unit, engine: () -> LargeDownload?, onMic: () -> Unit, onClose: () -> Unit, onSettings: () -> Unit = {}, onOpenChat: (String) -> Unit = {}, onType: () -> Unit = {}) {
+internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -> Unit, engine: () -> LargeDownload?, onMic: () -> Unit, onClose: () -> Unit, onSettings: () -> Unit = {}, onOpenChat: (String) -> Unit = {}, onType: () -> Unit = {}, onDontSend: () -> Unit = {}, onSendAgain: () -> Unit = {}) {
     val w = rememberWords()
     val needsModel = state.phase == VoicePhase.NeedsModel || state.phase == VoicePhase.Downloading
     Box(Modifier.fillMaxSize().background(Mts.Surface000.copy(alpha = SCRIM_ALPHA)).clickable(onClick = onClose), contentAlignment = Alignment.BottomCenter) {
@@ -225,7 +226,7 @@ internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -
                 .clickable(enabled = false, onClick = {}).navigationBarsPadding().padding(SHEET_PADDING.dp),
             verticalArrangement = Arrangement.spacedBy(GAP.dp),
         ) {
-            Text(VoiceWords.label(w, state.phase), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.semantics { heading() })
+            Text(VoiceWords.label(w, state), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.semantics { heading() })
             VoiceWords.body(w, state.phase, dl)?.let { Text(it, style = HqType.BodySm, color = Mts.Ink) }
             if (state.heard.isNotBlank()) Text(state.heard, style = HqType.BodyBold, color = Mts.Ink)
             if (state.reply.isNotBlank()) {
@@ -235,6 +236,10 @@ internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -
             val late = androidx.compose.runtime.remember(waiting) { androidx.compose.runtime.mutableStateOf(false) }
             if (waiting) androidx.compose.runtime.LaunchedEffect(Unit) { kotlinx.coroutines.delay(CLOSE_HINT_MS); late.value = true }
             if (waiting && late.value) Text(w.s(R.string.voice_close_note), style = HqType.BodySm, color = Mts.InkMuted)
+            if (state.phase == VoicePhase.Listening && state.cold && !state.slowLoad) Text(w.s(R.string.voice_cold_line), style = HqType.BodySm, color = Mts.InkMuted)
+            if (state.reconnecting && state.phase in WORKING_PHASES) Text(w.s(R.string.voice_reconnecting_line), style = HqType.BodySm, color = Mts.InkMuted)
+            if (state.needsOk) Text(w.s(R.string.voice_needs_ok_line), style = HqType.BodySm, color = Mts.Ink)
+            if (state.afterClose && state.phase == VoicePhase.Idle && state.heard.isBlank()) Text(w.s(R.string.voice_next_open), style = HqType.BodySm, color = Mts.InkMuted)
             state.problem?.let { Problem(it) }
             if (state.phase == VoicePhase.MicBlocked) Text(w.s(R.string.assist_mic_taps), style = HqType.BodySm, color = Mts.InkMuted)
             if (needsModel) {
@@ -243,14 +248,26 @@ internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -
                 if (state.phase == VoicePhase.NeedsModel) TextButton(onClose, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.confirm_not_now), style = HqType.BodyBold, color = Mts.InkMuted) }
             } else {
                 if (state.phase == VoicePhase.MicBlocked) {
-                    SheetButton(w.s(R.string.assist_open_android), onSettings)
-                    SheetButton(w.s(R.string.voice_ask_again), onMic)
+                    SheetButton(w.s(R.string.assist_open_android), onClick = onSettings)
+                    SheetButton(w.s(R.string.voice_ask_again), onClick = onMic)
                 } else {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { MicButton(w, state.phase, onMic) }
+                    val chat = state.threadId?.takeIf { state.phase != VoicePhase.Idle || state.reply.isNotBlank() || state.afterClose }
+                    val stack = androidx.compose.ui.platform.LocalDensity.current.fontScale >= STACK_FONT_SCALE
+                    if (state.phase == VoicePhase.WaitingForHq) {
+                        SheetButton(w.s(R.string.voice_dont_send), onClick = onDontSend)
+                    } else if (chat != null && !stack) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(GAP.dp), verticalAlignment = Alignment.CenterVertically) {
+                            MicButton(w, state.phase, onMic)
+                            SheetButton(w.s(R.string.voice_open_chat), Modifier.weight(1f)) { onOpenChat(chat) }
+                        }
+                    } else {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { MicButton(w, state.phase, onMic) }
+                        chat?.let { SheetButton(w.s(R.string.voice_open_chat)) { onOpenChat(it) } }
+                    }
+                    if (state.phase == VoicePhase.Idle && state.problem != null && state.heard.isNotBlank()) SheetButton(w.s(R.string.voice_send_again), onClick = onSendAgain)
                 }
-                state.threadId?.takeIf { state.phase != VoicePhase.Idle || state.reply.isNotBlank() }?.let { SheetButton(w.s(R.string.voice_open_chat)) { onOpenChat(it) } }
                 val offerType = state.phase == VoicePhase.MicNeeded || state.phase == VoicePhase.MicBlocked || state.silent >= 2
-                if (offerType) SheetButton(w.s(R.string.voice_type_instead), onType)
+                if (offerType) SheetButton(w.s(R.string.voice_type_instead), onClick = onType)
             }
         }
     }
@@ -266,8 +283,8 @@ private fun Problem(text: String) {
 }
 
 @Composable
-private fun SheetButton(label: String, onClick: () -> Unit) {
-    TextButton(onClick, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(label, style = HqType.BodyBold, color = Mts.Ink) }
+private fun SheetButton(label: String, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
+    TextButton(onClick, modifier.heightIn(min = 48.dp)) { Text(label, style = HqType.BodyBold, color = Mts.Ink) }
 }
 
 @Composable
@@ -283,6 +300,8 @@ private fun MicButton(w: Words, phase: VoicePhase, onMic: () -> Unit) {
     }
 }
 
+private const val STACK_FONT_SCALE = 1.5f
+private val WORKING_PHASES = setOf(VoicePhase.Thinking, VoicePhase.LookingUp, VoicePhase.Answering)
 private const val CLOSE_HINT_MS = 3_000L
 private const val SCREEN_ON_MS = 30_000L
 private const val SCRIM_ALPHA = 0.5f

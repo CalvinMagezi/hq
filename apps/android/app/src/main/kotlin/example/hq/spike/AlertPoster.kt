@@ -254,6 +254,8 @@ object AlertPoster {
         return Notification.Builder(c, channel).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setContentText(words.body).build()
     }
 
+    internal fun simpleNotice(c: Context, channel: String, title: String, body: String, tap: PendingIntent): Notification = simple(c, channel, title, body, tap)
+
     private fun simple(c: Context, channel: String, title: String, body: String, tap: PendingIntent): Notification =
         Notification.Builder(c, channel).setSmallIcon(HubService.statIcon(c)).setContentTitle(title).setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body)).setContentIntent(tap).setAutoCancel(true)

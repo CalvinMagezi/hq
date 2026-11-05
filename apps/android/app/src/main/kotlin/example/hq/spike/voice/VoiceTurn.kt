@@ -23,6 +23,10 @@ sealed interface TurnOutput {
     data object Working : TurnOutput
     data object Done : TurnOutput
     data class Failed(val reason: String) : TurnOutput
+    /** The owner's OK is needed before HQ can finish; the turn is over for now, the sheet says so. */
+    data object NeedsOk : TurnOutput
+    /** Events were missed and the reply was read again from HQ: what is shown so far is replaced by this. */
+    data class Reset(val text: String) : TurnOutput
 }
 
 /**
@@ -36,13 +40,20 @@ class VoiceTurn(
     private val post: (content: String, threadId: String?, clientId: String) -> Boolean,
     private val startWaitMs: Long = START_WAIT_MS,
     private val quietWaitMs: Long = QUIET_WAIT_MS,
+    /** Asks the server to say where a thread's reply stands (`resume`). */
+    private val resume: (threadId: String) -> Unit = {},
+    /** The last saved reply of a thread, or null when there is none yet. */
+    private val lastReply: suspend (threadId: String) -> String? = { null },
+    /** Whether HQ still reports the thread as running; a silent turn that is still running is not given up on. */
+    private val stillRunning: suspend (threadId: String) -> Boolean = { false },
 ) {
     /** Cold: the frame goes out only once this turn is listening, so the first reply event cannot be missed. */
-    fun ask(transcript: String, threadId: String?): Flow<TurnOutput> = channelFlow {
-        val clientId = CLIENT_PREFIX + UUID.randomUUID()
+    fun ask(transcript: String, threadId: String?, clientId: String = newClientId()): Flow<TurnOutput> = channelFlow {
         val listening = CompletableDeferred<Unit>()
         val lastHeard = AtomicLong(System.currentTimeMillis())
         val started = AtomicBoolean(false)
+        val resuming = AtomicBoolean(false)
+        val threadOfTurn = java.util.concurrent.atomic.AtomicReference<String?>(threadId)
         // Whoever ends the turn first (the reply itself or a watcher) is the only ending sent.
         val ended = AtomicBoolean(false)
         val reading = launch {
@@ -50,11 +61,29 @@ class VoiceTurn(
             // Signalled once, when HQ starts a tool before any of the answer: a lookup can take many seconds.
             var answered = false
             events.onSubscription { listening.complete(Unit) }.transformWhile { event ->
+                if (event is ChatEvent.Lagged && thread != null) {
+                    resuming.set(true)
+                    resume(thread!!)
+                    return@transformWhile true
+                }
+                if (event is ChatEvent.ReplySoFar && resuming.get() && event.threadId == thread) {
+                    resuming.set(false)
+                    lastHeard.set(System.currentTimeMillis())
+                    if (event.running) {
+                        emit(TurnOutput.Reset(event.content))
+                        return@transformWhile true
+                    }
+                    if (!ended.compareAndSet(false, true)) return@transformWhile false
+                    emit(TurnOutput.Reset(lastReply(thread!!) ?: ""))
+                    emit(TurnOutput.Done)
+                    return@transformWhile false
+                }
                 val step = step(event, clientId, thread)
                 if (step.ours) lastHeard.set(System.currentTimeMillis())
                 if (thread == null && step.thread != null) {
                     thread = step.thread
                     started.set(true)
+                    threadOfTurn.set(step.thread)
                     emit(TurnOutput.Thread(step.thread))
                 }
                 if (step.ends && !ended.compareAndSet(false, true)) return@transformWhile false
@@ -84,13 +113,32 @@ class VoiceTurn(
             launch {
                 // A frame can be queued before the socket finishes opening; only a drop after it opened counts.
                 connected.first { it }
-                connected.first { !it }
-                endWith(RESTARTING)
+                while (reading.isActive) {
+                    connected.first { !it }
+                    val id = threadOfTurn.get()
+                    // HQ itself is still working: wait for the socket and ask where the reply stands, rather than give up.
+                    if (id != null && stillRunning(id)) {
+                        connected.first { it }
+                        lastHeard.set(System.currentTimeMillis())
+                        resuming.set(true)
+                        resume(id)
+                    } else {
+                        endWith(RESTARTING)
+                        break
+                    }
+                }
             }
             while (reading.isActive) {
                 delay(WATCH_TICK_MS)
                 val limit = if (started.get()) quietWaitMs else startWaitMs
-                if (System.currentTimeMillis() - lastHeard.get() > limit) endWith(if (started.get()) STILL_WORKING else NO_REPLY)
+                if (System.currentTimeMillis() - lastHeard.get() > limit) {
+                    val id = threadOfTurn.get()
+                    if (started.get() && id != null && stillRunning(id)) {
+                        lastHeard.set(System.currentTimeMillis())
+                    } else {
+                        endWith(if (started.get()) STILL_WORKING else NO_REPLY)
+                    }
+                }
             }
         }
         reading.join()
@@ -102,15 +150,17 @@ class VoiceTurn(
     private fun step(event: ChatEvent, clientId: String, thread: String?): Step {
         if (event is ChatEvent.TurnStart) return if (event.clientId == clientId) Step(thread = event.threadId, ours = true) else Step()
         if (event is ChatEvent.Rejected) {
-            return if (event.clientId == clientId) Step(listOf(TurnOutput.Failed(rejected(event))), ends = true) else Step()
+            if (event.clientId != clientId) return Step()
+            val failed = TurnOutput.Failed(rejected(event))
+            return if (event.running && !event.threadId.isNullOrBlank()) Step(listOf(failed), thread = event.threadId, ends = true) else Step(listOf(failed), ends = true)
         }
-        // Events were dropped for a slow reader; this turn's end may be among them.
+        // Events were dropped before this turn had a thread to ask about; nothing can be read back.
         if (event is ChatEvent.Lagged) return Step(listOf(TurnOutput.Failed(LOST_PART)), ends = true)
         if (thread == null || threadOf(event) != thread) return Step()
         return when (event) {
             is ChatEvent.Text -> Step(listOf(TurnOutput.Text(event.text)), ours = true)
             is ChatEvent.Failed -> Step(listOf(TurnOutput.Failed(event.message)), ends = true)
-            is ChatEvent.TurnEnd -> Step(listOf(TurnOutput.Done), ends = true)
+            is ChatEvent.TurnEnd -> Step(listOf(if (event.waitingForOwner) TurnOutput.NeedsOk else TurnOutput.Done), ends = true)
             else -> Step(ours = true)
         }
     }
@@ -130,6 +180,7 @@ class VoiceTurn(
 
     companion object {
         const val CLIENT_PREFIX = "voice-"
+        fun newClientId() = CLIENT_PREFIX + UUID.randomUUID()
 
         /**
          * Sent ahead of every spoken question. HQ passes an <hq-context> block to the model and leaves it out of the

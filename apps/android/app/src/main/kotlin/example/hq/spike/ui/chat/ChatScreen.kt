@@ -65,7 +65,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, starting: Boolean = fal
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             if (starting) StartingBanner() else if (!state.connected) ReconnectBanner()
-            NameRow(state.title, actions.onOpenChats)
+            NameRow(state.title, state.messages.any { it.spoken }, actions.onOpenChats)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.shown(state.suggestions), actions.onDraft) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
@@ -154,14 +154,14 @@ private fun ReconnectBanner() {
 }
 
 @Composable
-private fun NameRow(title: String, onClick: () -> Unit) {
+private fun NameRow(title: String, spoken: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(24.dp)
     Row(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
             .clickable(role = Role.Button, onClickLabel = "Show your chats", onClick = onClick).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(HqIcons.Chat, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+        Icon(if (spoken) HqIcons.Mic else HqIcons.Chat, null, Modifier.size(20.dp), tint = Mts.InkMuted)
         Text(title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.InkMuted)
     }
@@ -192,7 +192,7 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
                         interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = null,
                         onLongClickLabel = "Message actions", onClick = {}, onLongClick = { if (!m.sending) actions.onLongPress(m.id) },
                     ),
-                ) { if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile) else ReplyBubble(m, blocks) }
+                ) { if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile, spoken = m.spoken) else ReplyBubble(m, blocks) }
             }
         }
         if (away) LatestPill(Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)) { scope.launch { list.animateScrollToItem(0) } }

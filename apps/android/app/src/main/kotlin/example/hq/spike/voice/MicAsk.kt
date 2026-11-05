@@ -19,6 +19,12 @@ object MicAsk {
         else -> MicOutcome.Blocked
     }
 
+    /**
+     * The microphone is held back: another app has it (not recording), or from Android 10 the system has silenced this
+     * client (a call, another app with priority). Android 8 and 9 have only the recording state to go on.
+     */
+    fun blocked(recording: Boolean, sdk: Int, silenced: Boolean): Boolean = !recording || (sdk >= 29 && silenced)
+
     /** In a call the sheet does not try the microphone. */
     fun onCall(audioMode: Int): Boolean = audioMode == AudioManager.MODE_IN_CALL || audioMode == AudioManager.MODE_IN_COMMUNICATION
 

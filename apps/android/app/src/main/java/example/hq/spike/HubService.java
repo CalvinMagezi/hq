@@ -265,6 +265,7 @@ public class HubService extends Service {
             new Thread(() -> watchNotice(gen), "hq-notice").start();
             new Thread(() -> supervise(gen, "caddy", this::caddyProcess, false), "caddy-supervisor").start();
             new Thread(() -> Alerts.watch(getApplicationContext(), () -> gen == generation.get()), "alerts").start();
+            new Thread(() -> example.hq.spike.voice.VoiceHandoff.restore(getApplicationContext()), "voice-handoff").start();
             new Thread(() -> Updater.INSTANCE.watch(getApplicationContext(), () -> gen == generation.get()), "update-check").start();
         }
         registerLockReceiver();

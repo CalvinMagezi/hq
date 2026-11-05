@@ -322,7 +322,7 @@ private fun Home(ui: SettingsUi, actions: SettingsActions) {
         WithdrawnCard(ui, actions)
         UpdateCard(ui, actions)
         BackupWords.slot(w, ui.backup, ui.now)?.let { slot -> BackupSlot(slot) { actions.onPage(SettingsPage.About) } }
-        SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip).forEachIndexed { gi, g ->
+        SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip, serverRow(w, context)).forEachIndexed { gi, g ->
             Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = if (gi == 0) 8.dp else 20.dp, end = 16.dp, bottom = 4.dp))
             g.lead?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp)) }
             Group {
@@ -1457,4 +1457,11 @@ private fun ReadOnlyList(ui: SettingsUi, empty: String, rows: @Composable () -> 
 @Composable
 private fun MonoRow(text: String) {
     Group { Text(text, style = HqType.BodySm.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = Mts.Ink, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) }
+}
+
+/** The server HQ's own row, only while a server is kept: its name and whether it is signed in. The name is its host, as there is no name field. */
+private fun serverRow(w: example.hq.spike.ui.shell.Words, c: android.content.Context): HomeRow? {
+    val host = example.hq.spike.ServerHq.address(c)?.substringAfter("://")?.substringBefore('/') ?: return null
+    val state = w.s(if (example.hq.spike.ServerHq.signedOut(c)) R.string.state_server_signed_out else R.string.state_connected)
+    return HomeRow(SettingsPage.Devices, "phone", w.s(R.string.settings_server_hq_row), w.s(R.string.settings_server_hq_row_body, host) + " · " + state)
 }

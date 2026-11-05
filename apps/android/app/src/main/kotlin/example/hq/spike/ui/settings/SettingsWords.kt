@@ -133,14 +133,14 @@ object SettingsWords {
         return "${money(head.optDouble("spent_usd"))} of ${money(head.optDouble("limit_usd"))} $period".trim()
     }
 
-    fun home(w: Words, snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true, backup: BackupFacts = BackupFacts(), strip: String? = null): List<HomeGroup> = withChecking(w, loaded, listOf(
+    fun home(w: Words, snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true, backup: BackupFacts = BackupFacts(), strip: String? = null, server: HomeRow? = null): List<HomeGroup> = withChecking(w, loaded, listOf(
         HomeGroup("This phone", phone),
         HomeGroup(
             "Your accounts", listOf(
                 HomeRow(SettingsPage.Keys, "key", "AI service and keys", keysStatus(w, snap.settings, snap.providers)),
                 HomeRow(SettingsPage.Messaging, "chat", "Messaging apps", messagingStatus(snap.chatApps)),
                 HomeRow(SettingsPage.Devices, "phone", "Other devices", devicesStatus(snap.devices)),
-            ),
+            ) + listOfNotNull(server),
             note = CLAUDE_VIA_LAPTOP,
             lead = strip,
         ),

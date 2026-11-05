@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -309,10 +310,12 @@ private fun AssistantCard() {
         Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (facts.held) Mts.Ink else Mts.Line, shape).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        val big = LocalDensity.current.fontScale >= 1.5f
+        val head: @Composable () -> Unit = {
             androidx.compose.material3.Icon(if (facts.held) example.hq.spike.ui.shell.HqIcons.Check else example.hq.spike.ui.shell.HqIcons.Mic, null, Modifier.size(24.dp), tint = Mts.Ink)
             Text(stringResource(if (facts.held) R.string.assist_card_chosen_title else R.string.assist_card_title), style = HqType.BodyBold, color = Mts.Ink)
         }
+        if (big) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { head() } else Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { head() }
         if (facts.held) {
             val size = example.hq.spike.download.DownloadRules.sizeMb(example.hq.spike.voice.VoiceModels.SIZE_BYTES)
             Text(stringResource(R.string.assist_card_chosen_body, stringResource(R.string.dl_mb, size)), style = HqType.BodySm, color = Mts.InkMuted)

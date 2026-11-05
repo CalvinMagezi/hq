@@ -138,14 +138,14 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
             horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.size(40.dp).background(if (selected) Mts.Surface100 else Mts.Surface200, CircleShape), contentAlignment = Alignment.Center) {
-                if (row.running) Spinner(22, Mts.BrandGreen) else Icon(HqIcons.Chat, null, Modifier.size(22.dp), tint = Mts.Ink)
+                if (row.running) Spinner(22, Mts.BrandGreen) else Icon(if (row.spoken) HqIcons.Mic else HqIcons.Chat, null, Modifier.size(22.dp), tint = Mts.Ink)
             }
             Column(Modifier.weight(1f)) {
                 Text(row.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val subtitle = if (row.running) "Working" else row.subtitle
                 if (subtitle.isNotEmpty()) Text(subtitle, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (row.unread) Box(Modifier.size(10.dp).background(Mts.BrandGreen, CircleShape))
+            if (row.unread) Box(Modifier.size(10.dp).background(Mts.BrandBlue, CircleShape))
         }
     }
 }

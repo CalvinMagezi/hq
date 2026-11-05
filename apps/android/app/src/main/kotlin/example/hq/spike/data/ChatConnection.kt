@@ -40,6 +40,9 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
 
     fun stop(threadId: String): Boolean = write(JSONObject().put("type", "stop").put("thread_id", threadId))
 
+    /** Asks HQ for the reply so far on [threadId]; it answers with a `reply_so_far` event. */
+    fun resume(threadId: String): Boolean = write(JSONObject().put("type", "resume").put("thread_id", threadId))
+
     private fun write(frame: JSONObject): Boolean = socket?.send(frame.toString()) ?: false
 
     /** Set when the current attempt got as far as an open socket, so a later drop retries quickly instead of at the longest wait. */

@@ -34,8 +34,15 @@ data class StoredMessage(
     val createdAt: String,
     val tools: List<ToolStep>,
     val stopped: Boolean,
+    /** HQ's own mark that the question was spoken (`meta.source`), and the id the sender gave it. */
+    val source: String? = null,
+    val clientId: String? = null,
 ) {
+    val spoken: Boolean get() = role == "user" && source == SPOKEN
+
     companion object {
+        const val SPOKEN = "voice"
+
         fun from(o: JSONObject): StoredMessage {
             val meta = o.optJSONObject("meta")
             return StoredMessage(
@@ -46,6 +53,8 @@ data class StoredMessage(
                 createdAt = o.optString("created_at", ""),
                 tools = meta?.optJSONArray("tool_steps").toToolSteps(),
                 stopped = meta?.optBoolean("stopped", false) ?: false,
+                source = meta?.optString("source", "")?.ifBlank { null },
+                clientId = meta?.optString("client_id", "")?.ifBlank { null },
             )
         }
     }
