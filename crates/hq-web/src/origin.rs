@@ -114,9 +114,16 @@ const AUTH_API_PREFIX: &str = "/api/auth/";
 /// Replacing a model key from Settings writes a credential, like setup.
 const PROVIDER_KEY_PATH: &str = "/api/settings/provider-key";
 
-/// Endpoints that type into or take over a session. `drive`, `goal` and `unwatch` predate the
-/// header and must keep working for a cached PWA that does not send it yet.
-const HEADER_GUARDED_ACTIONS: [&str; 6] = ["send", "adopt", "stop", "resume", "rename", "archive"];
+/// Endpoints that type into, take over or answer for a session. A cached PWA older than the
+/// header loses `drive`, `goal` and `unwatch` until its worker updates the shell, which is a
+/// smaller risk than any page on the internet driving a session.
+const HEADER_GUARDED_ACTIONS: [&str; 10] = [
+    "send", "adopt", "stop", "resume", "rename", "archive", "drive", "goal", "unwatch", "answer",
+];
+
+/// Answering an Inbox item approves or declines on the owner's behalf.
+const NOTIFICATIONS_API_PREFIX: &str = "/api/notifications/";
+const NOTIFICATION_GUARDED_ACTIONS: [&str; 2] = ["answer", "action"];
 
 /// Starting an agent and creating its folders are new endpoints, so they are guarded from the start.
 const SPAWN_API_PATH: &str = "/api/harness-sessions";
@@ -129,7 +136,12 @@ pub(crate) fn missing_client_header(method: &Method, path: &str, has_header: boo
             .next()
             .is_some_and(|action| HEADER_GUARDED_ACTIONS.contains(&action))
     });
+    let answers_item = path
+        .strip_prefix(NOTIFICATIONS_API_PREFIX)
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(_, action)| NOTIFICATION_GUARDED_ACTIONS.contains(&action));
     let guarded = guarded
+        || answers_item
         || path == SPAWN_API_PATH
         || path.starts_with(WORKBENCH_API_PREFIX)
         || path.starts_with(SETUP_API_PREFIX)
@@ -303,15 +315,22 @@ mod tests {
     #[test]
     fn session_posts_need_the_client_header() {
         let post = |path: &str, header: bool| missing_client_header(&Method::POST, path, header);
-        for path in ["send", "adopt"] {
+        for path in ["send", "adopt", "drive", "goal", "unwatch", "answer"] {
             let full = format!("/api/harness-sessions/hs-1/{path}");
             assert!(post(&full, false), "{path} without the header");
             assert!(!post(&full, true), "{path} with the header");
         }
-        for path in ["drive", "goal", "unwatch"] {
-            let full = format!("/api/harness-sessions/hs-1/{path}");
-            assert!(!post(&full, false), "{path} stays open to cached clients");
+        for path in [
+            "/api/notifications/v1/answer",
+            "/api/notifications/v1/action",
+        ] {
+            assert!(post(path, false), "{path} without the header");
+            assert!(!post(path, true), "{path} with the header");
         }
+        assert!(
+            !post("/api/notifications/v1/read", false),
+            "only answering an item is guarded"
+        );
         assert!(!missing_client_header(
             &Method::GET,
             "/api/harness-sessions/hs-1",

@@ -847,25 +847,24 @@ mod web_auth_router_tests {
             }
             b.body(Body::from("{}")).unwrap()
         };
-        for action in ["send", "adopt", "stop", "resume", "rename", "archive"] {
-            let path = format!("/api/harness-sessions/hs-none/{action}");
+        let guarded = [
+            "send", "adopt", "stop", "resume", "rename", "archive", "drive", "goal", "unwatch",
+            "answer",
+        ];
+        let paths = guarded
+            .iter()
+            .map(|action| format!("/api/harness-sessions/hs-none/{action}"))
+            .chain(["answer", "action"].map(|a| format!("/api/notifications/val_x/{a}")));
+        for path in paths {
             assert_eq!(
                 status(&app, post(&path, false)).await,
                 StatusCode::FORBIDDEN,
-                "{action}"
+                "{path}"
             );
             assert_ne!(
                 status(&app, post(&path, true)).await,
                 StatusCode::FORBIDDEN,
-                "{action}"
-            );
-        }
-        for action in ["drive", "goal", "unwatch"] {
-            let path = format!("/api/harness-sessions/hs-none/{action}");
-            assert_ne!(
-                status(&app, post(&path, false)).await,
-                StatusCode::FORBIDDEN,
-                "{action} stays open to cached clients"
+                "{path}"
             );
         }
         for path in ["/api/harness-sessions", "/api/workbench/hosts/native/dirs"] {

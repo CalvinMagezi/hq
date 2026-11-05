@@ -17,7 +17,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 - [ ] web/wave-0/01-live-bugs.md: web push content and buttons
 - [ ] web/wave-0/01-live-bugs.md: the hub proxy and a taken port
 - [ ] web/wave-0/01-live-bugs.md: wipe the browser on a refused sign-in
-- [ ] web/wave-0/01-live-bugs.md: guard drive, goal and answer routes
+- [x] web/wave-0/01-live-bugs.md: guard drive, goal and answer routes. Try: nothing to see; a current web app and the phone app keep working (both send the header). A cross-site POST to `/api/harness-sessions/{id}/drive` now gets 403.
 - [ ] web/wave-0/02-shared-parts.md
 
 ## Phone wave 0 (safety and shared parts)
