@@ -278,7 +278,11 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
             }
         }
     }
-    let (tid, history) = open_thread(state, &req);
+    let claimed = match claim_message(state, &req) {
+        Some(claimed) => claimed,
+        None => return,
+    };
+    let (tid, history) = open_thread(state, &req, claimed.as_deref());
     let Some(config) = load_config(state, &tid) else {
         return;
     };
@@ -304,10 +308,45 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
     }
 }
 
+/// A resend from a browser's outbox: HQ already has this message (same client id), so no second
+/// copy and no second reply. Tells the tabs which message it was and returns `None`; otherwise the
+/// client id this send claimed, if it had one.
+fn claim_message(state: &WsState, req: &ChatRequest) -> Option<Option<String>> {
+    use hq_db::client_ids::{Claim, KIND_MESSAGE, claim, usable};
+    let Some(id) = usable(req.client_id.as_deref()) else {
+        return Some(None);
+    };
+    let claimed = state.db.with_conn(|c| claim(c, KIND_MESSAGE, id));
+    match claimed {
+        Ok(Claim::New) => Some(Some(id.to_string())),
+        Ok(Claim::Seen { item_id }) => {
+            state.broadcast(
+                &json!({
+                    "type": "chat_duplicate",
+                    "thread_id": req.thread_id,
+                    "client_id": id,
+                    "message_id": (!item_id.is_empty()).then_some(item_id),
+                })
+                .to_string(),
+            );
+            None
+        }
+        // The dedup table is a safety net; a send it cannot check still goes through.
+        Err(e) => {
+            tracing::warn!("chat: could not check the client id: {e:#}");
+            Some(None)
+        }
+    }
+}
+
 /// Creates the thread when needed, saves the user message (with its
 /// attachment marker), acks the turn with that saved message, and names a new
 /// chat. Returns the thread id and the history the model sees.
-fn open_thread(state: &WsState, req: &ChatRequest) -> (Option<String>, Vec<AgentMsg>) {
+fn open_thread(
+    state: &WsState,
+    req: &ChatRequest,
+    claimed: Option<&str>,
+) -> (Option<String>, Vec<AgentMsg>) {
     let (message, files) = (req.text.as_str(), req.files.as_slice());
     let db = &state.db;
     let tid = req.thread_id.clone().or_else(|| {
@@ -332,6 +371,17 @@ fn open_thread(state: &WsState, req: &ChatRequest) -> (Option<String>, Vec<Agent
     let saved = db
         .with_conn(|conn| hq_db::chat::add_message(conn, t, "user", stored.trim_start()))
         .ok();
+    if let Some(id) = claimed {
+        use hq_db::client_ids::{KIND_MESSAGE, record, release};
+        let noted = db.with_conn(|conn| match &saved {
+            Some(m) => record(conn, KIND_MESSAGE, id, &m.message_id),
+            // Not saved: give the id back so the outbox's next send is not taken for a repeat.
+            None => release(conn, KIND_MESSAGE, id),
+        });
+        if let Err(e) = noted {
+            tracing::warn!("chat: could not note the client id: {e:#}");
+        }
+    }
     // Ack before the first token. Carrying the saved message lets every other
     // tab show the question, and the sender swap its local copy for this one;
     // `replace_from` tells the other tabs which messages an edit replaced.
@@ -920,6 +970,35 @@ mod tests {
 
     fn next_event(rx: &mut tokio::sync::broadcast::Receiver<String>) -> serde_json::Value {
         serde_json::from_str(&rx.try_recv().expect("an event was broadcast")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_resend_with_the_same_client_id_saves_one_message_and_starts_no_second_reply() {
+        let state = test_state();
+        let tid = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user"))
+            .unwrap()
+            .thread_id;
+        handle_chat(&state, request(&tid, "hello", None)).await;
+        state.active_chat_turns.write().await.clear();
+        let mut rx = state.tx.subscribe();
+
+        handle_chat(&state, request(&tid, "hello", None)).await;
+
+        let ev = next_event(&mut rx);
+        assert_eq!(ev["type"], "chat_duplicate");
+        assert_eq!(ev["client_id"], "local-1");
+        let saved = state
+            .db
+            .with_conn(|c| hq_db::chat::get_messages(c, &tid, 10))
+            .unwrap();
+        assert_eq!(saved.len(), 1, "one copy on HQ");
+        assert_eq!(ev["message_id"], saved[0].message_id);
+        assert!(
+            state.active_chat_turns.read().await.is_empty(),
+            "no second reply"
+        );
     }
 
     #[tokio::test]

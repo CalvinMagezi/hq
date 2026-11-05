@@ -568,7 +568,8 @@ async fn note_export_response(
         .into_response()
 }
 
-/// `POST /api/note/create {folder?, title, content}`: never overwrites an existing note.
+/// `POST /api/note/create {folder?, title, content, client_id?}`: never overwrites an existing note,
+/// and a repeated `client_id` answers with the note it already made.
 pub(crate) async fn note_create_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<Value>,
@@ -589,7 +590,34 @@ pub(crate) async fn note_create_handler(
     if !state.resolved_allowed(&dir) {
         return ApiError::not_found().into_response();
     }
-    match create_unique(&dir, title, content) {
+    let client_id = hq_db::client_ids::usable(body.get("client_id").and_then(Value::as_str));
+    if let Some(id) = client_id {
+        use hq_db::client_ids::{Claim, KIND_NOTE, claim};
+        match state.db.with_conn(|c| claim(c, KIND_NOTE, id)) {
+            Ok(Claim::Seen { item_id }) if !item_id.is_empty() => {
+                // A resend from a browser's outbox: the note it made already exists.
+                return Json(json!({"success": true, "path": item_id, "deduplicated": true}))
+                    .into_response();
+            }
+            Ok(Claim::Seen { .. }) => {
+                return ApiError::Conflict("this note is still being made".into()).into_response();
+            }
+            Ok(Claim::New) => {}
+            Err(e) => tracing::warn!("notes: could not check the client id: {e:#}"),
+        }
+    }
+    let created = create_unique(&dir, title, content);
+    if let Some(id) = client_id {
+        use hq_db::client_ids::{KIND_NOTE, record, release};
+        let noted = state.db.with_conn(|c| match &created {
+            Ok(path) => record(c, KIND_NOTE, id, &rel_to_vault(&state.vault_path, path)),
+            Err(_) => release(c, KIND_NOTE, id),
+        });
+        if let Err(e) = noted {
+            tracing::warn!("notes: could not note the client id: {e:#}");
+        }
+    }
+    match created {
         Ok(path) => {
             index_web_note(&state, &path, content);
             record_owner_write(&state, &path);

@@ -18,6 +18,7 @@ const CHAT_EVENTS = new Set([
   'tool_end',
   'step_credits',
   'chat_rejected',
+  'chat_duplicate',
   'relay_message',
   'stream_lag',
 ])
@@ -143,6 +144,10 @@ function applyEvent(type: string, msg: ChatEvent, tid: string) {
       break
     case 'step_credits':
       store.addStepCredit(tid, typeof msg.turn === 'number' ? msg.turn : 0, typeof msg.delta === 'number' ? msg.delta : null)
+      break
+    case 'chat_duplicate':
+      // HQ already had this message (a resend from the outbox): show its saved copy, not a second one.
+      void loadMessages(tid).catch(() => {})
       break
     case 'chat_rejected':
       rejectSend(tid, str(msg.client_id), str(msg.reason) ?? 'The message was not sent', msg.running === true)

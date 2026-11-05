@@ -831,6 +831,40 @@ mod web_auth_router_tests {
     }
 
     #[tokio::test]
+    async fn a_resent_note_or_task_with_its_client_id_is_made_once() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let post = |path: &str, body: &str| {
+            local("POST", path)
+                .header("content-type", "application/json")
+                .header("x-hq-client", "web")
+                .body(Body::from(body.to_string()))
+                .unwrap()
+        };
+        let note = r#"{"title":"Title","content":"x","client_id":"c-note-1"}"#;
+        let first = json_of(&app, post("/api/note/create", note)).await;
+        let again = json_of(&app, post("/api/note/create", note)).await;
+        assert_eq!(first["path"], again["path"]);
+        assert_eq!(again["deduplicated"], true);
+        assert!(!vault.path().join("Notebooks/Inbox/Title 2.md").exists());
+
+        let task = r#"{"title":"Buy milk","client_id":"c-task-1"}"#;
+        let first = json_of(&app, post("/api/tasks", task)).await;
+        let again = json_of(&app, post("/api/tasks", task)).await;
+        assert_eq!(first["id"], again["id"]);
+        assert_eq!(again["deduplicated"], true);
+    }
+
+    async fn json_of(app: &Router, req: Request<Body>) -> serde_json::Value {
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert!(res.status().is_success(), "{}", res.status());
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
     async fn hello_answers_a_signed_out_browser_and_the_rest_of_the_api_does_not() {
         let vault = tempfile::TempDir::new().unwrap();
         let mut state = WsState::new(vault.path().to_path_buf(), None);

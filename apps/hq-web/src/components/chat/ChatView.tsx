@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { newClientId } from '~/lib/outbox'
 import { Paperclip, PencilLine, X } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { useThreadStore, useLiveTurn, type ThreadMessage } from '~/store/threadStore'
@@ -164,7 +165,8 @@ export function ChatView({ active, onClose }: Props) {
   const sendChat = (tid: string, content: string, files: ChatAttachment[], replaceFrom?: string) => {
     const store = useThreadStore.getState()
     if (replaceFrom) store.removeFrom(tid, replaceFrom)
-    const clientId = `local-${Date.now()}`
+    // `local-` marks it unsaved here; the random rest keeps two devices from ever sharing one, since HQ drops repeats.
+    const clientId = `local-${newClientId()}`
     store.appendMessage(tid, {
       messageId: clientId,
       threadId: tid,

@@ -334,6 +334,9 @@ pub(crate) struct CreateTaskBody {
     pub(crate) created_by: String,
     /// Idempotency key, unique per space; a repeat returns the existing task.
     pub(crate) external_id: Option<String>,
+    /// The id a browser's or phone's outbox gave this task; a resend returns the task already made.
+    #[serde(default)]
+    pub(crate) client_id: Option<String>,
     pub(crate) estimate_minutes: Option<i64>,
     #[serde(default)]
     pub(crate) long_horizon: bool,
@@ -351,6 +354,9 @@ fn default_created_by() -> String {
     "unknown".to_string()
 }
 
+/// A client id stored as the task's idempotency key, so it cannot meet a real external id.
+const CLIENT_ID_PREFIX: &str = "client:";
+
 pub(crate) async fn create_task_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<CreateTaskBody>,
@@ -359,6 +365,10 @@ pub(crate) async fn create_task_handler(
         return ApiError::bad_request("title is required").into_response();
     }
     let id = hq_tools::util::generate_id("tk");
+    let external_id = body.external_id.clone().or_else(|| {
+        hq_db::client_ids::usable(body.client_id.as_deref())
+            .map(|c| format!("{CLIENT_ID_PREFIX}{c}"))
+    });
     let result = state.db.with_conn(move |c| {
         let parent = match &body.parent_task_id {
             Some(pid) => Some(
@@ -398,7 +408,7 @@ pub(crate) async fn create_task_handler(
                 tags: &body.tags,
                 assignees: &body.assignees,
                 created_by: &body.created_by,
-                external_id: body.external_id.as_deref(),
+                external_id: external_id.as_deref(),
                 estimate_minutes: body.estimate_minutes,
                 long_horizon: body.long_horizon,
             },
@@ -1022,6 +1032,7 @@ mod tests {
                 tags: vec![],
                 created_by: "test".into(),
                 external_id: Some("req-1".into()),
+                client_id: None,
                 estimate_minutes: None,
                 long_horizon: false,
                 assignees: vec![],
@@ -1067,6 +1078,7 @@ mod tests {
                 tags: vec!["hq".into()],
                 created_by: "test".into(),
                 external_id: None,
+                client_id: None,
                 estimate_minutes: None,
                 long_horizon: false,
                 assignees: vec![],
