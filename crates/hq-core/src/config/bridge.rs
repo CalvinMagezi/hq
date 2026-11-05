@@ -104,9 +104,11 @@ pub struct BridgeForward {
     /// the device as long as a dial may take.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fail_fast_secs: Option<u64>,
-    /// `direct`: use the device only over a direct path (the same network, or a hole punched
-    /// through), never through a relay, and close connections at once while only a relay reaches
-    /// it. For a metered phone. `any`, the default, takes whichever path there is.
+    /// `direct`: open new connections to the device only over a direct path (the same network,
+    /// or a hole punched through), and end them at once while only a relay reaches it, so a
+    /// prompt does not cross a metered link. The dial's handshake, keepalives and a stream already
+    /// open when the path falls back may still use the relay. `any`, the default, takes whichever
+    /// path there is.
     #[serde(default, skip_serializing_if = "ForwardWhen::is_any")]
     pub when: ForwardWhen,
 }

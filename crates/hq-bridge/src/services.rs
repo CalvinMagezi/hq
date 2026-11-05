@@ -285,6 +285,24 @@ struct Link {
     down: AtomicBool,
     /// A background try is running.
     retrying: AtomicBool,
+    /// When the kept connection was dialed: a direct-only forward gives a connection this young
+    /// time to leave the relay, for every request that reaches it, not only the one that dialed.
+    dialed_at: std::sync::Mutex<Option<tokio::time::Instant>>,
+}
+
+impl Link {
+    fn dialed(&self) {
+        *self.dialed_at.lock().unwrap() = Some(tokio::time::Instant::now());
+    }
+
+    /// How much of [`DIRECT_WAIT`] the kept connection has left.
+    fn direct_grace(&self) -> Duration {
+        self.dialed_at
+            .lock()
+            .unwrap()
+            .map(|at| DIRECT_WAIT.saturating_sub(at.elapsed()))
+            .unwrap_or_default()
+    }
 }
 
 /// How a forward treats a peer that is slow, away or only behind a relay.
@@ -350,14 +368,16 @@ async fn open_stream(
 ) -> Result<(SendStream, RecvStream)> {
     let direct = options.direct_only;
     let Some(limit) = options.fail_fast else {
-        return stream_to(dialer, peer, service, &link.conn, direct).await;
+        return stream_to(dialer, peer, service, link, direct).await;
     };
     if link.down.load(Ordering::SeqCst) {
         retry_in_background(dialer, peer, service, link, direct);
         return Err(Unreachable.into());
     }
+    // A direct-only forward may also spend its grace on a new connection leaving the relay.
+    let budget = if direct { limit + DIRECT_WAIT } else { limit };
     let outcome =
-        tokio::time::timeout(limit, stream_to(dialer, peer, service, &link.conn, direct)).await;
+        tokio::time::timeout(budget, stream_to(dialer, peer, service, link, direct)).await;
     match outcome {
         Ok(Ok(stream)) => return Ok(stream),
         // The peer answered; it is only on the wrong path, which may change on the next request.
@@ -407,12 +427,12 @@ fn is_direct(conn: &Connection) -> bool {
     crate::bridge::path_kind(conn) == "direct"
 }
 
-/// Whether `conn` is on a direct path, waiting up to [`DIRECT_WAIT`] for a new one to get there.
-async fn reaches_directly(conn: &Connection, fresh: bool) -> bool {
-    if is_direct(conn) || !fresh {
+/// Whether `conn` is on a direct path, waiting up to `grace` for it to get there.
+async fn reaches_directly(conn: &Connection, grace: Duration) -> bool {
+    if is_direct(conn) || grace.is_zero() {
         return is_direct(conn);
     }
-    let deadline = tokio::time::Instant::now() + DIRECT_WAIT;
+    let deadline = tokio::time::Instant::now() + grace;
     while tokio::time::Instant::now() < deadline {
         tokio::time::sleep(DIRECT_POLL).await;
         if is_direct(conn) {
@@ -449,7 +469,7 @@ fn retry_in_background(
     tokio::spawn(async move {
         let tried = kept_id(&link).await;
         // The stream only proves the service answers; dropping it ends it on the far side.
-        let answered = match stream_to(&dialer, &peer, &service, &link.conn, direct_only).await {
+        let answered = match stream_to(&dialer, &peer, &service, &link, direct_only).await {
             Ok(_) => true,
             Err(e) => e.is::<NotDirect>(),
         };
@@ -477,9 +497,10 @@ async fn stream_to(
     dialer: &Dialer,
     peer: &str,
     service: &str,
-    kept: &tokio::sync::Mutex<Option<Connection>>,
+    link: &Link,
     direct_only: bool,
 ) -> Result<(SendStream, RecvStream)> {
+    let kept = &link.conn;
     let mut slot = kept.lock().await;
     if let Some((code, reason)) = refusal(&dialer.standing(peer).await) {
         if let Some(conn) = slot.take() {
@@ -491,7 +512,6 @@ async fn stream_to(
         .as_ref()
         .filter(|c| c.close_reason().is_none())
         .cloned();
-    let fresh = alive.is_none();
     let conn = match alive {
         Some(conn) => conn,
         None => {
@@ -500,12 +520,13 @@ async fn stream_to(
                 .await
                 .context("the peer did not answer in time")??;
             *slot = Some(conn.clone());
+            link.dialed();
             conn
         }
     };
     drop(slot);
     // The relayed connection is kept: it may still move to a direct path.
-    if direct_only && !reaches_directly(&conn, fresh).await {
+    if direct_only && !reaches_directly(&conn, link.direct_grace()).await {
         return Err(NotDirect.into());
     }
     match open_service(&conn, service).await {
@@ -515,7 +536,8 @@ async fn stream_to(
                 .await
                 .context("the peer did not answer in time")??;
             *kept.lock().await = Some(fresh.clone());
-            if direct_only && !reaches_directly(&fresh, true).await {
+            link.dialed();
+            if direct_only && !reaches_directly(&fresh, link.direct_grace()).await {
                 return Err(NotDirect.into());
             }
             open_service(&fresh, service).await

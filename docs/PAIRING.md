@@ -357,8 +357,10 @@ on a metered phone, a long prompt then never crosses mobile data to reach the la
 dialed connection gets 2 s to move from the relay to a direct path (most do within a second on the
 same network); while only a relay reaches the device, every request through the forward ends at
 once, so the backend chain moves to the next backend. The connection is kept, and requests go
-through again as soon as it finds a direct path. The default, `when: any`, takes whichever path
-there is.
+through again as soon as it finds a direct path. It gates new requests, not bytes: the dial's
+handshake and keepalives go through the relay, a request already streaming when the path falls back
+to the relay finishes there, and a device that vanished while on the relay is noticed only when the
+connection times out. The default, `when: any`, takes whichever path there is.
 
 Ollama's default context (4096 tokens on smaller machines) is shorter than HQ's prompt, and Ollama
 cuts the prompt without an error; set `OLLAMA_CONTEXT_LENGTH` (or the Ollama app's context length) to
