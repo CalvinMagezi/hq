@@ -37,6 +37,44 @@ pub(crate) async fn status_ai_handler(State(state): State<Arc<WsState>>) -> Resp
     }
 }
 
+/// A scheduled backup counts as overdue this long after it was due.
+const BACKUP_GRACE_SECS: i64 = 60 * 60;
+const SECS_PER_HOUR: i64 = 3600;
+
+/// What the backup status route says, from the config and the last run's status file.
+pub(crate) fn backup_view(
+    cfg: &hq_core::config::BackupConfig,
+    last: Option<&hq_backup::status::Status>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> serde_json::Value {
+    let configured = cfg.enabled && cfg.dir.is_some();
+    let finished = last.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s.finished).ok());
+    let last_ok_at = last.filter(|s| s.ok).and(finished);
+    let failed = configured && last.is_some_and(|s| !s.ok);
+    let due = cfg.every_hours as i64 * SECS_PER_HOUR + BACKUP_GRACE_SECS;
+    let overdue = configured
+        && last_ok_at.is_none_or(|at| (now - at.with_timezone(&chrono::Utc)).num_seconds() > due);
+    json!({
+        "configured": configured,
+        "last_ok_at": last_ok_at.map(|t| t.to_rfc3339()),
+        "failed": failed,
+        "overdue": overdue,
+        "every_hours": cfg.every_hours,
+    })
+}
+
+/// `GET /api/backup/status`: whether HQ's scheduled backup is set up, when it last worked, and
+/// whether it failed or is overdue (resolutions.md B10). No paths, no keys.
+pub(crate) async fn backup_status_handler(State(state): State<Arc<WsState>>) -> Response {
+    let cfg = state
+        .hq_config
+        .as_deref()
+        .map(|c| c.backup.clone())
+        .unwrap_or_default();
+    let last = cfg.dir.as_deref().and_then(hq_backup::status::read);
+    Json(backup_view(&cfg, last.as_ref(), chrono::Utc::now())).into_response()
+}
+
 /// `GET /api/status/busy`: `{busy, chat_turns, backup}`.
 pub(crate) async fn status_busy_handler(State(state): State<Arc<WsState>>) -> Response {
     let chat_turns = state.active_chat_turns.read().await.len();
@@ -95,5 +133,32 @@ mod tests {
         hq_backup::status::RUNNING.store(false, Ordering::SeqCst);
         assert_eq!(busy["busy"], true);
         assert_eq!(busy["backup"], true);
+    }
+
+    #[test]
+    fn backup_is_overdue_or_failed_only_when_set_up() {
+        let now = chrono::Utc::now();
+        let mut cfg = hq_core::config::BackupConfig::default();
+        assert_eq!(backup_view(&cfg, None, now)["overdue"], false, "not set up");
+        cfg.enabled = true;
+        cfg.dir = Some("/backups".into());
+        cfg.every_hours = 24;
+        assert_eq!(backup_view(&cfg, None, now)["overdue"], true, "never ran");
+        let run = |hours_ago: i64, ok: bool| hq_backup::status::Status {
+            finished: (now - chrono::Duration::hours(hours_ago)).to_rfc3339(),
+            ok,
+            message: String::new(),
+            path: None,
+            files: 0,
+            left_out: 0,
+        };
+        let fresh = backup_view(&cfg, Some(&run(3, true)), now);
+        assert_eq!(fresh["overdue"], false);
+        assert_eq!(fresh["failed"], false);
+        assert_eq!(
+            backup_view(&cfg, Some(&run(72, true)), now)["overdue"],
+            true
+        );
+        assert_eq!(backup_view(&cfg, Some(&run(1, false)), now)["failed"], true);
     }
 }

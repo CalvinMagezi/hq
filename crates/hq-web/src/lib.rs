@@ -269,6 +269,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(hello::HELLO_PATH, get(hello::hello_handler))
         .route("/api/status/ai", get(status_ai::status_ai_handler))
         .route("/api/status/busy", get(status_ai::status_busy_handler))
+        .route("/api/backup/status", get(status_ai::backup_status_handler))
         .route("/api/vault-status", get(api::vault_status_handler))
         .route("/api/ws-ticket", post(auth::ws_ticket_handler))
         .route(
@@ -369,12 +370,20 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             axum::routing::post(threads_api::archive_thread_handler),
         )
         .route(
+            "/api/threads/{thread_id}/unarchive",
+            axum::routing::post(threads_api::unarchive_thread_handler),
+        )
+        .route(
             "/api/notifications",
             get(notifications_api::list_notifications_handler),
         )
         .route(
             "/api/notifications/{id}/action",
             axum::routing::post(notifications_api::notification_action_handler),
+        )
+        .route(
+            "/api/notifications/{id}/restore",
+            axum::routing::post(notifications_api::restore_notification_handler),
         )
         .route(
             "/api/notifications/{id}/answer",

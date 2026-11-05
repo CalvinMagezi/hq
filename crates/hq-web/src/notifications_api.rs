@@ -279,6 +279,28 @@ fn refuse_unanswered_dialog(
 const DIALOG_NOT_ANSWERED: &str = "This is an agent waiting at a question. Answer it with its own buttons or on the agent's page; approving the notice would not answer the agent.";
 
 /// Returns false when no value item has that id.
+/// `POST /api/notifications/{id}/restore`: the Undo of a clear, within the window.
+pub(crate) async fn restore_notification_handler(
+    State(state): State<Arc<WsState>>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(val_id) = id.strip_prefix("val_") else {
+        return ApiError::bad_request("unrecognized notification ID format").into_response();
+    };
+    let window = crate::threads_api::UNDO_WINDOW_SECS;
+    match hq_db::value_items::restore_dismissed(&state.db, val_id, window) {
+        Ok(true) => {
+            state.broadcast(
+                &serde_json::json!({"type": "notification:restored", "id": id}).to_string(),
+            );
+            axum::http::StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => ApiError::Conflict(crate::threads_api::UNDO_TOO_LATE.into()).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
 pub(crate) fn record_action(
     db: &hq_db::Database,
     val_id: &str,

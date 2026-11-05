@@ -500,6 +500,20 @@ const MIN_ID_PREFIX_LEN: usize = 4;
 /// (token). Returns true if a row matched. Rejects a prefix shorter than
 /// [`MIN_ID_PREFIX_LEN`] rather than silently dismissing everything it
 /// happens to match.
+/// Undo a clear: puts a dismissed item back while the clear is at most `window_secs` old
+/// (resolutions.md A6). Returns false when it is older, was answered instead, or is unknown.
+pub fn restore_dismissed(db: &Database, id: &str, window_secs: i64) -> Result<bool> {
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE value_items SET state='delivered', engagement=NULL, engaged_at=NULL \
+             WHERE id = ?1 AND state = 'dismissed' \
+               AND julianday(engaged_at) >= julianday('now', ?2)",
+            params![id, format!("-{window_secs} seconds")],
+        )?;
+        Ok(n > 0)
+    })
+}
+
 pub fn dismiss_by_id(db: &Database, id_or_token: &str) -> Result<bool> {
     if id_or_token.len() < MIN_ID_PREFIX_LEN {
         anyhow::bail!(
@@ -606,6 +620,29 @@ pub fn count_from_sources_since(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clear_is_undone_within_the_window_and_not_after() {
+        let db = Database::open_memory().unwrap();
+        let item = ValueItem::new("agent_notify", ValueKind::Fyi, "t", "b");
+        emit(&db, &item).unwrap();
+        assert!(dismiss_by_id(&db, &item.id).unwrap());
+        assert!(restore_dismissed(&db, &item.id, 600).unwrap());
+        assert!(
+            !restore_dismissed(&db, &item.id, 600).unwrap(),
+            "only a cleared item"
+        );
+        assert!(dismiss_by_id(&db, &item.id).unwrap());
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE value_items SET engaged_at = datetime('now', '-11 minutes') WHERE id = ?1",
+                params![item.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!restore_dismissed(&db, &item.id, 600).unwrap(), "too late");
+    }
     use hq_core::types::ValueKind;
 
     fn open_db() -> Database {
