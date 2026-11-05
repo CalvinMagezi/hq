@@ -46,7 +46,6 @@
   "components/SearchOverlay.tsx": 4,
   "components/BottomNav.tsx": 5,
   "components/InstallPrompt.tsx": 3,
-  "components/ReachabilityBanner.tsx": 4,
   "components/NoteEditor.tsx": 3,
   "components/AppRail.tsx": 2,
   "components/CodeViewer.tsx": 2,

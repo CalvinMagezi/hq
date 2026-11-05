@@ -29,7 +29,7 @@ function onOnlineChange(listener: () => void): () => void {
   }
 }
 
-/** Whether the browser reports a network, read live; the build's prerender counts as online. */
+/** Whether the browser reports a network, read in real time; the build's prerender counts as online. */
 export function useDeviceOnline(): boolean {
   return useSyncExternalStore(onOnlineChange, () => navigator.onLine, () => true)
 }

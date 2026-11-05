@@ -8,9 +8,9 @@ import {
   createRootRoute,
 } from '@tanstack/react-router'
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
-import { CACHE_BUSTER, CACHE_MAX_AGE_MS, lastSyncedAt, queryClient, queryPersister } from '~/lib/offlineCache'
+import { CACHE_BUSTER, CACHE_MAX_AGE_MS, queryClient, queryPersister } from '~/lib/offlineCache'
 import type { ReactNode } from 'react'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { MessageSquare, Search, Settings } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
@@ -20,15 +20,15 @@ import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { InstallPrompt } from '~/components/InstallPrompt'
 import { SignedOutView, SignInPrompt } from '~/components/SignInPrompt'
-import { ReachabilityBanner } from '~/components/ReachabilityBanner'
-import { useDeviceOnline } from '~/lib/reachability'
+import { StatusLine } from '~/components/StatusLine'
+import { ConnectionSheet } from '~/components/ConnectionSheet'
+import { useConnection } from '~/lib/connection'
 import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
 import { HeaderClock } from '~/components/HeaderClock'
 import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
 import alignedCss from '~/styles/aligned-ui.css?url'
 import appCss from '../../app.css?url'
-import { relTime } from '~/lib/time'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
@@ -167,7 +167,9 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const pathname = useRouterState({ select: (r) => r.location.pathname })
   const setSystemNotice = useHQStore((s) => s.setSystemNotice)
-  const isOnline = useDeviceOnline()
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const connection = useConnection()
+  const statusLineRef = useRef<HTMLButtonElement>(null)
   const [swUpdateAvailable, setSwUpdateAvailable] = useState(false)
 
   // Another tab of this HQ was refused and wiped the browser: this one shows nothing either.
@@ -261,7 +263,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
         <>
           <InstallPrompt />
           <SignInPrompt />
-          <ReachabilityBanner />
+          <ConnectionSheet connection={connection} open={sheetOpen} onClose={() => setSheetOpen(false)} triggerRef={statusLineRef} />
         </>
       )}
 
@@ -357,27 +359,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
           <Settings className="w-4 h-4" />
         </Link>
 
-        <div
-          className="flex items-center gap-1.5 flex-shrink-0"
-          title={wsConnected ? 'Connected' : signInNeeded ? 'Sign in to HQ to sync' : 'Showing data saved on this device'}
-        >
-          <div className="relative">
-            <div className={`status-dot ${wsConnected ? 'active' : 'error'}`} />
-            {wsConnected && (
-              <div
-                className="absolute inset-0 rounded-full animate-ping"
-                style={{ background: 'var(--accent-green)', opacity: 0.25, animationDuration: '3s' }}
-              />
-            )}
-          </div>
-          <span
-            suppressHydrationWarning
-            className="text-[9px] font-mono"
-            style={{ color: wsConnected ? 'var(--accent-green)' : isOnline ? 'var(--accent-amber)' : 'var(--accent-red)' }}
-          >
-            {wsConnected ? 'live' : <SavedDataLabel reconnecting={isOnline} />}
-          </span>
-        </div>
+        <StatusLine connection={connection} onClick={() => setSheetOpen(true)} buttonRef={statusLineRef} />
       </header>}
 
       <main className="flex-1 min-h-0 overflow-hidden relative main-content md:mx-3 md:mb-3 md:rounded-2xl hq-glass-pane">
@@ -390,21 +372,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   )
 }
 
-const MINUTE_MS = 60_000
 // Lets the first route's lazy chunks finish loading before they are reported to the worker.
 const ROUTE_CHUNKS_SETTLE_MS = 3000
-
-/** Shown while disconnected: screens are showing data saved on this device. */
-function SavedDataLabel({ reconnecting }: { reconnecting: boolean }) {
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const id = window.setInterval(() => tick((n) => n + 1), MINUTE_MS)
-    return () => window.clearInterval(id)
-  }, [])
-  const synced = lastSyncedAt()
-  const age = synced ? ` · ${relTime(synced)}` : ''
-  return <>{reconnecting ? 'saved' : 'offline'}{age}</>
-}
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
