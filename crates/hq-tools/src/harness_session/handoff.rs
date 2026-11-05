@@ -249,24 +249,14 @@ fn existing_report(
 /// must still be settled. The launch itself is bounded below the client's
 /// transport limit (`ScriptedHost::launch_bound`), so a caller normally gets the
 /// real error rather than a timeout.
-pub async fn handoff(
-    vault_path: &Path,
-    db: &Arc<Database>,
-    host: Host,
-    req: HandoffRequest,
-) -> Result<Value> {
-    let (vault_path, db) = (vault_path.to_path_buf(), db.clone());
-    tokio::spawn(async move { run_handoff(&vault_path, &db, host, req).await })
+pub async fn handoff(db: &Arc<Database>, host: Host, req: HandoffRequest) -> Result<Value> {
+    let db = db.clone();
+    tokio::spawn(async move { run_handoff(&db, host, req).await })
         .await
         .map_err(|e| anyhow!("the handoff task did not finish: {e}"))?
 }
 
-async fn run_handoff(
-    vault_path: &Path,
-    db: &Arc<Database>,
-    host: Host,
-    req: HandoffRequest,
-) -> Result<Value> {
+async fn run_handoff(db: &Arc<Database>, host: Host, req: HandoffRequest) -> Result<Value> {
     super::require_cwd(Some(&req.cwd))?;
     // Checked before a task or thread is filed, so a model the harness cannot take leaves nothing behind.
     super::resolve(&req.harness)?.with_model(non_blank(&req.model))?;
@@ -293,7 +283,6 @@ async fn run_handoff(
     let prompt = non_blank(&req.prompt)
         .map_or_else(|| default_prompt(&task, &req.acceptance), str::to_string);
     let spawned = super::spawn_on(
-        vault_path,
         db,
         host.clone(),
         SpawnRequest {

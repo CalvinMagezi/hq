@@ -40,12 +40,7 @@ pub(super) fn require_alive(row: &HarnessSessionRow) -> Result<Host> {
 /// Resume a prior session: same session dir / resume token, new agent.
 /// Falls back to a fresh spawn when the harness has no resume support or no
 /// token was harvested; the result says which happened.
-pub async fn resume(
-    vault_path: &Path,
-    db: &Arc<Database>,
-    session_id: &str,
-    prompt: Option<&str>,
-) -> Result<Value> {
+pub async fn resume(db: &Arc<Database>, session_id: &str, prompt: Option<&str>) -> Result<Value> {
     let row = get_row(db, session_id)?;
     if row.origin == registry::ORIGIN_STACK {
         bail!(
@@ -82,7 +77,6 @@ pub async fn resume(
         ResumeStrategy::None => false,
     };
     let mut value = launch_session(
-        vault_path,
         db,
         &harness,
         Launch {
@@ -992,7 +986,6 @@ pub fn record_agent_session_id(
 /// Once the agent has reported its conversation id, has the host restart it
 /// into exactly that conversation instead of the most recent one.
 pub fn refresh_restart_command(
-    _vault_path: &Path,
     host: &Host,
     row: &HarnessSessionRow,
     agent: &AgentInfo,
