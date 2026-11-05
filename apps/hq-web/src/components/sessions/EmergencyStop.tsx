@@ -23,19 +23,22 @@ interface ButtonProps {
   compact?: boolean
   /** Called after a stop went through, so the page can refresh what it shows. */
   onStopped: () => void
+  /** Why stopping is off while HQ can't be reached. */
+  off?: string | null
 }
 
 /** The emergency stop: kills every agent on one computer or all of them, after one confirmation. */
-export function StopAllButton({ compact = false, onStopped }: ButtonProps) {
+export function StopAllButton({ compact = false, onStopped, off = null }: ButtonProps) {
   const [open, setOpen] = useState(false)
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
+        disabled={off !== null}
         className={compact ? 'hq-btn-stop !h-11 !w-11 !p-0' : 'hq-btn-stop'}
         aria-label={t('stop_all_act')}
-        title={t('stop_all_act')}
+        title={off ?? t('stop_all_act')}
       >
         <OctagonX className="w-4 h-4" />
         {!compact && t('stop_all_act')}

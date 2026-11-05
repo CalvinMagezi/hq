@@ -2,6 +2,7 @@ import { AlertTriangle } from 'lucide-react'
 import type { QueueHealth, Rollout } from '~/lib/verificationApi'
 import { RolloutPanel } from './RolloutPanel'
 import { WAITING_LABEL, queueLines, waitingChips } from './verification'
+import { t } from '~/strings'
 
 /** Backlog by who it waits on, the sentences that matter, and why anything is deferred. */
 export function QueueHealthPanel({ health, rollout }: { health: QueueHealth; rollout?: Rollout }) {
@@ -11,7 +12,7 @@ export function QueueHealthPanel({ health, rollout }: { health: QueueHealth; rol
   return (
     <div className="mt-3 pt-3 border-t border-white/10 space-y-2.5 text-xs">
       {chips.length === 0 ? (
-        <p className="text-neutral-400">Nothing is waiting on anyone.</p>
+        <p className="text-neutral-400">{t('verify_queue_empty')}</p>
       ) : (
         <ul className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {chips.map((c) => (
@@ -32,7 +33,7 @@ export function QueueHealthPanel({ health, rollout }: { health: QueueHealth; rol
       </ul>
       {health.deferrals.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">Waiting, and why</p>
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{t('verify_queue_waiting')}</p>
           <ul className="space-y-1">
             {health.deferrals.map((d) => (
               <li key={`${d.waiting_for}-${d.reason}`} className="text-neutral-400">

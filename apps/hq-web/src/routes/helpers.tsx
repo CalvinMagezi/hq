@@ -20,6 +20,9 @@ import { tn } from '~/strings'
 import { useSidebarLayout } from '~/components/sessions/useSidebarLayout'
 import { SIDEBAR_MAX, SIDEBAR_MIN } from '~/lib/sidebarLayout'
 import { ErrorText } from '~/components/sessions/ErrorText'
+import { useSharedConnection } from '~/lib/connection'
+import { helpersAway, readSavedHelpers, saveHelpers, type HelpersAway } from '~/lib/helpersSaved'
+import { savedLine } from '~/components/SavedStrip'
 
 const HELPER_EVENTS = ['helpers:change', 'sessions:sync'] as const
 const LIST_POLL_MS = 8_000
@@ -56,6 +59,8 @@ function WorkbenchPage() {
   const filters = useMemo(() => ({ ...(task ? { task_id: task } : {}), include_archived: true }), [task])
   const list = usePolled(JSON.stringify(filters), () => globalSessionsApi.list(filters), LIST_POLL_MS, true, true, HELPER_EVENTS)
   const detail = usePolled(selectedId ?? '', () => globalSessionsApi.get(selectedId ?? ''), DETAIL_POLL_MS, Boolean(selectedId), true, HELPER_EVENTS)
+  const away = helpersAway(useSharedConnection())
+  const offWhy = away ? t(away === 'starting' ? 'off_until_started' : 'off_until_reached') : null
   const hosts = usePolled('hosts', () => workbenchApi.hosts(), HOSTS_POLL_MS, true, true, HELPER_EVENTS)
   const afterStop = () => void Promise.all([list.refresh(), hosts.refresh()])
 
@@ -110,14 +115,14 @@ function WorkbenchPage() {
               </span>
             </div>
             <div className="flex gap-2 px-4 pb-3">
-              <button type="button" onClick={() => setCreating(true)} className="hq-btn-primary flex-1 min-w-0">
+              <button type="button" disabled={away !== null} title={offWhy ?? undefined} onClick={() => setCreating(true)} className="hq-btn-primary flex-1 min-w-0">
                 <Plus className="w-4 h-4" />
                 {t('helpers_start_a_helper')}
               </button>
-              <StopAllButton onStopped={afterStop} />
+              <StopAllButton onStopped={afterStop} off={offWhy} />
             </div>
             <LockdownBanner hosts={hosts.data?.hosts ?? []} />
-            <AgentList list={list} selectedId={selectedId} showArchived={showArchived} onShowArchived={setShowArchived} onNew={() => setCreating(true)} task={task} onShowAll={() => void navigate({ search: (prev) => ({ ...prev, task: undefined }), replace: true })} />
+            <AgentList away={away} offWhy={offWhy} list={list} selectedId={selectedId} showArchived={showArchived} onShowArchived={setShowArchived} onNew={() => setCreating(true)} task={task} onShowAll={() => void navigate({ search: (prev) => ({ ...prev, task: undefined }), replace: true })} />
           </>
         )}
       </aside>
@@ -176,6 +181,8 @@ function WorkbenchPage() {
 }
 
 interface ListProps {
+  away: HelpersAway
+  offWhy: string | null
   list: ReturnType<typeof usePolled<HarnessSession[]>>
   selectedId: string | undefined
   showArchived: boolean
@@ -194,12 +201,17 @@ function SectionTitle({ children, count }: { children: string; count: number }) 
   )
 }
 
-function AgentList({ list, selectedId, showArchived, onShowArchived, onNew, task, onShowAll }: ListProps) {
+function AgentList({ away, offWhy, list, selectedId, showArchived, onShowArchived, onNew, task, onShowAll }: ListProps) {
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [chip, setChip] = useState<HelperChip>('all')
   const own = usePolled('edge-worker', () => edgeWorkerApi.runs(), OWN_POLL_MS, true, true, HELPER_EVENTS)
-  const sessions = list.data ?? []
+  const saved = useMemo(() => (away ? readSavedHelpers() : null), [away])
+  const live = away ? null : list.data
+  useEffect(() => {
+    if (live) saveHelpers(live)
+  }, [live])
+  const sessions = (away ? saved?.list : list.data) ?? []
   const groups = useMemo(() => groupHelpers(sessions, chip, showArchived), [sessions, chip, showArchived])
   const counts = useMemo(() => chipCounts(sessions), [sessions])
   const banner = task ? taskBanner(sessions, task) : null
@@ -227,7 +239,14 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onNew, task
     }
   }
 
-  if (list.loading) {
+  if (away && !saved) {
+    return (
+      <p className="p-4 text-xs text-neutral-400" role="status">
+        {t('saved_nothing')} {offWhy}
+      </p>
+    )
+  }
+  if (list.loading && !away) {
     return (
       <div className="flex items-center gap-2 p-4 text-xs text-neutral-500" role="status">
         <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
@@ -235,7 +254,7 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onNew, task
       </div>
     )
   }
-  if (!list.data) {
+  if (!list.data && !away) {
     return <ErrorText className="p-4 text-xs">{list.error ?? t('helpers_load_failed')}</ErrorText>
   }
 
@@ -244,6 +263,11 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onNew, task
 
   return (
     <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 pb-4 px-2">
+      {away && saved && (
+        <p className="px-3 py-2 text-xs text-neutral-400" role="status">
+          {savedLine(saved.at)} {offWhy}
+        </p>
+      )}
       {banner && (
         <div className="px-2 py-2 text-xs text-neutral-300 border-y border-white/5" role="status">
           <p className="font-semibold">{banner.title}</p>
@@ -294,6 +318,7 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onNew, task
                 onAnswered={() => list.refresh()}
                 onRestore={s.archived ? () => void archive([s.id], false) : undefined}
                 busy={busyId === s.id || busyId === 'all'}
+                answersOff={offWhy}
               />
             ))}
           </ul>

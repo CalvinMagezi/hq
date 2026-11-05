@@ -108,10 +108,12 @@ interface Props {
   /** Offered on an archived card, beside its link. */
   onRestore?: () => void
   busy?: boolean
+  /** Why answering is off while HQ can't be reached. */
+  answersOff?: string | null
 }
 
 /** One helper in the list: a title link to its page, one line of facts, and for a plain question the answer in place. */
-export function SessionRow({ session: s, selected, onAnswered, onRestore, busy }: Props) {
+export function SessionRow({ session: s, selected, onAnswered, onRestore, busy, answersOff = null }: Props) {
   const folder = folderName(s.cwd)
   const state = helperState(s)
   return (
@@ -150,7 +152,7 @@ export function SessionRow({ session: s, selected, onAnswered, onRestore, busy }
           <SessionTaskLink session={s} />
         </div>
       )}
-      {state === 'needs' && !s.archived && <InlineAnswer session={s} onDone={onAnswered} />}
+      {state === 'needs' && !s.archived && <InlineAnswer session={s} onDone={onAnswered} off={answersOff} />}
     </li>
   )
 }

@@ -13,7 +13,7 @@ import { currentHqId, keyFor, LEGACY_KEYS } from './savedCopy'
 /** One HQ's stores, each named `{name}:{hq_id}` (shared parts rule 7). */
 export const WIPED_IDB_NAMES = ['hq-query-cache', 'hq-store', 'hq-thread-store', 'hq-outbox']
 // The token itself is dropped by hqAuth before the wipe starts (see refuseSignIn).
-export const WIPED_LOCAL_NAMES = ['hq-drafts', 'hq-last-sync']
+export const WIPED_LOCAL_NAMES = ['hq-drafts', 'hq-last-sync', 'hq-helpers-saved']
 export const API_CACHE = 'hq-api'
 /** Names from before the stores were keyed by HQ id; always cleared too. */
 const LEGACY_LOCAL_KEYS = ['hq.chat.drafts', 'hq-last-sync']

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronUp, Loader2 } from 'lucide-react'
 import { STATUS_LABELS, STATUS_ORDER, type TaskPriority, type TaskStatus } from '~/lib/tasksApi'
+import { t } from '~/strings'
 import { PRIORITIES } from './taskFields'
 
 const priorityLabel = (priority: TaskPriority) => priority.charAt(0).toUpperCase() + priority.slice(1)
@@ -42,10 +43,10 @@ export function BulkActionBar({ total, ticked, progress, message, onSelectAll, o
 
   return (
     <div className="sticky bottom-0 z-30 -mx-4 sm:-mx-8 mt-auto px-4 sm:px-8 pt-2 pb-3">
-      {menu && <button type="button" aria-label="Close menu" className="fixed inset-0 z-30 cursor-default" onClick={() => setMenu(null)} />}
+      {menu && <button type="button" aria-label={t('tasks_bulk_close_menu')} className="fixed inset-0 z-30 cursor-default" onClick={() => setMenu(null)} />}
       <div
         role="toolbar"
-        aria-label="Bulk actions"
+        aria-label={t('tasks_bulk_bar')}
         style={SOLID}
         className="relative z-40 hq-modal rounded-2xl px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2"
       >
@@ -54,10 +55,10 @@ export function BulkActionBar({ total, ticked, progress, message, onSelectAll, o
             {running ? (
               <span className="flex items-center gap-1.5">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                {progress.settled} of {progress.total}
+                {t('tasks_bulk_progress', { settled: progress.settled, total: progress.total })}
               </span>
             ) : (
-              `${ticked} selected`
+              t('tasks_bulk_selected', { n: ticked })
             )}
           </span>
           <button
@@ -66,13 +67,13 @@ export function BulkActionBar({ total, ticked, progress, message, onSelectAll, o
             onClick={allTicked ? onClear : onSelectAll}
             className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-40 whitespace-nowrap"
           >
-            {allTicked ? 'Clear' : `Select all ${total}`}
+            {allTicked ? t('inbox_clear') : t('tasks_bulk_select_all', { n: total })}
           </button>
           {message && !running && <span className="text-xs text-neutral-400 truncate min-w-0">{message}</span>}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <MenuButton label="Set status" open={menu === 'status'} disabled={running || none} onToggle={() => setMenu(menu === 'status' ? null : 'status')}>
+          <MenuButton label={t('tasks_bulk_set_status')} open={menu === 'status'} disabled={running || none} onToggle={() => setMenu(menu === 'status' ? null : 'status')}>
             {STATUS_ORDER.map((status) => (
               <MenuItem key={status} onClick={() => pick(() => onStatus(status))}>
                 {STATUS_LABELS[status]}
@@ -80,17 +81,17 @@ export function BulkActionBar({ total, ticked, progress, message, onSelectAll, o
             ))}
           </MenuButton>
 
-          <MenuButton label="Set priority" open={menu === 'priority'} disabled={running || none} onToggle={() => setMenu(menu === 'priority' ? null : 'priority')}>
+          <MenuButton label={t('tasks_bulk_set_priority')} open={menu === 'priority'} disabled={running || none} onToggle={() => setMenu(menu === 'priority' ? null : 'priority')}>
             {PRIORITIES.map((p) => (
               <MenuItem key={p} onClick={() => pick(() => onPriority(p))}>
                 {priorityLabel(p)}
               </MenuItem>
             ))}
-            <MenuItem onClick={() => pick(() => onPriority(null))}>No priority</MenuItem>
+            <MenuItem onClick={() => pick(() => onPriority(null))}>{t('tasks_bulk_no_priority')}</MenuItem>
           </MenuButton>
 
           <button type="button" disabled={running} onClick={onDone} className={BUTTON}>
-            Done
+            {t('safe_done_button')}
           </button>
         </div>
       </div>

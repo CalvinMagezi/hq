@@ -76,7 +76,7 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
 
       {facts.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">What HQ saw</p>
+          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{t('verify_audit_saw')}</p>
           <ul className="space-y-1">
             {facts.map((o) => (
               <li key={o.id} className="flex items-start gap-1.5 text-xs text-neutral-400">
@@ -97,7 +97,7 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
       {disagreeing ? (
         <div className="space-y-2">
           <label className="block text-xs text-neutral-300">
-            What is wrong? It goes on the task, which is reopened.
+            {t('verify_audit_wrong')}
             <textarea
               value={note}
               onChange={(e) => onNote(e.target.value)}
@@ -107,11 +107,11 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
           </label>
           <div className="flex gap-2">
             <button type="button" disabled={busy} onClick={onCancelDisagree} className={`${SHEET_QUIET} flex-1`}>
-              Back
+              {t('verify_audit_back')}
             </button>
             <button type="button" disabled={busy} onClick={onDisagree} className={`${SHEET_DANGER} flex-1`}>
               <ThumbsDown className="w-4 h-4" />
-              Reopen it
+              {t('verify_audit_reopen')}
             </button>
           </div>
         </div>
@@ -119,13 +119,13 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
         <div className="flex gap-2">
           <button type="button" disabled={busy} onClick={onAgree} className={`${SHEET_PRIMARY} flex-1`}>
             <ThumbsUp className="w-4 h-4" />
-            Agree
+            {t('verify_audit_agree')}
           </button>
           <button type="button" disabled={busy} onClick={onDisagree} className={`${SHEET_DANGER} flex-1`}>
             <ThumbsDown className="w-4 h-4" />
-            Disagree
+            {t('verify_audit_disagree')}
           </button>
-          <button type="button" disabled={busy} onClick={onSkip} className={`${SHEET_QUIET} px-3`} aria-label="Skip">
+          <button type="button" disabled={busy} onClick={onSkip} className={`${SHEET_QUIET} px-3`} aria-label={t('verify_audit_skip')}>
             <SkipForward className="w-4 h-4" />
           </button>
         </div>
@@ -155,7 +155,7 @@ export function AuditStackView({ stack, index, busy, error, disagreeing, note, o
   return (
     <div className="space-y-4">
       <p className="text-xs text-neutral-400">
-        You are checking HQ, not the work: do you agree that these were done? Every disagreement reopens the task and counts against the verifier.
+        {t('verify_audit_intro')}
       </p>
       {card ? (
         <>
@@ -175,7 +175,7 @@ export function AuditStackView({ stack, index, busy, error, disagreeing, note, o
           />
         </>
       ) : (
-        <p className="text-sm text-neutral-200">Nothing left to answer. Ask for more whenever you like: the ones with the least data come first.</p>
+        <p className="text-sm text-neutral-200">{t('verify_audit_none_left')}</p>
       )}
       {error && <p className="text-xs text-[var(--warn)]">{error}</p>}
       <div className="pt-3 border-t border-white/10 space-y-2.5">

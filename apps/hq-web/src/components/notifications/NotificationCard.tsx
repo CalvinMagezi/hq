@@ -38,15 +38,20 @@ export function NotificationCard({
 }: Props) {
   const isPending = notification.state === 'pending'
   const [failure, setFailure] = useState<string | null>(null)
+  const [refused, setRefused] = useState(false)
+  const [sent, setSent] = useState<{ answer: string; at: Date } | null>(null)
   const kind = cardKind(notification)
   const ranOut = lapsed(notification)
   const stuckOpen = kind === 'stuck' && isPending && !ranOut
   const act = async (id: string, action: string) => {
     setFailure(null)
+    setRefused(false)
     try {
       await onAction(id, action)
+      if (action === 'approve' || action === 'reject') setSent({ answer: t(action === 'approve' ? 'inbox_answer_allowed' : 'inbox_answer_declined'), at: new Date() })
     } catch (e) {
       setFailure(answerErrorLine(e))
+      setRefused((e as { status?: number } | null)?.status === 409)
     }
   }
   const dialog = openDialog(notification)
@@ -152,6 +157,21 @@ export function NotificationCard({
       {/* Action Footer */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
 
+        {failure && !notification.actions.includes('approve') && (
+          <p role="alert" className="w-full text-xs" style={{ color: 'var(--warn)' }}>
+            {failure}
+          </p>
+        )}
+        {refused && (
+          <Link to="/helpers/$id" params={{ id: notification.metadata.extra?.session_id ?? notification.id }} className="a-btn secondary ml-auto">
+            {t('inbox_open_helper')}
+          </Link>
+        )}
+        {sent && (
+          <p role="status" className="w-full text-xs text-neutral-400">
+            {t('inbox_answer_sent_at', { answer: sent.answer, time: new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(sent.at) })}
+          </p>
+        )}
         {ranOut && <p className="a-muted text-xs">{t('inbox_request_ran_out')}</p>}
         {stuckOpen && (
           <Link

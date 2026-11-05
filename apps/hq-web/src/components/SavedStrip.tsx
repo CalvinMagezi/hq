@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useEffect, useReducer } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import type { ConnectionState } from '~/lib/connection'
 import { placeSavedAt } from '~/lib/savedCopy'
@@ -37,6 +38,9 @@ export function placeSavedTime(queries: { queryKey: readonly unknown[]; state: {
 /** One strip per place under the status line while HQ is not Connected. */
 export function SavedStrip({ state, pathname }: { state: ConnectionState; pathname: string }) {
   const client = useQueryClient()
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  // The restored copy lands after first paint; without this the strip kept saying nothing was saved.
+  useEffect(() => client.getQueryCache().subscribe(redraw), [client])
   const keys = savedKeysFor(pathname)
   if (!keys || !stripShown(state)) return null
   const savedAt = placeSavedTime(client.getQueryCache().getAll(), keys)

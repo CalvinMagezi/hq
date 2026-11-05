@@ -47,7 +47,7 @@ export function useDialogAnswer(session: HarnessSession, onDone: Done) {
 }
 
 /** Decline and Allow once on a list card. Shown only for a plain yes or no question. */
-export function InlineAnswer({ session, onDone }: { session: HarnessSession; onDone: Done }) {
+export function InlineAnswer({ session, onDone, off = null }: { session: HarnessSession; onDone: Done; /** Why answering is off, said on the card. */ off?: string | null }) {
   const { answer, busy, error } = useDialogAnswer(session, onDone)
   const read = readDialog(session)
   if (!read || !canAllowOnce(read.dialog)) return null
@@ -55,14 +55,15 @@ export function InlineAnswer({ session, onDone }: { session: HarnessSession; onD
   return (
     <div className="px-3.5 pb-3 space-y-2">
       <div className="flex gap-2">
-        <button type="button" disabled={busy} onClick={() => void answer(read.seq, { decline: true })} className="a-btn secondary flex-1">
+        <button type="button" disabled={busy || off !== null} onClick={() => void answer(read.seq, { decline: true })} className="a-btn secondary flex-1">
           {t('notice_action_decline')}
         </button>
-        <button type="button" disabled={busy} onClick={() => picked && void answer(read.seq, { option: picked.id })} className="a-btn flex-1">
+        <button type="button" disabled={busy || off !== null} onClick={() => picked && void answer(read.seq, { option: picked.id })} className="a-btn flex-1">
           {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
           {t('notice_action_allow_once')}
         </button>
       </div>
+      {off && <p className="text-xs text-neutral-400">{off}</p>}
       {error && (
         <p role="alert" className="text-xs" style={{ color: 'var(--warn)' }}>
           {error}

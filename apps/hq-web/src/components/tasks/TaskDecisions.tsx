@@ -1,5 +1,5 @@
 import { ApprovalCard } from '../ui/ApprovalCard'
-import { t } from '~/strings'
+import { t, type StringKey } from '~/strings'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { answerDecision, fetchTaskDecisions, type TaskDecision } from '~/lib/taskDecisionsApi'
@@ -9,12 +9,12 @@ import { SectionLabel } from './taskFields'
 
 const DECISIONS_POLL_MS = 30_000
 
-const ASKS: Record<string, string> = {
-  command: 'wants to run',
-  edit: 'wants to change',
-  path: 'wants to reach',
-  question: 'asks',
-  trust: 'asks whether to trust',
+const ASKS: Record<string, StringKey> = {
+  command: 'task_dec_runs',
+  edit: 'task_dec_changes',
+  path: 'task_dec_reaches',
+  question: 'task_dec_asks',
+  trust: 'task_dec_trust',
 }
 
 /** The dialogs this task's agents wait on you for. Shown only while there are any. */
@@ -24,8 +24,8 @@ export function TaskDecisions({ taskId }: { taskId: string }) {
   const open = decisions.data?.decisions ?? []
   if (open.length === 0) return null
   return (
-    <section aria-label="Decisions waiting for you">
-      <SectionLabel>Waiting for you</SectionLabel>
+    <section aria-label={t('task_dec_aria')}>
+      <SectionLabel>{t('task_dec_title')}</SectionLabel>
       <ul className="space-y-2">
         {open.map((d) => (
           <DecisionRow key={d.item_id} decision={d} onAnswered={decisions.refresh} />
@@ -44,7 +44,7 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
     try {
       await answerDecision(d.notification_id, choice)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not answer that.')
+      setError(e instanceof Error ? e.message : t('task_dec_error'))
     } finally {
       await onAnswered()
       setBusy(false)
@@ -56,7 +56,7 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
         <Link to="/helpers/$id" params={{ id: d.session_id }} className="underline decoration-dotted">
           {d.session_id}
         </Link>{' '}
-        {ASKS[d.kind] ?? 'needs an answer'}
+        {t(ASKS[d.kind] ?? 'task_dec_needs')}
         {d.question ? `: ${d.question}` : ''}
       </p>
       <ApprovalCard

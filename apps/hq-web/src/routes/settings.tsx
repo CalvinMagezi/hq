@@ -33,7 +33,17 @@ import {
 
 export const Route = createFileRoute('/settings')({
   component: SettingsLayout,
+  notFoundComponent: SettingsNotHere,
 })
+
+function SettingsNotHere() {
+  return (
+    <div role="status" className="flex flex-col gap-2">
+      <h1 className="a-h1">{t('settings_not_here_title')}</h1>
+      <p className="a-body">{t('settings_not_here_body')}</p>
+    </div>
+  )
+}
 
 function useSettingsData() {
   return useQuery({ queryKey: ['settings'], queryFn: fetchSettings })

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Check, Plus, X } from 'lucide-react'
 import { STATUS_LABELS, type TaskItem } from '~/lib/tasksApi'
 import { STATUS_BADGE_CLASS } from './TaskCard'
+import { t } from '~/strings'
 
 interface Props {
   task: TaskItem
@@ -66,7 +67,7 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
       {!task.parent_task_id && (
         <div>
           <h3 className={SECTION_TITLE_CLASS}>
-            Sub-tasks ({task.subtask_done}/{task.subtask_count})
+            {t('task_rel_subtasks', { done: task.subtask_done, total: task.subtask_count })}
           </h3>
           <div className="space-y-1.5 mb-2">
             {subtasks.map((sub) => {
@@ -76,7 +77,7 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
                   <button
                     type="button"
                     disabled={busy}
-                    title={done ? 'Reopen' : 'Mark complete'}
+                    title={done ? t('task_reopen') : t('task_mark_complete')}
                     onClick={() => onUpdate(sub.id, { status: done ? 'to_do' : 'complete', expected_status: sub.status })}
                     className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
                       done ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'border-white/20 text-transparent hover:border-white/40'
@@ -93,7 +94,7 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
               value={subtaskTitle}
               onChange={(e) => setSubtaskTitle(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addSubtask()}
-              placeholder="Add a sub-task..."
+              placeholder={t('task_rel_add_sub')}
               className={INPUT_CLASS}
             />
             <button type="button" onClick={addSubtask} disabled={busy || !subtaskTitle.trim()} className="p-1.5 rounded-lg text-emerald-400 hover:bg-white/10 disabled:opacity-40">
@@ -104,14 +105,14 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
       )}
 
       <div>
-        <h3 className={SECTION_TITLE_CLASS}>Waiting on ({waitingOn.length})</h3>
+        <h3 className={SECTION_TITLE_CLASS}>{t('task_rel_waiting_on', { n: waitingOn.length })}</h3>
         <div className="space-y-1.5 mb-2">
           {waitingOn.map((dep) => (
             <TaskLine key={dep.id} task={dep} onOpen={() => onSelectTask(dep.id)}>
               <button
                 type="button"
                 disabled={busy}
-                title="Remove dependency"
+                title={t('task_rel_remove_dep')}
                 onClick={() => onUpdate(task.id, { remove_depends_on: [dep.id] })}
                 className="text-neutral-500 hover:text-rose-400 shrink-0"
               >
@@ -126,7 +127,7 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
             value={dependencyQuery}
             onChange={(e) => setDependencyQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addDependency()}
-            placeholder="Task id, e.g. FR-012"
+            placeholder={t('task_rel_id_hint')}
             className={INPUT_CLASS}
           />
           <datalist id={`dependency-candidates-${task.id}`}>

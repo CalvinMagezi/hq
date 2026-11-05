@@ -4,6 +4,7 @@ import { STATUS_LABELS, type TaskStatus } from '~/lib/tasksApi'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { usePolled } from '../sessions/usePolled'
 import { ageLabel, authorLabel, briefingIsEmpty, freshnessLines, reviewBadge, reviewSummary } from './activity'
+import { t } from '~/strings'
 
 const BRIEFING_POLL_MS = 120_000
 
@@ -24,7 +25,7 @@ export function InitiativeBriefingView({ view, nowMs }: { view: InitiativeActivi
 
       {view.awaiting_review.length > 0 && (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-neutral-500">Waiting for review</div>
+          <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('brief_waiting_review')}</div>
           <ul className="text-xs text-neutral-200">
             {view.awaiting_review.map((t) => (
               <li key={t.id}>
@@ -37,7 +38,7 @@ export function InitiativeBriefingView({ view, nowMs }: { view: InitiativeActivi
 
       {view.blocked.length > 0 && (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-neutral-500">Blocked (as recorded)</div>
+          <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('brief_blocked')}</div>
           <ul className="text-xs text-neutral-200">
             {view.blocked.map((t) => (
               <li key={t.id} className="break-words">
@@ -52,7 +53,7 @@ export function InitiativeBriefingView({ view, nowMs }: { view: InitiativeActivi
 
       {view.contributors.length > 0 ? (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-neutral-500">Contributors</div>
+          <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('brief_contributors')}</div>
           <ul className="text-xs text-neutral-200">
             {view.contributors.map((c) => (
               <li key={c.actor}>
@@ -67,7 +68,7 @@ export function InitiativeBriefingView({ view, nowMs }: { view: InitiativeActivi
           </ul>
         </div>
       ) : (
-        <p className="text-xs text-neutral-400">No one is on record as having written to these tasks.</p>
+        <p className="text-xs text-neutral-400">{t('brief_no_contributors')}</p>
       )}
 
       <p className="text-xs text-neutral-300">
@@ -76,7 +77,7 @@ export function InitiativeBriefingView({ view, nowMs }: { view: InitiativeActivi
 
       {view.recent_notes.length > 0 && (
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">Recent notes</div>
+          <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">{t('brief_recent_notes')}</div>
           <ul className="space-y-1">
             {view.recent_notes.map((n) => {
               const badge = reviewBadge(n)
@@ -117,7 +118,7 @@ export function InitiativeBriefing({ initiativeId, name, onClose }: { initiative
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close briefing"
+          aria-label={t('brief_close')}
           className="p-1 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-white/10"
         >
           <X className="w-3.5 h-3.5" />
@@ -126,7 +127,7 @@ export function InitiativeBriefing({ initiativeId, name, onClose }: { initiative
       {found.loading ? (
         <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Loading briefing
+          {t('brief_loading')}
         </div>
       ) : found.data ? (
         <InitiativeBriefingView view={found.data} />
