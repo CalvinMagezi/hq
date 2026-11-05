@@ -424,7 +424,8 @@ async fn a_shut_gate_forwards_nothing() {
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let open = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let gate_open = open.clone();
-    let gate: proxy::UpstreamGate = Arc::new(move || gate_open.load(Ordering::SeqCst));
+    let gate: proxy::UpstreamGate =
+        Arc::new(move || (!gate_open.load(Ordering::SeqCst)).then_some(proxy::HELD_PORT_LINE));
     let proxy = proxy::start_gated(
         ProxyConfig {
             listen: "127.0.0.1:0".parse().unwrap(),

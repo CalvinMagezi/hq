@@ -10,7 +10,8 @@ import { useThreadStore } from '~/store/threadStore'
 import { clearDrafts } from '~/components/chat/draftStore'
 
 export const WIPED_IDB_KEYS = ['hq-query-cache', 'hq-store', 'hq-thread-store']
-export const WIPED_LOCAL_KEYS = ['hq-web-token', 'hq.chat.drafts', 'hq-last-sync']
+// The token itself is dropped by hqAuth before the wipe starts (see refuseSignIn).
+export const WIPED_LOCAL_KEYS = ['hq.chat.drafts', 'hq-last-sync']
 export const API_CACHE = 'hq-api'
 export const AUTH_CHANNEL = 'hq-auth'
 export const SIGNED_OUT_MESSAGE = { type: 'signed-out' } as const
@@ -81,15 +82,15 @@ export function wipeBrowser(): Promise<void> {
   return wipeWith(browserDeps())
 }
 
-/** Another tab of this HQ was refused: wipe here too, without echoing it back. Returns the stop. */
-export function listenForWipe(onWiped: () => void): () => void {
+/** Another tab of this HQ was refused: wipe here too, without echoing it back. `onSignedOut` says
+ * whether this tab was still signed in; one already signed out has nothing left to wipe. */
+export function listenForWipe(onSignedOut: () => boolean): () => void {
   if (typeof BroadcastChannel === 'undefined') return () => {}
   const channel = new BroadcastChannel(AUTH_CHANNEL)
   channel.onmessage = (event) => {
     if (event.data?.type !== SIGNED_OUT_MESSAGE.type) return
     // The screen goes first, before the next paint.
-    onWiped()
-    void wipeWith(browserDeps(), { announce: false })
+    if (onSignedOut()) void wipeWith(browserDeps(), { announce: false })
   }
   return () => channel.close()
 }

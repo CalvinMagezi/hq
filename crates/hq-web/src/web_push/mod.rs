@@ -218,12 +218,21 @@ impl WebPush {
         ] {
             waiting.extend(hq_db::value_items::list_by_state(db, state)?);
         }
-        waiting.retain(|i| self.wants(i) && gained.contains(&PushKind::of(i)));
+        let now = Utc::now();
+        waiting.retain(|i| {
+            let live = i.expires_at.is_none_or(|at| at > now);
+            live && self.wants(i) && gained.contains(&PushKind::of(i))
+        });
         waiting.sort_by_key(|i| i.created_at);
         let skip = waiting.len().saturating_sub(REPLAY_MAX);
         let mut sent = 0;
         for item in waiting.iter().skip(skip) {
-            sent += self.push_item(db, item, std::slice::from_ref(&sub)).await;
+            // A push service that refuses one stops the replay: five failures in a row would
+            // drop the subscription, and a gone one has nothing left to post to.
+            if self.push_item(db, item, std::slice::from_ref(&sub)).await == 0 {
+                break;
+            }
+            sent += 1;
         }
         Ok(sent)
     }
@@ -726,6 +735,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(sent, 1, "the waiting Needs you item, once");
-        assert_eq!(received.requests.lock().unwrap().len(), 2);
+        let mut lapsed = blocked_item().with_dedup_key("session-blocked-hs-9-1");
+        lapsed.expires_at = Some(Utc::now() - chrono::Duration::minutes(1));
+        hq_db::value_items::emit(&db, &lapsed).unwrap();
+        let sent = push
+            .replay(&db, &endpoint, &[PushKind::Needs])
+            .await
+            .unwrap();
+        assert_eq!(
+            sent, 1,
+            "the same waiting item again, not the one that ran out"
+        );
+        assert_eq!(received.requests.lock().unwrap().len(), 3);
     }
 }

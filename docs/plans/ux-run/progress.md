@@ -33,7 +33,28 @@ Add one line per spec file as the wave starts (see `plan.md` for the order).
 
 ## Try this now
 
-Write the note for each finished wave here.
+### Web wave 0, the four live bugs (2026-11-05)
+
+Install on the laptop, from `~/Documents/GitHub/hq-ux-run` (branch `ccr-66a72c4c-52kq29`):
+
+```bash
+cd apps/hq-web && bun install && bun run build && cd ../..
+./scripts/install-hq.sh            # builds, installs, restarts the daemon, verifies
+./scripts/install-hq.sh --check    # nothing stale
+hq web --json                      # open the login_url it prints
+```
+
+For the hub: `cd apps/desktop && bun install && bun run build:ui && bun run tauri dev`.
+
+1. Push: in Settings turn push on, press Test. You see "HQ" / "Notifications from HQ are on in this browser." Start a helper that asks for approval and lock the screen: "{Helper} needs your OK" / "Open HQ to see what it wants to do.", one tap target, no Allow or Decline, no command anywhere in the notification history.
+2. Reply alert: switch reply alerts on, send a chat, switch tabs. The alert reads "HQ answered" / "Tap to read."
+3. Signed out: open HQ in a second browser profile and sign in with a code. From the first browser, Settings › Devices, sign the second one out. In the second browser every place reads "Sign in to see your notes" (or chats, tasks, settings, what needs you) and nothing else. DevTools › Application: no `hq-query-cache`, `hq-store`, `hq-thread-store`, `hq-web-token`, no `hq-api` cache. Offline reload: still nothing.
+4. Hub proxy (phone as hub): run `hq bridge serve` in a terminal first, then turn pairing on in HQ Hub. The Host tab shows "Couldn't open HQ on your phone", "Port in use", and Open HQ is off. Stop the terminal one, press Look again: Open HQ works.
+5. Guarded routes: nothing to see. The web app and the phone app keep approving and driving sessions as before.
+
+Not covered yet: "Your server HQ needs your OK" (see Found by the owner), and the amber colour on "Port in use" (the hub's tokens arrive in wave 3).
+
+Gates at hand-over: workspace clippy clean; `cargo test --workspace` 5432 passed, 0 failed, 44 ignored (94 binaries), then hq-web and hq-desktop re-run green after the review fixes; web 364 tests and the build pass; desktop typecheck passes. Android not built: nothing in these four changes touches the app.
 
 ## Found by the owner
 

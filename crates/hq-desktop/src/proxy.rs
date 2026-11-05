@@ -193,9 +193,9 @@ struct ProxyState {
     gate: Option<UpstreamGate>,
 }
 
-/// Asked before every request: whether the upstream is still one this app trusts with a sign-in.
-/// A paired hub's forward can be given up and taken by another program while the proxy runs.
-pub type UpstreamGate = Arc<dyn Fn() -> bool + Send + Sync>;
+/// Asked before every request: `None` while the upstream is one this app trusts with a sign-in,
+/// else the line to answer with. A paired hub's forward can be given up while the proxy runs.
+pub type UpstreamGate = Arc<dyn Fn() -> Option<&'static str> + Send + Sync>;
 
 /// The answer while the gate is shut, in the words the window shows.
 pub const HELD_PORT_LINE: &str =
@@ -277,8 +277,8 @@ async fn handle(State(state): State<Arc<ProxyState>>, req: Request) -> Response 
     if let Err(refusal) = judge(req.method(), req.uri(), req.headers(), state.port) {
         return refusal.status().into_response();
     }
-    if state.gate.as_ref().is_some_and(|open| !open()) {
-        return (StatusCode::SERVICE_UNAVAILABLE, HELD_PORT_LINE).into_response();
+    if let Some(shut) = state.gate.as_ref().and_then(|gate| gate()) {
+        return (StatusCode::SERVICE_UNAVAILABLE, shut).into_response();
     }
     let is_upgrade = req
         .headers()

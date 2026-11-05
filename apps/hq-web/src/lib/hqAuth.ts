@@ -141,18 +141,33 @@ export function wasSignedOut(): boolean {
   return signedOut
 }
 
-/** HQ refused this browser: wipe everything first, then ask to sign in. */
+/** HQ refused this browser: wipe everything first, then ask to sign in. Once per signed-out spell,
+ * so polling queries and other tabs cannot keep wiping (and echoing) while nobody is signed in. */
 export function refuseSignIn() {
-  if (hqToken()) signedOut = true
+  if (signInNeeded) return
+  dropRefusedToken()
   // Imported when needed: the wipe reaches the stores, which import this module.
   void import('./wipe').then((m) => m.wipeBrowser()).catch((err) => console.warn('wipe failed', err))
   setSignInNeeded(true)
 }
 
+/** Removes the refused token right away, before any await, so a token pasted a moment later stays. */
+function dropRefusedToken() {
+  try {
+    if (localStorage.getItem(STORAGE_KEY) === null) return
+    localStorage.removeItem(STORAGE_KEY)
+    signedOut = true
+  } catch {
+    // Blocked storage holds no token.
+  }
+}
+
 /** Another tab of this HQ was refused and wiped this browser; this tab asks to sign in too. */
-export function signedOutElsewhere() {
+export function signedOutElsewhere(): boolean {
+  if (signInNeeded) return false
   signedOut = true
   setSignInNeeded(true)
+  return true
 }
 
 /** Track what a response says about sign-in and sync. A copy from the worker's cache says nothing about either, whatever its status. */

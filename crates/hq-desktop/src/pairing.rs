@@ -514,7 +514,11 @@ impl PairingController {
     /// A gate for the proxy: open only while this app holds the forward on `listen`.
     pub fn forward_gate(&self, listen: SocketAddr) -> crate::proxy::UpstreamGate {
         let views = self.forward_views.clone();
-        Arc::new(move || holds(&views, listen) == Some(true))
+        Arc::new(move || match holds(&views, listen) {
+            Some(true) => None,
+            Some(false) => Some(crate::proxy::HELD_PORT_LINE),
+            None => Some(crate::desktop::FORWARD_WAIT_LINE),
+        })
     }
 }
 

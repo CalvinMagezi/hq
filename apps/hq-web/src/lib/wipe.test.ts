@@ -29,7 +29,7 @@ describe('wipeWith', () => {
     const b = fakeBrowser()
     await wipeWith(b.deps)
     for (const k of WIPED_IDB_KEYS) expect(b.idb.has(k)).toBe(false)
-    for (const k of ['hq-web-token', 'hq.chat.drafts', 'hq-last-sync']) expect(b.local.has(k)).toBe(false)
+    for (const k of WIPED_LOCAL_KEYS) expect(b.local.has(k)).toBe(false)
     expect(b.caches.has(API_CACHE)).toBe(false)
     expect(b.push()).toBe(false)
     expect(b.told).toEqual(['memory', 'tabs', 'worker'])
@@ -48,7 +48,7 @@ describe('wipeWith', () => {
       b.local.delete(k)
     }
     await wipeWith(b.deps)
-    expect(b.local.has('hq-web-token')).toBe(false)
+    expect(b.local.has('hq-last-sync')).toBe(false)
     for (const k of WIPED_IDB_KEYS) expect(b.idb.has(k)).toBe(false)
   })
 
