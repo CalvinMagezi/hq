@@ -402,6 +402,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "108_session_subscriptions",
         include_str!("../sql/108_session_subscriptions.sql"),
     ),
+    ("109_offer_log", include_str!("../sql/109_offer_log.sql")),
     ("110_push_kinds", include_str!("../sql/110_push_kinds.sql")),
     ("111_client_ids", include_str!("../sql/111_client_ids.sql")),
     (

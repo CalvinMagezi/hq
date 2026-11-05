@@ -238,15 +238,19 @@ test; the checks cover the logic moved into `HubConfig`.
 
 ## Reading HQ's own reports from the phone
 
-`scripts/phone-hq.sh <hq arguments>` runs one `hq` command on the phone, in the app's sandbox, with
-the phone's binary and vault (through `run-as`, so it needs this debuggable build and a running app).
-It is for reports that print counts only:
+`scripts/phone-hq.sh` reads the counts-only reports from the phone's HQ over the bridge
+(`docs/PAIRING.md`): the phone computes them and only the JSON comes back. A release build is not
+debuggable, so `run-as` cannot reach the app's files; the script signs the computer in as a device
+instead, with a one-time code from the phone's Settings, Devices.
 
 ```sh
+scripts/phone-hq.sh signin <code>         # once; the token stays in ~/.hq/phone-report-token (mode 600)
 scripts/phone-hq.sh adoption              # how HQ is used: capabilities, corrections, return visits
-scripts/phone-hq.sh offers replay         # how often the planned offers would have appeared
-scripts/phone-hq.sh adoption --json > adoption.json
+scripts/phone-hq.sh offers replay --days 56   # how often offers appear, phase 1 rules beside the tuned ones
+scripts/phone-hq.sh signout
 ```
 
-Only the command's output crosses the cable. Do not pull `vault.db` or chats off the phone to read
-them elsewhere (`docs/security/ADOPTION_DATA.md`). `HQ_APP_ID` picks a side-by-side test build.
+They call `GET /api/adoption` and `GET /api/offers/replay`, which need the web token or a device
+token (no MCP key reaches them). `HQ_PHONE_URL` points the script elsewhere than the bridge's
+`http://127.0.0.1:47480`. Do not pull `vault.db` or chats off the phone to read them elsewhere
+(`docs/security/ADOPTION_DATA.md`).

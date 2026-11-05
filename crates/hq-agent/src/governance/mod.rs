@@ -130,9 +130,8 @@ impl LiveUserTurn {
 /// tracing — no external notification.
 ///
 /// Wired at session-construction sites via `ToolGuardian::set_denial_notifier`,
-/// never called directly from this module: `hq-agent` has no vault, mailbox,
-/// or bus knowledge by design, so `cargo test -p hq-agent` can never page
-/// anyone.
+/// never called directly from this module, so governance tests can never
+/// write to an inbox.
 pub type DenialNotifier = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 // ─── ToolGuardian ───────────────────────────────────────────────
@@ -248,7 +247,7 @@ impl ToolGuardian {
     }
 
     /// Attach a callback for surfacing hard denials outside the tool result
-    /// text (e.g. a Telegram ping via the operator's mailbox). See
+    /// text (an item in the owner's inbox). See
     /// `DenialNotifier` for the contract and why this crate never implements
     /// the sending itself.
     pub fn set_denial_notifier(&mut self, notifier: DenialNotifier) {

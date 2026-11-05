@@ -210,6 +210,8 @@ mod tests {
             effort: None,
             wire: WireApi::Responses,
             enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
         }
     }
 

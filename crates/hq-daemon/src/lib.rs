@@ -2,7 +2,6 @@
 //! memory consolidation, turn recovery). hq-cli's daemon loop schedules them.
 
 pub mod agent_worker;
-pub mod email_gate;
 pub mod email_send;
 pub mod email_triage;
 pub mod embedding_worker;

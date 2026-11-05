@@ -5,6 +5,7 @@ pub mod hello;
 mod status_ai;
 pub use api::HEALTH_SERVICE;
 pub use vault_api::{lite_hides, lite_hides_resolved};
+mod adoption_api;
 pub mod auth;
 mod budgets_api;
 mod capabilities_api;
@@ -21,6 +22,7 @@ mod mcp_http;
 mod notifications_api;
 mod notifications_watch;
 mod oauth;
+mod offers_api;
 mod openrouter_usage_api;
 mod origin;
 mod profile_gate;
@@ -339,6 +341,9 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/capabilities",
             get(capabilities_api::capabilities_handler),
         )
+        .route("/api/adoption", get(adoption_api::adoption_handler))
+        .route("/api/offers/replay", get(adoption_api::replay_handler))
+        .route("/api/offers/answer", post(offers_api::answer_handler))
         .route("/api/setup/status", get(setup_api::status_handler))
         .route("/api/setup/test", post(setup_api::test_handler))
         .route("/api/setup/provider", post(setup_api::provider_handler))

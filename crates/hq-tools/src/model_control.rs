@@ -459,6 +459,8 @@ mod tests {
                     effort: Some("high".into()),
                     wire,
                     enabled: true,
+                    unix_socket: None,
+                    prompted_tools: false,
                 }
             };
         vec![

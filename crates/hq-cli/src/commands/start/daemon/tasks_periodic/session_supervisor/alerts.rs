@@ -23,7 +23,6 @@ pub(super) fn notify_dismiss_cap(db: &Database, row: &registry::HarnessSessionRo
 /// one has looked at yet.
 pub(super) fn alert_finished(
     db: &Database,
-    vault_path: &Path,
     row: &registry::HarnessSessionRow,
     agent: &AgentInfo,
     screen: &str,
@@ -67,13 +66,16 @@ pub(super) fn alert_finished(
         "Session {} on {} finished its task and is waiting for the next instruction.{commit_line}\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
         row.id, row.host,
     );
-    post_relay_nudge(
-        vault_path,
-        &row.id,
-        &format!("Harness session '{label}' finished its task"),
-        &body,
-        false,
-    );
+    // One open item per session: a session that finishes turn after turn while the owner is
+    // away says once that it waits, not once a turn.
+    let item = ValueItem::new(
+        "session-supervisor",
+        ValueKind::Fyi,
+        format!("Harness session '{label}' finished its task"),
+        body,
+    )
+    .with_dedup_key(format!("session-finished-{}", row.id));
+    let _ = hq_db::value_items::emit(db, &item);
     tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent finished, alert sent");
 }
 
@@ -94,36 +96,6 @@ pub(super) fn report_to_observers(
         Err(e) => {
             tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not tell the observers")
         }
-    }
-}
-
-/// Untagged, so the notification gate sends it to the digest: a finished
-/// session is a status update (FR-001 criterion 3). `interrupt` is for the few
-/// that need the operator now; a session blocked on a dialog alerts through
-/// `alert_blocked` instead.
-pub(super) fn post_relay_nudge(
-    vault_path: &Path,
-    session_id: &str,
-    subject: &str,
-    body: &str,
-    interrupt: bool,
-) {
-    let mut msg = hq_core::mailbox::new_message(
-        "session-supervisor",
-        "relay",
-        MailboxMessageType::Nudge,
-        Some(subject),
-        body,
-        None,
-    );
-    if interrupt {
-        msg.meta.insert(
-            hq_core::mailbox::META_INTERRUPT.to_string(),
-            "true".to_string(),
-        );
-    }
-    if let Err(e) = hq_core::mailbox::send_message(vault_path, &msg) {
-        tracing::warn!(session = %session_id, error = %e, "session-supervisor: relay mailbox post failed");
     }
 }
 
@@ -369,7 +341,7 @@ pub(super) fn task_line(link: Option<&mission::TaskLink>) -> String {
 }
 
 /// An exit that just left the linked task blocked means work stopped with no
-/// one on it: that interrupts. Every other exit is a status update.
+/// one on it: the owner has to act. Every other exit is a status update.
 pub(super) fn exit_interrupts(link: Option<&mission::TaskLink>) -> bool {
     link.is_some_and(|l| l.moved && l.status == hq_db::tasks::STATUS_BLOCKED)
 }

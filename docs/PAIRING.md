@@ -286,9 +286,89 @@ number or an absolute socket path, chosen by the machine that offers it: the oth
 it and never chooses an address. A service may not lead to the web server's own port; give paired
 devices the web app through `bridge.web_listen`, a second listener the web server opens only when
 the web token is set, which serves the web app, `/api`, `/ws` and `/mcp` with an API key or a launched agent's session token, and never
-the claude.ai connector's OAuth paths. A forward listens on loopback only. The services use their
+the claude.ai connector's OAuth paths. A forward listens on a loopback port or on a unix socket
+(below). The services use their
 own protocol name (`hq/svc/1`), offered only by a machine that has services, and admitted only from
 paired peers; revoking a peer closes its open streams.
+
+### A forward only HQ can use
+
+Every process on a machine can open a loopback port, and on a phone that means every app. A forward
+can listen on a unix socket instead: give `listen` an absolute path (or `unix:<path>`). The bridge
+makes the socket's directory `0700` when it is missing, refuses a directory anyone else can write or
+that is a link, makes the socket `0600`, and leaves a socket that another running bridge still
+answers on alone. Only this user's processes can connect, which on Android means only the HQ app.
+The path must fit the OS limit (103 bytes on macOS, 107 on Linux and Android). Windows has no such
+forward.
+
+An `openai-compatible` backend reaches a model through such a forward with `unix_socket`. Its
+`endpoint` keeps only the path; the host part is not used for the connection but is sent as `Host`,
+and `localhost` is what Ollama accepts. If the laptop's model ignores the `tools` field (HQ's chat
+then never calls a tool), add `prompted_tools: true` to the phone's backend entry: HQ describes the
+tools in the prompt and reads the model's `<tool_call>` tags back (`docs/architecture/model-selection.md`).
+
+```yaml
+# On the phone: use the laptop's model, and the cloud when the laptop is away.
+bridge:
+  forwards:
+    - peer: <laptop id>
+      service: llm
+      listen: /data/data/<app id>/files/hqhome/.hq/bridge/llm.sock
+      fail_fast_secs: 3                # move to the cloud quickly when the laptop is away
+      when: direct                     # optional: never over mobile data through a relay
+
+backends:
+  primary: laptop
+  fallbacks: [cloud]
+  backends:
+    - name: laptop
+      kind: openai-compatible
+      endpoint: http://localhost/v1
+      unix_socket: /data/data/<app id>/files/hqhome/.hq/bridge/llm.sock
+      model: qwen3:8b
+    - name: cloud
+      kind: openrouter
+      model: <model>
+
+# On the laptop: offer the local model to the phone only.
+bridge:
+  services:
+    llm:
+      to: 127.0.0.1:11434
+      peers: [<phone id>]
+```
+
+A service written as `name: address` is open to every paired device. Written as `to:` and `peers:`,
+it is open only to the machine ids listed (`hq bridge peers`); any other paired device is told the
+service does not exist, as for a name that is not offered. Give a service that asks for no
+credential of its own, such as a local model, a `peers` list, so a tablet or second laptop paired
+later does not get it by default.
+
+Give the forward `fail_fast_secs` when the service has a fallback. Without it, a request through a
+forward to a device that is away waits for the dial (up to 20 s) or for the service's answer (10 s
+when the device stopped answering, such as a laptop whose lid closed), and every request waits
+again. With `fail_fast_secs: 3`, the first request gives up after 3 s, the device is marked
+unreachable, and later requests end at once, so the backend chain moves to the next backend
+straight away. Each request while the device is unreachable asks for one background try (one at a
+time, nothing on a timer); once a try reaches the service, requests go through again. Leave it
+unset for forwards with no fallback, such as the web app or the host gate, where a slow answer is
+better than none. It takes 1 to 20.
+
+Give the forward `when: direct` to use the device only over a direct path, never through a relay:
+on a metered phone, a long prompt then never crosses mobile data to reach the laptop. A freshly
+dialed connection gets 2 s to move from the relay to a direct path (most do within a second on the
+same network); while only a relay reaches the device, every request through the forward ends at
+once, so the backend chain moves to the next backend. The connection is kept, and requests go
+through again as soon as it finds a direct path. It gates new requests, not bytes: the dial's
+handshake and keepalives go through the relay, a request already streaming when the path falls back
+to the relay finishes there, and a device that vanished while on the relay is noticed only when the
+connection times out. The default, `when: any`, takes whichever path there is.
+
+Ollama's default context (4096 tokens on smaller machines) is shorter than HQ's prompt, and Ollama
+cuts the prompt without an error; set `OLLAMA_CONTEXT_LENGTH` (or the Ollama app's context length) to
+at least 32768. `hq doctor` dials the socket when the primary backend has one.
+
+### Signing in at a forward
 
 The web app keeps its sign-in per address, so open it at the forward's address and sign in there
 once: on the phone, Settings, Devices, **Sign in another device**, then type the code into the
@@ -306,7 +386,7 @@ List that origin in the phone's `web_allowed_origins` if the browser shows it as
 | Connection to the connector door | One per stream the edge opens, made by the bridge, to the door's socket (or opted-in loopback port) only |
 | The service protocol on the long-term endpoint | Whenever a serving bridge has `bridge.services`, or offers `gate` or `web` for setup; the gate admits only paired peers |
 | The setup protocol on the long-term endpoint | On a hub, whenever its bridge runs (`hq bridge run`, or `--as hub`); the gate admits only paired peers. A machine never accepts it |
-| One TCP port per forward, on loopback | While `hq bridge serve` or `hq bridge run` runs with `bridge.forwards`, and one per setup row |
+| One TCP port per forward on loopback, or one unix socket in a private directory | While `hq bridge serve` or `hq bridge run` runs with `bridge.forwards`, and one port per setup row |
 | The web server's paired-devices door, on loopback | While the web server runs with `bridge.web_listen` and the web token set |
 
 `hq bridge run` is both: the long-term endpoint for as long as it runs, and one throwaway endpoint while

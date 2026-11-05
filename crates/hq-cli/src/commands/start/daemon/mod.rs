@@ -419,7 +419,6 @@ fn run_startup_hooks(config: &HqConfig, vault_path: &Path, db: &Database) {
     for host_name in hq_tools::agent_host::native_host_names() {
         tokio::spawn(tasks_periodic::session_events::run_session_event_loop(
             host_name,
-            vault_path.to_path_buf(),
             db.clone(),
             config.clone(),
         ));
@@ -492,6 +491,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("tool-failure-digest", Duration::from_secs(604800)),
         // How HQ was used (capabilities, corrections, return), once a week; `daemon.adoption_digest`.
         DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
+        // Tasks made in chat that are due today or tomorrow, or overdue; acts in waking hours only.
+        DaemonTask::with_default_timeout("due-reminders", Duration::from_secs(3600)),
         DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("verify-briefing", Duration::from_secs(3600)),
     ]
@@ -609,7 +610,7 @@ async fn dispatch_task(
         "heartbeat" => tasks_periodic::run_heartbeat(vault_path).await,
         "subagent-supervisor" => tasks_periodic::run_subagent_supervisor(db),
         "session-supervisor" => {
-            tasks_periodic::session_supervisor::run_session_supervisor(vault_path, db, config).await
+            tasks_periodic::session_supervisor::run_session_supervisor(db, config).await
         }
         "stack-dispatch" => tasks_periodic::run_stack_dispatch(db, config).await,
         "edge-worker-dispatch" => tasks_periodic::run_edge_worker_dispatch(db, config).await,
@@ -650,6 +651,7 @@ async fn dispatch_task(
         "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
         "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
         "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
+        "due-reminders" => tasks_periodic::run_due_reminders(db).await,
 
         unknown => {
             warn!(task = unknown, "daemon: unknown task");
@@ -881,6 +883,7 @@ mod lite_tests {
             "email-poll",
             "session-supervisor",
             "stack-dispatch",
+            "due-reminders",
         ] {
             assert!(phone.contains(&kept), "{kept}");
         }

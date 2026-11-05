@@ -106,9 +106,7 @@ impl HqTool for AgentSendMessageTool {
          progress notes, or one-way notifications, not questions you need answered. \
          Use '@all' to reach every agent that already has a mailbox; note that broadcast only fans out \
          to existing mailboxes, so an agent that has never received a message is not reachable that way. \
-         Use recipient 'relay' to proactively message the operator outside the current turn (e.g. \
-         a background task volunteering a result, an alert): the mailbox poller delivers it to whichever \
-         of Telegram/Discord he's active on within ~45s, no separate notification tool needed."
+         To reach the owner, use notify_owner: this tool cannot."
     }
 
     fn parameters(&self) -> Value {
@@ -118,7 +116,7 @@ impl HqTool for AgentSendMessageTool {
             "properties": {
                 "recipient": {
                     "type": "string",
-                    "description": "Target agent mailbox id (e.g. 'relay', 'claude-code', 'pi'), or '@all' to broadcast."
+                    "description": "Target agent mailbox id (e.g. 'claude-code', 'pi'), or '@all' to broadcast."
                 },
                 "message": {
                     "type": "string",
@@ -152,6 +150,15 @@ impl HqTool for AgentSendMessageTool {
         let msg_type = parse_msg_type(&args)?;
         let sender = resolve_agent_id(&args, "sender");
         let subject = args.get("subject").and_then(|v| v.as_str());
+
+        // The relay mailbox reaches no one: chat relays drop every notice. Saying so beats a
+        // "sent" the owner never sees.
+        if recipient == hq_core::mailbox::RELAY_MAILBOX {
+            anyhow::bail!(
+                "the 'relay' mailbox does not reach the owner: chat relays carry chat only. \
+                 Use notify_owner to put a message in the owner's inbox."
+            );
+        }
 
         if recipient == BROADCAST_RECIPIENT {
             let delivered =
@@ -319,15 +326,33 @@ mod tests {
         let vault = TempDir::new().unwrap();
         let (send_tool, _) = tools(&vault);
 
-        send(&send_tool, "relay", "review the mailbox refactor")
+        send(&send_tool, "pi", "review the mailbox refactor")
             .await
             .unwrap();
 
         // The file must be readable by hq_core, which is the whole point.
-        let received = mailbox::peek_messages(vault.path(), "relay").unwrap();
+        let received = mailbox::peek_messages(vault.path(), "pi").unwrap();
         assert_eq!(received.len(), 1);
         assert_eq!(received[0].from, "claude-code");
         assert_eq!(received[0].msg_type, MailboxMessageType::Direct);
+    }
+
+    #[tokio::test]
+    async fn the_relay_mailbox_is_refused_with_the_tool_that_reaches_the_owner() {
+        let vault = TempDir::new().unwrap();
+        let (send_tool, _) = tools(&vault);
+
+        let err = send(&send_tool, "relay", "the build finished")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("notify_owner"), "{err}");
+        assert!(
+            mailbox::peek_messages(vault.path(), "relay")
+                .unwrap_or_default()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

@@ -36,11 +36,14 @@ const REPLAY_MAX: usize = 50;
 /// Where a tap goes when the item names no page.
 const DEFAULT_LINK: &str = "/inbox";
 
-/// Inbox sources that are always pushed: what agents send through `notify_owner`, and a new
-/// device signing in, which the owner must hear about even with no chat app connected.
+/// Inbox sources that are always pushed: what agents send through `notify_owner`, a new device
+/// signing in, which the owner must hear about even with no chat app connected, and due-date
+/// reminders.
 const ALWAYS_PUSHED_SOURCES: &[&str] = &[
     hq_tools::notify::NOTIFY_SOURCE,
     crate::device_auth::DEVICE_SIGN_IN_SOURCE,
+    // A reminder the person asked for in chat: it is only useful if it reaches them.
+    hq_core::types::DUE_REMINDER_SOURCE,
 ];
 
 pub(crate) struct WebPush {
@@ -512,6 +515,23 @@ mod tests {
         let item = ValueItem::new("task_stale_digest", ValueKind::Fyi, "Stale tasks", "3");
         hq_db::value_items::emit(&db, &item).unwrap();
         assert_eq!(push(dir.path(), true).dispatch_once(&db).await.unwrap(), 1);
+        assert_eq!(received.requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_due_reminder_is_pushed_without_push_all() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = hq_db::Database::open_memory().unwrap();
+        let (base, received) = mock_push_service().await;
+        subscribe(&db, &format!("{base}/ok/a"));
+        let item = ValueItem::new(
+            hq_core::types::DUE_REMINDER_SOURCE,
+            ValueKind::Fyi,
+            "Due today: pay rent",
+            "INB-1",
+        );
+        hq_db::value_items::emit(&db, &item).unwrap();
+        assert_eq!(push(dir.path(), false).dispatch_once(&db).await.unwrap(), 1);
         assert_eq!(received.requests.lock().unwrap().len(), 1);
     }
 

@@ -3280,4 +3280,6 @@ export const en = {
   tasks_none_yet_title: "No tasks yet",
   tasks_none_yet_body: "Add one and it shows up here.",
   helpers_tell_failed: "Couldn't send that. Look at its screen.",
+  chat_offer_yes: "Yes",
+  chat_offer_not_now: "Not now",
 } as const

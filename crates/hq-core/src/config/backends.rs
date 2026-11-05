@@ -62,6 +62,18 @@ impl BackendKind {
         !matches!(self, BackendKind::GithubCopilotCli)
     }
 
+    /// The variable that holds this kind's key in `config.yaml` terms (`openai_api_key` is
+    /// `OPENAI_API_KEY`), for kinds that have one.
+    pub fn config_key_env(self) -> Option<&'static str> {
+        match self {
+            BackendKind::Openrouter => Some("OPENROUTER_API_KEY"),
+            BackendKind::KimiCode => Some("KIMI_CODE_API_KEY"),
+            BackendKind::AnthropicCompatible => Some("ANTHROPIC_API_KEY"),
+            BackendKind::OpenaiCompatible => Some("OPENAI_API_KEY"),
+            BackendKind::GithubCopilotCli | BackendKind::GithubCopilotApi => None,
+        }
+    }
+
     /// Canonical default endpoint for kinds that have one, else `None`.
     ///
     /// `openai-compatible` has no canonical default: the generic kind's endpoint
@@ -130,6 +142,19 @@ pub struct BackendEntry {
     /// chain is resolved.
     #[serde(default = "default_true")]
     pub enabled: bool,
+
+    /// Reach `endpoint` through this unix socket instead of the network, for an
+    /// `openai-compatible` backend. Used with a bridge forward that listens on a socket, so no
+    /// other process on the machine can reach the model; `endpoint` then keeps only the path
+    /// (`http://localhost/v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unix_socket: Option<std::path::PathBuf>,
+
+    /// Describe the tools in the system prompt and read `<tool_call>` tags back from the reply,
+    /// for an `openai-compatible` model or server that ignores the `tools` field. Replies to
+    /// requests with tools are buffered, not streamed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub prompted_tools: bool,
 }
 
 impl BackendEntry {
@@ -139,6 +164,21 @@ impl BackendEntry {
             .as_deref()
             .map(str::to_string)
             .or_else(|| self.kind.default_endpoint().map(str::to_string))
+    }
+
+    /// Whether a missing `credential_env` value may be filled from the kind's key in
+    /// `config.yaml`. Only when no variable is named, or the named one is that same key: a
+    /// backend that names its own variable must never be sent another service's key.
+    pub fn may_use_config_key(&self) -> bool {
+        match self
+            .credential_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+        {
+            None => true,
+            Some(name) => self.kind.config_key_env() == Some(name),
+        }
     }
 }
 
@@ -255,6 +295,41 @@ impl BackendsConfig {
             if !seen.insert(entry.name.clone()) {
                 problems.push(format!("duplicate backend name '{}'", entry.name));
             }
+            if let Some(path) = &entry.unix_socket {
+                if entry.kind != BackendKind::OpenaiCompatible {
+                    problems.push(format!(
+                        "backend '{}': unix_socket works only with kind openai-compatible",
+                        entry.name
+                    ));
+                } else if !path.is_absolute() {
+                    problems.push(format!(
+                        "backend '{}': unix_socket must be an absolute path",
+                        entry.name
+                    ));
+                } else if !entry
+                    .endpoint
+                    .as_deref()
+                    .is_some_and(|e| e.starts_with("http://localhost"))
+                {
+                    // The host is never dialed, but other readers of the endpoint (usage panels)
+                    // would call a real host over the network with the key.
+                    problems.push(format!(
+                        "backend '{}': with unix_socket the endpoint must be http://localhost/<path>",
+                        entry.name
+                    ));
+                } else if !cfg!(unix) {
+                    problems.push(format!(
+                        "backend '{}': unix_socket needs a unix machine",
+                        entry.name
+                    ));
+                }
+            }
+            if entry.prompted_tools && entry.kind != BackendKind::OpenaiCompatible {
+                problems.push(format!(
+                    "backend '{}': prompted_tools works only with kind openai-compatible",
+                    entry.name
+                ));
+            }
             if entry.kind.is_api() && entry.resolved_endpoint().is_none() {
                 problems.push(format!(
                     "backend '{}' ({:?}) requires an endpoint",
@@ -311,6 +386,8 @@ mod tests {
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
         }
     }
 
@@ -386,6 +463,61 @@ mod tests {
     }
 
     #[test]
+    fn a_unix_socket_backend_must_be_openai_compatible_absolute_and_on_localhost() {
+        let check = |edit: fn(&mut BackendEntry)| {
+            let mut entry = openai_entry("laptop");
+            entry.endpoint = Some("http://localhost/v1".into());
+            entry.unix_socket = Some("/data/hq/bridge/llm.sock".into());
+            edit(&mut entry);
+            BackendsConfig {
+                primary: "laptop".into(),
+                backends: vec![entry],
+                ..Default::default()
+            }
+            .validate()
+        };
+        assert_eq!(check(|_| {}).is_ok(), cfg!(unix));
+        for (edit, says) in [
+            (
+                (|e: &mut BackendEntry| e.kind = BackendKind::Openrouter) as fn(&mut BackendEntry),
+                "only with kind openai-compatible",
+            ),
+            (|e| e.unix_socket = Some("llm.sock".into()), "absolute path"),
+            (
+                |e| e.endpoint = Some("https://api.example.test/v1".into()),
+                "http://localhost",
+            ),
+        ] {
+            let problems = check(edit).unwrap_err();
+            assert!(problems.iter().any(|p| p.contains(says)), "{problems:?}");
+        }
+    }
+
+    #[test]
+    fn prompted_tools_is_off_by_default_and_only_for_openai_compatible() {
+        let yaml = "primary: a\nbackends:\n  - name: a\n    kind: openai-compatible\n    endpoint: http://127.0.0.1:47600/v1\n";
+        let cfg: BackendsConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.backends[0].prompted_tools);
+        assert!(
+            !serde_yaml::to_string(&cfg)
+                .unwrap()
+                .contains("prompted_tools")
+        );
+        let on: BackendsConfig =
+            serde_yaml::from_str(&format!("{yaml}    prompted_tools: true\n")).unwrap();
+        assert!(on.backends[0].prompted_tools && on.validate().is_ok());
+        let mut wrong = on.clone();
+        wrong.backends[0].kind = BackendKind::AnthropicCompatible;
+        let problems = wrong.validate().unwrap_err();
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("prompted_tools works only")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
     fn validate_flags_missing_primary_and_fallback() {
         let cfg = BackendsConfig {
             primary: "ghost".to_string(),
@@ -420,6 +552,8 @@ mod tests {
                 effort: None,
                 wire: Default::default(),
                 enabled: true,
+                unix_socket: None,
+                prompted_tools: false,
             }],
             ..Default::default()
         };
@@ -499,6 +633,8 @@ mod tests {
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
         };
         assert_eq!(
             entry.resolved_endpoint().as_deref(),
@@ -537,6 +673,8 @@ mod tests {
                 effort: None,
                 wire: Default::default(),
                 enabled: true,
+                unix_socket: None,
+                prompted_tools: false,
             }],
             ..Default::default()
         };

@@ -25,6 +25,20 @@ data class ChatThread(
 /** A tool call a reply made, from the saved `meta.tool_steps` or from live `tool_start` and `tool_end` frames. */
 data class ToolStep(val id: String, val name: String, val args: String?, val result: String?, val durationMs: Long?)
 
+/** Something HQ offers to do under a reply (`meta.offer`), chosen on the device; the model never sees it. Yes sends [reply], or puts it in the composer when [send] is false. */
+data class Offer(val kind: String, val line: String, val reply: String, val send: Boolean) {
+    companion object {
+        fun from(o: JSONObject?): Offer? {
+            if (o == null) return null
+            val kind = o.optString("kind", "")
+            val line = o.optString("line", "")
+            val reply = o.optString("reply", "")
+            if (kind.isBlank() || line.isBlank() || reply.isBlank()) return null
+            return Offer(kind, line, reply, o.optBoolean("send", false))
+        }
+    }
+}
+
 /** A saved message. `meta` is present on replies that did more than talk. */
 data class StoredMessage(
     val id: String,
@@ -37,6 +51,7 @@ data class StoredMessage(
     /** HQ's own mark that the question was spoken (`meta.source`), and the id the sender gave it. */
     val source: String? = null,
     val clientId: String? = null,
+    val offer: Offer? = null,
 ) {
     val spoken: Boolean get() = role == "user" && source == SPOKEN
 
@@ -55,6 +70,7 @@ data class StoredMessage(
                 stopped = meta?.optBoolean("stopped", false) ?: false,
                 source = meta?.optString("source", "")?.ifBlank { null },
                 clientId = meta?.optString("client_id", "")?.ifBlank { null },
+                offer = Offer.from(meta?.optJSONObject("offer")),
             )
         }
     }

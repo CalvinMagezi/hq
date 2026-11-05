@@ -479,6 +479,8 @@ async fn an_undeclared_dispatch_model_stops_dispatch_without_parking_anything() 
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
         }],
         ..Default::default()
     };

@@ -6,9 +6,7 @@ use std::sync::Arc;
 
 use hq_llm::provider::LlmProvider;
 
-use super::{
-    CAPABILITY_FLOOR, HqToolAdapter, SessionBuilder, SessionRole, mailbox_denial_notifier,
-};
+use super::{CAPABILITY_FLOOR, HqToolAdapter, SessionBuilder, SessionRole, inbox_denial_notifier};
 use crate::governance::{GovernedRegistry, ToolGuardian};
 use crate::session::SessionConfig;
 use crate::tools::AgentTool;
@@ -466,7 +464,7 @@ impl SessionBuilder {
             self.security_profile.clone(),
             self.permission_mode.clone(),
         );
-        guardian.set_denial_notifier(mailbox_denial_notifier(vault_path.to_path_buf()));
+        guardian.set_denial_notifier(inbox_denial_notifier(vault_path.to_path_buf()));
         guardian.set_owner_approval(self.owner_approval.clone());
         guardian.set_taint(taint);
 

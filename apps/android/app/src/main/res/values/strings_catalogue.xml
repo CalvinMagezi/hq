@@ -3440,4 +3440,6 @@
     <string name="tasks_none_yet_title">No tasks yet</string>
     <string name="tasks_none_yet_body">Add one and it shows up here.</string>
     <string name="helpers_tell_failed">Couldn\'t send that. Look at its screen.</string>
+    <string name="chat_offer_yes">Yes</string>
+    <string name="chat_offer_not_now">Not now</string>
 </resources>

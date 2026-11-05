@@ -1,6 +1,7 @@
 package example.hq.spike.ui.chat
 
 import example.hq.spike.data.ChatEvent
+import example.hq.spike.data.Offer
 import example.hq.spike.data.ToolStep
 import example.hq.spike.ui.chat.blocks.Attachment
 import example.hq.spike.ui.chat.blocks.Attachments
@@ -25,12 +26,13 @@ data class UiMessage(
     val files: List<Attachment> = emptyList(),
     /** The owner asked this by voice. */
     val spoken: Boolean = false,
+    val offer: Offer? = null,
 ) {
     companion object {
         /** A saved message: the attachment marker the server appends is split off into [files]. */
-        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false): UiMessage {
+        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false, offer: Offer? = null): UiMessage {
             // Only the user's own messages carry the marker; a model reply that contains one is just text.
-            if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt)
+            if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt, offer = offer)
             val (text, files) = Attachments.split(content)
             return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files, spoken = spoken)
         }

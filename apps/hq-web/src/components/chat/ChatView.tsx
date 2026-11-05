@@ -14,6 +14,7 @@ import { useInHub } from '~/lib/hubWindow'
 import { bannerKey, savedBannerLine, sendFailureKey, stopFailureKey, stopReply } from '~/lib/chatConnection'
 import { threadApi, refreshThreads, loadMessages, newThread } from '~/lib/threadApi'
 import { rejectSend } from '~/lib/chatEvents'
+import { answerOffer } from '~/lib/offersApi'
 import { MAX_ATTACHMENTS, type ChatAttachment } from '~/lib/chatUploads'
 import { parseSlashCommand, isSlashInput } from './SlashCommandPalette'
 import { ThreadSidebar } from './ThreadSidebar'
@@ -267,6 +268,22 @@ export function ChatView({ active, onClose, threadId }: Props) {
     if (question) sendChat(activeThreadId, question.content, question.attachments ?? [], question.messageId)
   }
 
+  /** Yes sends the offer's request, or puts it in the composer when it needs the person's words. */
+  const answerOfferOn = (m: ThreadMessage, yes: boolean) => {
+    const offer = m.offer
+    if (!offer || !activeThreadId) return
+    void answerOffer(activeThreadId, m.messageId, yes ? 'yes' : 'not_now').catch((err) =>
+      console.warn('ChatView: could not record the answer to an offer', err),
+    )
+    if (!yes) return
+    if (offer.send && connected && !liveTurn) {
+      sendChat(activeThreadId, offer.reply, [])
+      return
+    }
+    draft.setText(offer.reply)
+    focusInput()
+  }
+
   const handleStop = () => {
     if (!activeThreadId) return
     void stopReply(activeThreadId, send, threadApi.stopThread).then((ok) => {
@@ -337,6 +354,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
           onEdit={startEdit}
           onRegenerate={regenerate}
           onPick={(text) => draft.setText(text)}
+          onOffer={answerOfferOn}
         />
 
         <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} />

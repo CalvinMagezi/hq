@@ -52,7 +52,8 @@ fn is_local_endpoint(endpoint: &str) -> bool {
 }
 
 /// Resolve an entry's credential: the named environment variable wins when
-/// set; otherwise the matching `HqConfig` key for the kind. Local
+/// set; otherwise the matching `HqConfig` key for the kind, unless the entry
+/// names a variable of its own ([`BackendEntry::may_use_config_key`]). Local
 /// OpenAI-compatible endpoints (Ollama and friends) accept any token, so they
 /// get a placeholder. Never writes to the environment.
 pub fn resolve_credential(entry: &BackendEntry, creds: &ConfigCredentials) -> Option<String> {
@@ -67,6 +68,7 @@ pub fn resolve_credential(entry: &BackendEntry, creds: &ConfigCredentials) -> Op
         return from_env;
     }
     let fallback = match entry.kind {
+        _ if !entry.may_use_config_key() => None,
         BackendKind::KimiCode => creds.kimi_code.clone(),
         BackendKind::Openrouter => creds.openrouter.clone(),
         BackendKind::AnthropicCompatible => creds.anthropic.clone(),
@@ -91,11 +93,37 @@ pub fn openai_compat_provider(
     effort: Option<String>,
     wire: WireApi,
 ) -> Arc<dyn LlmProvider> {
-    Arc::new(
-        OpenRouterProvider::new_with_base(api_key, endpoint)
-            .with_thinking_effort(effort)
-            .with_responses_api(wire == WireApi::Responses),
-    )
+    Arc::new(compat_provider(endpoint, api_key, effort, wire))
+}
+
+fn compat_provider(
+    endpoint: &str,
+    api_key: &str,
+    effort: Option<String>,
+    wire: WireApi,
+) -> OpenRouterProvider {
+    OpenRouterProvider::new_with_base(api_key, endpoint)
+        .with_thinking_effort(effort)
+        .with_responses_api(wire == WireApi::Responses)
+}
+
+/// The client for an entry whose endpoint is reached through its `unix_socket`.
+#[cfg(unix)]
+fn socket_client(entry: &BackendEntry) -> Result<reqwest::Client, String> {
+    let path = entry
+        .unix_socket
+        .as_deref()
+        .unwrap_or(std::path::Path::new(""));
+    crate::http::unix_socket_client(path)
+        .map_err(|e| format!("backend '{}': unix_socket client: {e}", entry.name))
+}
+
+#[cfg(not(unix))]
+fn socket_client(entry: &BackendEntry) -> Result<reqwest::Client, String> {
+    Err(format!(
+        "backend '{}': unix_socket needs a unix machine",
+        entry.name
+    ))
 }
 
 /// Build the HTTP provider for an API-kind entry.
@@ -129,10 +157,21 @@ fn build_api_provider(
         BackendKind::GithubCopilotCli => Ok(None),
         // Auth resolves dynamically (env vars, else `gh auth token`).
         BackendKind::GithubCopilotApi => Ok(Some(Arc::new(CopilotProvider::new()))),
+        BackendKind::OpenaiCompatible if entry.unix_socket.is_some() => {
+            let endpoint = endpoint()?;
+            let Some(key) = resolve_credential(entry, creds) else {
+                return Ok(None);
+            };
+            let provider = compat_provider(&endpoint, &key, entry.effort.clone(), entry.wire)
+                .with_http_client(socket_client(entry)?);
+            Ok(Some(with_prompted_tools(entry, Arc::new(provider))))
+        }
         BackendKind::Openrouter | BackendKind::KimiCode | BackendKind::OpenaiCompatible => {
             let endpoint = endpoint()?;
             Ok(resolve_credential(entry, creds).map(|key| {
-                openai_compat_provider(&endpoint, &key, entry.effort.clone(), entry.wire)
+                let provider =
+                    openai_compat_provider(&endpoint, &key, entry.effort.clone(), entry.wire);
+                with_prompted_tools(entry, provider)
             }))
         }
         BackendKind::AnthropicCompatible => {
@@ -141,6 +180,18 @@ fn build_api_provider(
                 Arc::new(AnthropicProvider::new_with_base(&key, &endpoint)) as Arc<dyn LlmProvider>
             }))
         }
+    }
+}
+
+/// The provider behind the prompted-tools shim when the entry asks for it.
+fn with_prompted_tools(
+    entry: &BackendEntry,
+    provider: Arc<dyn LlmProvider>,
+) -> Arc<dyn LlmProvider> {
+    if entry.prompted_tools {
+        Arc::new(crate::prompted_tools::PromptedToolsProvider::new(provider))
+    } else {
+        provider
     }
 }
 
@@ -301,6 +352,209 @@ mod tests {
     use hq_core::types::{ChatMessage, MessageRole};
     use std::sync::Mutex;
 
+    #[cfg(unix)]
+    mod over_a_socket {
+        use super::*;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        const ANSWER: &str = r#"{"id":"x","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"pong"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
+        const STREAM: &str = "data: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pong\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+
+        /// Answers each request on `socket` with `body` and records its request line and `Host`.
+        async fn serve(
+            listener: tokio::net::UnixListener,
+            body: &'static str,
+            kind: &'static str,
+        ) -> Arc<Mutex<Vec<String>>> {
+            let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+            let record = seen.clone();
+            tokio::spawn(async move {
+                while let Ok((mut sock, _)) = listener.accept().await {
+                    let mut buf = vec![0u8; 64 * 1024];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let line = head.lines().next().unwrap_or_default().to_string();
+                    let host = head
+                        .lines()
+                        .find(|l| l.to_ascii_lowercase().starts_with("host:"))
+                        .unwrap_or_default()
+                        .to_string();
+                    record
+                        .lock()
+                        .unwrap()
+                        .push(format!("{line} | {host} | {head}"));
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                }
+            });
+            seen
+        }
+
+        fn entry(socket: &std::path::Path) -> BackendEntry {
+            BackendEntry {
+                name: "laptop".into(),
+                kind: BackendKind::OpenaiCompatible,
+                endpoint: Some("http://localhost/v1".into()),
+                credential_env: None,
+                model: Some("m".into()),
+                effort: None,
+                wire: WireApi::ChatCompletions,
+                enabled: true,
+                unix_socket: Some(socket.to_path_buf()),
+                prompted_tools: false,
+            }
+        }
+
+        fn request() -> ChatRequest {
+            ChatRequest {
+                model: "m".into(),
+                messages: vec![ChatMessage {
+                    image_parts: Vec::new(),
+                    role: MessageRole::User,
+                    content: "hi".into(),
+                    tool_calls: vec![],
+                    tool_call_id: None,
+                    reasoning_content: None,
+                }],
+                tools: vec![],
+                temperature: None,
+                max_tokens: None,
+            }
+        }
+
+        #[tokio::test]
+        async fn a_backend_with_a_unix_socket_sends_every_request_through_it() {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("llm.sock");
+            let seen = serve(
+                tokio::net::UnixListener::bind(&socket).unwrap(),
+                ANSWER,
+                "application/json",
+            )
+            .await;
+            let provider = build_api_provider(&entry(&socket), &ConfigCredentials::default())
+                .unwrap()
+                .expect("a loopback endpoint needs no key");
+            let answer = provider.chat(&request()).await.unwrap();
+            assert_eq!(answer.message.content, "pong");
+            let seen = seen.lock().unwrap().clone();
+            assert_eq!(seen.len(), 1, "{seen:?}");
+            assert!(seen[0].starts_with("POST /v1/chat/completions"), "{seen:?}");
+            assert!(
+                seen[0].to_ascii_lowercase().contains("host: localhost"),
+                "{seen:?}"
+            );
+        }
+
+        const TOOL_TAG_ANSWER: &str = r#"{"id":"x","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"Checking. <tool_call name=\"task_list\"><args>{\"limit\":3}</args></tool_call>"}}],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
+
+        #[tokio::test]
+        async fn prompted_tools_puts_the_tools_in_the_prompt_and_reads_the_tags_back() {
+            use tokio_stream::StreamExt;
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("llm.sock");
+            let seen = serve(
+                tokio::net::UnixListener::bind(&socket).unwrap(),
+                TOOL_TAG_ANSWER,
+                "application/json",
+            )
+            .await;
+            let mut with_shim = entry(&socket);
+            with_shim.prompted_tools = true;
+            let provider = build_api_provider(&with_shim, &ConfigCredentials::default())
+                .unwrap()
+                .unwrap();
+            let mut asked = request();
+            asked.tools = vec![hq_core::types::ToolDefinition {
+                name: "task_list".into(),
+                description: "List tasks".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }];
+            let mut stream = provider.chat_stream(&asked).await.unwrap();
+            let (mut text, mut name, mut args) = (String::new(), None, String::new());
+            while let Some(chunk) = stream.next().await {
+                match chunk.unwrap() {
+                    StreamChunk::Text(t) => text.push_str(&t),
+                    StreamChunk::ToolCallDelta {
+                        index,
+                        name: n,
+                        arguments_delta,
+                        ..
+                    } => {
+                        assert_eq!(index, 0, "one call");
+                        name = n.or(name);
+                        args.push_str(&arguments_delta);
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(text, "Checking.");
+            assert_eq!(name.as_deref(), Some("task_list"));
+            assert_eq!(args, r#"{"limit":3}"#);
+            let seen = seen.lock().unwrap().clone();
+            assert_eq!(seen.len(), 1, "{seen:?}");
+            assert!(
+                !seen[0].contains(r#""tools""#),
+                "no native tools field: {seen:?}"
+            );
+            assert!(
+                seen[0].contains("task_list"),
+                "the tool is in the prompt: {seen:?}"
+            );
+        }
+
+        #[tokio::test]
+        async fn without_prompted_tools_the_tools_go_in_the_tools_field() {
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("llm.sock");
+            let seen = serve(
+                tokio::net::UnixListener::bind(&socket).unwrap(),
+                ANSWER,
+                "application/json",
+            )
+            .await;
+            let provider = build_api_provider(&entry(&socket), &ConfigCredentials::default())
+                .unwrap()
+                .unwrap();
+            let mut asked = request();
+            asked.tools = vec![hq_core::types::ToolDefinition {
+                name: "task_list".into(),
+                description: "List tasks".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }];
+            provider.chat(&asked).await.unwrap();
+            assert!(seen.lock().unwrap()[0].contains(r#""tools""#));
+        }
+
+        #[tokio::test]
+        async fn a_streamed_reply_comes_through_the_socket_too() {
+            use tokio_stream::StreamExt;
+            let dir = tempfile::tempdir().unwrap();
+            let socket = dir.path().join("llm.sock");
+            let seen = serve(
+                tokio::net::UnixListener::bind(&socket).unwrap(),
+                STREAM,
+                "text/event-stream",
+            )
+            .await;
+            let provider = build_api_provider(&entry(&socket), &ConfigCredentials::default())
+                .unwrap()
+                .unwrap();
+            let mut stream = provider.chat_stream(&request()).await.unwrap();
+            let mut text = String::new();
+            while let Some(chunk) = stream.next().await {
+                if let StreamChunk::Text(t) = chunk.unwrap() {
+                    text.push_str(&t);
+                }
+            }
+            assert_eq!(text, "pong");
+            assert_eq!(seen.lock().unwrap().len(), 1);
+        }
+    }
+
     /// Records the model it was asked for; fails when `error` is set.
     struct Fake {
         seen: Mutex<Vec<String>>,
@@ -422,6 +676,129 @@ mod tests {
             message: "too long".into(),
         };
         assert!(!should_fail_over(&overflow.into()));
+    }
+
+    /// Opt-in check against a real model that ignores `tools`:
+    /// `HQ_TEST_PROMPTED_MODEL=gemma4:e2b cargo test -p hq-llm prompted_tools_live -- --ignored`
+    /// with Ollama on its default port.
+    #[tokio::test]
+    #[ignore = "needs Ollama on 127.0.0.1:11434 and HQ_TEST_PROMPTED_MODEL"]
+    async fn prompted_tools_live() {
+        let model = std::env::var("HQ_TEST_PROMPTED_MODEL").expect("HQ_TEST_PROMPTED_MODEL");
+        let entry = BackendEntry {
+            name: "local".into(),
+            kind: BackendKind::OpenaiCompatible,
+            endpoint: Some("http://127.0.0.1:11434/v1".into()),
+            credential_env: None,
+            model: Some(model.clone()),
+            effort: None,
+            wire: WireApi::ChatCompletions,
+            enabled: true,
+            unix_socket: None,
+            prompted_tools: true,
+        };
+        let provider = build_api_provider(&entry, &ConfigCredentials::default())
+            .unwrap()
+            .unwrap();
+        let request = ChatRequest {
+            model,
+            messages: vec![ChatMessage {
+                image_parts: Vec::new(),
+                role: MessageRole::User,
+                content: "What is the weather in Kampala right now? Use the tool.".into(),
+                tool_calls: vec![],
+                tool_call_id: None,
+                reasoning_content: None,
+            }],
+            tools: vec![hq_core::types::ToolDefinition {
+                name: "get_weather".into(),
+                description: "Current weather for a city".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"]
+                }),
+            }],
+            temperature: Some(0.0),
+            max_tokens: None,
+        };
+        let reply = provider.chat(&request).await.unwrap();
+        let call = reply.message.tool_calls.first().expect("a tool call");
+        assert_eq!(call.name, "get_weather", "{reply:?}");
+        assert!(
+            call.arguments
+                .to_string()
+                .to_lowercase()
+                .contains("kampala"),
+            "{reply:?}"
+        );
+    }
+
+    #[test]
+    fn a_backend_that_names_its_own_key_never_gets_the_generic_one() {
+        let creds = ConfigCredentials {
+            openai: Some("generic-openai-key".into()),
+            openrouter: Some("generic-openrouter-key".into()),
+            ..Default::default()
+        };
+        let entry = |kind, endpoint: &str, env: Option<&str>| BackendEntry {
+            name: "b".into(),
+            kind,
+            endpoint: Some(endpoint.into()),
+            credential_env: env.map(str::to_string),
+            model: Some("m".into()),
+            effort: None,
+            wire: WireApi::default(),
+            enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
+        };
+        let unset = Some("HQ_TEST_UNSET_KEY_9C1D");
+        let remote = "https://api.example.test/v1";
+        let cases = [
+            (BackendKind::OpenaiCompatible, remote, unset, None),
+            (
+                BackendKind::OpenaiCompatible,
+                "http://127.0.0.1:47600/v1",
+                unset,
+                Some("local"),
+            ),
+            (
+                BackendKind::OpenaiCompatible,
+                "http://localhost/v1",
+                unset,
+                Some("local"),
+            ),
+            (BackendKind::Openrouter, remote, unset, None),
+            (
+                BackendKind::OpenaiCompatible,
+                remote,
+                None,
+                Some("generic-openai-key"),
+            ),
+            (
+                BackendKind::OpenaiCompatible,
+                remote,
+                Some("OPENAI_API_KEY"),
+                Some("generic-openai-key"),
+            ),
+            (
+                BackendKind::Openrouter,
+                remote,
+                Some("OPENROUTER_API_KEY"),
+                Some("generic-openrouter-key"),
+            ),
+            (
+                BackendKind::OpenaiCompatible,
+                remote,
+                Some(" "),
+                Some("generic-openai-key"),
+            ),
+        ];
+        for (kind, endpoint, env, want) in cases {
+            let got = resolve_credential(&entry(kind, endpoint, env), &creds);
+            assert_eq!(got.as_deref(), want, "{kind:?} {endpoint} {env:?}");
+        }
     }
 
     #[test]

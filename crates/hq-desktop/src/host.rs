@@ -868,7 +868,7 @@ mod tests {
     fn bridge(gate: bool, web_forward: bool) -> hq_core::config::BridgeServicesConfig {
         hq_core::config::BridgeServicesConfig {
             services: gate
-                .then(|| ("gate".to_string(), "127.0.0.1:7747".to_string()))
+                .then(|| ("gate".to_string(), "127.0.0.1:7747".into()))
                 .into_iter()
                 .collect(),
             forwards: web_forward
@@ -876,6 +876,8 @@ mod tests {
                     peer: "abc".into(),
                     service: "web".into(),
                     listen: "127.0.0.1:47480".into(),
+                    fail_fast_secs: None,
+                    when: Default::default(),
                 })
                 .into_iter()
                 .collect(),

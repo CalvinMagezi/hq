@@ -79,12 +79,35 @@ private fun ReplyFrame(modifier: Modifier = Modifier, border: androidx.compose.u
 }
 
 @Composable
-fun ReplyBubble(message: UiMessage, blocks: BlockActions, lifted: Boolean = false, modifier: Modifier = Modifier) = ReplyFrame(modifier, if (lifted) Mts.Line else Mts.Hairline) {
+fun ReplyBubble(message: UiMessage, blocks: BlockActions, lifted: Boolean = false, modifier: Modifier = Modifier, onOffer: ((Boolean) -> Unit)? = null) = ReplyFrame(modifier, if (lifted) Mts.Line else Mts.Hairline) {
     if (message.text.isNotBlank()) ReplyBody(message.text, blocks)
     val cards = remember(message.tools) { StepCards.of(message.tools) }
     message.files.forEach { FileCardView(it, { blocks.onOpenFile(it) }, Modifier.padding(top = 12.dp)) }
     ReplyCards(cards, message.createdAt.let { if (it.isBlank()) "just now" else ChatTime.since(it) }, blocks, Modifier.padding(top = 12.dp))
     if (message.tools.isNotEmpty()) ToolLine(message.tools)
+    val offer = message.offer
+    if (offer != null && onOffer != null) OfferLine(offer.line, onOffer)
+}
+
+/** One thing HQ can also do here, under the reply the person is reading. Not a notification. */
+@Composable
+private fun OfferLine(line: String, onAnswer: (Boolean) -> Unit) {
+    Column(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(line, style = HqType.BodySm, color = Mts.InkMuted)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OfferButton("Yes", Mts.Surface200, Mts.Ink) { onAnswer(true) }
+            OfferButton("Not now", Mts.Surface100, Mts.InkMuted) { onAnswer(false) }
+        }
+    }
+}
+
+@Composable
+private fun OfferButton(label: String, fill: androidx.compose.ui.graphics.Color, ink: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Row(
+        Modifier.heightIn(min = 48.dp).clip(CircleShape).background(fill).border(1.dp, Mts.Hairline, CircleShape)
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) { Text(label, style = HqType.BodySmBold, color = ink) }
 }
 
 /** The collapsed "What I did" line under a finished reply; one tap shows the steps in plain words. */

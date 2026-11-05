@@ -9,7 +9,9 @@
 //! ## Activation
 //!
 //! Call `needs_prompted_tools(model_id)` to decide whether to route through
-//! the shim. `OllamaProvider` checks this at request time.
+//! the shim. `OllamaProvider` checks this at request time; an
+//! `openai-compatible` backend opts in with `prompted_tools: true`, which
+//! wraps its provider in [`PromptedToolsProvider`].
 //!
 //! ## Format
 //!
@@ -27,9 +29,63 @@
 //! <tool_result name="spawn_subagent">{output}</tool_result>
 //! ```
 
-use hq_core::types::{ChatMessage, MessageRole, ToolCall, ToolDefinition};
+use std::{pin::Pin, sync::Arc};
 
-use crate::provider::ChatRequest;
+use anyhow::Result;
+use async_trait::async_trait;
+use hq_core::types::{ChatMessage, MessageRole, ToolCall, ToolDefinition};
+use tokio_stream::Stream;
+
+use crate::provider::{ChatRequest, ChatResponse, LlmProvider, StreamChunk, response_to_stream};
+
+/// A provider whose model ignores the `tools` field: requests with tools carry them in the
+/// system prompt, and `<tool_call>` tags in the reply become native tool calls. Such replies are
+/// buffered, because a tag split across chunks cannot be told apart from text until it closes.
+pub struct PromptedToolsProvider {
+    inner: Arc<dyn LlmProvider>,
+}
+
+impl PromptedToolsProvider {
+    pub fn new(inner: Arc<dyn LlmProvider>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl LlmProvider for PromptedToolsProvider {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
+        if request.tools.is_empty() {
+            return self.inner.chat(request).await;
+        }
+        let mut shimmed = request.clone();
+        inject_tool_prompt(&mut shimmed);
+        let mut resp = self.inner.chat(&shimmed).await?;
+        let (cleaned, calls) = promote_calls(&resp.message.content);
+        resp.message.content = cleaned;
+        if !calls.is_empty() {
+            resp.message.tool_calls = calls;
+        }
+        Ok(resp)
+    }
+
+    async fn chat_stream(
+        &self,
+        request: &ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
+        if request.tools.is_empty() {
+            return self.inner.chat_stream(request).await;
+        }
+        Ok(response_to_stream(self.chat(request).await?))
+    }
+
+    fn is_instrumented(&self) -> bool {
+        self.inner.is_instrumented()
+    }
+}
 
 /// Model-id prefixes that require the shim. Kept small and conservative:
 /// adding a prefix here means "treat this model as lacking native tools".
@@ -94,6 +150,19 @@ fn flatten_tool_results(messages: &mut Vec<ChatMessage>) {
                 pending.push(tag);
             }
             MessageRole::Assistant => {
+                // Results the model has not seen yet go before its next reply, as their own user
+                // turn, so the history keeps alternating.
+                if !pending.is_empty() {
+                    out.push(ChatMessage {
+                        image_parts: Vec::new(),
+                        role: MessageRole::User,
+                        content: pending.join("\n"),
+                        tool_calls: Vec::new(),
+                        tool_call_id: None,
+                        reasoning_content: None,
+                    });
+                    pending.clear();
+                }
                 // Carry assistant text but strip tool_calls (we re-emit them
                 // as free text in the same format the model produced). If
                 // there are tool_calls but no content, synthesize the XML so
@@ -416,5 +485,34 @@ mod tests {
         assert!(msgs[1].content.contains("call_7"));
         assert!(msgs[1].content.contains("42"));
         assert!(msgs[1].content.contains("what next?"));
+    }
+
+    #[test]
+    fn a_result_goes_before_the_reply_that_used_it() {
+        let msg = |role, content: &str, call: Option<&str>| ChatMessage {
+            image_parts: Vec::new(),
+            role,
+            content: content.into(),
+            tool_calls: vec![],
+            tool_call_id: call.map(str::to_string),
+            reasoning_content: None,
+        };
+        let mut msgs = vec![
+            msg(MessageRole::User, "how many tasks?", None),
+            msg(MessageRole::Assistant, "", None),
+            msg(MessageRole::Tool, "7", Some("call_1")),
+            msg(MessageRole::Assistant, "You have 7.", None),
+            msg(MessageRole::User, "and done ones?", None),
+        ];
+        msgs[1].tool_calls = vec![ToolCall {
+            id: "call_1".into(),
+            name: "task_list".into(),
+            arguments: json!({}),
+        }];
+        flatten_tool_results(&mut msgs);
+        let roles: Vec<_> = msgs.iter().map(|m| format!("{:?}", m.role)).collect();
+        assert_eq!(roles, ["User", "Assistant", "User", "Assistant", "User"]);
+        assert!(msgs[2].content.contains("<tool_result") && msgs[2].content.contains('7'));
+        assert_eq!(msgs[4].content, "and done ones?");
     }
 }

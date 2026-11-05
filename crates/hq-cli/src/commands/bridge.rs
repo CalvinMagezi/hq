@@ -273,7 +273,7 @@ fn bridge_services(
         bridge
             .services
             .entry(name.to_string())
-            .or_insert_with(|| addr.to_string());
+            .or_insert_with(|| addr.to_string().into());
     }
     hq_bridge::services_from_config(&bridge, config.ws_port)
 }
@@ -314,7 +314,13 @@ fn setup_config(config: Option<&HqConfig>, role: Role) -> SetupConfig {
     cfg.reserved_names
         .extend(config.remote_mcp.iter().map(|s| s.name.clone()));
     let forwards = config.bridge.forwards().unwrap_or_default();
-    cfg.reserved_ports = forwards.iter().map(|f| f.listen.port()).collect();
+    cfg.reserved_ports = forwards
+        .iter()
+        .filter_map(|f| match f.listen {
+            DoorTarget::Tcp(addr) => Some(addr.port()),
+            DoorTarget::Unix(_) => None,
+        })
+        .collect();
     cfg.configured_forwards = forwards
         .into_iter()
         .map(|f| (canonical_id(&f.peer), f.service))
@@ -830,13 +836,11 @@ mod tests {
         let mut config = HqConfig::default();
         assert!(bridge_services(Some(&config), None).unwrap().is_none());
         config.ws_port = 5678;
-        config.bridge.services =
-            BTreeMap::from([("web".to_string(), "127.0.0.1:5678".to_string())]);
+        config.bridge.services = BTreeMap::from([("web".to_string(), "127.0.0.1:5678".into())]);
         assert!(bridge_services(Some(&config), None).is_err());
-        config.bridge.services =
-            BTreeMap::from([("web".to_string(), "127.0.0.1:5690".to_string())]);
+        config.bridge.services = BTreeMap::from([("web".to_string(), "127.0.0.1:5690".into())]);
         assert!(bridge_services(Some(&config), None).unwrap().is_some());
-        config.bridge.services = BTreeMap::from([("web".to_string(), "0.0.0.0:5690".to_string())]);
+        config.bridge.services = BTreeMap::from([("web".to_string(), "0.0.0.0:5690".into())]);
         assert!(bridge_services(Some(&config), None).is_err());
     }
 
@@ -961,8 +965,7 @@ mod tests {
             Some(hq_bridge::DoorTarget::Tcp(a)) if a.port() == 5690
         ));
         assert!(setup_config(Some(&config), Role::Hub).web);
-        config.bridge.services =
-            BTreeMap::from([("web".to_string(), "127.0.0.1:5691".to_string())]);
+        config.bridge.services = BTreeMap::from([("web".to_string(), "127.0.0.1:5691".into())]);
         assert!(matches!(
             targets(&config, Role::Hub).get(SVC_WEB),
             Some(hq_bridge::DoorTarget::Tcp(a)) if a.port() == 5691
@@ -984,6 +987,8 @@ mod tests {
             peer: id.to_uppercase(),
             service: "web".into(),
             listen: "127.0.0.1:47480".into(),
+            fail_fast_secs: None,
+            when: Default::default(),
         }];
         let setup = setup_config(Some(&config), Role::Machine);
         assert!(setup.reserved_names.contains(&"laptop".to_string()));

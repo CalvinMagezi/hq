@@ -167,6 +167,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
             model: req.model.map(str::to_string),
         }),
         spoken: None,
+        offer: None,
     };
     let abort = spawn_supervised(turn, config, req.question.to_string(), history, Vec::new());
     turns.insert(
@@ -325,6 +326,7 @@ mod tests {
                 model: None,
             }),
             spoken: None,
+            offer: None,
         }
     }
 

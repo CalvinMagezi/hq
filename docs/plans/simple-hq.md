@@ -1,6 +1,6 @@
 # Simple HQ: an assistant that shows what it can do and learns you
 
-Status: phases 0 and 1 built (see "Where the build differs" under Phases); phases 2 to 5 are
+Status: phases 0, 1 and 2 built (see "Where the build differs" under Phases); phases 3 to 5 are
 proposals. Replaces the first draft, "Proactive HQ" (commit `8a82d5d`), after the adversarial
 review below.
 
@@ -250,10 +250,37 @@ Where the build of phases 0 and 1 differs from the text above:
   third time in two weeks) so `hq offers replay` can run them over past chats. It prints, per
   detector, how often it fired, how often HQ used that capability within ten minutes anyway, and
   how often it would have been the one offer under that reply. Nothing shows an offer yet. On a
-  phone, `scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` run them in the
-  app's sandbox so only the counts leave it.
+  phone, `scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` read them from the
+  phone's HQ so only the counts leave it.
+- Phase 2, first step (measurement on a release phone): a release build is not debuggable, so the
+  reports moved behind `GET /api/adoption` and `GET /api/offers/replay` (web or device token), and
+  `phone-hq.sh` signs a computer in as a device and reads them over the bridge. The replay prints
+  phase 1's rules beside the tuned ones (the person's own messages only, ready capabilities only,
+  offers spaced by `SAME_OFFER_GAP_SECS` and `ANY_OFFER_GAP_SECS`, cues as whole words, tighter
+  lists, dated to-dos and file requests), so one run on the phone gives the before and the after.
+  The offers themselves, the reminders and the decline memory follow in the next pull request.
 
-**Phase 2: offers.** The post-turn detectors (written, tuned with `hq offers replay`), the one-line
+Where the build of phase 2 differs from the text above:
+
+- An offer lives in the reply's saved meta (`chat_messages.meta.offer`: `kind`, `line`, `reply`,
+  `send`), chosen after the turn by `hq_tools::capabilities::offers::for_turn` for owner turns in
+  the web and phone chats only (not relays, `hq_ask`, sub-agents or the session driver). Only the
+  newest reply shows its offer; writing again moves on from it.
+- The line is "I can also" plus the catalog's `says`. Yes sends a short request in the person's
+  words rather than the catalog's `example`, which is written for an empty chat ("Turn that list
+  into separate tasks.", "Make that a task due on Friday 6 November 2026."); only the PDF offer
+  goes to the composer, because which note to export is the person's to say.
+- "A turn needed a capability that is one step away" is not built: the only one-step state is a
+  missing model key, and without one there is no reply to put an offer under.
+- The repeated question offers a look-up, not a watch: `look-up` is the catalog entry it maps to.
+- "Not now" twice in a row mutes that kind of offer for 30 days; a Yes in between resets the run.
+  Answers live only in `offer_log` (migration 109), and the answer removes the offer from the meta.
+- Reminders come from the `due-reminders` daemon task: tasks with a `chat_thread` origin link
+  (only HQ's own chat sets one), due today or tomorrow or overdue by up to seven days, one inbox
+  item per task per day between 08:00 and 21:00 local time, pushed like `notify_owner` (owner's
+  decision, 2026-11-05). Phase 5's quiet hours will replace the fixed window.
+
+**Phase 2: offers (built).** The post-turn detectors (written, tuned with `hq offers replay`), the one-line
 offer under a reply, Yes/Not now, and the 30-day memory of declines. The date detector and the reminder ship here. Offers are chosen by HQ
 on the device and drawn by the apps; the "I can also do this for you" line for an untried
 capability is one of them, so the model is never told what the person has not used.

@@ -130,33 +130,14 @@ pub(super) async fn dispatch_hq(
     }
 }
 
-/// The primary was unavailable and a fallback served the reply. A standalone
-/// interrupting notice covers turns with no rendered reply (detached or watch),
-/// and the reply itself is annotated so it does not look like a normal turn.
+/// The primary was unavailable and a fallback served the reply: the reply is
+/// annotated so it does not look like a normal turn.
 fn flag_fallback(
     config: &hq_core::config::HqConfig,
     result_text: String,
     served_by: &str,
 ) -> String {
     let primary = &config.backends.primary;
-    let notice = format!(
-        "Provider fallback: `{primary}` was unavailable this turn, served by `{served_by}` instead. See daemon logs for the error."
-    );
-    let mut msg = hq_core::mailbox::new_message(
-        "provider-chain",
-        "relay",
-        hq_core::types::MailboxMessageType::Nudge,
-        Some("Provider fallback"),
-        &notice,
-        None,
-    );
-    msg.meta.insert(
-        hq_core::mailbox::META_INTERRUPT.to_string(),
-        "true".to_string(),
-    );
-    if let Err(e) = hq_core::mailbox::send_message(&config.vault_path, &msg) {
-        tracing::warn!(%e, "dispatch_hq: fallback notification failed");
-    }
     format!(
         "{result_text}\n\n_(served by `{served_by}` — primary `{primary}` was unavailable this turn; see daemon logs)_"
     )

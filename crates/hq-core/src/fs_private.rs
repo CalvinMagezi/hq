@@ -70,6 +70,81 @@ pub fn owned_by_current_user(path: &Path) -> io::Result<bool> {
     }
 }
 
+/// Longest socket path the OS takes: `sun_path` holds 104 bytes on macOS and the BSDs and 108 on
+/// Linux and Android, one of them the terminating NUL.
+#[cfg(unix)]
+pub const MAX_SOCKET_PATH: usize = if cfg!(any(target_os = "linux", target_os = "android")) {
+    107
+} else {
+    103
+};
+
+/// Binds a unix socket only this user can reach. Its directory must be one only this user can
+/// change (created `0700` when missing and `create_dir` is set), a stale socket from a run that
+/// did not clean up is replaced, a socket another process still answers on is `AddrInUse`, and
+/// anything else at the path is refused, so nothing is removed
+/// that is not a socket. The socket itself is `0600`.
+#[cfg(unix)]
+pub fn bind_private_socket(path: &Path, create_dir: bool) -> io::Result<tokio::net::UnixListener> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+    const GROUP_OTHER_WRITE: u32 = 0o022;
+    let refuse = |why: String| io::Error::new(io::ErrorKind::PermissionDenied, why);
+    if path.as_os_str().len() > MAX_SOCKET_PATH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} is longer than the {MAX_SOCKET_PATH} bytes a socket path may have",
+                path.display()
+            ),
+        ));
+    }
+    let dir = path
+        .parent()
+        .ok_or_else(|| refuse(format!("{} has no directory", path.display())))?;
+    if create_dir && !dir.exists() {
+        create_private_dir_all(dir)?;
+    }
+    let meta = std::fs::symlink_metadata(dir)?;
+    if !meta.is_dir() {
+        return Err(refuse(format!("{} is not a directory", dir.display())));
+    }
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    if meta.uid() != unsafe { libc::geteuid() } {
+        return Err(refuse(format!("{} belongs to another user", dir.display())));
+    }
+    if meta.permissions().mode() & GROUP_OTHER_WRITE != 0 {
+        return Err(refuse(format!(
+            "{} can be written by others; chmod 700 it",
+            dir.display()
+        )));
+    }
+    match std::fs::symlink_metadata(path) {
+        // A socket someone still answers on belongs to a running process: leave it to that one.
+        // ponytail: blocking connect; a live owner with a full backlog would stall this, use a
+        // nonblocking connect with a timeout if that is ever seen.
+        Ok(existing) if existing.file_type().is_socket() => {
+            if std::os::unix::net::UnixStream::connect(path).is_ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    format!("{} is in use by another process", path.display()),
+                ));
+            }
+            std::fs::remove_file(path)?
+        }
+        Ok(_) => {
+            return Err(refuse(format!(
+                "{} exists and is not a socket; not touching it",
+                path.display()
+            )));
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let listener = tokio::net::UnixListener::bind(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(PRIVATE_FILE_MODE))?;
+    Ok(listener)
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -128,5 +203,79 @@ mod tests {
         assert_eq!(mode(&dir.path().join("a")), 0o700);
         assert_eq!(mode(dir.path()), 0o755);
         create_private_dir_all(&nested).unwrap();
+    }
+    #[tokio::test]
+    async fn a_socket_and_the_directory_made_for_it_are_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let door = dir.path().join("door");
+        let socket = door.join("door.sock");
+        assert!(
+            bind_private_socket(&socket, false).is_err(),
+            "no directory made unasked"
+        );
+        let _listener = bind_private_socket(&socket, true).unwrap();
+        assert_eq!(mode(&door), 0o700);
+        assert_eq!(mode(&socket), 0o600);
+    }
+
+    #[tokio::test]
+    async fn a_directory_others_can_write_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("door.sock");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        let err = bind_private_socket(&socket, false).unwrap_err();
+        assert!(
+            err.to_string().contains("can be written by others"),
+            "{err}"
+        );
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(
+            bind_private_socket(&socket, false).is_err(),
+            "group write counts too"
+        );
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(bind_private_socket(&socket, false).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_stale_socket_is_replaced_and_anything_else_at_the_path_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.path().join("door.sock");
+        drop(bind_private_socket(&socket, false).unwrap());
+        // The socket file is still there after the listener is gone: a crash leaves it so.
+        assert!(socket.exists());
+        let again = bind_private_socket(&socket, false).expect("a stale socket is replaced");
+        let err = bind_private_socket(&socket, false).unwrap_err();
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::AddrInUse,
+            "a live one is not taken over"
+        );
+        drop(again);
+        let file = dir.path().join("precious");
+        std::fs::write(&file, b"keep me").unwrap();
+        let err = bind_private_socket(&file, false).unwrap_err();
+        assert!(err.to_string().contains("not a socket"), "{err}");
+        assert_eq!(std::fs::read(&file).unwrap(), b"keep me");
+    }
+
+    #[tokio::test]
+    async fn a_directory_that_is_a_link_is_refused() {
+        let real = tempfile::tempdir().unwrap();
+        let holder = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(holder.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = holder.path().join("door");
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+        let err = bind_private_socket(&link.join("door.sock"), false).unwrap_err();
+        assert!(err.to_string().contains("not a directory"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_socket_path_too_long_for_the_os_is_refused_with_a_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let long = dir.path().join("x".repeat(MAX_SOCKET_PATH));
+        let err = bind_private_socket(&long, false).unwrap_err();
+        assert!(err.to_string().contains("longer than"), "{err}");
     }
 }

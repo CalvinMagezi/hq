@@ -325,6 +325,8 @@ mod tests {
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
         }
     }
 
@@ -338,6 +340,8 @@ mod tests {
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
         }
     }
 
@@ -487,6 +491,8 @@ mod tests {
             effort: None,
             wire: Default::default(),
             enabled: true,
+            unix_socket: None,
+            prompted_tools: false,
         }
     }
 

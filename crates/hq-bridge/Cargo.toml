@@ -30,3 +30,7 @@ url = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 hq-gate = { workspace = true }
 
+
+[dev-dependencies]
+# A relay on loopback, so tests can make a connection that only a relay carries.
+iroh-relay = { version = "=1.4.1", features = ["server"] }

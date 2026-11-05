@@ -45,6 +45,8 @@ pub(super) struct TurnRecord {
     saved: bool,
     /// For a reply the session driver started: which session and why.
     driver: Option<Value>,
+    /// The one thing HQ offers under this reply, chosen on the device.
+    offer: Option<hq_tools::capabilities::offers::TurnOffer>,
 }
 
 struct StepRecord {
@@ -60,6 +62,8 @@ struct StepRecord {
 pub(super) struct ReplyToSave {
     pub content: String,
     pub meta: Option<Value>,
+    /// The kind of offer the meta carries, to note it as shown once the reply has an id.
+    pub offer_kind: Option<&'static str>,
 }
 
 impl TurnRecord {
@@ -91,6 +95,15 @@ impl TurnRecord {
         self.driver
             .as_ref()
             .is_some_and(|d| d.get("session_id").is_some())
+    }
+
+    /// Tools this reply called, in order.
+    pub(super) fn tool_names(&self) -> Vec<String> {
+        self.steps.iter().map(|s| s.name.clone()).collect()
+    }
+
+    pub(super) fn set_offer(&mut self, offer: hq_tools::capabilities::offers::TurnOffer) {
+        self.offer = Some(offer);
     }
 
     pub(super) fn is_driver_turn(&self) -> bool {
@@ -174,9 +187,18 @@ impl TurnRecord {
         if content.trim().is_empty() && !did_work {
             return None;
         }
+        // A stopped reply was cut short; offering more under it would read oddly.
+        let offer = self.offer.take().filter(|_| !stopped);
+        let offer_kind = offer.as_ref().map(|o| o.kind);
+        let mut meta = self.meta(stopped);
+        if let Some(offer) = offer {
+            let obj = meta.get_or_insert_with(|| Value::Object(Map::new()));
+            obj["offer"] = serde_json::to_value(offer).unwrap_or(Value::Null);
+        }
         Some(ReplyToSave {
             content,
-            meta: self.meta(stopped),
+            meta,
+            offer_kind,
         })
     }
 

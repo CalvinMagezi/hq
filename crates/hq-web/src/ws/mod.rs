@@ -267,17 +267,22 @@ fn save_reply_message(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take(final_text, stopped)?;
-    db.with_conn(|conn| {
-        hq_db::chat::add_message_with_meta(
-            conn,
-            thread_id,
-            "assistant",
-            &reply.content,
-            reply.meta.as_ref(),
-        )
-    })
-    .inspect_err(|e| tracing::warn!(thread_id, "could not save chat reply: {e}"))
-    .ok()
+    let saved = db
+        .with_conn(|conn| {
+            hq_db::chat::add_message_with_meta(
+                conn,
+                thread_id,
+                "assistant",
+                &reply.content,
+                reply.meta.as_ref(),
+            )
+        })
+        .inspect_err(|e| tracing::warn!(thread_id, "could not save chat reply: {e}"))
+        .ok()?;
+    if let Some(kind) = reply.offer_kind {
+        crate::offers_api::record_shown(db, &saved.message_id, kind);
+    }
+    Some(saved)
 }
 
 /// One chat message as the browser sent it, after its files were resolved.
@@ -354,6 +359,7 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
         Some(claimed) => claimed,
         None => return,
     };
+    let asked_at = chrono::Utc::now().timestamp();
     let (tid, history) = open_thread(state, &req, claimed.as_deref());
     let Some(config) = load_config(state, &tid) else {
         return;
@@ -369,6 +375,11 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
         spoken: req
             .source
             .map(|_| hq_agent::threads::strip_hq_context(&req.text).to_string()),
+        offer: Some(crate::offers_api::OfferContext {
+            asked_at,
+            text: stored_text(&req),
+            registry: state.registry.clone(),
+        }),
     };
     let abort = spawn_supervised(turn, config, req.text, history, req.files);
     if let Some(t) = tid {
@@ -451,14 +462,13 @@ fn open_thread(
         state.broadcast(&json!({"type": "turn_start", "thread_id": tid}).to_string());
         return (tid, history);
     };
-    // The stored copy drops the ephemeral <hq-context> block; the model still gets it.
     let user_clean = hq_agent::threads::strip_hq_context(message);
     let metas: Vec<ChatAttachment> = files.iter().map(|f| f.meta.clone()).collect();
-    let stored = format!("{user_clean}{}", chat_uploads::marker(&metas));
+    let stored = stored_text(req);
     let meta = user_meta(req);
     let saved = db
         .with_conn(|conn| {
-            hq_db::chat::add_message_with_meta(conn, t, "user", stored.trim_start(), meta.as_ref())
+            hq_db::chat::add_message_with_meta(conn, t, "user", &stored, meta.as_ref())
         })
         .ok();
     if let Some(id) = claimed {
@@ -505,6 +515,16 @@ fn open_thread(
         );
     }
     (tid, history)
+}
+
+/// The person's message as it is saved: without the ephemeral `<hq-context>` block (the model
+/// still gets it), with the attachment marker.
+fn stored_text(req: &ChatRequest) -> String {
+    let user_clean = hq_agent::threads::strip_hq_context(&req.text);
+    let metas: Vec<ChatAttachment> = req.files.iter().map(|f| f.meta.clone()).collect();
+    format!("{user_clean}{}", chat_uploads::marker(&metas))
+        .trim_start()
+        .to_string()
 }
 
 /// The last messages of a thread, as the model sees them.
@@ -577,6 +597,7 @@ pub(crate) async fn start_driver_turn(
         record: record.clone(),
         ask: None,
         spoken: None,
+        offer: None,
     };
     let abort = spawn_supervised(turn, config, prompt, history, Vec::new());
     turns.insert(
@@ -656,6 +677,8 @@ struct ChatTurn {
     ask: Option<ask::AskTurn>,
     /// The question, when it was asked by voice: approvals quote it ("You said: …").
     spoken: Option<String>,
+    /// Set for a reply to the person's own message: the reply may carry one offer.
+    offer: Option<crate::offers_api::OfferContext>,
 }
 
 /// Runs a turn and watches it. A panic inside the run would otherwise leave no
@@ -784,6 +807,9 @@ impl ChatTurn {
                 )
             }
         };
+        if failure.is_none() && !content.trim().is_empty() {
+            self.attach_offer(&config).await;
+        }
         self.finish(
             &content,
             streamed.load(Ordering::Relaxed),
@@ -791,6 +817,31 @@ impl ChatTurn {
             failure.as_deref(),
         )
         .await;
+    }
+
+    /// Picks the one offer for this reply, on the device, and puts it in the reply's meta.
+    async fn attach_offer(&self, config: &Arc<hq_core::config::HqConfig>) {
+        let Some(ctx) = self.offer.clone() else {
+            return;
+        };
+        let tools = self
+            .record
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .tool_names();
+        let (db, config) = (self.db.clone(), config.clone());
+        let chosen = tokio::task::spawn_blocking(move || {
+            crate::offers_api::choose(&db, &config, &ctx, &tools)
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(offer) = chosen {
+            self.record
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .set_offer(offer);
+        }
     }
 
     /// Owner turns ask before calls that need the owner; an `hq_ask` turn is someone else's
@@ -1034,6 +1085,29 @@ mod tests {
             ClientMsg::Stop { thread_id: Some(_) }
         ));
         assert!(matches!(parse(r#"{"type":"ping"}"#), ClientMsg::Other));
+    }
+
+    #[test]
+    fn an_offer_under_a_reply_never_reaches_the_models_history() {
+        let state = test_state();
+        let tid = state
+            .db
+            .with_conn(|c| {
+                let t = hq_db::chat::create_thread(c, "t", "user", "user")?;
+                hq_db::chat::add_message(c, &t.thread_id, "user", "- a1\n- b2\n- c3")?;
+                let meta = json!({"offer": {"kind": "pasted_list", "line": "I can also secret-offer-line.",
+                    "reply": "Turn that list into separate tasks.", "send": true}});
+                hq_db::chat::add_message_with_meta(c, &t.thread_id, "assistant", "Noted.", Some(&meta))?;
+                Ok(t.thread_id)
+            })
+            .unwrap();
+        let history = thread_history(&state.db, &tid);
+        assert_eq!(history.len(), 2);
+        assert!(
+            history
+                .iter()
+                .all(|m| !m.content.contains("secret-offer-line"))
+        );
     }
 
     fn test_state() -> Arc<WsState> {
@@ -1323,6 +1397,7 @@ mod tests {
             record: record.clone(),
             ask: None,
             spoken: None,
+            offer: None,
         };
         let task = tokio::spawn(async { panic!("boom") });
         state.active_chat_turns.write().await.insert(
@@ -1360,6 +1435,7 @@ mod tests {
             record: Arc::new(std::sync::Mutex::new(TurnRecord::default())),
             ask: None,
             spoken: None,
+            offer: None,
         };
         let task = tokio::spawn(std::future::pending::<()>());
         task.abort();

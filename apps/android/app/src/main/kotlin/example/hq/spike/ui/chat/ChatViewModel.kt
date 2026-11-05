@@ -80,6 +80,8 @@ class ChatActions(
     val onExportFormat: (ExportFormat) -> Unit = {},
     val onExportClose: () -> Unit = {},
     val onExportAgain: () -> Unit = {},
+    /** Answers the offer under a reply: the reply's id, and Yes or Not now. */
+    val onOffer: (String, Boolean) -> Unit = { _, _ -> },
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -121,7 +123,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onRegenerate = ::regenerate, onEditResend = ::editResend, onCancelEdit = { _state.update { s -> s.copy(editing = null, draft = "", files = s.files.filter { it.uri.isNotEmpty() }) } },
         onNoteMenu = { open -> _state.update { it.copy(noteMenu = open) } }, onTogglePin = ::togglePin,
         onExport = { _state.value.note?.let { n -> _state.update { it.copy(noteMenu = false) }; exporter.choose(n.path, n.title, n.body) } }, onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
-        onLoadOlder = ::loadOlder, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
+        onLoadOlder = ::loadOlder, onOffer = ::answerOffer, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
     )
 
     init {
@@ -340,7 +342,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, m.spoken)
+    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, spoken = m.spoken, offer = m.offer)
+
+    /** Hides the line at once and tells HQ, which forgets the offer on that reply. Yes then sends its request, or puts it in the composer. */
+    private fun answerOffer(id: String, yes: Boolean) {
+        val offer = _state.value.messages.firstOrNull { it.id == id }?.offer ?: return
+        _state.update { s -> s.copy(messages = s.messages.map { if (it.id == id) it.copy(offer = null) else it }) }
+        viewModelScope.launch {
+            try {
+                client.postJson("/api/offers/answer", org.json.JSONObject().put("message_id", id).put("answer", if (yes) "yes" else "not_now"))
+            } catch (e: Exception) {
+                android.util.Log.w("ChatViewModel", "could not record the answer to an offer", e)
+            }
+        }
+        if (!yes) return
+        val s = _state.value
+        if (offer.send && s.connected && !s.running) submit(offer.reply, replaceFrom = null, files = emptyList(), contexts = emptyList()) else setDraft(offer.reply)
+    }
 
     /** Fetches the note first and opens the sheet when it is in hand, so a chip can say "Opening…" and a missing note never flashes an empty sheet. */
     private fun openNote(path: String) {

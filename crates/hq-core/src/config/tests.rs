@@ -103,6 +103,21 @@ mod load_from_path_tests {
     }
 
     #[test]
+    fn bridge_services_load_in_both_forms() {
+        let id = "ab".repeat(32);
+        let path = write_config(&format!(
+            "bridge:\n  services:\n    web: 127.0.0.1:5690\n    llm:\n      to: 127.0.0.1:11434\n      peers: [\"{id}\"]\n"
+        ));
+        let services = HqConfig::load_from_path(&path)
+            .unwrap()
+            .bridge
+            .services()
+            .unwrap();
+        assert_eq!(services["web"].peers, None);
+        assert_eq!(services["llm"].peers, Some(vec![id]));
+    }
+
+    #[test]
     fn http_referer_comes_from_config_yaml() {
         let path = write_config("http_referer: https://hq.example.com\n");
         let config = crate::HqConfig::load_from_path(&path).unwrap();
@@ -483,6 +498,8 @@ fn runtime_identity_names_primary_provider_and_fallbacks() {
         effort: None,
         wire: Default::default(),
         enabled: true,
+        unix_socket: None,
+        prompted_tools: false,
     };
     config.backends.primary = "haiku".into();
     config.backends.fallbacks = vec!["deepseek".into()];

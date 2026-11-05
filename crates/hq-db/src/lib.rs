@@ -16,6 +16,7 @@ pub mod host_outages;
 pub mod mcp_connector;
 pub mod migrations;
 pub mod moved;
+pub mod offers;
 pub mod owner_approvals;
 pub mod pool;
 pub mod provenance;

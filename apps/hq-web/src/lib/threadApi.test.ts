@@ -55,3 +55,11 @@ test('a question an MCP client asked carries its caller, and ordinary messages d
   expect(toThreadMessage({ ...base, meta: null }).viaMcp).toBeUndefined()
   expect(toThreadMessage(base).viaMcp).toBeUndefined()
 })
+
+test('an offer under a reply comes back whole, and a broken one is dropped', () => {
+  const base = { message_id: 'a2', thread_id: 't', role: 'assistant', content: 'done', created_at: '2026-11-05T00:00:00Z' }
+  const offer = { kind: 'pasted_list', line: 'I can also turn a list you paste into separate tasks.', reply: 'Turn that list into tasks.', send: true }
+  expect(toThreadMessage({ ...base, meta: { offer } }).offer).toEqual(offer)
+  expect(toThreadMessage({ ...base, meta: { offer: { ...offer, reply: '' } } }).offer).toBeUndefined()
+  expect(toThreadMessage(base).offer).toBeUndefined()
+})
