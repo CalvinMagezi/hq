@@ -167,9 +167,20 @@ class ShellActivity : ComponentActivity() {
         try { startActivity(intent) } catch (e: android.content.ActivityNotFoundException) { inAndroidSettings = null }
     }
 
+    override fun onStart() {
+        super.onStart()
+        example.hq.spike.update.AppVisibility.visible = true
+    }
+
+    override fun onStop() {
+        example.hq.spike.update.AppVisibility.visible = false
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         rereadNotifications()
+        Thread { example.hq.spike.update.Updater.onForeground(applicationContext) }.start()
         val origin = inAndroidSettings ?: return
         inAndroidSettings = null
         if (notifFacts?.needsOn == true) NotifAccess.grantedInSettings(this, origin)
@@ -390,7 +401,7 @@ class ShellActivity : ComponentActivity() {
                 }
                 else HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
-                    onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen,
+                    onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,
                     subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }) else null },
                     topActions = { place ->
                         if (place == Place.Tasks && tasksState.tab == TaskTab.All) IconButton({ tasks.actions.onFilter(true) }, Modifier.size(48.dp)) { Icon(HqIcons.Filter, "Filter", Modifier.size(24.dp), tint = if (tasksState.scope == TaskScope.Everything) Mts.Ink else Mts.BrandGreen) }

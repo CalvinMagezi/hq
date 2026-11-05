@@ -9,6 +9,8 @@ import org.junit.Test
 
 /** Updates wait for HQ to be free, and a bad version can be pulled (wave-0/02-safe-mode.md, sections 6.15 to 6.21). */
 class SafeUpdateLogicTest {
+    init { UpdateLogic.repo = "example/hq" }
+
     private val sha = "a".repeat(64)
     private fun m(code: Long = 10, rollout: Int = 100, withdrawn: List<Long> = emptyList(), minSdk: Int = 26, seq: Long = 1) =
         ChannelManifest("1.$code", code, UpdateLogic.APK_URL_PREFIX + "x/a.apk", sha, minSdk, seq = seq, rollout = rollout, withdrawn = withdrawn)

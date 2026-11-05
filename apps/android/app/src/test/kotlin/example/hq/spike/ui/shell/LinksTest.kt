@@ -20,6 +20,8 @@ class LinksTest {
         assertEquals(LinkTarget(Place.Chat), parse("hq://chat"))
     }
 
+    @Test fun theUpdatePageHasALink() = assertEquals("update", parse("hq://settings/update").screen)
+
     @Test fun aTrailingSlashChangesNothing() {
         assertEquals("t-1", parse("hq://chat/t-1/").id)
         assertEquals("keys", parse("hq://settings/keys/").screen)

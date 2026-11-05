@@ -18,6 +18,10 @@ val generated = layout.buildDirectory.dir("generated/hq")
 val releaseKeystore = providers.environmentVariable("HQ_RELEASE_KEYSTORE")
 val releaseKeystorePassword = providers.environmentVariable("HQ_RELEASE_KEYSTORE_PASSWORD")
 val releaseKeyAlias = providers.environmentVariable("HQ_RELEASE_KEY_ALIAS")
+// -Phq.releasesRepo=owner/repo names the GitHub repository the in-app updater reads; with none the updater is off.
+val releasesRepo = providers.gradleProperty("hq.releasesRepo").getOrElse("").also {
+    if (it.isNotEmpty() && !Regex("[A-Za-z0-9._-]+/[A-Za-z0-9._-]+").matches(it)) throw GradleException("-Phq.releasesRepo must look like owner/repo")
+}
 val versionCodeProperty = providers.gradleProperty("hq.versionCode")
 val versionNameProperty = providers.gradleProperty("hq.versionName")
 
@@ -87,6 +91,7 @@ android {
         versionName = versionNameProperty.getOrElse("dev")
         // -Phq.port= gives a test copy its own loopback port, so its hq never fights the installed app's for 5678.
         buildConfigField("int", "HQ_PORT", providers.gradleProperty("hq.port").getOrElse("5678"))
+        buildConfigField("String", "RELEASES_REPO", "\"$releasesRepo\"")
         // shortcuts.xml cannot use a manifest placeholder, so its target package is a resource.
         resValue("string", "hq_application_id", applicationId!!)
         ndk { abiFilters += "arm64-v8a" }
