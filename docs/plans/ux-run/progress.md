@@ -21,6 +21,9 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 | W50 | After this run: no Windows or Linux hub builds now | 2026-11-05 |
 | WR18 | Yes: "Typing to the helper", off by default, Ctrl ] always leaves | 2026-11-05 |
 | Cutover | PR to main when the gates pass, then the CI release on the A32 and install-hq.sh on the laptop | 2026-11-05 |
+| L1 | Yes: the losing tools and commands as listed below | 2026-11-05 |
+| L2 | Yes: a session's command policy keeps saying yes to a losing command its own rules allow | 2026-11-05 |
+| L3 | Yes: a command dialog cut too short to read counts as losing for automatic answers | 2026-11-05 |
 | B11 (resolutions.md) | Approved as recommended: "This window", saved copy and outbox keyed by HQ id, "Saved in HQ Hub at 14:32", no web push, HQ Hub system notices | 2026-11-05 |
 
 ## Web wave 0 (live bugs and shared parts)
@@ -64,9 +67,9 @@ the safer side.
 
 | Id | Question | Built until answered |
 |---|---|---|
-| L1 | Which calls count as losing (red "Allow {verb}", never an automatic yes). Built: a tool or action named delete, remove, stop, revoke, disconnect, drop, overwrite, logout, trash, purge, uninstall or kill; for `bash` and helper command dialogs `rm`, `rmdir`, `unlink`, `shred`, `git rm`, `git clean`, `git branch -d/-D`, `git push --force/-f/--force-with-lease/--mirror/--delete`, `git reset --hard`, `git checkout --`, `git restore`, `git stash drop/clear`, `kill`, `pkill`, `killall`, `dropdb`, `gh repo delete`, `gh auth logout` (`crates/hq-core/src/losing.rs`, `command_policy.rs` `LOSING_COMMANDS`). Add or drop any? | as listed |
-| L2 | Should a session's command policy (the owner's own allow rules) still say yes by itself to a losing command it allows? The built-in builder and reviewer policies allow none. | yes, the policy keeps deciding |
-| L3 | A command dialog cut too short to read whole is treated as losing for Drive and other automatic answers (they may decline it, not say yes). Keep? | yes |
+| L1 (answered yes) | Which calls count as losing (red "Allow {verb}", never an automatic yes). Built: a tool or action named delete, remove, stop, revoke, disconnect, drop, overwrite, logout, trash, purge, uninstall or kill; for `bash` and helper command dialogs `rm`, `rmdir`, `unlink`, `shred`, `git rm`, `git clean`, `git branch -d/-D`, `git push --force/-f/--force-with-lease/--mirror/--delete`, `git reset --hard`, `git checkout --`, `git restore`, `git stash drop/clear`, `kill`, `pkill`, `killall`, `dropdb`, `gh repo delete`, `gh auth logout` (`crates/hq-core/src/losing.rs`, `command_policy.rs` `LOSING_COMMANDS`). Add or drop any? | as listed |
+| L2 (answered yes) | Should a session's command policy (the owner's own allow rules) still say yes by itself to a losing command it allows? The built-in builder and reviewer policies allow none. | yes, the policy keeps deciding |
+| L3 (answered yes) | A command dialog cut too short to read whole is treated as losing for Drive and other automatic answers (they may decline it, not say yes). Keep? | yes |
 
 ### Web wave 1
 
