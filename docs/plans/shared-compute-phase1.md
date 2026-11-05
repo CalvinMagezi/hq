@@ -1,6 +1,6 @@
 # Shared compute, phase 1: the phone uses the laptop's model
 
-Status: plan, not started. Phase 1 of a larger idea (devices lending model capacity to each other);
+Status: test zero run 2026-11-05 (results in section 5 below); feature work not started. Phase 1 of a larger idea (devices lending model capacity to each other);
 phase 2 and beyond are listed at the end and are out of scope here.
 
 ## The problem
@@ -109,6 +109,44 @@ bridge helper and the `hq` child reread the config.
 | T6 | Quit Ollama but keep the laptop awake | Falls back to `cloud` | Time to fall back (the service answers "down", which should be fast) |
 | T7 | From another app on the phone (for example a terminal app), `curl http://127.0.0.1:47600/v1/models` | Today: it answers | Confirms gap 3 below |
 
+### 5. Results (run 2026-11-05)
+
+Laptop: 24 GB Apple silicon, Ollama 0.40.14, `qwen3:8b` (already pulled; the 14b and 20b candidates
+did not fit on a nearly full disk). Phone: release build 0.9.1-main.299, then 0.9.1-main.364 (the
+config edits survived the update). HQ's chat prompt was about 26,200 tokens.
+
+| # | Result |
+|---|---|
+| T1 | Served by `laptop` (Ollama log, and `budget_status` lists `qwen3:8b` at $0). A cold turn took 3 min 30 s: prompt read at about 136 tokens/s (192 s), output at 10 to 16 tokens/s. Later turns in the same thread took 13 to 24 s because Ollama reused its prompt cache. |
+| T2 | Tool calls parsed and ran (two round trips per turn). The answer was wrong (it said 0 tasks where 7 exist): a model quality limit, not a transport one. |
+| T3 | `direct`, round trips mostly 5 to 50 ms. |
+| T4 | Worked on mobile data with path `relay`. A cold turn took about 4 min 10 s plus a second call of 1 min 20 s. The phone moved about 1.5 MB in and 1.3 MB out over that time, other traffic included. |
+| T5 | Laptop bridge stopped: the forward accepted the local connection and returned nothing for at least 35 s (the test's own limit). `stream_to` dials up to twice with a 20 s `DIAL_TIMEOUT`, so the stall can reach 40 s before the chain even tries the fallback. |
+| T6 | Ollama quit, laptop awake: fell back to `luna` and answered in 6.2 s end to end. |
+| T7 | Confirmed: the `adb shell` user, a different process from the app, got `/v1/models` through `127.0.0.1:47600`. |
+
+What had to be done by hand, and what the plan got wrong:
+
+1. **Ollama's default context silently truncates HQ's prompt.** With `default_num_ctx=4096` Ollama cut
+   the 26,184-token prompt to 2,050 tokens with only a log warning; the reply still looked fine.
+   The `/v1` API cannot raise it per request. Fix used: `launchctl setenv OLLAMA_CONTEXT_LENGTH 32768`
+   and restart Ollama (lost on reboot; the Ollama app's context setting is the durable way). Sharing
+   must check the served context length and refuse or warn when it is smaller than HQ's prompt.
+2. **On the laptop the bridge is the launchd `com.agent-hq.bridge` (`hq-bridge bridge serve`), not the
+   desktop app.** Restarting it (`launchctl kickstart -k`) drops every forward through it for a few seconds.
+3. **The phone's config on a release build** was edited with `file_edit_batch` over MCP (no `run-as`).
+   `config_manage get` on the phone answers "no config file": it does not look at `hqhome/config.yaml`.
+4. **Restarts:** the backend chain picked up `backends:` on the next turn with no restart. The new forward
+   needed Paired devices turned off and on.
+5. **The phone's other key goes to the laptop.** `resolve_credential` falls back to the generic OpenAI
+   credential whenever the `credential_env` variable is unset, even when `credential_env` is named, so
+   naming it does not keep that key away from the laptop. Only a loopback endpoint with no generic key
+   gets the placeholder.
+6. **Everything moves, not only chat.** Background work (memory, reviews) also ran on the laptop once it
+   was primary, which makes the slow cold prompt read worse. Phase 2's separate chains matter sooner.
+7. **Ollama checks the `Host` header**: a request with `Host` other than a loopback name gets 403. HQ's
+   client sends `127.0.0.1:47600`, which passes.
+
 ## Feature work after test zero
 
 Each is a small, focused PR with tests. Order by what test zero shows hurts most.
@@ -119,7 +157,8 @@ Each is a small, focused PR with tests. Order by what test zero shows hurts most
 2. **Fast failover.** A request should not wait 20 s for a laptop that is gone. Options: the
    backend chain asks the bridge whether the peer is reachable before choosing that link, or forwards
    for model services use a short dial timeout and close the local connection at once on failure so
-   the HTTP client errors immediately. Target: fallback within 2 s of the laptop being unreachable.
+   the HTTP client errors immediately. Test zero measured a stall of at least 35 s (two 20 s dials).
+   Target: fallback within 2 s of the laptop being unreachable.
 3. **The forward is open to every app on the phone.** `docs/security/PAIRING.md` S8 accepts that any
    local process can use a forward and says to use forwards on single-user machines. Android is not
    one: every app can reach the phone's loopback, and Ollama has no authentication. Fix by putting a
