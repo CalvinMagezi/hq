@@ -220,14 +220,14 @@ class NoticePostingTest {
 
     @Test fun theFiveChannelsAreMadeOnceWithTheBoardsImportance() {
         val ch = AlertPoster.channels(c).associateBy { it.id }
-        assertEquals(listOf("needs", "updates", "app_updates", "downloads", "hub"), AlertPoster.channels(c).map { it.id })
+        assertEquals(listOf("needs", "updates", "app_updates", "downloads", "hub_min"), AlertPoster.channels(c).map { it.id })
         assertEquals(NotificationManager.IMPORTANCE_HIGH, ch.getValue("needs").importance)
         assertEquals(NotificationManager.IMPORTANCE_DEFAULT, ch.getValue("updates").importance)
         assertEquals(null, ch.getValue("updates").sound)
         assertEquals(NotificationManager.IMPORTANCE_LOW, ch.getValue("app_updates").importance)
         assertEquals(NotificationManager.IMPORTANCE_LOW, ch.getValue("downloads").importance)
-        assertEquals(NotificationManager.IMPORTANCE_MIN, ch.getValue("hub").importance)
-        assertEquals("HQ is running", ch.getValue("hub").name.toString())
+        assertEquals(NotificationManager.IMPORTANCE_MIN, ch.getValue("hub_min").importance)
+        assertEquals("HQ is running", ch.getValue("hub_min").name.toString())
     }
 
     @Test fun anUpgraderStartsWithDetailsOffAndSeesTheNoteOnce() {

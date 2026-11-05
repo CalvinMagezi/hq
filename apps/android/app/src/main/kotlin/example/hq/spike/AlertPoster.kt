@@ -31,7 +31,10 @@ object AlertPoster {
     const val UPDATES = "updates"
     const val APP_UPDATES = "app_updates"
     const val DOWNLOADS = "downloads"
-    const val HUB = "hub"
+    const val HUB = "hub_min"
+
+    /** The running notice's first channel: Low, and importance cannot change after creation, so it was replaced. */
+    const val OLD_HUB = "hub"
     const val EXTRA_NOTICE_TAP = "notice_tap"
     private const val ID_BASE = 100
     private const val ID_SPAN = 100_000
@@ -43,6 +46,11 @@ object AlertPoster {
     private const val UPGRADER_NOTE = "upgrader_note"
     private const val SEEN = "seen"
     private const val RESULT_KEEP_MS = 15_000L
+    private const val UPDATES_PER_HOUR = 3
+    private const val HOUR_MS = 3_600_000L
+    private const val UPDATES_FOLD_ID = ID_BASE - 2
+    private const val UPD_START = "updates_window_start"
+    private const val UPD_COUNT = "updates_window_count"
     private val answeredAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
     @Volatile private var appContext: Context? = null
 
@@ -129,20 +137,50 @@ object AlertPoster {
 
     /** Oldest first so the newest ends on top; past [maxShown] one line stands for the rest. Returns the ids that got their own notice. */
     @JvmStatic
-    fun post(c: Context, items: Map<String, JSONObject>, fresh: List<String>, maxShown: Int): List<String> {
+    @JvmOverloads
+    fun post(c: Context, items: Map<String, JSONObject>, fresh: List<String>, maxShown: Int, replay: Boolean = false): List<String> {
         val nm = c.getSystemService(NotificationManager::class.java)
         val shown = if (fresh.size > maxShown) fresh.subList(0, maxShown) else fresh
-        val details = detailsNow(c)
+        // Questions that waited while notifications were off come back in the default words; details need a live unlock.
+        val details = !replay && detailsNow(c)
+        var folded = 0
+        var postedUpdates = 0
+        val own = mutableListOf<String>()
+        var updatesLeft = updatesLeft(c)
         for (id in shown.reversed()) {
             val card = InboxWords.card(itemOf(items.getValue(id)))
+            if (card.kind == CardKind.Update) {
+                if (updatesLeft == 0) { folded++; continue }
+                updatesLeft--
+                postedUpdates++
+            }
+            own += id
             nm.notify(notificationId(id), build(c, card, details, quiet = false))
             Counters.get(c).apply { bump(Counter.NoticePosted); if (ServerHq.isServer(card.id)) bump(Counter.NoticeServerTapped, 1) }
         }
+        if (folded > 0) {
+            nm.notify(UPDATES_FOLD_ID, simple(c, UPDATES, c.getString(R.string.updates_folded, folded.toString()), c.getString(R.string.updates_folded_body), open(c)))
+        }
+        recordUpdates(c, postedUpdates)
         if (fresh.size > shown.size) {
             val more = fresh.size - shown.size
             nm.notify(ID_BASE - 1, simple(c, NEEDS, c.getString(R.string.needs_folded, more.toString()), c.getString(R.string.needs_folded_body), open(c)))
         }
-        return shown
+        return own
+    }
+
+    /** Updates still allowed to have their own notice in this hour; past that they fold into one line. */
+    internal fun updatesLeft(c: Context, now: Long = System.currentTimeMillis()): Int {
+        val p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (now - p.getLong(UPD_START, 0L) >= HOUR_MS) return UPDATES_PER_HOUR
+        return (UPDATES_PER_HOUR - p.getInt(UPD_COUNT, 0)).coerceAtLeast(0)
+    }
+
+    private fun recordUpdates(c: Context, posted: Int, now: Long = System.currentTimeMillis()) {
+        if (posted <= 0) return
+        val p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val fresh = now - p.getLong(UPD_START, 0L) >= HOUR_MS
+        p.edit().putLong(UPD_START, if (fresh) now else p.getLong(UPD_START, now)).putInt(UPD_COUNT, (if (fresh) 0 else p.getInt(UPD_COUNT, 0)) + posted).apply()
     }
 
     /**

@@ -3,6 +3,7 @@ package example.hq.spike.ui.inbox
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import example.hq.spike.NotifAccess
 import example.hq.spike.R
 import example.hq.spike.data.HqServices
 import example.hq.spike.ui.shell.ClientRestore
@@ -31,6 +32,9 @@ data class DoneEntry(val id: String, val title: String, val createdAt: String)
 
 data class InboxLine(val text: String, val action: String? = null)
 
+/** The Needs tab's banner while notifications cannot reach the owner: what waited here, and what waits on a server HQ. */
+data class InboxBanner(val waited: Int, val server: Int)
+
 data class InboxUi(
     val loaded: Boolean = false,
     val offline: Boolean = false,
@@ -44,6 +48,7 @@ data class InboxUi(
     val cleared: Set<String> = emptySet(),
     val line: InboxLine? = null,
     val checkedAt: String = "",
+    val banner: InboxBanner? = null,
 ) {
     val shownNeeds: List<InboxCard> get() = needs.filter { it.id !in cleared }
     val shownUpdates: List<InboxCard> get() = updates.filter { it.id !in cleared }
@@ -58,6 +63,8 @@ class InboxActions(
     val onClearAll: () -> Unit = {},
     val onUndo: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
+    val onBannerNotNow: () -> Unit = {},
+    var onServerOpen: () -> Unit = {},
 )
 
 class InboxViewModel(app: Application) : AndroidViewModel(app) {
@@ -72,6 +79,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onNotNow = { answer(it, allow = false) },
         onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), getApplication<Application>().getString(R.string.undo_update_cleared)) },
         onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
+        onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
     )
 
     init {
@@ -99,7 +107,16 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     /** How many things are waiting on the owner, for the badge on the nav bar. */
     val badge: Int get() = _state.value.shownNeeds.size
 
+    /** Re-reads whether the banner shows: on every poll and when the app comes back from Android settings. */
+    fun refreshBanner() {
+        if (frozen) return
+        val c = getApplication<Application>()
+        val banner = NotifAccess.banner(NotifAccess.read(c), NotifAccess.snoozeUntil(c), System.currentTimeMillis(), NotifAccess.waited(c))
+        _state.update { it.copy(banner = banner) }
+    }
+
     suspend fun refresh() {
+        refreshBanner()
         val pending = try { client.notifications("pending", PENDING_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
         if (pending == null) {

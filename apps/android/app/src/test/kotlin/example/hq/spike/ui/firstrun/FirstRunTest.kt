@@ -23,7 +23,7 @@ class FirstRunLogicTest {
 
     @Test fun aKillResumesTheSavedStepEvenThoughKeyAndFirstAnswerNowExist() {
         // The key is sealed at step 1 and hq answers /health during the flow: neither may end it early.
-        for (step in listOf(Step.Welcome, Step.Moved, Step.Model, Step.Chat, Step.Start, Step.Restore)) {
+        for (step in listOf(Step.Welcome, Step.Moved, Step.Model, Step.Chat, Step.Notify, Step.Start, Step.Restore)) {
             assertEquals(step, FirstRunLogic.decide(done = false, saved = step, hasModelKey = true, heardHqBefore = true))
         }
     }
@@ -31,11 +31,13 @@ class FirstRunLogicTest {
     @Test fun eachButtonLeadsToTheNextScreen() {
         assertEquals(Step.Model, FirstRunLogic.next(Step.Welcome))
         assertEquals(Step.Chat, FirstRunLogic.next(Step.Model))
-        assertEquals(Step.Start, FirstRunLogic.next(Step.Chat))
-        assertEquals(Step.Start, FirstRunLogic.next(Step.Restore))
+        assertEquals(Step.Notify, FirstRunLogic.next(Step.Chat))
+        assertEquals(Step.Start, FirstRunLogic.next(Step.Notify))
+        assertEquals(Step.Notify, FirstRunLogic.next(Step.Restore))
         assertEquals(Step.Welcome, FirstRunLogic.back(Step.Model))
         assertEquals(Step.Model, FirstRunLogic.back(Step.Chat))
-        assertEquals(Step.Chat, FirstRunLogic.back(Step.Start))
+        assertEquals(Step.Chat, FirstRunLogic.back(Step.Notify))
+        assertEquals(Step.Notify, FirstRunLogic.back(Step.Start))
         assertEquals(Step.Welcome, FirstRunLogic.back(Step.Restore))
     }
 }

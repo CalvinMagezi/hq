@@ -25,7 +25,7 @@ object FirstRunWords {
     const val BACK = "Back"
     const val SKIP = "Skip"
 
-    const val CHAT_TITLE = "Chat apps (optional)"
+    const val CHAT_TITLE = "Messaging apps (optional)"
     const val CHAT_BODY = "Talk to HQ from Telegram or Discord. Paste a bot token for either one, or skip this and add them later in Settings."
     const val TELEGRAM_LABEL = "Telegram bot token"
     const val DISCORD_LABEL = "Discord bot token"

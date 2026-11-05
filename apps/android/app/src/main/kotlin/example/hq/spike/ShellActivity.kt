@@ -44,6 +44,7 @@ import example.hq.spike.ui.settings.settingsFixture
 import example.hq.spike.ui.inbox.InboxCard
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
+import example.hq.spike.ui.firstrun.NotifUpgraderSheet
 import example.hq.spike.ui.inbox.InboxUi
 import example.hq.spike.ui.inbox.InboxViewModel
 import example.hq.spike.ui.inbox.inboxFixture
@@ -130,6 +131,61 @@ class ShellActivity : ComponentActivity() {
 
     /** A place asked for by a tapped notification while the app is already open; the shell takes it and clears it. */
     private var requested by mutableStateOf<Place?>(null)
+
+    private var notifFacts by mutableStateOf<NotifFactsNow?>(null)
+    private var upgraderOpen by mutableStateOf(false)
+    private var turnOnOrigin = NotifOrigin.Later
+
+    /** Set while the owner is in Android's settings for a Turn on, so coming back counts a grant. */
+    private var inAndroidSettings: NotifOrigin? = null
+
+    private val askNotifications = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted ->
+        // Only an activity can say whether Android would show its dialog again.
+        val rationale = !granted && shouldShowRequestPermissionRationale(android.Manifest.permission.POST_NOTIFICATIONS)
+        NotifAccess.answered(this, turnOnOrigin, granted, rationale)
+        if (!granted && turnOnOrigin == NotifOrigin.FirstRun) firstRun.actions.onNotifNotNow()
+        rereadNotifications()
+    }
+
+    private fun rereadNotifications() {
+        notifFacts = NotifAccess.read(this)
+        inbox.actions.onServerOpen = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }
+        inbox.refreshBanner()
+    }
+
+    /** The one Turn on: asks Android, or opens the page where the owner switches it on, as the phone's state requires. */
+    private fun turnOnNotifications(origin: NotifOrigin) {
+        turnOnOrigin = origin
+        val c = packageName
+        val intent = when (NotifAccess.next(NotifAccess.read(this))) {
+            NotifStep.AskAndroid -> { askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS); return }
+            NotifStep.OpenApp -> Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, c)
+            NotifStep.OpenChannel -> Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, c).putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, AlertPoster.NEEDS)
+            NotifStep.Done -> { rereadNotifications(); return }
+        }
+        inAndroidSettings = origin
+        try { startActivity(intent) } catch (e: android.content.ActivityNotFoundException) { inAndroidSettings = null }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        rereadNotifications()
+        val origin = inAndroidSettings ?: return
+        inAndroidSettings = null
+        if (notifFacts?.needsOn == true) NotifAccess.grantedInSettings(this, origin)
+    }
+
+    /** The upgrader sheet: Android 13 and newer, the first open after an update, never asked and not allowed. Once only. */
+    private fun decideUpgrader() {
+        val f = NotifAccess.read(this)
+        val info = packageManager.getPackageInfo(packageName, 0)
+        @Suppress("DEPRECATION")
+        val now = if (android.os.Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else info.versionCode
+        val stored = NotifAccess.storedVersion(this).let { if (it == 0 && firstRunStep == null) 1 else it }
+        upgraderOpen = NotifAccess.showUpgrader(f.sdk, stored, now, f.granted, f.asked, NotifAccess.upgraderShown(this))
+        if (upgraderOpen) NotifAccess.markUpgraderShown(this)
+        NotifAccess.saveVersion(this, now)
+    }
 
     /** The web page shown in the host screen over everything, or null. */
     private var web by mutableStateOf<WebPage?>(null)
@@ -267,6 +323,8 @@ class ShellActivity : ComponentActivity() {
         web = WebPage.fromSlug(savedInstanceState?.getString(STATE_WEB))
         if (intent.getStringExtra("fixture") == null) firstRunStep = decideFirstRun()
         HqServices.ensureHubRunning(this)
+        notifFacts = NotifAccess.read(this)
+        if (intent.getStringExtra("fixture") == null && savedInstanceState == null) decideUpgrader()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -319,7 +377,8 @@ class ShellActivity : ComponentActivity() {
             val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
             val firstRunUi by firstRun.ui.collectAsStateWithLifecycle()
             val startup = startupFixture ?: if (fixture == null) StartupWords.decide(status, firstDone) else Startup.None
-            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }) {
+            val notifUi = notifFacts?.let { NotifUi(it, ::turnOnNotifications) }
+            HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }, LocalNotif provides notifUi) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
                 else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
                 else if (startup == Startup.DidNotStart) androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
@@ -340,7 +399,7 @@ class ShellActivity : ComponentActivity() {
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); if (upgraderOpen) NotifUpgraderSheet(onAllow = { upgraderOpen = false; turnOnNotifications(NotifOrigin.Later) }, onClose = { upgraderOpen = false }); SettingsHost(settingsState, settings.actions); SearchHost(searchState); web?.let { page -> WebHostScreen(page) { web = null } } },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)

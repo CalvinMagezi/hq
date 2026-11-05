@@ -7,8 +7,8 @@ import android.database.sqlite.SQLiteDatabase
 import java.io.File
 import java.io.IOException
 
-/** The screens of the first-run flow. [Restore] hangs off [Welcome] and ends at [Start]. [Moved] opens the flow on a phone the vault was copied to. */
-enum class Step { Welcome, Moved, Model, Chat, Start, Restore }
+/** The screens of the first-run flow. [Restore] hangs off [Welcome] and ends at [Notify], which is skipped when notifications already reach the owner. [Moved] opens the flow on a phone the vault was copied to. */
+enum class Step { Welcome, Moved, Model, Chat, Notify, Start, Restore }
 
 /** The pure rules: which screen shows on launch, and where each button leads. */
 object FirstRunLogic {
@@ -30,9 +30,10 @@ object FirstRunLogic {
         Step.Welcome -> Step.Model
         Step.Moved -> Step.Model
         Step.Model -> Step.Chat
-        Step.Chat -> Step.Start
+        Step.Chat -> Step.Notify
+        Step.Notify -> Step.Start
         Step.Start -> Step.Start
-        Step.Restore -> Step.Start
+        Step.Restore -> Step.Notify
     }
 
     fun back(step: Step, moved: Boolean = false): Step = when (step) {
@@ -40,7 +41,8 @@ object FirstRunLogic {
         Step.Moved -> Step.Moved
         Step.Model -> if (moved) Step.Moved else Step.Welcome
         Step.Chat -> Step.Model
-        Step.Start -> Step.Chat
+        Step.Notify -> Step.Chat
+        Step.Start -> Step.Notify
         Step.Restore -> Step.Welcome
     }
 }
