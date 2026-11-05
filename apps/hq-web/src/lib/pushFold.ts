@@ -1,6 +1,8 @@
 // Folding pushes so a busy HQ never buries the lock screen (docs/plans/ux-run/web/wave-0/01-live-bugs.md
 // rule 13). Pure, so `bun test` can drive it; the service worker feeds it what is showing.
 
+import { t } from '../strings'
+
 export type PushKind = 'needs' | 'updates'
 
 /** A notification this worker is showing, as its `data` records it. */
@@ -41,8 +43,8 @@ export const UPDATES_WINDOW_MS = 60 * 60 * 1000
 const INBOX_URL = '/notifications'
 
 const needsFold = (n: number): ToShow => ({
-  title: `${n} more waiting for you`,
-  body: 'Open HQ to see them.',
+  title: t('needs_folded', { n }),
+  body: t('needs_folded_body'),
   url: INBOX_URL,
   tag: NEEDS_FOLD_TAG,
   kind: 'needs',
@@ -50,8 +52,8 @@ const needsFold = (n: number): ToShow => ({
 })
 
 const updatesFold = (n: number): ToShow => ({
-  title: `${n} updates from HQ`,
-  body: 'Tap to read.',
+  title: t('updates_folded', { n }),
+  body: t('updates_folded_body'),
   url: INBOX_URL,
   tag: UPDATES_FOLD_TAG,
   kind: 'updates',

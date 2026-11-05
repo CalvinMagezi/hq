@@ -10,6 +10,9 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 
 | Id | Answer | Date |
 |---|---|---|
+| N4 | Yes: transfer carries the vault; keys, config, bridge key, run mode and preferences stay behind, then the moved-phone flow | 2026-11-05 |
+| N6 | Yes: the safe-mode copy is a plain .zip with no password, for now | 2026-11-05 |
+| N19 | Yes: one catalogue of whole sentences builds the phone's resources and the web's strings | 2026-11-05 |
 | B11 (resolutions.md) | Approved as recommended: "This window", saved copy and outbox keyed by HQ id, "Saved in HQ Hub at 14:32", no web push, HQ Hub system notices | 2026-11-05 |
 
 ## Web wave 0 (live bugs and shared parts)
