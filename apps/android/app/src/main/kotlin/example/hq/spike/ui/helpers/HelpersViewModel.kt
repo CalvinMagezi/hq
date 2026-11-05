@@ -2,6 +2,7 @@ package example.hq.spike.ui.helpers
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import example.hq.spike.R
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.HelperHost
@@ -43,6 +44,8 @@ data class HelperOpen(
     val error: String? = null,
     val menu: Boolean = false,
     val confirmStop: Boolean = false,
+    val stopping: Boolean = false,
+    val stopError: String? = null,
     val rename: String? = null,
     val raw: Boolean = false,
     val technical: Boolean = false,
@@ -148,7 +151,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onKey = ::sendKey,
         onMenu = { m -> editOpen { it.copy(menu = m) } },
         onTechnical = { t -> editOpen { it.copy(technical = t, menu = false) } },
-        onAskStop = { a -> editOpen { it.copy(confirmStop = a, menu = false) } },
+        onAskStop = { a -> editOpen { it.copy(confirmStop = a, menu = false, stopping = false, stopError = null) } },
         onStop = ::stop,
         onRename = { r -> editOpen { it.copy(rename = r?.let(HelperWords::typedLabel), menu = false) } },
         onSaveRename = ::saveRename,
@@ -353,14 +356,18 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun stop() {
         val id = _state.value.open?.id ?: return
+        if (_state.value.open?.stopping == true) return
+        val agent = _state.value.openCard?.agent ?: ""
+        val res = getApplication<Application>().resources
+        editFor(id) { it.copy(stopping = true, stopError = null) }
         viewModelScope.launch {
             try {
                 client.stopHelper(id)
                 closeIfOpen(id)
-                say("Stopped.")
+                say(res.getString(R.string.stop_helper_done, agent))
                 refresh()
             } catch (e: HqUnavailable) {
-                editFor(id) { it.copy(confirmStop = false, error = "Couldn't stop it. HQ didn't reply.") }
+                editFor(id) { it.copy(stopping = false, stopError = res.getString(R.string.fail_stop_helper_no_reply, agent)) }
             }
         }
     }

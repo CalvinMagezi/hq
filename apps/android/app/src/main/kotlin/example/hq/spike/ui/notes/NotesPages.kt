@@ -33,6 +33,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.stringResource
 import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.ui.chat.blocks.Block
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -436,7 +438,7 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
         if (!w.preview) FormatBar(w, actions) { focus.clearFocus() }
     }
     if (w.chooser) FolderChooser(w, folders, actions)
-    if (w.leaving) LeaveDialog(w.leaveBody, actions)
+    if (w.leaving) LeaveDialog(w.leaveName, actions)
 }
 
 @Composable
@@ -510,16 +512,7 @@ private fun FolderChooser(w: WriteState, folders: List<String>, actions: NotesAc
 }
 
 @Composable
-private fun LeaveDialog(body: String, actions: NotesActions) {
-    BackHandler(onBack = actions.onKeepEditing)
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = actions.onKeepEditing))
-        Column(Modifier.padding(start = 24.dp, top = 240.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.notes_save_your_changes), style = HqType.H2, color = Mts.Ink)
-            Text(body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 12.dp))
-            GreenPill("Save", Modifier.fillMaxWidth(), onClick = actions.onSave)
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = actions.onKeepEditing), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_keep_editing), style = HqType.BodySmBold, color = Mts.Ink) }
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onDiscard), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_discard_changes), style = HqType.BodySmBold, color = Mts.DangerText) }
-        }
-    }
+private fun LeaveDialog(name: String, actions: NotesActions) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    ConfirmDialog(ConfirmCopy.leaveNote(context, name.ifBlank { context.getString(R.string.leave_note_fallback) }), onKeep = actions.onKeepEditing, onAct = actions.onDiscard, onExtra = actions.onSave)
 }

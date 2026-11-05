@@ -470,8 +470,6 @@ object SettingsWords {
 
     fun standbyNotice(platform: String) = "Background work is paused, so HQ cannot answer on ${appName(platform)} yet. Turn it on in Background work."
 
-    fun disconnectWords(platform: String) = ModeWords("Disconnect ${appName(platform)}?", "HQ stops answering on ${appName(platform)} and forgets the bot token. HQ restarts for a moment.", "Disconnect")
-    val REPLACE_WORDS = ModeWords("Link a different account?", "The current owner loses access until the new account pairs. Continue?", "Continue")
 
     fun pairBlurb(platform: String) = "Send this code to your bot. It tells HQ which ${appName(platform)} account is yours."
 
@@ -496,7 +494,6 @@ object SettingsWords {
 
     const val CLAUDE_VIA_LAPTOP = "Claude Code and Claude Desktop reach HQ through your laptop while it is paired with this phone."
 
-    val SIGN_OUT_ALL_WORDS = ModeWords("Sign out everywhere?", "Every other device is signed out, and so is any sign-in link you made earlier. Claude connections end too. HQ restarts for a moment.", "Sign out")
 
     /** The name HQ gives the one sign-in that "Sign out everywhere" leaves behind. */
     const val ROTATE_LABEL = "Sign out everywhere"

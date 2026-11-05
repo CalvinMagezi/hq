@@ -11,7 +11,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqClient
+import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.ui.shell.ClientRestore
+import example.hq.spike.ui.shell.Undo
+import example.hq.spike.ui.shell.UndoKind
 import example.hq.spike.data.HqStatus
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.data.NoteNotFound
@@ -442,29 +446,34 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s -> s.copy(chats = rows.filter { it.id != archiving?.first }) }
     }
 
-    /** Archiving waits a few seconds so Undo has something to undo; the server is only told after that. */
+    /** The server is told at once; Undo inside the window asks it to bring the chat back. */
     private fun archive(id: String) {
-        archiving?.let { (earlier, job) -> job.cancel(); commit(earlier) }
-        _state.update { it.copy(chats = it.chats.filter { row -> row.id != id }, notice = Notice("Chat archived", "Undo")) }
+        archiving?.second?.cancel()
+        val app = getApplication<Application>()
+        _state.update { it.copy(chats = it.chats.filter { row -> row.id != id }, notice = Notice(app.getString(R.string.undo_chat_archived), app.getString(R.string.undo))) }
         archiving = id to viewModelScope.launch {
-            delay(UNDO_MS)
-            commit(id)
-            archiving = null
-        }
-    }
-
-    private fun commit(id: String) {
-        viewModelScope.launch {
-            try { client.archive(id) } catch (e: HqUnavailable) { return@launch }
+            try { client.archive(id) } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = null) }
+                refreshChats()
+                return@launch
+            }
             if (_state.value.threadId == id) newChat(keepSheet = true)
+            delay(Undo.millis(app))
+            archiving = null
+            _state.update { it.copy(notice = null) }
         }
     }
 
     private fun undoArchive() {
-        archiving?.second?.cancel()
+        val (id, timer) = archiving ?: return
+        timer.cancel()
         archiving = null
-        _state.update { it.copy(notice = null) }
-        viewModelScope.launch { refreshChats() }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val result = Undo.restore(ClientRestore(client), UndoKind.Thread, id)
+            _state.update { it.copy(notice = Undo.failLine(app, result)?.let(::Notice)) }
+            refreshChats()
+        }
     }
 
     private fun draftKey(threadId: String?) = threadId ?: NEW_CHAT_KEY
@@ -472,7 +481,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val DRAFT_PREFS = "chat_drafts"
         const val NEW_CHAT_KEY = "new"
-        const val UNDO_MS = 5_000L
         const val MAX_ATTACHED = 10
         const val NOTE_GONE = "That note is not in your notes any more"
         const val CHAT_GONE = "That chat is not in your list"

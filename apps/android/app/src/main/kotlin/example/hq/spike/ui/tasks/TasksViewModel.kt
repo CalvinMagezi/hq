@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqClient.TaskComment
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.TaskItem
+import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.ui.shell.Undo
 import example.hq.spike.data.HqUnavailable
 import java.time.LocalDate
 import java.util.UUID
@@ -231,7 +233,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             val failedIds = picked.zip(results).filter { it.second is Applied.Failed }.mapTo(HashSet()) { it.first.id }
             refreshSeq++
             _state.update { it.copy(bulking = false, selected = failedIds) }
-            say(BulkEdit.summary(change, results))
+            val moved = picked.zip(results).filter { it.second is Applied.Changed }.map { it.first }
+            if (change == Bulk.Status("complete") && moved.isNotEmpty() && failedIds.isEmpty()) {
+                val line = getApplication<Application>().getString(R.string.bulk_done_line, moved.size.toString())
+                say(line, getApplication<Application>().getString(R.string.undo)) {
+                    moved.forEach { t -> BulkEdit.patchFor(Bulk.Status(t.status), t.copy(status = "complete"))?.let { client.patchTask(t.id, it) } }
+                    refresh()
+                }
+            } else say(BulkEdit.summary(change, results))
             refresh()
         }
     }
@@ -337,7 +346,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         undo = undoWith
         lineJob?.cancel()
         _state.update { it.copy(line = TaskLine(text, action)) }
-        lineJob = viewModelScope.launch { delay(LINE_MS); _state.update { it.copy(line = null) }; undo = null }
+        lineJob = viewModelScope.launch { delay(Undo.millis(getApplication())); _state.update { it.copy(line = null) }; undo = null }
     }
 
     /** Finishes a task at once and offers Undo; a 409 says it changed meanwhile and reloads. */

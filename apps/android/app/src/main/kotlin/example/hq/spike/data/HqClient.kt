@@ -260,6 +260,14 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/comments").post(json(JSONObject().put("body", body).put("author", "operator"))).build()) { }
     }
 
+    /** Undo's restore calls: 200 puts the item back, 409 (surfaced as [HqUnavailable.status]) means it changed or 10 minutes passed. */
+    suspend fun unarchiveThread(id: String) { send(authed("/api/threads/${java.net.URLEncoder.encode(id, "UTF-8")}/unarchive").post(EMPTY_JSON).build()) { } }
+
+    suspend fun restoreNotification(id: String) { send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/restore").post(EMPTY_JSON).build()) { } }
+
+    /** Undoes a deleted spending limit by sending the limits as they were. */
+    suspend fun restoreBudgets(limits: JSONObject) { send(authed("/api/budgets").put(json(limits)).build()) { } }
+
     suspend fun archiveTask(id: String) { send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}").delete().build()) { } }
 
     suspend fun restoreTask(id: String) { send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/restore").post(json(JSONObject())).build()) { } }

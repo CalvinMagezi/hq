@@ -80,8 +80,6 @@ object PairingWords {
         }
     }
 
-    fun removeTitle(p: BridgePeer) = "Remove “${p.name.ifBlank { PairLink.shortId(p.id) }}”?"
-    const val REMOVE_BODY = "It loses access to this phone at once and its open connection is closed. You can pair it again later."
 
     /** Digits only, at most six: what a field may hold while the person types. */
     fun typed(text: String): String = text.filter(Char::isDigit).take(DIGITS_LENGTH)

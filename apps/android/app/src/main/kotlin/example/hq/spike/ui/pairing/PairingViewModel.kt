@@ -3,6 +3,7 @@ package example.hq.spike.ui.pairing
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import example.hq.spike.R
 import example.hq.spike.bridge.BridgePeer
 import example.hq.spike.bridge.BridgeState
 import example.hq.spike.bridge.BridgeSupervisor
@@ -25,6 +26,7 @@ data class PairingUi(
     val link: String = "",
     val line: String? = null,
     val askRemove: BridgePeer? = null,
+    val removeError: String? = null,
 )
 
 class PairingViewModel(app: Application) : AndroidViewModel(app) {
@@ -157,12 +159,14 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         if (b.ticket == null && b.request == null && !b.join.inFlight()) BridgeSupervisor.stopUnlessEnabled(getApplication())
     }
 
-    fun askRemove(peer: BridgePeer?) = mutableUi.update { it.copy(askRemove = peer) }
+    fun askRemove(peer: BridgePeer?) = mutableUi.update { it.copy(askRemove = peer, removeError = null) }
 
     fun confirmRemove() {
-        val peer = mutableUi.value.askRemove
-        askRemove(null)
-        if (peer != null && !BridgeSupervisor.revoke(peer.id)) mutableUi.update { it.copy(line = PairingWords.NOT_REMOVED) }
+        val peer = mutableUi.value.askRemove ?: return
+        val res = getApplication<Application>().resources
+        val device = peer.name.ifBlank { "Unnamed device" }
+        if (BridgeSupervisor.revoke(peer.id)) mutableUi.update { it.copy(askRemove = null, removeError = null, line = res.getString(R.string.remove_device_done, device)) }
+        else mutableUi.update { it.copy(removeError = res.getString(R.string.fail_remove_device_pairing_off, device)) }
     }
 
     fun refresh() {

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
 import example.hq.spike.R
 import example.hq.spike.ui.chat.ActionRow
@@ -44,6 +45,8 @@ import example.hq.spike.ui.chat.SheetFrame
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.inbox.PrimaryButton
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
@@ -65,7 +68,7 @@ fun HelperOverlays(ui: HelpersUi, actions: HelpersActions) {
             open.page == HelperPage.Ask && card.ask != null -> AskPage(card, open, actions)
             else -> HelperPageView(card, open, ui, actions)
         }
-        if (open.confirmStop) StopDialog(card, actions)
+        if (open.confirmStop) StopDialog(card, open, actions)
         if (open.rename != null) RenameDialog(open.rename, actions)
         if (open.menu) MenuSheet(card, actions)
     }
@@ -293,17 +296,12 @@ private const val TECH_LINES = 60
 // ---------------------------------------------------------------- dialogs and sheets
 
 @Composable
-private fun StopDialog(card: HelperCard, actions: HelpersActions) {
-    BackHandler { actions.onAskStop(false) }
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(onClick = { actions.onAskStop(false) }))
-        Column(Modifier.padding(start = 24.dp, top = 220.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.helpers_stop_this_helper), style = HqType.H2, color = Mts.Ink)
-            Text("${card.agent} stops what it is doing and its terminal on ${card.where} closes. Nothing it already saved is undone.", style = HqType.BodySm, color = Mts.InkMuted)
-            PrimaryButton("Yes, stop it", Modifier.fillMaxWidth(), onClick = actions.onStop)
-            OutlineButton("Keep going", Modifier.fillMaxWidth()) { actions.onAskStop(false) }
-        }
-    }
+private fun StopDialog(card: HelperCard, open: HelperOpen, actions: HelpersActions) {
+    val context = LocalContext.current
+    ConfirmDialog(
+        ConfirmCopy.stopHelper(context, card.agent), onKeep = { actions.onAskStop(false) }, onAct = actions.onStop,
+        busy = open.stopping, error = open.stopError,
+    )
 }
 
 @Composable
@@ -326,7 +324,7 @@ private fun MenuSheet(card: HelperCard, actions: HelpersActions) {
     SheetFrame({ actions.onMenu(false) }, top = null) {
         ActionRow(HqIcons.Edit, "Rename", null, { actions.onRename(card.title) })
         ActionRow(HqIcons.Chat, "Follow in chat", "Opens a chat that follows this helper.", actions.onFollow)
-        if (running) ActionRow(HqIcons.Pause, "Stop", "It stops and its terminal closes. Asks first.", { actions.onAskStop(true) }, tint = Mts.DangerText)
+        if (running) ActionRow(HqIcons.Pause, "Stop", "It stops and its terminal closes. Asks first.", { actions.onAskStop(true) }, tint = Mts.Ink)
     }
 }
 

@@ -56,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.data.HqClient.TaskItem
 import example.hq.spike.ui.chat.ActionRow
 import example.hq.spike.ui.chat.SheetFrame
@@ -83,13 +85,7 @@ fun TasksScreen(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit = {}) 
         }
         if (ui.selected.isEmpty()) NewTaskButton(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onQuick(QuickState()) }
         ui.bulkAsk?.let { ask ->
-            val words = BulkEdit.confirmDone(ui.selected.size)
-            SheetFrame({ actions.onBulkAsk(null) }, top = null) {
-                Text(words.title, style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp))
-                Text(words.body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
-                ActionRow(HqIcons.Check, words.confirm, null, { actions.onBulkAsk(ask) })
-                ActionRow(HqIcons.Close, "Cancel", null, { actions.onBulkAsk(null) })
-            }
+            ConfirmDialog(ConfirmCopy.bulkDone(androidx.compose.ui.platform.LocalContext.current, ui.selected.size), onKeep = { actions.onBulkAsk(null) }, onAct = { actions.onBulkAsk(ask) })
         }
         when (ui.bulkPrompt) {
             "status" -> SheetFrame({ actions.onBulkPrompt(null) }, top = null) {

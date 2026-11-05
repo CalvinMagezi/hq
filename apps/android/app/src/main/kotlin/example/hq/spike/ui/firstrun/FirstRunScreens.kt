@@ -45,6 +45,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmDialog
+import example.hq.spike.ui.shell.ConfirmKind
+import example.hq.spike.ui.shell.ConfirmWords
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
@@ -244,19 +247,13 @@ private fun NotClean(ui: FirstRunUi, actions: FirstRunActions) {
 
 @Composable
 private fun FreshDialog(actions: FirstRunActions) {
-    Dialog(onDismissRequest = actions.onKeepNotes) {
-        Column(Modifier.clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.moved_fresh_dialog_title), style = HqType.H2, color = Mts.Ink)
-            Text(stringResource(R.string.moved_fresh_dialog_body), style = HqType.BodySm, color = Mts.InkMuted)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.weight(1f)) { OutlinePill(stringResource(R.string.moved_keep_notes), onClick = actions.onKeepNotes) }
-                Box(
-                    Modifier.weight(1f).heightIn(min = 48.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Mts.DangerText).clickable(role = Role.Button, onClick = actions.onDeleteMoved),
-                    contentAlignment = Alignment.Center,
-                ) { Text(stringResource(R.string.moved_delete_notes), style = HqType.BodySmBold, color = Color.Black, textAlign = TextAlign.Center) }
-            }
-        }
-    }
+    ConfirmDialog(
+        ConfirmWords(
+            stringResource(R.string.moved_fresh_dialog_title), stringResource(R.string.moved_fresh_dialog_body),
+            stringResource(R.string.moved_keep_notes), stringResource(R.string.moved_delete_notes), stringResource(R.string.confirm_busy_deleting), ConfirmKind.Red,
+        ),
+        onKeep = actions.onKeepNotes, onAct = actions.onDeleteMoved,
+    )
 }
 
 /** Frame 5's warning: the old phone may still be answering the same chats. */

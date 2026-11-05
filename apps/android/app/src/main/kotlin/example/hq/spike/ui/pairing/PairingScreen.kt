@@ -36,7 +36,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -77,6 +76,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import example.hq.spike.R
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.bridge.BridgePeer
 import example.hq.spike.bridge.BridgeState
 import example.hq.spike.bridge.JoinState
@@ -109,7 +110,7 @@ fun PairingHost(vm: PairingViewModel, onClose: () -> Unit) {
                 PairingScreen.Joining -> Joining(vm, bridge)
             }
         }
-        ui.askRemove?.let { RemoveDialog(it, { vm.askRemove(null) }, vm::confirmRemove) }
+        ui.askRemove?.let { peer -> ConfirmDialog(ConfirmCopy.removeDevice(androidx.compose.ui.platform.LocalContext.current, peer.name.ifBlank { "Unnamed device" }), { vm.askRemove(null) }, vm::confirmRemove, error = ui.removeError) }
         (ui.line ?: bridge.line)?.let { Notice(it, Modifier.align(Alignment.BottomCenter), vm::dismissLine) }
     }
 }
@@ -246,23 +247,11 @@ private fun PeerRow(peer: BridgePeer, onRemove: () -> Unit) {
             Text(peer.name.ifBlank { "Unnamed device" }, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(PairingWords.peerLine(peer, now), style = HqType.BodySm, color = Mts.InkMuted)
         }
-        TextButton(onClick = onRemove) { Text(stringResource(R.string.outbox_remove), color = Mts.DangerText, style = HqType.BodySmBold) }
+        TextButton(onClick = onRemove) { Text(stringResource(R.string.outbox_remove), color = Mts.Ink, style = HqType.BodySmBold) }
     }
 }
 
 private const val MS_PER_SEC = 1_000L
-
-@Composable
-private fun RemoveDialog(peer: BridgePeer, onCancel: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        containerColor = Mts.Surface100,
-        title = { Text(PairingWords.removeTitle(peer), style = HqType.ScreenTitle, color = Mts.Ink) },
-        text = { Text(PairingWords.REMOVE_BODY, style = HqType.Body, color = Mts.InkMuted) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.outbox_remove), color = Mts.DangerText, style = HqType.BodySmBold) } },
-        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.pairing_cancel), color = Mts.Ink, style = HqType.BodySmBold) } },
-    )
-}
 
 // ---------------------------------------------------------------- this phone shows a code
 

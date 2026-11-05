@@ -3,7 +3,12 @@ package example.hq.spike.ui.inbox
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.ui.shell.ClientRestore
+import example.hq.spike.ui.shell.Undo
+import example.hq.spike.ui.shell.UndoKind
+import example.hq.spike.ui.shell.UndoResult
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.ui.helpers.AnswerCheck
 import example.hq.spike.ui.helpers.HelperWords
@@ -60,12 +65,13 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(InboxUi())
     val state: StateFlow<InboxUi> = _state
     private var clearing: Job? = null
+    private var lastCleared: List<InboxCard> = emptyList()
     private var frozen = false
 
     val actions = InboxActions(
         onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onNotNow = { answer(it, allow = false) },
-        onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), "Update cleared") },
-        onClearAll = { clear(_state.value.shownUpdates, "Updates cleared") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
+        onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), getApplication<Application>().getString(R.string.undo_update_cleared)) },
+        onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
     )
 
     init {
@@ -151,36 +157,38 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    /** Hides the updates now and dismisses them after a few seconds; Undo inside that time puts them back. */
+    /** Dismisses at once; Undo inside the window restores them on the server. */
     private fun clear(cards: List<InboxCard>, text: String) {
         if (cards.isEmpty()) return
         clearing?.cancel()
-        flushCleared()
-        val ids = cards.map { it.id }.toSet()
-        _state.update { it.copy(cleared = ids, line = InboxLine(text, "Undo")) }
+        val app = getApplication<Application>()
+        val ids = cards.map { it.id }
+        val line = if (ids.size == 1) text else app.resources.getQuantityString(R.plurals.updates_cleared, ids.size, ids.size)
+        _state.update { it.copy(line = InboxLine(line, app.getString(R.string.undo)), updates = it.updates.filter { u -> u.id !in ids }) }
+        lastCleared = cards
         clearing = viewModelScope.launch {
-            delay(UNDO_MS)
-            flushCleared()
-        }
-    }
-
-    private fun flushCleared() {
-        val ids = _state.value.cleared
-        if (ids.isEmpty()) return
-        _state.update { it.copy(cleared = emptySet(), line = null, updates = it.updates.filter { u -> u.id !in ids }) }
-        viewModelScope.launch {
             ids.forEach { id -> try { client.answerNotification(id, "dismiss") } catch (e: HqUnavailable) { /* it shows again on the next refresh */ } }
+            delay(Undo.millis(app))
+            lastCleared = emptyList()
+            _state.update { it.copy(line = null) }
         }
     }
 
     private fun undo() {
         clearing?.cancel()
-        _state.update { it.copy(cleared = emptySet(), line = null) }
+        val cards = lastCleared
+        lastCleared = emptyList()
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            var late = false
+            cards.forEach { c -> if (Undo.restore(ClientRestore(client), UndoKind.Notification, c.id) == UndoResult.TooLate) late = true }
+            _state.update { it.copy(line = if (late) InboxLine(Undo.failLine(app, UndoResult.TooLate).orEmpty()) else null, updates = if (late) it.updates else (it.updates + cards).distinctBy { u -> u.id }) }
+            refresh()
+        }
     }
 
     private companion object {
         const val POLL_MS = 20_000L
-        const val UNDO_MS = 5_000L
         const val HISTORY_LIMIT = 200
         const val PENDING_LIMIT = 500
         /** More lines than the Helpers poll reads, so the check never shares its cached read. */

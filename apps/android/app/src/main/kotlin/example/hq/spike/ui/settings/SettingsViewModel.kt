@@ -14,6 +14,8 @@ import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.AlertPoster
+import example.hq.spike.R
+import example.hq.spike.ui.shell.Undo
 import example.hq.spike.HubService
 import example.hq.spike.ServerHq
 import example.hq.spike.capture.CapturePrefs
@@ -32,6 +34,7 @@ import example.hq.spike.update.Updater
 import java.io.File
 import java.time.Instant
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -86,6 +89,13 @@ data class SettingsUi(
     /** What is being asked or done on the Other devices page. */
     val busy: String? = null,
     val askSignOutAll: Boolean = false,
+    /** The device the owner is being asked to sign out, and why the last try failed. */
+    val askSignOut: SettingsWords.Device? = null,
+    val signOutError: String? = null,
+    val askServerDisconnect: Boolean = false,
+    /** Captures hidden while their Undo snackbar shows; the file is deleted when it closes. */
+    val hiddenCaptures: Set<String> = emptySet(),
+    val undoLine: String? = null,
     val deviceCode: DeviceCode? = null,
     val setup: SetupState? = null,
     val pair: PairState? = null,
@@ -132,7 +142,10 @@ class SettingsActions(
     val onDisconnect: () -> Unit = {},
     val onAskReplace: (String?) -> Unit = {},
     val onNewCode: () -> Unit = {},
-    val onSignOut: (String) -> Unit = {},
+    val onAskSignOut: (SettingsWords.Device?) -> Unit = {},
+    val onSignOutConfirm: () -> Unit = {},
+    val onAskServerDisconnect: (Boolean) -> Unit = {},
+    val onUndoDiscard: () -> Unit = {},
     val onSignOutAll: (Boolean) -> Unit = {},
     val onSignOutAllConfirm: () -> Unit = {},
     val onCopy: (String) -> Unit = {},
@@ -184,7 +197,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onDisconnect = ::disconnectApp,
         onAskReplace = { p -> _state.update { it.copy(askReplace = p) } },
         onNewCode = ::newCode,
-        onSignOut = { id -> act("out:$id", "Could not sign it out. HQ is not answering.") { client.deleteAt("/api/auth/devices/${java.net.URLEncoder.encode(id, "UTF-8")}") } },
+        onAskSignOut = { d -> _state.update { it.copy(askSignOut = d, signOutError = null) } },
+        onSignOutConfirm = ::signOutDevice,
+        onAskServerDisconnect = { ask -> _state.update { it.copy(askServerDisconnect = ask) } },
+        onUndoDiscard = ::undoDiscard,
         onSignOutAll = { ask -> _state.update { if (it.restarting) it else it.copy(askSignOutAll = ask) } },
         onSignOutAllConfirm = ::signOutAll,
         onCopy = { text -> copyText(text) },
@@ -193,7 +209,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onKeySave = ::saveKey,
         onShareOpens = { v -> CapturePrefs.setShareOpens(ctx(), v); _state.update { it.copy(capture = it.capture.copy(shareOpens = v)) } },
         onShowTitles = { on -> CapturePrefs.setShowTitles(ctx(), on); Widgets.renderAll(ctx()); _state.update { it.copy(capture = it.capture.copy(showTitles = on)) } },
-        onAddWidget = ::addWidget, onSendNow = ::sendNow, onDiscard = { id -> Outbox.of(ctx()).remove(id); _state.update { it.copy(capture = captureFacts(), phone = phoneRows()) } },
+        onAddWidget = ::addWidget, onSendNow = ::sendNow, onDiscard = ::discard,
         onDetails = { on -> AlertPoster.setShowDetails(ctx(), on); _state.update { it.copy(notif = it.notif.copy(showDetails = on)) } },
         onUpgraderNoteSeen = { AlertPoster.clearUpgraderNote(ctx()) },
         onServerConnect = ::connectServer,
@@ -431,13 +447,62 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val said = withContext(Dispatchers.IO) {
                 val before = startStamp().second
-                try { client.deleteAt("/api/chat-apps/$platform") } catch (e: HqUnavailable) { return@withContext if (e.status == 409) SettingsWords.chatAppFailure(409, null) else "Could not disconnect it. HQ is not answering." }
+                try { client.deleteAt("/api/chat-apps/$platform") } catch (e: HqUnavailable) { return@withContext if (e.status == 409) SettingsWords.chatAppFailure(409, null) else ctx().getString(R.string.fail_disconnect_app_no_reply, SettingsWords.appName(platform)) }
                 HubService.restartHq()
-                if (waitForHq(before)) SettingsWords.SAVED_RESTARTED else RESTART_TIMEOUT_LINE
+                if (waitForHq(before)) ctx().getString(R.string.disconnect_app_done, SettingsWords.appName(platform)) else RESTART_TIMEOUT_LINE
             }
             _state.update { it.copy(restarting = false, line = said).withFacts() }
             refreshNow()
         }
+    }
+
+    /** Signs one device out after the question; the dialog stays on a failure, with the reason in amber. */
+    private fun signOutDevice() {
+        val d = _state.value.askSignOut ?: return
+        if (_state.value.busy != null) return
+        _state.update { it.copy(busy = "out:${d.id}", signOutError = null) }
+        viewModelScope.launch {
+            val failed = try { client.deleteAt("/api/auth/devices/${java.net.URLEncoder.encode(d.id, "UTF-8")}"); false } catch (e: HqUnavailable) { e.status != HTTP_NOT_FOUND }
+            _state.update {
+                if (failed) it.copy(busy = null, signOutError = ctx().getString(R.string.fail_sign_out_no_reply, d.label))
+                else it.copy(busy = null, askSignOut = null, line = ctx().getString(R.string.sign_out_device_done, d.label))
+            }
+            refreshNow()
+        }
+    }
+
+    private var discarding: Job? = null
+
+    /** Hides a waiting capture now and deletes it when the Undo snackbar closes. */
+    private fun discard(id: String) {
+        flushDiscard()
+        val kind = Outbox.of(ctx()).all().firstOrNull { it.id == id }
+        val text = ctx().getString(if (kind?.isNote == true) R.string.undo_note_discarded else R.string.undo_task_discarded)
+        _state.update { it.copy(hiddenCaptures = it.hiddenCaptures + id, undoLine = text) }
+        discarding = viewModelScope.launch {
+            delay(Undo.millis(ctx()))
+            flushDiscard()
+        }
+    }
+
+    private fun flushDiscard() {
+        discarding?.cancel()
+        discarding = null
+        val hidden = _state.value.hiddenCaptures
+        if (hidden.isEmpty()) return
+        hidden.forEach { Outbox.of(ctx()).remove(it) }
+        _state.update { it.copy(hiddenCaptures = emptySet(), undoLine = null, capture = captureFacts(), phone = phoneRows()) }
+    }
+
+    private fun undoDiscard() {
+        discarding?.cancel()
+        discarding = null
+        _state.update { it.copy(hiddenCaptures = emptySet(), undoLine = null) }
+    }
+
+    override fun onCleared() {
+        flushDiscard()
+        super.onCleared()
     }
 
     /** One call to HQ from these pages: the tapped control is inert until it returns, a failure says so, and the page reads again either way. */
@@ -467,9 +532,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val said = withContext(Dispatchers.IO) {
                 val before = startStamp().second
-                try { client.postJson("/api/auth/rotate") } catch (e: HqUnavailable) { return@withContext "Could not sign out. HQ is not answering." }
+                try { client.postJson("/api/auth/rotate") } catch (e: HqUnavailable) { return@withContext ctx().getString(R.string.fail_sign_out_all_no_reply) }
                 HubService.recoverToken(ctx(), true)
-                if (waitForHq(before)) { dropRotateDevice(); "Signed out everywhere." } else RESTART_TIMEOUT_LINE
+                if (waitForHq(before)) { dropRotateDevice(); ctx().getString(R.string.sign_out_all_done) } else RESTART_TIMEOUT_LINE
             }
             _state.update { it.copy(restarting = false, line = said).withFacts() }
             refreshNow()
@@ -549,7 +614,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** Stops asking the server HQ. The sign-in itself ends only when the phone is signed out there, which the line says. */
     private fun disconnectServer() {
         ServerHq.disconnect(ctx())
-        _state.update { it.copy(serverError = null, notif = notifFacts(), line = "Disconnected. To end the sign-in on that HQ too, sign this phone out in its Settings, Devices.") }
+        _state.update { it.copy(serverError = null, notif = notifFacts(), line = ctx().getString(R.string.disconnect_server_done), askServerDisconnect = false) }
     }
 
     /** Opens the Android page that changes a setting the owner was told about; a page this phone does not have is tried past, never a crash. */

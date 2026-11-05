@@ -77,7 +77,10 @@ import example.hq.spike.update.UpdateLogic
 import example.hq.spike.update.UpdateState
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.chat.Spinner
+import example.hq.spike.ui.shell.ConfirmCopy
+import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.UndoSnackbar
 import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.webhost.LocalOpenWeb
@@ -176,12 +179,22 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Computers -> ReadOnlyList(ui, "No computer is listed.") { Facts(SettingsWords.computerRows(ui.snap.settings)) }
             }
         }
-        ui.askMode?.let { ConfirmDialog(SettingsWords.modeDialog(it), actions.onModeCancel, actions.onModeConfirm) }
+        val context = androidx.compose.ui.platform.LocalContext.current
+        ui.askMode?.let { toActive ->
+            val w = SettingsWords.modeDialog(toActive)
+            ConfirmDialog(if (toActive) ConfirmCopy.start(context, w.title, w.body) else ConfirmCopy.pause(context, w.title, w.body), actions.onModeCancel, actions.onModeConfirm)
+        }
         ui.keySheet?.let { KeySheetView(it, actions) }
-        ui.askDisconnect?.let { p -> ConfirmDialog(SettingsWords.disconnectWords(p), { actions.onAskDisconnect(null) }, actions.onDisconnect) }
-        ui.askReplace?.let { p -> ConfirmDialog(SettingsWords.REPLACE_WORDS, { actions.onAskReplace(null) }) { actions.onPair(p, true) } }
-        if (ui.askSignOutAll) ConfirmDialog(SettingsWords.SIGN_OUT_ALL_WORDS, { actions.onSignOutAll(false) }, actions.onSignOutAllConfirm)
-        if (ui.askRestart) ConfirmDialog(SettingsWords.RESTART_WORDS, { actions.onRestart(false) }, actions.onRestartConfirm)
+        ui.askDisconnect?.let { p -> ConfirmDialog(ConfirmCopy.disconnectApp(context, SettingsWords.appName(p)), { actions.onAskDisconnect(null) }, actions.onDisconnect) }
+        ui.askReplace?.let { p -> ConfirmDialog(ConfirmCopy.unlinkAccount(context, SettingsWords.appName(p)), { actions.onAskReplace(null) }, { actions.onPair(p, true) }) }
+        if (ui.askSignOutAll) ConfirmDialog(ConfirmCopy.signOutAll(context), { actions.onSignOutAll(false) }, actions.onSignOutAllConfirm)
+        ui.askSignOut?.let { d -> ConfirmDialog(ConfirmCopy.signOutDevice(context, d.label), { actions.onAskSignOut(null) }, actions.onSignOutConfirm, busy = ui.busy == "out:${d.id}", error = ui.signOutError) }
+        if (ui.askServerDisconnect) ConfirmDialog(ConfirmCopy.disconnectServer(context, ConfirmCopy.hostOf(ui.notif.server.address)), { actions.onAskServerDisconnect(false) }, actions.onServerDisconnect)
+        if (ui.askRestart) {
+            val w = SettingsWords.RESTART_WORDS
+            ConfirmDialog(ConfirmCopy.restart(context, w.title, w.body), { actions.onRestart(false) }, actions.onRestartConfirm)
+        }
+        ui.undoLine?.let { UndoSnackbar(it, actions.onUndoDiscard, Modifier.align(Alignment.BottomCenter)) }
         ui.line?.let { Snack(it, actions.onDismissLine, Modifier.align(Alignment.BottomCenter)) }
     }
 }
@@ -403,8 +416,8 @@ private fun AppCardView(c: SettingsWords.AppCard, platform: String, busy: Boolea
             KeyValue("Your account", c.owner, if (c.owner == "Linked") Mts.BrandGreen else Mts.InkMuted)
             if (c.owner != "Linked") GreenButton("Link my ${c.name}", enabled = !busy) { actions.onPair(platform, false) }
             Row(Modifier.offset(x = (-12).dp), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-                if (c.owner == "Linked") TextLink("Link a different account", Mts.BrandBlue, enabled = !busy) { actions.onAskReplace(platform) }
-                TextLink("Disconnect", Mts.DangerText, enabled = !busy) { actions.onAskDisconnect(platform) }
+                if (c.owner == "Linked") TextLink("Link a different account", Mts.Ink, enabled = !busy) { actions.onAskReplace(platform) }
+                TextLink("Disconnect", Mts.Ink, enabled = !busy) { actions.onAskDisconnect(platform) }
             }
         } else {
             Text("Add a bot so HQ can answer in ${c.name}.", style = HqType.BodySm, color = Mts.InkMuted)
@@ -588,12 +601,12 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
                             Text(dev.label + if (dev.current) " (this phone)" else "", style = HqType.BodyBold, color = Mts.Ink)
                             Text(dev.line, style = HqType.BodySm, color = Mts.InkMuted)
                         }
-                        if (!dev.current) TextLink("Sign out", Mts.BrandBlue, enabled = ui.busy == null) { actions.onSignOut(dev.id) }
+                        if (!dev.current) TextLink("Sign out", Mts.Ink, enabled = ui.busy == null) { actions.onAskSignOut(dev) }
                     }
                 }
             }
         }
-        Box(Modifier.padding(start = 4.dp, top = 4.dp)) { TextLink("Sign out everywhere", Mts.DangerText, enabled = ui.busy == null && !ui.restarting) { actions.onSignOutAll(true) } }
+        Box(Modifier.padding(start = 4.dp, top = 4.dp)) { TextLink("Sign out everywhere", Mts.Ink, enabled = ui.busy == null && !ui.restarting) { actions.onSignOutAll(true) } }
     }
 }
 
@@ -673,23 +686,6 @@ private fun ModeCard(title: String, text: String, selected: Boolean, enabled: Bo
         Column {
             Text(title, style = HqType.BodyBold, color = Mts.Ink)
             Text(text, style = HqType.BodySm, color = Mts.InkMuted)
-        }
-    }
-}
-
-/** Says what stops or starts before something that restarts hq, over the whole of Settings. Back and a tap outside cancel. */
-@Composable
-private fun ConfirmDialog(words: SettingsWords.ModeWords, onCancel: () -> Unit, onConfirm: () -> Unit) {
-    BackHandler(onBack = onCancel)
-    Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onCancel))
-        Column(Modifier.padding(start = 24.dp, top = 270.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp)) {
-            Text(words.title, style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
-            Text(words.body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 20.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                DialogButton("Cancel", onCancel)
-                DialogButton(words.confirm, onConfirm)
-            }
         }
     }
 }
@@ -884,7 +880,7 @@ private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: Settin
                     Text(stringResource(R.string.settings_signed_in), style = HqType.BodyBold, color = Mts.Ink)
                     Text(server.address.orEmpty(), style = HqType.BodySm, color = Mts.InkMuted)
                 }
-                DialogButton("Disconnect", actions.onServerDisconnect)
+                DialogButton("Disconnect") { actions.onAskServerDisconnect(true) }
             }
         }
         Text(
@@ -1033,10 +1029,10 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
                 }
             }
         }
-        if (c.waiting.isNotEmpty()) {
+        if (c.waiting.any { it.id !in ui.hiddenCaptures }) {
             Label("Waiting to send")
             Group {
-                c.waiting.forEachIndexed { i, q ->
+                c.waiting.filter { it.id !in ui.hiddenCaptures }.forEachIndexed { i, q ->
                     if (i > 0) Divider()
                     Column(Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 4.dp)) {
                         Text(q.title.ifBlank { "Untitled" }, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
