@@ -102,6 +102,15 @@ pub struct ValueItem {
 
 const DEFAULT_TTL_DAYS: i64 = 7;
 
+/// Source of the weekly adoption digest: how the person uses HQ.
+pub const ADOPTION_DIGEST_SOURCE: &str = "adoption_digest";
+
+/// Inbox items that describe how the person uses HQ. They are shown only in the owner's own apps
+/// (the web inbox, the phone app reading its HQ) and never leave through a third party: no web
+/// push (which crosses Google's, Apple's or Mozilla's push service), no model prompt, no chat
+/// relay. See `docs/security/ADOPTION_DATA.md`.
+pub const DEVICE_ONLY_SOURCES: &[&str] = &[ADOPTION_DIGEST_SOURCE];
+
 impl ValueItem {
     pub fn new(
         source_task: impl Into<String>,
@@ -138,6 +147,11 @@ impl ValueItem {
     pub fn with_link(mut self, link: impl Into<String>) -> Self {
         self.link = Some(link.into());
         self
+    }
+
+    /// Whether this item may only be shown on the owner's own devices ([`DEVICE_ONLY_SOURCES`]).
+    pub fn is_device_only(&self) -> bool {
+        DEVICE_ONLY_SOURCES.contains(&self.source_task.as_str())
     }
 }
 

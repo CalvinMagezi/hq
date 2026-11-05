@@ -632,14 +632,15 @@ impl SessionBuilder {
             let block = governed_registry.behavioral_block(MAX_BEHAVIORAL_NOTE_CHARS);
             (!block.is_empty()).then_some(block)
         };
-        // The person's own sessions hear which ready capabilities they have not tried yet, so
-        // the model can offer one when it fits. Sub-agents, guests and custom prompts do not.
+        // The person's own sessions hear what HQ can do on this install, so the model can offer
+        // something when it fits. Built without reading usage: adoption data stays on the device.
+        // Sub-agents, guests and custom prompts do not get it.
         let capability_block = (self.subagent_depth == 0
             && self.system_prompt.is_none()
             && session_config.agent_name == hq_db::adoption::OWNER_AGENT)
             .then(|| {
                 let names: std::collections::HashSet<&str> = governed_registry.names().collect();
-                prompt::capability_block(&self.config, &names, shared_db.as_deref())
+                prompt::capability_block(&self.config, &names)
             })
             .flatten();
         let weak_catalog = matches!(self.session_profile, SessionProfile::Weak)

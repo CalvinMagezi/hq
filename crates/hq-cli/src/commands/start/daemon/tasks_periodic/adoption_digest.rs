@@ -12,8 +12,8 @@ use hq_tools::capabilities::adoption::{AdoptionReport, report};
 use hq_tools::capabilities::{Install, catalog, resolve, used_tools};
 use tracing::info;
 
-/// Source name of the digest item, shown in the web inbox.
-pub const ADOPTION_DIGEST_SOURCE: &str = "adoption_digest";
+/// Source name of the digest item, shown in the web inbox. Device-only: web push skips it.
+pub use hq_core::types::ADOPTION_DIGEST_SOURCE;
 /// Capabilities named in one line; the count still covers all of them.
 const MAX_NAMED: usize = 4;
 const MINUTE: i64 = 60;
@@ -179,6 +179,10 @@ mod tests {
         assert!(item.body.contains("Nothing was sent anywhere"));
         assert!(!item.body.contains('\u{2014}'));
         assert_eq!(item.dedup_key.as_deref(), Some("adoption-2026-W45"));
+        assert!(
+            item.is_device_only(),
+            "never pushed, never shown to a model"
+        );
     }
 
     #[test]

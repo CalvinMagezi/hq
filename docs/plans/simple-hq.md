@@ -236,12 +236,19 @@ Where the build of phases 0 and 1 differs from the text above:
   misses" only while the list stays the same.
 - The chips come from `GET /api/capabilities`: four ready capabilities, untried ones first. With no
   model key there are none on the web (setup comes first) and the phone keeps its fixed three.
-- The agent block (at most six lines, 1 KB) goes only to sessions with the owner's agent name, no
+- The agent block (at most eight lines, 1 KB) goes only to sessions with the owner's agent name, no
   custom prompt and no parent; `a_mobile_turn_sends_a_small_fixed_prompt` still holds with it.
+  It lists what is ready on this install and **nothing about use**: the earlier "has not used
+  yet" wording would have sent adoption data to the model provider on every turn. Choosing what
+  the person has not tried happens on the device only (the chips now, the offers in phase 2).
+- Adoption data stays on the device (`docs/security/ADOPTION_DATA.md`): the digest is
+  device-only and never pushed, and a guard test fails if adoption code imports a way out.
 - Not built yet: the "What HQ can do" page and the one-step items in `hq doctor` and settings.
 
 **Phase 2: offers.** The post-turn detectors, the one-line offer under a reply, Yes/Not now, and the
-30-day memory of declines. The date detector and the reminder ship here.
+30-day memory of declines. The date detector and the reminder ship here. Offers are chosen by HQ
+on the device and drawn by the apps; the "I can also do this for you" line for an untried
+capability is one of them, so the model is never told what the person has not used.
 
 **Phase 3: the profile.** Promote stated preferences to `USER.md` traits; counters for reply length,
 language and active hours; the bounded prompt block.

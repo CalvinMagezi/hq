@@ -7,6 +7,12 @@
 //! would make work.
 //!
 //! No model is involved anywhere in this module.
+//!
+//! Which capabilities the person has used is adoption data, and it stays on the device: it orders
+//! the chips the owner's own apps show and fills the weekly digest in their inbox, and nothing
+//! else. The block a model sees ([`prompt_block`]) is built from the catalog and the install
+//! alone and takes no usage at all, so no provider learns what the person does or does not use.
+//! `docs/security/ADOPTION_DATA.md`.
 
 pub mod adoption;
 
@@ -43,6 +49,14 @@ pub struct Capability {
     pub tools: Vec<String>,
     #[serde(default)]
     pub needs: Vec<Need>,
+    /// Worth mentioning to the model as something to offer. Off for what any chat assistant does
+    /// unasked (saving and finding notes), so the block stays short.
+    #[serde(default = "offered_by_default")]
+    pub offer: bool,
+}
+
+fn offered_by_default() -> bool {
+    true
 }
 
 fn parse_catalog(yaml: &str) -> Result<Vec<Capability>, serde_yaml::Error> {
@@ -138,6 +152,8 @@ pub struct Offer {
     pub used: bool,
     #[serde(skip)]
     pub tools: Vec<String>,
+    #[serde(skip)]
+    pub offer: bool,
 }
 
 impl Offer {
@@ -164,6 +180,7 @@ pub fn resolve(
             readiness: readiness(cap, install, has_tool),
             used: cap.tools.iter().any(|t| used_tools.contains(t)),
             tools: cap.tools.clone(),
+            offer: cap.offer,
         })
         .collect()
 }
@@ -192,20 +209,29 @@ pub fn suggestions(offers: &[Offer], n: usize) -> Vec<&Offer> {
 }
 
 /// Lines in the agent's block, and its size in bytes. A phone sends this with every turn.
-const BLOCK_MAX_LINES: usize = 6;
+const BLOCK_MAX_LINES: usize = 8;
 pub const BLOCK_MAX_BYTES: usize = 1024;
 
 const BLOCK_HEAD: &str = "## Things you can offer\n\
-The person has not used these yet. When one would help with what they are doing right now, \
-offer it in one short sentence at the end of your reply, at most one per reply. Never list them.\n";
+HQ can also do these on this install. When one would clearly help with what the person is doing \
+and they do not seem to know about it, offer it in one short sentence at the end of your reply, \
+at most one per reply. Never list them.\n";
 
-/// The agent's block of ready capabilities the person has not used, or none when they have
-/// tried them all.
-pub fn unused_block(offers: &[Offer]) -> Option<String> {
+/// The block of capabilities the model may offer: what is ready on this install, in catalog
+/// order. It takes no usage on purpose. What the person has or has not used never reaches a
+/// model provider; choosing by usage happens only on the device (the chips, the digest).
+pub fn prompt_block(
+    catalog: &[Capability],
+    install: &Install,
+    has_tool: &dyn Fn(&str) -> bool,
+) -> Option<String> {
     let mut block = String::from(BLOCK_HEAD);
     let mut lines = 0;
-    for o in offers.iter().filter(|o| o.is_ready() && !o.used) {
-        let line = format!("- {} ({})\n", o.says, o.tools.join(", "));
+    let ready = catalog
+        .iter()
+        .filter(|c| c.offer && readiness(c, install, has_tool) == Readiness::Ready);
+    for c in ready {
+        let line = format!("- {} ({})\n", c.says, c.tools.join(", "));
         if lines == BLOCK_MAX_LINES || block.len() + line.len() > BLOCK_MAX_BYTES {
             break;
         }
@@ -266,6 +292,7 @@ mod tests {
             example: "x".into(),
             tools: vec!["t".into()],
             needs,
+            offer: true,
         };
         let no_model = Install {
             model: false,
@@ -312,15 +339,23 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_block_is_small_and_absent_once_everything_was_tried() {
-        let offers = resolve(catalog(), &everything(), &all_tools, &HashSet::new());
-        let block = unused_block(&offers).unwrap();
+    fn the_model_block_is_small_and_says_nothing_about_use() {
+        let block = prompt_block(catalog(), &everything(), &all_tools).unwrap();
         assert!(block.len() <= BLOCK_MAX_BYTES);
-        assert_eq!(block.matches("\n- ").count(), BLOCK_MAX_LINES);
-        assert!(block.contains("(vault_write_note)"));
-        let every_tool: HashSet<String> = catalog().iter().flat_map(|c| c.tools.clone()).collect();
-        let tried = resolve(catalog(), &everything(), &all_tools, &every_tool);
-        assert_eq!(unused_block(&tried), None);
+        assert!(block.matches("\n- ").count() <= BLOCK_MAX_LINES);
+        assert!(block.contains("(vault_import)"));
+        assert!(
+            !block.contains("(vault_write_note)"),
+            "saving notes goes without saying"
+        );
+        assert!(!block.to_lowercase().contains("not used"));
+        assert!(!block.to_lowercase().contains("tried"));
+        // Nothing to offer without a model key.
+        let no_model = Install {
+            model: false,
+            ..everything()
+        };
+        assert_eq!(prompt_block(catalog(), &no_model, &all_tools), None);
     }
 
     #[test]

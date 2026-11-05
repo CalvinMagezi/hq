@@ -113,6 +113,14 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   `background_turn_status` looks any turn up by its 8-character short ref.
 - The vault is the primary output target for knowledge and agent output.
 - **Search freshness has two sources.** The vault watcher (events, seconds) and the scheduled `embeddings` task's full scan (every 30 minutes, the correctness floor). Index writes go through `hq_db::search::reconcile`, never hand-written SQL on `notes_fts`, so a delete clears every derived row. Tests that touch the index use the real migrated schema (`crate::migrations::run`).
+- **Adoption data stays on the device.** What the person uses HQ for (capabilities used or never
+  tried, corrections, return visits) is never sent to a model provider, a push service, a relay or
+  any third party, and is never sold or shared. It orders the owner's own chips and fills their
+  weekly digest, nothing else. The model's "Things you can offer" block takes no usage
+  (`hq_tools::capabilities::prompt_block`), web push skips `hq_core::types::DEVICE_ONLY_SOURCES`,
+  and `crates/hq-tools/tests/adoption_stays_local.rs` fails if adoption code imports a way out.
+  "You haven't tried this" nudges are chosen on the device, never by the model. Policy:
+  `docs/security/ADOPTION_DATA.md`.
 - **Identity is never model-writable.** Tools learn the caller only from reserved `_hq_*` arguments the runtime sets (`_hq_connector`, `_hq_caller_session`, `_hq_native_*`). A native session strips every `_hq_*` key the model sent before it sets its own, and the MCP gateway strips `_hq_native_*` from callers. Provenance is recorded only where a write path knows the caller; otherwise it is `unknown`. Review state changes only through `note_review`.
 - **Disk watchdog**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/disk_watchdog.rs` is a 6-hour daemon task
   that checks overall disk usage, the bun install cache, and `node_modules` and
@@ -121,8 +129,8 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - **Capabilities and the adoption digest**: `crates/hq-tools/assets/capabilities.yaml` lists what
   HQ can do in the person's words; `hq_tools::capabilities` resolves it against the install (model
   key, OCR, `gws`, registered tools) and what the owner's sessions used. It feeds the empty chat's
-  chips (`GET /api/capabilities`, web and Android), a short "Things you can offer" block in the
-  owner's own sessions, and the weekly `adoption-digest` daemon task
+  chips (`GET /api/capabilities`, web and Android), a short usage-free "Things you can offer"
+  block in the owner's own sessions, and the weekly device-only `adoption-digest` daemon task
   (`crates/hq-cli/src/commands/start/daemon/tasks_periodic/adoption_digest.rs`, queries in
   `hq_db::adoption`). A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
   Plan: `docs/plans/simple-hq.md`. Off with `daemon.adoption_digest: false`.

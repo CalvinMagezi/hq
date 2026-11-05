@@ -8,6 +8,7 @@
 # tools    the tools that do it: every one must be registered, or the entry is hidden
 # needs    what this install must have: model, ocr, email, helpers
 # group    notes, tasks, documents, outside, work
+# offer    false for what any assistant does unasked; the model's "things you can offer" skips it
 #
 # Order is the default order of suggestions: everyday things first.
 
@@ -17,6 +18,7 @@
   example: "Save this as a note: buy cement and iron sheets on Saturday"
   tools: [vault_write_note]
   needs: [model]
+  offer: false
 
 - id: find-notes
   group: notes
@@ -24,6 +26,7 @@
   example: What did I write about school fees?
   tools: [vault_search]
   needs: [model]
+  offer: false
 
 - id: track-todo
   group: tasks
@@ -38,6 +41,7 @@
   example: What needs me today?
   tools: [task_list]
   needs: [model]
+  offer: false
 
 - id: tasks-from-list
   group: tasks
