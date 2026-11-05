@@ -3,6 +3,7 @@ package example.hq.spike.ui.helpers
 import example.hq.spike.R
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.HelperRow
+import example.hq.spike.ui.shell.Words
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.format.DateTimeParseException
@@ -59,7 +60,7 @@ object HelperWords {
     private const val MAX_TITLE = 80
     const val MAX_LINE = 140
 
-    fun agentName(harness: String): String = when (harness) {
+    fun agentName(w: Words, harness: String): String = when (harness) {
         "claude-code", "claude" -> "Claude"
         "codex" -> "Codex"
         "cursor" -> "Cursor"
@@ -67,12 +68,12 @@ object HelperWords {
         "copilot", "copilot-cli" -> "Copilot"
         "hermes" -> "Hermes"
         "openclaw" -> "OpenClaw"
-        else -> harness.split('-', '_').filter { it.isNotBlank() }.joinToString(" ") { it.replaceFirstChar(Char::uppercase) }.ifBlank { "A helper" }
+        else -> harness.split('-', '_').filter { it.isNotBlank() }.joinToString(" ") { it.replaceFirstChar(Char::uppercase) }.ifBlank { w.s(R.string.helpers_a_helper) }
     }
 
-    fun placeName(host: String): String = when (host) {
-        "", "local", "native" -> "this phone"
-        else -> "your $host"
+    fun placeName(w: Words, host: String): String = when (host) {
+        "", "local", "native" -> w.s(R.string.helpers_this_phone)
+        else -> w.s(R.string.helpers_your_host, host)
     }
 
     /** The job, never a folder name: the label, else the goal, else the task it serves, else a plain name. */
@@ -82,14 +83,14 @@ object HelperWords {
     fun folderOf(cwd: String): String = cwd.trimEnd('/').substringAfterLast('/').trim()
 
     /** Why a computer cannot be reached, in the owner's words. The server's own text names a missing key file and a command to run. */
-    fun hostProblem(name: String, error: String?): String = when {
-        error?.contains("no gate key", ignoreCase = true) == true -> "This phone has no key to reach ${placeName(name)} yet."
-        else -> "HQ cannot reach ${placeName(name)} right now."
+    fun hostProblem(w: Words, name: String, error: String?): String = when {
+        error?.contains("no gate key", ignoreCase = true) == true -> w.s(R.string.helpers_host_no_key, placeName(w, name))
+        else -> w.s(R.string.helpers_host_unreachable, placeName(w, name))
     }
 
-    fun title(row: HelperRow): String {
+    fun title(w: Words, row: HelperRow): String {
         val job = listOf(row.label, row.goal, row.taskTitle).firstOrNull { !it.isNullOrBlank() }?.trim()?.lineSequence()?.first()?.trim()
-        return job?.let { if (it.length > MAX_TITLE) it.take(MAX_TITLE).trimEnd() + "…" else it } ?: "${agentName(row.harness)} helper"
+        return job?.let { if (it.length > MAX_TITLE) it.take(MAX_TITLE).trimEnd() + "…" else it } ?: w.s(R.string.helpers_default_title, agentName(w, row.harness))
     }
 
     fun state(row: HelperRow): HelperState = when {
@@ -103,38 +104,36 @@ object HelperWords {
         else -> HelperState.Ready
     }
 
-    fun stateWords(w: example.hq.spike.ui.shell.Words, state: HelperState, own: Boolean = false): String = when {
+    fun stateWords(w: Words, state: HelperState, own: Boolean = false): String = when {
         own && state == HelperState.Working -> w.s(R.string.helpers_own_working)
         own && state == HelperState.Finished -> w.s(R.string.helpers_own_done)
-        else -> stateWords(state)
-    }
-
-    fun stateWords(state: HelperState): String = when (state) {
-        HelperState.NeedsOk -> "Needs your OK"
-        HelperState.Working -> "Working on it"
-        HelperState.Ready -> "Ready"
-        HelperState.Offline -> "Computer offline"
-        HelperState.Lost -> "Lost contact"
-        HelperState.Finished -> "Finished"
-        HelperState.Stopped -> "Stopped"
+        else -> w.s(when (state) {
+            HelperState.NeedsOk -> R.string.helpers_needs_your_ok
+            HelperState.Working -> R.string.helpers_state_working
+            HelperState.Ready -> R.string.helper_state_ready
+            HelperState.Offline -> R.string.helpers_state_offline
+            HelperState.Lost -> R.string.helpers_state_lost
+            HelperState.Finished -> R.string.helpers_finished
+            HelperState.Stopped -> R.string.helper_state_stopped
+        })
     }
 
     /** A UTC time as HQ writes it: SQLite's "2026-11-03 07:43:52", or RFC 3339 with an offset (the edge worker's runs). */
     private fun parse(time: String): LocalDateTime? = example.hq.spike.data.Instants.parseUtc(time)
 
     /** "12 min", "2 h", "3 d": how long ago, with no "ago", for the line under a title. */
-    fun span(from: String, now: LocalDateTime): String? {
+    fun span(w: Words, from: String, now: LocalDateTime): String? {
         val then = parse(from) ?: return null
         val minutes = Duration.between(then, now).toMinutes().coerceAtLeast(0)
         return when {
-            minutes < 1 -> "just now"
-            minutes < 60 -> "$minutes min"
-            minutes < 24 * 60 -> "${minutes / 60} h"
-            else -> "${minutes / (24 * 60)} d"
+            minutes < 1 -> w.s(R.string.age_just_now)
+            minutes < 60 -> w.s(R.string.helpers_span_min, minutes.toString())
+            minutes < 24 * 60 -> w.s(R.string.helpers_span_h, (minutes / 60).toString())
+            else -> w.s(R.string.helpers_span_d, (minutes / (24 * 60)).toString())
         }
     }
 
-    private fun ago(from: String, now: LocalDateTime): String = span(from, now)?.let { if (it == "just now") it else "$it ago" }.orEmpty()
+    private fun ago(w: Words, from: String, now: LocalDateTime): String = span(w, from, now)?.let { if (it == w.s(R.string.age_just_now)) it else w.s(R.string.helpers_ago, it) }.orEmpty()
 
     /** When a helper was last seen; the oldest rows never had a last-seen time (the server sends null), so they fall back to when they started. */
     fun lastSeen(row: HelperRow): String = row.lastSeenAt.takeIf { parse(it) != null } ?: row.createdAt
@@ -262,11 +261,11 @@ object HelperWords {
     fun decisionFor(rows: List<HelperRow>, id: String): HqClient.HelperDecision? = rows.firstOrNull { it.id == id }?.decision
 
     /** What to tell the owner when a check refuses the key, in the words used on every screen that answers a helper. */
-    fun checkWords(check: AnswerCheck): String = when (check) {
+    fun checkWords(w: Words, check: AnswerCheck): String = when (check) {
         AnswerCheck.Ok -> ""
-        AnswerCheck.NotLive -> "Couldn't read its screen just now. Look again before you answer."
-        AnswerCheck.NoPrompt, AnswerCheck.Changed -> "It asked something else just now. Open the helper and look again before you answer."
-        AnswerCheck.BroadYes, AnswerCheck.NoCursor -> "Its highlighted choice would say yes for good, or cannot be read. Open the helper to pick the answer."
+        AnswerCheck.NotLive -> w.s(R.string.helpers_check_not_live)
+        AnswerCheck.NoPrompt, AnswerCheck.Changed -> w.s(R.string.helpers_check_changed)
+        AnswerCheck.BroadYes, AnswerCheck.NoCursor -> w.s(R.string.helpers_check_broad)
     }
 
     /** The lines HQ's session supervisor puts around a screen excerpt (`OUTPUT_OPEN` and `OUTPUT_CLOSE` in its Rust source). */
@@ -294,88 +293,96 @@ object HelperWords {
     /** The end of the screen as the helper drew it, cursor included, for the owner to read exactly what it asked. */
     fun rawTail(screen: List<String>, n: Int): List<String> = tail(screen, n)
 
-    fun askTitle(agent: String, ask: BlockedPrompt): String = when (ask.kind) {
-        AskKind.Edit -> "$agent wants to edit a file"
-        AskKind.Create -> "$agent wants to create a file"
-        AskKind.Command -> "$agent wants to run a command"
-        AskKind.Plan -> "$agent has a plan to approve"
-        AskKind.Other -> "$agent has a question"
+    fun askTitle(w: Words, agent: String, ask: BlockedPrompt): String = when (ask.kind) {
+        AskKind.Edit -> w.s(R.string.helpers_ask_title_edit, agent)
+        AskKind.Create -> w.s(R.string.helpers_ask_title_create, agent)
+        AskKind.Command -> w.s(R.string.helpers_ask_title_command, agent)
+        AskKind.Plan -> w.s(R.string.helpers_ask_title_plan, agent)
+        AskKind.Other -> w.s(R.string.helpers_ask_title_other, agent)
     }
 
-    fun askLine(ask: BlockedPrompt): String = when (ask.kind) {
+    fun askLine(w: Words, ask: BlockedPrompt): String = when (ask.kind) {
+        AskKind.Edit -> w.s(R.string.helpers_ask_line_edit, ask.subject.toString())
+        AskKind.Create -> w.s(R.string.helpers_ask_line_create, ask.subject.toString())
+        AskKind.Command -> w.s(R.string.helpers_ask_line_command)
+        AskKind.Plan -> w.s(R.string.helpers_ask_line_plan)
+        AskKind.Other -> ask.question
+    }
+
+    /** [askLine] and, for a command, the lines it ran: for a place with no room to draw them apart, such as a notification. */
+    fun askText(w: Words, ask: BlockedPrompt): String = askLine(w, ask) + if (ask.kind == AskKind.Command && ask.detail.isNotEmpty()) ":\n" + ask.detail.joinToString("\n") else ""
+
+    /** The Context-free English of [askText] for InboxWords, which has no Words yet; it goes when that file takes one. */
+    fun askText(ask: BlockedPrompt): String = when (ask.kind) {
         AskKind.Edit -> "Wants to edit one file: ${ask.subject}"
         AskKind.Create -> "Wants to create one file: ${ask.subject}"
         AskKind.Command -> "Wants to run a command"
         AskKind.Plan -> "Wants your OK on its plan"
         AskKind.Other -> ask.question
+    } + if (ask.kind == AskKind.Command && ask.detail.isNotEmpty()) ":\n" + ask.detail.joinToString("\n") else ""
+
+    fun allowHint(w: Words, ask: BlockedPrompt): String = w.s(when (ask.kind) {
+        AskKind.Edit -> R.string.helpers_allow_hint_edit
+        AskKind.Create -> R.string.helpers_allow_hint_create
+        AskKind.Command -> R.string.helpers_allow_hint_command
+        AskKind.Plan -> R.string.helpers_allow_hint_plan
+        AskKind.Other -> R.string.helpers_allow_hint_other
+    })
+
+    fun ifAllowed(w: Words, ask: BlockedPrompt, where: String): String = when (ask.kind) {
+        AskKind.Edit -> w.s(R.string.helpers_if_allowed_edit, where)
+        AskKind.Create -> w.s(R.string.helpers_if_allowed_create, where)
+        AskKind.Command -> w.s(R.string.helpers_if_allowed_command, where)
+        AskKind.Plan -> w.s(R.string.helpers_if_allowed_plan, where)
+        AskKind.Other -> w.s(R.string.helpers_if_allowed_other)
     }
 
-    /** [askLine] and, for a command, the lines it ran: for a place with no room to draw them apart, such as a notification. */
-    fun askText(ask: BlockedPrompt): String = askLine(ask) + if (ask.kind == AskKind.Command && ask.detail.isNotEmpty()) ":\n" + ask.detail.joinToString("\n") else ""
+    fun ifNotNow(w: Words): String = w.s(R.string.helpers_if_not_now)
 
-    fun allowHint(ask: BlockedPrompt): String = when (ask.kind) {
-        AskKind.Edit -> "Allow once lets it change this file one time."
-        AskKind.Create -> "Allow once lets it create this file one time."
-        AskKind.Command -> "Allow once lets it run this one command."
-        AskKind.Plan -> "Allow once says yes to the plan as it stands."
-        AskKind.Other -> "Allow once says yes to this one question."
-    }
-
-    fun ifAllowed(ask: BlockedPrompt, where: String): String = when (ask.kind) {
-        AskKind.Edit -> "It changes this one file on $where, then carries on."
-        AskKind.Create -> "It creates this one file on $where, then carries on."
-        AskKind.Command -> "It runs this one command on $where, then carries on."
-        AskKind.Plan -> "It goes ahead with the plan on $where, then carries on."
-        AskKind.Other -> "It goes ahead with what it asked, then carries on."
-    }
-
-    const val IF_NOT_NOW = "It stops that step and waits. You can tell it what to do instead."
-
-    fun card(row: HelperRow, ask: BlockedPrompt?, now: LocalDateTime, lastWords: String? = null): HelperCard {
+    fun card(w: Words, row: HelperRow, ask: BlockedPrompt?, now: LocalDateTime, lastWords: String? = null): HelperCard {
         val state = state(row)
-        val agent = agentName(row.harness)
-        val where = placeName(row.host)
+        val agent = agentName(w, row.harness)
+        val where = placeName(w, row.host)
         val line = when (state) {
-            HelperState.NeedsOk -> ask?.let(::askLine) ?: "Waiting for your answer"
-            HelperState.Working -> row.detail?.takeIf { it.isNotBlank() }?.let { cleanLine(it) } ?: lastWords ?: "Working"
-            HelperState.Ready -> "Waiting for your next instruction"
-            HelperState.Offline -> hostProblem(row.host, row.detail).removeSuffix(".")
-            HelperState.Lost -> "HQ lost contact with this helper"
-            HelperState.Finished -> "Finished ${ago(lastSeen(row), now)}".trim()
-            HelperState.Stopped -> "Stopped ${ago(lastSeen(row), now)}".trim()
+            HelperState.NeedsOk -> ask?.let { askLine(w, it) } ?: w.s(R.string.helpers_line_waiting)
+            HelperState.Working -> row.detail?.takeIf { it.isNotBlank() }?.let { cleanLine(it) } ?: lastWords ?: w.s(R.string.helpers_line_working)
+            HelperState.Ready -> w.s(R.string.helpers_line_ready)
+            HelperState.Offline -> hostProblem(w, row.host, row.detail).removeSuffix(".")
+            HelperState.Lost -> w.s(R.string.helpers_line_lost)
+            HelperState.Finished -> w.s(R.string.helpers_line_finished, ago(w, lastSeen(row), now)).trim()
+            HelperState.Stopped -> w.s(R.string.helpers_line_stopped, ago(w, lastSeen(row), now)).trim()
         }
-        val time = if (state == HelperState.Working || state == HelperState.NeedsOk) span(row.createdAt, now).orEmpty() else ago(lastSeen(row), now)
-        return HelperCard(row.id, title(row), agent, where, state, line, time, ask.takeIf { state == HelperState.NeedsOk }, row.id, isGeneric(row), folderOf(row.cwd))
+        val time = if (state == HelperState.Working || state == HelperState.NeedsOk) span(w, row.createdAt, now).orEmpty() else ago(w, lastSeen(row), now)
+        return HelperCard(row.id, title(w, row), agent, where, state, line, time, ask.takeIf { state == HelperState.NeedsOk }, row.id, isGeneric(row), folderOf(row.cwd))
     }
 
     /** A run of HQ's own edge worker on this phone, as a card beside the other helpers. Its id starts with [EDGE_PREFIX]. */
-    fun edgeCard(run: HqClient.EdgeRun, now: LocalDateTime): HelperCard {
+    fun edgeCard(w: Words, run: HqClient.EdgeRun, now: LocalDateTime): HelperCard {
         val state = when (run.status) {
             "pending" -> HelperState.Working
             "answered" -> HelperState.Finished
             else -> HelperState.Stopped
         }
-        val task = run.displayId ?: "a task"
+        val task = run.displayId ?: w.s(R.string.helpers_a_task)
         val line = when (state) {
-            HelperState.Working -> "Working on $task"
-            HelperState.Finished -> listOfNotNull(task, run.taskStatus?.let(::taskStatusWords)).joinToString(" · ")
-            else -> "Stopped before finishing $task"
+            HelperState.Working -> w.s(R.string.helpers_edge_working, task)
+            HelperState.Finished -> listOfNotNull(task, run.taskStatus?.let { taskStatusWords(w, it) }).joinToString(" · ")
+            else -> w.s(R.string.helpers_edge_stopped, task)
         }
-        val time = if (state == HelperState.Working) span(run.startedAt, now).orEmpty() else ago(run.finishedAt ?: run.startedAt, now)
-        return HelperCard(EDGE_PREFIX + run.askId, run.title ?: task, EDGE_AGENT, EDGE_PLACE, state, line, time, null, "")
+        val time = if (state == HelperState.Working) span(w, run.startedAt, now).orEmpty() else ago(w, run.finishedAt ?: run.startedAt, now)
+        return HelperCard(EDGE_PREFIX + run.askId, run.title ?: task, EDGE_AGENT, w.s(R.string.helpers_this_phone), state, line, time, null, "")
     }
 
-    private fun taskStatusWords(status: String) = when (status) {
-        "ready_for_review" -> "ready for your review"
-        "blocked" -> "blocked"
-        "complete" -> "done"
-        "in_progress" -> "in progress"
-        else -> "to do"
-    }
+    private fun taskStatusWords(w: Words, status: String) = w.s(when (status) {
+        "ready_for_review" -> R.string.helpers_task_ready_review
+        "blocked" -> R.string.helpers_task_blocked
+        "complete" -> R.string.helpers_task_complete
+        "in_progress" -> R.string.helpers_task_in_progress
+        else -> R.string.helpers_task_to_do
+    })
 
     const val EDGE_PREFIX = "edge:"
     private const val EDGE_AGENT = "HQ"
-    private const val EDGE_PLACE = "this phone"
 
     /** The order on the list: waiting for the owner first, then working, then the rest, newest first within each. */
     val order: Comparator<HelperCard> = compareBy<HelperCard> {
@@ -389,9 +396,9 @@ object HelperWords {
     }
 
     /** Why "Follow in chat" did not open a chat: [status] is the HTTP status HQ answered with, 0 when it did not answer, null when it answered with no chat. */
-    fun followFailed(status: Int?): String = when (status) {
-        404 -> "That helper is gone."
-        0, 503 -> "HQ didn't answer in time."
-        else -> "Could not open the chat."
+    fun followFailed(w: Words, status: Int?): String = when (status) {
+        404 -> w.s(R.string.helpers_follow_gone)
+        0, 503 -> w.s(R.string.helpers_follow_timeout)
+        else -> w.s(R.string.helpers_open_chat_failed)
     }
 }

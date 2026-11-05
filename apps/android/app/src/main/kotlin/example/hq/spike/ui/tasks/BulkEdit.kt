@@ -44,7 +44,7 @@ object BulkEdit {
         val already = results.count { it == Applied.Already }
         val failed = results.filterIsInstance<Applied.Failed>()
         val to = when (change) {
-            is Bulk.Status -> "moved to ${TasksLogic.statusWords(change.to)}"
+            is Bulk.Status -> "moved to ${TasksLogic.statusWords(w, change.to)}"
             is Bulk.Priority -> if (change.to == null) "set to no priority" else "set to ${priorityWords(change.to)}"
         }
         val done = buildList {

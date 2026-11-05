@@ -109,13 +109,13 @@ class SettingsWordsTest {
 
     @Test fun messagingNeedsBothTheTokenAndTheSwitch() {
         val chat = JSONObject("""{"telegram":{"token_set":true,"enabled":true},"discord":{"token_set":true,"enabled":false}}""")
-        assertEquals("Telegram on · Discord off", SettingsWords.messagingStatus(chat))
-        assertEquals("No answer yet", SettingsWords.messagingStatus(null))
+        assertEquals("Telegram on · Discord off", SettingsWords.messagingStatus(testWords(), chat))
+        assertEquals("No answer yet", SettingsWords.messagingStatus(testWords(), null))
     }
 
     @Test fun devicesAreCounted() {
-        assertEquals("1 signed in", SettingsWords.devicesStatus(JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":"2026-10-20 10:00:00"}]}""")))
-        assertEquals("None signed in", SettingsWords.devicesStatus(JSONObject("""{"devices":[]}""")))
+        assertEquals("1 signed in", SettingsWords.devicesStatus(testWords(), JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":"2026-10-20 10:00:00"}]}""")))
+        assertEquals("None signed in", SettingsWords.devicesStatus(testWords(), JSONObject("""{"devices":[]}""")))
     }
 
     @Test fun spendingShowsTodaysBudgetInDollars() {
@@ -199,9 +199,9 @@ class SettingsWordsTest {
     }
 
     @Test fun theModelAndFallbackOrderAreRead() {
-        assertEquals("openrouter/auto", SettingsWords.activeModel(settings))
-        assertEquals(listOf("1 · openrouter" to "primary", "2 · luna" to "fallback"), SettingsWords.fallbackRows(settings))
-        assertEquals(listOf("1 · None set" to "no AI is set", "2 · None set" to "no fallback"), SettingsWords.fallbackRows(JSONObject("""{"backends":{"fallbacks":[]}}""")))
+        assertEquals("openrouter/auto", SettingsWords.activeModel(testWords(), settings))
+        assertEquals(listOf("1 · openrouter" to "primary", "2 · luna" to "fallback"), SettingsWords.fallbackRows(testWords(), settings))
+        assertEquals(listOf("1 · None set" to "no AI is set", "2 · None set" to "no fallback"), SettingsWords.fallbackRows(testWords(), JSONObject("""{"backends":{"fallbacks":[]}}""")))
     }
 
     @Test fun aMessagingCardSaysRunningOffOrRestart() {
@@ -222,7 +222,7 @@ class SettingsWordsTest {
         val groups = SettingsWords.home(testWords(), SettingsSnapshot(settings = settings), now)
         assertEquals(listOf("This phone", "Your accounts", "How HQ behaves", "Your data"), groups.map { it.title })
         assertEquals(listOf("AI service and keys", "Messaging apps", "Other devices"), groups[1].rows.map { it.title })
-        assertEquals(SettingsWords.CLAUDE_VIA_LAPTOP, groups[1].note)
+        assertEquals(SettingsWords.claudeViaLaptop(testWords()), groups[1].note)
         assertEquals("Read only", groups[2].rows.single().status)
         assertNull(groups[0].rows.firstOrNull())
     }
@@ -232,10 +232,10 @@ class SettingsWordsTest {
 
     @Test fun deviceTimesAreDatesAndHowLongAgoNeverRawNumbers() {
         val d = JSONObject("""{"devices":[{"id":"d1","label":"Signed in with a code","created_at":${nowSec - 170_000},"last_used_at":${nowSec - 10_800},"expires_at":null},{"id":"d2","label":"MacBook","created_at":${nowSec - 90_000},"last_used_at":null,"expires_at":null}]}""")
-        val list = SettingsWords.devices(d, now, ZoneOffset.UTC)
+        val list = SettingsWords.devices(testWords(), d, now, ZoneOffset.UTC)
         assertEquals("Signed in Oct 19 · used 3 h ago", list[0].line)
         assertEquals("Signed in Oct 20", list[1].line)
-        assertEquals("2 signed in", SettingsWords.devicesStatus(d))
+        assertEquals("2 signed in", SettingsWords.devicesStatus(testWords(), d))
     }
 
     @Test fun aTimeIsReadFromSecondsMillisecondsDigitsAndText() {
@@ -287,7 +287,7 @@ class SettingsWordsTest {
 
     @Test fun noOrderedListOfAisIsTheFlatDefaultNotNoAi() {
         val s = JSONObject("""{"backends":{"configured":false,"primary":"","fallbacks":[],"entries":[]}}""")
-        assertEquals(listOf("Whichever key is set" to "no order is set"), SettingsWords.fallbackRows(s))
+        assertEquals(listOf("Whichever key is set" to "no order is set"), SettingsWords.fallbackRows(testWords(), s))
     }
 
     @Test fun theHomeListSaysItIsCheckingUntilItHasAskedAndNeverThenSaysNotAnswering() {
@@ -324,8 +324,8 @@ class SettingsWordsTest {
     }
 
     @Test fun theEmptyBudgetsLineDoesNotClaimNothingIsLimitedWhenBackgroundRunsAreCapped() {
-        assertEquals("No budgets are set, so nothing is limited.", SettingsWords.noBudgets(JSONObject("""{"budgets":[]}""")))
-        assertEquals("No budgets are set.", SettingsWords.noBudgets(JSONObject("""{"budgets":[],"background_run_usd":2.5}""")))
+        assertEquals("No budgets are set, so nothing is limited.", SettingsWords.noBudgets(testWords(), JSONObject("""{"budgets":[]}""")))
+        assertEquals("No budgets are set.", SettingsWords.noBudgets(testWords(), JSONObject("""{"budgets":[],"background_run_usd":2.5}""")))
     }
 
     @Test fun theNotesCountIsShownOnlyWhenThisHqSaysIt() {

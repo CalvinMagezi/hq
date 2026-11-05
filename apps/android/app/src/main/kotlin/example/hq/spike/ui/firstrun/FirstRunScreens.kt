@@ -173,7 +173,7 @@ private fun StartStep(ui: FirstRunUi, actions: FirstRunActions) {
     }
     ui.error?.let { Message(it) }
     StartNotifCard()
-    AssistantCard()
+    AssistantCard(example.hq.spike.ui.settings.rememberAssistantFacts())
     if (!ui.moved) Text(stringResource(R.string.assist_one_machine), style = HqType.BodySm, color = Mts.InkMuted)
     GreenPill(if (ui.busy) FirstRunWords.STARTING else FirstRunWords.START, busy = ui.busy, onClick = actions.onStart)
     TextAction(FirstRunWords.BACK, enabled = !ui.busy, onClick = actions.onBack)
@@ -298,9 +298,8 @@ private fun displayName(context: Context, uri: Uri): String? = runCatching {
 
 /** The optional "make HQ your phone's assistant" card. Shown only where the phone has the setting; it never blocks Start HQ. */
 @Composable
-private fun AssistantCard() {
+internal fun AssistantCard(facts: example.hq.spike.ui.settings.AssistantFacts) {
     val context = LocalContext.current
-    val facts = example.hq.spike.ui.settings.rememberAssistantFacts()
     var steps by remember { mutableStateOf(false) }
     var skipped by remember { mutableStateOf(false) }
     if (!facts.available) return

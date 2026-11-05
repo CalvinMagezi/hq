@@ -1,11 +1,17 @@
 package example.hq.spike.measure
 
+import example.hq.spike.testing.testWords
 import example.hq.spike.ui.settings.SettingsWords
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class CopyDetailsTest {
     private fun column(version: String, since: String, vararg v: Pair<Counter, List<Long>>) = CounterColumn(version, since, v.toMap())
 
@@ -28,7 +34,7 @@ class CopyDetailsTest {
     )
 
     @Test fun theTextIsTheBoardsBlockOverAFixture() {
-        val text = SettingsWords.copyDetails(facts, CounterSnapshot(true, "", now, before))
+        val text = SettingsWords.copyDetails(testWords(), facts, CounterSnapshot(true, "", now, before))
         val expected = """
             AgentHQ 0.9.1 (build 1) on Android 14
             Background work: On
@@ -60,19 +66,19 @@ class CopyDetailsTest {
     }
 
     @Test fun withoutALastVersionThereIsOneColumn() {
-        val text = SettingsWords.copyDetails(facts, CounterSnapshot(true, "", now, null))
+        val text = SettingsWords.copyDetails(testWords(), facts, CounterSnapshot(true, "", now, null))
         assertTrue(text.contains("What HQ noticed (0.9.1 since 3 Nov)\n"))
         assertTrue(text.contains("undo.task_discarded 2/31\n"))
         assertFalse(text.contains("|"))
     }
 
     @Test fun countingOffSaysSo() {
-        val text = SettingsWords.copyDetails(facts, CounterSnapshot(false, "2026-11-05", now, before))
+        val text = SettingsWords.copyDetails(testWords(), facts, CounterSnapshot(false, "2026-11-05", now, before))
         assertTrue(text.contains("What HQ noticed: counting is off, stopped on 5 Nov\n"))
     }
 
     @Test fun everyLineIsAKeyAndNumbersWhateverTheCountersHold() {
-        val text = SettingsWords.copyDetails(facts, CounterSnapshot(true, "", now, before)).lines().drop(4).filter { it.isNotBlank() }
+        val text = SettingsWords.copyDetails(testWords(), facts, CounterSnapshot(true, "", now, before)).lines().drop(4).filter { it.isNotBlank() }
         val keys = Counter.entries.map { it.key }
         assertEquals(keys.size, text.size)
         text.forEach { line -> assertTrue(line, Regex("""[a-z_.]+ [a-z0-9/]+( \| [a-z0-9/]+)?""").matches(line)) }

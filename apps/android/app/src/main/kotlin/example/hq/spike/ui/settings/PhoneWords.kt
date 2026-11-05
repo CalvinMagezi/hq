@@ -50,62 +50,61 @@ data class CaptureFacts(val shareOpens: String = "note", val showTitles: Boolean
 
 /** The phone pages under Settings (Keep running, Notifications): only what Android can say, and where it cannot, saying so. */
 object PhoneWords {
-    private const val IMPORTANCE_HIGH = 4
-    private const val IMPORTANCE_DEFAULT = 3
-    private const val IMPORTANCE_LOW = 2
-    private const val IMPORTANCE_MIN = 1
     private const val HUB_CHANNEL = AlertPoster.HUB
-    private val NUMBER_WORDS = listOf("Zero", "One", "Two", "Three", "Four", "Five")
-    private val ORDINALS = listOf("zeroth", "first", "second", "third", "fourth", "fifth", "sixth")
+    private val NUMBER_WORDS = listOf(R.string.settings_num_0, R.string.settings_num_1, R.string.settings_num_2, R.string.settings_num_3, R.string.settings_num_4, R.string.settings_num_5)
+    private val ORDINALS = listOf(R.string.settings_ord_0, R.string.settings_ord_1, R.string.settings_ord_2, R.string.settings_ord_3, R.string.settings_ord_4, R.string.settings_ord_5, R.string.settings_ord_6)
 
     fun keepRunning(w: example.hq.spike.ui.shell.Words, f: KeepFacts, now: Instant): KeepPage {
+        val battery = w.s(R.string.settings_check_battery)
+        val revoke = w.s(R.string.settings_check_autorevoke)
         val rows = buildList {
             add(
                 when {
-                    f.backgroundRestricted -> CheckRow("Battery use", "Restricted", false, PhoneFix.Battery)
-                    f.batteryUnrestricted -> CheckRow("Battery use", "Unrestricted", true, null)
-                    else -> CheckRow("Battery use", "Optimised, so Android may pause it", false, PhoneFix.Battery)
+                    f.backgroundRestricted -> CheckRow(battery, w.s(R.string.settings_check_restricted), false, PhoneFix.Battery)
+                    f.batteryUnrestricted -> CheckRow(battery, w.s(R.string.settings_check_unrestricted), true, null)
+                    else -> CheckRow(battery, w.s(R.string.settings_check_optimised), false, PhoneFix.Battery)
                 },
             )
             f.autoRevokeOff?.let { off ->
-                add(if (off) CheckRow("Remove permissions if app is unused", "Off for AgentHQ", true, null) else CheckRow("Remove permissions if app is unused", "On for AgentHQ", false, PhoneFix.AutoRevoke))
+                add(if (off) CheckRow(revoke, w.s(R.string.settings_check_off_for_app), true, null) else CheckRow(revoke, w.s(R.string.settings_check_on_for_app), false, PhoneFix.AutoRevoke))
             }
-            add(if (f.notificationsAllowed) CheckRow("Notifications", "Allowed", true, null) else CheckRow("Notifications", "Off in Android", false, PhoneFix.Notifications))
+            val notifications = w.s(R.string.row_notifications)
+            add(if (f.notificationsAllowed) CheckRow(notifications, w.s(R.string.settings_check_allowed), true, null) else CheckRow(notifications, w.s(R.string.settings_check_off_android), false, PhoneFix.Notifications))
         }
         val bad = rows.count { !it.ok }
         val good = rows.size - bad
         val (title, body) = when {
             bad > 0 -> w.n(R.plurals.settings_one_thing_to_fix, bad, bad) to w.n(R.plurals.settings_may_stop_until, bad)
-            f.samsung -> "One thing Android may still stop" to "${NUMBER_WORDS.getOrElse(good) { "$good" }} settings are fine. A ${ORDINALS.getOrElse(good + 1) { "next" }}, in Samsung's own battery menu, cannot be checked from here."
-            else -> "Everything Android can report is fine" to "AgentHQ is set to keep running."
+            f.samsung -> w.s(R.string.settings_samsung_title) to w.s(R.string.settings_samsung_body, NUMBER_WORDS.getOrNull(good)?.let(w::s) ?: "$good", ORDINALS.getOrNull(good + 1)?.let(w::s) ?: w.s(R.string.settings_ord_next))
+            else -> w.s(R.string.settings_all_fine_title) to w.s(R.string.settings_all_fine_body)
         }
-        return KeepPage(title, body, bad > 0 || f.samsung, rows, f.samsung, history(f.lastStop, now))
+        return KeepPage(title, body, bad > 0 || f.samsung, rows, f.samsung, history(w, f.lastStop, now))
     }
 
     /** The Home row for Capture: where a share opens, and how many saved things still wait for HQ. */
-    fun captureSummary(f: CaptureFacts): String {
-        val opens = when (f.shareOpens) { "task" -> "Sharing opens a new task"; example.hq.spike.capture.CapturePrefs.LAST -> "Sharing opens the last one you used"; else -> "Sharing opens a new note" }
-        return if (f.waiting.isEmpty()) opens else "$opens \u00b7 ${f.waiting.size} waiting to send"
+    fun captureSummary(w: example.hq.spike.ui.shell.Words, f: CaptureFacts): String {
+        val opens = w.s(when (f.shareOpens) { "task" -> R.string.settings_share_task; example.hq.spike.capture.CapturePrefs.LAST -> R.string.settings_share_last_used; else -> R.string.settings_share_note })
+        return if (f.waiting.isEmpty()) opens else w.s(R.string.settings_share_waiting, opens, f.waiting.size)
     }
 
     /** What a queued item says about itself: what it is, and why it is still here. */
-    fun queuedLine(q: example.hq.spike.capture.Queued): String = (if (q.isNote) "Note" else "Task") + " \u00b7 " + (q.failure ?: "Waiting for HQ")
+    fun queuedLine(w: example.hq.spike.ui.shell.Words, q: example.hq.spike.capture.Queued): String = w.s(if (q.isNote) R.string.settings_capture_note else R.string.tasks_task) + " \u00b7 " + (q.failure ?: w.s(R.string.settings_waiting_for_hq))
 
     /** The Home row: "Good" when every setting Android can read is fine, with the one it cannot read called out on a Samsung. */
     fun keepSummary(w: example.hq.spike.ui.shell.Words, f: KeepFacts, now: Instant): String {
         val page = keepRunning(w, f, now)
         val bad = page.checked.count { !it.ok }
         return when {
-            bad > 0 -> "$bad to fix"
-            f.samsung -> "Good · 1 thing to check"
-            else -> "Good"
+            bad > 0 -> w.s(R.string.settings_to_fix, bad)
+            f.samsung -> w.s(R.string.settings_good_one_check)
+            else -> w.s(R.string.settings_good)
         }
     }
 
-    private fun history(last: LastStop?, now: Instant): FactRow {
-        val title = "Last stopped by Android"
-        if (last == null) return FactRow(title, "Nothing recorded")
-        return FactRow(title, "${SettingsWords.ago(last.at, now)} · ${exitWords(last.reason)}")
+    private fun history(w: example.hq.spike.ui.shell.Words, last: LastStop?, now: Instant): FactRow {
+        val title = w.s(R.string.settings_last_stopped)
+        if (last == null) return FactRow(title, w.s(R.string.settings_nothing_recorded))
+        return FactRow(title, "${SettingsWords.ago(w, last.at, now)} · ${exitWords(w, last.reason)}")
     }
 
     /** True for an exit Android chose, not one the owner or the app asked for. */
@@ -118,20 +117,14 @@ object PhoneWords {
 
     private const val REASON_FREEZER = 14
 
-    fun exitWords(reason: Int): String = when (reason) {
-        ApplicationExitInfo.REASON_LOW_MEMORY -> "low memory"
-        ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "using too much"
-        REASON_FREEZER -> "frozen"
-        else -> "killed by the system"
-    }
-
-    private fun importanceWords(i: Int) = when {
-        i >= IMPORTANCE_HIGH -> "High"
-        i == IMPORTANCE_DEFAULT -> "Default"
-        i == IMPORTANCE_LOW -> "Low"
-        i == IMPORTANCE_MIN -> "Min"
-        else -> "Off"
-    }
+    fun exitWords(w: example.hq.spike.ui.shell.Words, reason: Int): String = w.s(
+        when (reason) {
+            ApplicationExitInfo.REASON_LOW_MEMORY -> R.string.settings_exit_low_memory
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> R.string.settings_exit_too_much
+            REASON_FREEZER -> R.string.settings_exit_frozen
+            else -> R.string.settings_exit_killed
+        },
+    )
 
     /** The line under a channel's name, from the catalogue; a channel turned off in Android says so. */
     @androidx.annotation.StringRes

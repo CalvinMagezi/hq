@@ -70,17 +70,17 @@ private fun NotesList(ui: NotesUi, actions: NotesActions) {
             item { val open = example.hq.spike.ui.shell.LocalOpenSearch.current; SearchPill { open(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes)) } }
             if (ui.topFolders.isNotEmpty()) item { FolderChips(ui.topFolders) { actions.onOpenFolder("Notebooks/$it") } }
             if (ui.pinned.isNotEmpty()) {
-                item { SectionLabel("Pinned") }
+                item { SectionLabel(stringResource(R.string.notes_home_pinned)) }
                 item {
                     LazyRow(contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(ui.pinned, key = { it.path }) { PinnedCard(it) { actions.onOpenNote(it.path) } }
                     }
                 }
             }
-            if (ui.recent.isNotEmpty()) item { SectionLabel("Recent") }
+            if (ui.recent.isNotEmpty()) item { SectionLabel(stringResource(R.string.notes_home_recent)) }
             items(ui.recent, key = { it.path }) { NoteRow(it) { actions.onOpenNote(it.path) } }
         }
-        NewNoteButton("New note", Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onNew(INBOX) }
+        NewNoteButton(stringResource(R.string.quick_note_title), Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onNew(INBOX) }
     }
 }
 
@@ -102,7 +102,7 @@ private fun FolderChips(names: List<String>, onOpen: (String) -> Unit) {
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 16.dp, top = 14.dp, end = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         names.forEach { name ->
             Row(
-                Modifier.heightIn(min = 40.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClickLabel = "Open $name") { onOpen(name) }.padding(horizontal = 14.dp),
+                Modifier.heightIn(min = 40.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_open_file, name)) { onOpen(name) }.padding(horizontal = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(HqIcons.Folder, null, Modifier.size(18.dp), tint = Mts.Ink)
@@ -170,7 +170,7 @@ private fun EmptyNotes(actions: NotesActions, onAskHq: () -> Unit) {
         Box(Modifier.size(72.dp).background(Mts.Surface200, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Icon(HqIcons.Notes, null, Modifier.size(36.dp), tint = Mts.Ink) }
         Text(stringResource(R.string.notes_your_notes_will_show), style = HqType.H2, color = Mts.Ink)
         Text(stringResource(R.string.notes_write_one_yourself_or), style = HqType.BodySm, color = Mts.InkMuted)
-        Box(Modifier.padding(top = 8.dp)) { NewNoteButton("New note", Modifier) { actions.onNew(INBOX) } }
+        Box(Modifier.padding(top = 8.dp)) { NewNoteButton(stringResource(R.string.quick_note_title), Modifier) { actions.onNew(INBOX) } }
         Box(
             Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = onAskHq).padding(horizontal = 24.dp),
             contentAlignment = Alignment.Center,

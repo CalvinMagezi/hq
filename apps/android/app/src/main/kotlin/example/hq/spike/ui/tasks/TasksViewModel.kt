@@ -100,6 +100,8 @@ data class TasksUi(
     val edge: HqClient.EdgeWorker? = null,
     /** While you were away: what HQ's checks did in the last 24 hours, on this phone and on a server HQ. */
     val away: AwayUi = AwayUi(),
+    /** The words of this screen; the view model and the screen both set it, and no list shows without it. */
+    val words: example.hq.spike.ui.shell.Words? = null,
 ) {
     /** Whether a task is inside what the All tab is narrowed to. */
     val keep: (TaskItem) -> Boolean get() = TaskFilters.keeps(tree, scope)
@@ -110,11 +112,13 @@ data class TasksUi(
     val visibleIds: Set<String> get() = groups.flatMapTo(HashSet()) { g -> g.tasks.map { it.id } }
     val workingIds: Set<String> get() = sessions.mapTo(HashSet()) { it.taskId }
     val shown: List<TaskItem> get() = tasks.filter { it.id !in hidden }
-    val groups: List<TaskGroup> get() = when (tab) {
-        TaskTab.Today -> TasksLogic.today(shown, today)
-        TaskTab.Upcoming -> TasksLogic.upcoming(shown, today)
-        TaskTab.All -> TasksLogic.allList(shown.filter(keep), chip, archived.filter(keep))
-    }
+    val groups: List<TaskGroup> get() = words?.let { w ->
+        when (tab) {
+            TaskTab.Today -> TasksLogic.today(w, shown, today)
+            TaskTab.Upcoming -> TasksLogic.upcoming(w, shown, today)
+            TaskTab.All -> TasksLogic.allList(w, shown.filter(keep), chip, archived.filter(keep))
+        }
+    } ?: emptyList()
 }
 
 /** The briefing read from this phone's HQ and a server HQ, each with when the phone last read it. A server part read from the saved copy is [serverStale]. */
@@ -170,7 +174,7 @@ class TasksActions(
 
 class TasksViewModel(app: Application) : AndroidViewModel(app) {
     private val client = HqServices.get(app).client
-    private val _state = MutableStateFlow(TasksUi())
+    private val _state = MutableStateFlow(TasksUi(words = example.hq.spike.ui.shell.Words.of(app)))
     val state: StateFlow<TasksUi> = _state
     private var frozen = false
     private var undo: (suspend () -> Unit)? = null
@@ -405,10 +409,10 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.restoreTask(t.id)
                 _state.update { it.copy(detail = null, archived = it.archived.filter { a -> a.id != t.id }) }
-                say("Task restored")
+                say(w().s(R.string.tasks_task_restored))
                 refresh()
             } catch (e: HqUnavailable) {
-                say(why(e, "Couldn\'t restore it. HQ didn\'t answer in time. Try again."))
+                say(why(e, R.string.tasks_restore_no_reply))
             } finally {
                 restoring.remove(t.id)
             }
@@ -435,12 +439,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(hidden = it.hidden - id) }
     }
 
-    private fun why(e: HqUnavailable, notAnswering: String) = when (e.status) {
-        HTTP_CONFLICT -> "Changed meanwhile. Updated."
-        HTTP_BAD_REQUEST -> "HQ would not accept that."
-        HTTP_NOT_FOUND -> "That task is not there any more."
+    private fun w() = example.hq.spike.ui.shell.Words.of(getApplication<Application>())
+
+    private fun why(e: HqUnavailable, notAnswering: Int) = w().s(when (e.status) {
+        HTTP_CONFLICT -> R.string.tasks_changed_meanwhile
+        HTTP_BAD_REQUEST -> R.string.tasks_not_accepted
+        HTTP_NOT_FOUND -> R.string.tasks_task_gone
         else -> notAnswering
-    }
+    })
 
     private fun say(text: String, action: String? = null, undoWith: (suspend () -> Unit)? = null) {
         undo = undoWith
@@ -456,7 +462,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.patchTask(t.id, JSONObject().put("status", "complete").put("expected_status", t.status))
                 succeeded(t.id)
-                say("Done: ${t.title.take(TITLE_IN_LINE)}", "Undo") {
+                say(w().s(R.string.tasks_done_line, t.title.take(TITLE_IN_LINE)), w().s(R.string.undo)) {
                     val back = JSONObject().put("status", t.status).put("expected_status", "complete")
                     // Leaving "blocked" clears the reason, so it goes back with the status.
                     if (t.status == "blocked") t.blockedReason?.let { back.put("blocked_reason", it) }
@@ -465,7 +471,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: HqUnavailable) {
                 failed(t.id)
-                say(why(e, "Couldn\'t finish it. HQ didn\'t answer in time. Try again."))
+                say(why(e, R.string.tasks_finish_no_reply))
                 refresh()
             }
         }
@@ -479,14 +485,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.patchTask(t.id, JSONObject().put("start_date", date.toString()))
                 succeeded(t.id)
-                say("Moved to tomorrow", "Undo") {
+                say(w().s(R.string.tasks_moved_tomorrow), w().s(R.string.undo)) {
                     client.patchTask(t.id, JSONObject().put("start_date", t.startDate ?: JSONObject.NULL))
                     refresh()
                 }
                 refresh()
             } catch (e: HqUnavailable) {
                 failed(t.id)
-                say(if (e.status == HTTP_BAD_REQUEST) "It is due before tomorrow, so it cannot move." else why(e, "Couldn\'t move it. HQ didn\'t answer in time. Try again."))
+                say(if (e.status == HTTP_BAD_REQUEST) w().s(R.string.tasks_due_before_tomorrow) else why(e, R.string.tasks_move_no_reply))
             }
         }
     }
@@ -496,7 +502,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         undo = null
         lineJob?.cancel()
         _state.update { it.copy(line = null) }
-        viewModelScope.launch { try { action() } catch (e: HqUnavailable) { say("Couldn\'t undo that. HQ didn\'t answer in time. Try again.") } }
+        viewModelScope.launch { try { action() } catch (e: HqUnavailable) { say(w().s(R.string.tasks_undo_no_reply)) } }
     }
 
     /**
@@ -506,7 +512,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     fun openRef(ref: String, onMissing: () -> Unit) {
         viewModelScope.launch {
             val task = _state.value.tasks.firstOrNull { it.displayId == ref } ?: run { refresh(); _state.value.tasks.firstOrNull { it.displayId == ref } }
-            if (task != null) open(task) else { say("Could not find $ref in your tasks."); onMissing() }
+            if (task != null) open(task) else { say(w().s(R.string.tasks_not_found_ref, ref)); onMissing() }
         }
     }
 
@@ -514,7 +520,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     fun openById(id: String, onMissing: () -> Unit) {
         viewModelScope.launch {
             val task = _state.value.tasks.firstOrNull { it.id == id } ?: run { refresh(); _state.value.tasks.firstOrNull { it.id == id } }
-            if (task != null) open(task) else { say("Could not find that task."); onMissing() }
+            if (task != null) open(task) else { say(w().s(R.string.tasks_not_found)); onMissing() }
         }
     }
 
@@ -539,7 +545,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 detailOf(id) { it.copy(task = updated, busy = false) }
                 refresh()
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = why(e, "Couldn\'t save. HQ didn\'t answer in time. Try again.")) }
+                detailOf(id) { it.copy(busy = false, error = why(e, R.string.tasks_save_no_reply)) }
                 if (e.status == HTTP_CONFLICT) refresh()
             }
         }
@@ -556,7 +562,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.addTaskComment(id, sent)
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = "Couldn\'t send it back. HQ didn\'t answer in time. Try again.") }
+                detailOf(id) { it.copy(busy = false, error = w().s(R.string.tasks_send_back_no_reply)) }
                 return@launch
             }
             // The note is in, so it is not typed again if the move below fails.
@@ -564,13 +570,13 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.patchTask(id, JSONObject().put("status", "in_progress").put("expected_status", "ready_for_review"))
                 closeIfOpen(id)
-                say("Sent back to hq")
+                say(w().s(R.string.tasks_sent_back))
             } catch (e: HqUnavailable) {
                 if (e.status == HTTP_CONFLICT) {
                     closeIfOpen(id)
-                    say("Changed meanwhile. Your note was added.")
+                    say(w().s(R.string.tasks_changed_note_added))
                 } else {
-                    detailOf(id) { it.copy(busy = false, prompt = null, error = "Your note was added, but the task did not move. Use the status button to move it.") }
+                    detailOf(id) { it.copy(busy = false, prompt = null, error = w().s(R.string.tasks_note_added_not_moved)) }
                 }
             }
             refresh()
@@ -589,7 +595,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 refresh()
             } catch (e: HqUnavailable) {
                 val subs = try { client.tasks(parentId = parent) } catch (e2: HqUnavailable) { null }
-                detailOf(parent) { d -> d.copy(subtasks = subs ?: d.subtasks, error = why(e, "Couldn\'t save. HQ didn\'t answer in time. Try again.")) }
+                detailOf(parent) { d -> d.copy(subtasks = subs ?: d.subtasks, error = why(e, R.string.tasks_save_no_reply)) }
             }
         }
     }
@@ -605,7 +611,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 // The key follows the words, so sending the same ones again after a lost answer adds nothing twice, and different ones are new.
                 client.createTask(JSONObject().put("title", sent).put("parent_task_id", id).put("created_by", "operator").put("external_id", "${d.subKey}-${sent.hashCode()}"))
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = why(e, "Couldn\'t add it. HQ didn\'t answer in time. Try again.")) }
+                detailOf(id) { it.copy(busy = false, error = why(e, R.string.tasks_add_sub_no_reply)) }
                 return@launch
             }
             val subs = try { client.tasks(parentId = id) } catch (e: HqUnavailable) { null }
@@ -624,7 +630,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.addTaskComment(id, sent)
             } catch (e: HqUnavailable) {
-                detailOf(id) { it.copy(busy = false, error = why(e, "Couldn\'t post the comment. HQ didn\'t answer in time. Try again.")) }
+                detailOf(id) { it.copy(busy = false, error = why(e, R.string.tasks_comment_no_reply)) }
                 return@launch
             }
             val comments = try { client.taskComments(id) } catch (e: HqUnavailable) { null }
@@ -640,10 +646,10 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.archiveTask(t.id)
                 succeeded(t.id)
-                say("Task archived", "Undo") { client.restoreTask(t.id); refresh() }
+                say(w().s(R.string.tasks_task_archived), w().s(R.string.undo)) { client.restoreTask(t.id); refresh() }
             } catch (e: HqUnavailable) {
                 failed(t.id)
-                say(if (e.status == HTTP_BAD_REQUEST && t.subtaskCount > 0) "Archive its sub-tasks first." else why(e, "Couldn\'t archive it. HQ didn\'t answer in time. Try again."))
+                say(if (e.status == HTTP_BAD_REQUEST && t.subtaskCount > 0) w().s(R.string.tasks_archive_subs_first) else why(e, R.string.tasks_archive_no_reply))
             }
         }
     }
@@ -661,7 +667,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun saveQuick() {
         val q = _state.value.quick ?: return
-        val parsed = QuickAdd.parse(q.text, LocalDate.now())
+        val parsed = QuickAdd.parse(w(), q.text, LocalDate.now())
         if (parsed.title.isBlank() || q.saving) return
         _state.update { it.copy(quick = q.copy(saving = true, error = null)) }
         viewModelScope.launch {
@@ -680,14 +686,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(quick = null) }
                 say(
                     when {
-                        repo != null -> "Task added. HQ starts on it in a few minutes."
-                        q.repo != null -> "Task added, but HQ will not code it. ${q.repo} is no longer on its list."
-                        else -> "Task added"
+                        repo != null -> w().s(R.string.tasks_task_added_edge)
+                        q.repo != null -> w().s(R.string.tasks_task_added_no_code, q.repo)
+                        else -> w().s(R.string.tasks_task_added)
                     },
                 )
                 refresh()
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(quick = it.quick?.copy(saving = false, error = why(e, "Couldn\'t add it. HQ didn\'t answer in time. Try again."))) }
+                _state.update { it.copy(quick = it.quick?.copy(saving = false, error = why(e, R.string.tasks_add_sub_no_reply))) }
             }
         }
     }

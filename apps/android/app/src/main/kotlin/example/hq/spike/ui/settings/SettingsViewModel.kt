@@ -380,6 +380,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun get(path: String): Got = try { Got(client.json(path), true) } catch (e: HqUnavailable) { Got(null, e.message?.startsWith("HTTP ") == true) }
 
     private fun ctx(): Application = getApplication()
+    private fun words() = Words.of(ctx())
 
     /** What a server HQ says about its backups; null when this phone is not signed in to one, or the server does not say. */
     @Volatile private var serverBackup: HqClient.ServerBackup? = null
@@ -395,7 +396,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val info = app.packageManager.getPackageInfo(app.packageName, 0)
         @Suppress("DEPRECATION")
         val number = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode else info.versionCode.toLong()
-        return "${info.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build $number"
+        return app.getString(R.string.settings_build_line, info.versionName.orEmpty().ifBlank { "hub" }, number)
     }
 
     private fun modeOf(): String = try { File(ctx().filesDir, "mode").takeIf { it.length() <= MODE_MAX }?.readText()?.trim().orEmpty().ifEmpty { "standby" } } catch (e: java.io.IOException) { "standby" }
@@ -410,13 +411,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val allowed = nm.areNotificationsEnabled()
         val speech = example.hq.spike.voice.VoiceModels(c).let { if (it.ready()) it.onPhoneBytes() else -1L }
         return listOfNotNull(
-            HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
-            HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(Words.of(ctx()), keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(Words.of(ctx()), it, Instant.now()).checked.any { r -> !r.ok } }),
-            HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
+            HomeRow(SettingsPage.Background, "background", c.getString(R.string.about_background), SettingsWords.backgroundWords(Words.of(c), active)),
+            HomeRow(SettingsPage.KeepRunning, "battery", c.getString(R.string.settings_page_keep_running), PhoneWords.keepSummary(Words.of(ctx()), keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(Words.of(ctx()), it, Instant.now()).checked.any { r -> !r.ok } }),
+            HomeRow(SettingsPage.Notifications, "notifications", c.getString(R.string.row_notifications), if (!allowed) c.getString(R.string.assist_mic_off) else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
             assistantRow(c),
             speech.takeIf { it >= 0 }?.let { HomeRow(SettingsPage.Speech, "speech", c.getString(R.string.speech_title), c.getString(R.string.speech_home_status, example.hq.spike.download.DownloadRules.sizeMb(it))) },
-            HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
-            HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
+            HomeRow(SettingsPage.CaptureWidgets, "capture", c.getString(R.string.settings_page_capture), PhoneWords.captureSummary(Words.of(c), captureFacts())),
+            HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, c.getString(R.string.settings_stored_keys_status)),
         )
     }
 
@@ -501,10 +502,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 client.setProviderKey(sheet.id, key)
-                _state.update { it.copy(keySheet = null, line = SettingsWords.keySaved(sheet.name)) }
+                _state.update { it.copy(keySheet = null, line = SettingsWords.keySaved(words(), sheet.name)) }
                 refreshNow()
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(keySheet = it.keySheet?.copy(checking = false, error = SettingsWords.keyFailure(e.status))) }
+                _state.update { it.copy(keySheet = it.keySheet?.copy(checking = false, error = SettingsWords.keyFailure(words(), e.status))) }
             }
         }
     }
@@ -520,10 +521,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 val r = client.postJson("/api/chat-apps/${setup.platform}/verify", JSONObject().put("token", token))
                 if (r.optBoolean("ok")) {
                     val name = r.optString("username").takeIf { n -> n.isNotBlank() }
-                    setup.copy(checking = false, found = name?.let { n -> if (setup.platform == "telegram") "@$n" else n } ?: "your bot", appId = r.optString("application_id").takeIf { a -> a.isNotBlank() }, intentOff = setup.platform == "discord" && r.has("message_content") && !r.optBoolean("message_content"))
-                } else setup.copy(checking = false, error = r.optString("error").takeIf { e -> e.isNotBlank() } ?: SettingsWords.TOKEN_REFUSED)
+                    setup.copy(checking = false, found = name?.let { n -> if (setup.platform == "telegram") "@$n" else n } ?: ctx().getString(R.string.settings_your_bot), appId = r.optString("application_id").takeIf { a -> a.isNotBlank() }, intentOff = setup.platform == "discord" && r.has("message_content") && !r.optBoolean("message_content"))
+                } else setup.copy(checking = false, error = r.optString("error").takeIf { e -> e.isNotBlank() } ?: SettingsWords.tokenRefused(words()))
             } catch (e: HqUnavailable) {
-                setup.copy(checking = false, error = SettingsWords.chatAppFailure(e.status, null))
+                setup.copy(checking = false, error = SettingsWords.chatAppFailure(words(), e.status, null))
             }
             _state.update { if (it.setup == null) it else it.copy(setup = next) }
         }
@@ -538,14 +539,14 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val failure = withContext(Dispatchers.IO) {
                 val before = startStamp().second
-                try { client.postJson("/api/chat-apps/${setup.platform}", JSONObject().put("token", token)) } catch (e: HqUnavailable) { return@withContext SettingsWords.chatAppFailure(e.status, null) }
+                try { client.postJson("/api/chat-apps/${setup.platform}", JSONObject().put("token", token)) } catch (e: HqUnavailable) { return@withContext SettingsWords.chatAppFailure(words(), e.status, null) }
                 HubService.restartHq()
-                if (waitForHq(before)) null else RESTART_TIMEOUT_LINE
+                if (waitForHq(before)) null else restartTimeoutLine()
             }
             if (failure != null) { _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, error = failure)) }; return@launch }
             refreshNow()
-            val linked = _state.value.snap.chatApps.let { SettingsWords.appCard(Words.of(ctx()), it, setup.platform, SettingsWords.appName(setup.platform)).owner == "Linked" }
-            _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, saved = true), line = SettingsWords.SAVED_RESTARTED) }
+            val linked = _state.value.snap.chatApps.let { SettingsWords.appCard(words(), it, setup.platform, SettingsWords.appName(setup.platform)).linked }
+            _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, saved = true), line = SettingsWords.savedRestarted(words())) }
             if (!linked) pairApp(setup.platform, false, replacePage = true)
             else _state.update { if (it.stack.lastOrNull() == SettingsPage.SetupApp) it.copy(stack = it.stack.dropLast(1), setup = null) else it.copy(setup = null) }
         }
@@ -564,7 +565,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(pair = pair, stack = (if (swaps) it.stack.dropLast(1) else it.stack) + SettingsPage.PairApp)
                 }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(line = SettingsWords.chatAppFailure(e.status, null)) }
+                _state.update { it.copy(line = SettingsWords.chatAppFailure(words(), e.status, null)) }
             }
         }
     }
@@ -574,10 +575,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val pair = _state.value.pair ?: return
         if (pair.expiresAt <= java.time.Instant.now().epochSecond) return
         val body = try { client.json("/api/chat-apps") } catch (e: HqUnavailable) { return }
-        val linked = SettingsWords.appCard(Words.of(ctx()), body, pair.platform, SettingsWords.appName(pair.platform)).owner == "Linked"
+        val linked = SettingsWords.appCard(words(), body, pair.platform, SettingsWords.appName(pair.platform)).linked
         _state.update { s ->
             val withBody = s.copy(snap = s.snap.copy(chatApps = body))
-            if (linked && s.page == SettingsPage.PairApp) withBody.copy(stack = s.stack.dropLast(1), pair = null, line = "Linked.") else withBody
+            if (linked && s.page == SettingsPage.PairApp) withBody.copy(stack = s.stack.dropLast(1), pair = null, line = ctx().getString(R.string.settings_linked_line)) else withBody
         }
     }
 
@@ -589,9 +590,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val said = withContext(Dispatchers.IO) {
                 val before = startStamp().second
-                try { client.deleteAt("/api/chat-apps/$platform") } catch (e: HqUnavailable) { return@withContext if (e.status == 409) SettingsWords.chatAppFailure(409, null) else ctx().getString(R.string.fail_disconnect_app_no_reply, SettingsWords.appName(platform)) }
+                try { client.deleteAt("/api/chat-apps/$platform") } catch (e: HqUnavailable) { return@withContext if (e.status == 409) SettingsWords.chatAppFailure(words(), 409, null) else ctx().getString(R.string.fail_disconnect_app_no_reply, SettingsWords.appName(platform)) }
                 HubService.restartHq()
-                if (waitForHq(before)) ctx().getString(R.string.disconnect_app_done, SettingsWords.appName(platform)) else RESTART_TIMEOUT_LINE
+                if (waitForHq(before)) ctx().getString(R.string.disconnect_app_done, SettingsWords.appName(platform)) else restartTimeoutLine()
             }
             _state.update { it.copy(restarting = false, line = said).withFacts() }
             refreshNow()
@@ -652,13 +653,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.busy != null) return
         _state.update { it.copy(busy = key) }
         viewModelScope.launch {
-            val said = try { block(); null } catch (e: HqUnavailable) { if (e.status == HTTP_NOT_FOUND) "That is already gone." else failure }
+            val said = try { block(); null } catch (e: HqUnavailable) { if (e.status == HTTP_NOT_FOUND) ctx().getString(R.string.settings_already_gone) else failure }
             _state.update { it.copy(busy = null, line = said ?: it.line) }
             refreshNow()
         }
     }
 
-    private fun newCode() = act("code", "Couldn\'t get a code. HQ didn\'t answer in time. Try again.") {
+    private fun newCode() = act("code", ctx().getString(R.string.settings_code_failed)) {
         val o = client.postJson("/api/auth/device-code")
         val code = o.optString("code")
         if (code.isNotBlank()) _state.update { it.copy(deviceCode = DeviceCode(code, o.optLong("expires_at"))) }
@@ -676,7 +677,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 val before = startStamp().second
                 try { client.postJson("/api/auth/rotate") } catch (e: HqUnavailable) { return@withContext ctx().getString(R.string.fail_sign_out_all_no_reply) }
                 HubService.recoverToken(ctx(), true)
-                if (waitForHq(before)) { dropRotateDevice(); ctx().getString(R.string.sign_out_all_done) } else RESTART_TIMEOUT_LINE
+                if (waitForHq(before)) { dropRotateDevice(); ctx().getString(R.string.sign_out_all_done) } else restartTimeoutLine()
             }
             _state.update { it.copy(restarting = false, line = said).withFacts() }
             refreshNow()
@@ -700,7 +701,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private fun copyText(text: String) {
         val cm = ctx().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         cm.setPrimaryClip(android.content.ClipData.newPlainText("AgentHQ", text))
-        _state.update { it.copy(line = "Copied.") }
+        _state.update { it.copy(line = ctx().getString(R.string.copy_details_copied)) }
     }
 
     private fun captureFacts() = CaptureFacts(CapturePrefs.shareOpens(ctx()), CapturePrefs.showTitles(ctx()), Outbox.of(ctx()).all())
@@ -710,7 +711,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** Asks the launcher to put one of the three widgets on the home screen, which it confirms itself. */
     private fun addWidget(which: Int) {
         val ok = Widgets.pin(ctx(), widgetKinds[which])
-        if (!ok) _state.update { it.copy(line = "Your launcher cannot add it from here. Press and hold the home screen and choose Widgets.") }
+        if (!ok) _state.update { it.copy(line = ctx().getString(R.string.settings_launcher_cannot)) }
     }
 
     /** Tries one saved item again now, then reads what is left. */
@@ -747,10 +748,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 try {
                     ServerHq.connect(ctx(), address, code)
                 } catch (e: IllegalStateException) {
-                    "Signed in, but this phone could not keep the sign-in. Try again."
+                    ctx().getString(R.string.settings_signin_not_kept)
                 }
             }
-            _state.update { it.copy(busy = null, serverError = problem, notif = notifFacts(), line = if (problem == null) "Signed in. Questions from that HQ now arrive here." else it.line) }
+            _state.update { it.copy(busy = null, serverError = problem, notif = notifFacts(), line = if (problem == null) ctx().getString(R.string.settings_signed_in_line) else it.line) }
         }
     }
 
@@ -772,7 +773,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startFirst(tries: List<Intent>) {
-        if (!PhoneIntents.startFirst(ctx(), tries)) _state.update { it.copy(line = "Android could not open that screen.") }
+        if (!PhoneIntents.startFirst(ctx(), tries)) _state.update { it.copy(line = ctx().getString(R.string.settings_cannot_open_screen)) }
     }
 
     private fun phoneRow(key: String) {
@@ -783,10 +784,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             else -> null
         }
         if (intent == null) {
-            _state.update { it.copy(line = "These options are not in the native app yet.") }
+            _state.update { it.copy(line = ctx().getString(R.string.settings_not_in_native)) }
             return
         }
-        try { c.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: android.content.ActivityNotFoundException) { _state.update { it.copy(line = "Android could not open that screen.") } }
+        try { c.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: android.content.ActivityNotFoundException) { _state.update { it.copy(line = ctx().getString(R.string.settings_cannot_open_screen)) } }
     }
 
     /**
@@ -807,13 +808,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** Null when hq is back running the chosen mode; otherwise the line that says what went wrong. */
     private suspend fun switchAndWait(toActive: Boolean): String? {
         val before = startStamp().second
-        try { HubService.switchMode(ctx(), toActive) } catch (e: java.io.IOException) { return SAVE_FAILED_LINE }
-        if (!waitForHq(before)) return RESTART_TIMEOUT_LINE
+        try { HubService.switchMode(ctx(), toActive) } catch (e: java.io.IOException) { return saveFailedLine() }
+        if (!waitForHq(before)) return restartTimeoutLine()
         if (HubService.childActive() == toActive) return null
         // The switch landed while hq was starting with the old mode: restart once more so it reads the file.
         val again = startStamp().second
         HubService.restartHq()
-        return if (waitForHq(again)) null else RESTART_TIMEOUT_LINE
+        return if (waitForHq(again)) null else restartTimeoutLine()
     }
 
     /** Stops hq and waits for it to answer again, with the mode left as it is. */
@@ -824,7 +825,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             val said = withContext(Dispatchers.IO) {
                 val before = startStamp().second
                 HubService.restartHq()
-                if (waitForHq(before)) "HQ restarted." else RESTART_TIMEOUT_LINE
+                if (waitForHq(before)) ctx().getString(R.string.settings_hq_restarted) else restartTimeoutLine()
             }
             _state.update { it.copy(restarting = false, line = said).withFacts() }
             refreshNow()
@@ -850,7 +851,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val s = _state.value
         val cm = ctx().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         cm.setPrimaryClip(android.content.ClipData.newPlainText("HQ diagnostics", SettingsWords.diagnostics(s.build, s.mode == "active", s.snap.health, HubService.PORT)))
-        _state.update { it.copy(line = "Copied.") }
+        _state.update { it.copy(line = ctx().getString(R.string.copy_details_copied)) }
     }
 
     private companion object {
@@ -862,8 +863,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         const val SAMSUNG_BATTERY_PACKAGE = "com.samsung.android.lool"
         const val SAMSUNG_BATTERY_PAGE = "com.samsung.android.sm.battery.ui.BatteryActivity"
         const val HTTP_NOT_FOUND = 404
-        const val SAVE_FAILED_LINE = "Could not save the setting."
         const val KEEP_CACHE_MS = 5_000L
-        const val RESTART_TIMEOUT_LINE = "HQ did not come back within two minutes."
     }
+
+    private fun saveFailedLine() = ctx().getString(R.string.settings_save_failed)
+    private fun restartTimeoutLine() = ctx().getString(R.string.settings_restart_timeout)
 }

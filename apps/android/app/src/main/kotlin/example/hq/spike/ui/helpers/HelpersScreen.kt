@@ -59,7 +59,8 @@ private const val LINE_MS = 4_000L
 
 /** The Helpers place: filter chips, a card for each helper, finished ones folded into one row, and a button to start another. */
 @Composable
-fun HelpersScreen(ui: HelpersUi, actions: HelpersActions) {
+fun HelpersScreen(shownUi: HelpersUi, actions: HelpersActions) {
+    val ui = shownUi.copy(words = example.hq.spike.ui.shell.rememberWords())
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             Chips(ui, actions)
@@ -76,7 +77,7 @@ private fun Chips(ui: HelpersUi, actions: HelpersActions) {
         HelperFilter.entries.forEach { f ->
             val on = f == ui.filter
             val count = if (f == HelperFilter.All) null else ui.count(f)
-            val label = when (f) { HelperFilter.All -> "All"; HelperFilter.Needs -> "Needs your OK"; HelperFilter.Working -> "Working"; HelperFilter.Finished -> "Finished" }
+            val label = stringResource(when (f) { HelperFilter.All -> R.string.helpers_filter_all; HelperFilter.Needs -> R.string.helpers_needs_your_ok; HelperFilter.Working -> R.string.helpers_filter_working; HelperFilter.Finished -> R.string.helpers_finished })
             Box(
                 Modifier.heightIn(min = 48.dp).clip(CircleShape).selectable(selected = on, role = Role.Tab, onClick = { actions.onFilter(f) }),
                 contentAlignment = Alignment.Center,
@@ -114,12 +115,13 @@ private fun Feed(ui: HelpersUi, actions: HelpersActions) {
     }
 }
 
-private fun emptyWords(f: HelperFilter) = when (f) {
-    HelperFilter.All -> "No helpers yet. Start one and it shows up here."
-    HelperFilter.Needs -> "Nothing is waiting for your OK."
-    HelperFilter.Working -> "No helper is working right now."
-    HelperFilter.Finished -> "No finished helpers."
-}
+@Composable
+private fun emptyWords(f: HelperFilter) = stringResource(when (f) {
+    HelperFilter.All -> R.string.helpers_empty_all
+    HelperFilter.Needs -> R.string.helpers_empty_needs
+    HelperFilter.Working -> R.string.helpers_empty_working
+    HelperFilter.Finished -> R.string.helpers_empty_finished
+})
 
 @Composable
 private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
@@ -127,14 +129,14 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
     val waiting = c.state == HelperState.NeedsOk
     Column(
         Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (waiting) Mts.Amber else Mts.Hairline, shape)
-            .clickable(role = Role.Button, onClickLabel = "Open helper") { actions.onOpen(c.id) }.padding(16.dp),
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.inbox_open_helper)) { actions.onOpen(c.id) }.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             Text(c.title, style = HqType.BodyBold.copy(fontSize = 17.sp), color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             StatePill(c.state, c.own)
         }
-        Text(listOf("${c.agent} · on ${c.where}", c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
+        Text(listOf(stringResource(R.string.helpers_agent_where, c.agent, c.where), c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
         Text(c.line, style = HqType.BodySm, color = Mts.Ink)
         if (c.state == HelperState.Working) WorkingBar()
         if (waiting && c.ask != null && HelperWords.canAnswerInline(c.ask)) {
@@ -142,13 +144,13 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
                 c.ask.detail.forEach { Text(it, style = HqType.Caption.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp), color = Mts.Ink) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryButton("Allow once", Modifier.weight(1f)) { actions.onAllow(c.sessionId, c.ask) }
-                OutlineButton("Not now", Modifier.weight(1f)) { actions.onNotNow(c.sessionId, c.ask) }
+                PrimaryButton(stringResource(R.string.notice_action_allow_once), Modifier.weight(1f)) { actions.onAllow(c.sessionId, c.ask) }
+                OutlineButton(stringResource(R.string.confirm_not_now), Modifier.weight(1f)) { actions.onNotNow(c.sessionId, c.ask) }
             }
-            Text(HelperWords.allowHint(c.ask), style = SmallText, color = Mts.InkMuted)
+            Text(HelperWords.allowHint(example.hq.spike.ui.shell.rememberWords(), c.ask), style = SmallText, color = Mts.InkMuted)
         } else if (waiting) {
             // What it asks is too long to read here, or cannot be read at all: the owner reads all of it on the helper's own page.
-            PrimaryButton("Open helper", Modifier.fillMaxWidth()) { actions.onOpen(c.id) }
+            PrimaryButton(stringResource(R.string.inbox_open_helper), Modifier.fillMaxWidth()) { actions.onOpen(c.id) }
         }
     }
 }
@@ -199,7 +201,7 @@ internal fun StatePill(state: HelperState, own: Boolean = false) {
 private fun FinishedRow(past: List<HelperCard>, open: Boolean, onToggle: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).clickable(role = Role.Button, onClickLabel = if (open) "Hide finished" else "Show finished", onClick = onToggle).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).clickable(role = Role.Button, onClickLabel = stringResource(if (open) R.string.helpers_hide_finished else R.string.helpers_show_finished), onClick = onToggle).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {

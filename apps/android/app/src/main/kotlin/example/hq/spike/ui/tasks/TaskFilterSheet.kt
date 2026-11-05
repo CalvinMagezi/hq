@@ -67,7 +67,7 @@ private fun FilterRows(ui: TasksUi, tree: TaskTree, actions: TasksActions) {
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) { Icon(HqIcons.Info, null, Modifier.size(20.dp), tint = Mts.BrandBlue) }
-                Text(BriefingWords.TITLE, style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
+                Text(BriefingWords.title(example.hq.spike.ui.shell.rememberWords()), style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
                 Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
             }
         }
