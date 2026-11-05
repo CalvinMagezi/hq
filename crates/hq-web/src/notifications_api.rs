@@ -51,6 +51,9 @@ pub(crate) struct NotificationMetadata {
     /// For an owner approval: the call verbatim, and whether it loses something (N17).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) approval: Option<serde_json::Value>,
+    /// For a new sign-in: the device, so "Sign it out" signs out exactly that one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sign_in: Option<serde_json::Value>,
 }
 
 /// The approval columns of a joined row: `{tool, args, loses, verb}`, the verb from the tool.
@@ -183,7 +186,12 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
     } else {
         "value"
     };
-    let notice = is_notice(row.get::<_, Option<String>>(18)?.as_deref());
+    let dedup_key = row.get::<_, Option<String>>(18)?;
+    let notice = is_notice(dedup_key.as_deref());
+    let sign_in = dedup_key
+        .as_deref()
+        .and_then(|k| k.strip_prefix(crate::device_auth::SIGN_IN_ITEM_PREFIX))
+        .map(|device_id| serde_json::json!({ "device_id": device_id }));
     let actions: &[&str] = match (state == NotificationState::Pending, needs_answer) {
         (false, _) => &[],
         (true, true) if notice => &["dismiss"],
@@ -223,6 +231,7 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
                 .filter(|l| crate::web_push::is_app_path(l)),
             dialog,
             approval: approval_from_row(row)?,
+            sign_in,
         },
         actions: actions.iter().map(|a| a.to_string()).collect(),
     })

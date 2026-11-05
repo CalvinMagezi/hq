@@ -237,6 +237,20 @@ minutes, so a request is not a write). A presented Bearer secret is valid when:
 - it starts with `hqw_` and its SHA-256 matches a row that has not expired. The
   lookup is by hash, so it leaks no timing an attacker can use without a preimage.
 
+**Sign-ins with a one-time code** are named by browser and system from the
+`User-Agent` ("Firefox on Windows", `device_auth/names.rs`; the raw header is never
+stored or shown) and expire after 90 days without use (`idle_expires_after`,
+counted from `last_used_at`, or `created_at` when never used). The owner can choose
+Keep signed in for one device (`POST /api/auth/devices/{id}/keep`). An expired row is
+refused and hidden but stays in the table, so the last sign-in running out never
+turns sign-in off. The operator link, `/login` links and local one-call tokens have
+no idle expiry. Each new code sign-in puts a Needs you item in the owner's inbox
+(dedup key `device-sign-in:<device id>`): "It was me" answers it, and signing the
+device out (`DELETE /api/auth/devices/{id}`) answers it too. The exchange may say
+`"shared": true` ("This is a shared computer"); the browser then keeps its token for
+the tab only, and the row says so. `DELETE /api/auth/devices/current` signs out the
+caller's own device token.
+
 A database error refuses a device token. Whether the configured token is signed
 out is cached in memory: read when the server starts, set by this server's own
 rotate, and read again at most every 60 seconds while it is live (another server on

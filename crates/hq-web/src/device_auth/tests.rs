@@ -586,3 +586,107 @@ async fn a_rotate_waits_for_an_exchange_in_flight_and_voids_its_code() {
         "only the rotating device"
     );
 }
+
+const FIREFOX_ON_WINDOWS: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0";
+
+async fn sign_in_as(app: &axum::Router, user_agent: &str, shared: bool) -> String {
+    let code = issue(app).await;
+    let request = post(EXCHANGE_PATH)
+        .header("user-agent", user_agent)
+        .body(Body::from(
+            json!({ "code": code, "shared": shared }).to_string(),
+        ))
+        .unwrap();
+    let (status, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::OK);
+    body["token"].as_str().unwrap().to_string()
+}
+
+fn device_row(listed: &serde_json::Value, current: bool) -> &serde_json::Value {
+    listed["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["current"] == current)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_new_sign_in_is_named_by_browser_and_waits_in_needs_you() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    let firefox = sign_in_as(&app, FIREFOX_ON_WINDOWS, true).await;
+    let (_, listed) = list_devices(&app, &firefox).await;
+    let row = device_row(&listed, true);
+    assert_eq!(row["label"], "Firefox on Windows");
+    assert_eq!(row["browser"], "Firefox");
+    assert_eq!(row["system"], "Windows");
+    assert_eq!(row["shared"], true);
+    assert_eq!(row["new"], true);
+    assert_eq!(row["idle_expires_after"], hq_db::web_auth::IDLE_EXPIRY_SECS);
+    let items = crate::notifications_api::scan_value_items(&state.db, Some("pending")).unwrap();
+    let item = items
+        .iter()
+        .find(|n| n.title == "A new sign-in to your HQ")
+        .expect("the sign-in waits in Needs you");
+    assert_eq!(
+        item.kind,
+        crate::notifications_api::NotificationKind::ActionNeeded
+    );
+    assert_eq!(
+        item.metadata.sign_in.as_ref().unwrap()["device_id"],
+        row["id"]
+    );
+    assert!(item.description.starts_with("Firefox on Windows signed in"));
+}
+
+#[tokio::test]
+async fn signing_the_new_device_out_answers_its_item() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    let stranger = sign_in_as(&app, FIREFOX_ON_WINDOWS, false).await;
+    let (_, listed) = list_devices(&app, &stranger).await;
+    let id = device_row(&listed, true)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(sign_out(&app, TOKEN, &id).await, StatusCode::NO_CONTENT);
+    let waiting = crate::notifications_api::scan_value_items(&state.db, Some("pending")).unwrap();
+    assert!(
+        waiting.iter().all(|n| n.metadata.sign_in.is_none()),
+        "{waiting:?}"
+    );
+}
+
+#[tokio::test]
+async fn keep_signed_in_and_sign_out_this_browser() {
+    let _serial = SERIAL.lock().await;
+    let (app, _vault) = router(Some(TOKEN));
+    let laptop = sign_in_as(&app, FIREFOX_ON_WINDOWS, false).await;
+    let (_, listed) = list_devices(&app, &laptop).await;
+    let id = device_row(&listed, true)["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let keep = authed(post(&format!("/api/auth/devices/{id}/keep")), TOKEN)
+        .body(Body::from(json!({ "keep": true }).to_string()))
+        .unwrap();
+    assert_eq!(send(&app, keep).await.0, StatusCode::OK);
+    let (_, listed) = list_devices(&app, &laptop).await;
+    assert_eq!(device_row(&listed, true)["keep"], true);
+
+    // The operator link has no row of its own to sign out.
+    assert_eq!(
+        sign_out(&app, TOKEN, "current").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        sign_out(&app, &laptop, "current").await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        list_devices(&app, &laptop).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+}

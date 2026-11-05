@@ -285,8 +285,16 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(device_auth::devices::list_handler),
         )
         .route(
+            device_auth::devices::CURRENT_DEVICE_PATH,
+            axum::routing::delete(device_auth::devices::delete_current_handler),
+        )
+        .route(
             device_auth::devices::DEVICE_PATH,
             axum::routing::delete(device_auth::devices::delete_handler),
+        )
+        .route(
+            device_auth::devices::KEEP_PATH,
+            post(device_auth::devices::keep_handler),
         )
         .route(
             device_auth::devices::ROTATE_PATH,

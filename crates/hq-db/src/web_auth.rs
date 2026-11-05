@@ -15,6 +15,27 @@ pub const DEVICE_TOKEN_PREFIX: &str = "hqw_";
 /// `last_used_at` moves at most this often per device, so every request is not a write.
 pub const LAST_USED_RESOLUTION_SECS: i64 = 5 * 60;
 
+/// A code sign-in not used for this long stops working, unless the owner keeps it.
+pub const IDLE_EXPIRY_SECS: i64 = 90 * 24 * 60 * 60;
+
+/// Rows that still work at `?N`: not past a hard expiry, and not idle too long unless kept.
+const LIVE: &str = "(expires_at IS NULL OR expires_at > ?N) \
+     AND (keep = 1 OR idle_expires_after IS NULL \
+          OR COALESCE(last_used_at, created_at) + idle_expires_after > ?N)";
+
+fn live_at(param: usize) -> String {
+    LIVE.replace("?N", &format!("?{param}"))
+}
+
+/// What a code sign-in knows about the device: the names parsed from its user agent, and
+/// whether it is a shared computer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SignIn {
+    pub browser: Option<String>,
+    pub system: Option<String>,
+    pub shared: bool,
+}
+
 /// A signed-in device as the owner sees it. Never carries the token or its hash.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct DeviceToken {
@@ -23,6 +44,13 @@ pub struct DeviceToken {
     pub created_at: i64,
     pub last_used_at: Option<i64>,
     pub expires_at: Option<i64>,
+    pub browser: Option<String>,
+    pub system: Option<String>,
+    pub shared: bool,
+    /// The owner chose Keep signed in, so idleness never signs it out.
+    pub keep: bool,
+    /// Seconds without use after which it stops working; `None` for never.
+    pub idle_expires_after: Option<i64>,
 }
 
 /// A token just minted: the only time the secret exists outside the device holding it.
@@ -88,9 +116,45 @@ fn insert(conn: &Connection, label: &str, now: i64, expires_at: Option<i64>) -> 
 }
 
 /// A new device token labelled `label`. `expires_at` is for a token a local command needs for
-/// one call; a device's sign-in never expires on its own.
+/// one call; these never expire from idleness (the operator link, `/login`, local commands).
 pub fn mint(db: &Database, label: &str, now: i64, expires_at: Option<i64>) -> Result<Minted> {
     db.with_conn(|c| insert(c, label, now, expires_at))
+}
+
+/// A device that signed in with a one-time code: named, and signed out after
+/// [`IDLE_EXPIRY_SECS`] without use.
+pub fn mint_sign_in(db: &Database, label: &str, device: &SignIn, now: i64) -> Result<Minted> {
+    db.with_conn(|c| {
+        let tx = immediate(c)?;
+        let minted = insert(&tx, label, now, None)?;
+        tx.execute(
+            "UPDATE web_device_tokens SET browser = ?2, system = ?3, shared = ?4, idle_expires_after = ?5
+             WHERE id = ?1",
+            params![
+                minted.id,
+                device.browser,
+                device.system,
+                device.shared,
+                IDLE_EXPIRY_SECS
+            ],
+        )?;
+        tx.commit()?;
+        Ok(minted)
+    })
+}
+
+/// Turns Keep signed in on or off for one device. Returns whether it is still signed in.
+pub fn set_keep(db: &Database, id: &str, keep: bool, now: i64) -> Result<bool> {
+    db.with_conn(|c| {
+        let n = c.execute(
+            &format!(
+                "UPDATE web_device_tokens SET keep = ?2 WHERE id = ?1 AND {}",
+                live_at(3)
+            ),
+            params![id, keep, now],
+        )?;
+        Ok(n > 0)
+    })
 }
 
 /// The device a token belongs to, or None for an unknown, signed-out or expired token. Notes
@@ -103,8 +167,10 @@ pub fn verify(db: &Database, secret: &str, now: i64) -> Result<Option<String>> {
     db.with_conn(|c| {
         let id: Option<String> = c
             .query_row(
-                "SELECT id FROM web_device_tokens
-                 WHERE token_hash = ?1 AND (expires_at IS NULL OR expires_at > ?2)",
+                &format!(
+                    "SELECT id FROM web_device_tokens WHERE token_hash = ?1 AND {}",
+                    live_at(2)
+                ),
                 params![hash, now],
                 |r| r.get(0),
             )
@@ -127,11 +193,12 @@ pub fn verify(db: &Database, secret: &str, now: i64) -> Result<Option<String>> {
 /// Every signed-in device that has not expired, oldest first.
 pub fn list(db: &Database, now: i64) -> Result<Vec<DeviceToken>> {
     db.with_conn(|c| {
-        let mut stmt = c.prepare(
-            "SELECT id, label, created_at, last_used_at, expires_at FROM web_device_tokens
-             WHERE expires_at IS NULL OR expires_at > ?1
-             ORDER BY created_at ASC, id ASC",
-        )?;
+        let mut stmt = c.prepare(&format!(
+            "SELECT id, label, created_at, last_used_at, expires_at, browser, system, shared, \
+                 keep, idle_expires_after FROM web_device_tokens WHERE {} \
+                 ORDER BY created_at ASC, id ASC",
+            live_at(1)
+        ))?;
         let rows = stmt
             .query_map(params![now], |r| {
                 Ok(DeviceToken {
@@ -140,6 +207,11 @@ pub fn list(db: &Database, now: i64) -> Result<Vec<DeviceToken>> {
                     created_at: r.get(2)?,
                     last_used_at: r.get(3)?,
                     expires_at: r.get(4)?,
+                    browser: r.get(5)?,
+                    system: r.get(6)?,
+                    shared: r.get(7)?,
+                    keep: r.get(8)?,
+                    idle_expires_after: r.get(9)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -260,6 +332,52 @@ mod tests {
             })
             .unwrap();
         assert!(!ids.contains(&short.id), "expired rows are purged on mint");
+    }
+
+    #[test]
+    fn a_code_sign_in_unused_for_90_days_stops_working_unless_kept() {
+        let db = Database::open_memory().unwrap();
+        let device = SignIn {
+            browser: Some("Firefox".into()),
+            system: Some("Windows".into()),
+            shared: false,
+        };
+        let idle = mint_sign_in(&db, "Firefox on Windows", &device, T0).unwrap();
+        let kept = mint_sign_in(&db, "Chrome on macOS", &device, T0).unwrap();
+        let link = mint(&db, "Operator link", T0, None).unwrap();
+        assert!(set_keep(&db, &kept.id, true, T0).unwrap());
+        let late = T0 + 91 * 24 * 60 * 60;
+        assert!(
+            verify(&db, &idle.token, T0 + IDLE_EXPIRY_SECS - 1)
+                .unwrap()
+                .is_some()
+        );
+        // Used just now: the 90 days count from the last use.
+        assert!(verify(&db, &idle.token, late).unwrap().is_some());
+        let later = late + IDLE_EXPIRY_SECS;
+        assert_eq!(verify(&db, &idle.token, later).unwrap(), None);
+        assert!(verify(&db, &kept.token, later).unwrap().is_some());
+        assert!(verify(&db, &link.token, later).unwrap().is_some());
+        let mut names: Vec<String> = list(&db, later)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.label)
+            .collect();
+        names.sort();
+        assert_eq!(names, ["Chrome on macOS", "Operator link"]);
+        assert!(
+            !set_keep(&db, &idle.id, true, later).unwrap(),
+            "an expired one cannot be kept"
+        );
+    }
+
+    #[test]
+    fn an_idle_expired_sign_in_never_turns_sign_in_off() {
+        let db = Database::open_memory().unwrap();
+        let only = mint_sign_in(&db, "Safari on macOS", &SignIn::default(), T0).unwrap();
+        let later = T0 + 2 * IDLE_EXPIRY_SECS;
+        assert_eq!(verify(&db, &only.token, later).unwrap(), None);
+        assert!(sign_in_enabled(&db, None).unwrap());
     }
 
     #[test]

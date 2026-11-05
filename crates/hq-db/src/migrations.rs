@@ -408,6 +408,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "112_owner_approvals",
         include_str!("../sql/112_owner_approvals.sql"),
     ),
+    (
+        "113_device_names",
+        include_str!("../sql/113_device_names.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
