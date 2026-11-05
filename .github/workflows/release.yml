@@ -526,8 +526,10 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_21_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
           [ "$(ls android-out)" = "agent-hq-android.apk" ] || { echo "android-out holds more than the APK" >&2; exit 1; }
+          # seq is the signing time in seconds, so it rises across release, promote and withdraw, and a
+          # phone refuses a replayed older manifest (resolutions.md D-3).
           bash scripts/release/android-channel.sh --apk android-out/agent-hq-android.apk --version "$VERSION" --tag "$TAG" \
-            --repo "$GH_REPO" --out android-out/android-channel.json
+            --repo "$GH_REPO" --out android-out/android-channel.json --seq "$(date -u +%s)"
           (cd android-out && sha256sum agent-hq-android.apk > agent-hq-android.apk.sha256)
           cat android-out/android-channel.json
 

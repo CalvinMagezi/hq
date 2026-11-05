@@ -109,6 +109,13 @@ if you turn on "Follow every build of main". The signature is checked by the `hq
 release key, the APK against the hash in that signed file, and Android against the app's own signing key.
 You still confirm each install. How it is built and signed: `apps/android/README.md`.
 
+The signed file also carries `size`, release `notes` (per language, up to three lines), a `seq` that only
+rises (the signing time; a phone refuses an older file), `issued_at`, a `rollout` share, `urgent` and a
+`withdrawn` list of versionCodes. Promote builds a new file from the release's verified one with its own
+rollout and seq and signs it again. The manual "Android withdraw" workflow adds a versionCode to
+`withdrawn` (and can set rollout to 0) and signs again, so phones on that version move off it and none
+installs it.
+
 Google plans to require developers to be verified for apps installed outside the Play Store from 2026
 on certified devices, country by country. It is not enforced in Uganda before 2027. The project owner
 registers the app id and signing key before then, so these installs keep working; that is not done yet

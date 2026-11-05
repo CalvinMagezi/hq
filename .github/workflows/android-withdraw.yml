@@ -1,0 +1,76 @@
+name: Android withdraw
+
+# Pulls an Android version from phones: adds its versionCode to the signed stable manifest's
+# withdrawn list (resolutions.md D-3, mobile/wave-0/02-safe-mode.md), optionally stops the rollout,
+# and signs again. Phones on that version are told to move off it; no phone installs it. Manual
+# runs only, from main. No release artifact changes.
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: "versionCode to withdraw, for example 92"
+        required: true
+        type: string
+      stop_rollout:
+        description: "Also set rollout to 0, so no phone is offered the current update"
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  withdraw:
+    name: Withdraw and sign the stable Android manifest
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write # upload the re-signed manifest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CODE: ${{ inputs.version_code }}
+      STOP: ${{ inputs.stop_rollout }}
+    steps:
+      - name: Refuse any ref but main, and a malformed versionCode
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          [ "$REF" = "refs/heads/main" ] || { echo "withdraw runs from main only" >&2; exit 1; }
+          [[ "$CODE" =~ ^[0-9]+$ ]] || { echo "bad versionCode '$CODE'" >&2; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned minisign and jq
+        run: |
+          dir=$(bash scripts/release/install-tools.sh "$RUNNER_TEMP/tools")
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Withdraw, sign and publish
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          rm -rf withdraw
+          mkdir withdraw
+          gh release download channel-stable --dir withdraw --pattern android-channel.json --pattern android-channel.json.minisig
+          minisign -V -p release/minisign.pub -m withdraw/android-channel.json -x withdraw/android-channel.json.minisig -q
+          # seq is the signing time, so this file outranks the one it replaces on every phone.
+          jq --argjson code "$CODE" --argjson seq "$(date -u +%s)" --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson stop "$STOP" \
+            '.withdrawn = (((.withdrawn // []) + [$code]) | unique) | .seq = $seq | .issued_at = $issued
+             | if $stop then .rollout = 0 else . end' \
+            withdraw/android-channel.json > withdraw/android-channel.next.json
+          mv withdraw/android-channel.next.json withdraw/android-channel.json
+          cat withdraw/android-channel.json
+          bash scripts/release/sign.sh withdraw/android-channel.json
+          minisign -V -p release/minisign.pub -m withdraw/android-channel.json -x withdraw/android-channel.json.minisig -q
+          gh release upload channel-stable withdraw/android-channel.json withdraw/android-channel.json.minisig --clobber

@@ -10,6 +10,11 @@ on:
         description: "Release tag to promote, for example v0.9.1-main.57"
         required: true
         type: string
+      rollout:
+        description: "Share of phones offered the Android update, 0 to 100"
+        required: false
+        default: "100"
+        type: string
 
 permissions: {}
 
@@ -82,6 +87,10 @@ jobs:
       # The app's updater reads the stable channel from the latest release, so the Android manifest
       # the tag was published with moves to channel-stable too, and channel-stable is the latest release.
       - name: Promote the Android update manifest
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          ROLLOUT: ${{ inputs.rollout }}
         run: |
           rm -rf promote-android
           mkdir promote-android
@@ -95,6 +104,16 @@ jobs:
           gh release download "$TAG" --dir promote-android --pattern agent-hq-android.apk --pattern agent-hq-android.apk.sha256
           (cd promote-android && sha256sum -c agent-hq-android.apk.sha256)
           [ "$(sha256sum promote-android/agent-hq-android.apk | cut -d' ' -f1)" = "$(jq -r .sha256 promote-android/android-channel.json)" ] || { echo "the APK does not match its signed manifest" >&2; exit 1; }
+          # A new file from the verified one, signed again: promote sets its own rollout and a higher
+          # seq, so a phone can tell it from the release's and never takes an older one back.
+          [[ "$ROLLOUT" =~ ^[0-9]+$ ]] && [ "$ROLLOUT" -le 100 ] || { echo "rollout is 0 to 100" >&2; exit 1; }
+          jq --argjson seq "$(date -u +%s)" --argjson rollout "$ROLLOUT" \
+            --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '.seq = $seq | .rollout = $rollout | .issued_at = $issued' \
+            promote-android/android-channel.json > promote-android/android-channel.next.json
+          mv promote-android/android-channel.next.json promote-android/android-channel.json
+          bash scripts/release/sign.sh promote-android/android-channel.json
+          minisign -V -p release/minisign.pub -m promote-android/android-channel.json -x promote-android/android-channel.json.minisig -q
           gh release upload channel-stable promote-android/android-channel.json promote-android/android-channel.json.minisig \
             promote-android/agent-hq-android.apk promote-android/agent-hq-android.apk.sha256 --clobber
           gh release edit channel-stable --latest
