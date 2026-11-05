@@ -342,6 +342,8 @@ struct Command {
     script: bool,
     /// Runs as another user.
     elevated: bool,
+    /// A wrapper or `sudo` came first, whose own option values may stand where the command does.
+    wrapped: bool,
 }
 
 /// Git options that come before the subcommand, and whether each takes a value.
@@ -362,6 +364,10 @@ const GIT_GLOBAL: &[(&str, bool)] = &[
 
 /// Wrappers that run the command after them.
 const WRAPPERS: &[&str] = &["command", "exec", "nohup", "time", "nice", "builtin"];
+/// Shell words that come before a command in a compound line (`for f in a; do rm $f; done`).
+const SHELL_WORDS: &[&str] = &[
+    "if", "then", "else", "elif", "do", "while", "until", "!", "{",
+];
 const ELEVATE: &[&str] = &["sudo", "doas", "su", "pkexec"];
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh"];
 const INTERPRETERS: &[&str] = &[
@@ -414,14 +420,20 @@ impl Command {
             out
         };
         let mut elevated = false;
+        let mut wrapped = false;
         loop {
             while tokens.first().is_some_and(|t| is_assignment(t)) {
                 tokens.remove(0);
             }
             let first = tokens.first().cloned()?;
             let base = first.rsplit('/').next().unwrap_or(&first).to_string();
+            if SHELL_WORDS.contains(&base.as_str()) {
+                tokens.remove(0);
+                continue;
+            }
             if ELEVATE.contains(&base.as_str()) {
                 elevated = true;
+                wrapped = true;
                 tokens.remove(0);
                 while tokens.first().is_some_and(|t| t.starts_with('-')) {
                     tokens.remove(0);
@@ -432,6 +444,7 @@ impl Command {
                 || (base == "env" && tokens.len() > 1)
                 || base == "timeout"
             {
+                wrapped = true;
                 tokens.remove(0);
                 while tokens
                     .first()
@@ -473,7 +486,8 @@ impl Command {
             .unwrap_or(tokens.len());
         let rest = tokens.split_off(split);
         let words = tokens;
-        let head = words[0].as_str();
+        // A segment that starts with a flag names no command.
+        let head = words.first()?.as_str();
         let script = head == "eval"
             || head == "source"
             || head == "."
@@ -487,6 +501,7 @@ impl Command {
             rest,
             script,
             elevated,
+            wrapped,
         })
     }
 }
@@ -657,42 +672,134 @@ const LOSING_COMMANDS: &[(&str, &str)] = &[
     ("killall", "stop"),
     ("dropdb", "drop"),
     ("gh repo delete", "delete"),
+    ("find -delete", "delete"),
+    ("git checkout .", "overwrite"),
+    ("git worktree remove", "remove"),
+    ("git tag -d", "delete"),
+    ("git tag --delete", "delete"),
     ("gh auth logout", "sign out"),
 ];
 
-/// How deep `sh -c '...'` is opened to find the command inside.
+/// How deep `sh -c '...'` is opened to find the command inside; deeper is unreadable.
 const MAX_SCRIPT_DEPTH: usize = 2;
 
-/// The verb of the first command in `command` that loses something, or `None`. Inline shell code
-/// (`sh -c '...'`) is read too; code it cannot see (substitution, a heredoc) is not judged.
-pub fn losing_verb(command: &str) -> Option<&'static str> {
-    losing_verb_at(command, 0)
+/// Commands that run another command named later in their words (`xargs rm`, `find -exec rm`,
+/// `nice -n 10 rm`), so those words are read for a losing command too.
+const RUNNERS: &[&str] = &[
+    "xargs", "find", "nice", "env", "timeout", "sudo", "doas", "nohup", "watch", "parallel",
+    "ionice", "chrt", "taskset", "stdbuf", "strace", "command", "exec", "time", "builtin",
+];
+
+/// What HQ can tell about whether a command line loses something.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Losing {
+    No,
+    Verb(&'static str),
+    /// Part of it is hidden (substitution, a heredoc, inline code, a quote HQ cannot close, too
+    /// long), so HQ cannot say it loses nothing.
+    Unreadable,
 }
 
-fn losing_verb_at(command: &str, depth: usize) -> Option<&'static str> {
-    let text = command.trim();
-    if text.is_empty() || text.len() > MAX_COMMAND {
-        return None;
+/// The verb of the first command in `command` that loses something, or `None`.
+pub fn losing_verb(command: &str) -> Option<&'static str> {
+    match losing(command) {
+        Losing::Verb(verb) => Some(verb),
+        Losing::No | Losing::Unreadable => None,
     }
-    let line = parse_line(text)?;
+}
+
+/// Whether `command` loses something, by verb, or cannot be read whole.
+pub fn losing(command: &str) -> Losing {
+    losing_at(command, 0)
+}
+
+fn losing_at(command: &str, depth: usize) -> Losing {
+    let text = command.trim();
+    if text.is_empty() {
+        return Losing::No;
+    }
+    if text.len() > MAX_COMMAND {
+        return Losing::Unreadable;
+    }
+    let Some(line) = parse_line(text) else {
+        return Losing::Unreadable;
+    };
     let table: Vec<(Pattern, &'static str)> = LOSING_COMMANDS
         .iter()
         .filter_map(|(p, verb)| Pattern::parse(p).map(|pat| (pat, *verb)))
         .collect();
-    line.commands.iter().find_map(|cmd| {
-        if let Some((_, verb)) = table.iter().find(|(p, _)| p.matches(cmd)) {
-            return Some(*verb);
+    let mut unreadable = line.hidden;
+    for cmd in &line.commands {
+        match command_losing(cmd, &table, depth) {
+            Losing::Verb(verb) => return Losing::Verb(verb),
+            Losing::Unreadable => unreadable = true,
+            Losing::No => {}
         }
-        let inline =
-            (cmd.script && depth < MAX_SCRIPT_DEPTH && SHELLS.contains(&cmd.words[0].as_str()))
-                .then(|| {
-                    cmd.rest
-                        .iter()
-                        .skip_while(|t| !flag_matches("-c", t))
-                        .nth(1)
-                })
-                .flatten()?;
-        losing_verb_at(inline, depth + 1)
+    }
+    if unreadable {
+        Losing::Unreadable
+    } else {
+        Losing::No
+    }
+}
+
+fn command_losing(cmd: &Command, table: &[(Pattern, &'static str)], depth: usize) -> Losing {
+    if let Some((_, verb)) = table.iter().find(|(p, _)| p.matches(cmd)) {
+        return Losing::Verb(verb);
+    }
+    if let Some(verb) = git_refspec_verb(cmd).or_else(|| run_verb(cmd, table)) {
+        return Losing::Verb(verb);
+    }
+    if !cmd.script {
+        return Losing::No;
+    }
+    let inline = SHELLS
+        .contains(&cmd.words[0].as_str())
+        .then(|| {
+            cmd.rest
+                .iter()
+                .skip_while(|t| !flag_matches("-c", t))
+                .nth(1)
+        })
+        .flatten();
+    match inline {
+        Some(code) if depth < MAX_SCRIPT_DEPTH => losing_at(code, depth + 1),
+        // `python3 -c`, `eval`, `source`, or shell code nested too deep.
+        _ => Losing::Unreadable,
+    }
+}
+
+/// `git push origin +main` forces, `git push origin :old` deletes.
+fn git_refspec_verb(cmd: &Command) -> Option<&'static str> {
+    if cmd.words.get(..2) != Some(&["git".to_string(), "push".to_string()][..]) {
+        return None;
+    }
+    let refs = cmd.words[2..].iter().chain(&cmd.rest);
+    let mut verb = None;
+    for r in refs {
+        if r.starts_with('+') {
+            return Some("overwrite");
+        }
+        if r.starts_with(':') {
+            verb = Some("delete");
+        }
+    }
+    verb
+}
+
+/// A losing command named later in a runner's words (`xargs rm`, `nice -n 10 kill 4`).
+fn run_verb(cmd: &Command, table: &[(Pattern, &'static str)]) -> Option<&'static str> {
+    if !cmd.wrapped && !RUNNERS.contains(&cmd.words[0].as_str()) {
+        return None;
+    }
+    let tokens: Vec<String> = cmd.words.iter().chain(&cmd.rest).skip(1).cloned().collect();
+    (0..tokens.len()).find_map(|i| {
+        let rest = tokens[i..].to_vec();
+        let inner = Command::from_tokens(rest)?;
+        table
+            .iter()
+            .find(|(p, _)| p.matches(&inner))
+            .map(|(_, verb)| *verb)
     })
 }
 
@@ -927,6 +1034,13 @@ mod tests {
             "escalate",
             "only --hard is denied"
         );
+    }
+
+    #[test]
+    fn a_line_that_starts_with_a_flag_is_escalated_not_a_crash() {
+        let b = policy(BUILDER);
+        assert_eq!(decide(&b, "-rf /"), "escalate");
+        assert_eq!(decide(&b, "sudo -- -x"), "escalate");
     }
 
     #[test]

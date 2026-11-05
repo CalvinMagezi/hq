@@ -125,12 +125,14 @@ pub fn refusal(dialog: &PendingDialog, choice: &Choice, who: Answerer) -> Option
             option.label
         )),
         // The owner's command policy keeps deciding what its rules say (owner to confirm).
-        Answerer::Automated(by) if dialog.may_lose() => Some(format!(
-            "this dialog asks to {} something, so only the owner may say yes to it (from their Inbox or phone). {by} may decline it or leave it for the owner.",
-            dialog
-                .losing_verb()
-                .unwrap_or("run code HQ cannot read for")
-        )),
+        Answerer::Automated(by) if dialog.may_lose() => Some(match dialog.losing_verb() {
+            Some(verb) => format!(
+                "this dialog asks to {verb} something, so only the owner may say yes to it (from their Inbox or phone). {by} may decline it or leave it for the owner."
+            ),
+            None => format!(
+                "HQ cannot read this command whole, so only the owner may say yes to it (from their Inbox or phone). {by} may decline it or leave it for the owner."
+            ),
+        }),
         _ => None,
     }
 }

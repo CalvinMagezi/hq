@@ -175,10 +175,12 @@ impl PendingDialog {
         hq_core::losing::dialog_verb(&self.kind, self.command.as_deref())
     }
 
-    /// A yes here may lose something: it names a losing command, or it is a command dialog cut
-    /// short, whose hidden part HQ cannot judge.
+    /// A yes here may lose something: it names a losing command, or it is a command dialog HQ
+    /// cannot read whole (cut short, hidden code, inline scripts).
     pub fn may_lose(&self) -> bool {
-        self.losing_verb().is_some() || (self.kind == "command" && self.truncated)
+        self.losing_verb().is_some()
+            || (self.kind == "command" && self.truncated)
+            || hq_core::losing::dialog_unreadable(&self.kind, self.command.as_deref())
     }
 }
 

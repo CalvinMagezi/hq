@@ -66,6 +66,15 @@ pub fn dialog_verb(kind: &str, command: Option<&str>) -> Option<&'static str> {
     }
 }
 
+/// A command dialog HQ cannot read whole (hidden code, inline scripts, a quote it cannot close):
+/// no automatic answer may say yes to it.
+pub fn dialog_unreadable(kind: &str, command: Option<&str>) -> bool {
+    kind == "command"
+        && command.is_some_and(|c| {
+            crate::command_policy::losing(c) == crate::command_policy::Losing::Unreadable
+        })
+}
+
 /// `task_delete`, `remove_file`, `deleteEvent`: any part of the name that is a losing word.
 fn name_verb(name: &str) -> Option<&'static str> {
     name.split(|c: char| !c.is_ascii_alphanumeric())
@@ -154,6 +163,23 @@ mod tests {
         assert_eq!(bash("sh -c 'kill 42'"), Some("stop"));
         assert_eq!(bash("git push origin main"), None);
         assert_eq!(bash("echo rm"), None);
+        assert_eq!(bash("grep -r kill src"), None);
+        // Shell words, runners with option values, absolute paths, refspecs.
+        assert_eq!(bash("for f in a b; do rm -rf $f; done"), Some("delete"));
+        assert_eq!(
+            bash("if true; then git reset --hard; fi"),
+            Some("overwrite")
+        );
+        assert_eq!(bash("nice -n 10 rm x"), Some("delete"));
+        assert_eq!(bash("sudo -u bob rm x"), Some("delete"));
+        assert_eq!(bash("timeout -s KILL 5 rm x"), Some("delete"));
+        assert_eq!(bash("ls | xargs rm"), Some("delete"));
+        assert_eq!(bash("find . -name '*.o' -delete"), Some("delete"));
+        assert_eq!(bash("find . -exec rm {} ;"), Some("delete"));
+        assert_eq!(bash("/bin/rm x"), Some("delete"));
+        assert_eq!(bash("git push origin +main"), Some("overwrite"));
+        assert_eq!(bash("git push origin :old"), Some("delete"));
+        assert_eq!(bash("git checkout ."), Some("overwrite"));
         assert_eq!(bash("ls -la"), None);
         // The model's words around a call never make it losing.
         assert_eq!(
@@ -182,6 +208,23 @@ mod tests {
         assert_eq!(dialog_verb("command", Some("cargo build")), None);
         assert_eq!(dialog_verb("edit", Some("src/main.rs")), None);
         assert_eq!(dialog_verb("question", None), None);
+    }
+
+    #[test]
+    fn a_command_hq_cannot_read_whole_is_not_called_safe() {
+        for hidden in [
+            "echo \"$(rm -rf x)\"",
+            "echo `rm x`",
+            "eval 'rm -rf x'",
+            "python3 -c 'import shutil; shutil.rmtree(\"x\")'",
+            "echo $'\\''; rm -rf x",
+            "sh -c \"sh -c 'sh -c ls'\"",
+        ] {
+            assert!(dialog_unreadable("command", Some(hidden)), "{hidden}");
+        }
+        assert!(dialog_unreadable("command", Some(&"a".repeat(20_000))));
+        assert!(!dialog_unreadable("command", Some("cargo test")));
+        assert!(!dialog_unreadable("edit", Some("echo `x`")));
     }
 
     #[test]
