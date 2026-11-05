@@ -86,7 +86,7 @@ fun ReplyBubble(message: UiMessage, blocks: BlockActions, lifted: Boolean = fals
 @Composable
 private fun ToolLine(tools: List<ToolStep>) {
     var open by remember { mutableStateOf(false) }
-    val count = if (tools.size == 1) "1 step" else "${tools.size} steps"
+    val count = androidx.compose.ui.res.pluralStringResource(R.plurals.chat_steps, tools.size, tools.size)
     Column(Modifier.padding(top = 8.dp)) {
         Row(
             Modifier.fillMaxWidth().minimumInteractiveComponentSize().clickable { open = !open }

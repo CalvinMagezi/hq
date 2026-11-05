@@ -159,7 +159,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-                Text(pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+                Text(pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
             }
             when (ui.page) {
                 SettingsPage.Home -> Home(ui, actions)
@@ -325,6 +325,7 @@ private fun Home(ui: SettingsUi, actions: SettingsActions) {
 
 @Composable
 private fun Safety(ui: SettingsUi, actions: SettingsActions) {
+    val w = example.hq.spike.ui.shell.rememberWords()
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SettingsWords.SafetyTab.entries.forEach { t ->
@@ -338,8 +339,8 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
             }
         }
         Page {
-            Notice("Read only. You can change these in the config file on this phone.")
-            val rows = SettingsWords.safetyRows(ui.snap.settings, ui.safetyTab)
+            Notice(stringResource(R.string.settings_read_only_notice))
+            val rows = SettingsWords.safetyRows(w, ui.snap.settings, ui.safetyTab)
             Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) Unanswered(ui, "settings", false) else Facts(rows, actions.onPage) }
         }
     }
@@ -349,13 +350,14 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
 
 @Composable
 private fun Keys(ui: SettingsUi, actions: SettingsActions) {
+    val w = example.hq.spike.ui.shell.rememberWords()
     val s = ui.snap.settings
     Page {
         if (Unanswered(ui, "settings", s != null) || s == null) return@Page
         Label("Model")
         Facts(listOf(FactRow("Which AI HQ uses", SettingsWords.activeModel(s)), FactRow("Only AI that runs on this phone", SettingsWords.onOff(s.optJSONObject("model")?.optBoolean("local_only") == true))))
         Text(stringResource(R.string.settings_the_model_is_set), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
-        val ai = SettingsWords.aiRows(ui.snap)
+        val ai = SettingsWords.aiRows(w, ui.snap)
         if (ai.isNotEmpty()) {
             Label("Which AI answers")
             Facts(ai)
@@ -397,10 +399,11 @@ private fun Keys(ui: SettingsUi, actions: SettingsActions) {
 
 @Composable
 private fun Messaging(ui: SettingsUi, actions: SettingsActions) {
+    val w = example.hq.spike.ui.shell.rememberWords()
     Page {
         if (Unanswered(ui, "chatApps", ui.snap.chatApps != null)) return@Page
         Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf("telegram" to "Telegram", "discord" to "Discord").forEach { (key, name) -> AppCardView(SettingsWords.appCard(ui.snap.chatApps, key, name, ui.now), key, ui.restarting, actions) }
+            listOf("telegram" to "Telegram", "discord" to "Discord").forEach { (key, name) -> AppCardView(SettingsWords.appCard(w, ui.snap.chatApps, key, name, ui.now), key, ui.restarting, actions) }
         }
         Text(if (ui.restarting) "HQ is restarting\u2026" else "Changes restart HQ. This screen reconnects by itself.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
     }
@@ -623,20 +626,21 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
 
 @Composable
 private fun Spending(ui: SettingsUi) {
+    val w = example.hq.spike.ui.shell.rememberWords()
     Page {
         val b = ui.snap.budgets
         if (Unanswered(ui, "budgets", b != null) || b == null) return@Page
-        val cards = SettingsWords.budgetCards(b, ui.now)
+        val cards = SettingsWords.budgetCards(w, b, ui.now)
         Label("Budgets")
         if (cards.isEmpty()) Notice(SettingsWords.noBudgets(b), HqIcons.Info)
         else Group { cards.forEachIndexed { i, c -> if (i > 0) Divider(); BudgetCardView(c) } }
-        val forecast = SettingsWords.forecast(ui.snap.forecast)
+        val forecast = SettingsWords.forecast(w, ui.snap.forecast)
         when {
             forecast == null && "forecast" in ui.snap.unavailable -> { Label("Forecast, this month"); Text(stringResource(R.string.settings_the_forecast_is_not), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)) }
             forecast?.note != null -> { Label("Forecast, this month"); Text(forecast.note, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)) }
             forecast != null -> { Label("Forecast, this month"); Facts(forecast.rows) }
         }
-        val services = SettingsWords.serviceRows(ui.snap)
+        val services = SettingsWords.serviceRows(w, ui.snap)
         if (services.isNotEmpty()) {
             Label("By AI service")
             Facts(services)
@@ -661,6 +665,7 @@ private fun BudgetCardView(c: SettingsWords.BudgetCard) {
                 .semantics { progressBarRangeInfo = ProgressBarRangeInfo(c.fraction, 0f..1f) },
         ) { Box(Modifier.fillMaxWidth(c.fraction).fillMaxHeight().background(fill)) }
         Text(c.stand, style = SmallText, color = Mts.InkMuted)
+        c.resetNote?.let { Text(it, style = SmallText, color = Mts.InkMuted) }
     }
 }
 
@@ -674,7 +679,7 @@ private fun Background(ui: SettingsUi, actions: SettingsActions) {
             ModeCard("Working in the background", "HQ answers your chats and runs scheduled tasks, even when the app is closed.", active, !ui.restarting) { actions.onMode(true) }
             ModeCard("Only when I open the app", "Your notes and tasks work. Chats and scheduled tasks pause.", !active, !ui.restarting) { actions.onMode(false) }
         }
-        Box(Modifier.padding(top = 12.dp)) { Notice("Use this on one device only. If two copies of HQ share your data, both answer the same messages and run the same tasks.", HqIcons.Warning, warn = true) }
+        Box(Modifier.padding(top = 12.dp)) { Notice("Use this on one device only. Two copies sharing your data both answer the same messages.", HqIcons.Warning, warn = true) }
         Label("Right now")
         Facts(SettingsWords.rightNow(ui.snap, active, ui.restarting))
     }
@@ -726,7 +731,7 @@ private fun NoticeCard(title: String, text: String, warn: Boolean) {
 
 @Composable
 private fun KeepRunning(ui: SettingsUi, actions: SettingsActions) {
-    val page = PhoneWords.keepRunning(ui.keep, ui.now)
+    val page = PhoneWords.keepRunning(example.hq.spike.ui.shell.rememberWords(), ui.keep, ui.now)
     Page {
         Box(Modifier.padding(top = 4.dp)) { NoticeCard(page.noticeTitle, page.notice, page.warn) }
         Label("Checked")
@@ -890,7 +895,7 @@ private fun InfoCard(title: String, text: String) {
 /** The owner's HQ on a server: this phone signs in to it with a one-time code, and its questions then arrive here too. */
 @Composable
 private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: SettingsActions) {
-    Label("Your HQ on a server")
+    Label(stringResource(R.string.settings_server_hq_title))
     if (server.connected) {
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1053,7 +1058,7 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
                 c.waiting.filter { it.id !in ui.hiddenCaptures }.forEachIndexed { i, q ->
                     if (i > 0) Divider()
                     Column(Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 4.dp)) {
-                        Text(q.title.ifBlank { "Untitled" }, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(q.title.ifBlank { "Untitled" }, style = HqType.BodyBold, color = Mts.Ink)
                         Text(PhoneWords.queuedLine(q), style = HqType.BodySm, color = if (q.failure != null) Mts.Amber else Mts.InkMuted)
                         Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                             DialogButton("Send now") { actions.onSendNow(q.id) }
@@ -1076,12 +1081,12 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
         Label("About")
         Facts(
             listOf(
-                FactRow("AgentHQ", ui.build),
-                FactRow("Run mode", if (ui.mode == "active") "Active" else "Standby"),
-                FactRow("HQ", ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: "Not answering"),
+                FactRow("AgentHQ", stringResource(R.string.about_build, ui.build.substringAfterLast(' '))),
+                FactRow(stringResource(R.string.about_background), stringResource(if (ui.mode == "active") R.string.about_background_on else R.string.about_background_off)),
+                FactRow(stringResource(R.string.about_hq_version), ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: "Not answering"),
             ) + listOfNotNull(SettingsWords.notesCount(ui.snap)?.let { FactRow("Notes", it) }),
         )
-        Label("Updates")
+        Label(stringResource(R.string.settings_app_updates))
         UpdateGroup(ui, actions)
         Label("Support")
         Group {
@@ -1294,9 +1299,9 @@ private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { actions.onUpdateMain(!ui.updateMain) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                 Text(stringResource(R.string.settings_follow_every_build_of), style = HqType.BodyBold, color = Mts.Ink)
-                Text(if (ui.updateMain) "Newest builds, before they are promoted" else "Only builds the owner promoted", style = HqType.BodySm, color = Mts.InkMuted)
+                Text(stringResource(if (ui.updateMain) R.string.settings_update_on_line else R.string.settings_update_off_line), style = HqType.BodySm, color = Mts.InkMuted)
             }
-            Text(if (ui.updateMain) "On" else "Off", style = HqType.BodySmBold, color = Mts.Ink)
+            Text(stringResource(if (ui.updateMain) R.string.settings_update_toggle_on else R.string.settings_update_toggle_off), style = HqType.BodySmBold, color = Mts.Ink)
         }
     }
 }
@@ -1426,7 +1431,7 @@ private fun MovingCard() {
 @Composable
 private fun ReadOnlyList(ui: SettingsUi, empty: String, rows: @Composable () -> Unit) {
     Page {
-        Notice("Read only. You can change these in the config file on this phone.")
+        Notice(stringResource(R.string.settings_read_only_notice))
         if (ui.snap.settings == null) Unanswered(ui, "settings", false)
         else Box(Modifier.padding(top = 12.dp)) { Column { rows() } }
     }

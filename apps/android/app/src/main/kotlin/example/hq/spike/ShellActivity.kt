@@ -273,7 +273,7 @@ class ShellActivity : ComponentActivity() {
         val active = (java.io.File(filesDir, "mode").takeIf { it.length() <= MODE_FILE_MAX }?.readText()?.trim() ?: "") == "active"
         val log = StartupWords.cleanLog(tailOf(java.io.File(filesDir, "hq.log")))
         val build = packageManager.getPackageInfo(packageName, 0).let { "${it.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build ${if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) it.longVersionCode else it.versionCode.toLong()}" }
-        val text = StartupWords.details(build, active, StartupWords.failedLines(HubService.lastStart(this), HubService.lastExit(this)), log)
+        val text = StartupWords.details(build, active, StartupWords.failedLines(example.hq.spike.ui.shell.Words.of(this), HubService.lastStart(this), HubService.lastExit(this)), log)
         (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
         android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
     }
@@ -382,7 +382,7 @@ class ShellActivity : ComponentActivity() {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
                 else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
                 else if (startup == Startup.DidNotStart) androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                    DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
+                    DidNotStartScreen(StartupWords.failedLines(example.hq.spike.ui.shell.Words.of(this@ShellActivity), HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
                     androidx.compose.material3.TextButton(
                         { example.hq.spike.safe.SafeModeActivity.open(this@ShellActivity) },
                         Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).size(width = 280.dp, height = 48.dp),

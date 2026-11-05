@@ -58,7 +58,7 @@ object PhoneWords {
     private val NUMBER_WORDS = listOf("Zero", "One", "Two", "Three", "Four", "Five")
     private val ORDINALS = listOf("zeroth", "first", "second", "third", "fourth", "fifth", "sixth")
 
-    fun keepRunning(f: KeepFacts, now: Instant): KeepPage {
+    fun keepRunning(w: example.hq.spike.ui.shell.Words, f: KeepFacts, now: Instant): KeepPage {
         val rows = buildList {
             add(
                 when {
@@ -75,7 +75,7 @@ object PhoneWords {
         val bad = rows.count { !it.ok }
         val good = rows.size - bad
         val (title, body) = when {
-            bad > 0 -> (if (bad == 1) "One thing to fix" else "${NUMBER_WORDS.getOrElse(bad) { "$bad" }} things to fix") to "Android may stop AgentHQ until ${if (bad == 1) "it is" else "they are"} set."
+            bad > 0 -> w.n(R.plurals.settings_one_thing_to_fix, bad, bad) to w.n(R.plurals.settings_may_stop_until, bad)
             f.samsung -> "One thing Android may still stop" to "${NUMBER_WORDS.getOrElse(good) { "$good" }} settings are fine. A ${ORDINALS.getOrElse(good + 1) { "next" }}, in Samsung's own battery menu, cannot be checked from here."
             else -> "Everything Android can report is fine" to "AgentHQ is set to keep running."
         }
@@ -92,8 +92,8 @@ object PhoneWords {
     fun queuedLine(q: example.hq.spike.capture.Queued): String = (if (q.isNote) "Note" else "Task") + " \u00b7 " + (q.failure ?: "Waiting for HQ")
 
     /** The Home row: "Good" when every setting Android can read is fine, with the one it cannot read called out on a Samsung. */
-    fun keepSummary(f: KeepFacts, now: Instant): String {
-        val page = keepRunning(f, now)
+    fun keepSummary(w: example.hq.spike.ui.shell.Words, f: KeepFacts, now: Instant): String {
+        val page = keepRunning(w, f, now)
         val bad = page.checked.count { !it.ok }
         return when {
             bad > 0 -> "$bad to fix"

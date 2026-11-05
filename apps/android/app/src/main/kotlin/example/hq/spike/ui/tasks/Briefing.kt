@@ -1,5 +1,7 @@
 package example.hq.spike.ui.tasks
 
+import example.hq.spike.R
+import example.hq.spike.ui.shell.Words
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
@@ -62,11 +64,11 @@ object BriefingWords {
         return if (parts.isEmpty()) "no reviews recorded" else parts.joinToString(", ")
     }
 
-    fun gapsLine(b: Briefing) = "Notes: ${reviewSummary(b.reviewCounts)}. ${b.gapsTotal} ${if (b.gapsTotal == 1) "gap" else "gaps"} in attribution or links."
+    fun gapsLine(w: Words, b: Briefing) = "Notes: ${reviewSummary(b.reviewCounts)}. " + w.n(R.plurals.brief_gaps, b.gapsTotal, b.gapsTotal)
 
-    fun contributorLine(c: Contributor, now: Instant): String = buildString {
-        append("${c.notes} ${if (c.notes == 1) "note" else "notes"}")
-        if (c.leases > 0) append(", ${c.leases} ${if (c.leases == 1) "lease" else "leases"}")
+    fun contributorLine(w: Words, c: Contributor, now: Instant): String = buildString {
+        append(w.n(R.plurals.brief_notes, c.notes, c.notes))
+        if (c.leases > 0) append(", " + w.n(R.plurals.brief_leases, c.leases, c.leases))
         c.lastActive?.let { append(", last ${age(it, now)}") }
     }
 
@@ -99,10 +101,6 @@ object BriefingWords {
     }
 
     private fun parse(stamp: String?): Instant? {
-        if (stamp.isNullOrBlank()) return null
-        return try {
-            if (Regex("([zZ]|[+-]\\d{2}:\\d{2})$").containsMatchIn(stamp)) OffsetDateTime.parse(stamp).toInstant()
-            else LocalDateTime.parse(stamp.replace(' ', 'T')).toInstant(ZoneOffset.UTC)
-        } catch (e: DateTimeParseException) { null }
+        return example.hq.spike.data.Instants.parse(stamp)
     }
 }

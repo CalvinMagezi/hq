@@ -70,7 +70,7 @@ fun StoredKeysPage() {
                 if (i > 0) Row(Modifier.fillMaxWidth().size(0.dp, 1.dp).background(Mts.Hairline)) {}
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(HqIcons.Key, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-                    Text(n, style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    Text(KeyNames.display(n), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 8.dp))
                     TextAction("Replace", enabled = !busy) { name = n; line = null }
                     TextAction(FirstRunWords.KEYS_REMOVE, enabled = !busy) { confirming = n; line = null }
                 }

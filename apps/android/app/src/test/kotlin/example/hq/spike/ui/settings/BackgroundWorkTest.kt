@@ -72,12 +72,12 @@ class BackgroundWorkTest {
     private val settings = JSONObject("""{"safety":{"web_allowed_origins":["https://hq.example.ts.net","http://localhost:5678"]},"agent_host":{"default_host":"mac-mini","hosts":["mac-mini","native"]},"integrations":{"remote_mcp":[{"name":"diagrams","host":"example.com","live_user_turn_only":true},{"name":"search","host":"search.example.com","live_user_turn_only":false}]}}""")
 
     @Test fun theSafetyCountsOpenTheirListsWhenTheyHaveRows() {
-        val safety = SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Safety)
+        val safety = SettingsWords.safetyRows(testWords(), settings, SettingsWords.SafetyTab.Safety)
         assertEquals(SettingsPage.Origins, safety.first { it.title.startsWith("Addresses") }.opens)
-        assertEquals(SettingsPage.Computers, SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Helpers).first { it.title == "Computers" }.opens)
-        assertEquals(SettingsPage.ConnectedTools, SettingsWords.safetyRows(settings, SettingsWords.SafetyTab.Tools).first { it.title == "Connected tools" }.opens)
+        assertEquals(SettingsPage.Computers, SettingsWords.safetyRows(testWords(), settings, SettingsWords.SafetyTab.Helpers).first { it.title == "Computers" }.opens)
+        assertEquals(SettingsPage.ConnectedTools, SettingsWords.safetyRows(testWords(), settings, SettingsWords.SafetyTab.Tools).first { it.title == "Connected tools" }.opens)
         val none = JSONObject("""{"safety":{"web_allowed_origins":[]},"integrations":{"remote_mcp":[]},"agent_host":{"hosts":[]}}""")
-        assertEquals(null, SettingsWords.safetyRows(none, SettingsWords.SafetyTab.Tools).first { it.title == "Connected tools" }.opens)
+        assertEquals(null, SettingsWords.safetyRows(testWords(), none, SettingsWords.SafetyTab.Tools).first { it.title == "Connected tools" }.opens)
     }
 
     @Test fun theListsReadTheirRows() {

@@ -4,6 +4,7 @@ import example.hq.spike.R
 import example.hq.spike.ui.shell.Words
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.time.format.DateTimeParseException
 import example.hq.spike.ui.usage.ChainRow
 import example.hq.spike.ui.usage.UsageWords
@@ -58,14 +59,14 @@ object SettingsWords {
 
     fun configuredKeys(s: JSONObject?): List<String> = s.arr("provider_keys").items().filter { it.optBoolean("configured") && it.optString("name") !in TOOL_KEYS }.map { it.optString("name") }
 
-    fun keysStatus(s: JSONObject?, providers: JSONObject? = null): String {
+    fun keysStatus(w: Words, s: JSONObject?, providers: JSONObject? = null): String {
         if (s == null) return NOT_ANSWERED
         // The AI HQ uses is the first one in its chain, whichever keys are stored: a stored key is not a choice.
         val services = UsageWords.providers(s, providers)
-        if (services.isNotEmpty()) return "${services.first()} · ${services.size} ${if (services.size == 1) "service" else "services"}"
+        if (services.isNotEmpty()) return w.n(R.plurals.settings_services_count, services.size, services.first(), services.size)
         val keys = configuredKeys(s)
         if (keys.isEmpty()) return "No key yet"
-        return "${keys.first()} · ${keys.size} ${if (keys.size == 1) "key" else "keys"}"
+        return w.n(R.plurals.settings_keys_count, keys.size, keys.first(), keys.size)
     }
 
     private fun app(chat: JSONObject?, name: String): String = if (chat.obj(name)?.let { it.optBoolean("enabled") && it.optBoolean("token_set") } == true) "on" else "off"
@@ -86,10 +87,7 @@ object SettingsWords {
 
     /** ISO text with an offset (+00:00, Z) or none (taken as UTC). OffsetDateTime reads the offsets that Instant.parse refuses before Android 14. */
     private fun iso(t: String): Instant? {
-        val text = t.replace(' ', 'T')
-        return try { java.time.OffsetDateTime.parse(text).toInstant() } catch (e: DateTimeParseException) {
-            try { java.time.LocalDateTime.parse(text).toInstant(java.time.ZoneOffset.UTC) } catch (e2: DateTimeParseException) { null }
-        }
+        return example.hq.spike.data.Instants.parse(t)
     }
 
     private fun epoch(n: Long): Instant = if (n >= MILLIS_FROM) Instant.ofEpochMilli(n) else Instant.ofEpochSecond(n)
@@ -125,12 +123,12 @@ object SettingsWords {
 
     private fun money(v: Double) = "$" + String.format(java.util.Locale.ROOT, "%.2f", v)
 
-    fun spendingStatus(b: JSONObject?): String {
+    fun spendingStatus(w: Words, b: JSONObject?): String {
         if (b == null) return NOT_ANSWERED
         val all = b.arr("budgets").items()
         // The whole-spend budget (scope global), daily if there is one; a budget for one provider or model is not today's total.
         val head = all.firstOrNull { it.optString("scope") == "global" && it.optString("period") == "day" } ?: all.firstOrNull { it.optString("scope") == "global" }
-        if (head == null) return if (all.isEmpty()) "No limit set" else "${all.size} limits set"
+        if (head == null) return if (all.isEmpty()) "No limit set" else w.n(R.plurals.spend_limits_set, all.size, all.size)
         val period = when (head.optString("period")) { "day" -> "today"; "week" -> "this week"; "month" -> "this month"; else -> "" }
         return "${money(head.optDouble("spent_usd"))} of ${money(head.optDouble("limit_usd"))} $period".trim()
     }
@@ -139,7 +137,7 @@ object SettingsWords {
         HomeGroup("This phone", phone),
         HomeGroup(
             "Your accounts", listOf(
-                HomeRow(SettingsPage.Keys, "key", "AI service and keys", keysStatus(snap.settings, snap.providers)),
+                HomeRow(SettingsPage.Keys, "key", "AI service and keys", keysStatus(w, snap.settings, snap.providers)),
                 HomeRow(SettingsPage.Messaging, "chat", "Messaging apps", messagingStatus(snap.chatApps)),
                 HomeRow(SettingsPage.Devices, "phone", "Other devices", devicesStatus(snap.devices)),
             ),
@@ -149,7 +147,7 @@ object SettingsWords {
         HomeGroup("How HQ behaves", listOf(HomeRow(SettingsPage.Safety, "shield", "Safety and limits", if (snap.settings == null) NOT_ANSWERED else "Read only"))),
         HomeGroup(
             "Your data", listOf(
-                HomeRow(SettingsPage.Spending, "gauge", "Spending limits", spendingStatus(snap.budgets)),
+                HomeRow(SettingsPage.Spending, "gauge", "Spending limits", spendingStatus(w, snap.budgets)),
                 HomeRow(SettingsPage.About, "arch", "Backup and about", BackupWords.homeLine(w, backup, now), warn = BackupWords.warns(backup, now)),
             ),
         ),
@@ -203,7 +201,7 @@ object SettingsWords {
         return (0 until a.length()).mapNotNull { i -> a.optString(i).takeIf { it.isNotBlank() } }.map { FactRow(computerName(it), "", if (it == default) "Default" else null) }
     }
 
-    fun safetyRows(s: JSONObject?, tab: SafetyTab): List<FactRow> {
+    fun safetyRows(w: Words, s: JSONObject?, tab: SafetyTab): List<FactRow> {
         if (s == null) return emptyList()
         val safety = s.obj("safety")
         val limits = s.obj("limits")
@@ -227,10 +225,10 @@ object SettingsWords {
                 countRow("Computers", host.arr("hosts")?.length() ?: 0, SettingsPage.Computers),
                 FactRow("Safe box for helpers", sandbox(host.text("sandbox_mode").orEmpty())),
                 FactRow("Stop idle helpers after", host?.optInt("idle_reap_hours")?.let { if (it <= 0) "Never" else "$it h" } ?: "Never"),
-                FactRow("New helpers: HQ answers their questions", yesNo(host?.optBoolean("drive_new_watches") == true)),
+                FactRow(w.s(R.string.settings_safety_say_yes), yesNo(host?.optBoolean("drive_new_watches") == true)),
                 FactRow("How often HQ checks on helpers", host?.optInt("driver_checkin_minutes")?.let { "$it min" } ?: "Not set"),
                 FactRow("How many instructions HQ may give one helper", "${host?.optInt("driver_nudge_budget") ?: 0}"),
-                FactRow("Stop answering a helper that makes no progress after", "${host?.optInt("driver_no_progress_limit") ?: 0} turns", "HQ stops answering its questions for you. The helper itself keeps running."),
+                FactRow("Stop answering a helper that makes no progress after", (host?.optInt("driver_no_progress_limit") ?: 0).let { n -> w.n(R.plurals.settings_no_progress_after, n, n) }, "HQ stops answering its questions for you. The helper itself keeps running."),
             )
             SafetyTab.Tools -> listOf(
                 countRow("Connected tools", integ.arr("remote_mcp")?.length() ?: 0, SettingsPage.ConnectedTools),
@@ -298,21 +296,21 @@ object SettingsWords {
     }
 
     /** The AI services in the order HQ tries them, each with its model and whether the provider says it works. */
-    fun aiRows(snap: SettingsSnapshot): List<FactRow> = UsageWords.chain(snap.settings, snap.providers).map { r ->
-        val status = UsageWords.statusWords(UsageWords.providerRow(snap.providers, r.backend)?.optString("status"))
-        FactRow("${r.position} · ${r.provider}", if (r.first) "First choice" else "If the one before is down", listOf(r.model, status).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null })
+    fun aiRows(w: Words, snap: SettingsSnapshot): List<FactRow> = UsageWords.chain(snap.settings, snap.providers).map { r ->
+        val status = UsageWords.statusWords(w, UsageWords.providerRow(snap.providers, r.backend)?.optString("status"))
+        FactRow("${r.position} · ${r.provider}", if (r.first) "First choice" else "If the one before is down", listOf(r.model.substringAfterLast('/'), status).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null })
     }
 
     // ------------------------------------------------------------ Spending by AI service
 
     /** What each AI service in use has left and what it cost: credits for a plan, a balance where the provider gives one, else HQ's own record. */
-    fun serviceRows(snap: SettingsSnapshot): List<FactRow> {
+    fun serviceRows(w: Words, snap: SettingsSnapshot): List<FactRow> {
         val chain = UsageWords.chain(snap.settings, snap.providers)
         val services: List<ChainRow> = if (chain.isNotEmpty()) chain.distinctBy { it.provider } else snap.providers.arr("backends").items().map {
             val name = it.optString("backend")
             ChainRow(name, UsageWords.providerName(null, null, name), "", 0)
         }
-        return services.map { r -> if (r.provider == UsageWords.COPILOT) copilotRow(snap.copilot) else providerRow(r, UsageWords.providerRow(snap.providers, r.backend)) }
+        return services.map { r -> if (r.provider == UsageWords.COPILOT) copilotRow(snap.copilot) else providerRow(w, r, UsageWords.providerRow(snap.providers, r.backend)) }
     }
 
     private fun copilotRow(c: JSONObject?): FactRow {
@@ -329,7 +327,7 @@ object SettingsWords {
         return FactRow(UsageWords.COPILOT, value, listOfNotNull("Credits on your plan", reset).joinToString(" · "))
     }
 
-    private fun providerRow(r: ChainRow, row: JSONObject?): FactRow {
+    private fun providerRow(w: Words, r: ChainRow, row: JSONObject?): FactRow {
         val reading = row.obj("provider")
         val ledger = row.obj("ledger")
         fun num(o: JSONObject?, name: String): Double? = o?.takeIf { it.has(name) && !it.isNull(name) }?.optDouble(name)?.takeIf { it.isFinite() }
@@ -339,7 +337,7 @@ object SettingsWords {
         val value = when {
             left != null -> "$left left"
             today != null -> "${UsageWords.usd(today)} today"
-            else -> UsageWords.statusWords(row?.optString("status")).ifBlank { "Not measured" }
+            else -> UsageWords.statusWords(w, row?.optString("status")).ifBlank { "Not measured" }
         }
         val windows = listOfNotNull(today?.let { "Today ${UsageWords.usd(it)}" }, num(spend, "week")?.let { "This week ${UsageWords.usd(it)}" }, num(spend, "month")?.let { "This month ${UsageWords.usd(it)}" })
         val fromLedger = reading == null && ledger != null
@@ -361,7 +359,7 @@ object SettingsWords {
 
     data class AppCard(val name: String, val on: Boolean, val line: String, val bot: String?, val owner: String)
 
-    fun appCard(chat: JSONObject?, key: String, name: String, now: Instant = Instant.now()): AppCard {
+    fun appCard(w: Words, chat: JSONObject?, key: String, name: String, now: Instant = Instant.now()): AppCard {
         val a = chat.obj(key)
         val on = a?.let { it.optBoolean("enabled") && it.optBoolean("token_set") } == true
         val relay = a.obj("relay")
@@ -370,7 +368,7 @@ object SettingsWords {
         val current = relay?.optBoolean("current", true) != false
         val line = when {
             !on -> "Off"
-            !current -> "Not running yet"
+            !current -> w.s(R.string.settings_app_not_connected)
             status == "connected" || status == "running" || status == "online" -> "Running" + (time(relay, "last_seen")?.let { " \u00b7 seen ${seen(it, now)}" }.orEmpty())
             status != null -> status.replaceFirstChar(Char::uppercase)
             else -> "Saved"
@@ -492,7 +490,7 @@ object SettingsWords {
         else -> serverText ?: TOKEN_REFUSED
     }
 
-    const val CLAUDE_VIA_LAPTOP = "Claude Code and Claude Desktop reach HQ through your laptop while it is paired with this phone."
+    const val CLAUDE_VIA_LAPTOP = "Claude Code and Claude Desktop reach HQ through your laptop. It must stay paired with this phone."
 
 
     /** The name HQ gives the one sign-in that "Sign out everywhere" leaves behind. */
@@ -519,24 +517,51 @@ object SettingsWords {
     enum class BudgetTone { Ok, Warning, Exceeded }
 
     /** One budget as the Spending page draws it: its name and what it covers, how much is used, a bar, and where it stands. */
-    data class BudgetCard(val title: String, val covers: String, val used: String, val fraction: Float, val stand: String, val tone: BudgetTone)
+    data class BudgetCard(val title: String, val covers: String, val used: String, val fraction: Float, val stand: String, val tone: BudgetTone, val resetNote: String? = null)
 
-    fun budgetCards(b: JSONObject?, now: Instant): List<BudgetCard> = b.arr("budgets").items().map {
+    /** "openrouter" reads "OpenRouter"; a name nobody mapped is only capitalised. */
+    fun serviceName(id: String): String = SERVICE_NAMES[id.lowercase()] ?: id.replaceFirstChar(Char::uppercase)
+
+    private val SERVICE_NAMES = mapOf("openrouter" to "OpenRouter", "anthropic" to "Anthropic", "openai" to "OpenAI", "google" to "Google", "ollama" to "Ollama", "copilot" to "GitHub Copilot")
+
+    /** "provider:openrouter" reads "OpenRouter only", "model:anthropic/claude-x" reads "claude-x only", and a global budget reads "All AI spending". */
+    fun scopeTitle(w: Words, scope: String): String = when {
+        scope == "global" || scope.isBlank() -> w.s(R.string.spend_scope_all)
+        scope.startsWith("provider:") -> w.s(R.string.spend_scope_service, serviceName(scope.removePrefix("provider:")))
+        scope.startsWith("model:") -> w.s(R.string.spend_scope_model, scope.removePrefix("model:").substringAfterLast('/'))
+        scope.startsWith("origin:") -> w.s(R.string.spend_scope_origin, scope.removePrefix("origin:"))
+        else -> scope
+    }
+
+    fun budgetCards(w: Words, b: JSONObject?, now: Instant, zone: ZoneId = ZoneId.systemDefault()): List<BudgetCard> = b.arr("budgets").items().map {
         val spent = numOrNull(it, "spent_usd") ?: 0.0
         val limit = numOrNull(it, "limit_usd")
         val pct = numOrNull(it, "pct") ?: if (limit != null && limit > 0) spent / limit * PERCENT else 0.0
         val tone = when (it.optString("state")) { "warning", "warn" -> BudgetTone.Warning; "exceeded", "blocked" -> BudgetTone.Exceeded; else -> BudgetTone.Ok }
-        val state = when (tone) { BudgetTone.Ok -> "Within budget"; BudgetTone.Warning -> "Past the alert threshold"; BudgetTone.Exceeded -> "Limit reached" }
-        val resets = numOrNull(it, "resets_at")?.let { at -> ", resets in ${span((at - now.epochSecond) / SECONDS_PER_HOUR)}" }.orEmpty()
-        val period = when (it.optString("period")) { "day" -> "daily"; "week" -> "weekly"; "month" -> "monthly"; else -> it.optString("period") }
-        val action = it.optString("action").takeIf { a -> a.isNotBlank() }?.let { a -> ", then $a" }.orEmpty()
+        val resetsAt = numOrNull(it, "resets_at")?.toLong()
+        val span = resetsAt?.let { at -> span(w, (at - now.epochSecond).toDouble() / SECONDS_PER_HOUR) }
+        val stand = when (tone) {
+            BudgetTone.Ok -> if (span == null) w.s(R.string.spend_stand_ok) else w.s(R.string.spend_stand_ok_resets, span)
+            BudgetTone.Warning -> if (span == null) w.s(R.string.spend_stand_warn) else w.s(R.string.spend_stand_warn_resets, span)
+            BudgetTone.Exceeded -> if (span == null) w.s(R.string.spend_stand_exceeded) else w.s(R.string.spend_stand_exceeded_resets, span)
+        }
+        val period = it.optString("period")
+        val action = it.optString("action")
+        val covers = when (period) {
+            "day" -> when (action) { "block" -> R.string.spend_covers_day_block; "notify", "alert", "warn" -> R.string.spend_covers_day_notify; else -> R.string.spend_covers_day }
+            "week" -> when (action) { "block" -> R.string.spend_covers_week_block; "notify", "alert", "warn" -> R.string.spend_covers_week_notify; else -> R.string.spend_covers_week }
+            "month" -> when (action) { "block" -> R.string.spend_covers_month_block; "notify", "alert", "warn" -> R.string.spend_covers_month_notify; else -> R.string.spend_covers_month }
+            else -> null
+        }
+        val midnightUtc = period == "day" && resetsAt != null && resetsAt % 86_400L == 0L
         BudgetCard(
-            it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase),
-            it.optString("scope").ifBlank { "global" } + ", " + period + action,
+            scopeTitle(w, it.optString("scope")),
+            covers?.let(w::s).orEmpty(),
             "${UsageWords.usd(spent)} of ${UsageWords.usd(limit)} (${Math.round(pct)}%)",
             (pct / PERCENT).coerceIn(0.0, 1.0).toFloat(),
-            state + resets,
+            stand,
             tone,
+            if (midnightUtc) w.s(R.string.spend_reset_utc_here, w.clock(Instant.ofEpochSecond(resetsAt!!), zone)) else null,
         )
     }
 
@@ -544,26 +569,26 @@ object SettingsWords {
     fun noBudgets(b: JSONObject?): String =
         if ((numOrNull(b, "background_run_usd") ?: 0.0) > 0.0) "No budgets are set." else "No budgets are set, so nothing is limited."
 
-    /** Hours as the board writes them: under an hour "<1h", under a day "9h", then "3 days". */
-    fun span(hours: Double): String = when {
-        !hours.isFinite() || hours < 1 -> "<1h"
-        hours < HOURS_PER_DAY -> "${Math.round(hours)}h"
-        else -> Math.round(hours / HOURS_PER_DAY).coerceAtLeast(1).let { d -> "$d day${if (d == 1L) "" else "s"}" }
+    /** Hours the way the person reads them: "under 1 h", "9 h", then "3 days". */
+    fun span(w: Words, hours: Double): String = when {
+        !hours.isFinite() || hours < 1 -> w.s(R.string.spend_span_under_hour)
+        hours < HOURS_PER_DAY -> w.s(R.string.spend_span_hours, Math.round(hours).toInt())
+        else -> Math.round(hours / HOURS_PER_DAY).coerceAtLeast(1).toInt().let { d -> w.n(R.plurals.spend_span_days, d, d) }
     }
 
     /** The month so far, where it ends, and when it resets; one line saying so when nothing has been spent yet. Null when the route gave no month. */
     data class Forecast(val rows: List<FactRow>, val note: String?)
 
-    fun forecast(f: JSONObject?): Forecast? {
+    fun forecast(w: Words, f: JSONObject?): Forecast? {
         val m = f.obj("month") ?: return null
         val spent = numOrNull(m, "spent_this_period") ?: 0.0
-        if (numOrNull(m, "rate_per_hour") == null && spent <= 0.0) return Forecast(emptyList(), "No spend recorded yet, so there is nothing to forecast.")
-        val rough = if (m.optString("confidence") == "low") "Not much history yet, so this is a rough guess." else null
+        if (numOrNull(m, "rate_per_hour") == null && spent <= 0.0) return Forecast(emptyList(), w.s(R.string.spend_forecast_none))
+        val rough = if (m.optString("confidence") == "low") w.s(R.string.spend_forecast_rough) else null
         return Forecast(
             listOf(
-                FactRow("Spent so far", UsageWords.usd(spent)),
-                FactRow("Projected month end", UsageWords.usd(numOrNull(m, "projected_period_total")), rough),
-                FactRow("Resets in", numOrNull(m, "hours_to_reset")?.let(::span) ?: "-"),
+                FactRow(w.s(R.string.spend_forecast_spent), UsageWords.usd(spent)),
+                FactRow(w.s(R.string.spend_forecast_total), UsageWords.usd(numOrNull(m, "projected_period_total")), rough),
+                FactRow(w.s(R.string.spend_forecast_resets), numOrNull(m, "hours_to_reset")?.let { h -> span(w, h) } ?: "-"),
             ),
             null,
         )

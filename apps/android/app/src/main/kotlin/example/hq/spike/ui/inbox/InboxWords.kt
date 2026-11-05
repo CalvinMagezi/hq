@@ -151,7 +151,7 @@ object InboxWords {
         }
     }
 
-    private fun parse(value: String): Instant? = try { OffsetDateTime.parse(value).toInstant() } catch (e: DateTimeParseException) { null }
+    private fun parse(value: String): Instant? = example.hq.spike.data.Instants.parse(value)
 
     /** "now", "2 min ago", "1 hour ago", "3 days ago": the age in a card's meta line. */
     fun ago(createdAt: String, now: Instant = Instant.now()): String {

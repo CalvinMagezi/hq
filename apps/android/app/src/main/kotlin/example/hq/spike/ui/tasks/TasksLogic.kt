@@ -122,14 +122,22 @@ object TasksLogic {
 
     /** "2d", or "5h" within a day, from the server's `YYYY-MM-DD HH:MM:SS` UTC time. */
     fun stuckFor(since: String?, now: LocalDateTime): String? {
-        val then = try { LocalDateTime.parse(since?.replace(' ', 'T') ?: return null) } catch (e: DateTimeParseException) { return null }
+        val then = example.hq.spike.data.Instants.parseUtc(since) ?: return null
         val hours = Duration.between(then, now).toHours().coerceAtLeast(0)
         return if (hours >= 24) "${hours / 24}d" else if (hours < 1) "<1h" else "${hours}h"
     }
 
+    /** "Claude, on T-4" for one helper, "Claude on T-4, and 1 more" for several; the task shows as its board number. */
+    fun stripLine(w: Words, sessions: List<example.hq.spike.data.HqClient.WorkSession>, tasks: List<TaskItem>): String {
+        val first = sessions.first()
+        val helper = example.hq.spike.ui.helpers.HelperWords.agentName(first.harness.ifBlank { first.actor })
+        val task = tasks.firstOrNull { it.id == first.taskId }?.displayId ?: first.cwd.trimEnd('/').substringAfterLast('/').ifBlank { first.taskId }
+        return if (sessions.size == 1) w.s(R.string.tasks_strip_first, helper, task) else w.s(R.string.tasks_strip_more, helper, task, sessions.size - 1)
+    }
+
     /** The third line of an All row: what it is waiting on, who it is for, how far along, and when. */
     fun allMeta(w: Words, t: TaskItem, today: LocalDate, working: Boolean, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)): String {
-        val forWho = t.assignees.firstOrNull()?.let { "for $it" }
+        val forWho = t.assignees.firstOrNull()?.let { if (it.equals("hq", ignoreCase = true)) w.s(R.string.tasks_for_hq) else "for $it" }
         val tag = t.tags.firstOrNull()
         val parts = when {
             t.archivedAt != null -> listOfNotNull("Archived " + (readyAgo(t.archivedAt, now) ?: "earlier"))
@@ -137,7 +145,7 @@ object TasksLogic {
             t.status == "blocked" -> listOfNotNull(t.waitingOn?.takeIf { it.isNotBlank() }?.let { "Waiting on $it" }, t.blockedReason?.takeIf { it.isNotBlank() })
             t.status == "ready_for_review" -> listOfNotNull(forWho, readyAgo(t.readyAt, now)?.let { "moved $it" })
             else -> listOfNotNull(
-                "HQ is working on it".takeIf { working },
+                w.s(R.string.tasks_hq_working).takeIf { working },
                 Counts.progress(w, t.subtaskDone, t.subtaskCount).takeIf { t.subtaskCount > 0 },
                 dueWords(t.dueDate, today), forWho, tag,
             )
@@ -198,7 +206,7 @@ object TasksLogic {
 
     /** "3 h ago" from the server's `YYYY-MM-DD HH:MM:SS` UTC time. */
     fun readyAgo(readyAt: String?, now: LocalDateTime): String? {
-        val then = try { LocalDateTime.parse(readyAt?.replace(' ', 'T') ?: return null) } catch (e: DateTimeParseException) { return null }
+        val then = example.hq.spike.data.Instants.parseUtc(readyAt) ?: return null
         val minutes = Duration.between(then, now).toMinutes().coerceAtLeast(0)
         return when {
             minutes < 1 -> "just now"

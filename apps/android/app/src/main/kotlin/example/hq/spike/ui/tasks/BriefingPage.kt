@@ -82,8 +82,8 @@ private fun Body(b: Briefing, name: String, onTask: (BriefTask) -> Unit, onNote:
         }
         Label("Contributors")
         if (b.contributors.isEmpty()) Text(BriefingWords.NO_AUTHOR, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-        b.contributors.forEach { c -> Entry(c.actor, BriefingWords.contributorLine(c, now), null, null) }
-        Text(BriefingWords.gapsLine(b), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+        b.contributors.forEach { c -> Entry(c.actor, BriefingWords.contributorLine(example.hq.spike.ui.shell.rememberWords(), c, now), null, null) }
+        Text(BriefingWords.gapsLine(example.hq.spike.ui.shell.rememberWords(), b), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
         if (b.notes.isNotEmpty()) {
             Label("Recent notes")
             b.notes.forEach { n -> NoteRow(n, now) { onNote(n.path) } }

@@ -147,7 +147,7 @@ private fun title(s: PairingScreen) = when (s) {
 internal fun TopBar(title: String, onBack: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
         IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = onBack)
-        Text(title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+        Text(title, style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
     }
 }
 
@@ -244,7 +244,7 @@ private fun PeerRow(peer: BridgePeer, onRemove: () -> Unit) {
     val now = System.currentTimeMillis() / MS_PER_SEC
     Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("peer-${peer.id.take(8)}"), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-            Text(peer.name.ifBlank { "Unnamed device" }, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(peer.name.ifBlank { "Unnamed device" }, style = HqType.BodyBold, color = Mts.Ink)
             Text(PairingWords.peerLine(peer, now), style = HqType.BodySm, color = Mts.InkMuted)
         }
         TextButton(onClick = onRemove) { Text(stringResource(R.string.outbox_remove), color = Mts.Ink, style = HqType.BodySmBold) }

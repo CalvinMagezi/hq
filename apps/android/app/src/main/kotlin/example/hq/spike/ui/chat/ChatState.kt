@@ -304,7 +304,7 @@ object ChatTime {
         parse(at)?.atZone(zone)?.toLocalTime()?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")).orEmpty()
 
     /** hq writes `+00:00`, not `Z`; Instant.parse takes only `Z` before Android 14, so the offset form is read instead. */
-    private fun parse(value: String): Instant? = try { java.time.OffsetDateTime.parse(value).toInstant() } catch (e: DateTimeParseException) { null }
+    private fun parse(value: String): Instant? = example.hq.spike.data.Instants.parse(value)
 
     private const val WEEK_DAYS = 7L
     private const val MINUTES_PER_HOUR = 60L

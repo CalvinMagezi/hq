@@ -1,5 +1,7 @@
 package example.hq.spike.testing
 
+import example.hq.spike.testing.testWords
+
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import example.hq.spike.ui.shell.Words

@@ -1,11 +1,20 @@
 package example.hq.spike.ui.startup
 
+import example.hq.spike.testing.testWords
+
 import example.hq.spike.data.HqStatus
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class StartupTest {
+    @org.junit.Before fun english() = java.util.Locale.setDefault(java.util.Locale.ENGLISH)
+
     @Test fun theFirstStartGetsItsOwnScreenAndLaterOnesKeepTheApp() {
         assertEquals(Startup.Starting, StartupWords.decide(HqStatus.Starting(12), firstLaunchDone = false))
         assertEquals(Startup.None, StartupWords.decide(HqStatus.Starting(12), firstLaunchDone = true))
@@ -21,9 +30,9 @@ class StartupTest {
 
     @Test fun theBoxSaysWhenHqLastStartedAndHowItEnded() {
         val at = java.time.Instant.parse("2026-10-22T14:31:00Z").toEpochMilli()
-        assertEquals(listOf("Health check timed out after 60 s.", "Last start: 14:31 \u00b7 exit code none"), StartupWords.failedLines(at, null, ZoneOffset.UTC))
-        assertEquals("Last start: 14:31 \u00b7 exit code 137", StartupWords.failedLines(at, 137, ZoneOffset.UTC)[1])
-        assertEquals("Last start: never \u00b7 exit code none", StartupWords.failedLines(0, null)[1])
+        assertEquals(listOf("Health check timed out after 60 s.", "Last start: 2:31 PM \u00b7 exit code none"), StartupWords.failedLines(testWords(), at, null, ZoneOffset.UTC))
+        assertEquals("Last start: 2:31 PM \u00b7 exit code 137", StartupWords.failedLines(testWords(), at, 137, ZoneOffset.UTC)[1])
+        assertEquals("Last start: never \u00b7 exit code none", StartupWords.failedLines(testWords(), 0, null)[1])
     }
 
     @Test fun aCopiedReportKeepsTheEndOfTheLogWithTokensBlankedAndLinesCut() {

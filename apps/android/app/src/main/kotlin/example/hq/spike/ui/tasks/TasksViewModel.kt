@@ -240,7 +240,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                     moved.forEach { t -> BulkEdit.patchFor(Bulk.Status(t.status), t.copy(status = "complete"))?.let { client.patchTask(t.id, it) } }
                     refresh()
                 }
-            } else say(BulkEdit.summary(change, results))
+            } else say(BulkEdit.summary(example.hq.spike.ui.shell.Words.of(getApplication()), change, results))
             refresh()
         }
     }

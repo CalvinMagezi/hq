@@ -1,13 +1,22 @@
 package example.hq.spike.ui.usage
 
+import example.hq.spike.testing.testWords
+
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /** The shapes are what /api/settings, /api/usage/providers, /api/copilot-usage and /api/budgets send, for a config whose first choice runs on GitHub Copilot. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class UsageWordsTest {
+    @org.junit.Before fun english() = java.util.Locale.setDefault(java.util.Locale.ENGLISH)
+
     private fun entry(name: String, host: String, model: String, primary: Boolean = false, fallback: Int? = null) =
         """{"name":"$name","kind":"openai-compatible","model":"$model","effort":null,"endpoint_host":"$host","primary":$primary,"fallback_position":${fallback ?: "null"}}"""
 
@@ -72,7 +81,7 @@ class UsageWordsTest {
     }
 
     @Test fun theChipShowsCreditsLeftOnTheServiceInUse() {
-        val chip = UsageWords.chip(UsageSnapshot(settings = settings, providers = providers(4.2), copilot = copilot, budgets = budgets(budget("all", 40, "ok"))))!!
+        val chip = UsageWords.chip(testWords(), UsageSnapshot(settings = settings, providers = providers(4.2), copilot = copilot, budgets = budgets(budget("all", 40, "ok"))))!!
         assertEquals("Copilot 912 left", chip.label)
         assertEquals("GitHub Copilot credits: 912 of 1.5k left, 8/h over 6h", chip.title)
         assertEquals(ChipTarget.AiService, chip.target)
@@ -80,35 +89,35 @@ class UsageWordsTest {
     }
 
     @Test fun aBudgetThatNeedsAttentionOutranksABalance() {
-        val warn = UsageWords.chip(UsageSnapshot(settings = settings, copilot = copilot, budgets = budgets(budget("all", 10, "ok"), budget("openrouter", 85, "warning", "provider:openrouter"), budget("weekly", 120, "exceeded"))))!!
-        assertEquals("weekly 120%", warn.label)
+        val warn = UsageWords.chip(testWords(), UsageSnapshot(settings = settings, copilot = copilot, budgets = budgets(budget("all", 10, "ok"), budget("openrouter", 85, "warning", "provider:openrouter"), budget("weekly", 120, "exceeded"))))!!
+        assertEquals("Today 120%", warn.label)
         assertEquals(ChipTone.Exceeded, warn.tone)
         assertEquals(ChipTarget.Spending, warn.target)
-        val soft = UsageWords.chip(UsageSnapshot(settings = settings, copilot = copilot, budgets = budgets(budget("openrouter", 85, "warning", "provider:openrouter"))))!!
-        assertEquals("openrouter 85%", soft.label)
+        val soft = UsageWords.chip(testWords(), UsageSnapshot(settings = settings, copilot = copilot, budgets = budgets(budget("openrouter", 85, "warning", "provider:openrouter"))))!!
+        assertEquals("OpenRouter 85%", soft.label)
         assertEquals(ChipTone.Warning, soft.tone)
-        assertTrue(soft.title.contains("on provider:openrouter"))
+        assertTrue(soft.title.contains("Spending limit"))
     }
 
     @Test fun whenCopilotCannotBeReadTheNextServiceInTheChainShows() {
         val off = JSONObject("""{"active":false}""")
-        assertEquals("OpenRouter $4.20 left", UsageWords.chip(UsageSnapshot(settings = settings, providers = providers(4.2), copilot = off))!!.label)
-        assertEquals("OpenRouter $0.31 today", UsageWords.chip(UsageSnapshot(settings = settings, providers = providers(null), copilot = off))!!.label)
+        assertEquals("OpenRouter $4.20 left", UsageWords.chip(testWords(), UsageSnapshot(settings = settings, providers = providers(4.2), copilot = off))!!.label)
+        assertEquals("OpenRouter $0.31 today", UsageWords.chip(testWords(), UsageSnapshot(settings = settings, providers = providers(null), copilot = off))!!.label)
     }
 
     @Test fun aServiceWithNoBalanceShowsWhatItCostToday() {
         val s = JSONObject("""{"backends":{"configured":true,"primary":"deepseek","fallbacks":[],"entries":[${entry("deepseek", "api.deepseek.com", "deepseek-flash", primary = true)}]}}""")
-        assertEquals("DeepSeek $0.42 today", UsageWords.chip(UsageSnapshot(settings = s, providers = providers(null)))!!.label)
+        assertEquals("DeepSeek $0.42 today", UsageWords.chip(testWords(), UsageSnapshot(settings = s, providers = providers(null)))!!.label)
     }
 
     @Test fun nothingKnownMeansNoChip() {
-        assertNull(UsageWords.chip(UsageSnapshot()))
-        assertNull(UsageWords.chip(UsageSnapshot(settings = settings, copilot = JSONObject("""{"active":true,"unavailable":true,"note":"GitHub refused the read"}"""))))
+        assertNull(UsageWords.chip(testWords(), UsageSnapshot()))
+        assertNull(UsageWords.chip(testWords(), UsageSnapshot(settings = settings, copilot = JSONObject("""{"active":true,"unavailable":true,"note":"GitHub refused the read"}"""))))
     }
 
     @Test fun withNoOrderSetTheWebAppsOrderApplies() {
         val none = JSONObject("""{"backends":{"configured":false}}""")
-        assertEquals("Copilot 912 left", UsageWords.chip(UsageSnapshot(settings = none, providers = providers(4.2), copilot = copilot))!!.label)
+        assertEquals("Copilot 912 left", UsageWords.chip(testWords(), UsageSnapshot(settings = none, providers = providers(4.2), copilot = copilot))!!.label)
     }
 
     @Test fun numbersAreShortAndExact() {
@@ -127,7 +136,7 @@ class UsageWordsTest {
         // What the server sends for a seat with no credit allowance: a quota of zero and no burn.
         val unmetered = JSONObject("""{"active":true,"quota":{"entitlement":0,"credits_used":0,"remaining":0,"percent_remaining":0,"overage_permitted":false},"note":"This plan is not metered."}""")
         assertNull(UsageWords.copilotChip(unmetered))
-        assertEquals("OpenRouter $4.20 left", UsageWords.chip(UsageSnapshot(settings = settings, providers = providers(4.2), copilot = unmetered))!!.label)
+        assertEquals("OpenRouter $4.20 left", UsageWords.chip(testWords(), UsageSnapshot(settings = settings, providers = providers(4.2), copilot = unmetered))!!.label)
     }
 
     @Test fun aBackendThatIsSwitchedOffIsNotPartOfTheOrder() {
@@ -148,13 +157,13 @@ class UsageWordsTest {
     @Test fun aServiceWithNothingRecordedDoesNotHideTheNextOnesBalance() {
         val s = JSONObject("""{"backends":{"configured":true,"primary":"deepseek","fallbacks":["haiku"],"entries":[${entry("deepseek", "api.deepseek.com", "deepseek-flash", primary = true)},${entry("haiku", "openrouter.ai", "x", fallback = 0)}]}}""")
         val p = JSONObject("""{"backends":[{"backend":"deepseek","adapter":"deepseek","status":"no_key","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0}},{"backend":"haiku","adapter":"openrouter","status":"ok","provider":{"balance":{"amount":4.2,"currency":"USD"},"spend":{"today":0.31},"limit_remaining":null},"ledger":{"today":0.3}}]}""")
-        assertEquals("OpenRouter $4.20 left", UsageWords.chip(UsageSnapshot(settings = s, providers = p))!!.label)
+        assertEquals("OpenRouter $4.20 left", UsageWords.chip(testWords(), UsageSnapshot(settings = s, providers = p))!!.label)
     }
 
     @Test fun aBalanceInAnotherCurrencyKeepsItsCode() {
         val s = JSONObject("""{"backends":{"configured":true,"primary":"deepseek","fallbacks":[],"entries":[${entry("deepseek", "api.deepseek.com", "deepseek-flash", primary = true)}]}}""")
         val p = JSONObject("""{"backends":[{"backend":"deepseek","adapter":"deepseek","status":"ok","provider":{"balance":{"amount":50.0,"currency":"CNY"},"spend":null,"limit_remaining":null},"ledger":{"today":0.0}}]}""")
-        assertEquals("DeepSeek 50.00 CNY left", UsageWords.chip(UsageSnapshot(settings = s, providers = p))!!.label)
+        assertEquals("DeepSeek 50.00 CNY left", UsageWords.chip(testWords(), UsageSnapshot(settings = s, providers = p))!!.label)
         assertEquals("$4.20", UsageWords.money(4.2, "USD"))
         assertEquals("$4.20", UsageWords.money(4.2, null))
     }
@@ -169,14 +178,14 @@ class UsageWordsTest {
     }
 
     @Test fun aFailedUsageReadIsNotSaidAsIfTheAiWereDown() {
-        assertEquals("Balance not readable", UsageWords.statusWords("refused"))
-        assertEquals("Usage not readable", UsageWords.statusWords("error"))
+        assertEquals("Balance not readable", UsageWords.statusWords(testWords(), "refused"))
+        assertEquals("Usage not readable", UsageWords.statusWords(testWords(), "error"))
     }
 
     @Test fun aStatusIsSaidInPlainWords() {
-        assertEquals("Subscription", UsageWords.statusWords("subscription"))
-        assertEquals("No key set", UsageWords.statusWords("no_key"))
-        assertEquals("", UsageWords.statusWords("something-new"))
+        assertEquals("Subscription", UsageWords.statusWords(testWords(), "subscription"))
+        assertEquals("No key set", UsageWords.statusWords(testWords(), "no_key"))
+        assertEquals("Other", UsageWords.statusWords(testWords(), "something-new"))
     }
 
     @Test fun aNegativeAmountKeepsItsSignBeforeTheDollar() {

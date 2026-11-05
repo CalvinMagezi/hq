@@ -69,13 +69,13 @@ class AllTabTest {
         assertEquals("Waiting on you \u00b7 needs a reboot window", TasksLogic.allMeta(testWords(), t("1", "blocked").copy(waitingOn = "you", blockedReason = "needs a reboot window"), today, false, now))
         assertEquals("needs a reboot window", TasksLogic.allMeta(testWords(), t("1", "blocked").copy(blockedReason = "needs a reboot window"), today, false, now))
         val ready = t("2", "ready_for_review").copy(assignees = listOf("hq"), readyAt = "2026-10-22 09:00:00", updatedAt = "2026-10-22 11:59:00")
-        assertEquals("for hq \u00b7 moved 3 h ago", TasksLogic.allMeta(testWords(), ready, today, false, now))
-        assertEquals("for hq", TasksLogic.allMeta(testWords(), ready.copy(readyAt = null), today, false, now))
+        assertEquals("for HQ \u00b7 moved 3 h ago", TasksLogic.allMeta(testWords(), ready, today, false, now))
+        assertEquals("for HQ", TasksLogic.allMeta(testWords(), ready.copy(readyAt = null), today, false, now))
     }
 
     @Test fun anOpenTaskNamesItsProgressDueDateAndOwner() {
         val task = t("3").copy(subtaskCount = 3, subtaskDone = 1, dueDate = "2026-10-24", assignees = listOf("hq"), tags = listOf("mobile-first"))
-        assertEquals("HQ is working on it \u00b7 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done \u00b7 due Saturday \u00b7 for hq \u00b7 mobile-first", TasksLogic.allMeta(testWords(), task, today, true, now))
+        assertEquals("HQ is working on it \u00b7 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done \u00b7 due Saturday \u00b7 for HQ \u00b7 mobile-first", TasksLogic.allMeta(testWords(), task, today, true, now))
         assertEquals("", TasksLogic.allMeta(testWords(), t("4"), today, false, now))
     }
 

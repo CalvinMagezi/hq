@@ -10,7 +10,7 @@ object NoteTime {
     private const val MINUTES_PER_HOUR = 60L
     private const val HOURS_PER_DAY = 24L
 
-    private fun parse(value: String): Instant? = try { OffsetDateTime.parse(value).toInstant() } catch (e: DateTimeParseException) { null }
+    private fun parse(value: String): Instant? = example.hq.spike.data.Instants.parse(value)
 
     /** "now", "5m", "3h", "1d": the short form at the end of a list row. Blank when the time is not known. */
     fun short(mtime: String, now: Instant = Instant.now()): String {
