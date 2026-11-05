@@ -176,16 +176,17 @@ object MovedPhone {
         listOf(DB, "$DB-wal", "$DB-shm").forEach { File(vault, it).delete() }
     }
 
-    /** Runs `hq vault moved` against the copied vault. True when it ended cleanly. */
-    fun forget(context: Context): Boolean {
+    /** Runs `hq vault moved` against [vault] (the live one by default). True when it ended cleanly. */
+    fun forget(context: Context, vault: File? = null): Boolean {
         val app = context.applicationContext
         val home = File(app.filesDir, "hqhome")
+        val target = vault ?: File(home, ".vault")
         val lib = File(app.applicationInfo.nativeLibraryDir, "libhq.so")
         return try {
             val pb = ProcessBuilder(args(lib.path)).redirectErrorStream(true).redirectOutput(java.io.File(app.cacheDir, "moved.out"))
             pb.environment().apply {
                 clear()
-                putAll(env(home.path, app.cacheDir.path, File(home, "config.yaml").path, File(home, ".vault").path, System.getenv("ANDROID_ROOT"), System.getenv("ANDROID_DATA")))
+                putAll(env(home.path, app.cacheDir.path, File(home, "config.yaml").path, target.path, System.getenv("ANDROID_ROOT"), System.getenv("ANDROID_DATA")))
             }
             val child = pb.start()
             child.outputStream.close()

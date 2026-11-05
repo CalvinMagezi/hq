@@ -361,6 +361,11 @@ fn open_thread(
         .unwrap_or_default();
 
     let Some(t) = tid.as_deref() else {
+        // No chat to put it in: give the id back, so the outbox's next send is not taken for a repeat.
+        if let Some(id) = claimed {
+            let _ = db
+                .with_conn(|c| hq_db::client_ids::release(c, hq_db::client_ids::KIND_MESSAGE, id));
+        }
         state.broadcast(&json!({"type": "turn_start", "thread_id": tid}).to_string());
         return (tid, history);
     };

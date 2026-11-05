@@ -32,6 +32,7 @@ export const OUTBOX_LIMIT = 100
 export const MESSAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
 export const OUTBOX_NAME = 'hq-outbox'
+const OUTBOX_LOCK = 'hq-outbox'
 const keyFor = (hqId: string) => keyedName(OUTBOX_NAME, hqId)
 
 export const browserStore: OutboxStore = {
@@ -81,7 +82,10 @@ export function createOutbox(store: OutboxStore, now: () => number = Date.now) {
   // added while the drain is sending must never be written over by the drain's older copy.
   let chain: Promise<unknown> = Promise.resolve()
   function locked<T>(fn: () => Promise<T>): Promise<T> {
-    const run = chain.then(fn, fn)
+    // Tabs share the store: a Web Lock keeps one tab's change from writing over another's.
+    const across = (): Promise<T> =>
+      typeof navigator !== 'undefined' && navigator.locks ? (navigator.locks.request(OUTBOX_LOCK, fn) as Promise<T>) : fn()
+    const run = chain.then(across, across)
     chain = run.catch(() => undefined)
     return run
   }

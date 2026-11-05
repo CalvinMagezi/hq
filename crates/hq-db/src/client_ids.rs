@@ -7,6 +7,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 /// How long an id is remembered; an outbox gives up on a message after a day.
 pub const KEEP_DAYS: i64 = 7;
+/// A claim still without its item after this long was cut off (a crash, a failed save): the next
+/// send of that id makes the item instead of being taken for a repeat.
+pub const STALE_CLAIM_SECS: i64 = 5 * 60;
 /// Ids longer than this are not ids a client made; they are not remembered.
 pub const MAX_ID_CHARS: usize = 128;
 
@@ -29,6 +32,11 @@ pub fn claim(conn: &Connection, kind: &str, client_id: &str) -> Result<Claim> {
     conn.execute(
         "DELETE FROM client_ids WHERE created_at < ?1",
         params![cutoff],
+    )?;
+    let stale = (Utc::now() - Duration::seconds(STALE_CLAIM_SECS)).to_rfc3339();
+    conn.execute(
+        "DELETE FROM client_ids WHERE item_id = '' AND created_at < ?1",
+        params![stale],
     )?;
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO client_ids (kind, client_id, created_at) VALUES (?1, ?2, ?3)",
@@ -122,6 +130,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(claim(&c, KIND_MESSAGE, "m1").unwrap(), Claim::New);
+    }
+
+    #[test]
+    fn a_claim_cut_off_before_its_item_was_made_is_tried_again_later() {
+        let c = conn();
+        assert_eq!(claim(&c, KIND_NOTE, "n1").unwrap(), Claim::New);
+        let old = (Utc::now() - Duration::seconds(STALE_CLAIM_SECS + 1)).to_rfc3339();
+        c.execute("UPDATE client_ids SET created_at = ?1", params![old])
+            .unwrap();
+        assert_eq!(claim(&c, KIND_NOTE, "n1").unwrap(), Claim::New);
     }
 
     #[test]

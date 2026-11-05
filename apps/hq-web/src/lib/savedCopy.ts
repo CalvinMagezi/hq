@@ -24,17 +24,23 @@ function readLastId(): string | null {
   }
 }
 
-let current: string | null = typeof window === 'undefined' ? null : readLastId()
+// The id this page last knew. It is trusted only once this page load's own hello agrees, or after
+// HELLO_WAIT_MS with no answer (offline), so a page now fronting another HQ never reads the old copy.
+const stored: string | null = typeof window === 'undefined' ? null : readLastId()
+let current: string | null = null
 let resolveReady: (id: string | null) => void = () => {}
-let ready: Promise<string | null> = current
-  ? Promise.resolve(current)
-  : new Promise((resolve) => {
-      resolveReady = resolve
-      if (typeof window === 'undefined') return
-      setTimeout(() => resolve(null), HELLO_WAIT_MS)
-      // A first visit asks which HQ this is; imported when needed, since hello reports back here.
-      void import('./hello').then((m) => m.fetchHello())
-    })
+let ready: Promise<string | null> = new Promise((resolve) => {
+  resolveReady = resolve
+  if (typeof window === 'undefined') return resolve(null)
+  setTimeout(() => {
+    // No answer in time: start offline on the copy this browser last kept.
+    if (current === null) current = stored
+    tellWorkerHqId()
+    resolve(current)
+  }, HELLO_WAIT_MS)
+  // Imported when needed, since hello reports back here.
+  void import('./hello').then((m) => m.fetchHello())
+})
 
 /** The HQ this page's stores belong to, or null until /api/hello has said. */
 export function currentHqId(): string | null {
@@ -64,6 +70,7 @@ if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && navigat
  */
 export function noteHqId(id: string, reload: () => void = () => window.location.reload()): boolean {
   if (current === id) return false
+  // The page's first hello: it settles which copy this page uses, the stored id agreeing or not.
   const first = current === null
   try {
     localStorage.setItem(LAST_ID_KEY, id)

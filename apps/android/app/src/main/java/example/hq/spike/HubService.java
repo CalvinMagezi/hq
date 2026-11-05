@@ -55,7 +55,13 @@ public class HubService extends Service {
     private static volatile boolean childActive;
     private static volatile Process caddyProc;
     /** While true the supervisor does not start hq: a restore is replacing the vault it would hold open. */
-    private static volatile boolean held;
+    /** How many callers hold hq stopped (a restore, the moved-phone check, a safe-mode copy); hq starts again at zero. */
+    private static final java.util.concurrent.atomic.AtomicInteger holds = new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicBoolean copyHolding = new java.util.concurrent.atomic.AtomicBoolean();
+
+    private static boolean held() {
+        return holds.get() > 0;
+    }
     private static final long HELD_POLL_MS = 1_000;
 
     /** The notification glyph, looked up by name because the build makes no R class. */
@@ -142,26 +148,26 @@ public class HubService extends Service {
      * ended (at most about 25 s); call it off the main thread. Returns false if it could not be stopped.
      */
     public static boolean holdHq() {
-        held = true;
+        holds.incrementAndGet();
         restartHq();
         Process p = hqProc;
         if (p == null) return true;
         try {
             if (!p.waitFor(FORCE_STOP_AFTER_MS + 5_000, TimeUnit.MILLISECONDS)) {
-                held = false;
+                releaseHq();
                 return false;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            held = false;
+            releaseHq();
             return false;
         }
         return true;
     }
 
-    /** Lets the supervisor start hq again, with whatever mode and credentials are stored by then. */
+    /** Gives back one hold; the supervisor starts hq again, with what is stored by then, once none is left. */
     public static void releaseHq() {
-        held = false;
+        holds.updateAndGet(n -> Math.max(0, n - 1));
     }
 
     /** Asked by the safe-mode screen, which runs in its own process, to stop hq while the database files are copied. */
@@ -185,15 +191,16 @@ public class HubService extends Service {
             return;
         }
         new Thread(() -> {
-            boolean ok = holdHq();
-            if (ok) {
+            // One copy holds at most once; a second request while it runs answers held without another hold.
+            boolean ok = copyHolding.get() || holdHq();
+            if (ok && copyHolding.compareAndSet(false, true)) {
                 Thread timer = new Thread(() -> {
                     try {
                         Thread.sleep(COPY_HOLD_MAX_MS);
                     } catch (InterruptedException e) {
                         // The copy finished first.
                     }
-                    releaseHq();
+                    releaseCopyHold();
                 }, "hq-copy-release");
                 synchronized (LOCK) {
                     if (copyTimer != null) copyTimer.interrupt();
@@ -210,7 +217,12 @@ public class HubService extends Service {
             if (copyTimer != null) copyTimer.interrupt();
             copyTimer = null;
         }
-        releaseHq();
+        releaseCopyHold();
+    }
+
+    /** The copy's own hold goes once, by the screen or by the timer, never another caller's. */
+    private static void releaseCopyHold() {
+        if (copyHolding.compareAndSet(true, false)) releaseHq();
     }
 
     /** True when the running hq child was started in Active mode. */
@@ -306,7 +318,7 @@ public class HubService extends Service {
                 if (pb == null) {
                     if (!saidUnconfigured) Log.i(TAG, name + " not configured, waiting for its files");
                     saidUnconfigured = true;
-                    if (!pause(gen, held && isHq ? HELD_POLL_MS : BACKOFF_MAX_MS)) return;
+                    if (!pause(gen, held() && isHq ? HELD_POLL_MS : BACKOFF_MAX_MS)) return;
                     continue;
                 }
                 long t0 = System.currentTimeMillis();
@@ -356,7 +368,7 @@ public class HubService extends Service {
      * they cannot change the vault, config, bind address or port.
      */
     private ProcessBuilder hqProcess() {
-        if (held) return null;
+        if (held()) return null;
         SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
         WebAssets.sync(this);
         boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));

@@ -92,20 +92,37 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
      * Before HQ runs on a copied vault: checks the database, then makes HQ forget what belonged to the old phone.
      * hq is held stopped meanwhile, so nothing has the database open. A broken database stops here and shows frame 7.
      */
+    /** Whether the moved check holds HQ stopped (until the old phone is forgotten). */
+    @Volatile private var movedHold = false
+
+    override fun onCleared() {
+        // Leaving first run mid-check never keeps HQ stopped for good.
+        if (movedHold) HubService.releaseHq()
+        super.onCleared()
+    }
+
     private fun prepareMoved(notesOnly: Boolean) {
         mutableUi.update { it.copy(movedChecking = true, error = null) }
         viewModelScope.launch {
             val app = getApplication<Application>()
             val result = withContext(Dispatchers.IO) {
-                val held = HubService.holdHq()
+                // One hold for the whole moved check: kept across a failed try, given back once it succeeds.
+                val held = movedHold || HubService.holdHq()
+                movedHold = held
+                var forgot = false
                 try {
                     if (!held) return@withContext null to false
                     val vault = Moved.vault(app)
                     if (notesOnly) MovedPhone.dropDatabase(vault)
                     val facts = MovedPhone.facts(vault)
-                    facts to (facts.databaseOk && MovedPhone.forget(app))
+                    forgot = facts.databaseOk && MovedPhone.forget(app)
+                    facts to forgot
                 } finally {
-                    if (held) HubService.releaseHq()
+                    // Until the old phone's sign-ins are gone HQ stays stopped, so none of them works here.
+                    if (held && forgot) {
+                        HubService.releaseHq()
+                        movedHold = false
+                    }
                 }
             }
             val (facts, forgot) = result

@@ -94,10 +94,12 @@ jobs:
         run: |
           rm -rf promote-android
           mkdir promote-android
-          if ! gh release download "$TAG" --dir promote-android --pattern android-channel.json --pattern android-channel.json.minisig; then
+          # A tag without an Android build is fine; a download that fails for another reason is not.
+          if ! gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx android-channel.json; then
             echo "::notice::$TAG has no Android build; channel-stable keeps its previous Android manifest"
             exit 0
           fi
+          gh release download "$TAG" --dir promote-android --pattern android-channel.json --pattern android-channel.json.minisig
           minisign -V -p release/minisign.pub -m promote-android/android-channel.json -x promote-android/android-channel.json.minisig -q
           [ "$(jq -r .version promote-android/android-channel.json)" = "${TAG#v}" ] || { echo "android manifest version does not match the tag" >&2; exit 1; }
           # The APK goes along so the website can link one fixed address (releases/latest/download/...).
@@ -107,9 +109,17 @@ jobs:
           # A new file from the verified one, signed again: promote sets its own rollout and a higher
           # seq, so a phone can tell it from the release's and never takes an older one back.
           [[ "$ROLLOUT" =~ ^[0-9]+$ ]] && [ "$ROLLOUT" -le 100 ] || { echo "rollout is 0 to 100" >&2; exit 1; }
-          jq --argjson seq "$(date -u +%s)" --argjson rollout "$ROLLOUT" \
+          # Versions withdrawn on the stable channel stay withdrawn: carry its signed list over.
+          withdrawn='[]'
+          mkdir -p promote-android/current
+          if gh release view channel-stable --json assets --jq '.assets[].name' | grep -qx android-channel.json; then
+            gh release download channel-stable --dir promote-android/current --pattern android-channel.json --pattern android-channel.json.minisig
+            minisign -V -p release/minisign.pub -m promote-android/current/android-channel.json -x promote-android/current/android-channel.json.minisig -q
+            withdrawn=$(jq -c '.withdrawn // []' promote-android/current/android-channel.json)
+          fi
+          jq --argjson seq "$(date -u +%s)" --argjson rollout "$ROLLOUT" --argjson kept "$withdrawn" \
             --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '.seq = $seq | .rollout = $rollout | .issued_at = $issued' \
+            '.seq = $seq | .rollout = $rollout | .issued_at = $issued | .withdrawn = (((.withdrawn // []) + $kept) | unique)' \
             promote-android/android-channel.json > promote-android/android-channel.next.json
           mv promote-android/android-channel.next.json promote-android/android-channel.json
           bash scripts/release/sign.sh promote-android/android-channel.json

@@ -182,17 +182,25 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
         return finish(report, &args);
     }
 
+    // The port answers "Starting HQ" (`/api/hello` with the step) while the vault and database open,
+    // then the full router takes it over (`hq_web::hello::StartingServer`).
+    let addr = listen_addr(&bind, port)?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("could not listen on {addr}"))?;
+    let starting = hq_web::hello::StartingServer::new(&config.vault_path, config.profile)?;
+    let serving = tokio::spawn(axum::serve(listener, starting.router()).into_future());
+
     let vault =
         Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
     let db = Arc::new(Database::open(&config.db_path()).context("failed to open database")?);
     hq_agent::install_ledger(db.clone());
     super::skills::sync_builtin_at_start(config);
+    starting.progress.at(STEP_LOADING);
     let state =
         super::start::build_web_state(config, &vault, &db, Some(static_dir.clone()), token, &bind);
-    let addr = listen_addr(&bind, port)?;
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .with_context(|| format!("could not listen on {addr}"))?;
+    starting.progress.at(STEP_ALMOST_READY);
+    starting.ready(hq_web::create_router(state));
 
     report.pid = Some(std::process::id());
     write_state(&WebState {
@@ -202,14 +210,20 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
     });
     finish(report, &args)?;
 
-    let app = hq_web::create_router(state);
     let served = tokio::select! {
-        r = axum::serve(listener, app) => r.context("web server stopped"),
+        r = serving => match r {
+            Ok(r) => r.context("web server stopped"),
+            Err(e) => Err(anyhow::anyhow!("web server stopped: {e}")),
+        },
         () = hq_agent::shutdown::wait_for_shutdown_signal() => Ok(()),
     };
     let _ = std::fs::remove_file(state_path());
     served
 }
+
+/// Start steps the port reports while HQ opens (`hq_web::hello::START_STEPS`).
+const STEP_LOADING: usize = 1;
+const STEP_ALMOST_READY: usize = 2;
 
 /// An HQ server already answers on `port`: describe it as it is, not as this
 /// run's flags would have made it. Asking for a different address than the

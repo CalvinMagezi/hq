@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { currentHqId, keyFor } from '~/lib/savedCopy'
+import { currentHqId, hqIdReady, keyFor } from '~/lib/savedCopy'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { MAX_ATTACHMENTS, isPreviewableImage, rejectReason, uploadChatFile, type ChatAttachment } from '~/lib/chatUploads'
 import type { PendingAttachment } from './AttachmentChips'
@@ -153,4 +153,15 @@ export function restoreDraft(threadId: string, text: string) {
 /** Drops every draft in memory; the saved text goes with the browser's wipe. */
 export function clearDrafts() {
   useDraftStore.setState({ drafts: {} })
+}
+
+// The HQ id is known only once this page's first hello answers, so saved drafts load then.
+if (typeof window !== 'undefined') {
+  void hqIdReady().then(() => {
+    const saved = readSavedText()
+    if (Object.keys(saved).length === 0) return
+    const drafts = { ...useDraftStore.getState().drafts }
+    for (const [key, text] of Object.entries(saved)) if (!drafts[key]?.text) drafts[key] = { text, attachments: drafts[key]?.attachments ?? [] }
+    useDraftStore.setState({ drafts })
+  })
 }

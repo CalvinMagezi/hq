@@ -188,13 +188,17 @@ object Restore {
     private fun restoreZip(app: Context, zip: File, home: File, into: File): RestoreOutcome {
         wipe(into)
         RestoreLogic.unzip(zip, into)
+        // The old phone is forgotten in the unpacked copy, before it replaces anything: a failure here
+        // leaves this phone's vault as it was.
+        if (!MovedPhone.databaseOk(File(into, MovedPhone.DB))) MovedPhone.dropDatabase(into)
+        if (!MovedPhone.forget(app, into)) {
+            wipe(into)
+            return RestoreOutcome.Failed(app.getString(example.hq.spike.R.string.moved_forget_failed))
+        }
         if (!swap(home, into)) {
             wipe(into)
             return RestoreOutcome.Failed("The restored files could not be put in place.")
         }
-        val vault = File(home, ".vault")
-        if (!MovedPhone.databaseOk(File(vault, MovedPhone.DB))) MovedPhone.dropDatabase(vault)
-        if (!MovedPhone.forget(app)) return RestoreOutcome.Failed(app.getString(example.hq.spike.R.string.moved_forget_failed))
         return RestoreOutcome.Done
     }
 
