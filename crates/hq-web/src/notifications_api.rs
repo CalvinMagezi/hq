@@ -66,12 +66,26 @@ fn approval_from_row(row: &rusqlite::Row) -> rusqlite::Result<Option<serde_json:
         .and_then(|a| serde_json::from_str(&a).ok())
         .unwrap_or_default();
     let verb = hq_core::losing::tool_verb(&tool, &args);
+    let thread_id = row
+        .get::<_, Option<String>>(18)?
+        .as_deref()
+        .and_then(web_chat_of)
+        .map(str::to_string);
     Ok(Some(serde_json::json!({
         "tool": tool,
         "args": args,
         "loses": verb.is_some(),
         "verb": verb,
+        "thread_id": thread_id,
     })))
+}
+
+/// The web chat an owner approval came from, read from its key (`owner-approval:web:<thread>:...`),
+/// so that chat shows the same card. `None` for another chat app or a chat not saved yet.
+fn web_chat_of(dedup_key: &str) -> Option<&str> {
+    let rest = dedup_key.strip_prefix("owner-approval:web:")?;
+    let (thread, _) = rest.split_once(':')?;
+    (!thread.is_empty() && thread != "new").then_some(thread)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -680,6 +694,20 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_names_the_web_chat_it_came_from() {
+        assert_eq!(
+            web_chat_of("owner-approval:web:t-42:bash:abc"),
+            Some("t-42")
+        );
+        assert_eq!(web_chat_of("owner-approval:web:new:bash:abc"), None);
+        assert_eq!(
+            web_chat_of("owner-approval:relay:telegram:9:bash:abc"),
+            None
+        );
+        assert_eq!(web_chat_of("disk-watchdog-2026-11-05"), None);
+    }
+
+    #[test]
     fn a_notice_to_look_at_offers_only_dismiss() {
         let db = hq_db::Database::open_memory().unwrap();
         let item = hq_core::types::ValueItem::new(
@@ -722,6 +750,10 @@ mod tests {
                 .unwrap()
         };
         let d = approval(&delete);
+        assert!(
+            d["thread_id"].is_null(),
+            "an item with no web chat key names no chat"
+        );
         assert_eq!(d["tool"], "task_delete");
         assert_eq!(d["args"]["id"], "t-1");
         assert_eq!(d["loses"], true);
