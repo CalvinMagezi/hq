@@ -334,10 +334,15 @@ pub(crate) fn read_note(vault: &Path, rel: &str, abs: &Path, lite: bool) -> Resp
         TEXT_MAX_BYTES
     };
     match read_capped(abs, size, cap) {
-        Ok(content) => Json(json!({
-            "path": rel, "content": content, "isDir": false, "truncated": size > cap,
-        }))
-        .into_response(),
+        Ok(content) => {
+            // The version the editor starts from; a save names it as `base` (web wave 4, notes rule 3).
+            let hash = (size <= cap).then(|| hq_db::search::content_hash(&content));
+            Json(json!({
+                "path": rel, "content": content, "isDir": false, "truncated": size > cap,
+                "hash": hash,
+            }))
+            .into_response()
+        }
         Err(e) => ApiError::internal(e).into_response(),
     }
 }
@@ -646,6 +651,25 @@ pub(crate) fn update_preserving_frontmatter(
 }
 
 /// `PUT /api/note {path, content}`: body-only edit that keeps the note's frontmatter.
+/// A save that started from an older version: nothing is written, and the editor learns who wrote the
+/// newer one and when, so the owner can compare (never a silent overwrite).
+// ponytail: the base check and the write are not one atomic step; two saves in the same instant can
+// still race. A per-path lock around read and write closes it if that is ever seen.
+fn changed_since(state: &WsState, rel: &str, theirs: &str) -> Response {
+    let who = state
+        .db
+        .with_conn(|c| hq_db::provenance::current(c, rel, theirs))
+        .ok()
+        .flatten();
+    let body = json!({
+        "changed": true,
+        "by": who.as_ref().map(|p| p.source_kind.as_str()),
+        "at": who.as_ref().map(|p| p.written_at.clone()),
+        "theirs_hash": theirs,
+    });
+    (axum::http::StatusCode::CONFLICT, Json(body)).into_response()
+}
+
 pub(crate) async fn note_update_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<Value>,
@@ -668,6 +692,12 @@ pub(crate) async fn note_update_handler(
         }
         Err(e) => return ApiError::internal(e).into_response(),
     };
+    if let Some(base) = body.get("base").and_then(Value::as_str) {
+        let theirs = hq_db::search::content_hash(&existing);
+        if base != theirs {
+            return changed_since(&state, rel, &theirs);
+        }
+    }
     let updated =
         update_preserving_frontmatter(&existing, content, &chrono::Utc::now().to_rfc3339());
     if let Err(e) = hq_vault::notes::write_atomic(&abs, updated.as_bytes()) {
@@ -1007,6 +1037,37 @@ mod tests {
         };
         assert_eq!(hits("quokka")[0].note_path, "Notebooks/Inbox/Plan.md");
         assert!(hits("zebra").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_save_from_an_older_version_is_refused_and_writes_nothing() {
+        let v = vault();
+        let state = Arc::new(WsState::new(v.path().to_path_buf(), None));
+        let path = v.path().join("Notebooks/Inbox/Plan.md");
+        std::fs::write(&path, "first").unwrap();
+        let opened = hq_db::search::content_hash("first");
+        std::fs::write(&path, "changed on the phone").unwrap();
+        let stale = json!({"path": "Notebooks/Inbox/Plan.md", "content": "mine", "base": opened});
+        let res = note_update_handler(State(state.clone()), Json(stale)).await;
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["changed"], true);
+        assert_eq!(
+            body["theirs_hash"],
+            hq_db::search::content_hash("changed on the phone")
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "changed on the phone"
+        );
+
+        let fresh = hq_db::search::content_hash("changed on the phone");
+        let ok = json!({"path": "Notebooks/Inbox/Plan.md", "content": "mine", "base": fresh});
+        let res = note_update_handler(State(state.clone()), Json(ok)).await;
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     #[tokio::test]
