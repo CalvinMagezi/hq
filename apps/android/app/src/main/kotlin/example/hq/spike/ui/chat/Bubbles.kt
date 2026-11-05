@@ -30,11 +30,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import example.hq.spike.R
 import example.hq.spike.data.ToolStep
 import example.hq.spike.ui.chat.blocks.Attachment
 import example.hq.spike.ui.chat.blocks.BlockActions
@@ -135,7 +137,7 @@ fun FailedCard(onRetry: () -> Unit) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
-            Text("HQ did not finish a reply to this message.", style = HqType.BodySm, color = Mts.Ink)
+            Text(stringResource(R.string.chat_hq_did_not_finish), style = HqType.BodySm, color = Mts.Ink)
         }
         Row(
             Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button, onClick = onRetry)
@@ -143,7 +145,7 @@ fun FailedCard(onRetry: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(HqIcons.RotateCw, null, Modifier.size(18.dp), tint = Mts.Ink)
-            Text("Retry", style = HqType.BodySmBold, color = Mts.Ink)
+            Text(stringResource(R.string.chat_retry), style = HqType.BodySmBold, color = Mts.Ink)
         }
     }
 }

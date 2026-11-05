@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.data.HqClient.TaskItem
 import example.hq.spike.ui.chat.ActionRow
 import example.hq.spike.ui.chat.SheetFrame
@@ -120,7 +122,7 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
     val groups = ui.groups
     val onAll = ui.tab == TaskTab.All
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-        if (ui.offline) item { Text("HQ is not running. These are the last tasks it had.", style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
+        if (ui.offline) item { Text(stringResource(R.string.tasks_hq_is_not_running), style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
         if (onAll) item(key = "chips") { AllChips(ui, actions.onChip) }
         if (onAll && ui.scope != TaskScope.Everything) item(key = "scope") { ScopeChip(TaskFilters.label(ui.tree, ui.scope) ?: "Filtered") { actions.onScope(TaskScope.Everything) } }
         if (onAll && ui.sessions.isNotEmpty() && ui.chip == AllChip.Active) item(key = "strip") { WorkingStrip(ui.sessions, onHelpers) }
@@ -326,7 +328,7 @@ private fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions) {
             if (t.status == "ready_for_review") Box(
                 Modifier.padding(top = 14.dp, start = 8.dp).heightIn(min = 36.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { actions.onOpen(t) }.padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Check it", style = HqType.BodySmBold, color = Mts.Ink) }
+            ) { Text(stringResource(R.string.tasks_check_it), style = HqType.BodySmBold, color = Mts.Ink) }
         }
     }
 }
@@ -336,7 +338,7 @@ private fun NewTaskButton(modifier: Modifier, onClick: () -> Unit) {
     Row(
         modifier.heightIn(min = 56.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onClick).padding(start = 20.dp, end = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) { Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.OnGreen); Text("New task", style = HqType.BodySmBold, color = Mts.OnGreen) }
+    ) { Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.OnGreen); Text(stringResource(R.string.tasks_new_task), style = HqType.BodySmBold, color = Mts.OnGreen) }
 }
 
 @Composable

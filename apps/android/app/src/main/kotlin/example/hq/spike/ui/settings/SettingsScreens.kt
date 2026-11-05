@@ -265,7 +265,7 @@ private fun Facts(rows: List<FactRow>, onOpen: (SettingsPage) -> Unit = {}) = Gr
 
 @Composable
 private fun Waiting(ui: SettingsUi) {
-    if (!ui.loaded) Text("Asking HQ…", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
+    if (!ui.loaded) Text(stringResource(R.string.settings_asking_hq), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
 }
 
 /** True when the page has nothing to show yet: it says it is asking, or why there is nothing (no answer, or an error answer). */
@@ -332,12 +332,12 @@ private fun Keys(ui: SettingsUi, actions: SettingsActions) {
         if (Unanswered(ui, "settings", s != null) || s == null) return@Page
         Label("Model")
         Facts(listOf(FactRow("Which AI HQ uses", SettingsWords.activeModel(s)), FactRow("Only AI that runs on this phone", SettingsWords.onOff(s.optJSONObject("model")?.optBoolean("local_only") == true))))
-        Text("The model is set in the config file on this phone.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+        Text(stringResource(R.string.settings_the_model_is_set), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
         val ai = SettingsWords.aiRows(ui.snap)
         if (ai.isNotEmpty()) {
             Label("Which AI answers")
             Facts(ai)
-            Text("HQ tries them in this order and uses the first one that answers.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+            Text(stringResource(R.string.settings_hq_tries_them_in), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
         }
         Label("Your keys")
         Group {
@@ -462,7 +462,7 @@ private fun SetupApp(ui: SettingsUi, actions: SettingsActions) {
                 horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Bot token", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+                    Text(stringResource(R.string.settings_bot_token), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
                     androidx.compose.foundation.text.BasicTextField(
                         typed, { typed = it }, Modifier.fillMaxWidth(), enabled = !setup.saving, singleLine = true,
                         textStyle = HqType.Body.copy(color = Mts.Ink, fontFamily = FontFamily.Monospace, letterSpacing = 0.1.em), cursorBrush = androidx.compose.ui.graphics.SolidColor(Mts.Ink),
@@ -524,7 +524,7 @@ private fun PairApp(ui: SettingsUi, actions: SettingsActions) {
             }
             ui.setup?.appId?.takeIf { platform == "discord" }?.let { id ->
                 Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(SettingsWords.inviteUrl(id))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }.padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-                    Text("Open the invite link", style = HqType.BodySmBold, color = Mts.Ink)
+                    Text(stringResource(R.string.settings_open_the_invite_link), style = HqType.BodySmBold, color = Mts.Ink)
                 }
                 if (ui.setup?.intentOff == true) Text(SettingsWords.INTENT_OFF, style = HqType.BodySm, color = Mts.Amber, textAlign = TextAlign.Center)
             }
@@ -563,7 +563,7 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
         val shape = RoundedCornerShape(12.dp)
         val live = code != null && left > 0
         Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Sign in another device", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.fillMaxWidth())
+            Text(stringResource(R.string.settings_sign_in_another_device), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.fillMaxWidth())
             if (live && code != null) {
                 Text(SettingsWords.groupCode(code.code), style = HqType.H2.copy(fontFamily = FontFamily.Monospace, fontSize = 28.sp, lineHeight = 36.sp, letterSpacing = 0.06.em), color = Mts.Ink)
                 Text(SettingsWords.codeHelp(SettingsWords.clock(left)), style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center)
@@ -572,13 +572,13 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
                 Text(if (code != null) "That code expired." else "Get a code, then enter it on the other device.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.fillMaxWidth())
                 Row(Modifier.align(Alignment.Start).heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(enabled = ui.busy == null, role = Role.Button) { actions.onNewCode() }.padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (ui.busy == "code") Spinner(18)
-                    Text("New code", style = HqType.BodySmBold, color = Mts.Ink)
+                    Text(stringResource(R.string.settings_new_code), style = HqType.BodySmBold, color = Mts.Ink)
                 }
             }
         }
         val list = SettingsWords.devices(d)
         Label("Signed in")
-        if (list.isEmpty()) Text("No other device is signed in.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 16.dp))
+        if (list.isEmpty()) Text(stringResource(R.string.settings_no_other_device_is), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 16.dp))
         else {
             Group {
                 list.forEachIndexed { i, dev ->
@@ -610,7 +610,7 @@ private fun Spending(ui: SettingsUi) {
         else Group { cards.forEachIndexed { i, c -> if (i > 0) Divider(); BudgetCardView(c) } }
         val forecast = SettingsWords.forecast(ui.snap.forecast)
         when {
-            forecast == null && "forecast" in ui.snap.unavailable -> { Label("Forecast, this month"); Text("The forecast is not available here.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)) }
+            forecast == null && "forecast" in ui.snap.unavailable -> { Label("Forecast, this month"); Text(stringResource(R.string.settings_the_forecast_is_not), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)) }
             forecast?.note != null -> { Label("Forecast, this month"); Text(forecast.note, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)) }
             forecast != null -> { Label("Forecast, this month"); Facts(forecast.rows) }
         }
@@ -620,7 +620,7 @@ private fun Spending(ui: SettingsUi) {
             Facts(services)
         }
         val openWeb = LocalOpenWeb.current
-        Text("Changing a limit is in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        Text(stringResource(R.string.settings_changing_a_limit_is), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
         TextLink("Open the full usage page", Mts.BrandBlue) { openWeb(WebPage.Usage) }
     }
 }
@@ -744,8 +744,8 @@ private fun KeepRunning(ui: SettingsUi, actions: SettingsActions) {
                 Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button) { actions.onFix(PhoneFix.SleepingApps) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(HqIcons.Info, null, Modifier.size(24.dp), tint = Mts.InkMuted)
                     Column(Modifier.weight(1f)) {
-                        Text("Sleeping apps", style = HqType.BodyBold, color = Mts.Ink)
-                        Text("Samsung may put AgentHQ to sleep. Open Background usage limits, then Sleeping apps, and check that it is not on the list.", style = HqType.BodySm, color = Mts.InkMuted)
+                        Text(stringResource(R.string.settings_sleeping_apps), style = HqType.BodyBold, color = Mts.Ink)
+                        Text(stringResource(R.string.settings_samsung_may_put_agenthq), style = HqType.BodySm, color = Mts.InkMuted)
                     }
                     Icon(HqIcons.External, null, Modifier.size(20.dp), tint = Mts.InkMuted)
                 }
@@ -881,14 +881,14 @@ private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: Settin
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Signed in", style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(R.string.settings_signed_in), style = HqType.BodyBold, color = Mts.Ink)
                     Text(server.address.orEmpty(), style = HqType.BodySm, color = Mts.InkMuted)
                 }
                 DialogButton("Disconnect", actions.onServerDisconnect)
             }
         }
         Text(
-            "Questions from coding agents on that HQ arrive here, checked once a minute. Disconnect stops that on this phone; to end the sign-in itself, sign this phone out in Settings, Devices on that HQ.",
+            stringResource(R.string.settings_questions_from_coding_agents),
             style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp),
         )
         return
@@ -898,7 +898,7 @@ private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: Settin
     var address by remember { androidx.compose.runtime.mutableStateOf(server.address.orEmpty()) }
     var code by remember { androidx.compose.runtime.mutableStateOf("") }
     Column(Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("If your HQ runs on a server, sign this phone in to it so its questions arrive here with the same buttons. Get a one-time code from Settings, Devices on that HQ.", style = HqType.BodySm, color = Mts.InkMuted)
+        Text(stringResource(R.string.settings_if_your_hq_runs), style = HqType.BodySm, color = Mts.InkMuted)
         ServerField("Address", address, "https://hq.example.com", busy, androidx.compose.ui.text.input.KeyboardType.Uri) { address = it }
         ServerField("One-time code", code, "XXXXX-XXXXX", busy, androidx.compose.ui.text.input.KeyboardType.Ascii) { code = it }
         ui.serverError?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText) }
@@ -955,7 +955,7 @@ private fun KeySheetView(sheet: KeySheet, actions: SettingsActions) {
                 horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Your key", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = if (bad) Mts.DangerText else Mts.InkMuted)
+                    Text(stringResource(R.string.settings_your_key), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = if (bad) Mts.DangerText else Mts.InkMuted)
                     androidx.compose.foundation.text.BasicTextField(
                         typed, { typed = it }, Modifier.fillMaxWidth(), enabled = !sheet.checking, singleLine = true,
                         textStyle = HqType.Body.copy(color = Mts.Ink, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, letterSpacing = 0.1.em),
@@ -969,7 +969,7 @@ private fun KeySheetView(sheet: KeySheet, actions: SettingsActions) {
             sheet.error?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText, modifier = Modifier.padding(start = 16.dp, top = 0.dp)) }
             SettingsWords.keyHelpUrl(sheet.id)?.let { url ->
                 Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }.padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-                    Text("Where do I find my key?", style = HqType.BodySmBold, color = Mts.BrandBlue)
+                    Text(stringResource(R.string.settings_where_do_i_find), style = HqType.BodySmBold, color = Mts.BrandBlue)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -982,7 +982,7 @@ private fun KeySheetView(sheet: KeySheet, actions: SettingsActions) {
                     Text(if (sheet.checking) "Checking\u2026" else "Check and save", style = HqType.BodySmBold, color = if (ready || sheet.checking) Mts.OnGreen else Mts.InkMuted)
                 }
                 Box(Modifier.heightIn(min = 48.dp).clickable(enabled = !sheet.checking, role = Role.Button, onClick = actions.onKeyClose).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                    Text("Cancel", style = HqType.BodySmBold, color = Mts.InkMuted)
+                    Text(stringResource(R.string.pairing_cancel), style = HqType.BodySmBold, color = Mts.InkMuted)
                 }
             }
             Text(SettingsWords.KEY_NOTE, style = SmallText, color = Mts.InkMuted)
@@ -1015,8 +1015,8 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Show titles in Needs you", style = HqType.BodyBold, color = Mts.Ink)
-                    Text("Off: the widget shows a count only. Titles can be read on a locked screen.", style = HqType.BodySm, color = Mts.InkMuted)
+                    Text(stringResource(R.string.settings_show_titles_in_needs), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(R.string.settings_off_the_widget_shows), style = HqType.BodySm, color = Mts.InkMuted)
                 }
                 Switch(
                     checked = c.showTitles, onCheckedChange = actions.onShowTitles,
@@ -1029,7 +1029,7 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
                 if (i > 0) Divider()
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(name, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
-                    Box(Modifier.heightIn(min = 40.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button) { actions.onAddWidget(i) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text("Add", style = HqType.BodySmBold, color = Mts.Ink) }
+                    Box(Modifier.heightIn(min = 40.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button) { actions.onAddWidget(i) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.settings_add), style = HqType.BodySmBold, color = Mts.Ink) }
                 }
             }
         }
@@ -1279,7 +1279,7 @@ private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
         Divider()
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { actions.onUpdateMain(!ui.updateMain) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                Text("Follow every build of main", style = HqType.BodyBold, color = Mts.Ink)
+                Text(stringResource(R.string.settings_follow_every_build_of), style = HqType.BodyBold, color = Mts.Ink)
                 Text(if (ui.updateMain) "Newest builds, before they are promoted" else "Only builds the owner promoted", style = HqType.BodySm, color = Mts.InkMuted)
             }
             Text(if (ui.updateMain) "On" else "Off", style = HqType.BodySmBold, color = Mts.Ink)
@@ -1306,9 +1306,9 @@ private fun BackupCard(card: BackupWords.Card) {
             Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).padding(horizontal = 24.dp).semantics { disabled(); contentDescription = "Set up backup, needs a decision" },
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Set up backup", style = HqType.BodySmBold, color = Mts.Ink)
+            Text(stringResource(R.string.settings_set_up_backup), style = HqType.BodySmBold, color = Mts.Ink)
             Box(Modifier.heightIn(min = 24.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, Mts.Line, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                Text("Needs a decision", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+                Text(stringResource(R.string.settings_needs_a_decision), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
             }
         }
     }

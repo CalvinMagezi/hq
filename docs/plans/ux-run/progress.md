@@ -34,6 +34,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 
 ## Phone wave 0 (safety and shared parts)
 
+- [x] Strings moved to the catalogue (N20, D-8): every inline string in the phone's composables now comes from `apps/strings/en.yaml`, words unchanged (the rewrites are wave 1); the lint baseline is gone, so any new inline string fails the build. Keys are mechanical for now and get real names with the wave 1 rewrite. Try: nothing changes on screen.
 - [x] Test setup (resolutions.md D-11): Compose UI tests and a screenshot test under Robolectric (`app/src/test/.../testing/Screenshots.kt`, goldens in `src/test/resources/screenshots`, `-Phq.recordScreenshots=true` to re-record), and the `:lint-checks` module with `HqInlineText` (words in a composable come from the catalogue). The 137 inline strings found today are in `app/lint-baseline.xml`; new ones fail the build. Try: nothing on the phone.
 
 - [x] Server for phone wave 0: `hq vault moved` (forgets a moved phone's device sign-ins, pairings, edge, claude.ai grants and push subscriptions; notes stay) and `GET /api/status/busy` (a chat reply or a scheduled backup running), for the update idle gate.

@@ -22,9 +22,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
@@ -50,7 +52,7 @@ fun BriefingPage(b: BriefingUi, onClose: () -> Unit, onRetry: () -> Unit, onTask
             is BriefingPhase.Failed -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (phase.missing) BriefingWords.MISSING else BriefingWords.FAILED, style = HqType.BodySm, color = Mts.InkMuted)
                 if (!phase.missing) Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onRetry).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-                    Text("Try again", style = HqType.BodySmBold, color = Mts.OnGreen)
+                    Text(stringResource(R.string.notice_action_try_again), style = HqType.BodySmBold, color = Mts.OnGreen)
                 }
             }
             is BriefingPhase.Ready -> Body(phase.briefing, b.name, onTask, onNote)

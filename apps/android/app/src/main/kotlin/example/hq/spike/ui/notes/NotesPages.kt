@@ -31,6 +31,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.stringResource
+import example.hq.spike.R
 import example.hq.spike.ui.chat.blocks.Block
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -159,8 +161,8 @@ private fun ReaderPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<S
         ReaderPhase.Failed -> Column {
             TopBar("Note", null, actions.onBack)
             Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("HQ is not running", style = HqType.H2, color = Mts.Ink)
-                Text("The note will open when HQ is back.", style = HqType.BodySm, color = Mts.InkMuted)
+                Text(stringResource(R.string.notes_hq_is_not_running_2), style = HqType.H2, color = Mts.Ink)
+                Text(stringResource(R.string.notes_the_note_will_open), style = HqType.BodySm, color = Mts.InkMuted)
             }
         }
     }
@@ -217,7 +219,7 @@ private fun NoteBody(path: String, blocks: List<Block>, handlers: BlockActions, 
     DisposableEffect(path) { onDispose { actions.onScrolled(path, list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset) } }
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = ReaderPadding) {
         itemsIndexed(blocks) { i, block -> Box(Modifier.padding(top = blockGap(blocks, i))) { BlockView(block, handlers) } }
-        if (truncated) item { Text("This note is long. Only the start is shown.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
+        if (truncated) item { Text(stringResource(R.string.notes_this_note_is_long), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
     }
 }
 
@@ -229,15 +231,15 @@ private fun GonePage(ui: NotesUi, actions: NotesActions) {
         TopBar("Note", null, actions.onBack)
         Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(72.dp).background(Mts.Surface200, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Icon(HqIcons.Warning, null, Modifier.size(34.dp), tint = Mts.Amber) }
-            Text("This note is not here any more", style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.notes_this_note_is_not), style = HqType.H2, color = Mts.Ink)
             Text("It may have been moved or deleted. ${path.removePrefix("Notebooks/")}", style = HqType.BodySm, color = Mts.InkMuted)
             Box(Modifier.padding(top = 8.dp)) {
                 Row(
                     Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onBack(); actions.onOpenSearch() }.padding(horizontal = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-                ) { Icon(HqIcons.Search, null, Modifier.size(20.dp), tint = Mts.OnGreen); Text("Search for it", style = HqType.BodySmBold, color = Mts.OnGreen) }
+                ) { Icon(HqIcons.Search, null, Modifier.size(20.dp), tint = Mts.OnGreen); Text(stringResource(R.string.notes_search_for_it), style = HqType.BodySmBold, color = Mts.OnGreen) }
             }
-            Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onBack).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text("Go to Notes", style = HqType.BodySmBold, color = Mts.BrandBlue) }
+            Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onBack).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_go_to_notes), style = HqType.BodySmBold, color = Mts.BrandBlue) }
         }
     }
 }
@@ -259,7 +261,7 @@ private fun FolderPage(ui: NotesUi, actions: NotesActions) {
                 item {
                     Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 36.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(HqIcons.Sort, null, Modifier.size(18.dp), tint = Mts.Ink)
-                        Text("A to Z", style = HqType.BodySmBold, color = Mts.Ink)
+                        Text(stringResource(R.string.notes_a_to_z), style = HqType.BodySmBold, color = Mts.Ink)
                     }
                 }
                 if (view.folders.isNotEmpty()) item { SubFolders(view.folders, actions.onOpenFolder) }
@@ -267,7 +269,7 @@ private fun FolderPage(ui: NotesUi, actions: NotesActions) {
                 items(view.notes, key = { it }) { path ->
                     example.hq.spike.ui.notes.NoteRow(example.hq.spike.data.HqClient.NoteItem(path, NoteRefs.title(path), "", "", false)) { actions.onOpenNote(path) }
                 }
-                if (!view.loading && view.notes.isEmpty() && view.folders.isEmpty()) item { Text("Nothing in this folder yet.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
+                if (!view.loading && view.notes.isEmpty() && view.folders.isEmpty()) item { Text(stringResource(R.string.notes_nothing_in_this_folder), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
             }
             NewNoteButton("New note here", Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onNew(view.path) }
         }
@@ -308,7 +310,7 @@ private fun SearchPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<S
                 BasicTextField(
                     value = s.query, onValueChange = actions.onQuery, singleLine = true, textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
                     modifier = Modifier.weight(1f).focusRequester(focus),
-                    decorationBox = { inner -> Box { if (s.query.isEmpty()) Text("Search your notes", style = HqType.Body, color = Mts.InkMuted); inner() } },
+                    decorationBox = { inner -> Box { if (s.query.isEmpty()) Text(stringResource(R.string.notes_search_your_notes), style = HqType.Body, color = Mts.InkMuted); inner() } },
                 )
                 if (s.query.isNotEmpty()) Box(Modifier.size(32.dp).clickable(role = Role.Button, onClickLabel = "Clear") { actions.onQuery("") }.semantics { contentDescription = "Clear" }, contentAlignment = Alignment.Center) { Icon(HqIcons.Close, null, Modifier.size(20.dp), tint = Mts.InkMuted) }
             }
@@ -317,7 +319,7 @@ private fun SearchPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<S
         Box(Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
                 items(hits, key = { it.path }) { hit -> HitRow(hit, s.query) { actions.onOpenNote(hit.path) } }
-                if (s.query.isNotBlank() && !s.loading && hits.isEmpty()) item { Text("Nothing matches that.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
+                if (s.query.isNotBlank() && !s.loading && hits.isEmpty()) item { Text(stringResource(R.string.notes_nothing_matches_that), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
                 if (s.loading) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Spinner(28) } }
             }
             if (hits.isNotEmpty()) {
@@ -408,7 +410,7 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
             if (w.isNew) {
                 BasicTextField(
                     value = w.title, onValueChange = actions.onTitle, textStyle = HqType.H2.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                    decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (w.title.isEmpty()) Text("Title", style = HqType.H2, color = Mts.InkMuted); inner() } },
+                    decorationBox = { inner -> Box(contentAlignment = Alignment.CenterStart) { if (w.title.isEmpty()) Text(stringResource(R.string.notes_title), style = HqType.H2, color = Mts.InkMuted); inner() } },
                 )
                 Row(
                     Modifier.padding(top = 8.dp, bottom = 12.dp).heightIn(min = 36.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { actions.onChooseFolder(true) }.padding(horizontal = 14.dp),
@@ -427,7 +429,7 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
                 BasicTextField(
                     value = w.text, onValueChange = actions.onText, textStyle = HqType.Body.copy(color = Mts.Ink, lineHeight = 26.sp), cursorBrush = SolidColor(Mts.BrandGreen), visualTransformation = MarkdownTransformation,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
-                    decorationBox = { inner -> Box { if (w.text.text.isEmpty()) Text("Start writing", style = HqType.Body.copy(lineHeight = 26.sp), color = Mts.InkMuted); inner() } },
+                    decorationBox = { inner -> Box { if (w.text.text.isEmpty()) Text(stringResource(R.string.notes_start_writing), style = HqType.Body.copy(lineHeight = 26.sp), color = Mts.InkMuted); inner() } },
                 )
             }
         }
@@ -463,7 +465,7 @@ private fun FormatBar(w: WriteState, actions: NotesActions, onDone: () -> Unit) 
             Key("Checklist", { edit { example.hq.spike.ui.notes.MarkdownEditing.prefixLines(it, "- [ ] ") } }) { Icon(HqIcons.Tasks, null, Modifier.size(22.dp), tint = Mts.Ink) }
             Key("Link", { edit(example.hq.spike.ui.notes.MarkdownEditing::link) }) { Icon(HqIcons.Link, null, Modifier.size(22.dp), tint = Mts.Ink) }
         }
-        Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onDone).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text("Done", style = HqType.BodySmBold, color = Mts.BrandBlue) }
+        Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onDone).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.safe_done_button), style = HqType.BodySmBold, color = Mts.BrandBlue) }
     }
 }
 
@@ -478,12 +480,12 @@ private fun FolderChooser(w: WriteState, folders: List<String>, actions: NotesAc
     val all = (listOf(INBOX) + folders).distinct().let { if (w.folder in it) it else it + w.folder }
     val shown = all.filter { find.isBlank() || it.contains(find, ignoreCase = true) }
     SheetFrame({ actions.onChooseFolder(false) }, top = 250.dp) {
-        Text("Save to", style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
+        Text(stringResource(R.string.notes_save_to), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
         val shape = RoundedCornerShape(24.dp)
         BasicTextField(
             value = find, onValueChange = { find = it }, singleLine = true, textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(horizontal = 16.dp, vertical = 11.dp),
-            decorationBox = { inner -> Box { if (find.isEmpty()) Text("Find a folder", style = HqType.Body, color = Mts.InkMuted); inner() } },
+            decorationBox = { inner -> Box { if (find.isEmpty()) Text(stringResource(R.string.notes_find_a_folder), style = HqType.Body, color = Mts.InkMuted); inner() } },
         )
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             items(shown, key = { it }) { folder ->
@@ -513,11 +515,11 @@ private fun LeaveDialog(body: String, actions: NotesActions) {
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = actions.onKeepEditing))
         Column(Modifier.padding(start = 24.dp, top = 240.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Save your changes?", style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.notes_save_your_changes), style = HqType.H2, color = Mts.Ink)
             Text(body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 12.dp))
             GreenPill("Save", Modifier.fillMaxWidth(), onClick = actions.onSave)
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = actions.onKeepEditing), contentAlignment = Alignment.Center) { Text("Keep editing", style = HqType.BodySmBold, color = Mts.Ink) }
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onDiscard), contentAlignment = Alignment.Center) { Text("Discard changes", style = HqType.BodySmBold, color = Mts.DangerText) }
+            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = actions.onKeepEditing), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_keep_editing), style = HqType.BodySmBold, color = Mts.Ink) }
+            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onDiscard), contentAlignment = Alignment.Center) { Text(stringResource(R.string.notes_discard_changes), style = HqType.BodySmBold, color = Mts.DangerText) }
         }
     }
 }

@@ -31,11 +31,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.data.HqClient.NoteItem
 import example.hq.spike.ui.chat.blocks.NoteRefs
 import example.hq.spike.ui.shell.HqIcons
@@ -86,7 +88,7 @@ internal fun OfflineBanner() {
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HqIcons.WifiOff, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text("HQ is not running. Your notes will show again when it starts.", style = HqType.BodySm, color = Mts.Ink)
+        Text(stringResource(R.string.notes_hq_is_not_running), style = HqType.BodySm, color = Mts.Ink)
     }
 }
 
@@ -99,7 +101,7 @@ private fun SearchPill(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HqIcons.Search, null, Modifier.size(22.dp), tint = Mts.InkMuted)
-        Text("Search your notes", style = HqType.Body, color = Mts.InkMuted)
+        Text(stringResource(R.string.notes_search_your_notes), style = HqType.Body, color = Mts.InkMuted)
     }
 }
 
@@ -168,12 +170,12 @@ internal fun NewNoteButton(label: String, modifier: Modifier, onClick: () -> Uni
 private fun EmptyNotes(actions: NotesActions, onAskHq: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(72.dp).background(Mts.Surface200, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Icon(HqIcons.Notes, null, Modifier.size(36.dp), tint = Mts.Ink) }
-        Text("Your notes will show up here", style = HqType.H2, color = Mts.Ink)
-        Text("Write one yourself, or ask HQ to write one for you.", style = HqType.BodySm, color = Mts.InkMuted)
+        Text(stringResource(R.string.notes_your_notes_will_show), style = HqType.H2, color = Mts.Ink)
+        Text(stringResource(R.string.notes_write_one_yourself_or), style = HqType.BodySm, color = Mts.InkMuted)
         Box(Modifier.padding(top = 8.dp)) { NewNoteButton("New note", Modifier) { actions.onNew(INBOX) } }
         Box(
             Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = onAskHq).padding(horizontal = 24.dp),
             contentAlignment = Alignment.Center,
-        ) { Text("Ask HQ to write one", style = HqType.BodySmBold, color = Mts.Ink) }
+        ) { Text(stringResource(R.string.notes_ask_hq_to_write), style = HqType.BodySmBold, color = Mts.Ink) }
     }
 }

@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -57,7 +58,7 @@ fun StartingScreen(seconds: Long, onCapture: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(HqIcons.Plus, null, Modifier.size(20.dp), tint = Mts.Ink)
-                Text("Capture", style = HqType.BodySmBold, color = Mts.Ink)
+                Text(stringResource(R.string.start_capture), style = HqType.BodySmBold, color = Mts.Ink)
             }
         }
     }
@@ -79,13 +80,13 @@ fun DidNotStartScreen(lines: List<String>, onTryAgain: () -> Unit, onBattery: ()
         }
         Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onTryAgain), contentAlignment = Alignment.Center) {
-                Text("Try again", style = HqType.BodySmBold, color = Mts.OnGreen)
+                Text(stringResource(R.string.notice_action_try_again), style = HqType.BodySmBold, color = Mts.OnGreen)
             }
             Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = onBattery), contentAlignment = Alignment.Center) {
-                Text("Battery settings", style = HqType.BodySmBold, color = Mts.Ink)
+                Text(stringResource(R.string.start_battery_settings), style = HqType.BodySmBold, color = Mts.Ink)
             }
             Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onCopy).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                Text("Copy details", style = HqType.BodySmBold, color = Mts.BrandBlue)
+                Text(stringResource(R.string.copy_details_title), style = HqType.BodySmBold, color = Mts.BrandBlue)
             }
         }
     }

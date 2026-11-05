@@ -30,6 +30,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -151,6 +153,6 @@ fun FileCardView(file: Attachment, onOpen: () -> Unit, modifier: Modifier = Modi
         Box(
             Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 12.dp),
             contentAlignment = Alignment.Center,
-        ) { Text("Open", style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
+        ) { Text(stringResource(R.string.notice_action_open), style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
     }
 }

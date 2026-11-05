@@ -30,6 +30,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -148,7 +149,7 @@ private fun ReconnectBanner() {
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HqIcons.WifiOff, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text("Reconnecting. Your draft is kept and can be sent once HQ is back.", style = HqType.BodySm, color = Mts.Ink)
+        Text(stringResource(R.string.chat_reconnecting_your_draft_is), style = HqType.BodySm, color = Mts.Ink)
     }
 }
 
@@ -205,7 +206,7 @@ private fun LatestPill(modifier: Modifier, onClick: () -> Unit) {
         modifier.heightIn(min = 36.dp).clip(CircleShape).background(Mts.Surface200).border(1.dp, Mts.Hairline, CircleShape).clickable(role = Role.Button, onClick = onClick).padding(start = 14.dp, end = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Latest", style = HqType.ToolLine, color = Mts.Ink)
+        Text(stringResource(R.string.chat_latest), style = HqType.ToolLine, color = Mts.Ink)
         Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.Ink)
     }
 }
@@ -224,8 +225,8 @@ private fun EmptyChat(suggestions: List<Suggestion>, onPick: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom)) {
         Image(painterResource(R.drawable.hq_mark), null, Modifier.size(56.dp).alpha(0.8f), contentScale = ContentScale.Fit)
         Column {
-            Text("What would you like to do?", style = HqType.H2, color = Mts.Ink)
-            Text("HQ can read your notes and tasks, write to them, and send helpers to do work.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp))
+            Text(stringResource(R.string.chat_what_would_you_like), style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.chat_hq_can_read_your), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp))
         }
         suggestions.forEach { s -> SuggestionChip(iconFor(s.group), s.label) { onPick(s.text) } }
     }

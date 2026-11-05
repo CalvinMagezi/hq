@@ -142,11 +142,9 @@ android {
     lint {
         // android.jar 36 holds APIs newer than minSdk 26. This check stops a call to one of them from
         // compiling and then crashing Android 8 to 10 (D8 backports some, such as List.of; lint knows which).
-        // HqInlineText (lint-checks): words a person reads come from the catalogue. The strings written
-        // inline before it existed are in the baseline, so only new ones fail; moving them shrinks it.
+        // HqInlineText (lint-checks): words a person reads come from the catalogue, so a literal fails the build.
         checkOnly += setOf("NewApi", "HqInlineText")
         abortOnError = true
-        baseline = file("lint-baseline.xml")
     }
 
     // Compose UI and screenshot tests run on the JVM under Robolectric (resolutions.md D-11).

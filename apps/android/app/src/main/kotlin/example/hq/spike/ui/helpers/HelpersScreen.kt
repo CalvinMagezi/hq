@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -45,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.inbox.PrimaryButton
 import example.hq.spike.ui.shell.HqIcons
@@ -94,7 +96,7 @@ private fun Feed(ui: HelpersUi, actions: HelpersActions) {
     val live = shown.filter { it.state != HelperState.Finished && it.state != HelperState.Stopped }
     val past = shown.filter { it.state == HelperState.Finished || it.state == HelperState.Stopped }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (ui.offline) item { Text("HQ is not running. These are the last helpers it had.", style = HqType.BodySm, color = Mts.Amber) }
+        if (ui.offline) item { Text(stringResource(R.string.helpers_hq_is_not_running), style = HqType.BodySm, color = Mts.Amber) }
         if (shown.isEmpty() && ui.loaded && !ui.offline) item { Text(emptyWords(ui.filter), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(vertical = 8.dp)) }
         items(live, key = { it.id }) { HelperCardView(it, actions) }
         if (past.isNotEmpty()) {
@@ -194,7 +196,7 @@ private fun FinishedRow(past: List<HelperCard>, open: Boolean, onToggle: () -> U
         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("Finished", style = HqType.BodyBold, color = Mts.Ink)
+            Text(stringResource(R.string.helpers_finished), style = HqType.BodyBold, color = Mts.Ink)
             Text(listOf(past.first().title, past.first().time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text("${past.size}", style = HqType.BodySm, color = Mts.InkMuted)
@@ -217,7 +219,7 @@ private fun StartButton(modifier: Modifier, onClick: () -> Unit) {
     Row(
         modifier.heightIn(min = 56.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onClick).padding(start = 20.dp, end = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) { Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.OnGreen); Text("Start a helper", style = HqType.BodySmBold, color = Mts.OnGreen) }
+    ) { Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.OnGreen); Text(stringResource(R.string.helpers_start_a_helper), style = HqType.BodySmBold, color = Mts.OnGreen) }
 }
 
 @Composable

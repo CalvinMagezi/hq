@@ -42,6 +42,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -50,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
@@ -196,7 +198,7 @@ private fun CaughtUp(ui: InboxUi) {
         item {
             Column(Modifier.fillMaxWidth().padding(start = 24.dp, top = 48.dp, end = 24.dp, bottom = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.size(64.dp).background(Mts.Surface200, CircleShape), contentAlignment = Alignment.Center) { Icon(HqIcons.Check, null, Modifier.size(32.dp), tint = Mts.BrandGreen) }
-                Text("You're all caught up", style = HqType.H2, color = Mts.Ink)
+                Text(stringResource(R.string.inbox_you_re_all_caught), style = HqType.H2, color = Mts.Ink)
                 Text(if (ui.checkedAt.isNotBlank()) "Nothing is waiting on you. Checked at ${ui.checkedAt}." else "Nothing is waiting on you.", style = HqType.BodySm, color = Mts.InkMuted)
             }
         }
@@ -223,7 +225,7 @@ private fun DoneList(entries: List<DoneEntry>) {
 @Composable
 private fun DoneFeed(ui: InboxUi) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
-        if (ui.done.isEmpty()) item { Text("Nothing decided yet.", style = HqType.BodySm, color = Mts.InkMuted) }
+        if (ui.done.isEmpty()) item { Text(stringResource(R.string.inbox_nothing_decided_yet), style = HqType.BodySm, color = Mts.InkMuted) }
         else ui.done.groupBy { InboxWords.dayLabel(it.createdAt) }.forEach { (day, entries) ->
             item(key = "d-$day") { Text(day.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)) }
             item(key = "l-$day") { DoneList(entries) }
@@ -237,10 +239,10 @@ private fun UpdatesFeed(ui: InboxUi, actions: InboxActions) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         if (rows.isNotEmpty()) item {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.End) {
-                Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onClearAll).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text("Clear all updates", style = HqType.BodySmBold, color = Mts.BrandBlue) }
+                Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onClearAll).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.inbox_clear_all_updates), style = HqType.BodySmBold, color = Mts.BrandBlue) }
             }
         }
-        if (rows.isEmpty() && ui.loaded) item { Text("No updates.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
+        if (rows.isEmpty() && ui.loaded) item { Text(stringResource(R.string.inbox_no_updates), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         val groups = rows.groupBy { InboxWords.dayLabel(it.createdAt) }
         groups.forEach { (label, group) ->
             item(key = "g-$label") { Text(label.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp)) }
@@ -260,7 +262,7 @@ private fun UpdateRow(card: InboxCard, actions: InboxActions) {
                 Box(Modifier.fillMaxSize().background(Mts.BrandIndigo), contentAlignment = Alignment.CenterEnd) {
                     Column(Modifier.width(104.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Icon(HqIcons.Archive, null, Modifier.size(24.dp), tint = Mts.Ink)
-                        Text("Clear", style = HqType.NavLabel, color = Mts.Ink)
+                        Text(stringResource(R.string.inbox_clear), style = HqType.NavLabel, color = Mts.Ink)
                     }
                 }
             }
@@ -300,7 +302,7 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
     Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp) { actions.onDetails(null) }
-            Text("Details", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
+            Text(stringResource(R.string.inbox_details), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(card.title, style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)

@@ -35,10 +35,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import example.hq.spike.R
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -60,7 +62,7 @@ fun ChatsSheet(state: ChatUiState, actions: ChatActions) {
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(top = SheetTop).fillMaxHeight().clip(SheetShape).background(Mts.Surface100).navigationBarsPadding()) {
             Box(Modifier.padding(top = 12.dp, bottom = 12.dp).size(width = 32.dp, height = 4.dp).align(Alignment.CenterHorizontally).background(Mts.Line, RoundedCornerShape(2.dp)))
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Chats", style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.chat_chats), style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
                 NewChatButton(actions.onNewChat)
             }
             SearchField(state.chatSearch, actions.onSearchChats)
@@ -85,7 +87,7 @@ private fun NewChatButton(onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HqIcons.Plus, null, Modifier.size(20.dp), tint = Mts.OnGreen)
-        Text("New chat", style = HqType.BodySmBold, color = Mts.OnGreen)
+        Text(stringResource(R.string.chat_new_chat), style = HqType.BodySmBold, color = Mts.OnGreen)
     }
 }
 
@@ -99,7 +101,7 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
         Icon(HqIcons.Search, null, Modifier.size(20.dp), tint = Mts.InkMuted)
         BasicTextField(
             query, onChange, Modifier.weight(1f), singleLine = true, textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
-            decorationBox = { inner -> Box { if (query.isEmpty()) Text("Search chats", style = HqType.Body, color = Mts.InkMuted); inner() } },
+            decorationBox = { inner -> Box { if (query.isEmpty()) Text(stringResource(R.string.chat_search_chats), style = HqType.Body, color = Mts.InkMuted); inner() } },
         )
     }
 }
@@ -123,7 +125,7 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
                 Box(Modifier.fillMaxSize().padding(horizontal = 8.dp).background(ArchivePanel, RoundedCornerShape(16.dp)), contentAlignment = Alignment.CenterEnd) {
                     Column(Modifier.width(88.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(HqIcons.Archive, null, Modifier.size(24.dp), tint = Mts.Ink)
-                        Text("Archive", style = HqType.NavLabel, color = Mts.Ink)
+                        Text(stringResource(R.string.chat_archive), style = HqType.NavLabel, color = Mts.Ink)
                     }
                 }
             }

@@ -31,12 +31,14 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.ActionRow
 import example.hq.spike.ui.chat.SheetFrame
 import example.hq.spike.ui.chat.Spinner
@@ -126,7 +128,7 @@ private fun HelperPageView(card: HelperCard, open: HelperOpen, ui: HelpersUi, ac
 private fun AskBanner(card: HelperCard, onOpen: () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).clickable(role = Role.Button, onClick = onOpen).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Needs your OK", style = HqType.BodyBold, color = Mts.Amber)
+        Text(stringResource(R.string.helpers_needs_your_ok), style = HqType.BodyBold, color = Mts.Amber)
         Text(card.line, style = HqType.BodySm, color = Mts.Ink)
     }
 }
@@ -144,7 +146,7 @@ private fun RightNow(card: HelperCard, open: HelperOpen, ui: HelpersUi) {
         Text(words, style = HqType.BodyBold.copy(fontSize = 18.sp, lineHeight = 26.sp), color = Mts.Ink, maxLines = 4, overflow = TextOverflow.Ellipsis)
         Text("${card.agent} · on ${card.where}", style = SmallText, color = Mts.InkMuted)
     }
-    if (card.state == HelperState.Offline) Text("The computer did not answer. Its helper may still be working there.", style = HqType.BodySm, color = Mts.InkMuted)
+    if (card.state == HelperState.Offline) Text(stringResource(R.string.helpers_the_computer_did_not), style = HqType.BodySm, color = Mts.InkMuted)
 }
 
 @Composable
@@ -171,7 +173,7 @@ private fun MessageRow(open: HelperOpen, actions: HelpersActions) {
         BasicTextField(
             open.draft, actions.onDraft, Modifier.weight(1f).heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape).padding(horizontal = 16.dp, vertical = 11.dp),
             textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
-            decorationBox = { inner -> Box { if (open.draft.isEmpty()) Text("Tell this helper something", style = HqType.Body, color = Mts.InkMuted); inner() } },
+            decorationBox = { inner -> Box { if (open.draft.isEmpty()) Text(stringResource(R.string.helpers_tell_this_helper_something), style = HqType.Body, color = Mts.InkMuted); inner() } },
         )
         Box(
             Modifier.size(48.dp).clip(CircleShape).background(if (ready) Mts.BrandGreen else Mts.Surface200).alpha(if (ready) 1f else 0.5f).clickable(enabled = ready, role = Role.Button, onClickLabel = "Send", onClick = actions.onSend),
@@ -188,7 +190,7 @@ private fun TechnicalRow(onOpen: (Boolean) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HqIcons.Code, null, Modifier.size(22.dp), tint = Mts.Ink)
-        Text("Technical details", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+        Text(stringResource(R.string.settings_technical_title), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
         Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
     }
 }
@@ -230,12 +232,12 @@ private fun AskPage(card: HelperCard, open: HelperOpen, actions: HelpersActions)
                 Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = actions.onToggleRaw).padding(end = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("See exactly what it asked", style = HqType.BodySmBold, color = Mts.InkMuted)
+                Text(stringResource(R.string.helpers_see_exactly_what_it), style = HqType.BodySmBold, color = Mts.InkMuted)
                 Icon(if (open.raw) HqIcons.ChevronUp else HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.InkMuted)
             }
             if (open.raw) Terminal(HelperWords.rawTail(open.screen, RAW_LINES))
             Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onSeeHelper), contentAlignment = Alignment.CenterStart) {
-                Text("Open the helper instead", style = HqType.BodySmBold, color = Mts.BrandBlue)
+                Text(stringResource(R.string.helpers_open_the_helper_instead), style = HqType.BodySmBold, color = Mts.BrandBlue)
             }
         }
     }
@@ -256,7 +258,7 @@ private fun Outcome(icon: androidx.compose.ui.graphics.vector.ImageVector, tint:
 private fun Terminal(lines: List<String>) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface000).border(1.dp, Mts.Hairline, shape).padding(horizontal = 12.dp, vertical = 10.dp)) {
-        if (lines.isEmpty()) Text("Nothing on its screen yet.", style = Mono, color = Mts.InkMuted)
+        if (lines.isEmpty()) Text(stringResource(R.string.helpers_nothing_on_its_screen), style = Mono, color = Mts.InkMuted)
         lines.forEach { Text(it, style = Mono, color = Mts.Ink) }
     }
 }
@@ -269,7 +271,7 @@ private fun TechnicalPage(card: HelperCard, open: HelperOpen, actions: HelpersAc
     Column(Modifier.page()) {
         PageBar("Technical details", statusOf(card), { actions.onTechnical(false) })
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState(), reverseScrolling = true).padding(start = 16.dp, end = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Terminal · read only", style = SmallText, color = Mts.InkMuted)
+            Text(stringResource(R.string.helpers_terminal_read_only), style = SmallText, color = Mts.InkMuted)
             Terminal(HelperWords.rawTail(open.screen, TECH_LINES))
         }
         open.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(horizontal = 16.dp)) }
@@ -296,7 +298,7 @@ private fun StopDialog(card: HelperCard, actions: HelpersActions) {
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(onClick = { actions.onAskStop(false) }))
         Column(Modifier.padding(start = 24.dp, top = 220.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Stop this helper?", style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.helpers_stop_this_helper), style = HqType.H2, color = Mts.Ink)
             Text("${card.agent} stops what it is doing and its terminal on ${card.where} closes. Nothing it already saved is undone.", style = HqType.BodySm, color = Mts.InkMuted)
             PrimaryButton("Yes, stop it", Modifier.fillMaxWidth(), onClick = actions.onStop)
             OutlineButton("Keep going", Modifier.fillMaxWidth()) { actions.onAskStop(false) }
@@ -310,7 +312,7 @@ private fun RenameDialog(text: String, actions: HelpersActions) {
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(onClick = { actions.onRename(null) }))
         Column(Modifier.padding(start = 24.dp, top = 220.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Rename this helper", style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.helpers_rename_this_helper), style = HqType.H2, color = Mts.Ink)
             val shape = RoundedCornerShape(12.dp)
             BasicTextField(text, { actions.onRename(it) }, Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(12.dp), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink), singleLine = true)
             PrimaryButton("Save", Modifier.fillMaxWidth(), enabled = text.isNotBlank(), onClick = actions.onSaveRename)
@@ -333,12 +335,12 @@ private fun StartSheet(form: StartForm, actions: HelpersActions) {
     SheetFrame(actions.onStartClose, top = 90.dp) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Start a helper", style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.helpers_start_a_helper), style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
                 IconAction(HqIcons.Close, "Close", iconSize = 24.dp, onClick = actions.onStartClose)
             }
             val shape = RoundedCornerShape(12.dp)
             Column(Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(Mts.Surface000).border(2.dp, Mts.BrandBlue, shape).padding(horizontal = 16.dp, vertical = 10.dp)) {
-                Text("What should it do?", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+                Text(stringResource(R.string.helpers_what_should_it_do), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
                 BasicTextField(form.job, actions.onJob, Modifier.fillMaxWidth(), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
             }
             Caps("Which helper?")
@@ -357,12 +359,12 @@ private fun StartSheet(form: StartForm, actions: HelpersActions) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Where", style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(R.string.helpers_where), style = HqType.BodyBold, color = Mts.Ink)
                     Text(whereWords(form), style = HqType.BodySm, color = if (form.host == null && form.hosts != null) Mts.Amber else Mts.InkMuted)
                 }
                 if ((form.hosts.orEmpty().count { it.reachable }) > 1) Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
             }
-            Text("It asks before it changes anything. You will see its questions here and in your Inbox.", style = SmallText, color = Mts.InkMuted)
+            Text(stringResource(R.string.helpers_it_asks_before_it), style = SmallText, color = Mts.InkMuted)
             form.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
             PrimaryButton(if (form.busy) "Starting…" else "Start", Modifier.fillMaxWidth(), enabled = form.job.isNotBlank() && form.host != null && !form.busy, onClick = actions.onStartSubmit)
         }

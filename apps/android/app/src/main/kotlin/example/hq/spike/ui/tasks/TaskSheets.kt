@@ -37,6 +37,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.TaskItem
 import example.hq.spike.ui.chat.ActionRow
@@ -86,7 +88,7 @@ fun QuickAddSheet(q: QuickState, today: LocalDate, edge: HqClient.EdgeWorker?, a
     SheetFrame(close, top = if (q.more) 150.dp else 200.dp) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("New task", style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.tasks_new_task), style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
                 IconAction(HqIcons.Close, "Close", iconSize = 24.dp, onClick = close)
             }
             val shape = RoundedCornerShape(12.dp)
@@ -94,7 +96,7 @@ fun QuickAddSheet(q: QuickState, today: LocalDate, edge: HqClient.EdgeWorker?, a
                 value = q.text, onValueChange = { actions.onQuick(q.copy(text = it)) }, textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
                 visualTransformation = remember(today) { Understood(today) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp).clip(shape).background(Mts.Surface000).border(2.dp, Mts.BrandBlue, shape).padding(horizontal = 16.dp, vertical = 12.dp).focusRequester(focus),
-                decorationBox = { inner -> Box { if (q.text.isEmpty()) Text("What needs doing?", style = HqType.Body, color = Mts.InkMuted); inner() } },
+                decorationBox = { inner -> Box { if (q.text.isEmpty()) Text(stringResource(R.string.tasks_what_needs_doing), style = HqType.Body, color = Mts.InkMuted); inner() } },
             )
             if (parsed.understood.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -105,7 +107,7 @@ fun QuickAddSheet(q: QuickState, today: LocalDate, edge: HqClient.EdgeWorker?, a
                         ) { Text(u.label, style = HqType.BodySmBold, color = Mts.Ink); Icon(HqIcons.Close, null, Modifier.size(18.dp), tint = Mts.Ink) }
                     }
                 }
-                Text("Words HQ understood are chips. Tap one to remove it.", style = SmallText, color = Mts.InkMuted)
+                Text(stringResource(R.string.tasks_words_hq_understood_are), style = SmallText, color = Mts.InkMuted)
             }
             if (q.more) MoreFields(q, today, edge, actions) else QuickPills(q, edge, actions)
             q.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
@@ -140,7 +142,7 @@ private fun HqClient.EdgeWorker?.takesTasks() = this != null && enabled && repos
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EdgeFields(q: QuickState, edge: HqClient.EdgeWorker, actions: TasksActions) {
-    Text("Edge worker", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+    Text(stringResource(R.string.tasks_edge_worker), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Pill("Not for the worker", q.repo == null) { actions.onQuick(q.copy(repo = null)) }
         edge.repos.forEach { repo -> Pill(repo.substringAfter('/'), q.repo == repo) { actions.onQuick(q.copy(repo = repo)) } }
@@ -154,14 +156,14 @@ private fun MoreFields(q: QuickState, today: LocalDate, edge: HqClient.EdgeWorke
     val shape = RoundedCornerShape(12.dp)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Line, shape).background(Mts.Surface100).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text("Notes (optional)", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+            Text(stringResource(R.string.tasks_notes_optional), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
             BasicTextField(q.notes, { actions.onQuick(q.copy(notes = it)) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
         }
-        Text("Priority", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+        Text(stringResource(R.string.tasks_priority), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PRIORITIES.forEach { (key, label) -> Pill(label, q.priority == key) { actions.onQuick(q.copy(priority = key)) } }
         }
-        Text("Due", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+        Text(stringResource(R.string.tasks_due), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Pill("None", q.due == null) { actions.onQuick(q.copy(due = null)) }
             Pill("Today", q.due == today) { actions.onQuick(q.copy(due = today)) }
@@ -169,7 +171,7 @@ private fun MoreFields(q: QuickState, today: LocalDate, edge: HqClient.EdgeWorke
             Pill("Next week", q.due == TasksLogic.nextMonday(today)) { actions.onQuick(q.copy(due = TasksLogic.nextMonday(today))) }
         }
         if (edge.takesTasks() && edge != null) EdgeFields(q, edge, actions)
-        Text("It goes to your Inbox list.", style = SmallText, color = Mts.InkMuted)
+        Text(stringResource(R.string.tasks_it_goes_to_your), style = SmallText, color = Mts.InkMuted)
     }
 }
 
@@ -193,7 +195,7 @@ fun TaskPage(d: TaskDetail, today: LocalDate, actions: TasksActions) {
     Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onClose)
-            Text("Task", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            Text(stringResource(R.string.tasks_task), style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 4.dp))
             if (t.archivedAt == null) IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { menu.value = true }
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -227,7 +229,7 @@ private fun ArchivedCard(t: TaskItem, actions: TasksActions) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Archived ${TasksLogic.readyAgo(t.archivedAt, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)) ?: "earlier"}. Restore it to work on it again, with its comments and sub-tasks.", style = HqType.BodySm, color = Mts.Ink)
-        Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = actions.onRestore).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) { Text("Restore", style = HqType.BodySmBold, color = Mts.OnGreen) }
+        Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = actions.onRestore).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) { Text(stringResource(R.string.tasks_restore), style = HqType.BodySmBold, color = Mts.OnGreen) }
     }
 }
 
@@ -247,8 +249,8 @@ private fun MoreAbout(open: Boolean, onToggle: () -> Unit, content: @Composable 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("More about this task", style = HqType.BodyBold, color = Mts.Ink)
-            Text("Priority, dates, sub-tasks, comments, history", style = HqType.BodySm, color = Mts.InkMuted)
+            Text(stringResource(R.string.tasks_more_about_this_task), style = HqType.BodyBold, color = Mts.Ink)
+            Text(stringResource(R.string.tasks_priority_dates_sub_tasks), style = HqType.BodySm, color = Mts.InkMuted)
         }
         Icon(if (open) HqIcons.ChevronUp else HqIcons.ChevronDown, null, Modifier.size(20.dp), tint = Mts.InkMuted)
     }
@@ -262,11 +264,11 @@ private fun Label(text: String) = Text(text.uppercase(), style = HqType.Group.co
 private fun ReadyCard(t: TaskItem, actions: TasksActions) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Ready for you to check", style = HqType.BodyBold, color = Mts.Amber)
+        Text(stringResource(R.string.tasks_ready_for_you_to), style = HqType.BodyBold, color = Mts.Amber)
         Text("hq says this is finished${TasksLogic.readyAgo(t.readyAt, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC))?.let { ", $it" } ?: ""}. Look it over, then mark it done.", style = HqType.BodySm, color = Mts.Ink)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = actions.onMarkDone), contentAlignment = Alignment.Center) { Text("Mark done", style = HqType.BodySmBold, color = Mts.OnGreen) }
-            Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { actions.onPrompt("sendback") }, contentAlignment = Alignment.Center) { Text("Send back", style = HqType.BodySmBold, color = Mts.Ink) }
+            Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = actions.onMarkDone), contentAlignment = Alignment.Center) { Text(stringResource(R.string.tasks_mark_done), style = HqType.BodySmBold, color = Mts.OnGreen) }
+            Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { actions.onPrompt("sendback") }, contentAlignment = Alignment.Center) { Text(stringResource(R.string.tasks_send_back), style = HqType.BodySmBold, color = Mts.Ink) }
         }
     }
 }
@@ -322,7 +324,7 @@ private fun SubTasks(d: TaskDetail, actions: TasksActions) {
     }
     if (d.prompt == "sub") Entry("Add a sub-task", d.draft, !d.busy, actions.onDraft, actions.onAddSub)
     else Row(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { actions.onPrompt("sub") }, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(HqIcons.Plus, null, Modifier.size(20.dp), tint = Mts.BrandBlue); Text("Add a sub-task", style = HqType.BodySmBold, color = Mts.BrandBlue)
+        Icon(HqIcons.Plus, null, Modifier.size(20.dp), tint = Mts.BrandBlue); Text(stringResource(R.string.tasks_add_a_sub_task), style = HqType.BodySmBold, color = Mts.BrandBlue)
     }
 }
 
@@ -357,11 +359,11 @@ private fun SendBackDialog(d: TaskDetail, actions: TasksActions) {
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(onClick = { actions.onPrompt(null) }))
         Column(Modifier.padding(start = 24.dp, top = 160.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("What should change?", style = HqType.H2, color = Mts.Ink)
-            Text("Your answer goes on the task as a comment, and it moves back to In progress.", style = HqType.BodySm, color = Mts.InkMuted)
+            Text(stringResource(R.string.tasks_what_should_change), style = HqType.H2, color = Mts.Ink)
+            Text(stringResource(R.string.tasks_your_answer_goes_on), style = HqType.BodySm, color = Mts.InkMuted)
             val shape = RoundedCornerShape(12.dp)
             BasicTextField(d.draft, actions.onDraft, Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(12.dp), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).alpha(if (d.draft.isBlank() || d.busy) 0.5f else 1f).clickable(enabled = d.draft.isNotBlank() && !d.busy, role = Role.Button, onClick = actions.onSendBack), contentAlignment = Alignment.Center) { Text("Send back", style = HqType.BodySmBold, color = Mts.OnGreen) }
+            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).alpha(if (d.draft.isBlank() || d.busy) 0.5f else 1f).clickable(enabled = d.draft.isNotBlank() && !d.busy, role = Role.Button, onClick = actions.onSendBack), contentAlignment = Alignment.Center) { Text(stringResource(R.string.tasks_send_back), style = HqType.BodySmBold, color = Mts.OnGreen) }
         }
     }
 }

@@ -28,12 +28,14 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import example.hq.spike.R
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -99,7 +101,7 @@ private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
                     Text(file.name, style = HqType.ToolLine, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(fileLine(file), style = HqType.Caption, color = if (failed) Mts.DangerText else Mts.InkMuted, maxLines = 1)
-                        if (file.retryable) Text("Retry", style = HqType.NavLabel, color = Mts.Ink)
+                        if (file.retryable) Text(stringResource(R.string.chat_retry), style = HqType.NavLabel, color = Mts.Ink)
                     }
                 }
                 Box(Modifier.size(36.dp).clickable(role = Role.Button, onClickLabel = "Remove ${file.name}") { actions.onRemoveFile(file.id) }.semantics { contentDescription = "Remove ${file.name}" }, contentAlignment = Alignment.Center) {
@@ -136,7 +138,7 @@ private fun MessageRow(state: ChatUiState, actions: ChatActions) {
                 .border(1.dp, Mts.Line, FieldShape).padding(horizontal = 16.dp, vertical = 11.dp),
             decorationBox = { inner ->
                 Box {
-                    if (state.draft.isEmpty()) Text("Message HQ", style = HqType.Body, color = Mts.InkMuted)
+                    if (state.draft.isEmpty()) Text(stringResource(R.string.chat_message_hq), style = HqType.Body, color = Mts.InkMuted)
                     inner()
                 }
             },

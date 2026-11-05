@@ -58,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
@@ -75,6 +76,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import example.hq.spike.R
 import example.hq.spike.bridge.BridgePeer
 import example.hq.spike.bridge.BridgeState
 import example.hq.spike.bridge.JoinState
@@ -192,7 +194,7 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
         Body(PairingWords.INTRO)
         Row(Modifier.fillMaxWidth().padding(top = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Paired devices", style = HqType.BodyBold, color = Mts.Ink)
+                Text(stringResource(R.string.pairing_paired_devices), style = HqType.BodyBold, color = Mts.Ink)
                 Text(PairingWords.switchLine(bridge), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.testTag("switch-line"))
             }
             Switch(
@@ -244,7 +246,7 @@ private fun PeerRow(peer: BridgePeer, onRemove: () -> Unit) {
             Text(peer.name.ifBlank { "Unnamed device" }, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(PairingWords.peerLine(peer, now), style = HqType.BodySm, color = Mts.InkMuted)
         }
-        TextButton(onClick = onRemove) { Text("Remove", color = Mts.DangerText, style = HqType.BodySmBold) }
+        TextButton(onClick = onRemove) { Text(stringResource(R.string.outbox_remove), color = Mts.DangerText, style = HqType.BodySmBold) }
     }
 }
 
@@ -257,8 +259,8 @@ private fun RemoveDialog(peer: BridgePeer, onCancel: () -> Unit, onConfirm: () -
         containerColor = Mts.Surface100,
         title = { Text(PairingWords.removeTitle(peer), style = HqType.ScreenTitle, color = Mts.Ink) },
         text = { Text(PairingWords.REMOVE_BODY, style = HqType.Body, color = Mts.InkMuted) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Remove", color = Mts.DangerText, style = HqType.BodySmBold) } },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel", color = Mts.Ink, style = HqType.BodySmBold) } },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.outbox_remove), color = Mts.DangerText, style = HqType.BodySmBold) } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.pairing_cancel), color = Mts.Ink, style = HqType.BodySmBold) } },
     )
 }
 

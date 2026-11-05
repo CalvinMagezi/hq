@@ -25,9 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -102,8 +104,8 @@ fun BlockedImageView() {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(HqIcons.Image, null, Modifier.size(24.dp), tint = Mts.InkMuted)
             Column {
-                Text("Picture not shown", style = HqType.BodySmBold, color = Mts.Ink)
-                Text("HQ does not load pictures from the internet inside chats.", style = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp), color = Mts.InkMuted)
+                Text(stringResource(R.string.chat_picture_not_shown), style = HqType.BodySmBold, color = Mts.Ink)
+                Text(stringResource(R.string.chat_hq_does_not_load), style = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp), color = Mts.InkMuted)
             }
         }
     }

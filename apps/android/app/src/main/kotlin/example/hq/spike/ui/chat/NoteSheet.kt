@@ -33,10 +33,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import example.hq.spike.R
 import example.hq.spike.ui.chat.blocks.BlockActions
 import example.hq.spike.ui.chat.blocks.Blocks
 import example.hq.spike.ui.chat.blocks.HeaderLabel
@@ -103,7 +105,7 @@ private fun NoteBody(sheet: NoteSheet, blocks: BlockActions, modifier: Modifier)
         Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = FadeHeight)) {
             Blocks(parsed, blocks)
             if (sheet.truncated) {
-                Text("This note is long. Open it in Notes to read all of it.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp))
+                Text(stringResource(R.string.chat_this_note_is_long), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp))
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Mts.Hairline))
@@ -121,11 +123,11 @@ private fun Footer(onOpenInNotes: () -> Unit, onAsk: () -> Unit) {
             Box(
                 Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onOpenInNotes).padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Open in Notes", style = HqType.BodySmBold, color = Mts.OnGreen, maxLines = 1) }
+            ) { Text(stringResource(R.string.chat_open_in_notes), style = HqType.BodySmBold, color = Mts.OnGreen, maxLines = 1) }
             Box(
                 Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = onAsk).padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Ask about this", style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1) }
+            ) { Text(stringResource(R.string.chat_ask_about_this), style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1) }
         }
     }
 }

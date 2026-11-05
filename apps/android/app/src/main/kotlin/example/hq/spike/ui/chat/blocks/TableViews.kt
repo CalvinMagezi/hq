@@ -29,6 +29,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.zIndex
+import example.hq.spike.R
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -203,7 +205,7 @@ private fun ScrollHint(hs: ScrollState) {
             Box(Modifier.padding(start = maxWidth * 0.5f * (hs.value.toFloat() / total)).width(maxWidth * 0.5f).height(4.dp).background(Mts.Line, RoundedCornerShape(2.dp)))
         }
     }
-    Text("Swipe sideways for more columns. The first column and the heading row stay in place.", style = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp), color = Mts.InkMuted,
+    Text(stringResource(R.string.chat_swipe_sideways_for_more), style = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp), color = Mts.InkMuted,
         modifier = Modifier.padding(start = 16.dp, top = 28.dp, end = 16.dp))
 }
 
