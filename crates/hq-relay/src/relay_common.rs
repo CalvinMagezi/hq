@@ -669,15 +669,6 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
 /// log failures themselves, so callers never block on delivery.
 pub(crate) type ChatSender = Arc<dyn Fn(String) + Send + Sync>;
 
-/// Cut `text` to `max` characters, ending with an ellipsis when cut.
-pub(crate) fn truncate_chars(text: String, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text;
-    }
-    let kept = hq_core::text::truncate_chars(&text, max.saturating_sub(1));
-    format!("{kept}…")
-}
-
 /// Insert a turn's registry row. `Some(id)` only when the row now exists, so
 /// callers never quote an id to the user that nothing can look up.
 pub(crate) fn register_turn(
@@ -797,7 +788,7 @@ pub(crate) fn progress_sink(
         {
             tracing::warn!(%e, "progress thread append failed");
         }
-        send(truncate_chars(entry, max_chars));
+        send(hq_core::text::truncate_chars_ellipsis(&entry, max_chars));
     })
 }
 

@@ -19,9 +19,7 @@ use hq_core::types::{ChatMessage, ImageAttachment, MessageRole, PermissionPreset
 use hq_db::Database;
 use tokio::sync::Mutex as TokioMutex;
 
-use crate::relay_common::{
-    ChannelState, ChatSender, close_turn_row, finish_detached, truncate_chars,
-};
+use crate::relay_common::{ChannelState, ChatSender, close_turn_row, finish_detached};
 
 const DEFAULT_PROGRESS_SECS: u64 = 300;
 
@@ -209,7 +207,7 @@ impl TurnRow {
                 "Sub-agent `{}` ({}) {status}{verdict}{run}:\n{}",
                 event.task_id, event.role, event.summary
             );
-            send(truncate_chars(text, max_chars));
+            send(hq_core::text::truncate_chars_ellipsis(&text, max_chars));
         })
     }
 
