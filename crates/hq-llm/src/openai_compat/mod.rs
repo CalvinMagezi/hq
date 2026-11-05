@@ -80,6 +80,13 @@ impl OpenRouterProvider {
         }
     }
 
+    /// Send every request through `http` instead of the shared client, streaming ones included.
+    pub fn with_http_client(mut self, http: reqwest::Client) -> Self {
+        self.client = self.client.with_http_client(http.clone());
+        self.http = http;
+        self
+    }
+
     /// Use the Responses API wire format (see [`crate::responses`]).
     pub fn with_responses_api(mut self, enabled: bool) -> Self {
         self.responses_api = enabled;

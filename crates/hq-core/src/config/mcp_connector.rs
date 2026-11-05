@@ -89,6 +89,15 @@ pub enum DoorTarget {
     Tcp(std::net::SocketAddr),
 }
 
+impl std::fmt::Display for DoorTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unix(path) => write!(f, "unix:{}", path.display()),
+            Self::Tcp(addr) => write!(f, "{addr}"),
+        }
+    }
+}
+
 impl DoorListen {
     /// Reads `mcp_connector.tls.door_listen` or `--edge-door`: nothing means the default, a path
     /// starting with `/` (or `unix:`) a unix socket, anything else a loopback `ip:port` with a

@@ -207,6 +207,7 @@ mod tests {
                     effort: None,
                     wire: Default::default(),
                     enabled: true,
+                    unix_socket: None,
                 },
                 BackendEntry {
                     name: "kimi".to_string(),
@@ -217,6 +218,7 @@ mod tests {
                     effort: None,
                     wire: Default::default(),
                     enabled: true,
+                    unix_socket: None,
                 },
                 BackendEntry {
                     name: "deepseek".to_string(),
@@ -227,6 +229,7 @@ mod tests {
                     effort: None,
                     wire: Default::default(),
                     enabled: true,
+                    unix_socket: None,
                 },
             ],
             ..Default::default()

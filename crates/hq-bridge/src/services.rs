@@ -6,7 +6,7 @@
 //! `bridge.rs`; the security notes are in `docs/security/PAIRING.md`, section 14.
 
 use crate::bridge::{Dialer, Live, LiveGuard, peer_revoked_us, refusal, refused};
-use crate::door::{DEFAULT_MAX_STREAMS, DoorTarget, RECHECK, check_target, connect, pipe};
+use crate::door::{DEFAULT_MAX_STREAMS, DoorTarget, Local, RECHECK, check_target, connect};
 use anyhow::{Context, Result, anyhow, bail};
 use hq_db::Database;
 use iroh::{
@@ -43,6 +43,8 @@ const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 const SERVICE_IDLE: Duration = Duration::from_secs(60 * 60);
 /// How long dialing a peer may take before a forwarded connection gives up.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long a forward waits after a failed accept before it tries again.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(200);
 /// Local connections one forward handles at once; more wait in the listener's backlog.
 const MAX_FORWARDED: usize = 256;
 
@@ -210,34 +212,75 @@ pub async fn open_service(conn: &Connection, service: &str) -> Result<(SendStrea
     }
 }
 
-/// Serves `listener` (a loopback port) for as long as the task lives: each connection becomes one
-/// stream to `service` on `peer`. One connection to the peer is kept and opened again when it
-/// breaks.
-pub async fn run_forward(dialer: Dialer, peer: String, service: String, listener: TcpListener) {
+/// Where a forward takes its local connections: a loopback port, which any local process can open,
+/// or a unix socket in a private directory, which only this user's processes can.
+pub enum ForwardListener {
+    Tcp(TcpListener),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixListener),
+}
+
+impl From<TcpListener> for ForwardListener {
+    fn from(listener: TcpListener) -> Self {
+        Self::Tcp(listener)
+    }
+}
+
+#[cfg(unix)]
+impl From<tokio::net::UnixListener> for ForwardListener {
+    fn from(listener: tokio::net::UnixListener) -> Self {
+        Self::Unix(listener)
+    }
+}
+
+impl ForwardListener {
+    /// The next local connection, or `None` for one to drop.
+    async fn accept(&self) -> std::io::Result<Option<Local>> {
+        match self {
+            Self::Tcp(listener) => {
+                let (tcp, from) = listener.accept().await?;
+                // Bound to loopback, so another address is a surprise and is dropped.
+                if !from.ip().is_loopback() {
+                    return Ok(None);
+                }
+                let _ = tcp.set_nodelay(true);
+                Ok(Some(Local::Tcp(tcp)))
+            }
+            #[cfg(unix)]
+            Self::Unix(listener) => Ok(Some(Local::Unix(listener.accept().await?.0))),
+        }
+    }
+}
+
+/// Serves `listener` for as long as the task lives: each connection becomes one stream to
+/// `service` on `peer`. One connection to the peer is kept and opened again when it breaks.
+pub async fn run_forward(
+    dialer: Dialer,
+    peer: String,
+    service: String,
+    listener: impl Into<ForwardListener>,
+) {
+    let listener = listener.into();
     let conn: Arc<tokio::sync::Mutex<Option<Connection>>> = Arc::default();
     let permits = Arc::new(Semaphore::new(MAX_FORWARDED));
     loop {
         let Ok(permit) = permits.clone().acquire_owned().await else {
             return;
         };
-        let (tcp, from) = match listener.accept().await {
-            Ok(accepted) => accepted,
+        let local = match listener.accept().await {
+            Ok(Some(local)) => local,
+            Ok(None) => continue,
             Err(e) => {
                 tracing::warn!("bridge forward: accept failed: {e}");
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                tokio::time::sleep(ACCEPT_BACKOFF).await;
                 continue;
             }
         };
-        // Bound to loopback, so another address is a surprise and is dropped.
-        if !from.ip().is_loopback() {
-            continue;
-        }
         let (dialer, peer, service, conn) =
             (dialer.clone(), peer.clone(), service.clone(), conn.clone());
         tokio::spawn(async move {
-            let _ = tcp.set_nodelay(true);
             match stream_to(&dialer, &peer, &service, &conn).await {
-                Ok((send, recv)) => pipe(send, recv, tcp, SERVICE_IDLE).await,
+                Ok((send, recv)) => local.pipe(send, recv, SERVICE_IDLE).await,
                 Err(e) => tracing::warn!(%service, "bridge forward: {e:#}"),
             }
             drop(permit);

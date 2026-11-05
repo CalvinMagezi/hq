@@ -41,7 +41,9 @@ pub struct BridgeForward {
     pub peer: String,
     /// The service name on that device.
     pub service: String,
-    /// The loopback `ip:port` this machine listens on.
+    /// Where this machine listens: a loopback `ip:port`, which any local process can open, or an
+    /// absolute unix socket path in a directory only this user can enter, which only this user's
+    /// processes can open (use it on a phone, where every app shares the loopback).
     pub listen: String,
 }
 
@@ -50,7 +52,7 @@ pub struct BridgeForward {
 pub struct CheckedForward {
     pub peer: String,
     pub service: String,
-    pub listen: SocketAddr,
+    pub listen: DoorTarget,
 }
 
 /// A service name is short lowercase ASCII, so it never needs escaping in logs or on the wire.
@@ -108,8 +110,10 @@ impl BridgeServicesConfig {
         self.forwards()
             .ok()?
             .into_iter()
-            .find(|f| f.service == HUB_WEB_SERVICE)
-            .map(|f| f.listen)
+            .find_map(|f| match f.listen {
+                DoorTarget::Tcp(addr) if f.service == HUB_WEB_SERVICE => Some(addr),
+                _ => None,
+            })
     }
 
     /// Whether this machine serves a hub: it offers its host gate and reaches the hub's web app,
@@ -118,7 +122,8 @@ impl BridgeServicesConfig {
         self.services.contains_key(HUB_GATE_SERVICE) && self.hub_web_listen().is_some()
     }
 
-    /// The forwards, checked: valid service names, loopback listen ports, no port used twice.
+    /// The forwards, checked: valid service names, loopback listen ports or socket paths, none used
+    /// twice.
     pub fn forwards(&self) -> Result<Vec<CheckedForward>, String> {
         let mut out: Vec<CheckedForward> = Vec::new();
         for f in &self.forwards {
@@ -131,7 +136,14 @@ impl BridgeServicesConfig {
             if f.peer.trim().is_empty() {
                 return Err("bridge.forwards: peer is required".into());
             }
-            let listen = loopback_port(&f.listen, "bridge.forwards")?;
+            let listen = match DoorListen::parse(Some(&f.listen)) {
+                Ok(DoorListen::Tcp(addr)) => DoorTarget::Tcp(addr),
+                Ok(DoorListen::Unix(path)) => DoorTarget::Unix(path),
+                Ok(DoorListen::Default) => {
+                    return Err("bridge.forwards: listen is required".into());
+                }
+                Err(e) => return Err(format!("bridge.forwards: {e}")),
+            };
             if out.iter().any(|o| o.listen == listen) {
                 return Err(format!("bridge.forwards: {listen} is listed twice"));
             }
@@ -182,14 +194,27 @@ mod tests {
 
     #[test]
     fn forwards_listen_on_loopback_once_each() {
-        let ok = parse("forwards:\n  - peer: abc\n    service: web\n    listen: 127.0.0.1:47480\n");
+        let ok = parse(
+            "forwards:\n  - peer: abc\n    service: web\n    listen: 127.0.0.1:47480\n  - peer: abc\n    service: llm\n    listen: /data/hq/bridge/llm.sock\n",
+        );
+        let forwards = ok.forwards().unwrap();
         assert_eq!(
-            ok.forwards().unwrap()[0].listen,
-            "127.0.0.1:47480".parse().unwrap()
+            forwards[0].listen,
+            DoorTarget::Tcp("127.0.0.1:47480".parse().unwrap())
+        );
+        assert_eq!(
+            forwards[1].listen,
+            DoorTarget::Unix("/data/hq/bridge/llm.sock".into())
+        );
+        assert_eq!(
+            ok.hub_web_listen(),
+            Some("127.0.0.1:47480".parse().unwrap())
         );
         for bad in [
             "forwards:\n  - peer: abc\n    service: web\n    listen: 0.0.0.0:47480\n",
-            "forwards:\n  - peer: abc\n    service: web\n    listen: /tmp/x.sock\n",
+            "forwards:\n  - peer: abc\n    service: web\n    listen: x.sock\n",
+            "forwards:\n  - peer: abc\n    service: web\n    listen: \"\"\n",
+            "forwards:\n  - {peer: a, service: web, listen: /s/a.sock}\n  - {peer: b, service: llm, listen: \"unix:/s/a.sock\"}\n",
             "forwards:\n  - peer: \" \"\n    service: web\n    listen: 127.0.0.1:1\n",
             "forwards:\n  - peer: a\n    service: WEB\n    listen: 127.0.0.1:1\n",
             "forwards:\n  - {peer: a, service: web, listen: \"127.0.0.1:1\"}\n  - {peer: b, service: gate, listen: \"127.0.0.1:1\"}\n",

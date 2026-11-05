@@ -49,7 +49,7 @@ pub(crate) fn spawn_door(state: &Arc<WsState>, router: Router) {
     let target = settings.door_listen.resolve(&state.vault_path);
     let host = settings.host;
     tokio::spawn(async move {
-        tracing::info!(host = %host, door = %describe(&target), "connector tls door: starting");
+        tracing::info!(host = %host, door = %target, "connector tls door: starting");
         serve_door(tls, target).await;
     });
 }
@@ -57,14 +57,6 @@ pub(crate) fn spawn_door(state: &Arc<WsState>, router: Router) {
 fn refuse(why: &str) {
     tracing::error!("connector tls door stays off: {why}");
     eprintln!("connector TLS door not enabled: {why}");
-}
-
-/// What is shown about the door's address.
-fn describe(target: &DoorTarget) -> String {
-    match target {
-        DoorTarget::Unix(path) => format!("unix:{}", path.display()),
-        DoorTarget::Tcp(addr) => addr.to_string(),
-    }
 }
 
 /// Binds the door and serves it, trying again if the bind fails, for as long as the task lives.
@@ -95,10 +87,10 @@ pub(crate) async fn serve_door(tls: Arc<ConnectorTls>, target: DoorTarget) {
             },
         };
         if let Err(e) = ended {
-            tracing::error!(door = %describe(&target), "connector tls door: could not listen: {e}");
+            tracing::error!(door = %target, "connector tls door: could not listen: {e}");
             eprintln!(
                 "connector TLS door could not listen on {}: {e}; trying again",
-                describe(&target)
+                target
             );
         }
         tokio::time::sleep(REBIND_WAIT).await;
@@ -147,56 +139,15 @@ pub(crate) async fn accept_unix(tls: &Arc<ConnectorTls>, listener: tokio::net::U
     }
 }
 
-/// Binds the door's socket. Its directory must be one only this user can change (created `0700`
-/// when it is the default one), a stale socket from a run that did not clean up is replaced, and
-/// anything else at the path is refused, so nothing is removed that is not a socket. The socket
-/// itself is `0600`.
+/// Binds the door's socket through the shared private-socket rules. Only the default directory is
+/// created; a directory the owner named must already exist.
 #[cfg(unix)]
 pub(crate) fn bind_unix(path: &std::path::Path) -> std::io::Result<tokio::net::UnixListener> {
-    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
-    const GROUP_OTHER_WRITE: u32 = 0o022;
-    let refuse = |why: String| std::io::Error::new(std::io::ErrorKind::PermissionDenied, why);
-    let dir = path
+    let default_dir = path
         .parent()
-        .ok_or_else(|| refuse(format!("{} has no directory", path.display())))?;
-    if !dir.exists()
-        && dir
-            .file_name()
-            .is_some_and(|n| n == hq_core::config::DOOR_DIR)
-    {
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)?;
-    }
-    let meta = std::fs::symlink_metadata(dir)?;
-    if !meta.is_dir() {
-        return Err(refuse(format!("{} is not a directory", dir.display())));
-    }
-    // SAFETY: geteuid has no preconditions and cannot fail.
-    if meta.uid() != unsafe { libc::geteuid() } {
-        return Err(refuse(format!("{} belongs to another user", dir.display())));
-    }
-    if meta.permissions().mode() & GROUP_OTHER_WRITE != 0 {
-        return Err(refuse(format!(
-            "{} can be written by others; chmod 700 it",
-            dir.display()
-        )));
-    }
-    match std::fs::symlink_metadata(path) {
-        Ok(existing) if existing.file_type().is_socket() => std::fs::remove_file(path)?,
-        Ok(_) => {
-            return Err(refuse(format!(
-                "{} exists and is not a socket; not touching it",
-                path.display()
-            )));
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-    let listener = tokio::net::UnixListener::bind(path)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(listener)
+        .and_then(|d| d.file_name())
+        .is_some_and(|n| n == hq_core::config::DOOR_DIR);
+    hq_core::fs_private::bind_private_socket(path, default_dir)
 }
 
 #[cfg(all(test, unix))]
@@ -217,51 +168,5 @@ mod tests {
         let _listener = bind_unix(&socket).unwrap();
         assert_eq!(mode(&door), 0o700);
         assert_eq!(mode(&socket), 0o600);
-    }
-
-    #[tokio::test]
-    async fn a_directory_others_can_write_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
-        let err = bind_unix(&dir.path().join("door.sock")).unwrap_err();
-        assert!(
-            err.to_string().contains("can be written by others"),
-            "{err}"
-        );
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o770)).unwrap();
-        assert!(
-            bind_unix(&dir.path().join("door.sock")).is_err(),
-            "group write counts too"
-        );
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(bind_unix(&dir.path().join("door.sock")).is_ok());
-    }
-
-    #[tokio::test]
-    async fn a_stale_socket_is_replaced_and_anything_else_at_the_path_is_left_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        let socket = dir.path().join("door.sock");
-        drop(bind_unix(&socket).unwrap());
-        // The socket file is still there after the listener is gone: a crash leaves it so.
-        assert!(socket.exists());
-        let _again = bind_unix(&socket).expect("a stale socket is replaced");
-
-        let file = dir.path().join("precious");
-        std::fs::write(&file, b"keep me").unwrap();
-        let err = bind_unix(&file).unwrap_err();
-        assert!(err.to_string().contains("not a socket"), "{err}");
-        assert_eq!(std::fs::read(&file).unwrap(), b"keep me");
-    }
-
-    #[tokio::test]
-    async fn a_directory_that_is_a_link_is_refused() {
-        let real = tempfile::tempdir().unwrap();
-        let holder = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(holder.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
-        let link = holder.path().join("door");
-        std::os::unix::fs::symlink(real.path(), &link).unwrap();
-        let err = bind_unix(&link.join("door.sock")).unwrap_err();
-        assert!(err.to_string().contains("not a directory"), "{err}");
     }
 }

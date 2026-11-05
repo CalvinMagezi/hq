@@ -314,7 +314,13 @@ fn setup_config(config: Option<&HqConfig>, role: Role) -> SetupConfig {
     cfg.reserved_names
         .extend(config.remote_mcp.iter().map(|s| s.name.clone()));
     let forwards = config.bridge.forwards().unwrap_or_default();
-    cfg.reserved_ports = forwards.iter().map(|f| f.listen.port()).collect();
+    cfg.reserved_ports = forwards
+        .iter()
+        .filter_map(|f| match f.listen {
+            DoorTarget::Tcp(addr) => Some(addr.port()),
+            DoorTarget::Unix(_) => None,
+        })
+        .collect();
     cfg.configured_forwards = forwards
         .into_iter()
         .map(|f| (canonical_id(&f.peer), f.service))
