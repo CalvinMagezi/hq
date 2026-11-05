@@ -417,6 +417,7 @@ mod tests {
             peer: "abc".into(),
             service: service.into(),
             listen: listen.into(),
+            fail_fast_secs: None,
         };
         let mut with_hub = config("127.0.0.1");
         with_hub.bridge.forwards = vec![

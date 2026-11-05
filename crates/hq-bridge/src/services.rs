@@ -18,7 +18,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -252,16 +252,30 @@ impl ForwardListener {
     }
 }
 
+/// The one connection a forward keeps to its peer, and whether the peer was last found
+/// unreachable.
+#[derive(Default)]
+struct Link {
+    conn: tokio::sync::Mutex<Option<Connection>>,
+    /// A fail-fast forward gave up on the peer; a background try that reaches it clears this.
+    down: AtomicBool,
+    /// A background try is running.
+    retrying: AtomicBool,
+}
+
 /// Serves `listener` for as long as the task lives: each connection becomes one stream to
 /// `service` on `peer`. One connection to the peer is kept and opened again when it breaks.
+/// With `fail_fast`, a peer that does not answer within it is marked unreachable, and while it is
+/// connections end at once, so a caller with a fallback (the backend chain) moves on.
 pub async fn run_forward(
     dialer: Dialer,
     peer: String,
     service: String,
     listener: impl Into<ForwardListener>,
+    fail_fast: Option<Duration>,
 ) {
     let listener = listener.into();
-    let conn: Arc<tokio::sync::Mutex<Option<Connection>>> = Arc::default();
+    let link = Arc::new(Link::default());
     let permits = Arc::new(Semaphore::new(MAX_FORWARDED));
     loop {
         let Ok(permit) = permits.clone().acquire_owned().await else {
@@ -276,16 +290,100 @@ pub async fn run_forward(
                 continue;
             }
         };
-        let (dialer, peer, service, conn) =
-            (dialer.clone(), peer.clone(), service.clone(), conn.clone());
+        let (dialer, peer, service, link) =
+            (dialer.clone(), peer.clone(), service.clone(), link.clone());
         tokio::spawn(async move {
-            match stream_to(&dialer, &peer, &service, &conn).await {
+            match open_stream(&dialer, &peer, &service, &link, fail_fast).await {
                 Ok((send, recv)) => local.pipe(send, recv, SERVICE_IDLE).await,
+                // Expected while the peer is away, and as often as the caller asks: not a warning.
+                Err(e) if e.is::<Unreachable>() => tracing::debug!(%service, "bridge forward: {e}"),
                 Err(e) => tracing::warn!(%service, "bridge forward: {e:#}"),
             }
             drop(permit);
         });
     }
+}
+
+/// The stream for one local connection. Without `fail_fast` it waits as long as a dial may take.
+async fn open_stream(
+    dialer: &Dialer,
+    peer: &str,
+    service: &str,
+    link: &Arc<Link>,
+    fail_fast: Option<Duration>,
+) -> Result<(SendStream, RecvStream)> {
+    let Some(limit) = fail_fast else {
+        return stream_to(dialer, peer, service, &link.conn).await;
+    };
+    if link.down.load(Ordering::SeqCst) {
+        retry_in_background(dialer, peer, service, link);
+        return Err(Unreachable.into());
+    }
+    let outcome = tokio::time::timeout(limit, stream_to(dialer, peer, service, &link.conn)).await;
+    if let Ok(Ok(stream)) = outcome {
+        return Ok(stream);
+    }
+    // Only marked: other connections may be streaming over the kept connection, so closing it is
+    // left to the background try, which alone uses it while the mark is set.
+    link.down.store(true, Ordering::SeqCst);
+    retry_in_background(dialer, peer, service, link);
+    match outcome {
+        Ok(Err(e)) => Err(e),
+        _ => Err(anyhow!("{peer} did not answer within {limit:?}")),
+    }
+}
+
+/// A fail-fast forward ended a connection because its peer is marked unreachable.
+#[derive(Debug)]
+struct Unreachable;
+
+impl std::fmt::Display for Unreachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the peer is unreachable; trying it again in the background")
+    }
+}
+
+impl std::error::Error for Unreachable {}
+
+/// The kept connection's id, if there is one.
+async fn kept_id(link: &Link) -> Option<usize> {
+    link.conn.lock().await.as_ref().map(Connection::stable_id)
+}
+
+/// Tries the peer's service once in the background, one try at a time, and clears the
+/// unreachable mark when it answers. Tries start only when a local connection asks, so a phone
+/// with nothing to send does not keep dialing.
+fn retry_in_background(dialer: &Dialer, peer: &str, service: &str, link: &Arc<Link>) {
+    if link.retrying.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let (dialer, peer, service, link) = (
+        dialer.clone(),
+        peer.to_string(),
+        service.to_string(),
+        link.clone(),
+    );
+    tokio::spawn(async move {
+        let tried = kept_id(&link).await;
+        // The stream only proves the service answers; dropping it ends it on the far side.
+        if stream_to(&dialer, &peer, &service, &link.conn)
+            .await
+            .is_ok()
+        {
+            link.down.store(false, Ordering::SeqCst);
+        } else {
+            // A kept connection that did not answer (a closed lid looks open) is not tried again:
+            // the next try dials afresh. Only that one is closed, never a newer one.
+            let mut slot = link.conn.lock().await;
+            if tried.is_some()
+                && slot.as_ref().map(Connection::stable_id) == tried
+                && let Some(conn) = slot.take()
+            {
+                conn.close(0u32.into(), b"unanswered");
+            }
+        }
+        link.retrying.store(false, Ordering::SeqCst);
+    });
 }
 
 /// A stream to the peer's service on the kept connection, dialing again when that connection is

@@ -399,6 +399,7 @@ async fn the_app_offers_its_gate_and_opens_forwards_and_reports_a_port_taken_els
         peer: "0123456789abcdef".into(),
         service: service.into(),
         listen: listen.to_string(),
+        fail_fast_secs: None,
     };
     let app = app_with_services(
         Tuning {

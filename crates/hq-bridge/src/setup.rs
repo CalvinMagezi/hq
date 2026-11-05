@@ -676,6 +676,7 @@ async fn reconcile(state: &SetupState, dialer: &Dialer, open: &mut OpenForwards)
                     setup.peer_id.clone(),
                     forward_service(setup).to_string(),
                     listener,
+                    None,
                 ));
                 open.0.insert(port, (setup.peer_id.clone(), task));
             }

@@ -98,6 +98,15 @@ async fn pair() -> (Machine, Machine) {
 }
 
 async fn forward(mac: &Machine, peer: &str, service: &str) -> SocketAddr {
+    forward_failing(mac, peer, service, None).await
+}
+
+async fn forward_failing(
+    mac: &Machine,
+    peer: &str,
+    service: &str,
+    fail_fast: Option<Duration>,
+) -> SocketAddr {
     let listener = TcpListener::bind(LOOPBACK).await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(run_forward(
@@ -105,6 +114,7 @@ async fn forward(mac: &Machine, peer: &str, service: &str) -> SocketAddr {
         peer.to_string(),
         service.to_string(),
         listener,
+        fail_fast,
     ));
     addr
 }
@@ -233,6 +243,7 @@ async fn a_forward_on_a_private_socket_reaches_the_service_and_is_not_taken_over
             peer: phone.id(),
             service: "web".into(),
             listen: socket.display().to_string(),
+            fail_fast_secs: None,
         }],
         ..BridgeServicesConfig::default()
     };
@@ -257,4 +268,169 @@ async fn a_forward_on_a_private_socket_reaches_the_service_and_is_not_taken_over
         "a live socket is not taken over"
     );
     forwards.abort();
+}
+
+/// A paired machine that accepts service streams and never answers them, like a laptop whose lid
+/// closed after the connection was made: packets go out and nothing comes back.
+struct Silent {
+    endpoint: iroh::Endpoint,
+    _router: iroh::protocol::Router,
+}
+
+#[derive(Debug, Clone)]
+struct NeverAnswer;
+
+impl iroh::protocol::ProtocolHandler for NeverAnswer {
+    async fn accept(
+        &self,
+        conn: iroh::endpoint::Connection,
+    ) -> Result<(), iroh::protocol::AcceptError> {
+        while let Ok(stream) = conn.accept_bi().await {
+            tokio::spawn(async move {
+                let _held = stream;
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Silent {
+    async fn new() -> Self {
+        let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+            .relay_mode(RelayMode::Disabled)
+            .clear_ip_transports()
+            .bind_addr(LOOPBACK.parse::<SocketAddr>().unwrap())
+            .unwrap()
+            .bind()
+            .await
+            .unwrap();
+        let router = iroh::protocol::Router::builder(endpoint.clone())
+            .accept(hq_bridge::SVC_ALPN, NeverAnswer)
+            .spawn();
+        Self {
+            endpoint,
+            _router: router,
+        }
+    }
+
+    fn id(&self) -> String {
+        self.endpoint.id().to_string()
+    }
+
+    fn known_by(&self, mac: &Machine) {
+        let addrs: Vec<String> = self
+            .endpoint
+            .bound_sockets()
+            .iter()
+            .map(|a| a.to_string())
+            .collect();
+        peers::add_peer(&mac.db, &self.id(), "silent", &[], &addrs).unwrap();
+    }
+}
+
+/// How long a connection to the forward at `addr` stays open before the forward closes it.
+async fn time_to_close(addr: SocketAddr) -> Duration {
+    let started = std::time::Instant::now();
+    let mut tcp = TcpStream::connect(addr).await.unwrap();
+    let _ = tcp.write_all(b"hello").await;
+    let mut buf = [0u8; 64];
+    let _ = tokio::time::timeout(Duration::from_secs(60), tcp.read(&mut buf)).await;
+    started.elapsed()
+}
+
+const FAIL_FAST: Duration = Duration::from_secs(2);
+/// Slack for scheduling on a loaded test machine.
+const MARGIN: Duration = Duration::from_millis(1500);
+/// A connection to a peer already known to be unreachable ends at about once.
+const AT_ONCE: Duration = Duration::from_millis(500);
+
+/// Without `fail_fast`, a forward to a peer that is gone waits out the dial: this is the old
+/// behaviour, kept for forwards with no fallback (the web app, the host gate).
+#[tokio::test]
+async fn without_fail_fast_a_forward_still_waits_for_a_peer_that_is_gone() {
+    let (phone, mac) = pair().await;
+    let port = forward(&mac, &phone.id(), "web").await;
+    assert!(with_timeout(round_trip(port, b"up")).await.is_some());
+    let Machine { bridge, .. } = phone;
+    Arc::try_unwrap(bridge).ok().unwrap().shutdown().await;
+    assert!(time_to_close(port).await > FAIL_FAST + MARGIN);
+}
+
+/// A peer that is gone costs one `fail_fast` wait, then connections end at once until it is back,
+/// and the first connection after a background try reached it gets through.
+#[tokio::test]
+async fn a_fail_fast_forward_gives_up_on_a_peer_that_is_gone_and_finds_it_again() {
+    let web = echo_server().await;
+    let key_dir = tempfile::tempdir().unwrap();
+    let start_phone = |port: u16| {
+        let key = key_dir.path().join("bridge.key");
+        async move {
+            let db = Database::open_memory().unwrap();
+            let bridge = Bridge::start_with_services(
+                BridgeConfig {
+                    key,
+                    bind: vec![SocketAddr::from(([127, 0, 0, 1], port))],
+                    relay: RelayMode::Disabled,
+                    name: "phone".into(),
+                    with_addrs: true,
+                    advertise: vec![],
+                },
+                db.clone(),
+                None,
+                None,
+                Some(offering("web", web)),
+            )
+            .await
+            .unwrap();
+            (bridge, db)
+        }
+    };
+    let mac = Machine::new("mac", None).await;
+    let (phone, phone_db) = start_phone(0).await;
+    let card = phone.card();
+    peers::add_peer(&mac.db, &card.id, &card.name, &card.relays, &card.addrs).unwrap();
+    let mac_card = mac.bridge.card();
+    peers::add_peer(&phone_db, &mac_card.id, "mac", &[], &mac_card.addrs).unwrap();
+    let port = forward_failing(&mac, &card.id, "web", Some(FAIL_FAST)).await;
+    assert!(with_timeout(round_trip(port, b"up")).await.is_some());
+
+    let phone_port: u16 = card.addrs[0].rsplit(':').next().unwrap().parse().unwrap();
+    phone.shutdown().await;
+    let first = time_to_close(port).await;
+    assert!(first <= FAIL_FAST + MARGIN, "first: {first:?}");
+    let next = time_to_close(port).await;
+    assert!(next <= AT_ONCE, "next: {next:?}");
+
+    let (_back, back_db) = start_phone(phone_port).await;
+    peers::add_peer(&back_db, &mac_card.id, "mac", &[], &mac_card.addrs).unwrap();
+    // Each connection while down asks for one background try; one of them finds the phone.
+    let mut through = false;
+    for _ in 0..20 {
+        if round_trip(port, b"back").await.is_some() {
+            through = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(
+        through,
+        "the phone came back but the forward never used it again"
+    );
+}
+
+/// A peer that holds the connection open and never answers (a closed lid) costs one `fail_fast`
+/// wait, not the ten seconds a service header may take, and later connections end at once.
+#[tokio::test]
+async fn a_fail_fast_forward_gives_up_on_a_peer_that_never_answers() {
+    let mac = Machine::new("mac", None).await;
+    let silent = Silent::new().await;
+    silent.known_by(&mac);
+    let port = forward_failing(&mac, &silent.id(), "llm", Some(FAIL_FAST)).await;
+    let first = time_to_close(port).await;
+    assert!(first <= FAIL_FAST + MARGIN, "first: {first:?}");
+    for _ in 0..3 {
+        let next = time_to_close(port).await;
+        assert!(next <= AT_ONCE, "next: {next:?}");
+    }
 }
