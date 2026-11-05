@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanyConfig {
@@ -31,22 +30,10 @@ pub struct ConnectorBinding {
     pub secret_ref: Option<String>,
 }
 
-impl ConnectorBinding {
-    pub fn is_singleton(&self) -> bool {
-        matches!(self.kind.as_str(), "gws" | "github" | "vercel" | "convex")
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompanyIdentity {
     pub contact_name: String,
     pub role: String,
-}
-
-impl CompanyConfig {
-    pub fn pending_emails_path(&self, vault_path: &Path) -> PathBuf {
-        vault_path.join(&self.vault_prefix).join("PendingEmails")
-    }
 }
 
 /// Look up a company by id from a slice. Returns `None` if not found.
@@ -125,22 +112,6 @@ budget:
     }
 
     #[test]
-    fn singleton_connector_detection() {
-        let binding = ConnectorBinding {
-            name: "gmail".into(),
-            kind: "gws".into(),
-            secret_ref: None,
-        };
-        assert!(binding.is_singleton());
-        let switchable = ConnectorBinding {
-            name: "zoho-mail".into(),
-            kind: "imap_smtp".into(),
-            secret_ref: Some("hq-x-zoho".into()),
-        };
-        assert!(!switchable.is_singleton());
-    }
-
-    #[test]
     fn company_by_id_found() {
         let companies = two_companies();
         let c = company_by_id(&companies, "acme").unwrap();
@@ -151,17 +122,5 @@ budget:
     fn company_by_id_not_found() {
         let companies = two_companies();
         assert!(company_by_id(&companies, "unknown").is_none());
-    }
-
-    #[test]
-    fn vault_paths_derived_correctly() {
-        use std::path::Path;
-        let companies = two_companies();
-        let c = company_by_id(&companies, "acme").unwrap();
-        let vault = Path::new("/vault");
-        assert_eq!(
-            c.pending_emails_path(vault),
-            Path::new("/vault/Notebooks/Companies/acme/PendingEmails")
-        );
     }
 }

@@ -11,11 +11,10 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 use tracing::info;
 
 use hq_core::config::HqConfig;
-use hq_core::types::{PermissionMode, PermissionPreset, SecurityProfile, SessionEvent};
+use hq_core::types::{PermissionMode, PermissionPreset, SecurityProfile};
 use hq_llm::provider::LlmProvider;
 
 use crate::session::{AgentSession, SessionConfig, SessionMode};
@@ -215,9 +214,7 @@ pub fn mailbox_denial_notifier(vault_path: PathBuf) -> crate::governance::Denial
 /// # Usage
 ///
 /// ```ignore
-/// let (tx, _rx) = broadcast::channel(256);
 /// let mut session = SessionBuilder::from_config(&config)
-///     .event_channel(tx)
 ///     .system_prompt("You are a helpful agent.".into())
 ///     .build()
 ///     .await?;
@@ -229,7 +226,6 @@ pub struct SessionBuilder {
     /// Harness-specific instructions appended after the soul (not a replacement).
     /// Callers that built `soul + RELAY_INSTRUCTIONS` strings should switch to this.
     harness_instructions: Option<String>,
-    event_tx: Option<broadcast::Sender<SessionEvent>>,
     extra_allowed_paths: Vec<PathBuf>,
     working_dir: Option<PathBuf>,
     provider_override: Option<Arc<dyn LlmProvider>>,
@@ -292,7 +288,6 @@ impl SessionBuilder {
             config: config.clone(),
             system_prompt: None,
             harness_instructions: None,
-            event_tx: None,
             extra_allowed_paths: Vec::new(),
             working_dir: None,
             provider_override: None,
@@ -377,12 +372,6 @@ impl SessionBuilder {
     /// Set the system prompt (overrides context-assembled prompt).
     pub fn system_prompt(mut self, prompt: String) -> Self {
         self.system_prompt = Some(prompt);
-        self
-    }
-
-    /// Subscribe to session events via a broadcast channel.
-    pub fn event_channel(mut self, tx: broadcast::Sender<SessionEvent>) -> Self {
-        self.event_tx = Some(tx);
         self
     }
 
@@ -632,6 +621,17 @@ impl SessionBuilder {
             let block = governed_registry.behavioral_block(MAX_BEHAVIORAL_NOTE_CHARS);
             (!block.is_empty()).then_some(block)
         };
+        // The person's own sessions hear what HQ can do on this install, so the model can offer
+        // something when it fits. Built without reading usage: adoption data stays on the device.
+        // Sub-agents, guests and custom prompts do not get it.
+        let capability_block = (self.subagent_depth == 0
+            && self.system_prompt.is_none()
+            && session_config.agent_name == hq_db::adoption::OWNER_AGENT)
+            .then(|| {
+                let names: std::collections::HashSet<&str> = governed_registry.names().collect();
+                prompt::capability_block(&self.config, &names)
+            })
+            .flatten();
         let weak_catalog = matches!(self.session_profile, SessionProfile::Weak)
             .then(|| governed_registry.catalog_block_by_category())
             .filter(|b| !b.is_empty());
@@ -677,14 +677,6 @@ impl SessionBuilder {
         }
         session.set_vault_path(vault_path.clone());
 
-        // Wire the broadcast channel.
-        if let Some(tx) = self.event_tx.take() {
-            session.on_event(move |event| {
-                // Best-effort: ignore send errors (no receivers)
-                let _ = tx.send(event);
-            });
-        }
-
         self.apply_system_prompt(
             &mut session,
             prompt::PromptInputs {
@@ -694,6 +686,7 @@ impl SessionBuilder {
                 tool_count,
                 tool_notes: tool_notes.as_deref(),
                 weak_catalog: weak_catalog.as_deref(),
+                capability_block,
                 context_window: session_config.context_window,
                 identity: hq_core::config::runtime_identity_block(&self.config),
             },

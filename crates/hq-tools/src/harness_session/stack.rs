@@ -171,7 +171,6 @@ pub fn brief_for(
 /// specialist that cannot be resolved or a run that could not start is one line
 /// in `skipped`.
 pub async fn dispatch(
-    vault_path: &Path,
     db: &Arc<Database>,
     cfg: &HqConfig,
     resolve: HostResolver<'_>,
@@ -186,7 +185,7 @@ pub async fn dispatch(
         .iter()
         .filter(|s| s.enabled && Specialist::valid_name(&s.name))
     {
-        match dispatch_one(vault_path, db, cfg, s, resolve).await {
+        match dispatch_one(db, cfg, s, resolve).await {
             Ok(Some(launched)) => report.started.push(launched),
             Ok(None) => {}
             Err(e) => report.skipped.push(format!("{}: {e:#}", s.name)),
@@ -197,7 +196,6 @@ pub async fn dispatch(
 
 /// The sweep for one specialist. `Ok(None)` means nothing to do this time.
 async fn dispatch_one(
-    vault_path: &Path,
     db: &Arc<Database>,
     cfg: &HqConfig,
     s: &Specialist,
@@ -247,15 +245,12 @@ async fn dispatch_one(
     let Some(task) = next.into_iter().find(|task| !backed_off(&task.id)) else {
         return Ok(None);
     };
-    start_run(vault_path, db, cfg, s, &lane, &task, resolve)
-        .await
-        .map(Some)
+    start_run(db, cfg, s, &lane, &task, resolve).await.map(Some)
 }
 
 /// `hq stack run <name> <task>`: start a run for one task now, whoever it is
 /// assigned to. The lane, the budget and the one-run-at-a-time rule still hold.
 pub async fn run_for(
-    vault_path: &Path,
     db: &Arc<Database>,
     cfg: &HqConfig,
     name: &str,
@@ -312,12 +307,11 @@ pub async fn run_for(
             t::CODE_TAG
         );
     }
-    start_run(vault_path, db, cfg, s, &lane, &task, resolve).await
+    start_run(db, cfg, s, &lane, &task, resolve).await
 }
 
 /// Launch the run and leave the task a comment when it could not start.
 async fn start_run(
-    vault_path: &Path,
     db: &Arc<Database>,
     cfg: &HqConfig,
     s: &Specialist,
@@ -352,7 +346,6 @@ async fn start_run(
         let session_id = super::new_session_id(&lane.harness.name);
         let label = s.label();
         let report = launch_session(
-            vault_path,
             db,
             &lane.harness,
             Launch {

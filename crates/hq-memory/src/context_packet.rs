@@ -294,14 +294,6 @@ fn query_terms(task: &str, need: &ContextNeed) -> Vec<String> {
     terms
 }
 
-fn truncate_chars(text: &str, cap: usize) -> String {
-    if text.chars().count() <= cap {
-        return text.to_string();
-    }
-    let cut: String = text.chars().take(cap.saturating_sub(1)).collect();
-    format!("{cut}…")
-}
-
 /// Pick the paragraphs that mention the terms, in document order, within `cap`.
 fn select_excerpt(content: &str, terms: &[String], cap: usize) -> String {
     let paragraphs: Vec<&str> = content
@@ -344,7 +336,7 @@ fn select_excerpt(content: &str, terms: &[String], cap: usize) -> String {
         .map(|&i| paragraphs[i])
         .collect::<Vec<_>>()
         .join("\n\n");
-    truncate_chars(&joined, cap)
+    hq_core::text::truncate_chars_ellipsis(&joined, cap)
 }
 
 fn fm_string_list(note: &Note, key: &str) -> Vec<String> {

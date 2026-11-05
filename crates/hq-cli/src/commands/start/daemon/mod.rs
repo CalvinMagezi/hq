@@ -490,6 +490,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("task-stale-digest", Duration::from_secs(21600)),
         // Recurring tool failures from local telemetry, once a week; `daemon.tool_failure_digest`.
         DaemonTask::with_default_timeout("tool-failure-digest", Duration::from_secs(604800)),
+        // How HQ was used (capabilities, corrections, return), once a week; `daemon.adoption_digest`.
+        DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
         DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("verify-briefing", Duration::from_secs(3600)),
     ]
@@ -609,7 +611,7 @@ async fn dispatch_task(
         "session-supervisor" => {
             tasks_periodic::session_supervisor::run_session_supervisor(vault_path, db, config).await
         }
-        "stack-dispatch" => tasks_periodic::run_stack_dispatch(vault_path, db, config).await,
+        "stack-dispatch" => tasks_periodic::run_stack_dispatch(db, config).await,
         "edge-worker-dispatch" => tasks_periodic::run_edge_worker_dispatch(db, config).await,
         "verify-dispatch" => tasks_periodic::run_verify_dispatch(vault_path, db, config).await,
         "verify-audit" => tasks_periodic::run_verify_audit(vault_path, db, config).await,
@@ -647,6 +649,7 @@ async fn dispatch_task(
         "turn-reconcile" => tasks_periodic::run_turn_reconcile(vault_path, db, config).await,
         "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
         "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
+        "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
 
         unknown => {
             warn!(task = unknown, "daemon: unknown task");
@@ -710,11 +713,7 @@ pub fn write_daemon_status(vault_path: &Path, tasks: &[DaemonTask], started_at: 
     );
     for t in tasks {
         let err_str = t.last_error.as_deref().unwrap_or("-");
-        let err_display = if err_str.len() > 60 {
-            &err_str[..60]
-        } else {
-            err_str
-        };
+        let err_display = hq_core::text::truncate_chars(err_str, 60);
         md.push_str(&format!(
             "| `{}` | {} | {} | {} | {} | {} | {} | {} |\n",
             t.name,
@@ -1047,6 +1046,29 @@ mod lite_tests {
             ..full.clone()
         };
         assert!(accept_reload(&full, tweaked, &no_env).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    /// The status table quotes each task's last error, cut to 60 characters. Errors here carry
+    /// em dashes, and a byte cut inside one used to panic the status writer.
+    #[test]
+    fn a_last_error_with_a_multibyte_character_at_the_cut_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut task = DaemonTask::new("t", Duration::from_secs(60), Duration::from_secs(5));
+        // 59 ASCII bytes, then a 3-byte em dash that straddles byte 60.
+        task.last_error = Some(format!("{} — and more after the cut", "e".repeat(58)));
+        assert!(!task.last_error.as_deref().unwrap().is_char_boundary(60));
+
+        write_daemon_status(dir.path(), &[task], "now");
+
+        let md = std::fs::read_to_string(dir.path().join("DAEMON-STATUS.md")).unwrap();
+        let row = md.lines().find(|l| l.starts_with("| `t`")).unwrap();
+        assert!(row.contains(&format!("{} —", "e".repeat(58))), "{row}");
+        assert!(!row.contains("and more"), "{row}");
     }
 }
 

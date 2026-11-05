@@ -621,11 +621,6 @@ impl OpenTicket {
         })
     }
 
-    /// The throwaway endpoint's id: what the ticket names.
-    pub fn pairing_id(&self) -> EndpointId {
-        self.pairing_endpoint.id()
-    }
-
     /// Whether the throwaway endpoint has been closed (it refuses everything). Its socket is
     /// released when this ticket is dropped, as the endpoint handle lives here.
     pub fn endpoint_closed(&self) -> bool {

@@ -17,6 +17,15 @@ pub fn truncate_chars_with(s: &str, max: usize, suffix: &str) -> String {
     format!("{kept}{suffix}")
 }
 
+/// At most `max` characters of `s` in all: whole when it fits, else cut one short and ended
+/// with an ellipsis.
+pub fn truncate_chars_ellipsis(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    format!("{}…", truncate_chars(s, max.saturating_sub(1)))
+}
+
 /// Cut tool output to `max_bytes` on a char boundary and append the truncation note.
 ///
 /// `hint` lands inside the note's brackets, so a caller can add guidance.
@@ -54,6 +63,14 @@ mod tests {
     fn truncate_chars_with_only_suffixes_when_cut() {
         assert_eq!(truncate_chars_with("héllo", 5, "..."), "héllo");
         assert_eq!(truncate_chars_with("héllo wörld", 7, "…"), "héllo w…");
+    }
+
+    #[test]
+    fn truncate_chars_ellipsis_never_exceeds_max() {
+        assert_eq!(truncate_chars_ellipsis("héllo", 10), "héllo");
+        assert_eq!(truncate_chars_ellipsis("héllo", 5), "héllo");
+        assert_eq!(truncate_chars_ellipsis("héllo wörld", 5), "héll…");
+        assert_eq!(truncate_chars_ellipsis("abc", 0), "…");
     }
 
     #[test]

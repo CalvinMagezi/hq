@@ -14,7 +14,7 @@ mod render;
 mod tests;
 
 pub use cache::{load_cached, load_cached_profile, refresh};
-pub use probe::{agent_hq_checkout_path, probe_machine, probe_machine_fast, which_binary};
+pub use probe::{probe_machine, probe_machine_fast, which_binary};
 pub use render::render_markdown;
 
 use serde::{Deserialize, Serialize};

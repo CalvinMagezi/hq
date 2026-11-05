@@ -70,15 +70,9 @@ pub async fn run(
                 bail!("usage: hq stack run <specialist> <task id or display id>");
             };
             let resolve = |host: Option<&str>| hq_tools::agent_host::host(host);
-            let report = hq_tools::harness_session::stack::run_for(
-                &config.vault_path,
-                &db,
-                config,
-                &name,
-                &task,
-                &resolve,
-            )
-            .await?;
+            let report =
+                hq_tools::harness_session::stack::run_for(&db, config, &name, &task, &resolve)
+                    .await?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&report).unwrap_or_default()

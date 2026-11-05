@@ -482,7 +482,6 @@ async fn deliver_messages(db: &Database, row: &registry::HarnessSessionRow, agen
 /// restart command. Best effort; the next sweep tries again.
 async fn keep_resume_current(
     db: &Database,
-    vault_path: &Path,
     row: &registry::HarnessSessionRow,
     agent: &AgentInfo,
     resolve: &HostResolver,
@@ -499,9 +498,9 @@ async fn keep_resume_current(
     let Ok(host) = (resolve.as_ref())(&row.host) else {
         return;
     };
-    let (vault, row_c, agent_c) = (vault_path.to_path_buf(), row.clone(), agent.clone());
+    let (row_c, agent_c) = (row.clone(), agent.clone());
     let refreshed = tokio::task::spawn_blocking(move || {
-        hq_tools::harness_session::refresh_restart_command(&vault, &host, &row_c, &agent_c)
+        hq_tools::harness_session::refresh_restart_command(&host, &row_c, &agent_c)
     })
     .await;
     match refreshed {
@@ -570,7 +569,7 @@ async fn supervise(
                     head,
                 };
                 sweep_alive(db, vault_path, &row, seen, &resolve);
-                keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
+                keep_resume_current(db, &row, &agent, &resolve).await;
                 alive.push((row, *agent));
                 continue;
             }

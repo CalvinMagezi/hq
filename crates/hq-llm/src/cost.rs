@@ -4,7 +4,7 @@
 use crate::models::{calculate_cost_with_cache, get_model_info};
 
 /// Providers that run on the owner's hardware: tokens are tracked, dollars are zero by design.
-const LOCAL_PROVIDERS: &[&str] = &["ollama", "turboquant"];
+const LOCAL_PROVIDERS: &[&str] = &["ollama"];
 /// Providers billed through a subscription quota rather than per token.
 const FLAT_RATE_PROVIDERS: &[&str] = &["copilot"];
 const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "[::1]", "0.0.0.0"];

@@ -619,15 +619,6 @@ pub fn repair_orphans(conn: &Connection, vault_path: &Path, apply: bool) -> Resu
     Ok(report)
 }
 
-/// `sync_index` as `(indexed, removed, unchanged)`.
-pub fn sync_index_incremental(
-    conn: &Connection,
-    notebooks_dir: &Path,
-) -> Result<(usize, usize, usize)> {
-    let report = sync_index(conn, notebooks_dir)?;
-    Ok((report.indexed, report.removed, report.unchanged))
-}
-
 #[cfg(test)]
 mod unit_tests {
     use super::*;

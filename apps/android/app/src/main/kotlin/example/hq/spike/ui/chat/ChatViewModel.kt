@@ -223,7 +223,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val made = client.createThread(topic)
-                _state.update { ChatUiState(connected = it.connected, threadId = made.id, title = made.title.ifBlank { topic }, chats = it.chats) }
+                _state.update { ChatUiState(connected = it.connected, threadId = made.id, title = made.title.ifBlank { topic }, chats = it.chats, suggestions = it.suggestions) }
                 old?.let(::archive)
                 refreshChats()
             } catch (e: HqUnavailable) {
@@ -418,10 +418,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var openedLatest = false
 
     private suspend fun openLatest() {
+        refreshSuggestions()
         refreshChats()
         val s = _state.value
         val untouched = s.threadId == null && s.messages.isEmpty() && s.draft.isBlank() && !s.chatsOpen
         if (!openedLatest && untouched) s.chats.firstOrNull()?.let { openedLatest = true; openThread(it.id) }
+    }
+
+    /** What the empty chat offers: HQ's own pick of what works here. Keeps the last answer when hq is not reachable. */
+    private suspend fun refreshSuggestions() {
+        val picked = try { client.capabilitySuggestions() } catch (e: HqUnavailable) { return }
+        _state.update { it.copy(suggestions = picked) }
     }
 
     private suspend fun refreshChats() {

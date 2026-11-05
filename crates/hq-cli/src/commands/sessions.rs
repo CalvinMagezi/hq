@@ -61,7 +61,6 @@ pub async fn run(
         policy,
     } = opts;
     let db = open_db(config)?;
-    let vault = &config.vault_path;
 
     match sub {
         "list" => {
@@ -138,7 +137,6 @@ pub async fn run(
                 }
             };
             let result = hq_tools::harness_session::spawn_with(
-                vault,
                 &db,
                 hq_tools::harness_session::SpawnRequest {
                     host: host.as_deref(),
@@ -212,8 +210,7 @@ pub async fn run(
             let id = arg1.ok_or_else(|| {
                 anyhow::anyhow!("usage: hq sessions resume <session-id> [--prompt ...]")
             })?;
-            let result =
-                hq_tools::harness_session::resume(vault, &db, &id, prompt.as_deref()).await?;
+            let result = hq_tools::harness_session::resume(&db, &id, prompt.as_deref()).await?;
             print_json(&result);
         }
         other => {

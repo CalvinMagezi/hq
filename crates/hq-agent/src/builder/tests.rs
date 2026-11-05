@@ -843,3 +843,76 @@ mod pinned_model {
         assert!(!b.pinned);
     }
 }
+
+/// The person's own session hears what HQ can do here; a session with its own prompt (a
+/// sub-agent, a relay's legacy path) does not.
+#[tokio::test]
+async fn an_owner_session_is_told_what_it_can_offer_and_a_custom_prompt_is_not() {
+    let session = build_measurement_session_with(SessionProfile::Standard, |_| {}).await;
+    let prompt = session.system_prompt().unwrap_or_default().to_string();
+    assert!(prompt.contains("## Things you can offer"), "{prompt}");
+    assert!(prompt.contains("(vault_import)"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let config = HqConfig {
+        openrouter_api_key: Some("test-key-no-network".to_string()),
+        vault_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
+    let custom = SessionBuilder::from_config(&config)
+        .working_dir(dir.path().to_path_buf())
+        .session_config(SessionConfig {
+            model: "relay".to_string(),
+            ..SessionConfig::default()
+        })
+        .system_prompt("You are a narrow helper.".to_string())
+        .build()
+        .await
+        .unwrap();
+    assert!(
+        !custom
+            .system_prompt()
+            .unwrap_or_default()
+            .contains("Things you can offer")
+    );
+}
+
+/// What the person has used is adoption data and stays on the device: a vault whose owner has
+/// used every capability gets exactly the same block in the model's prompt as a fresh one.
+#[tokio::test]
+async fn the_models_prompt_does_not_change_with_what_the_person_used() {
+    fn offer_block(prompt: &str) -> String {
+        let start = prompt
+            .find("## Things you can offer")
+            .expect("block present");
+        let rest = &prompt[start..];
+        let end = rest.find("\n\n").unwrap_or(rest.len());
+        rest[..end].to_string()
+    }
+    let fresh = build_measurement_session_with(SessionProfile::Standard, |_| {}).await;
+
+    let used = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(used.path().join("_data")).unwrap();
+    let db = hq_db::Database::open(&used.path().join("_data/vault.db")).unwrap();
+    db.with_conn(|c| {
+        for cap in hq_tools::capabilities::catalog() {
+            for tool in &cap.tools {
+                c.execute(
+                    "INSERT INTO tool_usage (tool_name, agent_name, session_id, timestamp, success)
+                     VALUES (?1, 'hq', 's', 1, 1)",
+                    [tool],
+                )?;
+            }
+        }
+        Ok(())
+    })
+    .unwrap();
+    let vault = used.path().to_path_buf();
+    let seasoned =
+        build_measurement_session_with(SessionProfile::Standard, |c| c.vault_path = vault).await;
+
+    assert_eq!(
+        offer_block(fresh.system_prompt().unwrap_or_default()),
+        offer_block(seasoned.system_prompt().unwrap_or_default())
+    );
+}

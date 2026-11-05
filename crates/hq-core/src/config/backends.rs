@@ -62,11 +62,6 @@ impl BackendKind {
         !matches!(self, BackendKind::GithubCopilotCli)
     }
 
-    /// Whether this kind is a local CLI harness subprocess.
-    pub fn is_cli(self) -> bool {
-        matches!(self, BackendKind::GithubCopilotCli)
-    }
-
     /// Canonical default endpoint for kinds that have one, else `None`.
     ///
     /// `openai-compatible` has no canonical default: the generic kind's endpoint
@@ -81,20 +76,6 @@ impl BackendKind {
             BackendKind::GithubCopilotApi => Some("https://api.githubcopilot.com"),
             BackendKind::OpenaiCompatible | BackendKind::GithubCopilotCli => None,
         }
-    }
-
-    /// Whether construction needs a static `credential_env` value. False for
-    /// both Copilot kinds: the CLI authenticates out-of-band (`gh auth`), and
-    /// `GithubCopilotApi` resolves a raw GitHub token dynamically (env vars,
-    /// else `gh auth token`) rather than reading a fixed API key once.
-    pub fn requires_credential(self) -> bool {
-        matches!(
-            self,
-            BackendKind::Openrouter
-                | BackendKind::KimiCode
-                | BackendKind::OpenaiCompatible
-                | BackendKind::AnthropicCompatible
-        )
     }
 }
 
@@ -359,14 +340,12 @@ mod tests {
     }
 
     #[test]
-    fn github_copilot_api_defaults_endpoint_and_needs_no_credential() {
+    fn github_copilot_api_defaults_endpoint_and_is_an_api_kind() {
         assert_eq!(
             BackendKind::GithubCopilotApi.default_endpoint(),
             Some("https://api.githubcopilot.com")
         );
-        assert!(!BackendKind::GithubCopilotApi.requires_credential());
         assert!(BackendKind::GithubCopilotApi.is_api());
-        assert!(!BackendKind::GithubCopilotApi.is_cli());
     }
 
     #[test]

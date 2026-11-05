@@ -8,9 +8,7 @@
 //! 2. Deduplication of repeated patterns (e.g., test output lines)
 //! 3. Whitespace normalization
 
-use crate::tokens::{
-    TruncationStrategy, count_tokens_fast, snap_to_char_boundary, truncate_with_strategy,
-};
+use crate::tokens::{TruncationStrategy, count_tokens_fast, truncate_with_strategy};
 
 /// Threshold above which microcompact activates (in tokens).
 pub const MICROCOMPACT_THRESHOLD: usize = 4000;
@@ -108,26 +106,6 @@ fn deduplicate_lines(text: &str) -> String {
     result.join("\n")
 }
 
-/// Create a head+tail preview of the text.
-pub fn create_preview(text: &str, byte_limit: usize) -> String {
-    if text.len() <= byte_limit {
-        return text.to_string();
-    }
-
-    let head_limit = byte_limit / 2;
-    let tail_limit = byte_limit - head_limit - 50; // reserve space for middle marker
-
-    let head_end = snap_to_char_boundary(text, head_limit);
-    let tail_start = text.len().saturating_sub(tail_limit);
-    let tail_start_safe = snap_to_char_boundary(text, tail_start);
-
-    format!(
-        "{}... [TRUNCATED] ...{}",
-        &text[..head_end],
-        &text[tail_start_safe..]
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,14 +131,5 @@ mod tests {
         let result = microcompact(&large);
         assert!(result.compacted_tokens < result.original_tokens);
         assert_ne!(result.strategy, MicrocompactStrategy::PassThrough);
-    }
-
-    #[test]
-    fn preview_preserves_head_tail() {
-        let lines: Vec<String> = (0..100).map(|i| format!("line {i}")).collect();
-        let text = lines.join("\n");
-        let preview = create_preview(&text, 500);
-        assert!(preview.contains("line 0"));
-        assert!(preview.contains("line 99"));
     }
 }

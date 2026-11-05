@@ -83,8 +83,12 @@ impl WebPush {
         self.key.public_key_b64()
     }
 
-    /// Whether the dispatcher pushes `item`.
+    /// Whether the dispatcher pushes `item`. Never one that is device-only (how the person uses
+    /// HQ): a push crosses a third party's push service, even if encrypted.
     fn wants(&self, item: &ValueItem) -> bool {
+        if item.is_device_only() {
+            return false;
+        }
         let open = matches!(
             item.state,
             ValueState::Pending | ValueState::Routed | ValueState::Delivered
@@ -265,13 +269,7 @@ pub(crate) fn is_app_path(link: &str) -> bool {
 }
 
 fn clip(s: &str, max: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max - 1).collect();
-    out.push('…');
-    out
+    hq_core::text::truncate_chars_ellipsis(s.trim(), max)
 }
 
 /// The endpoint's host, for logs: the path is a per-device secret.
@@ -419,6 +417,23 @@ mod tests {
         hq_db::value_items::emit(&db, &item).unwrap();
         assert_eq!(push(dir.path(), true).dispatch_once(&db).await.unwrap(), 1);
         assert_eq!(received.requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn adoption_data_is_never_pushed_even_with_push_all() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = hq_db::Database::open_memory().unwrap();
+        let (base, received) = mock_push_service().await;
+        subscribe(&db, &format!("{base}/ok/a"));
+        let item = ValueItem::new(
+            hq_core::types::ADOPTION_DIGEST_SOURCE,
+            ValueKind::ActionNeeded,
+            "How HQ was used this week",
+            "private",
+        );
+        hq_db::value_items::emit(&db, &item).unwrap();
+        assert_eq!(push(dir.path(), true).dispatch_once(&db).await.unwrap(), 0);
+        assert!(received.requests.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

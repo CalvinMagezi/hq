@@ -131,12 +131,6 @@ fn watch_done_marker_is_stripped_and_closes_only_the_watch_row() {
 }
 
 #[test]
-fn truncate_chars_cuts_on_characters_not_bytes() {
-    assert_eq!(truncate_chars("héllo".to_string(), 10), "héllo");
-    assert_eq!(truncate_chars("héllo wörld".to_string(), 5), "héll…");
-}
-
-#[test]
 fn progress_sink_sends_notes_and_heartbeats() {
     let vault = tempfile::TempDir::new().unwrap();
     let sent = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));

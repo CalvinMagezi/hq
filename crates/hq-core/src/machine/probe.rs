@@ -311,14 +311,6 @@ fn probe_can_build_self(binaries: &[BinaryStatus]) -> bool {
     has("cargo") && has("git") && find_agent_hq_checkout().is_some()
 }
 
-/// Whether an agent-hq source checkout is reachable on this host, without
-/// needing a full `MachineProfile` probe. For callers (like `hq-tools`'s
-/// `web_search`) that just need to decide whether it's honest to name a
-/// repo-relative script path in an error message.
-pub fn agent_hq_checkout_path() -> Option<PathBuf> {
-    find_agent_hq_checkout()
-}
-
 /// Strip a `http(s)://` scheme and split `host:port` from a URL's authority.
 /// ponytail: hand-rolled instead of pulling in the `url` crate for one field;
 /// doesn't handle IPv6-bracket or userinfo forms, fine for a local config

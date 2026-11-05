@@ -113,9 +113,9 @@ Outbound destinations (profile: lite)
 
 `hq doctor --egress` prints every destination the config can reach, whatever the profile, and
 exits non-zero under Lite when one is refused. It looks at model API keys (in the config or the
-environment, including SiliconFlow and Novita and the `OPENROUTER_BASE_URL`, `TURBOQUANT_BASE_URL`
-and `OLLAMA_HOST` overrides), `providers:` and `backends:` entries, a Telegram or Discord token
-(whether or not the relay is enabled, since the disk watchdog and restart notices post with it),
+environment, including SiliconFlow and Novita and the `OPENROUTER_BASE_URL` and `OLLAMA_HOST`
+overrides), `providers:` and `backends:` entries, a Telegram or Discord token (whether or not the
+relay is enabled),
 `remote_mcp:` servers, `decisions:` routes, company email listeners and `gws` connectors,
 `agent_host.hosts` and `agent_host.agent_mcp_url`, self-update, and the Copilot credit meter.
 Destinations on this machine (`localhost`, `127.0.0.1`) are not listed.

@@ -7,7 +7,7 @@
 //! and offers a bulk policy, because a long flat list is the bottleneck this exists to remove.
 
 use super::verification::{LEVEL_OWNER, VERDICT_PASS};
-use super::waits::{WAIT_BUDGET, WAIT_CI, WAIT_OWNER, WAIT_VERIFIER, WAIT_WORKER, WaitingItem};
+use super::waits::{WAIT_BUDGET, WAIT_OWNER, WAIT_VERIFIER, WAIT_WORKER, WaitingItem};
 use super::*;
 use hq_core::config::{VerificationConfig, VerificationMode};
 use std::collections::BTreeMap;
@@ -445,12 +445,4 @@ pub fn briefing_text(b: &Briefing) -> String {
         lines.push(format!("Attention: {alert}."));
     }
     lines.join("\n")
-}
-
-/// Waiting counts that are not about the owner, for the queue health line.
-pub fn machine_backlog(h: &QueueHealth) -> i64 {
-    [WAIT_CI, WAIT_VERIFIER, WAIT_BUDGET, WAIT_WORKER]
-        .iter()
-        .map(|k| h.backlog.get(*k).copied().unwrap_or(0))
-        .sum()
 }

@@ -631,8 +631,6 @@ impl LlmRouter {
     fn from_keys(key: &dyn Fn(&str) -> Option<String>, local_ollama: bool) -> Self {
         let mut router = Self::with_instruments(crate::instrument::Instruments::global());
         router.add_cloud_providers(FREE_TIER_PROVIDERS, key);
-        #[cfg(feature = "turboquant")]
-        router.add_turboquant();
         if local_ollama {
             router.add_hardware_ollama();
         }
@@ -686,31 +684,6 @@ impl LlmRouter {
         }
     }
 
-    /// TurboQuant local inference, if its server is reachable.
-    #[cfg(feature = "turboquant")]
-    fn add_turboquant(&mut self) {
-        let Ok(provider) = crate::turboquant::TurboQuantProvider::from_env() else {
-            return;
-        };
-        let base = std::env::var("TURBOQUANT_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:14747/v1".to_string());
-        if !crate::turboquant::is_available_sync(&base) {
-            info!("LLM Router: TurboQuant server not reachable at {}", base);
-            return;
-        }
-        let name = "turboquant";
-        self.add_provider(name, Arc::new(provider) as Arc<dyn LlmProvider>);
-        self.add_local_route("tq/*", name, "");
-        self.add_local_route("local/*", name, "");
-        for alias in ["fast", "bulk", "notification", "nudge"] {
-            self.add_local_route(alias, name, "qwen2.5-3b-turboquant");
-        }
-        info!(
-            "LLM Router: TurboQuant provider added (local, {}) with fast/bulk aliases",
-            base
-        );
-    }
-
     /// Ollama with hardware-recommended models, if reachable.
     fn add_hardware_ollama(&mut self) {
         if !super::strategy::ollama_is_available_sync() {
@@ -735,7 +708,8 @@ impl LlmRouter {
             "LLM Router: Ollama provider added ({} {}GB usable) with {} models: {}",
             match &profile.gpu_type {
                 hq_core::hardware::GpuType::AppleSilicon { chip } => chip.clone(),
-                _ => "CPU".into(),
+                hq_core::hardware::GpuType::NvidiaCuda { .. } => "NVIDIA CUDA".into(),
+                hq_core::hardware::GpuType::None => "CPU".into(),
             },
             profile.usable_for_models_gb,
             recommended.len(),
@@ -747,24 +721,10 @@ impl LlmRouter {
         );
     }
 
-    /// Build a router with only local inference providers (Ollama + TurboQuant).
+    /// Build a router with only local inference providers (Ollama).
     /// Use this when `local_only = true` in HqConfig.
     pub fn from_env_local_only() -> Self {
         let mut router = Self::with_instruments(crate::instrument::Instruments::global());
-
-        // TurboQuant optional local inference server
-        #[cfg(feature = "turboquant")]
-        if let Ok(provider) = crate::turboquant::TurboQuantProvider::from_env() {
-            let base = std::env::var("TURBOQUANT_BASE_URL")
-                .unwrap_or_else(|_| "http://localhost:14747/v1".to_string());
-            if crate::turboquant::is_available_sync(&base) {
-                let provider = Arc::new(provider) as Arc<dyn LlmProvider>;
-                router.add_provider("turboquant", provider);
-                router.add_local_route("tq/*", "turboquant", "");
-                router.add_local_route("local/*", "turboquant", "");
-                info!("LLM Router (local-only): TurboQuant added at {}", base);
-            }
-        }
 
         // Ollama — register provider + wildcard only; no hardware-detected routes.
         // Explicit alias routes (relay/plan/code/fast/etc.) are added by builder.rs.

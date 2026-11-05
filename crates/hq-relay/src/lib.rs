@@ -24,8 +24,6 @@ mod watch_scheduler;
 #[cfg(feature = "discord")]
 pub mod discord;
 #[cfg(feature = "discord")]
-mod discord_channels;
-#[cfg(feature = "discord")]
 pub mod discord_helpers {
     pub use super::discord::build_status_embed;
     pub use super::discord::format_attachment_descriptor;

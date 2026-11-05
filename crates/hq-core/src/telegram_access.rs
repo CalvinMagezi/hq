@@ -38,18 +38,13 @@ pub fn owner_set_in_config(relay: &RelayConfig) -> bool {
             .any(|u| u.role == crate::config::TelegramUserRole::Owner)
 }
 
-/// Proactive Telegram notifications always go to the owner, never guests.
-pub fn notification_chat_id(vault_path: &Path, relay: &RelayConfig) -> Option<i64> {
-    owner_chat_id(vault_path, relay)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
     #[test]
-    fn notification_ignores_presence_guest() {
+    fn owner_comes_from_config_and_pairing_file() {
         let tmp = TempDir::new().unwrap();
         let vault = tmp.path();
         std::fs::create_dir_all(vault.join("_system")).unwrap();
@@ -58,6 +53,6 @@ mod tests {
             telegram_authorized_chat_id: Some(111),
             ..Default::default()
         };
-        assert_eq!(notification_chat_id(vault, &relay), Some(111));
+        assert_eq!(owner_chat_id(vault, &relay), Some(111));
     }
 }

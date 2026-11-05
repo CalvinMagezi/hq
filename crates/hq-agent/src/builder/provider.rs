@@ -173,7 +173,7 @@ pub(super) async fn resolve_session_config(
 ///
 /// Sources (in priority order):
 /// 1. Config-driven providers (config.providers list — DeepSeek, Novita, SiliconFlow, etc.)
-/// 2. Environment-detected providers (Cerebras, Groq, Ollama, TurboQuant via LlmRouter::from_env)
+/// 2. Environment-detected providers (Cerebras, Groq, Ollama via LlmRouter::from_env)
 /// 3. Legacy OpenRouter key (config.openrouter_api_key — kept as fallback)
 ///
 /// Any model not matched by explicit routes falls through round-robin to all registered providers.

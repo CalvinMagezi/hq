@@ -1,0 +1,107 @@
+# What HQ can do, in the words of someone who will never read a tool list.
+#
+# Read by `hq_tools::capabilities`: the empty chat on the web and phone apps, the agent's short
+# "things you can offer" block, and the weekly adoption digest all come from this one list.
+#
+# says     what it does for the person, one line, no tool names
+# example  something they could type to try it; the chip puts it in the composer
+# tools    the tools that do it: every one must be registered, or the entry is hidden
+# needs    what this install must have: model, ocr, email, helpers
+# group    notes, tasks, documents, outside, work
+# offer    false for what any assistant does unasked; the model's "things you can offer" skips it
+#
+# Order is the default order of suggestions: everyday things first.
+
+- id: save-note
+  group: notes
+  says: Keep a thought, an idea or a list as a note
+  example: "Save this as a note: buy cement and iron sheets on Saturday"
+  tools: [vault_write_note]
+  needs: [model]
+  offer: false
+
+- id: find-notes
+  group: notes
+  says: Find something you wrote down earlier
+  example: What did I write about school fees?
+  tools: [vault_search]
+  needs: [model]
+  offer: false
+
+- id: track-todo
+  group: tasks
+  says: Keep a list of things to do, with the day each one is due
+  example: Add a task to pay the electricity bill by Friday
+  tools: [task_create]
+  needs: [model]
+
+- id: whats-next
+  group: tasks
+  says: Tell you what needs you today
+  example: What needs me today?
+  tools: [task_list]
+  needs: [model]
+  offer: false
+
+- id: tasks-from-list
+  group: tasks
+  says: Turn a list you paste into separate tasks
+  example: "Make these into tasks: order stock, call the landlord, fix the till"
+  tools: [task_create_many]
+  needs: [model]
+
+- id: read-photo
+  group: documents
+  says: Read the text in a photo or a scanned page
+  example: Read the text in this photo of a receipt
+  tools: [ocr_extract_text]
+  needs: [model, ocr]
+
+- id: file-to-note
+  group: documents
+  says: Turn a PDF, Word or Excel file into a note you can search
+  example: Keep this PDF as a note I can search later
+  tools: [vault_import]
+  needs: [model]
+
+- id: note-to-file
+  group: documents
+  says: Turn a note into a PDF or Word file to send or print
+  example: Make my price list note into a PDF I can send
+  tools: [vault_export]
+  needs: [model]
+
+- id: remember-people
+  group: notes
+  says: Remember details about the people you deal with
+  example: "Remember that the supplier from the market prefers to be paid on Mondays"
+  tools: [vault_person_record_fact]
+  needs: [model]
+
+- id: look-up
+  group: outside
+  says: Look something up on the internet
+  example: What is the current price of a bag of cement?
+  tools: [web_search]
+  needs: [model]
+
+- id: email
+  group: outside
+  says: Read and sort your email, and draft replies for you to check
+  example: Which emails from this week still need a reply?
+  tools: [google_workspace]
+  needs: [model, email]
+
+- id: projects
+  group: tasks
+  says: Group your work into projects and see how each one is going
+  example: Start a project for the new shop and put my shop tasks in it
+  tools: [space_create, initiative_create]
+  needs: [model]
+
+- id: helpers
+  group: work
+  says: Send a helper to do longer work on one of your computers
+  example: Send a helper to fix the failing test in my website project
+  tools: [harness_session_spawn]
+  needs: [model, helpers]

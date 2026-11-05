@@ -307,21 +307,15 @@ impl OwnedLaunch {
 /// bounded (`ScriptedHost::launch_bound`), so the caller is answered before its
 /// transport times out.
 pub(super) async fn launch_session(
-    vault_path: &Path,
     db: &Arc<Database>,
     harness: &Harness,
     l: Launch<'_>,
 ) -> Result<Value> {
-    let (vault_path, db, harness, owned) = (
-        vault_path.to_path_buf(),
-        db.clone(),
-        harness.clone(),
-        OwnedLaunch::new(&l),
-    );
+    let (db, harness, owned) = (db.clone(), harness.clone(), OwnedLaunch::new(&l));
     let in_flight = InFlight::claim(&db, owned.host.name(), &owned.session_id)?;
     tokio::spawn(async move {
         let _in_flight = in_flight;
-        run_launch(&vault_path, &db, &harness, owned.borrow()).await
+        run_launch(&db, &harness, owned.borrow()).await
     })
     .await
     .map_err(|e| anyhow::anyhow!("the launch task did not finish: {e}"))?
@@ -362,7 +356,6 @@ fn mcp_access(
 }
 
 pub(super) async fn run_launch(
-    vault_path: &Path,
     db: &Arc<Database>,
     harness: &Harness,
     l: Launch<'_>,
@@ -371,7 +364,7 @@ pub(super) async fn run_launch(
     let mcp = mcp_access(db, &l.host, harness, l.session_id);
     let minted = mcp.is_some();
     let session_id = l.session_id.to_string();
-    let launched = launch_with(vault_path, db, harness, l, mcp).await;
+    let launched = launch_with(db, harness, l, mcp).await;
     if launched.is_err() && minted {
         let _ =
             db.with_conn(move |c| hq_db::session_tokens::revoke_if_unregistered(c, &session_id));
@@ -380,7 +373,6 @@ pub(super) async fn run_launch(
 }
 
 async fn launch_with(
-    _vault_path: &Path,
     db: &Arc<Database>,
     harness: &Harness,
     l: Launch<'_>,
@@ -768,7 +760,6 @@ pub const OBSERVING_NOTE: &str = "When an observed session finishes a turn, bloc
 
 /// Spawn a fresh interactive session for a harness on the default host.
 pub async fn spawn(
-    vault_path: &Path,
     db: &Arc<Database>,
     harness: &str,
     prompt: Option<&str>,
@@ -777,7 +768,6 @@ pub async fn spawn(
     mission_id: Option<&str>,
 ) -> Result<Value> {
     spawn_with(
-        vault_path,
         db,
         SpawnRequest {
             host: None,
@@ -800,11 +790,7 @@ pub async fn spawn(
     .await
 }
 
-pub async fn spawn_with(
-    vault_path: &Path,
-    db: &Arc<Database>,
-    req: SpawnRequest<'_>,
-) -> Result<Value> {
+pub async fn spawn_with(db: &Arc<Database>, req: SpawnRequest<'_>) -> Result<Value> {
     require_allowed_cwd(Some(&req.cwd.to_string_lossy()))?;
     let cfg = hq_core::config::HqConfig::load()?;
     check_cwd_outside_vault(
@@ -814,14 +800,13 @@ pub async fn spawn_with(
         &cfg.vault_path,
     )?;
     let host = agent_host::host(req.host)?;
-    spawn_on(vault_path, db, host, req).await
+    spawn_on(db, host, req).await
 }
 
 /// `spawn_with` on an already resolved host, so a caller that must know the
 /// host first (the handoff) and a test can supply it. The caller has already
 /// vetted `req.cwd` against the config it loaded.
 pub(crate) async fn spawn_on(
-    vault_path: &Path,
     db: &Arc<Database>,
     host: Host,
     req: SpawnRequest<'_>,
@@ -878,7 +863,6 @@ pub(crate) async fn spawn_on(
         .as_ref()
         .map_or(folder.clone(), |(w, _)| w.path.clone());
     let launched = launch_session(
-        vault_path,
         db,
         &harness,
         Launch {

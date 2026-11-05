@@ -1,6 +1,5 @@
 //! What a task says "done" means, and a hash to tell whether it changed.
 
-use hq_db::tasks::Task;
 use sha2::{Digest, Sha256};
 
 /// The acceptance criteria written into a task's description.
@@ -32,11 +31,6 @@ pub fn contract_of(description: &str) -> Contract {
         .map(|b| format!("{b:02x}"))
         .collect();
     Contract { criteria, hash }
-}
-
-/// `contract_of` for a task.
-pub fn task_contract(task: &Task) -> Contract {
-    contract_of(&task.description)
 }
 
 #[cfg(test)]
