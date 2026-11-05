@@ -465,3 +465,32 @@ Claude Code's user config.
 Residual risk: the key now also lives in Claude Code's `~/.claude.json`, a file HQ does not own or
 protect. Anyone who can read it has the owner's `/mcp` through this machine until the device is
 revoked, which is the same reach as U6 and U9.
+
+## 17. A machine lends its model to its hub (`hq/share/1`)
+
+A machine that shares its model (`bridge.share_model`, or the desktop app's switch) tells each of its
+hubs over `hq/share/1` (`crates/hq-bridge/src/share.rs`): `{v, model, tools, context}`, with a null
+model when it stops. The hub stores it on the machine's `bridge_setup` row, opens a forward to the
+machine's `llm` service on a unix socket in `~/.hq/bridge` (fail-fast 3 s), and lists it in
+`~/.hq/bridge/shared-models.json` (0600). HQ's backend chains put a listed model in front of the
+configured primary, which becomes its first fallback (`HqConfig::backends_in_force`); the entry is
+never written to `config.yaml`.
+
+| # | Who | Tries | What happens | Test |
+|---|---|---|---|---|
+| L1 | A paired device the hub did not set up as a machine | Lends the hub a model, to become its primary and read every prompt | Only a peer with a `machine` row on the hub may set a model (`set_shared` matches the role in SQL); anyone else is answered `ok: false` and nothing is stored. A stranger or the edge is closed at the handshake: the protocol is paired-only, and only a hub accepts it | `only_a_machine_the_hub_set_up_can_lend_it_a_model`, `only_a_machine_row_lends_a_model_and_a_revoke_takes_it` |
+| L2 | A machine | Names a model that breaks the file or a request | A model name is at most 128 characters of letters, digits and `._:/-@+`; anything else, or another protocol version, is refused | `model_names_are_short_and_plain` |
+| L3 | Another app on the hub | Uses the lent model through the forward | The forward is a `0600` socket in a directory only HQ's user can enter (S8); a loopback port is never used for it | `fs_private::tests::*` |
+| L4 | A revoked machine | Stays the hub's primary | Revoking deletes the row with the model; within a few seconds the forward closes and the listing drops it | `revoking_the_machine_takes_its_model_off_the_hub` |
+| L5 | The hub's generic API key | Goes to the lent model | The listed backend names `HQ_SHARED_MODEL_KEY`, never set, so the config's `openai_api_key` is not used for it (#404); the socket endpoint gets the `local` placeholder | `a_shared_model_goes_in_front_and_the_configured_primary_becomes_its_fallback` |
+
+A "machine" here is any device the owner paired that ran setup as a machine (section 15): pairing,
+with its six digits, is the owner's consent, so a paired laptop that shares its model can become the
+hub's primary. Revoke a device to take that back. An install with no `backends:` chain never uses a
+lent model. An older hub does not speak `hq/share/1`; the machine is refused at the handshake, logs it
+at debug and asks again an hour later. A hub that is away is asked again after 30 s, doubling up to
+10 minutes; one that was told is told again every 10 minutes, in case a revoke and a new pairing
+cleared its row. Prompts and replies to a lent model cross the bridge like any service
+stream: end to end encrypted between the two paired keys, through the relay when there is no direct
+path (unless the hub's forward is `when: direct`, which pairing does not set).
+

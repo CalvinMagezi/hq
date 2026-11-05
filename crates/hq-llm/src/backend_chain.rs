@@ -232,9 +232,10 @@ impl ChainProvider {
     /// not a model any backend serves.
     pub fn from_config(config: &HqConfig) -> Option<Self> {
         let creds = ConfigCredentials::from_config(config);
+        let backends = config.backends_in_force();
         let mut links = Vec::new();
-        for name in config.backends.chain_order() {
-            let Some(entry) = config.backends.backend(&name).filter(|e| e.enabled) else {
+        for name in backends.chain_order() {
+            let Some(entry) = backends.backend(&name).filter(|e| e.enabled) else {
                 continue;
             };
             let Some(model) = entry.model.clone().filter(|m| !m.trim().is_empty()) else {

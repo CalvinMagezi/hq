@@ -1,4 +1,4 @@
-//! The call behind an owner-approval inbox item (`sql/112_owner_approvals.sql`). Owner approval
+//! The call behind an owner-approval inbox item (`sql/113_owner_approvals.sql`). Owner approval
 //! writes it with the item; the notifications API reads it to quote the call verbatim.
 
 use anyhow::Result;

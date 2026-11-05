@@ -145,6 +145,66 @@ pub fn setups_of(config: &HqConfig) -> Vec<Setup> {
         .unwrap_or_default()
 }
 
+/// A model a machine lends its hub, as the machine said it (`hq/share/1`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedModel {
+    pub model: String,
+    /// Whether the machine's server says the model takes tool calls; `None` when it did not say.
+    pub tools: Option<bool>,
+    pub context: Option<u64>,
+}
+
+/// Sets or clears what `peer` shares. Only a machine pairing set up with this hub may share:
+/// returns whether a row was changed, `false` for any other peer.
+pub fn set_shared(db: &Database, peer: &str, shared: Option<&SharedModel>) -> Result<bool> {
+    db.with_conn(|c| {
+        let changed = c.execute(
+            "UPDATE bridge_setup SET shared_model = ?2, shared_tools = ?3, shared_context = ?4, \
+             updated_at = ?5 WHERE peer_id = ?1 AND peer_role = ?6",
+            params![
+                peer,
+                shared.map(|s| s.model.clone()),
+                shared.and_then(|s| s.tools),
+                shared.and_then(|s| s.context).map(|n| n as i64),
+                now(),
+                ROLE_MACHINE,
+            ],
+        )?;
+        Ok(changed > 0)
+    })
+}
+
+/// Every machine sharing a model with this hub, with its setup row.
+pub fn shared(db: &Database) -> Result<Vec<(Setup, SharedModel)>> {
+    let models: Vec<(String, String, Option<bool>, Option<i64>)> = db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT peer_id, shared_model, shared_tools, shared_context FROM bridge_setup \
+             WHERE peer_role = ?1 AND shared_model IS NOT NULL ORDER BY created_at, peer_id",
+        )?;
+        let rows = stmt.query_map(params![ROLE_MACHINE], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    })?;
+    let setups = list(db)?;
+    Ok(models
+        .into_iter()
+        .filter_map(|(peer, model, tools, context)| {
+            let setup = setups.iter().find(|s| s.peer_id == peer)?.clone();
+            let context = context.and_then(|n| u64::try_from(n).ok());
+            Some((
+                setup,
+                SharedModel {
+                    model,
+                    tools,
+                    context,
+                },
+            ))
+        })
+        .collect())
+}
+
 /// Records a setup, and on a hub the hash of a key minted for it, in one transaction. Nothing is
 /// written unless the peer is paired now: a revoke that won the race leaves no row behind.
 /// Returns whether it was written.
@@ -270,6 +330,45 @@ mod tests {
         for bad in ["", "hqd_", "hqs_00", &format!("hqd_{}", "z".repeat(64))] {
             assert!(!is_device_key(bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn only_a_machine_row_lends_a_model_and_a_revoke_takes_it() {
+        let db = Database::open_memory().unwrap();
+        let qwen = SharedModel {
+            model: "qwen3:8b".into(),
+            tools: Some(false),
+            context: Some(32_768),
+        };
+        assert!(
+            !set_shared(&db, PEER, Some(&qwen)).unwrap(),
+            "no row, nothing lent"
+        );
+        peers::add_peer(&db, PEER, "laptop", &[], &[]).unwrap();
+        let mut hub = machine_row();
+        hub.peer_role = ROLE_HUB.into();
+        assert!(record(&db, &hub, None).unwrap());
+        assert!(
+            !set_shared(&db, PEER, Some(&qwen)).unwrap(),
+            "a hub does not lend to its hub"
+        );
+        assert!(record(&db, &machine_row(), None).unwrap());
+        assert!(set_shared(&db, PEER, Some(&qwen)).unwrap());
+        assert_eq!(shared(&db).unwrap(), vec![(machine_row(), qwen.clone())]);
+        assert!(record(&db, &machine_row(), None).unwrap());
+        assert_eq!(
+            shared(&db).unwrap().len(),
+            1,
+            "setup again keeps what is lent"
+        );
+        assert!(set_shared(&db, PEER, None).unwrap());
+        assert!(shared(&db).unwrap().is_empty());
+        set_shared(&db, PEER, Some(&qwen)).unwrap();
+        peers::revoke(&db, PEER).unwrap();
+        assert!(
+            shared(&db).unwrap().is_empty(),
+            "a revoke removes the row and the model"
+        );
     }
 
     #[test]

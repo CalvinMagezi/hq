@@ -122,9 +122,14 @@ pub(super) async fn dispatch_hq(
         Err(e) => format!("(HQ session error: {e})"),
     };
     let served_by = fallback_seen.lock().ok().and_then(|m| m.clone());
+    let in_force = config.backends_in_force();
+    // A lent model being away (a laptop closed or gone) is the expected case, not a fault: the
+    // configured primary answering then is a normal turn. Anything further down is flagged.
+    let lent = in_force.primary != config.backends.primary;
     match served_by {
-        Some(served_by) if config.backends.is_configured() => {
-            flag_fallback(&config, result_text, &served_by)
+        Some(served_by) if lent && served_by == config.backends.primary => result_text,
+        Some(served_by) if in_force.is_configured() => {
+            flag_fallback(&in_force.primary, result_text, &served_by)
         }
         _ => result_text,
     }
@@ -132,12 +137,7 @@ pub(super) async fn dispatch_hq(
 
 /// The primary was unavailable and a fallback served the reply: the reply is
 /// annotated so it does not look like a normal turn.
-fn flag_fallback(
-    config: &hq_core::config::HqConfig,
-    result_text: String,
-    served_by: &str,
-) -> String {
-    let primary = &config.backends.primary;
+fn flag_fallback(primary: &str, result_text: String, served_by: &str) -> String {
     format!(
         "{result_text}\n\n_(served by `{served_by}` — primary `{primary}` was unavailable this turn; see daemon logs)_"
     )

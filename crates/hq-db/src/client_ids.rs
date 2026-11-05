@@ -1,4 +1,4 @@
-//! Client ids for what a browser or phone makes (`sql/111_client_ids.sql`): the first send of an id
+//! Client ids for what a browser or phone makes (`sql/112_client_ids.sql`): the first send of an id
 //! claims it, a repeat learns the item already made, so an outbox that resends never makes two.
 
 use anyhow::Result;

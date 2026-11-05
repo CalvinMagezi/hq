@@ -403,15 +403,19 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/108_session_subscriptions.sql"),
     ),
     ("109_offer_log", include_str!("../sql/109_offer_log.sql")),
-    ("110_push_kinds", include_str!("../sql/110_push_kinds.sql")),
-    ("111_client_ids", include_str!("../sql/111_client_ids.sql")),
     (
-        "112_owner_approvals",
-        include_str!("../sql/112_owner_approvals.sql"),
+        "110_bridge_shared_model",
+        include_str!("../sql/110_bridge_shared_model.sql"),
+    ),
+    ("111_push_kinds", include_str!("../sql/111_push_kinds.sql")),
+    ("112_client_ids", include_str!("../sql/112_client_ids.sql")),
+    (
+        "113_owner_approvals",
+        include_str!("../sql/113_owner_approvals.sql"),
     ),
     (
-        "113_device_names",
-        include_str!("../sql/113_device_names.sql"),
+        "114_device_names",
+        include_str!("../sql/114_device_names.sql"),
     ),
 ];
 

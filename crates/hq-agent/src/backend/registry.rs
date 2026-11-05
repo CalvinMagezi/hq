@@ -81,11 +81,12 @@ impl std::fmt::Debug for BackendRegistry {
 }
 
 impl BackendRegistry {
-    /// Build from a full [`HqConfig`], reading the `backends` section and the
-    /// `github_copilot` harness settings.
+    /// Build from a full [`HqConfig`], reading the backends in force (`backends` and any model a
+    /// paired machine lends, [`HqConfig::backends_in_force`]) and the `github_copilot` harness
+    /// settings.
     pub fn from_config(config: &HqConfig) -> Result<Self, BackendRegistryError> {
         Self::from_parts(
-            &config.backends,
+            &config.backends_in_force(),
             &config.github_copilot,
             &ConfigCredentials::from_config(config),
         )

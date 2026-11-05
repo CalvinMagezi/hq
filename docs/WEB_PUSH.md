@@ -95,7 +95,7 @@ server picks the row up within a few seconds and pushes it.
     address a client made up.
 - `crates/hq-db/src/push_subscriptions.rs` and `sql/088_web_push.sql`: the
   subscriptions table, and the `link` and `pushed_at` columns on `value_items`.
-  `sql/110_push_kinds.sql` adds `kinds` (default `needs,updates`) and `details` (default off).
+  `sql/111_push_kinds.sql` adds `kinds` (default `needs,updates`) and `details` (default off).
 
 ## What a push says
 
