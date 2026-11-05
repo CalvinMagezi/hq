@@ -81,8 +81,20 @@ fn body(hq_id: &str, edition: &str, starting: Option<&StartProgress>) -> Value {
         "edition": edition,
         "version": hq_core::build_info::version(),
         "min_client": MIN_CLIENT,
+        "tz": host_zone(),
+        "tz_offset_minutes": chrono::Local::now().offset().local_minus_utc() / SECS_PER_MINUTE,
         "starting": starting.map(StartProgress::view),
     })
+}
+
+const SECS_PER_MINUTE: i32 = 60;
+
+/// HQ's own time zone as an IANA name, so a page can say "07:00 Nairobi time" for a time HQ
+/// keeps in its zone. `None` when the host does not say.
+fn host_zone() -> Option<String> {
+    iana_time_zone::get_timezone()
+        .ok()
+        .filter(|z| !z.is_empty())
 }
 
 fn edition(profile: hq_core::config::Profile) -> String {
@@ -168,6 +180,19 @@ mod tests {
             status,
             serde_json::from_slice(&bytes).unwrap_or(Value::Null),
         )
+    }
+
+    #[test]
+    fn hello_names_hqs_time_zone_and_its_offset() {
+        let v = body("id", "full", None);
+        let offset = chrono::Local::now().offset().local_minus_utc() / SECS_PER_MINUTE;
+        assert_eq!(v["tz_offset_minutes"], offset);
+        assert!(
+            v["tz"].is_null()
+                || v["tz"]
+                    .as_str()
+                    .is_some_and(|z| z.contains('/') || z == "UTC")
+        );
     }
 
     #[test]
