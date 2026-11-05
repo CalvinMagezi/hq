@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { KeyRound } from 'lucide-react'
-import { hasWebToken, needsSignIn, onSignInChange, saveWebToken, takeLinkCode } from '~/lib/hqAuth'
+import { hasWebToken, needsSignIn, onSignInChange, saveWebToken, takeLinkCode, wasSignedOut } from '~/lib/hqAuth'
 import { exchangeCode } from '~/lib/deviceSignIn'
 
 const INPUT_CLASS =
@@ -112,17 +112,51 @@ function TokenForm({ replacing }: { replacing: boolean }) {
   )
 }
 
+const SIGNED_OUT_LINE = "HQ no longer accepts this browser's sign-in, so nothing from it is kept here."
+
+/** The empty view's title for the place at `pathname`. */
+export function signedOutTitle(pathname: string): string {
+  if (pathname.startsWith('/notifications')) return 'Sign in to see what needs you'
+  const places: [string, string][] = [
+    ['/chat', 'your chats'],
+    ['/tasks', 'your tasks'],
+    ['/settings', 'your settings'],
+  ]
+  const place = places.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? 'your notes'
+  return `Sign in to see ${place}`
+}
+
+/** Stands in for every place while HQ refuses this browser: the wipe left nothing to show. */
+export function SignedOutView({ pathname, embedded }: { pathname: string; embedded: boolean }) {
+  const focusSignIn = () => document.getElementById('hq-sign-in-code')?.focus()
+  return (
+    <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
+      <KeyRound className="w-6 h-6" style={{ color: 'var(--text-dim)' }} />
+      <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+        {signedOutTitle(pathname)}
+      </h2>
+      <p className="text-sm max-w-sm" style={{ color: 'var(--text-dim)' }}>
+        {SIGNED_OUT_LINE}
+      </p>
+      {!embedded && (
+        <button type="button" onClick={focusSignIn} className={BUTTON_CLASS}>
+          Sign in
+        </button>
+      )}
+    </div>
+  )
+}
+
 /**
  * Shown once the server answers 401: this browser has no web token, or one that was rotated.
- * Screens behind it keep showing data saved on the device, so without this the only sign was
- * the sync dot.
+ * The browser was wiped first (lib/wipe.ts), so nothing saved shows behind it.
  */
 export function SignInPrompt() {
   // The build prerenders without a browser; the server snapshot keeps the prompt out of it.
   const needed = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   if (!needed) return null
 
-  const replacing = hasWebToken()
+  const replacing = hasWebToken() || wasSignedOut()
   return (
     <div
       role="alert"
@@ -137,8 +171,7 @@ export function SignInPrompt() {
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
           {replacing ? 'This device was signed out, or the server no longer accepts its sign-in. ' : ''}
           Open your HQ login link, enter a code from a device that is already signed in, or send{' '}
-          <code className="font-mono">/login</code> to your HQ bot on Telegram or Discord. Until then, screens show data saved
-          on this device.
+          <code className="font-mono">/login</code> to your HQ bot on Telegram or Discord.
         </p>
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
           None of those? Ask whoever set up your HQ server for a new login link. If HQ runs on your own computer, run{' '}

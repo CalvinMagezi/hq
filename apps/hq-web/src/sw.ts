@@ -141,6 +141,15 @@ function appUrl(raw: unknown, fallback: string): string {
   return new URL(fallback, self.location.origin).href
 }
 
+// HQ refused this browser's sign-in (lib/wipe.ts): no saved copy is served until a read succeeds.
+let signedOut = false
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'signed-out') return
+  signedOut = true
+  event.waitUntil(caches.delete(API_CACHE))
+})
+
 /** What a push carries (docs/WEB_PUSH.md): words the server chose, a page and a tag. Never an
  * answer: a browser cannot check a screen lock, so a push only opens HQ. */
 interface PushData {
@@ -243,6 +252,7 @@ self.addEventListener('fetch', (event) => {
       full
         .then((res) => {
           if (!res.ok) return
+          signedOut = false
           const copy = res.clone()
           return caches
             .open(API_CACHE)
@@ -255,6 +265,7 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         const res = await quick
         if (res) return res
+        if (signedOut) return markedFromCache(Response.json({ error: 'signed out' }, { status: 401 }))
         const cached = await caches.match(request, { ...MATCH, cacheName: API_CACHE })
         return cached ? markedFromCache(cached) : Response.json({ error: 'offline' }, { status: 503 })
       })(),

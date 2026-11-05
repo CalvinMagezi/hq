@@ -136,11 +136,12 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   `web_bind`/`ws_port`) opts in, and before any token is sent the target's
   `/health` must answer with `"service": "agent-hq"`, so another program on
   that port never receives it. `--local` forces the in-process backend.
-- **Session-changing requests.** `send` and `adopt` under
-  `/api/harness-sessions/` must carry `X-HQ-Client` (the PWA's `hqFetch` adds it
-  to every non-GET). `drive`, `goal` and `unwatch` predate the header and stay
-  open so a cached PWA can still stop a session; a cross-site form post could
-  toggle them on a token-less loopback setup. The origin guard trusts any loopback page when no web token
+- **Session-changing requests.** `send`, `adopt`, `stop`, `resume`, `rename`,
+  `archive`, `drive`, `goal`, `unwatch` and `answer` under `/api/harness-sessions/`,
+  and answering an Inbox item (`/api/notifications/{id}/answer` and `/action`), must
+  carry `X-HQ-Client` (the PWA's `hqFetch` adds it to every non-GET, and the Android
+  app sends it too). A PWA cached from before the header loses `drive`, `goal` and
+  `unwatch` until its worker updates the shell. The origin guard trusts any loopback page when no web token
   is set, and a plain form post needs no preflight, so the header (which the CORS
   layer does not allow) is what keeps another local page from typing into an
   agent. The Vite dev server proxies `/api`, so it stays same-origin.
@@ -152,9 +153,12 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   Old `?token=` links still work in the PWA but have already been logged by
   whatever proxy served the page, so rotate a token that was shared that way.
   When the server answers a request with 401 (no token here, or one that was signed out),
-  the PWA shows a "Sign in to HQ" banner with a field to paste the token, which
-  it stores the same way. Copies the service worker serves from its cache never
-  trigger it.
+  the PWA first wipes everything it saved from HQ (`src/lib/wipe.ts`: the query cache,
+  the persisted stores, chat drafts, the token, the worker's API cache and the push
+  subscription), tells its other tabs and the worker, and then shows only "Sign in to
+  HQ". The worker serves no saved API copy until a read succeeds again. Copies the
+  service worker serves from its cache never trigger it, and neither does a 401 for a
+  request sent with an older token than the one held now.
 - **`/login` from a chat.** The Telegram and Discord bots answer `/login` (and
   `!login`) with a `#token=` link carrying a new device token ("Telegram /login" or
   "Discord /login" in Settings, Devices), so that token lands in that chat's history.

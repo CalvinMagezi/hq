@@ -138,3 +138,8 @@ export function restoreDraft(threadId: string, text: string) {
   const state = useDraftStore.getState()
   if (!state.drafts[threadId]?.text.trim()) state.setText(threadId, text)
 }
+
+/** Drops every draft in memory; the saved text goes with the browser's wipe. */
+export function clearDrafts() {
+  useDraftStore.setState({ drafts: {} })
+}

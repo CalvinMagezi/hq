@@ -3,6 +3,7 @@ import {
   Link,
   Outlet,
   useNavigate,
+  useRouterState,
   Scripts,
   createRootRoute,
 } from '@tanstack/react-router'
@@ -18,7 +19,7 @@ import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { InstallPrompt } from '~/components/InstallPrompt'
-import { SignInPrompt } from '~/components/SignInPrompt'
+import { SignedOutView, SignInPrompt } from '~/components/SignInPrompt'
 import { ReachabilityBanner } from '~/components/ReachabilityBanner'
 import { useDeviceOnline } from '~/lib/reachability'
 import { AppRail } from '~/components/AppRail'
@@ -30,7 +31,8 @@ import { relTime } from '~/lib/time'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
-import { hqJson, needsSignIn, onSignInChange } from '~/lib/hqAuth'
+import { hqJson, needsSignIn, onSignInChange, signedOutElsewhere } from '~/lib/hqAuth'
+import { listenForWipe } from '~/lib/wipe'
 import { syncPushSubscription } from '~/lib/webPush'
 import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
 import { EMBED_HEAD_SCRIPT, readEmbedFlag } from '~/lib/embedHost'
@@ -160,9 +162,13 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   useNeedsYouCount()
   const systemNotice = useHQStore((s) => s.systemNotice)
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
+  const pathname = useRouterState({ select: (r) => r.location.pathname })
   const setSystemNotice = useHQStore((s) => s.setSystemNotice)
   const isOnline = useDeviceOnline()
   const [swUpdateAvailable, setSwUpdateAvailable] = useState(false)
+
+  // Another tab of this HQ was refused and wiped the browser: this one shows nothing either.
+  useEffect(() => listenForWipe(signedOutElsewhere), [])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -372,7 +378,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
       </header>}
 
       <main className="flex-1 min-h-0 overflow-hidden relative main-content md:mx-3 md:mb-3 md:rounded-2xl hq-glass-pane">
-        <Outlet />
+        {signInNeeded ? <SignedOutView pathname={pathname} embedded={embedded} /> : <Outlet />}
       </main>
 
       </div>

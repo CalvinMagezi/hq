@@ -123,11 +123,44 @@ const HTTP_UNAUTHORIZED = 401
 // The service worker marks the copies it answers from its cache with this header.
 const FROM_CACHE_HEADER = 'x-hq-cache'
 
+/**
+ * Whether a 401 means HQ refused the sign-in this browser holds now. A copy from the worker's
+ * cache says nothing, and neither does a request sent with an older token: it can finish after a
+ * fresh sign-in, and wiping then would throw the new one away.
+ */
+export function refusedNow(res: Response, sentToken: string | null, currentToken: string | null): boolean {
+  if (res.headers.has(FROM_CACHE_HEADER) || res.status !== HTTP_UNAUTHORIZED) return false
+  return sentToken === currentToken
+}
+
+// Set when a refusal wiped a sign-in this browser held, so the prompt can say so.
+let signedOut = false
+
+/** Whether HQ refused a sign-in this browser held (it was signed out or its token rotated). */
+export function wasSignedOut(): boolean {
+  return signedOut
+}
+
+/** HQ refused this browser: wipe everything first, then ask to sign in. */
+export function refuseSignIn() {
+  if (hqToken()) signedOut = true
+  // Imported when needed: the wipe reaches the stores, which import this module.
+  void import('./wipe').then((m) => m.wipeBrowser()).catch((err) => console.warn('wipe failed', err))
+  setSignInNeeded(true)
+}
+
+/** Another tab of this HQ was refused and wiped this browser; this tab asks to sign in too. */
+export function signedOutElsewhere() {
+  signedOut = true
+  setSignInNeeded(true)
+}
+
 /** Track what a response says about sign-in and sync. A copy from the worker's cache says nothing about either, whatever its status. */
-function noteAuth(res: Response) {
+function noteAuth(res: Response, sentToken: string | null) {
   if (res.headers.has(FROM_CACHE_HEADER)) return
-  if (res.status === HTTP_UNAUTHORIZED) setSignInNeeded(true)
-  else if (res.ok) {
+  if (res.status === HTTP_UNAUTHORIZED) {
+    if (refusedNow(res, sentToken, hqToken())) refuseSignIn()
+  } else if (res.ok) {
     setSignInNeeded(false)
     markSynced()
   }
@@ -162,7 +195,7 @@ export async function hqFetch(input: string, init: RequestInit = {}): Promise<Re
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (!SAFE_METHODS.has((init.method ?? 'GET').toUpperCase())) headers.set(CLIENT_HEADER, CLIENT_HEADER_VALUE)
   const res = await fetch(input, { ...init, headers })
-  noteAuth(res)
+  noteAuth(res, token)
   return res
 }
 
