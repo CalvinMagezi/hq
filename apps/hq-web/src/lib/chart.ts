@@ -1,4 +1,5 @@
 // Renders ```chart fenced blocks to inline SVG. Format: docs/CHART_BLOCKS.md.
+import { t } from '~/strings'
 
 type ChartType = 'line' | 'bar' | 'pie' | 'donut'
 
@@ -25,15 +26,12 @@ export const MAX_SERIES = 6
 const MAX_TEXT = 120
 const MAX_TICK_LABEL = 10
 
-// Existing theme variables only, so the chart follows the app theme.
-const SERIES_COLORS = [
-  'var(--accent-blue)',
-  'var(--accent-green)',
-  'var(--accent-amber)',
-  'var(--text-primary)',
-  'var(--accent-red)',
-  'var(--text-dim)',
-]
+// The brand palette: blue, sky, white, grey, indigo. Series past the fifth start over, told apart by line style.
+const SERIES_COLORS = ['var(--brand-blue)', 'var(--brand-sky)', 'var(--ink)', 'var(--ink-muted)', 'var(--brand-indigo)']
+const DASH = '6 4'
+const color = (i: number) => SERIES_COLORS[i % SERIES_COLORS.length]
+/** The first line is solid and the others dashed, so colour is never the only difference. */
+const isDashed = (i: number) => i > 0
 
 const VIEW_W = 360
 const VIEW_H = 240
@@ -56,14 +54,14 @@ const text = (v: unknown, fallback = ''): string =>
 const fail = (reason: string): ChartParse => ({ ok: false, reason })
 
 function parseSeries(raw: unknown, pointCount: number): ChartSeries[] | string {
-  if (!Array.isArray(raw) || raw.length === 0) return 'series must be a non-empty array'
-  if (raw.length > MAX_SERIES) return `at most ${MAX_SERIES} series are supported`
+  if (!Array.isArray(raw) || raw.length === 0) return t('chart_reason_series')
+  if (raw.length > MAX_SERIES) return t('chart_reason_too_many_series', { limit: MAX_SERIES })
   const out: ChartSeries[] = []
   for (const [i, item] of raw.entries()) {
-    if (!isRecord(item) || !Array.isArray(item.values)) return `series ${i + 1} needs a values array`
+    if (!isRecord(item) || !Array.isArray(item.values)) return t('chart_reason_values', { n: i + 1 })
     const values = item.values
-    if (values.length !== pointCount) return `series ${i + 1} must have ${pointCount} values, one per label`
-    if (!values.every((v) => typeof v === 'number' && Number.isFinite(v))) return `series ${i + 1} has a non-numeric value`
+    if (values.length !== pointCount) return t('chart_reason_count', { n: i + 1, count: pointCount })
+    if (!values.every((v) => typeof v === 'number' && Number.isFinite(v))) return t('chart_reason_number', { n: i + 1 })
     out.push({ name: text(item.name, `Series ${i + 1}`), values: values as number[] })
   }
   return out
@@ -74,22 +72,22 @@ export function parseChart(source: string): ChartParse {
   try {
     raw = JSON.parse(source)
   } catch {
-    return fail('payload is not valid JSON')
+    return fail(t('chart_reason_json'))
   }
-  if (!isRecord(raw)) return fail('payload must be a JSON object')
-  const type = CHART_TYPES.find((t) => t === raw.type)
-  if (!type) return fail(`type must be one of ${CHART_TYPES.join(', ')}`)
-  if (!Array.isArray(raw.labels) || raw.labels.length === 0) return fail('labels must be a non-empty array')
+  if (!isRecord(raw)) return fail(t('chart_reason_object'))
+  const type = CHART_TYPES.find((c) => c === raw.type)
+  if (!type) return fail(t('chart_reason_type'))
+  if (!Array.isArray(raw.labels) || raw.labels.length === 0) return fail(t('chart_reason_labels'))
   const isPie = type === 'pie' || type === 'donut'
   const limit = isPie ? MAX_SLICES : MAX_POINTS
-  if (raw.labels.length > limit) return fail(`at most ${limit} labels are supported for ${type} charts`)
+  if (raw.labels.length > limit) return fail(t('chart_reason_too_many_labels', { limit }))
   const labels = raw.labels.map((l) => text(l))
   const series = parseSeries(raw.series, labels.length)
   if (typeof series === 'string') return fail(series)
   if (isPie) {
     const values = series[0].values
-    if (values.some((v) => v < 0)) return fail('pie and donut values must not be negative')
-    if (values.reduce((a, b) => a + b, 0) <= 0) return fail('pie and donut values must sum to more than zero')
+    if (values.some((v) => v < 0)) return fail(t('chart_reason_negative'))
+    if (values.reduce((a, b) => a + b, 0) <= 0) return fail(t('chart_reason_zero'))
   }
   return {
     ok: true,
@@ -134,9 +132,9 @@ function cartesianSvg(spec: ChartSpec): string {
   const cx = (i: number) => left + (i + 0.5) * band
   const parts: string[] = []
 
-  for (const t of scale.ticks) {
-    parts.push(`<line x1="${left}" x2="${VIEW_W - right}" y1="${round(y(t))}" y2="${round(y(t))}" style="stroke:var(--text-dim);opacity:0.25"/>`)
-    parts.push(axisText(left - 6, y(t) + 3, compact(t), 'end'))
+  for (const tick of scale.ticks) {
+    parts.push(`<line x1="${left}" x2="${VIEW_W - right}" y1="${round(y(tick))}" y2="${round(y(tick))}" style="stroke:var(--text-dim);opacity:0.25"/>`)
+    parts.push(axisText(left - 6, y(tick) + 3, compact(tick), 'end'))
   }
   const every = Math.ceil(spec.labels.length / 8)
   spec.labels.forEach((l, i) => {
@@ -158,7 +156,7 @@ function barMarks(spec: ChartSpec, band: number, cx: (i: number) => number, y: (
         .map((v, i) => {
           const x = cx(i) - (band * 0.8) / 2 + si * barW
           const top = Math.min(y(v), zero)
-          return `<rect x="${round(x)}" y="${round(top)}" width="${round(barW)}" height="${round(Math.max(Math.abs(y(v) - zero), 1))}" style="fill:${SERIES_COLORS[si]}"/>`
+          return `<rect x="${round(x)}" y="${round(top)}" width="${round(barW)}" height="${round(Math.max(Math.abs(y(v) - zero), 1))}" style="fill:${color(si)}"/>`
         })
         .join(''),
     )
@@ -169,9 +167,9 @@ function lineMarks(spec: ChartSpec, cx: (i: number) => number, y: (v: number) =>
   return spec.series
     .map((s, si) => {
       const pts = s.values.map((v, i) => `${round(cx(i))},${round(y(v))}`)
-      const line = `<polyline points="${pts.join(' ')}" fill="none" style="stroke:${SERIES_COLORS[si]};stroke-width:2"/>`
+      const line = `<polyline points="${pts.join(' ')}" fill="none" style="stroke:${color(si)};stroke-width:2${isDashed(si) ? `;stroke-dasharray:${DASH}` : ''}"/>`
       if (s.values.length > POINT_MARKER_LIMIT) return line
-      const dots = s.values.map((v, i) => `<circle cx="${round(cx(i))}" cy="${round(y(v))}" r="2.5" style="fill:${SERIES_COLORS[si]}"/>`)
+      const dots = s.values.map((v, i) => `<circle cx="${round(cx(i))}" cy="${round(y(v))}" r="2.5" style="fill:${color(si)}"/>`)
       return line + dots.join('')
     })
     .join('')
@@ -197,7 +195,7 @@ function pieSvg(spec: ChartSpec): string {
     const sweep = (v / total) * FULL_TURN
     const d = v > 0 ? wedge(cx, cy, inner, PIE_RADIUS, angle, angle + sweep) : ''
     angle += sweep
-    return d ? `<path d="${d}" style="fill:${SERIES_COLORS[i % SERIES_COLORS.length]};stroke:var(--bg-solid-surface);stroke-width:1.5"/>` : ''
+    return d ? `<path d="${d}" style="fill:${color(i)};stroke:var(--bg-solid-surface);stroke-width:1.5"/>` : ''
   })
   return svgWrap(spec, slices.join(''))
 }
@@ -207,19 +205,24 @@ function svgWrap(spec: ChartSpec, inner: string): string {
   return `<svg viewBox="0 0 ${VIEW_W} ${VIEW_H}" role="img" aria-label="${escapeHtml(label)}" style="width:100%;height:auto;display:block"><title>${escapeHtml(label)}</title>${inner}</svg>`
 }
 
-const legendItem = (color: string, label: string) =>
-  `<li style="display:flex;align-items:center;gap:6px;min-width:0"><span style="width:10px;height:10px;border-radius:2px;flex:none;background:${color}"></span><span style="overflow-wrap:anywhere">${escapeHtml(label)}</span></li>`
+const legendItem = (swatch: string, label: string) =>
+  `<li style="display:flex;align-items:center;gap:6px;min-width:0"><span style="width:10px;height:10px;border-radius:2px;flex:none;background:${swatch}"></span><span style="overflow-wrap:anywhere">${escapeHtml(label)}</span></li>`
 
 function legendHtml(spec: ChartSpec): string {
   if (spec.type === 'pie' || spec.type === 'donut') {
     const values = spec.series[0].values
     const total = values.reduce((a, b) => a + b, 0)
     return spec.labels
-      .map((l, i) => legendItem(SERIES_COLORS[i % SERIES_COLORS.length], `${l}: ${compact(values[i])} (${Math.round((values[i] / total) * 100)}%)`))
+      .map((l, i) => legendItem(color(i), `${l}: ${compact(values[i])} (${Math.round((values[i] / total) * 100)}%)`))
       .join('')
   }
   if (spec.series.length < 2) return ''
-  return spec.series.map((s, i) => legendItem(SERIES_COLORS[i], s.name)).join('')
+  return spec.series
+    .map((s, i) => {
+      const name = spec.type === 'line' ? t(isDashed(i) ? 'chart_line_dashed' : 'chart_line_solid', { name: s.name }) : s.name
+      return legendItem(color(i), name)
+    })
+    .join('')
 }
 
 /** The full chart, ready to place in sanitized markdown output. */

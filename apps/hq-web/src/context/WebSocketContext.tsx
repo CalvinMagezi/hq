@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useCallback, useState, type ReactNode } from 'react'
 import { useHQStore } from '~/store/hqStore'
+import { useThreadStore } from '~/store/threadStore'
 import { refreshThreads } from '~/lib/threadApi'
 import { handleChatEvent } from '~/lib/chatEvents'
 import { addSocketBytes } from '~/lib/dataUsage'
@@ -72,7 +73,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         setWsConnected(true)
         setConnected(true)
         // Replies may have finished while the socket was down; their turn_end is gone.
-        void refreshThreads().catch(() => {})
+        const socket = ws
+        void refreshThreads()
+          .catch(() => {})
+          .then(() => {
+            // A reply running while the page was away: ask what it wrote so far.
+            for (const id of Object.keys(useThreadStore.getState().live)) {
+              if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'resume', thread_id: id }))
+            }
+          })
       }
       ws.onerror = () => { clearTimeout(connectTimeout) }
       ws.onclose = () => {

@@ -79,16 +79,16 @@ test('invalid payloads report a reason instead of throwing', () => {
     ['', 'not valid JSON'],
     ['{oops', 'not valid JSON'],
     ['[1,2]', 'JSON object'],
-    [payload({ type: 'radar' }), 'type must be'],
-    [payload({ labels: [] }), 'labels'],
-    [payload({ labels: 'abc' }), 'labels'],
-    [payload({ series: [] }), 'series'],
-    [payload({ series: [{ name: 'x', values: [1, 2] }] }), 'must have 3 values'],
-    [payload({ series: [{ name: 'x', values: [1, 'two', 3] }] }), 'non-numeric'],
-    [payload({ series: [{ name: 'x', values: [1, null, 3] }] }), 'non-numeric'],
-    [payload({ series: [{ name: 'x' }] }), 'values array'],
-    [payload({ type: 'pie', series: [{ name: 'x', values: [1, -1, 3] }] }), 'negative'],
-    [payload({ type: 'donut', series: [{ name: 'x', values: [0, 0, 0] }] }), 'sum to more than zero'],
+    [payload({ type: 'radar' }), 'The type must be'],
+    [payload({ labels: [] }), 'at least one label'],
+    [payload({ labels: 'abc' }), 'at least one label'],
+    [payload({ series: [] }), 'at least one series'],
+    [payload({ series: [{ name: 'x', values: [1, 2] }] }), 'needs 3 values'],
+    [payload({ series: [{ name: 'x', values: [1, 'two', 3] }] }), 'not a number'],
+    [payload({ series: [{ name: 'x', values: [1, null, 3] }] }), 'not a number'],
+    [payload({ series: [{ name: 'x' }] }), 'needs a list of values'],
+    [payload({ type: 'pie', series: [{ name: 'x', values: [1, -1, 3] }] }), 'negative value'],
+    [payload({ type: 'donut', series: [{ name: 'x', values: [0, 0, 0] }] }), 'add up to more than zero'],
   ]
   for (const [src, reason] of cases) {
     const r = parseChart(src)
@@ -130,4 +130,24 @@ test('leaves other Mermaid diagrams and unknown syntax alone', () => {
   expect(parseMermaidPie('graph TD\n A-->B').ok).toBe(false)
   expect(parseMermaidPie('pie\n "a" : 1\n click a callback').ok).toBe(false)
   expect(parseMermaidPie('pie\n').ok).toBe(false)
+})
+
+test('colours come from the brand palette and nothing else', () => {
+  const html = render({ type: 'line', series: [{ name: 'a', values: [1, 2, 3] }, { name: 'b', values: [3, 2, 1] }] })
+  expect(html).toContain('var(--brand-blue)')
+  expect(html).toContain('var(--brand-sky)')
+  expect(html).not.toContain('--accent-')
+})
+
+test('a second line is dashed and the legend says which is which', () => {
+  const html = render({ type: 'line', series: [{ name: 'a', values: [1, 2, 3] }, { name: 'b', values: [3, 2, 1] }] })
+  expect(html.match(/stroke-dasharray/g)).toHaveLength(1)
+  expect(html).toContain('a · solid line')
+  expect(html).toContain('b · dashed line')
+})
+
+test('failure reasons are plain sentences with no field names', () => {
+  const r = parseChart(payload({ series: [{ name: 'x', values: [1, 2] }] }))
+  expect(r.ok).toBe(false)
+  if (!r.ok) expect(r.reason).toBe('Series 1 needs 3 values, one for each label.')
 })

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { t, tn } from '~/strings'
 import { ChevronDown, ChevronRight, CheckCircle2, Loader2, Code2, Terminal, AlignLeft } from 'lucide-react'
 import type { ToolStep } from '~/store/threadStore'
 import { CREDITS_TOOLTIP, formatCredits, type StepCredit } from '~/lib/stepCredits'
@@ -78,10 +79,10 @@ export function ToolCallBlock({ steps, credits, live = false }: Props) {
         )}
         <span className="min-w-0 flex-1 truncate">
           <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {status ? (status.running ? `${status.name} running` : 'Working') : `${steps.length} tool${steps.length === 1 ? '' : 's'} used`}
+            {status ? (status.running ? t('chat_tool_running', { name: status.name }) : t('chat_working')) : tn('chat_did', steps.length)}
           </span>
           <span className="opacity-70">
-            {status ? ` · ${done} of ${steps.length} done` : ` · ${summarizeTools(steps)}`}
+            {status ? ` · ${t('chat_steps_done', { done, total: steps.length })}` : ` · ${summarizeTools(steps)}`}
           </span>
         </span>
         {!live && totalMs > 0 && <span className="text-[11px] opacity-60 shrink-0">{formatDuration(totalMs)}</span>}
