@@ -53,6 +53,7 @@ function VaultFileRoute() {
             key={filePath}
             filePath={filePath}
             content={note.data.content}
+            hash={note.data.hash}
             isDir={note.data.isDir}
             dirEntries={note.data.dirEntries ?? []}
         />
@@ -90,9 +91,10 @@ function DirView({ dirPath, entries }: { dirPath: string; entries: DirEntry[] })
     )
 }
 
-function VaultFileView({ filePath, content, isDir, dirEntries }: {
+function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
     filePath: string
     content: string
+    hash?: string
     isDir: boolean
     dirEntries: DirEntry[]
 }) {
@@ -125,26 +127,6 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
         (z: number) => setMdZoom(Math.max(MD_ZOOM_MIN, Math.min(MD_ZOOM_MAX, +z.toFixed(1)))),
         [setMdZoom],
     )
-
-    useEffect(() => {
-        if (!isMd || editing) return
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (!e.metaKey && !e.ctrlKey) return
-            if (e.key === '=' || e.key === '+') {
-                e.preventDefault()
-                setMdZoomPersisted(mdZoom + MD_ZOOM_STEP)
-            } else if (e.key === '-') {
-                e.preventDefault()
-                setMdZoomPersisted(mdZoom - MD_ZOOM_STEP)
-            } else if (e.key === '0') {
-                e.preventDefault()
-                setMdZoomPersisted(1)
-            }
-        }
-        window.addEventListener('keydown', handleKeyDown)
-        return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [isMd, editing, mdZoom, setMdZoomPersisted])
-
 
     if (isDir) {
         return (
@@ -309,6 +291,7 @@ ${safeHtml}
                 <NoteEditor
                     content={content}
                     filePath={filePath}
+                    base={hash}
                     onSaved={() => queryClient.invalidateQueries({ queryKey: vaultKeys.note(filePath) })}
                 />
             )

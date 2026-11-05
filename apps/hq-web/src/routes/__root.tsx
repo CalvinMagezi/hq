@@ -20,7 +20,8 @@ import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { InstallPrompt } from '~/components/InstallPrompt'
-import { SignedOutView, SignInPrompt } from '~/components/SignInPrompt'
+import { openSignIn, SignedOutView, SignInPrompt } from '~/components/SignInPrompt'
+import { isCover, needsSignInPage, ownsSignedOut } from '~/lib/covers'
 import { BalanceChip, HeaderTitle, placeFact, placeTitle } from '~/components/StatusLine'
 import { SavedStrip } from '~/components/SavedStrip'
 import { ConnectionSheet } from '~/components/ConnectionSheet'
@@ -38,7 +39,7 @@ import { visibleTimer } from '~/lib/visibleTimer'
 import { openrouterChipLabel, openrouterChipTitle, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, type CopilotUsage } from '~/lib/copilotUsageApi'
-import { hqJson, needsSignIn, onSignInChange, refuseSignIn, signedOutElsewhere, takeSignInArrival } from '~/lib/hqAuth'
+import { hasWebToken, hqJson, needsSignIn, onSignInChange, refuseSignIn, signedOutElsewhere, takeSignInArrival, wasSignedOut } from '~/lib/hqAuth'
 import { lastKnownEdition, setEdition, useEdition } from '~/lib/edition'
 import { fetchHello } from '~/lib/hello'
 import { noteHelloVersion, noteWaitingWorker } from '~/lib/version'
@@ -48,7 +49,7 @@ import { toastNotice } from '~/lib/toast'
 import { isSharedComputer, watchIdle } from '~/lib/sharedComputer'
 import { listenForWipe } from '~/lib/wipe'
 import { syncPushSubscription } from '~/lib/webPush'
-import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
+import { fetchSetupStatus, shouldRedirectToSetup, showsNoSignIn } from '~/lib/setupApi'
 import { EMBED_HEAD_SCRIPT, readEmbedFlag } from '~/lib/embedHost'
 
 
@@ -128,7 +129,7 @@ function SetupRedirect() {
     fetchSetupStatus()
       .then((status) => {
         // Replaces the page it left, so Back from setup does not return to a page that sends the visitor straight back.
-        if (shouldRedirectToSetup(status)) void navigate({ to: '/setup', replace: true })
+        if (shouldRedirectToSetup(status) || showsNoSignIn(status)) void navigate({ to: '/setup', replace: true })
       })
       .catch(() => undefined)
   }, [navigate])
@@ -225,6 +226,15 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   const navigate = useNavigate()
   const activeTasks = useHQStore((s) => s.tasks.filter((x) => x.status === 'in_progress').length)
   const statusLineRef = useRef<HTMLButtonElement>(null)
+  const cover = isCover(pathname)
+  const signInPage = needsSignInPage({ signInNeeded, hadSignIn: hasWebToken() || wasSignedOut() })
+
+  // A browser that never signed in opens the full page; once signed in, /signin returns to the start place.
+  useEffect(() => {
+    if (embedded) return
+    if (signInPage && !ownsSignedOut(pathname)) void navigate({ to: '/signin', replace: true })
+    else if (!signInNeeded && pathname === '/signin') void navigate({ to: lite ? '/notes' : '/chat', replace: true })
+  }, [embedded, signInPage, signInNeeded, pathname, lite, navigate])
 
   // HQ says which edition it is; the rail and bar draw the places that edition serves.
   useEffect(() => {
@@ -320,6 +330,18 @@ function VaultShell({ embedded }: { embedded: boolean }) {
     }
   }, [])
 
+  if (cover && !embedded) {
+    return (
+      <div className="fixed inset-0 overflow-hidden" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)', paddingTop: 'var(--safe-top)' }}>
+        <ToastHost />
+        <SignInPrompt />
+        <main className="h-full overflow-hidden">
+          {signInNeeded && !ownsSignedOut(pathname) ? <SignedOutView pathname={pathname} embedded={false} /> : <Outlet />}
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div
       className="flex flex-row fixed inset-0 overflow-hidden"
@@ -386,6 +408,12 @@ function VaultShell({ embedded }: { embedded: boolean }) {
         >
           <Settings className="w-4 h-4" />
         </Link>
+
+        {connection.state === 'signed_out' && (
+          <button type="button" className="a-btn compact" onClick={openSignIn}>
+            {t('signed_out_button')}
+          </button>
+        )}
 
         <MoreMenu state={connection.state} chip={chip} lite={lite} />
       </header>}

@@ -1,8 +1,9 @@
 import { Link } from '@tanstack/react-router'
 import type { PinnedNote } from '~/lib/vaultApi'
 import { relTime } from '~/lib/time'
+import { t } from '~/strings'
 
-export function PinnedCard({ note, isSelected, onClick, onUnpin, onKeepPin }: { note: PinnedNote; isSelected: boolean; onClick?: () => void; onUnpin?: (path: string) => void; onKeepPin?: (path: string) => void }) {
+export function PinnedCard({ note, isSelected, onClick, onUnpin, onKeepPin, onNotNow }: { note: PinnedNote; isSelected: boolean; onClick?: () => void; onUnpin?: (path: string) => void; onKeepPin?: (path: string) => void; onNotNow?: (path: string) => void }) {
     const folder = note.path.includes('/') ? note.path.split('/').slice(0, -1).join('/') : null
 
     return (
@@ -75,14 +76,23 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin, onKeepPin }: { 
             </Link>
             {note.suggestedBy && (
                 <div className="flex items-center gap-1.5 px-3 pb-2 -mt-1 text-[9px]" style={{ color: 'var(--text-dim)' }}>
-                    <span>Suggested by {note.suggestedBy}, not yet in HQ's context.</span>
+                    <span>{t('pin_suggested_by', { name: note.suggestedBy })}</span>
                     {onKeepPin && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onKeepPin(note.path) }}
                             className="underline hover:opacity-80"
                             style={{ color: 'var(--accent-blue)' }}
                         >
-                            Keep pin
+                            {t('pin_keep')}
+                        </button>
+                    )}
+                    {onNotNow && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onNotNow(note.path) }}
+                            className="underline hover:opacity-80"
+                            style={{ color: 'var(--text-dim)' }}
+                        >
+                            {t('pin_not_now')}
                         </button>
                     )}
                 </div>
@@ -90,7 +100,7 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin, onKeepPin }: { 
             {onUnpin && (
                 <button
                     onClick={(e) => { e.stopPropagation(); onUnpin(note.path) }}
-                    title="Unpin"
+                    title={t('pin_unpin')}
                     className="absolute top-2 right-2 md:opacity-0 md:group-hover:opacity-100 transition-all w-5 h-5 flex items-center justify-center rounded-full text-[9px] font-bold hover:scale-110"
                     style={{
                         background: 'rgba(0,0,0,0.6)',

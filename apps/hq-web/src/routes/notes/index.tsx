@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useRef, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { VaultSignals } from '~/lib/vaultApi'
+import { togglePinNote, type VaultSignals } from '~/lib/vaultApi'
 import { pinnedNotesQuery, vaultSignalsQuery } from '~/lib/queries'
 import { HomeSections } from '~/components/vault/HomeSections'
 import { GetStartedCard } from '~/components/vault/GetStartedCard'
@@ -164,6 +164,8 @@ function VaultHome() {
                     pinned={sectionState(pinnedQuery)}
                     recent={sectionState({ ...signalsQuery, data: signalsQuery.data?.recent })}
                     tasks={sectionState(tasksQuery)}
+                    onKeepPin={(path) => void togglePinNote(path, true).then(() => pinnedQuery.refetch())}
+                    onNotNow={(path) => void togglePinNote(path, false).then(() => pinnedQuery.refetch())}
                     onRetryPinned={() => pinnedQuery.refetch()}
                     onRetryRecent={() => signalsQuery.refetch()}
                     onRetryTasks={() => tasksQuery.refetch()}

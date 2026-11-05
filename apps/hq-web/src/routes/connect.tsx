@@ -1,9 +1,10 @@
 import { t } from '~/strings'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 import { HqHttpError } from '~/lib/hqAuth'
+import { openSignIn } from '~/components/SignInPrompt'
 import {
   SCOPE_CHOICES,
   approveConnectRequest,
@@ -29,22 +30,47 @@ export const Route = createFileRoute('/connect')({
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="h-full w-full overflow-y-auto">
-      <div className="glass-card rounded-2xl p-5 border border-white/10 mx-auto my-8 w-[calc(100%-2rem)] max-w-md flex flex-col gap-4">
-        <h1 className="text-sm font-mono uppercase tracking-wider text-neutral-100">{title}</h1>
+      <div className="mx-auto my-8 w-[calc(100%-2rem)] max-w-[560px] flex flex-col gap-4">
+        <h1 className="a-h1">{title}</h1>
         {children}
       </div>
     </div>
   )
 }
 
-function loadError(error: unknown): string {
-  if (error instanceof HqHttpError && error.status === HTTP_UNAUTHORIZED) {
-    return 'Sign in to HQ in this browser first (open your HQ login link), then press Connect in Claude again.'
+/** K2 to K5 and the loading line: the states with no choice to make. */
+export function ConnectNotice({ kind }: { kind: 'none' | 'loading' | 'expired' | 'signed_out' | 'closed' }) {
+  if (kind === 'none') return <Card title={t('connect_title')}><p className="a-body-sm a-muted">{t('connect_none')}</p></Card>
+  if (kind === 'loading') {
+    return (
+      <Card title={t('connect_title')}>
+        <p className="a-body-sm a-muted flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> {t('connect_loading')}</p>
+      </Card>
+    )
   }
-  if (error instanceof HqHttpError && error.status === HTTP_NOT_FOUND) {
-    return 'This request has expired, was already answered, or was started in another browser. Press Connect in Claude again from this browser.'
+  if (kind === 'expired') {
+    return <Card title={t('connect_expired_title')}><p role="alert" className="a-body-sm">{t('connect_expired_line')}</p></Card>
   }
-  return error instanceof Error ? error.message : 'Could not load this request.'
+  if (kind === 'signed_out') {
+    return (
+      <Card title={t('connect_signed_out_title')}>
+        <p role="alert" className="a-body-sm">{t('connect_signed_out_line')}</p>
+        <button type="button" className="a-btn" onClick={openSignIn}>{t('connect_signed_out_button')}</button>
+      </Card>
+    )
+  }
+  return (
+    <Card title={t('connect_closed_title')}>
+      <p className="a-body-sm">{t('connect_closed_line')}</p>
+      <Link to="/settings" hash="connector" className="a-btn">{t('connect_closed_open')}</Link>
+    </Card>
+  )
+}
+
+function noticeFor(error: unknown): 'expired' | 'signed_out' | null {
+  if (error instanceof HqHttpError && error.status === HTTP_UNAUTHORIZED) return 'signed_out'
+  if (error instanceof HqHttpError && error.status === HTTP_NOT_FOUND) return 'expired'
+  return null
 }
 
 function ConnectPage() {
@@ -55,28 +81,105 @@ function ConnectPage() {
     enabled: Boolean(request),
     retry: false,
   })
-  if (!request) {
-    return (
-      <Card title="Connect Claude">
-        <p className="text-xs text-neutral-400">This page opens when you press Connect in Claude.</p>
-      </Card>
-    )
-  }
-  if (query.isLoading) {
-    return (
-      <Card title="Connect Claude">
-        <p className="flex items-center gap-2 text-xs text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading the request</p>
-      </Card>
-    )
-  }
+  if (!request) return <ConnectNotice kind="none" />
+  if (query.isLoading) return <ConnectNotice kind="loading" />
   if (!query.data) {
+    const kind = noticeFor(query.error)
+    if (kind) return <ConnectNotice kind={kind} />
     return (
-      <Card title="Connect Claude">
-        <p role="alert" className="text-xs text-neutral-100">{loadError(query.error)}</p>
+      <Card title={t('connect_title')}>
+        <p role="alert" className="a-body-sm">{t('connect_failed')}</p>
       </Card>
     )
   }
   return <Consent id={request} req={query.data} />
+}
+
+export interface ConsentFormProps {
+  req: ConnectRequest
+  scope: GrantScope
+  label: string
+  busy: boolean
+  error: string | null
+  onScope: (s: GrantScope) => void
+  onLabel: (l: string) => void
+  onAllow: () => void
+  onDecline: () => void
+}
+
+/** Esc means Decline, never Allow; nothing answers while a call is out. */
+export function declinesOnKey(key: string, busy: boolean): boolean {
+  return key === 'Escape' && !busy
+}
+
+/** K1: Decline on the left, Allow on the right as the one primary; Esc means Decline. */
+export function ConsentForm(p: ConsentFormProps) {
+  const { req } = p
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (declinesOnKey(e.key, p.busy)) p.onDecline()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [p.busy, p.onDecline])
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    p.onAllow()
+  }
+  return (
+    <Card title={t('connect_title')}>
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <p className="a-body-sm">{t('connect_ask')}</p>
+        <div>
+          <div className="a-drow" style={{ padding: 0 }}><span>{t('connect_asked_at', { time: clockTime(req.created_at) })}</span></div>
+          <div className="a-drow" style={{ padding: 0 }}><span>{t('connect_returns_to', { host: req.redirect_host })}</span></div>
+          <div className="a-drow" style={{ padding: 0 }}><span>{t('connect_open_until', { time: clockTime(req.expires_at) })}</span></div>
+        </div>
+
+        <fieldset className="flex flex-col gap-2">
+          <legend className="a-field-label mb-1">{t('connect_what_may')}</legend>
+          <div role="radiogroup" aria-label={t('connect_what_may')} className="flex flex-col gap-2">
+            {SCOPE_CHOICES.map((choice) => {
+              const chosen = p.scope === choice.id
+              return (
+                <button
+                  key={choice.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={chosen}
+                  className="a-rcard"
+                  style={chosen ? { borderColor: 'var(--ink)' } : undefined}
+                  onClick={() => p.onScope(choice.id)}
+                >
+                  <i className="a-radio" aria-hidden="true" />
+                  <span>
+                    <b>{t(choice.title)}</b>
+                    <span>{t(choice.line)}</span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </fieldset>
+
+        <div className="a-field">
+          <label className="a-field-label" htmlFor="hq-connect-name">{t('connect_name')}</label>
+          <input id="hq-connect-name" className="a-input" value={p.label} maxLength={MAX_LABEL_CHARS} onChange={(e) => p.onLabel(e.target.value)} />
+        </div>
+
+        <p className="a-body-sm a-muted">{t('connect_privacy')}</p>
+
+        {p.error && <p role="alert" className="a-body-sm" style={{ color: 'var(--warn)' }}>{p.error}</p>}
+
+        <div className="a-btns">
+          <button type="button" className="a-btn secondary" disabled={p.busy} onClick={p.onDecline}>{t('connect_decline')}</button>
+          <button type="submit" className="a-btn" disabled={p.busy}>
+            {p.busy && <Loader2 className="a-ic animate-spin" aria-hidden="true" />} {t('connect_allow')}
+          </button>
+        </div>
+      </form>
+    </Card>
+  )
 }
 
 function Consent({ id, req }: { id: string; req: ConnectRequest }) {
@@ -85,15 +188,7 @@ function Consent({ id, req }: { id: string; req: ConnectRequest }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  if (req.armed_until === null) {
-    return (
-      <Card title="Connect Claude">
-        <p className="text-xs text-neutral-100">
-          HQ is not accepting new connections. Open <Link to="/settings" hash="connector" className="underline">Settings</Link>, choose Allow a new connection, then press Connect in Claude again.
-        </p>
-      </Card>
-    )
-  }
+  if (req.armed_until === null) return <ConnectNotice kind="closed" />
 
   const decide = async (approve: boolean) => {
     setBusy(true)
@@ -101,73 +196,24 @@ function Consent({ id, req }: { id: string; req: ConnectRequest }) {
     try {
       const { redirect } = approve ? await approveConnectRequest(id, scope, label) : await denyConnectRequest(id)
       const target = safeRedirect(redirect)
-      if (!target) throw new Error('HQ returned an unexpected address; nothing was sent.')
+      if (!target) throw new Error(t('connect_bad_address'))
       window.location.assign(target)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'That did not work.')
+      setError(err instanceof HqHttpError ? t('connect_failed') : err instanceof Error ? err.message : t('connect_failed'))
       setBusy(false)
     }
   }
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    void decide(true)
-  }
-
   return (
-    <Card title="Connect Claude to this HQ">
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        <p className="text-xs text-neutral-300">
-          <span className="text-neutral-100">{req.client_name}</span> is asking to use this HQ. Approving sends you back to{' '}
-          <span className="font-mono text-neutral-100">{req.redirect_host}</span>. The request arrived at {clockTime(req.created_at)}; only approve if you pressed Connect there yourself just then.
-        </p>
-
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-xs text-neutral-400">What Claude may do</legend>
-          {SCOPE_CHOICES.map((choice) => (
-            <label key={choice.id} className="flex gap-3 rounded-lg border border-white/10 px-3 py-2 text-xs cursor-pointer hover:bg-white/5">
-              <input type="radio" name="scope" value={choice.id} checked={scope === choice.id} onChange={() => setScope(choice.id)} className="mt-0.5" />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-neutral-100">{choice.title}</span>
-                <span className="text-neutral-400 leading-relaxed">{choice.detail}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-
-        <label className="flex flex-col gap-1 text-xs text-neutral-400">
-          Name for this connection
-          <input
-            value={label}
-            maxLength={MAX_LABEL_CHARS}
-            onChange={(e) => setLabel(e.target.value)}
-            className="rounded-lg bg-neutral-900 border border-white/10 px-3 py-2 text-neutral-100"
-          />
-        </label>
-
-        <p className="text-xs text-neutral-400 leading-relaxed">
-          What HQ's tools return becomes part of your Claude conversation, which Anthropic stores under its own terms. You can disconnect this at any time from Settings or with <code className="font-mono">hq connector revoke</code>. This request is open until {clockTime(req.expires_at)}.
-        </p>
-
-        {error && <p role="alert" className="text-xs font-mono text-neutral-100 break-words">{error}</p>}
-
-        <div className="flex gap-2">
-          <button
-            type="submit"
-            disabled={busy}
-            className="flex-1 rounded-lg border border-white/10 bg-white/10 hover:bg-white/15 disabled:opacity-40 px-3 py-2 text-xs font-mono text-neutral-100 flex items-center justify-center gap-2"
-          >
-            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('connect_allow')}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void decide(false)}
-            className="flex-1 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 px-3 py-2 text-xs font-mono text-neutral-100"
-          >
-            {t('connect_decline')}
-          </button>
-        </div>
-      </form>
-    </Card>
+    <ConsentForm
+      req={req}
+      scope={scope}
+      label={label}
+      busy={busy}
+      error={error}
+      onScope={setScope}
+      onLabel={setLabel}
+      onAllow={() => void decide(true)}
+      onDecline={() => void decide(false)}
+    />
   )
 }

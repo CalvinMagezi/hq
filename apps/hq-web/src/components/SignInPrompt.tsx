@@ -136,21 +136,24 @@ function TokenForm() {
   )
 }
 
+const OPEN_SIGN_IN = 'hq:open-sign-in'
+
+/** Asks the shell to open the Sign in sheet. */
+export function openSignIn() {
+  window.dispatchEvent(new Event(OPEN_SIGN_IN))
+}
+
 /** The empty view's title for the place at `pathname`. */
 export function signedOutTitle(pathname: string): string {
-  if (pathname.startsWith('/inbox')) return 'Sign in to see what needs you'
-  const places: [string, string][] = [
-    ['/chat', 'your chats'],
-    ['/tasks', 'your tasks'],
-    ['/settings', 'your settings'],
-  ]
-  const place = places.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? 'your notes'
-  return `Sign in to see ${place}`
+  if (pathname.startsWith('/inbox')) return t('signed_out_inbox')
+  if (pathname.startsWith('/chat')) return t('signed_out_chats')
+  if (pathname.startsWith('/tasks')) return t('signed_out_tasks')
+  if (pathname.startsWith('/settings')) return t('signed_out_settings')
+  return t('signed_out_notes')
 }
 
 /** Stands in for every place while HQ refuses this browser: the wipe left nothing to show. */
 export function SignedOutView({ pathname, embedded }: { pathname: string; embedded: boolean }) {
-  const focusSignIn = () => document.getElementById('hq-sign-in-code')?.focus()
   // The phone's own sign-in is the one to use, so the page shows one line and no shell.
   if (embedded) {
     return (
@@ -163,15 +166,15 @@ export function SignedOutView({ pathname, embedded }: { pathname: string; embedd
   }
   return (
     <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
-      <KeyRound className="w-6 h-6" style={{ color: 'var(--text-dim)' }} />
+      <KeyRound className="w-6 h-6" style={{ color: 'var(--warn)' }} aria-hidden="true" />
       <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
         {signedOutTitle(pathname)}
       </h2>
       <p className="text-sm max-w-sm" style={{ color: 'var(--text-dim)' }}>
-        {t(hasWebToken() || wasSignedOut() ? 'signin_signed_out_by_hq' : 'signin_first_time')}
+        {t('signed_out_line')}
       </p>
-      <button type="button" onClick={focusSignIn} className={BUTTON_CLASS}>
-        {t('signin_title')}
+      <button type="button" onClick={openSignIn} className="a-btn">
+        {t('signed_out_button')}
       </button>
     </div>
   )
@@ -201,45 +204,93 @@ function SharedComputerChoice() {
 }
 
 /**
- * Shown once the server answers 401: this browser has no web token, or one that was rotated.
- * The browser was wiped first (lib/wipe.ts), so nothing saved shows behind it.
+ * The Sign in sheet over the shell. It opens from a Sign in button, and once by itself when HQ
+ * refused a sign-in this browser held. The browser was wiped first (lib/wipe.ts).
  */
 export function SignInPrompt() {
-  // The build prerenders without a browser; the server snapshot keeps the prompt out of it.
+  // The build prerenders without a browser; the server snapshot keeps the sheet out of it.
   const needed = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
-  return needed ? <SignInSheet /> : null
+  const [open, setOpen] = useState(false)
+  const autoOpened = useRef(false)
+  useEffect(() => {
+    const show = () => setOpen(true)
+    window.addEventListener(OPEN_SIGN_IN, show)
+    return () => window.removeEventListener(OPEN_SIGN_IN, show)
+  }, [])
+  useEffect(() => {
+    if (!needed) {
+      autoOpened.current = false
+      setOpen(false)
+      return
+    }
+    if (wasSignedOut() && !autoOpened.current) {
+      autoOpened.current = true
+      setOpen(true)
+    }
+  }, [needed])
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+  if (!needed || !open) return null
+  const close = () => setOpen(false)
+  return (
+    <div className="a-app" style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'transparent' }}>
+      <div className="a-scrim" onClick={close} />
+      <div className="a-sheet center" role="dialog" aria-modal="true" aria-labelledby="hq-sign-in-title">
+        <div className="a-handle" />
+        <div className="a-sheet-head" style={{ justifyContent: 'flex-end' }}>
+          <button className="a-ib" type="button" aria-label={t('signin_sheet_close')} onClick={close}>
+            <svg className="a-ic" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="a-sheet-body">
+          <SignInSheet />
+        </div>
+      </div>
+    </div>
+  )
 }
 
-/** The sign-in sheet's content: code, shared computer, login link, and where to get either. */
+/** The full page for a browser that never signed in to this HQ: no shell, the same content as the sheet. */
+export function SignInPage() {
+  return (
+    <div className="h-full w-full overflow-y-auto">
+      <div className="mx-auto my-8 w-[calc(100%-2rem)] max-w-xl flex flex-col gap-4">
+        <SignInSheet />
+      </div>
+    </div>
+  )
+}
+
+/** The sign-in content: code, shared computer, login link, and where to get either. */
 export function SignInSheet() {
   const signedOut = hasWebToken() || wasSignedOut()
   return (
-    <div
-      role="alert"
-      className="px-4 py-3 relative z-10"
-      style={{ background: 'var(--bg-solid-elevated)', borderBottom: '1px solid var(--border)' }}
-    >
-      <div className="flex flex-col gap-3 max-w-2xl mx-auto">
-        <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-          <KeyRound className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--warn)' }} />
-          {t('signin_title')}
-        </div>
-        <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          {t(signedOut ? 'signin_signed_out_by_hq' : 'signin_first_time')}
-        </p>
-        <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          {t('signin_line')}
-        </p>
-        <CodeForm />
-        <SharedComputerChoice />
-        <p className="text-xs text-center" style={{ color: 'var(--text-dim)' }}>
-          {t('signin_or')}
-        </p>
-        <TokenForm />
-        <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          {t('signin_else')}
-        </p>
-      </div>
+    <div className="flex flex-col gap-3">
+      <h2 className="a-h2" id="hq-sign-in-title">
+        {t('signin_title')}
+      </h2>
+      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+        {t(signedOut ? 'signin_signed_out_by_hq' : 'signin_first_time')}
+      </p>
+      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+        {t('signin_line')}
+      </p>
+      <CodeForm />
+      <SharedComputerChoice />
+      <p className="text-xs text-center" style={{ color: 'var(--text-dim)' }}>
+        {t('signin_or')}
+      </p>
+      <TokenForm />
+      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+        {t('signin_else')}
+      </p>
     </div>
   )
 }
