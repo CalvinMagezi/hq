@@ -12,9 +12,10 @@ use clap::Subcommand;
 use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tools::capabilities::adoption::{AdoptionReport, report};
-use hq_tools::capabilities::offers::{DEFAULT_REPLAY_DAYS, ReplayReport, replay};
+use hq_tools::capabilities::offers::{
+    Comparison, DEFAULT_REPLAY_DAYS, ReplayReport, ready_detectors, replay,
+};
 use hq_tools::capabilities::{Install, catalog, resolve, used_tools};
-use serde_json::json;
 
 const DAY: i64 = 86_400;
 
@@ -54,30 +55,11 @@ pub fn run_adoption(config: &HqConfig, as_json: bool) -> Result<()> {
     let r = db.with_conn(|c| report(c, now(), &offers))?;
     let mut out = std::io::stdout();
     if as_json {
-        writeln!(out, "{}", serde_json::to_string_pretty(&adoption_json(&r))?)?;
+        writeln!(out, "{}", serde_json::to_string_pretty(&r.to_json())?)?;
     } else {
         render_adoption(&r, &mut out)?;
     }
     Ok(())
-}
-
-fn adoption_json(r: &AdoptionReport) -> serde_json::Value {
-    json!({
-        "first_message_at": r.first_message_at,
-        "first_value": r.first_value.as_ref().map(|(says, secs)| json!({"capability": says, "after_secs": secs})),
-        "used_this_week": r.used_this_week,
-        "used_last_week": r.used_last_week,
-        "never_used": r.never_used,
-        "ready": r.ready,
-        "first_month_distinct": r.first_month_distinct,
-        "first_month_over": r.first_month_over,
-        "messages_this_week": r.messages_this_week,
-        "corrections_this_week": r.corrections_this_week,
-        "corrections_last_week": r.corrections_last_week,
-        "active_days_7": r.active_days_7,
-        "active_days_28": r.active_days_28,
-        "returned_week_four": r.returned_week_four,
-    })
 }
 
 fn days_ago(at: i64, now: i64) -> i64 {
@@ -155,7 +137,14 @@ fn render_adoption(r: &AdoptionReport, out: &mut dyn Write) -> Result<()> {
 pub fn run_offers_replay(config: &HqConfig, days: Option<i64>, as_json: bool) -> Result<()> {
     let db = Database::open(&config.db_path())?;
     let days = days.unwrap_or(DEFAULT_REPLAY_DAYS);
-    let r = db.with_conn(|c| replay(c, now(), days))?;
+    let offers = resolve(
+        catalog(),
+        &Install::detect(config).assuming_model(),
+        &|_: &str| true,
+        &used_tools(&db),
+    );
+    let ready = ready_detectors(&offers);
+    let r = db.with_conn(|c| replay(c, now(), days, &ready))?;
     let mut out = std::io::stdout();
     if as_json {
         writeln!(out, "{}", serde_json::to_string_pretty(&r)?)?;
@@ -165,39 +154,50 @@ pub fn run_offers_replay(config: &HqConfig, days: Option<i64>, as_json: bool) ->
     Ok(())
 }
 
-fn render_replay(r: &ReplayReport, out: &mut dyn Write) -> Result<()> {
-    writeln!(
+fn render_replay(r: &Comparison, out: &mut dyn Write) -> Result<()> {
+    render_pass("Phase 1 rules (every message, no spacing)", &r.phase1, out)?;
+    writeln!(out)?;
+    render_pass(
+        "Tuned rules, as the apps offer them (your own messages, ready capabilities, spaced out)",
+        &r.tuned,
         out,
-        "Offers that would have appeared over the last {} days ({} messages read)",
-        r.days, r.messages
     )?;
     writeln!(
         out,
-        "  Replies with an offer: {} ({:.1} a week)\n",
+        "\n\"Already done\": HQ used that capability within ten minutes anyway, so no offer.\n\
+         \"Held back\": not ready on this install, or the same offer came too recently.\n\
+         At most one offer per reply. Counts only, read on this machine. Nothing was sent anywhere."
+    )?;
+    Ok(())
+}
+
+fn render_pass(heading: &str, r: &ReplayReport, out: &mut dyn Write) -> Result<()> {
+    writeln!(out, "{heading}")?;
+    writeln!(
+        out,
+        "  Last {} days, {} messages read. Replies with an offer: {} ({:.1} a week)",
+        r.days,
+        r.messages,
         r.replies_with_offer,
         r.offers_per_week()
     )?;
     writeln!(
         out,
-        "  {:<18} {:<16} {:>6} {:>13} {:>12}",
-        "detector", "offers", "fired", "already done", "would offer"
+        "  {:<18} {:<16} {:>6} {:>13} {:>10} {:>12}",
+        "detector", "offers", "fired", "already done", "held back", "would offer"
     )?;
     for c in &r.detectors {
         writeln!(
             out,
-            "  {:<18} {:<16} {:>6} {:>13} {:>12}",
+            "  {:<18} {:<16} {:>6} {:>13} {:>10} {:>12}",
             c.detector.as_str(),
             c.capability,
             c.fired,
             c.already_done,
+            c.held_back,
             c.would_offer
         )?;
     }
-    writeln!(
-        out,
-        "\n\"Already done\": HQ used that capability within ten minutes anyway, so no offer.\n\
-         At most one offer per reply. Counts only, read on this machine. Nothing was sent anywhere."
-    )?;
     Ok(())
 }
 
@@ -234,7 +234,7 @@ mod tests {
         assert!(text.contains("Used this week (1 of 10 ready; last week 2)"));
         assert!(text.contains("- Read the text in a photo"));
         assert!(text.contains("Nothing was sent anywhere"));
-        let json = adoption_json(&r);
+        let json = r.to_json();
         assert_eq!(json["first_value"]["after_secs"], 300);
         assert_eq!(json["returned_week_four"], true);
     }
@@ -252,10 +252,10 @@ mod tests {
 
     #[test]
     fn the_replay_table_has_one_row_per_detector() {
-        let r = ReplayReport {
+        let pass = |replies| ReplayReport {
             days: 56,
             messages: 200,
-            replies_with_offer: 16,
+            replies_with_offer: replies,
             detectors: Detector::ALL
                 .iter()
                 .map(|d| DetectorCount {
@@ -263,19 +263,25 @@ mod tests {
                     capability: d.capability(),
                     fired: 3,
                     already_done: 1,
+                    held_back: 0,
                     would_offer: 2,
                 })
                 .collect(),
         };
+        let r = Comparison {
+            phase1: pass(16),
+            tuned: pass(8),
+        };
         let mut out = Vec::new();
         render_replay(&r, &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
-        assert!(text.contains("last 56 days (200 messages read)"));
+        assert!(text.contains("Last 56 days, 200 messages read"));
         assert!(text.contains("16 (2.0 a week)"));
-        assert_eq!(text.matches("\n  dated_todo ").count(), 1);
+        assert!(text.contains("8 (1.0 a week)"));
+        assert_eq!(text.matches("\n  dated_todo ").count(), 2);
         assert_eq!(
             text.lines().filter(|l| l.contains("    3 ")).count(),
-            Detector::ALL.len()
+            2 * Detector::ALL.len()
         );
     }
 }

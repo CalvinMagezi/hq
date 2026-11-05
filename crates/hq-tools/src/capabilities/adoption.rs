@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 use anyhow::Result;
 use hq_db::adoption::{
     DAY_SECS, ToolUse, UserMessage, WEEK_SECS, active_days, first_user_message_at, is_correction,
-    owner_tool_use, user_messages_since,
+    owner_tool_use, persons_own, user_messages_since,
 };
 use rusqlite::Connection;
 
@@ -42,6 +42,29 @@ pub struct AdoptionReport {
     pub active_days_28: usize,
     /// Whether the person wrote in week four; `None` until week four is over.
     pub returned_week_four: Option<bool>,
+}
+
+impl AdoptionReport {
+    /// The report as `hq adoption --json` and `GET /api/adoption` print it: counts and catalog
+    /// wording only.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "first_message_at": self.first_message_at,
+            "first_value": self.first_value.as_ref().map(|(says, secs)| serde_json::json!({"capability": says, "after_secs": secs})),
+            "used_this_week": self.used_this_week,
+            "used_last_week": self.used_last_week,
+            "never_used": self.never_used,
+            "ready": self.ready,
+            "first_month_distinct": self.first_month_distinct,
+            "first_month_over": self.first_month_over,
+            "messages_this_week": self.messages_this_week,
+            "corrections_this_week": self.corrections_this_week,
+            "corrections_last_week": self.corrections_last_week,
+            "active_days_7": self.active_days_7,
+            "active_days_28": self.active_days_28,
+            "returned_week_four": self.returned_week_four,
+        })
+    }
 }
 
 /// The capabilities, as the person reads them, that any of `used` belongs to, in catalog order.
@@ -84,9 +107,12 @@ pub fn report(conn: &Connection, now: i64, offers: &[Offer]) -> Result<AdoptionR
         .min_by_key(|(_, at)| *at)
         .map(|(says, at)| (says, (at - first).max(0)));
 
-    let messages = user_messages_since(conn, (now - MONTH_SECS).min(now - 2 * WEEK_SECS))?;
+    let messages = persons_own(user_messages_since(
+        conn,
+        (now - MONTH_SECS).min(now - 2 * WEEK_SECS),
+    )?);
     let returned_week_four = if now >= first + MONTH_SECS {
-        let window = user_messages_since(conn, first + WEEK_FOUR_START)?;
+        let window = persons_own(user_messages_since(conn, first + WEEK_FOUR_START)?);
         Some(window.iter().any(|m| m.at < first + MONTH_SECS))
     } else {
         None

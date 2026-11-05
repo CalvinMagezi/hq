@@ -154,6 +154,8 @@ mod tests {
             (Method::POST, "/api/workbench/lockdown"),
             (Method::GET, "/api/setup/status"),
             (Method::GET, "/api/capabilities"),
+            (Method::GET, "/api/adoption"),
+            (Method::GET, "/api/offers/replay"),
             (Method::POST, "/api/setup/provider"),
             (Method::POST, "/api/settings/provider-key"),
             (Method::POST, "/api/admin/broadcast"),

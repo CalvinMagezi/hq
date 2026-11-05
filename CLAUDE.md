@@ -134,8 +134,8 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   (`crates/hq-cli/src/commands/start/daemon/tasks_periodic/adoption_digest.rs`, queries in
   `hq_db::adoption`). `hq adoption` prints the same report and `hq offers replay` runs the phase 2
   offer detectors (`hq_tools::capabilities::offers`) over past chats, counts only
-  (`crates/hq-cli/src/commands/adoption.rs`); `scripts/phone-hq.sh <args>` runs either on a phone
-  over adb. A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
+  (`crates/hq-cli/src/commands/adoption.rs`); `scripts/phone-hq.sh` reads both from a phone over the bridge
+  (`GET /api/adoption`, `GET /api/offers/replay`, `crates/hq-web/src/adoption_api.rs`) with a device token. A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
   Plan: `docs/plans/simple-hq.md`. Off with `daemon.adoption_digest: false`.
 - **Tool failure digest**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/tool_failure_digest.rs`
   is a weekly daemon task that groups the week's failed tool calls (`tool_usage`) by a
