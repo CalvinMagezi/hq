@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 
 pub const SITE_NOTIFY_GATE: &str = "notify_gate";
 pub const SITE_MEMORY_TURN: &str = "memory_turn";
-pub const SITE_EMAIL_FYI: &str = "email_fyi";
 /// Sharpens `task_create_from_note`'s pick of an existing Space/Folder/List for a
 /// promoted vault note. Off by default: the tool's own tag/folder-name heuristic is
 /// the incumbent behavior and works with no decisions config at all.
@@ -90,7 +89,7 @@ fn default_routes() -> Vec<DecisionRoute> {
 /// Mode a site runs in when the config does not mention it.
 fn builtin_mode(site: &str) -> DecisionMode {
     match site {
-        SITE_MEMORY_TURN | SITE_EMAIL_FYI => DecisionMode::Enforce,
+        SITE_MEMORY_TURN => DecisionMode::Enforce,
         SITE_NOTIFY_GATE => DecisionMode::Shadow,
         _ => DecisionMode::Off,
     }
@@ -133,7 +132,6 @@ mod tests {
         assert!(!cfg.enabled);
         assert_eq!(cfg.site_mode(SITE_MEMORY_TURN), DecisionMode::Enforce);
         assert_eq!(cfg.site_mode(SITE_NOTIFY_GATE), DecisionMode::Shadow);
-        assert_eq!(cfg.site_mode(SITE_EMAIL_FYI), DecisionMode::Enforce);
         assert_eq!(cfg.site_mode("unknown-site"), DecisionMode::Off);
     }
 
@@ -149,6 +147,5 @@ mod tests {
         assert_eq!(cfg.site_threshold(SITE_NOTIFY_GATE, 0.8), 0.9);
         assert_eq!(cfg.site_threshold(SITE_MEMORY_TURN, 0.15), 0.15);
         // A config that lists only some sites still gets built-in modes for the rest.
-        assert_eq!(cfg.site_mode(SITE_EMAIL_FYI), DecisionMode::Enforce);
     }
 }

@@ -419,7 +419,6 @@ fn run_startup_hooks(config: &HqConfig, vault_path: &Path, db: &Database) {
     for host_name in hq_tools::agent_host::native_host_names() {
         tokio::spawn(tasks_periodic::session_events::run_session_event_loop(
             host_name,
-            vault_path.to_path_buf(),
             db.clone(),
             config.clone(),
         ));
@@ -609,7 +608,7 @@ async fn dispatch_task(
         "heartbeat" => tasks_periodic::run_heartbeat(vault_path).await,
         "subagent-supervisor" => tasks_periodic::run_subagent_supervisor(db),
         "session-supervisor" => {
-            tasks_periodic::session_supervisor::run_session_supervisor(vault_path, db, config).await
+            tasks_periodic::session_supervisor::run_session_supervisor(db, config).await
         }
         "stack-dispatch" => tasks_periodic::run_stack_dispatch(db, config).await,
         "edge-worker-dispatch" => tasks_periodic::run_edge_worker_dispatch(db, config).await,

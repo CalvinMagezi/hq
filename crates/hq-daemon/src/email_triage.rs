@@ -10,8 +10,7 @@
 use crate::notif_gate::parse_event_header;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use hq_core::mailbox;
-use hq_core::types::{MailboxMessage, MailboxMessageType};
+use hq_core::types::MailboxMessage;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -250,12 +249,7 @@ pub fn build_prompt(msg: &MailboxMessage, identity: Option<(&str, &str, &str)>) 
 /// Handle a reasoned email-triage event: stash a pending send + Nudge the user
 /// for reply-worthy mail, or emit a quiet FYI line. Returns Ok(()) always
 /// (failures are logged, not fatal).
-pub async fn handle(
-    vault_path: &Path,
-    msg: &MailboxMessage,
-    llm_output: &str,
-    decisions: Option<&std::sync::Arc<hq_llm::decision::Decisions>>,
-) -> Result<()> {
+pub async fn handle(vault_path: &Path, msg: &MailboxMessage, llm_output: &str) -> Result<()> {
     let t = parse_triage(llm_output);
     let from = msg.meta.get("from").cloned().unwrap_or_default();
     let subject = msg
@@ -287,64 +281,39 @@ pub async fn handle(
         } else {
             format!("[{company_id}] ")
         };
-        let text = format!(
-            "{company_label}Reply needed — {from}\nRe: {subject}\n\n{}\n\nDraft:\n---\n{draft}\n---\nReply `send {token}` to send as-is, `skip {token}` to ignore, or type your own version then `send {token}`.",
-            t.summary
-        );
-        let mut out = mailbox::new_message(
-            "email-triage",
-            "relay",
-            MailboxMessageType::Nudge,
-            Some("Email needs reply"),
-            &text,
-            None,
-        );
-        // Carry the token so the relay renders tap-to-send/skip keyboard pills
-        // instead of making the user type `send <token>`.
-        out.meta.insert("email_token".to_string(), token.clone());
-        // Same-day actionable: a reply-needed prompt with send/skip
-        // tokens, not a status ping.
-        out.meta.insert(
-            hq_core::mailbox::META_INTERRUPT.to_string(),
-            "true".to_string(),
-        );
-        mailbox::send_message(vault_path, &out)?;
-
-        // Surface the reply-needed item on the value bus (best-effort).
+        // The inbox is where the owner reads it, so the item carries the draft and the
+        // commands; `send` and `skip` are answered in a chat with HQ.
+        let body = reply_needed_body(&subject, &t.summary, &draft, &token);
         // message_id was moved into PendingEmail above, so re-read it for the dedup key.
         let vi = hq_core::types::ValueItem::new(
             "email-triage",
             hq_core::types::ValueKind::ActionNeeded,
-            format!("Reply needed — {from}"),
-            t.summary.clone(),
+            format!("{company_label}Reply needed — {from}"),
+            body,
         )
         .with_dedup_key(msg.meta.get("messageId").cloned().unwrap_or_default());
         let _ = hq_db::value_items::emit_at(vault_path, &vi);
         return Ok(());
     }
 
-    // FYI (or no draft/message id): quiet one-liner, unless it is not worth the owner's attention.
-    // The event note is already written by the caller, so a suppressed FYI is still on record.
-    if crate::email_gate::suppress_fyi(decisions, &from, &subject).await {
-        return Ok(());
-    }
-    let text = format!("📧 FYI — {from} · {subject}\n{}", t.summary);
-    // Its own producer so the relay can route FYIs to Discord's #fyi (FR-026).
-    let out = mailbox::new_message(
-        "email-fyi",
-        "relay",
-        MailboxMessageType::Direct,
-        Some("Email FYI"),
-        &text,
-        None,
-    );
-    mailbox::send_message(vault_path, &out)?;
+    // An FYI (or a reply with no draft or message id) needs nothing more: the caller has
+    // already written the event note.
     Ok(())
+}
+
+/// What the owner reads in the inbox for an email that needs a reply: enough to decide, the
+/// draft, and the chat commands that answer it.
+fn reply_needed_body(subject: &str, summary: &str, draft: &str, token: &str) -> String {
+    format!(
+        "Re: {subject}\n\n{summary}\n\nDraft:\n---\n{draft}\n---\nTell HQ in chat `send {token}` to send it as is, `skip {token}` to drop it, or write your own version followed by `send {token}`."
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hq_core::mailbox;
+    use hq_core::types::MailboxMessageType;
     use tempfile::TempDir;
 
     fn ev_with_meta(pairs: &[(&str, &str)]) -> MailboxMessage {
@@ -360,6 +329,53 @@ mod tests {
             m.meta.insert(k.to_string(), v.to_string());
         }
         m
+    }
+
+    /// The owner reads a reply-needed email in the inbox, and answers it in chat, so the item
+    /// has to carry the draft and the token the chat commands take. Before, both went only to a
+    /// relay notice that was dropped.
+    #[tokio::test]
+    async fn a_reply_needed_email_puts_its_draft_and_token_in_the_inbox() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("_data")).unwrap();
+        let msg = ev_with_meta(&[
+            ("from", "Amina <amina@example.com>"),
+            ("subject", "Invoice 42"),
+            ("messageId", "m-42"),
+        ]);
+        let token: String = msg.id.chars().take(6).collect();
+        let llm = "CLASSIFICATION: needs-reply\nSUMMARY: Asks when invoice 42 will be paid.\n\
+                   DRAFT: Hi Amina, it goes out on Friday.";
+
+        handle(tmp.path(), &msg, llm).await.unwrap();
+
+        let db = hq_db::Database::open(&tmp.path().join("_data").join("vault.db")).unwrap();
+        let items =
+            hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
+        assert_eq!(items.len(), 1, "{items:?}");
+        let item = &items[0];
+        assert_eq!(item.title, "Reply needed — Amina <amina@example.com>");
+        assert!(item.body.contains("Re: Invoice 42"), "{}", item.body);
+        assert!(item.body.contains("it goes out on Friday"), "{}", item.body);
+        assert!(
+            item.body.contains(&format!("send {token}")),
+            "{}",
+            item.body
+        );
+        assert!(
+            item.body.contains(&format!("skip {token}")),
+            "{}",
+            item.body
+        );
+        assert!(
+            take_pending(tmp.path(), &token).is_some(),
+            "the send command finds it"
+        );
+        assert!(
+            mailbox::peek_messages(tmp.path(), "relay")
+                .unwrap_or_default()
+                .is_empty()
+        );
     }
 
     /// Regression for the Discord double-click TOCTOU flagged in review: two

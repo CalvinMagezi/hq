@@ -178,8 +178,8 @@ fn choose_or_create_space(
 /// confident pick (not configured, disabled, timed out, abstained) — callers
 /// must already have a heuristic fallback and treat this purely as a
 /// sharpening layer, never a dependency. Takes the `Decisions` handle as a
-/// parameter (fetched fresh per call by the caller via `hq_llm::decision::get()`,
-/// same convention as `email_gate::suppress_fyi`) rather than reaching for the
+/// parameter (fetched fresh per call by the caller via `hq_llm::decision::get()`)
+/// rather than reaching for the
 /// process-wide singleton itself, so this function stays testable with a
 /// `FakeDecisionProvider`-backed handle.
 pub(super) async fn choose_placement_via_jev(

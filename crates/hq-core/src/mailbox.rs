@@ -289,8 +289,12 @@ pub fn new_message(
 /// invisible to them without any reader changes.
 pub const ARCHIVE_DIR: &str = "archive";
 
+/// The mailbox the chat relays empty. Only a family member's request (`family-confirm`) comes
+/// back out of it; every other message is dropped, since chat relays carry chat only.
+pub const RELAY_MAILBOX: &str = "relay";
+
 /// Mailboxes with live pollers. Moving their mail would drop work in flight.
-pub const RESERVED_MAILBOXES: &[&str] = &["relay", "agent-worker"];
+pub const RESERVED_MAILBOXES: &[&str] = &[RELAY_MAILBOX, "agent-worker"];
 
 /// Move messages older than `older_than_days` into each mailbox's archive.
 ///

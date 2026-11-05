@@ -844,6 +844,39 @@ mod pinned_model {
     }
 }
 
+/// A governance denial reaches the owner as an inbox item, once per tool while it stays open.
+#[tokio::test]
+async fn a_tool_denial_lands_in_the_inbox_once_per_tool() {
+    let vault = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(vault.path().join("_data")).unwrap();
+    let notify = crate::builder::inbox_denial_notifier(vault.path().to_path_buf());
+    let db = hq_db::Database::open(&vault.path().join("_data").join("vault.db")).unwrap();
+    let pending =
+        || hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
+    // The notifier writes on a blocking task so the denied call never waits on the database.
+    let settle = || async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    };
+
+    notify("bash", "outbound network after untrusted content");
+    settle().await;
+    notify("bash", "outbound network after untrusted content");
+    settle().await;
+
+    let items = pending();
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(items[0].title, "HQ refused the tool 'bash'");
+    assert!(
+        items[0].body.contains("outbound network"),
+        "{}",
+        items[0].body
+    );
+
+    notify("vault_write_note", "orchestrator role");
+    settle().await;
+    assert_eq!(pending().len(), 2, "another tool is its own item");
+}
+
 /// The person's own session hears what HQ can do here; a session with its own prompt (a
 /// sub-agent, a relay's legacy path) does not.
 #[tokio::test]

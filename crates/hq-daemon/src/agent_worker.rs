@@ -3,17 +3,14 @@
 //! Drains the `agent-worker` mailbox on its own 20s loop. For each event it:
 //!   1. gate-filters (drops learned noise BEFORE spending any tokens),
 //!   2. reasons about it via the LLM router (terse triage),
-//!   3. writes a result note to `.vault/_events/<date>/`,
-//!   4. emits a gated summary to the relay (header preserved so the poller's gate
-//!      re-applies the same trait and delivers as digest/urgent).
+//!   3. writes a result note to `.vault/_events/<date>/`.
 //!
-//! This turns raw inbound events into agent-reasoned, vault-recorded, gated
-//! notifications instead of raw forwards.
+//! An email that needs a reply also becomes an inbox item (`email_triage`).
 
 use crate::notif_gate::{GateDecision, gate_decision, parse_event_header};
 use chrono::Utc;
 use hq_core::mailbox;
-use hq_core::types::{ChatMessage, MailboxMessage, MailboxMessageType, MessageRole};
+use hq_core::types::{ChatMessage, MailboxMessage, MessageRole};
 use hq_llm::{LlmProvider, provider::ChatRequest, router::LlmRouter};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
@@ -99,8 +96,7 @@ async fn process_event(
         let prompt = crate::email_triage::build_prompt(msg, identity_ref);
         let drafted = complete(router, "fast", prompt).await.unwrap_or_default();
         write_event_note(vault_path, msg, &drafted)?;
-        let decisions = hq_llm::decision::get();
-        crate::email_triage::handle(vault_path, msg, &drafted, decisions.as_ref()).await?;
+        crate::email_triage::handle(vault_path, msg, &drafted).await?;
         return Ok(true);
     }
 
@@ -109,19 +105,6 @@ async fn process_event(
         .unwrap_or_else(|| body_after_header(&msg.content).to_string());
 
     write_event_note(vault_path, msg, &summary)?;
-
-    // Emit a gated notification: keep the header so the relay poller's gate
-    // re-applies the same trait, then delivers (digest/urgent) to the user.
-    let notif = format!("{}\n\n{}", header_line(&msg.content), summary);
-    let out = mailbox::new_message(
-        "agent-worker",
-        "relay",
-        MailboxMessageType::Direct,
-        None,
-        &notif,
-        None,
-    );
-    mailbox::send_message(vault_path, &out)?;
     Ok(true)
 }
 
@@ -165,16 +148,6 @@ async fn complete(router: &LlmRouter, model: &str, prompt: String) -> Option<Str
     }
 }
 
-/// The leading `[…]` header line, or a default if the event had none.
-fn header_line(content: &str) -> String {
-    content
-        .lines()
-        .next()
-        .filter(|l| l.trim_start().starts_with('['))
-        .unwrap_or("[hq-event]")
-        .to_string()
-}
-
 /// Event body with the leading header line (and its blank line) stripped.
 fn body_after_header(content: &str) -> &str {
     match content.split_once("\n\n") {
@@ -215,6 +188,7 @@ fn write_event_note(vault_path: &Path, msg: &MailboxMessage, summary: &str) -> a
 mod tests {
     use super::*;
     use crate::user_model::{UserModel, UserTrait, save_user_model};
+    use hq_core::types::MailboxMessageType;
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -227,15 +201,6 @@ mod tests {
             content,
             None,
         )
-    }
-
-    #[test]
-    fn header_line_extracts_or_defaults() {
-        assert_eq!(
-            header_line("[hq-event source=x kind=y]\n\nbody"),
-            "[hq-event source=x kind=y]"
-        );
-        assert_eq!(header_line("no header here"), "[hq-event]");
     }
 
     #[test]
@@ -280,7 +245,7 @@ mod tests {
         save_user_model(tmp.path(), &m).unwrap();
         let router = LlmRouter::from_env();
         let msg = ev("[hq-event flow=gh source=github kind=dependabot]\n\nbump dep");
-        // gate says Drop → returns false, no _events note, no relay message
+        // gate says Drop → returns false, no _events note
         let reasoned = process_event(tmp.path(), &router, &msg).await.unwrap();
         assert!(!reasoned);
         assert!(!tmp.path().join("_events").exists());

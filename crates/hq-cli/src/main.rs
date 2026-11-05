@@ -650,7 +650,7 @@ enum Commands {
         /// How many days back to summarize
         #[arg(long, default_value = "7")]
         days: u32,
-        /// Only this gate, e.g. email_fyi, memory_turn
+        /// Only this gate, e.g. memory_turn
         #[arg(long)]
         site: Option<String>,
     },

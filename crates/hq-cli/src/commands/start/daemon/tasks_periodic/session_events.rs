@@ -5,10 +5,9 @@
 
 use super::session_supervisor::run_session_supervisor;
 use hq_core::config::HqConfig;
-use hq_core::types::{MailboxMessageType, ValueItem, ValueKind};
+use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
 use hq_tools::agent_host::{self, HostEvents};
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -31,12 +30,7 @@ fn wants_sweep(events: &HostEvents) -> bool {
         })
 }
 
-pub async fn run_session_event_loop(
-    host_name: String,
-    vault_path: PathBuf,
-    db: Database,
-    config: HqConfig,
-) {
+pub async fn run_session_event_loop(host_name: String, db: Database, config: HqConfig) {
     let mut cursor: Option<u64> = None;
     loop {
         let Ok(host) = agent_host::host(Some(&host_name)) else {
@@ -62,7 +56,6 @@ pub async fn run_session_event_loop(
         };
         for event in events.events.iter().filter(|e| e.kind == "lockdown") {
             alert_lockdown(
-                &vault_path,
                 &db,
                 &host_name,
                 event.rule.as_deref().unwrap_or("no reason given"),
@@ -73,7 +66,7 @@ pub async fn run_session_event_loop(
         if first_look || !wants_sweep(&events) {
             continue;
         }
-        if let Err(e) = run_session_supervisor(&vault_path, &db, &config).await {
+        if let Err(e) = run_session_supervisor(&db, &config).await {
             warn!(error = %e, "session-events: sweep failed");
         }
         tokio::time::sleep(MIN_SWEEP_GAP).await;
@@ -81,36 +74,16 @@ pub async fn run_session_event_loop(
 }
 
 /// A locked host is an emergency whoever locked it, so the owner hears at once
-/// in the inbox and on the relay, interrupting whatever the relay is doing.
-fn alert_lockdown(vault_path: &Path, db: &Database, host: &str, reason: &str) {
+/// in the inbox.
+fn alert_lockdown(db: &Database, host: &str, reason: &str) {
     let subject = format!("Host '{host}' is locked down");
     let body = format!(
         "No coding agent starts on '{host}' and the ones it ran were stopped (unless its start-rate breaker tripped, which only freezes new starts). Reason: {reason}. Check what started them with `host_agents` and the session logs, then lift it on that machine with `hq host unlock`."
     );
-    let item = ValueItem::new(
-        "agent-host",
-        ValueKind::ActionNeeded,
-        subject.clone(),
-        body.clone(),
-    )
-    .with_dedup_key(format!("host-lockdown-{host}"));
+    let item = ValueItem::new("agent-host", ValueKind::ActionNeeded, subject, body)
+        .with_dedup_key(format!("host-lockdown-{host}"));
     if let Err(e) = hq_db::value_items::emit(db, &item) {
         warn!(host, error = %e, "session-events: lockdown inbox item failed");
-    }
-    let mut msg = hq_core::mailbox::new_message(
-        "agent-host",
-        "relay",
-        MailboxMessageType::Nudge,
-        Some(&subject),
-        &body,
-        None,
-    );
-    msg.meta.insert(
-        hq_core::mailbox::META_INTERRUPT.to_string(),
-        "true".to_string(),
-    );
-    if let Err(e) = hq_core::mailbox::send_message(vault_path, &msg) {
-        warn!(host, error = %e, "session-events: lockdown relay alert failed");
     }
 }
 
