@@ -317,4 +317,21 @@
     <string name="update_pulled_body">%1$s was withdrawn. Nothing was installed.</string>
     <string name="update_rollout_note">It is going out to a few phones at a time. You can install it now.</string>
     <string name="update_notice_withdrawn_body">Open HQ to see what to do.</string>
+    <string name="state_server_unreachable">Your server HQ can\'t be reached</string>
+    <string name="state_server_signed_out">Signed out of your server</string>
+    <string name="reason_server_unreachable">Your server HQ can\'t be reached.</string>
+    <string name="reason_server_signed_out">This phone is signed out of your server HQ.</string>
+    <string name="reason_phone_full">The phone is almost full.</string>
+    <string name="reason_download_server">Couldn\'t reach the download server.</string>
+    <string name="reason_download_mismatch">The download did not match.</string>
+    <string name="outcome_retries_itself">It will try again by itself.</string>
+    <string name="outcome_retries_when_back">It will try again when HQ is back.</string>
+    <string name="outcome_retries_when_online">It will try again when you\'re back online.</string>
+    <string name="outcome_try_moment">Try again in a moment.</string>
+    <string name="outcome_start_hq">Start HQ to try again.</string>
+    <string name="outcome_try_again">Try again.</string>
+    <string name="outcome_try_when_back">Try again when it\'s back.</string>
+    <string name="outcome_try_when_online">Try again when you\'re back online.</string>
+    <string name="outcome_sign_in_again">Sign in again.</string>
+    <string name="outcome_hq_fine">HQ is fine. Try again soon.</string>
 </resources>
