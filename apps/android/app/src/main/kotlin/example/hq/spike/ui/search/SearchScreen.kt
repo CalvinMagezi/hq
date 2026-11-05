@@ -149,7 +149,7 @@ private fun GroupHeader(label: String, count: Int, more: Boolean, onMore: () -> 
         Text(label, style = HqType.Group, color = Mts.InkMuted)
         Box(Modifier.clip(CircleShape).background(Mts.Surface100).padding(horizontal = 8.dp, vertical = 2.dp)) { Text("$count", style = HqType.Badge, color = Mts.InkMuted) }
         Box(Modifier.weight(1f))
-        if (more) Box(Modifier.heightIn(min = 36.dp).clickable(role = Role.Button, onClick = onMore), contentAlignment = Alignment.Center) { Text(SearchWords.seeAll(count), style = HqType.BodySmBold, color = Mts.BrandBlue) }
+        if (more) Box(Modifier.heightIn(min = 36.dp).clickable(role = Role.Button, onClick = onMore), contentAlignment = Alignment.Center) { Text(SearchWords.seeAll(example.hq.spike.ui.shell.rememberWords(), count), style = HqType.BodySmBold, color = Mts.BrandBlue) }
     }
 }
 

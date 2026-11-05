@@ -234,4 +234,21 @@ object NotesCopy {
     /** When the last copy finished, for Backup and the copy-first rule. */
     fun recordCopy(filesDir: File, atMs: Long) { File(filesDir, LAST_COPY).writeText(atMs.toString()) }
     fun lastCopy(filesDir: File): Long? = File(filesDir, LAST_COPY).takeIf { it.isFile }?.readText()?.trim()?.toLongOrNull()
+
+    private const val OFF_PHONE = "backup-off-phone"
+
+    /** Whether a document lives in this phone's own storage (internal storage, Downloads, media), where losing the phone loses the copy. */
+    fun onThisPhone(authority: String?, documentId: String?): Boolean = when (authority) {
+        "com.android.externalstorage.documents" -> documentId?.startsWith("primary") == true
+        "com.android.providers.downloads.documents", "com.android.providers.media.documents" -> true
+        else -> false
+    }
+
+    /** Records a finished copy: always as the last copy, and as the last copy off this phone only when it was saved somewhere else. */
+    fun recordCopy(filesDir: File, atMs: Long, onPhone: Boolean) {
+        recordCopy(filesDir, atMs)
+        if (!onPhone) File(filesDir, OFF_PHONE).writeText(atMs.toString())
+    }
+
+    fun lastCopyOffPhone(filesDir: File): Long? = File(filesDir, OFF_PHONE).takeIf { it.isFile }?.readText()?.trim()?.toLongOrNull()
 }

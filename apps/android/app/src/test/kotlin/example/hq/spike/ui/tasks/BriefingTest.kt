@@ -3,7 +3,13 @@ package example.hq.spike.ui.tasks
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class BriefingTest {
     private val now = Instant.parse("2026-10-22T12:00:00Z")
 
@@ -11,9 +17,9 @@ class BriefingTest {
         Briefing("Alpha", shown, counts, emptyList(), emptyList(), emptyList(), reviews, gaps, emptyList(), fresh)
 
     @Test fun theStatusLineCountsEachStatusAndSaysHowManyTasks() {
-        assertEquals("2 in progress, 1 to do (3 tasks)", BriefingWords.statusLine(briefing(listOf("in_progress" to 2, "to_do" to 1), 3)))
-        assertEquals("1 to do (1 task)", BriefingWords.statusLine(briefing(listOf("to_do" to 1), 1)))
-        assertEquals("", BriefingWords.statusLine(briefing()))
+        assertEquals("2 in progress, 1 to do (3\u00A0tasks)", BriefingWords.statusLine(testWords(), briefing(listOf("in_progress" to 2, "to_do" to 1), 3)))
+        assertEquals("1 to do (1\u00A0task)", BriefingWords.statusLine(testWords(), briefing(listOf("to_do" to 1), 1)))
+        assertEquals("", BriefingWords.statusLine(testWords(), briefing()))
     }
 
     @Test fun reviewStatesComeInAFixedOrderAndZeroesAreLeftOut() {

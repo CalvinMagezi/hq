@@ -260,13 +260,8 @@ private fun FolderPage(ui: NotesUi, actions: NotesActions) {
         if (ui.offline) OfflineBanner()
         Box(Modifier.weight(1f)) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
-                item {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 36.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(HqIcons.Sort, null, Modifier.size(18.dp), tint = Mts.Ink)
-                        Text(stringResource(R.string.notes_a_to_z), style = HqType.BodySmBold, color = Mts.Ink)
-                    }
-                }
-                if (view.folders.isNotEmpty()) item { SubFolders(view.folders, actions.onOpenFolder) }
+                if (view.folders.isNotEmpty()) { item { SectionLabel("Folders", view.folders.size) }; item { SubFolders(view.folders, actions.onOpenFolder) } }
+                if (view.notes.isNotEmpty()) item { SectionLabel("Notes, A to Z", view.notes.size) }
                 if (view.loading) item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Spinner(28) } }
                 items(view.notes, key = { it }) { path ->
                     example.hq.spike.ui.notes.NoteRow(example.hq.spike.data.HqClient.NoteItem(path, NoteRefs.title(path), "", "", false)) { actions.onOpenNote(path) }

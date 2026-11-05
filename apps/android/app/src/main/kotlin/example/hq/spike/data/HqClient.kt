@@ -286,7 +286,12 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val actions: List<String>,
         /** For a helper's question the server read: the dialog it is about. Null from an older server. */
         val dialog: AlertDialog? = null,
+        /** For an owner approval: the call HQ will make, and whether HQ says it loses something. Null from an older server. */
+        val approval: ApprovalFacts? = null,
     )
+
+    /** What HQ says an approval is about: [tool] and [args] verbatim, [loses] and [verb] (one of [LOSING_VERBS]) decided by HQ, never by the card's words. */
+    data class ApprovalFacts(val tool: String, val args: String, val loses: Boolean, val verb: String?)
 
     /**
      * The dialog a helper's alert is about. [approveLabel] names the one answer a button may give (a plain yes, once),
@@ -301,6 +306,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val command: String?,
         val approveLabel: String?,
         val answered: Boolean,
+        val loses: Boolean = false,
+        val verb: String? = null,
     )
 
     data class InboxList(val items: List<InboxItem>, val unread: Int, val pending: Int)
@@ -316,7 +323,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                     InboxItem(
                         n.getString("id"), n.optString("kind", ""), n.optString("title", ""), n.optString("description", ""), n.optString("state", ""),
                         n.optString("created_at", ""), meta?.optStringOrNull("link"), extra?.optStringOrNull("source_task"), extra?.optStringOrNull("val_kind"),
-                        n.optJSONArray("actions").strings(), alertDialog(meta),
+                        n.optJSONArray("actions").strings(), alertDialog(meta), approvalFacts(meta),
                     )
                 },
                 o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),
@@ -448,6 +455,22 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/capabilities").build()) { example.hq.spike.ui.chat.Suggestions.parse(it) }
 
     suspend fun json(path: String): JSONObject = send(authed(path).build()) { JSONObject(it) }
+
+    /** What a server HQ says about its backups at `/api/backup/status`. [lastOkMs] is epoch milliseconds, null when it never finished one. */
+    data class ServerBackup(val configured: Boolean, val lastOkMs: Long?, val failed: Boolean, val overdue: Boolean, val everyHours: Int)
+
+    /** The server's backup report, or null when it does not say: an older server without the route, or any failure. */
+    suspend fun backupStatus(): ServerBackup? = try {
+        send(authed("/api/backup/status").build()) { text ->
+            val o = JSONObject(text)
+            ServerBackup(o.optBoolean("configured"), parseWhen(o.optString("last_ok_at", "")), o.optBoolean("failed"), o.optBoolean("overdue"), o.optInt("every_hours"))
+        }
+    } catch (e: IOException) { null } catch (e: org.json.JSONException) { null }
+
+    private fun parseWhen(text: String): Long? = text.takeIf { it.isNotBlank() }?.let {
+        runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull()
+            ?: runCatching { java.time.LocalDateTime.parse(it.replace(' ', 'T')).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }.getOrNull()
+    }
 
     /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */
     data class NoteItem(val path: String, val title: String, val preview: String, val mtime: String, val pinned: Boolean)
@@ -643,7 +666,21 @@ internal fun alertDialog(meta: JSONObject?): HqClient.AlertDialog? {
     if (!d.has("seq")) return null
     fun text(key: String) = if (d.isNull(key)) null else d.optString(key, "").ifBlank { null }
     val approve = d.optJSONObject("approve")?.let { a -> if (a.isNull("label")) null else a.optString("label", "").ifBlank { null } }
-    return HqClient.AlertDialog(session, d.optLong("seq"), d.optString("kind", "other"), text("question"), text("command"), approve, d.optBoolean("answered", false))
+    return HqClient.AlertDialog(
+        session, d.optLong("seq"), d.optString("kind", "other"), text("question"), text("command"), approve, d.optBoolean("answered", false),
+        d.optBoolean("loses", false), losingVerb(d),
+    )
+}
+
+internal val LOSING_VERBS = setOf("delete", "remove", "stop", "sign out", "revoke", "disconnect", "drop", "overwrite")
+
+private fun losingVerb(o: JSONObject): String? = if (o.isNull("verb")) null else o.optString("verb", "").trim().lowercase().takeIf { it in LOSING_VERBS }
+
+/** The approval in a notification's metadata, or null for any other notice. */
+internal fun approvalFacts(meta: JSONObject?): HqClient.ApprovalFacts? {
+    val a = meta?.optJSONObject("approval") ?: return null
+    val args = if (a.isNull("args")) "" else a.opt("args")?.let { if (it is String) it else it.toString() }.orEmpty()
+    return HqClient.ApprovalFacts(a.optString("tool", ""), args, a.optBoolean("loses", false), losingVerb(a))
 }
 
 internal fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }

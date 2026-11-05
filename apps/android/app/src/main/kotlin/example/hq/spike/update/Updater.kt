@@ -43,6 +43,7 @@ object Updater {
     private const val KEY_SEQ = "highest_seq"
     private const val KEY_BUCKET = "bucket"
     private const val KEY_OFFERED = "offered_code"
+    private const val KEY_SAVE_COPY = "switch_save_copy"
     private const val BUCKETS = 100
     private val BUSY_PORT = example.hq.spike.BuildConfig.HQ_PORT
     const val ACTION_RESULT = "example.hq.spike.update.RESULT"
@@ -207,7 +208,7 @@ object Updater {
         val manifest = UpdateLogic.parse(manifestFile.readText()) ?: throw UpdateException("The update information is not in a form this version understands.")
         val p = prefs(context)
         if (!UpdateLogic.seqOk(manifest, p.getLong(KEY_SEQ, 0))) return null
-        p.edit().putLong(KEY_SEQ, manifest.seq).apply()
+        p.edit().putLong(KEY_SEQ, manifest.seq).putBoolean(KEY_SAVE_COPY, manifest.switches.saveCopy).apply()
         val offered = p.getLong(KEY_OFFERED, 0) == manifest.versionCode
         return UpdateLogic.verdict(manifest, installedCode(context), Build.VERSION.SDK_INT, bucket(context), channel(context) == UpdateChannel.Main, offered)
     }
@@ -300,6 +301,9 @@ object Updater {
             session.commit(pending.intentSender)
         }
     }
+
+    /** The signed manifest's `saveCopy` switch as last seen; on until a verified manifest says otherwise. */
+    fun saveCopyAllowed(context: Context): Boolean = prefs(context).getBoolean(KEY_SAVE_COPY, true)
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

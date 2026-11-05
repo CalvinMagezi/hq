@@ -42,8 +42,6 @@ object NoticeWords {
 
     private fun helper(card: InboxCard): String = AnswerWords.asker(card.title) ?: UNKNOWN_HELPER
 
-    private val LOSING = Regex("\\b(delete|remove|erase|wipe|stop|revoke|disable|overwrite|sign out|force)\\b", RegexOption.IGNORE_CASE)
-
-    /** A request that takes something away: it shows its details like any other but offers Open only. */
-    fun losing(card: InboxCard): Boolean = card.kind == CardKind.Approval && LOSING.containsMatchIn(card.title + " " + card.body)
+    /** A request HQ says takes something away: it shows its details like any other but offers Open only. */
+    fun losing(card: InboxCard): Boolean = card.loses
 }

@@ -39,6 +39,12 @@ data class InboxCard(
     val fullBody: String = "",
     /** For a helper's question the server read: the dialog the answer goes to. Answered through the server, never by keys typed here. */
     val dialog: HqClient.AlertDialog? = null,
+    /** HQ's own word that allowing this takes something away, and the one verb for it. The card's words never decide this. */
+    val loses: Boolean = false,
+    val verb: String? = null,
+    /** For an approval: the tool and its arguments, exactly as HQ sent them. */
+    val tool: String? = null,
+    val toolArgs: String? = null,
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
@@ -63,7 +69,7 @@ object InboxWords {
             item.actions.any { it == "approve" || it == "reject" } -> {
                 val full = Plain.strip(item.description.trim())
                 val body = if (full.length > APPROVAL_BODY) full.take(APPROVAL_BODY).trimEnd() + "…" else full
-                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, full.length <= APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state, fullBody = full)
+                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, full.length <= APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state, fullBody = full, loses = item.approval?.loses == true, verb = item.approval?.verb, tool = item.approval?.tool?.ifBlank { null }, toolArgs = item.approval?.args?.ifBlank { null })
             }
             else -> InboxCard(item.id, CardKind.Update, Plain.strip(item.title.trim()), Plain.strip(item.description.trim()), whereOf(item, null), item.createdAt, updateIcon(item), null, false, "", item.link, askedBy(item, null), item.state)
         }
@@ -112,7 +118,7 @@ object InboxWords {
         val canAllow = d.approveLabel != null
         return InboxCard(
             item.id, CardKind.HelperAsks, "$who needs your OK", body, whereOf(item, host), item.createdAt, CardIcon.Sparkle, d.sessionId, canAllow,
-            if (canAllow) "Allow once" else "Open helper", item.link, askedBy(item, host), item.state, dialog = d,
+            if (canAllow) "Allow once" else "Open helper", item.link, askedBy(item, host), item.state, dialog = d, loses = d.loses, verb = d.verb,
         )
     }
 

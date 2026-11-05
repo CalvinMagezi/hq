@@ -68,7 +68,7 @@ private fun Body(b: Briefing, name: String, onTask: (BriefTask) -> Unit, onNote:
             Text(BriefingWords.empty(name), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(20.dp))
             return@Column
         }
-        Text(BriefingWords.statusLine(b), style = HqType.Body, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+        Text(BriefingWords.statusLine(example.hq.spike.ui.shell.rememberWords(), b), style = HqType.Body, color = Mts.Ink, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         if (b.awaiting.isNotEmpty()) {
             Label("Waiting for review")
             b.awaiting.forEach { t -> Entry(t.displayId, t.title, null) { onTask(t) } }
