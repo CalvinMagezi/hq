@@ -31,9 +31,8 @@ const PUSH_TTL_SECS: u32 = 24 * 60 * 60;
 /// Failed pushes in a row after which a subscription is dropped.
 const MAX_FAILURES: i64 = 5;
 const TITLE_CHARS: usize = 120;
-const BODY_CHARS: usize = 300;
-/// A notification button's label; longer ones are cut by the browser anyway.
-const ACTION_CHARS: usize = 40;
+/// Waiting items a returning subscription gets again at most; the worker folds the rest.
+const REPLAY_MAX: usize = 50;
 /// Where a tap goes when the item names no page.
 const DEFAULT_LINK: &str = "/notifications";
 
@@ -162,20 +161,6 @@ impl WebPush {
         Ok(res.status())
     }
 
-    /// Pushes `payload` to every subscription. Returns how many took it.
-    pub(crate) async fn broadcast(
-        &self,
-        db: &hq_db::Database,
-        payload: &[u8],
-        urgent: bool,
-    ) -> Result<usize> {
-        let subs = hq_db::push_subscriptions::list(db)?;
-        let outcomes =
-            futures::future::join_all(subs.iter().map(|sub| self.send(db, sub, payload, urgent)))
-                .await;
-        Ok(outcomes.iter().filter(|o| **o == PushOutcome::Sent).count())
-    }
-
     /// One pass of the dispatcher: claims each new item it wants and pushes it.
     pub(crate) async fn dispatch_once(&self, db: &hq_db::Database) -> Result<usize> {
         let since = Utc::now() - chrono::Duration::minutes(PUSH_WINDOW_MINUTES);
@@ -185,81 +170,175 @@ impl WebPush {
             if !hq_db::value_items::claim_push(db, &item.id)? || !self.wants(&item) {
                 continue;
             }
-            let urgent = matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal);
-            let buttons = answer_buttons(db, &item.id);
-            let delivered = self
-                .broadcast(db, &payload(&item, buttons.as_ref()), urgent)
-                .await?;
+            let subs = hq_db::push_subscriptions::list(db)?;
+            let delivered = self.push_item(db, &item, &subs).await;
             tracing::debug!(id = %item.id, delivered, "web push: pushed an inbox item");
             pushed += 1;
         }
         Ok(pushed)
     }
-}
 
-/// A blocked session's dialog and the signing key, for a push whose buttons answer it.
-pub(crate) struct AnswerButtons {
-    alert: hq_db::dialog_alerts::DialogAlert,
-    key: Vec<u8>,
-    expires: i64,
-}
-
-/// The answer buttons for inbox item `item_id`: when it is a blocked session's alert that is not
-/// answered yet. Without the signing key there are no buttons, only the tap that opens HQ.
-fn answer_buttons(db: &hq_db::Database, item_id: &str) -> Option<AnswerButtons> {
-    let alert = hq_db::dialog_alerts::get(db, item_id).ok().flatten()?;
-    if alert.answered {
-        return None;
+    /// Pushes one item to each subscription that receives its kind, with or without its first
+    /// line as each chose. Returns how many took it.
+    async fn push_item(
+        &self,
+        db: &hq_db::Database,
+        item: &ValueItem,
+        subs: &[hq_db::push_subscriptions::PushSubscription],
+    ) -> usize {
+        let kind = PushKind::of(item);
+        let urgent = kind == PushKind::Needs;
+        let who = helper_name(db, item);
+        let plain = payload(item, who.as_deref(), false);
+        let detailed = payload(item, who.as_deref(), true);
+        let sends = subs.iter().filter(|s| s.receives(kind.name())).map(|sub| {
+            let body = if sub.details { &detailed } else { &plain };
+            self.send(db, sub, body, urgent)
+        });
+        let outcomes = futures::future::join_all(sends).await;
+        outcomes.iter().filter(|o| **o == PushOutcome::Sent).count()
     }
-    let key = hq_core::approval_key::load_or_create_key()
-        .inspect_err(|e| tracing::warn!("web push: no approval key, so no answer buttons: {e:#}"))
-        .ok()?;
-    Some(AnswerButtons {
-        alert,
-        key,
-        expires: Utc::now().timestamp() + crate::dialog_answer::TOKEN_TTL_SECS,
-    })
+
+    /// Posts each item still waiting, of the kinds a subscription just gained, to that
+    /// subscription once. The service worker tags them by item id and folds past the newest few.
+    pub(crate) async fn replay(
+        &self,
+        db: &hq_db::Database,
+        endpoint: &str,
+        gained: &[PushKind],
+    ) -> Result<usize> {
+        let Some(sub) = hq_db::push_subscriptions::get(db, endpoint)? else {
+            return Ok(0);
+        };
+        let mut waiting = Vec::new();
+        for state in [
+            ValueState::Pending,
+            ValueState::Routed,
+            ValueState::Delivered,
+        ] {
+            waiting.extend(hq_db::value_items::list_by_state(db, state)?);
+        }
+        waiting.retain(|i| self.wants(i) && gained.contains(&PushKind::of(i)));
+        waiting.sort_by_key(|i| i.created_at);
+        let skip = waiting.len().saturating_sub(REPLAY_MAX);
+        let mut sent = 0;
+        for item in waiting.iter().skip(skip) {
+            sent += self.push_item(db, item, std::slice::from_ref(&sub)).await;
+        }
+        Ok(sent)
+    }
 }
 
-/// The JSON the service worker turns into a notification. With `buttons`, it also carries the
-/// item id, up to two actions (the yes-once option by its own label, and Decline) and a token for
-/// each, which the service worker posts to `PUSH_ANSWER_PATH` in place of the web token.
-pub(crate) fn payload(item: &ValueItem, buttons: Option<&AnswerButtons>) -> Vec<u8> {
-    use crate::dialog_answer::{Choice, token};
-    let mut body = serde_json::json!({
-        "title": clip(&item.title, TITLE_CHARS),
-        "body": clip(&item.body, BODY_CHARS),
+/// Which notification switch an item belongs to (`push_subscriptions.kinds`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PushKind {
+    Needs,
+    Updates,
+}
+
+impl PushKind {
+    pub(crate) fn of(item: &ValueItem) -> Self {
+        let needs = matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal)
+            || item.source_task == crate::device_auth::DEVICE_SIGN_IN_SOURCE;
+        if needs { Self::Needs } else { Self::Updates }
+    }
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Needs => hq_db::push_subscriptions::KIND_NEEDS,
+            Self::Updates => hq_db::push_subscriptions::KIND_UPDATES,
+        }
+    }
+}
+
+/// Every task source shares this prefix (`hq_tools::tasks::json`).
+const TASK_SOURCE_PREFIX: &str = "task_";
+/// The supervisor's dedup keys name the session: a blocked one, and one stuck at a prompt.
+const BLOCKED_KEY_PREFIX: &str = "session-blocked-";
+const STUCK_KEY_PREFIX: &str = "session-dismiss-cap-";
+const NEEDS_BODY: &str = "Open HQ to see what it wants to do.";
+/// A push with details on carries at most this much of the item's first line.
+const DETAIL_CHARS: usize = 120;
+
+/// The helper an item is about, by its display name, when it names a harness session.
+fn helper_name(db: &hq_db::Database, item: &ValueItem) -> Option<String> {
+    let from_alert = hq_db::dialog_alerts::get(db, &item.id)
+        .ok()
+        .flatten()
+        .map(|a| a.session_id);
+    let from_key = || {
+        let key = item.dedup_key.as_deref()?;
+        let rest = key
+            .strip_prefix(BLOCKED_KEY_PREFIX)
+            .and_then(|r| r.rsplit_once('-').map(|(id, _seq)| id))
+            .or_else(|| key.strip_prefix(STUCK_KEY_PREFIX))?;
+        Some(rest.to_string())
+    };
+    let session = from_alert.or_else(from_key)?;
+    let row = db
+        .with_conn(|c| hq_db::harness_sessions_registry::get(c, &session))
+        .ok()
+        .flatten()?;
+    Some(harness_display_name(&row.harness))
+}
+
+/// The name people know a harness by, matching the web app's `AGENT_NAMES`.
+fn harness_display_name(harness: &str) -> String {
+    let known = match harness {
+        "claude-code" => "Claude Code",
+        "codex" => "Codex",
+        "cursor" => "Cursor",
+        "pi" => "Pi",
+        "opencode" => "OpenCode",
+        "kimi" => "Kimi",
+        "qwen" => "Qwen",
+        "antigravity" => "Antigravity",
+        "github-copilot" | "copilot" | "copilot-lean" => "GitHub Copilot",
+        "hermes" => "Hermes",
+        "openclaw" => "OpenClaw",
+        _ => return "A helper".into(),
+    };
+    known.into()
+}
+
+/// The words a push shows, built here so no client ever receives an item's content
+/// (`docs/plans/ux-run/web/wave-0/01-live-bugs.md`). `who` is the helper's display name, if any.
+fn words(item: &ValueItem, who: Option<&str>, details: bool) -> (String, String) {
+    let stuck = item
+        .dedup_key
+        .as_deref()
+        .is_some_and(|k| k.starts_with(STUCK_KEY_PREFIX));
+    let (title, body) = if item.source_task == crate::device_auth::DEVICE_SIGN_IN_SOURCE {
+        ("A new sign-in to your HQ".to_string(), "Open HQ to see it.")
+    } else if stuck {
+        ("A helper is stuck".to_string(), "Open HQ to see which one.")
+    } else if PushKind::of(item) == PushKind::Updates {
+        // An update's title is the sender's own headline; its body stays in HQ.
+        (clip(&item.title, TITLE_CHARS), "")
+    } else if item.source_task.starts_with(TASK_SOURCE_PREFIX) {
+        ("A task needs your OK".to_string(), NEEDS_BODY)
+    } else {
+        (format!("{} needs your OK", who.unwrap_or("HQ")), NEEDS_BODY)
+    };
+    let first_line = item.body.lines().map(str::trim).find(|l| !l.is_empty());
+    let body = match first_line {
+        Some(line) if details => clip(line, DETAIL_CHARS),
+        _ => body.to_string(),
+    };
+    (title, body)
+}
+
+/// The JSON the service worker turns into a notification: words, a page to open and a tag.
+/// Never actions, tokens or the item's id, so a push cannot answer anything.
+pub(crate) fn payload(item: &ValueItem, who: Option<&str>, details: bool) -> Vec<u8> {
+    let (title, body) = words(item, who, details);
+    let body = serde_json::json!({
+        "title": title,
+        "body": body,
+        "kind": PushKind::of(item).name(),
         "url": item.link.as_deref().filter(|l| is_app_path(l)).unwrap_or(DEFAULT_LINK),
         "tag": format!("hq-inbox-{}", item.id),
     });
-    if let Some(b) = buttons {
-        let asks: Vec<&str> = [b.alert.question.as_deref(), b.alert.command.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect();
-        if !asks.is_empty() {
-            body["body"] = serde_json::json!(clip(&asks.join("\n"), BODY_CHARS));
-        }
-        let mut actions = Vec::new();
-        let mut tokens = serde_json::Map::new();
-        if let Some(label) = b.alert.approve_label() {
-            actions.push(
-                serde_json::json!({ "action": "approve", "title": clip(label, ACTION_CHARS) }),
-            );
-            tokens.insert(
-                "approve".into(),
-                token(&b.key, &b.alert, Choice::Approve, b.expires).into(),
-            );
-        }
-        actions.push(serde_json::json!({ "action": "decline", "title": "Decline" }));
-        tokens.insert(
-            "decline".into(),
-            token(&b.key, &b.alert, Choice::Decline, b.expires).into(),
-        );
-        body["item"] = serde_json::json!(format!("val_{}", item.id));
-        body["actions"] = serde_json::json!(actions);
-        body["tokens"] = serde_json::Value::Object(tokens);
-    }
     serde_json::to_vec(&body).unwrap_or_default()
 }
 
@@ -356,6 +435,14 @@ mod tests {
         WebPush::new(dir, &cfg, &[]).unwrap()
     }
 
+    /// An empty push to every subscription; how many took it.
+    async fn broadcast(push: &WebPush, db: &hq_db::Database) -> usize {
+        let subs = hq_db::push_subscriptions::list(db).unwrap();
+        let sends = subs.iter().map(|sub| push.send(db, sub, b"{}", false));
+        let outcomes = futures::future::join_all(sends).await;
+        outcomes.iter().filter(|o| **o == PushOutcome::Sent).count()
+    }
+
     fn subscribe(db: &hq_db::Database, endpoint: &str) {
         let (p256dh, auth) = browser_keys();
         hq_db::push_subscriptions::upsert(db, endpoint, &p256dh, &auth, None, None).unwrap();
@@ -447,98 +534,198 @@ mod tests {
         subscribe(&db, &down);
         let push = push(dir.path(), false);
 
-        assert_eq!(push.broadcast(&db, b"{}", false).await.unwrap(), 0);
+        assert_eq!(broadcast(&push, &db).await, 0);
         let left = hq_db::push_subscriptions::list(&db).unwrap();
         assert_eq!(left.len(), 1, "the 410 subscription is gone");
         assert_eq!(left[0].endpoint, down);
         assert_eq!(left[0].failures, 1);
 
         for _ in 1..MAX_FAILURES {
-            push.broadcast(&db, b"{}", false).await.unwrap();
+            broadcast(&push, &db).await;
         }
         assert!(hq_db::push_subscriptions::list(&db).unwrap().is_empty());
     }
 
+    fn parsed(item: &ValueItem, who: Option<&str>, details: bool) -> serde_json::Value {
+        let raw = payload(item, who, details);
+        assert!(raw.len() < encrypt::MAX_PLAINTEXT);
+        serde_json::from_slice(&raw).unwrap()
+    }
+
     #[test]
-    fn payload_clips_text_and_keeps_links_on_the_app() {
-        let mut item = ValueItem::new(
-            "agent_notify",
-            ValueKind::Fyi,
-            "x".repeat(200),
-            "y".repeat(900),
-        );
+    fn payload_keeps_links_on_the_app() {
+        let mut item = ValueItem::new("agent_notify", ValueKind::Fyi, "x".repeat(200), "y");
         item.link = Some("https://example.com".into());
-        let v: serde_json::Value = serde_json::from_slice(&payload(&item, None)).unwrap();
+        let v = parsed(&item, None, false);
         assert_eq!(v["title"].as_str().unwrap().chars().count(), TITLE_CHARS);
-        assert_eq!(v["body"].as_str().unwrap().chars().count(), BODY_CHARS);
         assert_eq!(v["url"], DEFAULT_LINK);
-        assert!(payload(&item, None).len() < encrypt::MAX_PLAINTEXT);
         item.link = Some("/chat?thread=t1".into());
-        let v: serde_json::Value = serde_json::from_slice(&payload(&item, None)).unwrap();
-        assert_eq!(v["url"], "/chat?thread=t1");
+        assert_eq!(parsed(&item, None, false)["url"], "/chat?thread=t1");
     }
 
-    fn path_dialog(item_id: &str, approve: Option<u32>) -> hq_db::dialog_alerts::DialogAlert {
-        hq_db::dialog_alerts::DialogAlert {
-            item_id: item_id.into(),
-            session_id: "hs-1".into(),
-            pending_seq: 7,
-            kind: "path".into(),
-            question: Some("Do you want to allow this?".into()),
-            command: Some("/tmp -> /private/tmp".into()),
-            options: vec![hq_db::dialog_alerts::DialogOption {
-                id: 1,
-                label: "Yes".into(),
-                remember: false,
-                typed: false,
-            }],
-            approve_option: approve,
-            answered: false,
-        }
-    }
-
-    #[test]
-    fn a_blocked_sessions_push_carries_two_buttons_and_a_token_for_each() {
-        let item = ValueItem::new(
+    fn blocked_item() -> ValueItem {
+        ValueItem::new(
             "session-supervisor",
             ValueKind::ActionNeeded,
             "Harness session 'copilot' is waiting for you",
-            "Session hs-1 on laptop is blocked on a prompt or approval:\n----- session output -----",
-        );
-        let buttons = AnswerButtons {
-            alert: path_dialog(&item.id, Some(1)),
-            key: vec![3u8; 32],
-            expires: 1_800_000_900,
-        };
-        let raw = payload(&item, Some(&buttons));
-        assert!(raw.len() < encrypt::MAX_PLAINTEXT);
-        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-        assert_eq!(v["item"], format!("val_{}", item.id));
-        assert_eq!(v["actions"][0]["action"], "approve");
-        assert_eq!(v["actions"][0]["title"], "Yes");
-        assert_eq!(v["actions"][1]["action"], "decline");
-        assert_eq!(
-            v["body"], "Do you want to allow this?\n/tmp -> /private/tmp",
-            "the question, not the raw screen"
-        );
-        let approve = v["tokens"]["approve"].as_str().unwrap();
-        assert!(crate::dialog_answer::token_valid(
-            &buttons.key,
-            &buttons.alert,
-            crate::dialog_answer::Choice::Approve,
-            approve,
-            1_800_000_000,
-        ));
+            "Session hs-1 on laptop is blocked on a prompt or approval:\nrm -rf /tmp/x",
+        )
+        .with_dedup_key("session-blocked-hs-1-7")
+    }
 
-        // No yes-once option: only Decline, and no approve token to misuse.
-        let decline_only = AnswerButtons {
-            alert: path_dialog(&item.id, None),
-            key: vec![3u8; 32],
-            expires: 1_800_000_900,
+    #[test]
+    fn a_blocked_sessions_push_names_the_helper_and_carries_no_command_or_answer() {
+        let item = blocked_item();
+        let raw = payload(&item, Some("Claude Code"), false);
+        assert!(!String::from_utf8_lossy(&raw).contains("rm -rf"));
+        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(v["title"], "Claude Code needs your OK");
+        assert_eq!(v["body"], "Open HQ to see what it wants to do.");
+        for retired in ["actions", "tokens", "item"] {
+            assert!(v.get(retired).is_none(), "no {retired} in a push");
+        }
+        assert_eq!(parsed(&item, None, false)["title"], "HQ needs your OK");
+    }
+
+    #[test]
+    fn details_show_the_first_line_never_the_command() {
+        let v = parsed(&blocked_item(), Some("Codex"), true);
+        assert_eq!(v["title"], "Codex needs your OK");
+        assert_eq!(
+            v["body"],
+            "Session hs-1 on laptop is blocked on a prompt or approval:"
+        );
+    }
+
+    #[test]
+    fn a_notify_owner_push_is_its_title_only() {
+        let item = ValueItem::new(
+            hq_tools::notify::NOTIFY_SOURCE,
+            ValueKind::Fyi,
+            "Payment",
+            "Your card ending 4242 was charged",
+        );
+        let raw = payload(&item, None, false);
+        assert!(!String::from_utf8_lossy(&raw).contains("4242"));
+        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(v["title"], "Payment");
+        assert_eq!(v["body"], "");
+        assert_eq!(v["kind"], "updates");
+    }
+
+    #[test]
+    fn task_stuck_and_sign_in_pushes_use_fixed_words() {
+        let task = ValueItem::new(
+            "task_ready_for_review",
+            ValueKind::ActionNeeded,
+            "T-1: Pay rent",
+            "Pay the rent by Friday",
+        );
+        let raw = payload(&task, None, false);
+        assert!(!String::from_utf8_lossy(&raw).contains("Pay rent"));
+        assert_eq!(parsed(&task, None, false)["title"], "A task needs your OK");
+
+        let stuck = ValueItem::new(
+            "session-supervisor",
+            ValueKind::ActionNeeded,
+            "Harness session 'x' keeps showing a prompt",
+            "Session hs-2 on laptop",
+        )
+        .with_dedup_key("session-dismiss-cap-hs-2");
+        let v = parsed(&stuck, Some("Codex"), false);
+        assert_eq!(v["title"], "A helper is stuck");
+        assert_eq!(v["body"], "Open HQ to see which one.");
+
+        let sign_in = ValueItem::new(
+            crate::device_auth::DEVICE_SIGN_IN_SOURCE,
+            ValueKind::Fyi,
+            "A new device signed in to HQ",
+            "at 10:00 UTC",
+        );
+        let v = parsed(&sign_in, None, false);
+        assert_eq!(v["title"], "A new sign-in to your HQ");
+        assert_eq!(v["body"], "Open HQ to see it.");
+        assert_eq!(v["kind"], "needs");
+    }
+
+    #[test]
+    fn a_helpers_name_comes_from_its_session() {
+        let db = hq_db::Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            hq_db::harness_sessions_registry::insert(
+                c,
+                &hq_db::harness_sessions_registry::NewSession {
+                    id: "hs-1",
+                    harness: "codex",
+                    label: "x",
+                    cwd: "/tmp",
+                    mission_id: None,
+                    placement: hq_db::harness_sessions_registry::Placement {
+                        host: "laptop",
+                        agent_name: "a",
+                        workspace_id: "w",
+                        pane_id: "p",
+                    },
+                    purpose: None,
+                },
+            )
+        })
+        .unwrap();
+        assert_eq!(helper_name(&db, &blocked_item()).as_deref(), Some("Codex"));
+    }
+
+    fn choose(db: &hq_db::Database, endpoint: &str, kinds: &str, details: bool) {
+        let (p256dh, auth) = browser_keys();
+        let choice = hq_db::push_subscriptions::Choice {
+            kinds: Some(kinds),
+            details: Some(details),
         };
-        let v: serde_json::Value =
-            serde_json::from_slice(&payload(&item, Some(&decline_only))).unwrap();
-        assert_eq!(v["actions"].as_array().unwrap().len(), 1);
-        assert!(v["tokens"].get("approve").is_none());
+        hq_db::push_subscriptions::upsert_with(db, endpoint, &p256dh, &auth, None, None, &choice)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn each_subscription_gets_only_its_kinds() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = hq_db::Database::open_memory().unwrap();
+        let (base, received) = mock_push_service().await;
+        choose(&db, &format!("{base}/ok/updates"), "updates", false);
+        choose(&db, &format!("{base}/ok/both"), "needs,updates", false);
+        hq_db::value_items::emit(&db, &blocked_item()).unwrap();
+        push(dir.path(), false).dispatch_once(&db).await.unwrap();
+        let reqs = received.requests.lock().unwrap();
+        let to: Vec<&str> = reqs.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(
+            to,
+            ["ok/both"],
+            "a Needs you item skips an updates-only browser"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_kind_turned_back_on_replays_what_still_waits_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = hq_db::Database::open_memory().unwrap();
+        let (base, received) = mock_push_service().await;
+        let endpoint = format!("{base}/ok/a");
+        choose(&db, &endpoint, "updates", false);
+        hq_db::value_items::emit(&db, &blocked_item()).unwrap();
+        let fyi = ValueItem::new(hq_tools::notify::NOTIFY_SOURCE, ValueKind::Fyi, "n", "b");
+        hq_db::value_items::emit(&db, &fyi).unwrap();
+        let push = push(dir.path(), false);
+        push.dispatch_once(&db).await.unwrap();
+        assert_eq!(
+            received.requests.lock().unwrap().len(),
+            1,
+            "the update only"
+        );
+
+        choose(&db, &endpoint, "needs,updates", false);
+        let sent = push
+            .replay(&db, &endpoint, &[PushKind::Needs])
+            .await
+            .unwrap();
+        assert_eq!(sent, 1, "the waiting Needs you item, once");
+        assert_eq!(received.requests.lock().unwrap().len(), 2);
     }
 }

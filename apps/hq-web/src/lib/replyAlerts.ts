@@ -6,7 +6,6 @@
 const PREF_KEY = 'hq.chat.replyAlerts'
 const SOUND_URL = '/notification.wav'
 const ICON_URL = '/icons/hq-icon-192.png'
-const BODY_CHARS = 140
 
 export function alertsSupported() {
   return typeof window !== 'undefined' && 'Notification' in window
@@ -39,16 +38,23 @@ export function chatOnScreen(overlayOpen: boolean) {
   return overlayOpen || window.location.pathname.startsWith('/chat')
 }
 
-/** Sound plus a system notification that opens the chat. Android only allows the service-worker kind. */
-export async function alertReplyDone(threadId: string, title: string, reply: string) {
-  if (!alertsEnabled()) return
-  const body = reply.trim().slice(0, BODY_CHARS) || 'Reply finished'
-  const options: NotificationOptions = {
-    body,
-    icon: ICON_URL,
-    tag: `hq-chat-${threadId}`,
-    data: { url: `/chat?thread=${encodeURIComponent(threadId)}` },
+/** A finished reply's alert. Fixed words: the reply's text is content and never leaves the page. */
+export function replyAlert(threadId: string): { title: string; options: NotificationOptions } {
+  return {
+    title: 'HQ answered',
+    options: {
+      body: 'Tap to read.',
+      icon: ICON_URL,
+      tag: `hq-chat-${threadId}`,
+      data: { url: `/chat?thread=${encodeURIComponent(threadId)}`, kind: 'updates', at: Date.now() },
+    },
   }
+}
+
+/** Sound plus a system notification that opens the chat. Android only allows the service-worker kind. */
+export async function alertReplyDone(threadId: string) {
+  if (!alertsEnabled()) return
+  const { title, options } = replyAlert(threadId)
   new Audio(SOUND_URL).play().catch(() => {})
   try {
     const reg = await navigator.serviceWorker?.getRegistration()

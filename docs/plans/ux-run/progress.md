@@ -14,7 +14,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 
 ## Web wave 0 (live bugs and shared parts)
 
-- [ ] web/wave-0/01-live-bugs.md: web push content and buttons
+- [x] web/wave-0/01-live-bugs.md: web push content and buttons. Try: with push on, have a helper ask; the lock screen shows "{Helper} needs your OK" / "Open HQ to see what it wants to do." with no buttons and no command. Settings test push reads "HQ" / "Notifications from HQ are on in this browser." A finished reply alert reads "HQ answered" / "Tap to read." Not built: the "Your server HQ needs your OK" title (see the note under Found by the owner).
 - [ ] web/wave-0/01-live-bugs.md: the hub proxy and a taken port
 - [ ] web/wave-0/01-live-bugs.md: wipe the browser on a refused sign-in
 - [x] web/wave-0/01-live-bugs.md: guard drive, goal and answer routes. Try: nothing to see; a current web app and the phone app keep working (both send the header). A cross-site POST to `/api/harness-sessions/{id}/drive` now gets 403.
@@ -39,3 +39,4 @@ Write the note for each finished wave here.
 
 | Date | Where | What | Fixed in |
 |---|---|---|---|
+| 2026-11-05 | web/wave-0/01-live-bugs.md check 10 (agent note) | "Your server HQ needs your OK" cannot be told apart on a web push: the HQ sending the push is the HQ asking, and no inbox item marks itself as from a server HQ. It is a phone notification (the phone talking to a server HQ). Left out of the web push until the owner says otherwise. | open |

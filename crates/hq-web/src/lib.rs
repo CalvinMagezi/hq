@@ -376,10 +376,6 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             post(dialog_answer::answer_handler),
         )
         .route(
-            dialog_answer::PUSH_ANSWER_PATH,
-            post(dialog_answer::push_answer_handler),
-        )
-        .route(
             "/api/notifications/mark-all-read",
             axum::routing::post(notifications_api::mark_all_read_handler),
         )
@@ -867,6 +863,11 @@ mod web_auth_router_tests {
                 "{path}"
             );
         }
+        assert_eq!(
+            status(&app, post("/api/notifications/push-answer", true)).await,
+            StatusCode::NOT_FOUND,
+            "a push can no longer answer anything"
+        );
         for path in ["/api/harness-sessions", "/api/workbench/hosts/native/dirs"] {
             assert_eq!(
                 status(&app, post(path, false)).await,

@@ -191,6 +191,5 @@ function finishTurn(tid: string, messageId: string | undefined, stopped: boolean
   void loadMessages(tid).catch(() => {})
   if (seen || reply === null || stopped) return
   hq.bumpChatUnread()
-  const title = useThreadStore.getState().threads.find((t) => t.threadId === tid)?.title ?? 'HQ'
-  void alertReplyDone(tid, title, reply)
+  void alertReplyDone(tid)
 }
