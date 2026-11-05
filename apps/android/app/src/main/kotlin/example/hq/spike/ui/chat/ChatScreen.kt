@@ -66,7 +66,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions, starting: Boolean = fal
             if (starting) StartingBanner() else if (!state.connected) ReconnectBanner()
             NameRow(state.title, actions.onOpenChats)
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (state.messages.isEmpty() && state.live == null) EmptyChat(actions.onDraft) else Conversation(state, actions)
+                if (state.messages.isEmpty() && state.live == null) EmptyChat(Suggestions.shown(state.suggestions), actions.onDraft) else Conversation(state, actions)
                 SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
             }
             Composer(state, actions)
@@ -213,21 +213,21 @@ private fun LatestPill(modifier: Modifier, onClick: () -> Unit) {
 private const val LATEST_AFTER = 2
 private const val OLDER_AHEAD = 3
 
-private val Suggestions = listOf(
-    Triple(HqIcons.Spark, "Summarise this note", "Summarise this note"),
-    Triple(HqIcons.Tasks, "What needs me today?", "What needs me today?"),
-    Triple(HqIcons.Notes, "Save a thought as a note", "Save a thought as a note"),
-)
+private fun iconFor(group: String): ImageVector = when (group) {
+    "tasks" -> HqIcons.Tasks
+    "notes" -> HqIcons.Notes
+    else -> HqIcons.Spark
+}
 
 @Composable
-private fun EmptyChat(onPick: (String) -> Unit) {
+private fun EmptyChat(suggestions: List<Suggestion>, onPick: (String) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom)) {
         Image(painterResource(R.drawable.hq_mark), null, Modifier.size(56.dp).alpha(0.8f), contentScale = ContentScale.Fit)
         Column {
             Text("What would you like to do?", style = HqType.H2, color = Mts.Ink)
             Text("HQ can read your notes and tasks, write to them, and send helpers to do work.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp))
         }
-        Suggestions.forEach { (icon, label, text) -> SuggestionChip(icon, label) { onPick(text) } }
+        suggestions.forEach { s -> SuggestionChip(iconFor(s.group), s.label) { onPick(s.text) } }
     }
 }
 

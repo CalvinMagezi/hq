@@ -60,6 +60,8 @@ data class ChatUiState(
     /** When the socket dropped (epoch milliseconds), so the status line can say how old what is shown is. */
     val offlineSince: Long? = null,
     val draft: String = "",
+    /** The empty chat's chips from HQ (`GET /api/capabilities`); null until it answers. */
+    val suggestions: List<Suggestion>? = null,
     val notice: Notice? = null,
     val chatsOpen: Boolean = false,
     val chats: List<ChatRow> = emptyList(),

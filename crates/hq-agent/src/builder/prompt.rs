@@ -16,6 +16,8 @@ pub(super) struct PromptInputs<'a> {
     pub(super) tool_count: usize,
     pub(super) tool_notes: Option<&'a str>,
     pub(super) weak_catalog: Option<&'a str>,
+    /// Ready capabilities the person has not used (`hq_tools::capabilities::unused_block`).
+    pub(super) capability_block: Option<String>,
     pub(super) context_window: usize,
     pub(super) identity: String,
 }
@@ -86,6 +88,11 @@ impl SessionBuilder {
                 )
             {
                 soul_with_user.push_str(&note);
+            }
+
+            if let Some(block) = &inputs.capability_block {
+                soul_with_user.push_str("\n\n");
+                soul_with_user.push_str(block);
             }
 
             // Dynamic memory from MemoryQuerier (merged with static MEMORY.md)
@@ -273,6 +280,24 @@ pub(super) fn concept_search_results(
     }
 
     hits
+}
+
+/// The block of ready capabilities the person has not used yet, for their own sessions.
+/// `tools` are the names this session can call (eager or deferred).
+pub(super) fn capability_block(
+    config: &hq_core::config::HqConfig,
+    tools: &std::collections::HashSet<&str>,
+    db: Option<&hq_db::Database>,
+) -> Option<String> {
+    use hq_tools::capabilities::{Install, catalog, resolve, unused_block, used_tools};
+    let used = db.map(used_tools).unwrap_or_default();
+    let offers = resolve(
+        catalog(),
+        &Install::detect(config),
+        &|t: &str| tools.contains(t),
+        &used,
+    );
+    unused_block(&offers)
 }
 
 /// Build memory context: static MEMORY.md + dynamic MemoryQuerier results.

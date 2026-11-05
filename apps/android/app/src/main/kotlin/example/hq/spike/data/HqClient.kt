@@ -435,6 +435,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** A read-only JSON route as it is, for the Settings pages that only show what the server says. */
+    /** The empty chat's chips: what works on this install, untried things first. */
+    suspend fun capabilitySuggestions(): List<example.hq.spike.ui.chat.Suggestion> =
+        send(authed("/api/capabilities").build()) { example.hq.spike.ui.chat.Suggestions.parse(it) }
+
     suspend fun json(path: String): JSONObject = send(authed(path).build()) { JSONObject(it) }
 
     /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */

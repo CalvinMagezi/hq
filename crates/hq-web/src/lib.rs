@@ -5,6 +5,7 @@ pub use api::HEALTH_SERVICE;
 pub use vault_api::{lite_hides, lite_hides_resolved};
 pub mod auth;
 mod budgets_api;
+mod capabilities_api;
 mod chat_apps;
 mod chat_uploads;
 mod copilot_usage_api;
@@ -304,6 +305,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/settings/provider-key",
             post(provider_keys::replace_handler),
+        )
+        .route(
+            "/api/capabilities",
+            get(capabilities_api::capabilities_handler),
         )
         .route("/api/setup/status", get(setup_api::status_handler))
         .route("/api/setup/test", post(setup_api::test_handler))

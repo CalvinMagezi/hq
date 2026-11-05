@@ -1,7 +1,8 @@
 # Simple HQ: an assistant that shows what it can do and learns you
 
-Status: proposal. Replaces the first draft, "Proactive HQ" (commit `8a82d5d`), after the
-adversarial review below. Nothing here is built yet.
+Status: phases 0 and 1 built (see "Where the build differs" under Phases); phases 2 to 5 are
+proposals. Replaces the first draft, "Proactive HQ" (commit `8a82d5d`), after the adversarial
+review below.
 
 ## The goal, restated
 
@@ -219,6 +220,25 @@ phase has a before and after.
 
 **Phase 1: the capability catalog.** The embedded list, `needs` resolution against config, the
 empty-chat chips on web and Android from it, and the agent's unused-capabilities block.
+
+Where the build of phases 0 and 1 differs from the text above:
+
+- The catalog is `crates/hq-tools/assets/capabilities.yaml` (13 entries), read by
+  `hq_tools::capabilities`. Only a missing model key is a "one step away" state; anything else a
+  capability needs (OCR, the `gws` command, somewhere to run helpers) hides it, because the apps
+  cannot take the person through installing software.
+- "The person's own sessions" are tool calls recorded with `agent_name = 'hq'`
+  (`hq_db::adoption::OWNER_AGENT`): web, the phone app and chat apps. Guests, sub-agents and
+  outside MCP clients record other names and are not counted.
+- The digest is the daemon task `adoption-digest` (weekly, `daemon.adoption_digest`, not run under
+  Lite). Offer acceptance waits for phase 2, which creates offers. Corrections are counted from a
+  short list of English phrases (`hq_db::adoption::is_correction`), so the number means "fewer
+  misses" only while the list stays the same.
+- The chips come from `GET /api/capabilities`: four ready capabilities, untried ones first. With no
+  model key there are none on the web (setup comes first) and the phone keeps its fixed three.
+- The agent block (at most six lines, 1 KB) goes only to sessions with the owner's agent name, no
+  custom prompt and no parent; `a_mobile_turn_sends_a_small_fixed_prompt` still holds with it.
+- Not built yet: the "What HQ can do" page and the one-step items in `hq doctor` and settings.
 
 **Phase 2: offers.** The post-turn detectors, the one-line offer under a reply, Yes/Not now, and the
 30-day memory of declines. The date detector and the reminder ship here.

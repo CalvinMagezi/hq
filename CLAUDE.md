@@ -118,6 +118,14 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   that checks overall disk usage, the bun install cache, and `node_modules` and
   `target` bloat under configurable roots, putting a report in the owner's inbox on
   breach. Config: `disk_watchdog:` in `~/.hq/config.yaml`.
+- **Capabilities and the adoption digest**: `crates/hq-tools/assets/capabilities.yaml` lists what
+  HQ can do in the person's words; `hq_tools::capabilities` resolves it against the install (model
+  key, OCR, `gws`, registered tools) and what the owner's sessions used. It feeds the empty chat's
+  chips (`GET /api/capabilities`, web and Android), a short "Things you can offer" block in the
+  owner's own sessions, and the weekly `adoption-digest` daemon task
+  (`crates/hq-cli/src/commands/start/daemon/tasks_periodic/adoption_digest.rs`, queries in
+  `hq_db::adoption`). A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
+  Plan: `docs/plans/simple-hq.md`. Off with `daemon.adoption_digest: false`.
 - **Tool failure digest**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/tool_failure_digest.rs`
   is a weekly daemon task that groups the week's failed tool calls (`tool_usage`) by a
   normalized error signature (`hq_db::tool_failures`), compares them with the week before

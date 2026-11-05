@@ -1,5 +1,6 @@
 //! SQLite database layer — single consolidated database for all HQ data.
 
+pub mod adoption;
 pub mod ask_requests;
 pub mod background_turns;
 pub mod bridge;

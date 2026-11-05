@@ -843,3 +843,36 @@ mod pinned_model {
         assert!(!b.pinned);
     }
 }
+
+/// The person's own session hears which ready capabilities they have not tried; a session with
+/// its own prompt (a sub-agent, a relay's legacy path) does not.
+#[tokio::test]
+async fn an_owner_session_is_told_what_it_can_offer_and_a_custom_prompt_is_not() {
+    let session = build_measurement_session_with(SessionProfile::Standard, |_| {}).await;
+    let prompt = session.system_prompt().unwrap_or_default().to_string();
+    assert!(prompt.contains("## Things you can offer"), "{prompt}");
+    assert!(prompt.contains("(vault_write_note)"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let config = HqConfig {
+        openrouter_api_key: Some("test-key-no-network".to_string()),
+        vault_path: dir.path().to_path_buf(),
+        ..Default::default()
+    };
+    let custom = SessionBuilder::from_config(&config)
+        .working_dir(dir.path().to_path_buf())
+        .session_config(SessionConfig {
+            model: "relay".to_string(),
+            ..SessionConfig::default()
+        })
+        .system_prompt("You are a narrow helper.".to_string())
+        .build()
+        .await
+        .unwrap();
+    assert!(
+        !custom
+            .system_prompt()
+            .unwrap_or_default()
+            .contains("Things you can offer")
+    );
+}

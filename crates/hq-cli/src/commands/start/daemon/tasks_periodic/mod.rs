@@ -3,6 +3,7 @@
 //! Each domain lives in its own submodule. This module re-exports every public
 //! task function so callers can continue using `tasks_periodic::run_*` paths.
 
+pub mod adoption_digest;
 pub mod backup;
 pub mod copilot_usage;
 pub mod disk_watchdog;
@@ -24,6 +25,7 @@ pub mod verify_audit;
 pub mod verify_briefing;
 pub mod verify_dispatch;
 
+pub use adoption_digest::run_adoption_digest;
 pub use backup::run_backup;
 pub use copilot_usage::run_copilot_usage;
 pub use disk_watchdog::run_disk_watchdog;

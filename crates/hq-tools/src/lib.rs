@@ -15,6 +15,7 @@ pub mod subagent_runs;
 pub mod agent_host;
 pub mod brand;
 pub mod budget_status;
+pub mod capabilities;
 pub mod coding;
 pub mod convert;
 pub mod copilot_credits;
