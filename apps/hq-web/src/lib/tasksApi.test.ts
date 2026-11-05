@@ -40,3 +40,10 @@ test('a row that shifts across a page boundary is kept once', async () => {
   expect(result.tasks.map((t) => t.id)).toEqual(['tk-0', 'tk-1', 'tk-2'])
   expect(result.count).toBe(3)
 })
+
+test('check 3: parseSqliteUtc reads an RFC 3339 instant with an offset as that instant, and zoneless text as UTC', async () => {
+  const { parseSqliteUtc } = await import('./tasksApi')
+  expect(parseSqliteUtc('2026-10-15T14:39:16Z').toISOString()).toBe('2026-10-15T14:39:16.000Z')
+  expect(parseSqliteUtc('2026-10-15T17:39:16+03:00').toISOString()).toBe('2026-10-15T14:39:16.000Z')
+  expect(parseSqliteUtc('2026-10-15 14:39:16').toISOString()).toBe('2026-10-15T14:39:16.000Z')
+})

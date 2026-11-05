@@ -11,7 +11,7 @@ const TASK_SESSIONS_POLL_MS = 120_000
 
 /** The coding-agent sessions launched for or linked to this task, each linking to the Workbench. */
 export function TaskSessions({ taskId }: { taskId: string }) {
-  const sessions = usePolled(taskId, () => globalSessionsApi.list({ task_id: taskId }), TASK_SESSIONS_POLL_MS)
+  const sessions = usePolled(taskId, () => globalSessionsApi.list({ task_id: taskId }), TASK_SESSIONS_POLL_MS, true, true, ['task:sync', 'sessions:sync'])
   useRefreshOn(['session:changed', 'task:sync'], sessions.refresh)
   return (
     <section aria-label="Linked agents">

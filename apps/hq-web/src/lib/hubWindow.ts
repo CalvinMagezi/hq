@@ -11,6 +11,11 @@ export function isHubResponse(headers: Pick<Headers, 'get'>): boolean {
 
 let known: boolean | null = null
 
+/** Whether the page already knows it is HQ's window; false until the first hello answers. */
+export function knownInHub(): boolean {
+  return known === true
+}
+
 export function useInHub(): boolean {
   const [hub, setHub] = useState(known ?? false)
   useEffect(() => {

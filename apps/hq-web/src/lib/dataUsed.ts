@@ -1,5 +1,5 @@
-// Data used by HQ in this browser this month (B17). Counted from the transfer sizes the browser
-// reports for HQ's own requests; the counter starts over on the 1st, in the display zone.
+// Data used by HQ in this browser this month (B17). The counting itself is in dataUsage.ts; the
+// counter starts over on the 1st, in the display zone.
 
 import { deviceTimeZone, readClockZone } from './clock'
 
@@ -38,18 +38,4 @@ export function addDataUsed(bytes: number, now = new Date()) {
   } catch {
     // Storage can be blocked; the number then only reads zero.
   }
-}
-
-let started = false
-
-/** Starts counting HQ's own requests once per page load. */
-export function startDataCounter() {
-  if (started || typeof PerformanceObserver === 'undefined') return
-  started = true
-  new PerformanceObserver((list) => {
-    for (const e of list.getEntries()) {
-      const r = e as PerformanceResourceTiming
-      if (r.name.startsWith(location.origin)) addDataUsed(r.transferSize)
-    }
-  }).observe({ type: 'resource', buffered: true })
 }

@@ -180,7 +180,7 @@ interface Props {
 
 /** Hidden for a task verification has nothing to say about: never verified and not waiting on it. */
 export function TaskVerification({ task, onUpdate }: Props) {
-  const found = usePolled(`task-verification-${task.id}`, () => fetchTaskVerification(task.id), POLL_MS)
+  const found = usePolled(`task-verification-${task.id}`, () => fetchTaskVerification(task.id), POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], found.refresh)
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { MarkdownViewer } from './MarkdownViewer'
 import { updateNote } from '~/lib/vaultApi'
+import { keepUnsaved, onBeforeReload, takeUnsaved } from '~/lib/version'
 
 interface NoteEditorProps {
     content: string
@@ -19,9 +20,16 @@ export function NoteEditor({ content, filePath, onSaved }: NoteEditorProps) {
 
     useEffect(() => {
         const newBody = content.replace(/^---[\s\S]*?---\n?/, '')
-        setEditContent(newBody)
-        setDirty(false)
-    }, [content])
+        const kept = takeUnsaved(`note:${filePath}`)
+        setEditContent(kept ?? newBody)
+        setDirty(kept !== null && kept !== newBody)
+    }, [content, filePath])
+
+    // A reload for a newer HQ must not lose what has not been saved.
+    useEffect(() => {
+        if (!dirty) return
+        return onBeforeReload(() => keepUnsaved(`note:${filePath}`, editContent))
+    }, [dirty, filePath, editContent])
 
     const handleChange = (value: string) => {
         setEditContent(value)

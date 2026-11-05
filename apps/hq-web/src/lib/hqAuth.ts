@@ -239,9 +239,18 @@ export class HqHttpError extends Error {
   }
 }
 
+const HTTP_UPGRADE_REQUIRED = 426
+let upgradeHandler: (() => void) | null = null
+
+/** Called when HQ refuses a call because this page is too old (426); version.ts sets it. */
+export function setUpgradeHandler(handler: () => void) {
+  upgradeHandler = handler
+}
+
 /** Parse an API response as JSON, throwing HqHttpError on a non-2xx status. */
 export async function readJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    if (res.status === HTTP_UPGRADE_REQUIRED) upgradeHandler?.()
     const data = await res.json().catch(() => ({}))
     throw new HqHttpError(data.error || `${res.status} ${res.statusText}`, res.status)
   }

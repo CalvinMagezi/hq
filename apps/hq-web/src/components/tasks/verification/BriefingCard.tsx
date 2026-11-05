@@ -199,7 +199,7 @@ interface Props {
 
 /** Polls the briefing; hidden while verification is off, and (at home) while there is nothing to say. */
 export function BriefingCard({ variant, onOpenTask, onPlanSweep, onAudit }: Props) {
-  const found = usePolled('verification-briefing', () => fetchBriefing(BRIEFING_HOURS), BRIEFING_POLL_MS)
+  const found = usePolled('verification-briefing', () => fetchBriefing(BRIEFING_HOURS), BRIEFING_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], found.refresh)
   const [busyVeto, setBusyVeto] = useState<string | null>(null)
   const b = found.data

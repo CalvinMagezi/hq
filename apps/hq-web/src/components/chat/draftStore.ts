@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { currentHqId, hqIdReady, keyFor } from '~/lib/savedCopy'
+import { onBeforeReload } from '~/lib/version'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { MAX_ATTACHMENTS, isPreviewableImage, rejectReason, uploadChatFile, type ChatAttachment } from '~/lib/chatUploads'
 import type { PendingAttachment } from './AttachmentChips'
@@ -149,6 +150,12 @@ export function restoreDraft(threadId: string, text: string) {
   const state = useDraftStore.getState()
   if (!state.drafts[threadId]?.text.trim()) state.setText(threadId, text)
 }
+
+/** Writes every draft's text down now; a reload for a newer HQ calls it first. */
+export function flushDrafts() {
+  saveText(useDraftStore.getState().drafts)
+}
+if (typeof window !== 'undefined') onBeforeReload(flushDrafts)
 
 /** Drops every draft in memory; the saved text goes with the browser's wipe. */
 export function clearDrafts() {

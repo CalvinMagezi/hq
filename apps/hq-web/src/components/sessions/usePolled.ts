@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useWSOptional } from '~/context/WebSocketContext'
 
 interface Polled<T> {
   data: T | null
@@ -21,7 +22,7 @@ interface PollerOptions<T> {
   load: () => Promise<T>
   onData: (data: T) => void
   onError: (message: string) => void
-  /** A function lets the period change (fast to slow) without restarting the poller. */
+  /** A function lets the period change (fast to slow) without restarting the poller. 0 means no timer at all. */
   everyMs: number | (() => number)
   isVisible?: () => boolean
 }
@@ -41,12 +42,14 @@ export function createPoller<T>({ load, onData, onError, everyMs, isVisible = ()
   const schedule = () => {
     clearTimeout(timer)
     if (stopped) return
-    timer = setTimeout(tick, backoffDelay(typeof everyMs === 'function' ? everyMs() : everyMs, failures))
+    const period = typeof everyMs === 'function' ? everyMs() : everyMs
+    if (period <= 0) return
+    timer = setTimeout(tick, backoffDelay(period, failures))
   }
 
+  // A hidden tab keeps no timer at all; `wake` starts it again when the tab is shown.
   const tick = () => {
     if (isVisible()) void run()
-    else schedule()
   }
 
   const run = (): Promise<void> => {
@@ -81,10 +84,8 @@ export function createPoller<T>({ load, onData, onError, everyMs, isVisible = ()
   return {
     start: () => void run(),
     refresh: run,
-    // A tab returning to view skips the wait, but not while failures are backing off.
-    wake: () => {
-      if (failures === 0) void run()
-    },
+    // A tab returning to view loads once at once and starts the timer again.
+    wake: () => void run(),
     stop: () => {
       stopped = true
       clearTimeout(timer)
@@ -97,12 +98,20 @@ export function createPoller<T>({ load, onData, onError, everyMs, isVisible = ()
  * what is loaded: when it changes the old data is dropped and the old poller
  * stopped, so a slow response for the previous key never shows under the new one.
  */
-export function usePolled<T>(key: string, load: () => Promise<T>, everyMs: number, enabled = true, refreshOnVisible = false): Polled<T> {
+export function usePolled<T>(
+  key: string,
+  load: () => Promise<T>,
+  everyMs: number,
+  enabled = true,
+  _refreshOnVisible = true,
+  /** Socket events that reload this; with any, there is no timer (`everyMs` is then only the old fallback and is ignored). */
+  events?: readonly string[],
+): Polled<T> {
   const [state, setState] = useState<{ key: string; data: T | null; error: string | null } | null>(null)
   const loadRef = useRef(load)
   loadRef.current = load
   const everyRef = useRef(everyMs)
-  everyRef.current = everyMs
+  everyRef.current = events?.length ? 0 : everyMs
   const pollerRef = useRef<ReturnType<typeof createPoller<T>> | null>(null)
 
   useEffect(() => {
@@ -121,13 +130,29 @@ export function usePolled<T>(key: string, load: () => Promise<T>, everyMs: numbe
     const onVisible = () => {
       if (document.visibilityState === 'visible') poller.wake()
     }
-    if (refreshOnVisible) document.addEventListener('visibilitychange', onVisible)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       poller.stop()
       if (pollerRef.current === poller) pollerRef.current = null
     }
-  }, [key, enabled, refreshOnVisible])
+  }, [key, enabled])
+
+  const eventKey = events?.join('|') ?? ''
+  const ws = useWSOptional()
+  const subscribe = ws?.subscribe
+  const connected = ws?.connected
+  useEffect(() => {
+    if (!enabled || !eventKey || !subscribe) return
+    const wanted = eventKey.split('|')
+    return subscribe((msg) => {
+      if (wanted.includes(String(msg.type)) && document.visibilityState === 'visible') void pollerRef.current?.refresh()
+    })
+  }, [enabled, eventKey, subscribe])
+  // Events sent while the socket was down are gone: a reconnect loads once.
+  useEffect(() => {
+    if (enabled && eventKey && connected) void pollerRef.current?.refresh()
+  }, [enabled, eventKey, connected])
 
   const refresh = useCallback(() => pollerRef.current?.refresh() ?? Promise.resolve(), [])
   const current = state?.key === key ? state : null

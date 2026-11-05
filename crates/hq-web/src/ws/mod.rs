@@ -58,6 +58,10 @@ enum ClientMsg {
     Stop {
         thread_id: Option<String>,
     },
+    /// A page that reconnected mid-reply asks for the reply so far (web wave 4, chat rule 5).
+    Resume {
+        thread_id: Option<String>,
+    },
     #[serde(other)]
     Other,
 }
@@ -169,13 +173,55 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
             thread_id: Some(tid),
         } if !tid.is_empty() => stop_chat_turn(state, &tid).await,
         ClientMsg::Stop { .. } => info!("ws chat stop requested with no thread_id"),
+        ClientMsg::Resume {
+            thread_id: Some(tid),
+        } if !tid.is_empty() => resume_reply(state, &tid).await,
+        ClientMsg::Resume { .. } => info!("ws chat resume requested with no thread_id"),
         ClientMsg::Other => info!(msg = %text, "ws client message"),
     }
 }
 
+/// Tells every tab the reply so far, so a page that lost its socket shows the same text and keeps
+/// receiving the rest; no second turn starts. A thread with no reply running answers with its last
+/// saved message, which the page then fetches.
+pub(crate) async fn resume_reply(state: &Arc<WsState>, thread_id: &str) {
+    let running = state
+        .active_chat_turns
+        .read()
+        .await
+        .get(thread_id)
+        .map(|slot| {
+            let record = slot.record.lock().unwrap_or_else(|e| e.into_inner());
+            record.content_so_far().to_string()
+        });
+    let frame = match running {
+        Some(content) => json!({
+            "type": "reply_so_far",
+            "thread_id": thread_id,
+            "running": true,
+            "content": content,
+        }),
+        None => {
+            let last = state
+                .db
+                .with_conn(|c| hq_db::chat::get_messages(c, thread_id, 1))
+                .ok()
+                .and_then(|m| m.into_iter().last())
+                .map(|m| m.message_id);
+            json!({
+                "type": "reply_so_far",
+                "thread_id": thread_id,
+                "running": false,
+                "message_id": last,
+            })
+        }
+    };
+    state.broadcast(&frame.to_string());
+}
+
 /// Abort the in-flight turn for a thread (if any), keep what it produced so
 /// far, and end it for every tab. Aborting the driver task drops the harness stream.
-async fn stop_chat_turn(state: &Arc<WsState>, thread_id: &str) {
+pub(crate) async fn stop_chat_turn(state: &Arc<WsState>, thread_id: &str) {
     // Settled before the slot goes, so a waiting hq_ask never sees an idle thread and a reason of its own.
     let ask_id = state
         .active_chat_turns
@@ -1058,6 +1104,68 @@ mod tests {
             state.active_chat_turns.read().await.is_empty(),
             "no second reply"
         );
+    }
+
+    /// A reply that is running: what it wrote so far, and a task that never ends on its own.
+    async fn running_reply(state: &Arc<WsState>, tid: &str, so_far: &str) {
+        let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::default()));
+        record
+            .lock()
+            .unwrap()
+            .observe(&hq_core::types::SessionEvent::TextDelta(so_far.into()));
+        let abort = tokio::spawn(std::future::pending::<()>()).abort_handle();
+        state.active_chat_turns.write().await.insert(
+            tid.to_string(),
+            ChatTurnSlot {
+                abort,
+                record,
+                ask_id: None,
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn a_page_that_reconnects_mid_reply_gets_the_reply_so_far_and_no_second_turn() {
+        let state = test_state();
+        running_reply(&state, "t1", "The dentist call is due").await;
+        let mut rx = state.tx.subscribe();
+        dispatch(&state, r#"{"type":"resume","thread_id":"t1"}"#).await;
+        let ev = next_event(&mut rx);
+        assert_eq!(ev["type"], "reply_so_far");
+        assert_eq!(ev["running"], true);
+        assert_eq!(ev["content"], "The dentist call is due");
+        assert_eq!(
+            state.active_chat_turns.read().await.len(),
+            1,
+            "no second turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_over_http_ends_the_reply_and_keeps_what_it_wrote() {
+        let state = test_state();
+        let tid = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user"))
+            .unwrap()
+            .thread_id;
+        running_reply(&state, &tid, "half an answer").await;
+        let mut rx = state.tx.subscribe();
+        let res = crate::threads_api::stop_thread_handler(
+            axum::extract::State(state.clone()),
+            axum::extract::Path(tid.clone()),
+        )
+        .await;
+        assert_eq!(res.status(), axum::http::StatusCode::NO_CONTENT);
+        let ev = next_event(&mut rx);
+        assert_eq!(ev["type"], "turn_end");
+        assert_eq!(ev["stopped"], true);
+        assert!(state.active_chat_turns.read().await.is_empty());
+        let saved = state
+            .db
+            .with_conn(|c| hq_db::chat::get_messages(c, &tid, 5))
+            .unwrap();
+        assert!(saved.iter().any(|m| m.content.contains("half an answer")));
     }
 
     #[tokio::test]

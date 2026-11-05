@@ -76,7 +76,7 @@ interface Props {
 
 /** Shown on the tasks page once verification is on; nothing at all while it is off. */
 export function VerificationBar({ onVerifyNow, onAudit }: Props) {
-  const status = usePolled('verification-status', fetchVerificationStatus, STATUS_POLL_MS)
+  const status = usePolled('verification-status', fetchVerificationStatus, STATUS_POLL_MS, true, true, ['task:sync'])
   useRefreshOn(['task:sync'], status.refresh)
   const [healthOpen, setHealthOpen] = useState(false)
   if (!status.data || !verificationActive(status.data.mode)) return null

@@ -4,6 +4,7 @@ import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 import fs from 'node:fs'
+import pkg from './package.json'
 
 const certDir = path.resolve(__dirname, 'certs')
 const tlsHost = process.env.TLS_HOST ?? ''
@@ -16,6 +17,7 @@ const httpsConfig = certPath && fs.existsSync(certPath)
   : undefined
 
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(process.env.HQ_WEB_VERSION ?? pkg.version) },
   server: {
     port: 4747,
     strictPort: true,

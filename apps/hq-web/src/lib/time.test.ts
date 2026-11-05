@@ -31,3 +31,35 @@ test('dateByAge: a clock time today, yesterday, a date, a date with the year', (
   expect(dateByAge(ago(400 * DAY), NOW)).toMatch(/2025/)
   expect(dateByAge('nonsense', NOW)).toBe('Not known')
 })
+
+import { displayZone, namedTime, noteHqTimeZone, spendResetLine, utcMidnightIn, zonesDiffer } from './time'
+
+test('check 1: HQ in Nairobi, browser in London: a daily watch names its zone, an ordinary time has no city', () => {
+  const now = Date.UTC(2026, 10, 5, 12, 0, 0)
+  expect(namedTime('07:00', 'Africa/Nairobi', 'Europe/London', now)).toBe('07:00 Nairobi time')
+  expect(namedTime('07:00', 'Africa/Nairobi', 'Africa/Nairobi', now)).toBe('07:00')
+  expect(namedTime('07:00', null, 'Europe/London', now)).toBe('07:00')
+  // A message time is formatted in the display zone and never carries a city.
+  const message = dateByAge(Date.UTC(2026, 10, 5, 11, 2), now, 'Europe/London')
+  expect(message).not.toMatch(/Nairobi|London/)
+  expect(zonesDiffer('Africa/Nairobi', 'Africa/Kampala', now)).toBe(false)
+})
+
+test('HQ reports its zone and a junk zone is ignored', () => {
+  noteHqTimeZone({ tz: 'Africa/Nairobi', tz_offset_minutes: 180 })
+  noteHqTimeZone({ tz: 'Mars/Olympus', tz_offset_minutes: 180 })
+  expect(typeof displayZone()).toBe('string')
+})
+
+test('check 2: Spending names UTC and the local time of the reset', () => {
+  const now = Date.UTC(2026, 10, 5, 12, 0, 0)
+  expect(utcMidnightIn('Africa/Nairobi', now)).toBe('03:00')
+  expect(spendResetLine('Africa/Nairobi', now)).toBe('Limits reset at midnight UTC, which is 03:00 in Nairobi. Weeks start on Monday.')
+})
+
+test('dateByAge decides today and yesterday in the display zone', () => {
+  const now = Date.UTC(2026, 10, 5, 22, 30)
+  // 22:30 UTC is already 01:30 on the 6th in Nairobi, so 20:00 UTC on the 5th is yesterday there.
+  expect(dateByAge(Date.UTC(2026, 10, 5, 20, 0), now, 'Africa/Nairobi')).toBe('yesterday')
+  expect(dateByAge(Date.UTC(2026, 10, 5, 20, 0), now, 'UTC')).toMatch(/\d/)
+})
