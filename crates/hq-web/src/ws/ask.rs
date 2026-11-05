@@ -166,6 +166,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
             untrusted: req.untrusted,
             model: req.model.map(str::to_string),
         }),
+        spoken: None,
     };
     let abort = spawn_supervised(turn, config, req.question.to_string(), history, Vec::new());
     turns.insert(
@@ -323,6 +324,7 @@ mod tests {
                 untrusted: false,
                 model: None,
             }),
+            spoken: None,
         }
     }
 
@@ -802,6 +804,7 @@ mod tests {
                 files: Vec::new(),
                 client_id: Some("local-1".into()),
                 replace_from: Some(ids[0].clone()),
+                source: None,
             },
         )
         .await;

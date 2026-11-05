@@ -52,6 +52,8 @@ enum ClientMsg {
         client_id: Option<String>,
         /// Edit or regenerate: this message and everything after it are replaced.
         replace_from: Option<String>,
+        /// Where the words came from; only "voice" is kept (D7). Never shown to the model.
+        source: Option<String>,
     },
     Stop {
         thread_id: Option<String>,
@@ -143,6 +145,7 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
             attachments,
             client_id,
             replace_from,
+            source,
         } => {
             let text = chat_uploads::strip_marker(&content);
             let files = chat_uploads::resolve(&state.vault_path, attachments).await;
@@ -156,6 +159,7 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
                         files,
                         client_id,
                         replace_from,
+                        source: spoken_source(source.as_deref()),
                     },
                 )
                 .await;
@@ -237,6 +241,28 @@ struct ChatRequest {
     files: Vec<ResolvedAttachment>,
     client_id: Option<String>,
     replace_from: Option<String>,
+    /// `Some(VOICE_SOURCE)` for a question asked by voice.
+    source: Option<&'static str>,
+}
+
+/// The one source a chat message may carry: it marks a spoken question in every app (D7).
+pub(crate) const VOICE_SOURCE: &str = "voice";
+
+fn spoken_source(raw: Option<&str>) -> Option<&'static str> {
+    (raw == Some(VOICE_SOURCE)).then_some(VOICE_SOURCE)
+}
+
+/// What HQ keeps about a user message beyond its text: where it came from and the sender's id, so a
+/// watcher that missed `turn_start` still finds its thread. `None` when there is nothing to keep.
+fn user_meta(req: &ChatRequest) -> Option<serde_json::Value> {
+    let mut meta = serde_json::Map::new();
+    if let Some(source) = req.source {
+        meta.insert("source".into(), json!(source));
+    }
+    if let Some(id) = hq_db::client_ids::usable(req.client_id.as_deref()) {
+        meta.insert("client_id".into(), json!(id));
+    }
+    (!meta.is_empty()).then_some(serde_json::Value::Object(meta))
 }
 
 /// Tells every tab a send was refused; only the sender has the local copy to drop.
@@ -294,6 +320,9 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
         tid: tid.clone(),
         record: record.clone(),
         ask: None,
+        spoken: req
+            .source
+            .map(|_| hq_agent::threads::strip_hq_context(&req.text).to_string()),
     };
     let abort = spawn_supervised(turn, config, req.text, history, req.files);
     if let Some(t) = tid {
@@ -306,6 +335,13 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
             },
         );
     }
+}
+
+/// Whether this chat's turn left an approval waiting for the owner, so an app says "HQ needs your
+/// OK to finish" instead of "HQ answered".
+fn waiting_for_owner(db: &hq_db::Database, thread_id: &str) -> bool {
+    let prefix = hq_agent::governance::owner_approval_prefix(&format!("web:{thread_id}"));
+    hq_db::value_items::count_waiting_with_prefix(db, &prefix).is_ok_and(|n| n > 0)
 }
 
 /// A resend from a browser's outbox: HQ already has this message (same client id), so no second
@@ -373,8 +409,11 @@ fn open_thread(
     let user_clean = hq_agent::threads::strip_hq_context(message);
     let metas: Vec<ChatAttachment> = files.iter().map(|f| f.meta.clone()).collect();
     let stored = format!("{user_clean}{}", chat_uploads::marker(&metas));
+    let meta = user_meta(req);
     let saved = db
-        .with_conn(|conn| hq_db::chat::add_message(conn, t, "user", stored.trim_start()))
+        .with_conn(|conn| {
+            hq_db::chat::add_message_with_meta(conn, t, "user", stored.trim_start(), meta.as_ref())
+        })
         .ok();
     if let Some(id) = claimed {
         use hq_db::client_ids::{KIND_MESSAGE, record, release};
@@ -397,6 +436,7 @@ fn open_thread(
             "user_message": saved,
             "client_id": req.client_id,
             "replace_from": req.replace_from,
+            "source": req.source,
         })
         .to_string(),
     );
@@ -490,6 +530,7 @@ pub(crate) async fn start_driver_turn(
         tid,
         record: record.clone(),
         ask: None,
+        spoken: None,
     };
     let abort = spawn_supervised(turn, config, prompt, history, Vec::new());
     turns.insert(
@@ -567,6 +608,8 @@ struct ChatTurn {
     record: SharedRecord,
     /// Set when `hq_ask` started this reply: it ends the ask and limits the tools.
     ask: Option<ask::AskTurn>,
+    /// The question, when it was asked by voice: approvals quote it ("You said: …").
+    spoken: Option<String>,
 }
 
 /// Runs a turn and watches it. A panic inside the run would otherwise leave no
@@ -715,9 +758,10 @@ impl ChatTurn {
             return None;
         }
         let scope = format!("web:{}", self.tid.as_deref().unwrap_or("new"));
-        Some(hq_agent::governance::OwnerApproval::new(
+        Some(hq_agent::governance::OwnerApproval::for_turn(
             Arc::new(self.db.clone()),
             scope,
+            self.spoken.as_deref(),
         ))
     }
 
@@ -829,7 +873,16 @@ impl ChatTurn {
         if !content.is_empty() && !streamed {
             self.send(json!({"type": "text_delta", "thread_id": self.tid, "content": content}));
         }
-        self.send(json!({"type": "turn_end", "thread_id": self.tid, "message_id": message_id}));
+        let waiting = self
+            .tid
+            .as_deref()
+            .is_some_and(|t| waiting_for_owner(&self.db, t));
+        self.send(json!({
+            "type": "turn_end",
+            "thread_id": self.tid,
+            "message_id": message_id,
+            "waiting_for_owner": waiting,
+        }));
         let Some(t) = &self.tid else { return };
         let mut guard = self.turns.write().await;
         if guard.get(t).is_some_and(|slot| slot.abort.id() == task_id) {
@@ -914,7 +967,7 @@ mod tests {
         let parse = |s: &str| serde_json::from_str::<ClientMsg>(s).unwrap();
         assert!(matches!(
             parse(r#"{"type":"chat","content":"hi","thread_id":null}"#),
-            ClientMsg::Chat { content, thread_id: None, attachments, client_id: None, replace_from: None }
+            ClientMsg::Chat { content, thread_id: None, attachments, client_id: None, replace_from: None, .. }
                 if content == "hi" && attachments.is_empty()
         ));
         let edit = parse(
@@ -970,6 +1023,7 @@ mod tests {
             files: Vec::new(),
             client_id: Some("local-1".into()),
             replace_from: replace_from.map(Into::into),
+            source: None,
         }
     }
 
@@ -1004,6 +1058,52 @@ mod tests {
             state.active_chat_turns.read().await.is_empty(),
             "no second reply"
         );
+    }
+
+    #[tokio::test]
+    async fn a_spoken_question_is_marked_by_hq_and_keeps_its_client_id() {
+        let state = test_state();
+        let tid = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user"))
+            .unwrap()
+            .thread_id;
+        let mut rx = state.tx.subscribe();
+        let mut req = request(&tid, "what is due today", None);
+        req.source = spoken_source(Some("voice"));
+        handle_chat(&state, req).await;
+        let ev = next_event(&mut rx);
+        assert_eq!(ev["type"], "turn_start");
+        assert_eq!(ev["source"], "voice");
+        let saved = state
+            .db
+            .with_conn(|c| hq_db::chat::get_messages_page(c, &tid, 10, None))
+            .unwrap();
+        let meta = saved[0].meta.clone().expect("the message keeps its meta");
+        assert_eq!(meta["source"], "voice");
+        assert_eq!(meta["client_id"], "local-1");
+        // Only "voice" is ever kept.
+        assert_eq!(spoken_source(Some("typed")), None);
+        assert_eq!(spoken_source(None), None);
+    }
+
+    #[test]
+    fn a_turn_that_left_an_approval_waiting_says_so() {
+        let db = hq_db::Database::open_memory().unwrap();
+        assert!(!waiting_for_owner(&db, "t1"));
+        let item = hq_core::types::ValueItem::new(
+            "owner-approval",
+            hq_core::types::ValueKind::ActionNeeded,
+            "x",
+            "y",
+        )
+        .with_dedup_key(format!(
+            "{}bash:abc",
+            hq_agent::governance::owner_approval_prefix("web:t1")
+        ));
+        hq_db::value_items::insert(&db, &item).unwrap();
+        assert!(waiting_for_owner(&db, "t1"));
+        assert!(!waiting_for_owner(&db, "t2"));
     }
 
     #[tokio::test]
@@ -1114,6 +1214,7 @@ mod tests {
             tid: Some(tid.clone()),
             record: record.clone(),
             ask: None,
+            spoken: None,
         };
         let task = tokio::spawn(async { panic!("boom") });
         state.active_chat_turns.write().await.insert(
@@ -1150,6 +1251,7 @@ mod tests {
             tid: Some("t".into()),
             record: Arc::new(std::sync::Mutex::new(TurnRecord::default())),
             ask: None,
+            spoken: None,
         };
         let task = tokio::spawn(std::future::pending::<()>());
         task.abort();

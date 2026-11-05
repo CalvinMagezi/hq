@@ -135,3 +135,25 @@ fn reads_and_notes_never_need_the_owner() {
     assert!(needs_owner("harness_session_spawn", "harness", &json!({})));
     assert!(!needs_owner("read_file", "coding", &json!({})));
 }
+
+#[tokio::test]
+async fn a_spoken_question_is_quoted_at_the_top_of_its_request() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let approval =
+        OwnerApproval::for_turn(db.clone(), "web:t1", Some("Delete the invoice draft task."));
+    approval.check("task_delete", &json!({"id": "t-9"})).await;
+    let id = request_id(&db, "task_delete");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(
+                c.query_row("SELECT body FROM value_items WHERE id = ?1", [&id], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert!(
+        body.starts_with("You said: \u{201c}Delete the invoice draft task.\u{201d}"),
+        "{body}"
+    );
+}
