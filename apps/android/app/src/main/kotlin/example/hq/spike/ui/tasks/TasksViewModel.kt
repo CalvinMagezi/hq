@@ -130,6 +130,8 @@ data class AwayUi(
     val serverAtMs: Long? = null,
     val serverStale: Boolean = false,
     val open: Boolean = false,
+    /** The failure line shown when this phone's HQ could not be read and nothing was read before; null otherwise. */
+    @androidx.annotation.StringRes val phoneFailure: Int? = null,
 ) {
     val hasNews: Boolean get() = phone?.hasNews == true || server?.hasNews == true
 }
@@ -254,13 +256,15 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
             val body = client.verificationBriefing(AWAY_HOURS)
             if (body == null) {
                 saved.forget(AWAY_PHONE)
-                _state.update { it.copy(away = it.away.copy(phone = null, phoneAtMs = null)) }
+                _state.update { it.copy(away = it.away.copy(phone = null, phoneAtMs = null, phoneFailure = null)) }
             } else {
                 saved.write(AWAY_PHONE, example.hq.spike.data.SavedCopy.Source.Phone, body, now)
-                _state.update { it.copy(away = it.away.copy(phone = Away.parse(body), phoneAtMs = now)) }
+                _state.update { it.copy(away = it.away.copy(phone = Away.parse(body), phoneAtMs = now, phoneFailure = null)) }
             }
         } catch (e: HqUnavailable) {
-            // Kept: what is on screen is what was last read, with its time.
+            // What is on screen is what was last read, with its time; with nothing read yet the page says why.
+            val failure = AwayWords.loadFailure(HqServices.get(app).status.value)
+            _state.update { it.copy(away = it.away.copy(phoneFailure = failure)) }
         }
         val server = withContext(kotlinx.coroutines.Dispatchers.IO) { example.hq.spike.ServerHq.current(app) }
         if (server == null) {

@@ -61,7 +61,7 @@ class FirstRunStore(context: Context) {
     fun step(): Step? {
         prefs.getString(STEP, null)?.let { name -> Step.entries.firstOrNull { it.name == name }?.let { return it } }
         if (Moved.detect(appContext, hasRecord = done() || FirstLaunch.isDone(appContext) || KeyVault.hasModelKey(appContext))) {
-            prefs.edit().putBoolean(MOVED, true).apply()
+            prefs.edit().putBoolean(MOVED, true).putBoolean(MOVED_SEEN, true).apply()
             return Step.Moved.also(::save)
         }
         if (!moved()) InstallMarker.write(appContext)
@@ -70,6 +70,9 @@ class FirstRunStore(context: Context) {
 
     /** True from the moment a copied vault is found until the flow ends or the owner starts fresh. */
     fun moved(): Boolean = prefs.getBoolean(MOVED, false)
+
+    /** True on a phone the notes were copied to, for good: the device lists say the sign-ins did not come along. */
+    fun movedSeen(): Boolean = prefs.getBoolean(MOVED_SEEN, false)
     fun save(step: Step) { prefs.edit().putString(STEP, step.name).apply() }
     fun finish() {
         prefs.edit().putBoolean(DONE, true).putBoolean(MOVED, false).remove(STEP).apply()
@@ -78,7 +81,7 @@ class FirstRunStore(context: Context) {
 
     /** The owner chose to start fresh: the flow begins again as on a clean install. */
     fun forgetMoved() {
-        prefs.edit().putBoolean(MOVED, false).remove(STEP).apply()
+        prefs.edit().putBoolean(MOVED, false).putBoolean(MOVED_SEEN, false).remove(STEP).apply()
         InstallMarker.write(appContext)
     }
 
@@ -87,6 +90,7 @@ class FirstRunStore(context: Context) {
         const val STEP = "step"
         const val DONE = "done"
         const val MOVED = "moved"
+        const val MOVED_SEEN = "moved_seen"
     }
 }
 

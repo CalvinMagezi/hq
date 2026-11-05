@@ -88,6 +88,9 @@ private fun Chip(icon: ImageVector, label: String, removeLabel: String, onRemove
 /** The files waiting to go with the message: a name, the size or what went wrong, and an x. Retry shows only when trying again can work. */
 @Composable
 private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
+    if (files.any { it.error == FileError.TooBig }) {
+        Text(stringResource(R.string.chat_remove_big), style = HqType.Caption, color = Mts.DangerText, modifier = Modifier.padding(horizontal = 16.dp))
+    }
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         files.forEach { file ->
             val failed = file.status == FileStatus.Failed
@@ -115,9 +118,16 @@ private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
     }
 }
 
+@Composable
 private fun fileLine(file: PendingFile): String = when (file.status) {
-    FileStatus.Uploading -> "Uploading…"
-    FileStatus.Failed -> file.error ?: "upload failed"
+    FileStatus.Uploading -> stringResource(R.string.chat_file_uploading)
+    FileStatus.Failed -> stringResource(
+        when (file.error) {
+            FileError.TooBig -> R.string.chat_file_too_big
+            FileError.Empty -> R.string.chat_file_empty
+            else -> R.string.chat_file_failed
+        },
+    )
     FileStatus.Ready -> sizeWords(file.size)
 }
 

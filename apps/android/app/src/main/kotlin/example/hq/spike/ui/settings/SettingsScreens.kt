@@ -618,7 +618,9 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
         }
         val list = SettingsWords.devices(example.hq.spike.ui.shell.rememberWords(), d)
         Label(stringResource(R.string.settings_label_signed_in))
-        if (list.isEmpty()) Text(stringResource(R.string.settings_no_other_device_is), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 16.dp))
+        val moved = ui.notif.server.moved
+        if (list.isEmpty() && moved) InfoCard(stringResource(R.string.moved_no_devices_title), stringResource(R.string.moved_no_devices_body))
+        else if (list.isEmpty()) Text(stringResource(R.string.settings_no_other_device_is), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 16.dp))
         else {
             Group {
                 list.forEachIndexed { i, dev ->
@@ -632,6 +634,10 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
                     }
                 }
             }
+        }
+        if (moved && ui.notif.server.address != null && !ui.notif.server.connected) {
+            Label(stringResource(R.string.settings_server_hq_title))
+            InfoCard(stringResource(R.string.moved_server_signed_out_title), stringResource(R.string.moved_server_signed_out_body))
         }
         Box(Modifier.padding(start = 4.dp, top = 4.dp)) { TextLink(stringResource(R.string.sign_out_all_act), Mts.Ink, enabled = ui.busy == null && !ui.restarting) { actions.onSignOutAll(true) } }
     }
@@ -928,7 +934,8 @@ private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: Settin
         )
         return
     }
-    if (server.signedOut) Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.settings_server_signed_out_title), stringResource(R.string.settings_server_signed_out_body, server.address.orEmpty()), true) }
+    if (server.keyLost) NewPhoneCard()
+    else if (server.signedOut) Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.settings_server_signed_out_title), stringResource(R.string.settings_server_signed_out_body, server.address.orEmpty()), true) }
     val busy = ui.busy == SERVER_BUSY
     var address by remember { androidx.compose.runtime.mutableStateOf(server.address.orEmpty()) }
     var code by remember { androidx.compose.runtime.mutableStateOf("") }
@@ -938,6 +945,22 @@ private fun ServerHqSection(server: ServerFacts, ui: SettingsUi, actions: Settin
         ServerField(stringResource(R.string.signin_code_label), code, "XXXXX-XXXXX", busy, androidx.compose.ui.text.input.KeyboardType.Ascii) { code = it }
         ui.serverError?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText) }
         GreenButton(stringResource(if (busy) R.string.settings_signing_in_dots else R.string.settings_sign_in), enabled = !busy && address.isNotBlank() && code.isNotBlank(), busy = busy) { actions.onServerConnect(address, code) }
+    }
+}
+
+/** A server HQ's owner on a new phone: the notes are on the server, only this phone's sign-in stayed behind. */
+@Composable
+private fun NewPhoneCard() {
+    var hidden by remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (hidden) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.server_new_phone_title), stringResource(R.string.server_new_phone_body), true) }
+    Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.server_new_phone_how), style = HqType.BodySm, color = Mts.InkMuted)
+        GreenButton(stringResource(R.string.server_new_phone_scan)) {
+            context.startActivity(android.content.Intent(context, example.hq.spike.ui.pairing.PairingActivity::class.java).putExtra(example.hq.spike.ui.pairing.PairingActivity.EXTRA_SCREEN, "scan"))
+        }
+        TextLink(stringResource(R.string.server_new_phone_later), Mts.Ink) { hidden = true }
     }
 }
 

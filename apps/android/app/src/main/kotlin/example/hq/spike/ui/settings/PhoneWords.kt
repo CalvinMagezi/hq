@@ -38,8 +38,8 @@ data class NotifFacts(
 )
 
 /** The owner's HQ on a server this phone is signed in to for its questions: its address, and whether it signed the phone out. */
-data class ServerFacts(val address: String? = null, val signedOut: Boolean = false) {
-    val connected: Boolean get() = address != null && !signedOut
+data class ServerFacts(val address: String? = null, val signedOut: Boolean = false, val keyLost: Boolean = false, val moved: Boolean = false) {
+    val connected: Boolean get() = address != null && !signedOut && !keyLost
 }
 
 /** [SettingsUi.busy] while the phone signs in to a server HQ. */
