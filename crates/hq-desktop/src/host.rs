@@ -751,6 +751,10 @@ pub fn run_within(path: &Path, args: &[&str], limit: Duration) -> Option<Vec<u8>
 
 /// What a short command printed, or None if it failed or ran past `limit`. On a timeout its whole
 /// process group is killed, so a shell's children go too.
+pub fn command_output_within(cmd: Command, limit: Duration) -> Option<Vec<u8>> {
+    output_within(cmd, limit)
+}
+
 fn output_within(mut cmd: Command, limit: Duration) -> Option<Vec<u8>> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())

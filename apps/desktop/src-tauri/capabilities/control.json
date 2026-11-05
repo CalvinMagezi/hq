@@ -25,8 +25,14 @@
     "allow-pairing-submit",
     "allow-pairing-decline",
     "allow-pairing-revoke",
-    "allow-claude-status",
-    "allow-claude-change",
+    "allow-helpers-list",
+    "allow-helpers-check",
+    "allow-helper-try",
+    "allow-helper-try-stop",
+    "allow-helper-connect",
+    "allow-helper-disconnect",
+    "allow-helper-restore",
+    "allow-helper-signin",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

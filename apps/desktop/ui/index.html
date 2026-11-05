@@ -60,49 +60,75 @@
       </section>
 
       <section id="tab-devices" hidden>
-        <div id="devices-off">
-          <p>Pair a phone or another computer with a QR code. Switching this on opens a network port for devices you have paired; nobody else is let in. Nothing listens until you do.</p>
-          <p class="row"><button type="button" class="a-btn" id="devices-on">Switch on</button></p>
+        <div id="devices-off" class="a-card">
+          <div class="a-card-head"><b id="devices-off-title"></b><span id="devices-off-state" class="a-state"></span></div>
+          <p id="devices-off-note" class="hub-why"></p>
+          <div class="a-card-actions"><button type="button" class="a-btn" id="devices-on"></button></div>
         </div>
         <div id="devices-on-block" hidden>
-          <p class="row"><strong id="this-name"></strong><span class="muted">id <code id="this-id"></code></span></p>
-          <p class="row">
-            <button type="button" class="a-btn secondary" id="show-code">Show pairing code</button>
-            <button type="button" class="a-btn secondary" id="devices-off-btn">Switch off</button>
-          </p>
-
-          <div id="ticket" class="a-card" hidden>
-            <p>Scan this with the other device's camera, or paste the link into <code>hq bridge join</code>. It works once and expires <span id="ticket-expires"></span>.</p>
-            <canvas id="qr" width="256" height="256" aria-label="Pairing QR code"></canvas>
-            <p class="row"><code id="ticket-link" class="link"></code></p>
-            <p class="row"><button type="button" class="a-btn compact secondary" id="copy-link">Copy link</button><button type="button" class="a-btn compact quiet" id="cancel-ticket">Cancel</button></p>
+          <div class="a-card">
+            <div class="a-card-head"><b id="devices-on-title"></b><span id="devices-on-state" class="a-state"></span></div>
+            <p id="devices-on-note" class="hub-why"></p>
+            <div class="a-card-actions">
+              <button type="button" class="a-btn" id="show-code"></button>
+              <button type="button" class="a-btn secondary" id="devices-off-btn"></button>
+            </div>
           </div>
 
+          <div id="ticket" class="a-card" hidden>
+            <div class="a-card-head"><b id="ticket-title"></b><span id="ticket-until" class="hub-why"></span></div>
+            <p id="ticket-note" class="hub-why"></p>
+            <canvas id="qr" width="256" height="256" aria-label="Pairing QR code"></canvas>
+            <p class="row"><code id="ticket-link" class="link"></code></p>
+            <p id="ticket-waiting" class="hub-why"></p>
+            <div class="a-card-actions"><button type="button" class="a-btn compact secondary" id="copy-link"></button><button type="button" class="a-btn compact quiet" id="cancel-ticket"></button></div>
+          </div>
+
+          <p id="just-paired" class="hub-why" hidden></p>
           <div id="pending"></div>
 
           <div id="forwards-block" hidden>
-            <h3>Shared with paired devices</h3>
+            <h3 id="forwards-title"></h3>
             <ul id="forwards" class="list"></ul>
           </div>
 
-          <h3>Paired devices</h3>
+          <h3 id="peers-title"></h3>
           <ul id="peers" class="list"></ul>
-          <p id="peers-empty" class="muted">No devices paired yet.</p>
+          <p id="peers-empty" class="muted"></p>
+          <div class="a-set hub-set"><div class="a-row"><div class="a-row-main"><b id="relay-title"></b><span id="relay-note"></span></div><span id="relay-state" class="a-state"></span></div></div>
         </div>
         <p id="devices-error" class="hub-error" role="alert"></p>
       </section>
 
       <section id="tab-helpers" hidden>
-        <h3 id="helpers-heading">Helpers on this computer</h3>
-        <ul id="agents" class="list"></ul>
-        <p id="agents-empty" class="muted"></p>
-
-        <h3>Use HQ in Claude</h3>
-        <p class="muted">Adds the hub this computer is paired with to Claude Code and Claude Desktop. Remove takes out only what was added here.</p>
-        <p id="claude-moved" class="muted" hidden></p>
-        <ul id="claude-hubs" class="list"></ul>
-        <p id="claude-empty" class="muted">Not paired with a hub yet. Pair from the Devices tab first.</p>
-        <p id="claude-error" class="hub-error" role="alert"></p>
+        <div id="helpers-list">
+          <p id="hh-intro" class="hub-why"></p>
+          <div class="a-card-actions"><span id="hh-checked" class="hub-why"></span><button type="button" id="hh-check-all" class="a-btn compact secondary"></button></div>
+          <div id="hh-first" class="a-card" hidden>
+            <div class="a-card-head"><b id="hh-first-title"></b></div>
+            <p id="hh-first-body" class="hub-why"></p>
+            <p id="hh-first-body2" class="hub-why"></p>
+            <p id="hh-off" class="hub-why"></p>
+            <div class="a-card-actions"><button type="button" id="hh-first-act" class="a-btn"></button></div>
+          </div>
+          <div id="hh-lock" class="a-card" hidden>
+            <div class="a-card-head"><b id="hh-lock-title"></b><span id="hh-lock-state" class="a-state needs"></span></div>
+            <p id="hh-lock-body" class="hub-why"></p>
+            <div class="a-card-actions"><button type="button" id="hh-lock-go" class="a-btn"></button></div>
+          </div>
+          <div id="hh-none" class="a-card" hidden>
+            <div class="a-card-head"><b id="hh-none-title"></b></div>
+            <p id="hh-none-body" class="hub-why"></p>
+            <p class="row"><code id="hh-none-line"></code><button type="button" id="hh-none-copy" class="a-btn compact secondary"></button></p>
+            <p id="hh-none-note" class="hub-why"></p>
+          </div>
+          <p id="hh-checking" class="hub-why" role="status"></p>
+          <p id="hh-platform" class="hub-why" hidden></p>
+          <div id="hh-work"></div>
+          <div id="hh-groups"></div>
+        </div>
+        <div id="helper-detail" hidden></div>
+        <p id="helpers-error" class="hub-error" role="alert"></p>
       </section>
     </main>
 
@@ -119,7 +145,7 @@
       <div class="a-sheet-head"><h2 id="sheet-title" class="a-h2"></h2><button type="button" id="sheet-close" class="a-btn compact quiet"></button></div>
       <div class="a-sheet-body"><p id="sheet-note" class="hub-why"></p><pre id="sheet-log" class="hub-log"></pre></div>
     </div>
-    <div id="toast" class="a-snack" role="status" hidden><span id="toast-text"></span><button type="button" id="toast-close" class="a-snack-act"></button></div>
+    <div id="toast" class="a-snack" role="status" hidden><span id="toast-text"></span><button type="button" id="toast-act" class="a-snack-act" hidden></button><button type="button" id="toast-close" class="a-snack-act"></button></div>
   </div>
   <script type="module" src="main.js"></script>
 </body>
