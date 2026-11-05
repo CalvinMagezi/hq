@@ -122,7 +122,15 @@ const VALUE_ITEM_COLUMNS: &str = "SELECT v.id, v.source_task, v.kind, v.title, v
 
 /// Action-needed items that ask the owner to look, not to decide: approving one would mean
 /// nothing, so they offer only Dismiss. Matched on the dedup key's prefix.
-const NOTICE_KEYS: &[&str] = &["host-unreachable-"];
+const NOTICE_KEYS: &[&str] = &[
+    "host-unreachable-",
+    "host-lockdown-",
+    "disk-watchdog-",
+    "self-apply-",
+    "bash-sandbox-refusing-",
+    "edge-worker-dispatch-",
+    "subagent-run-",
+];
 
 fn is_notice(dedup_key: Option<&str>) -> bool {
     dedup_key.is_some_and(|k| NOTICE_KEYS.iter().any(|p| k.starts_with(p)))
@@ -669,6 +677,21 @@ mod tests {
         let changed = list(Some(tag.clone())).await;
         assert_eq!(changed.status(), 200, "a new item is a new list");
         assert_ne!(changed.headers()[header::ETAG].to_str().unwrap(), tag);
+    }
+
+    #[test]
+    fn a_notice_to_look_at_offers_only_dismiss() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let item = hq_core::types::ValueItem::new(
+            "disk_watchdog",
+            hq_core::types::ValueKind::ActionNeeded,
+            "Disk watchdog: threshold(s) breached",
+            "Disk 96% used",
+        )
+        .with_dedup_key("disk-watchdog-2026-11-05");
+        hq_db::value_items::insert(&db, &item).unwrap();
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        assert_eq!(items[0].actions, ["dismiss"]);
     }
 
     #[test]

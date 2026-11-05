@@ -14,8 +14,8 @@ import { deviceTimeZone, useClockZone, zoneCity } from '~/lib/clock'
 import { readDataUsed, startDataCounter } from '~/lib/dataUsed'
 import { fetchHello } from '~/lib/hello'
 import { useInHub } from '~/lib/hubWindow'
-import { DEFAULT_PUSH_PREFS, readPushPrefs } from '~/lib/webPush'
-import { LANDING_PATH, WIDE_MIN_PX, ageWords, backupNeedsLook, formatSize, hashRedirect, liteNotice, type BackupStatus } from '~/lib/settingsGroups'
+import { DEFAULT_PUSH_PREFS, getPushState, readPushPrefs } from '~/lib/webPush'
+import { LANDING_PATH, WIDE_MIN_PX, ageWords, trailNotifKey, backupNeedsLook, formatSize, hashRedirect, liteNotice, type BackupStatus } from '~/lib/settingsGroups'
 import { HqHttpError } from '~/lib/hqAuth'
 import { ChatAppsSection } from '~/components/settings/ChatAppsSection'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
@@ -433,13 +433,14 @@ function useWide(): boolean {
 /** Words at the right of each home row, from what this browser already knows. */
 function useTrailing(hub: boolean, backup: BackupStatus | null): Record<string, string> {
   const prefs = useStoredPrefs()
+  const pushOn = usePushOn()
   const zone = useClockZone() || deviceTimeZone()
   const [used, setUsed] = useState<number | null>(null)
   useEffect(() => {
     startDataCounter()
     setUsed(readDataUsed())
   }, [])
-  const notif = prefs.needs ? (prefs.updates ? 'trail_notif_both' : 'trail_notif_needs') : prefs.updates ? 'trail_notif_updates' : 'trail_notif_none'
+  const notif = trailNotifKey(prefs, pushOn)
   const hello = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data
   return {
     notifications: hub ? '' : t(notif),
@@ -449,6 +450,16 @@ function useTrailing(hub: boolean, backup: BackupStatus | null): Record<string, 
     signout: t(hub ? 'trail_sign_out_window' : 'trail_sign_out_browser'),
     backup: backupRowWords(backup),
   }
+}
+
+function usePushOn(): boolean {
+  const [on, setOn] = useState(false)
+  useEffect(() => {
+    getPushState()
+      .then((s) => setOn(s === 'on'))
+      .catch(() => undefined)
+  }, [])
+  return on
 }
 
 function useStoredPrefs() {

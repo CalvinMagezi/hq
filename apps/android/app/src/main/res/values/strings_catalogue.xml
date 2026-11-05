@@ -157,6 +157,8 @@
     <string name="device_line_new">New · signed in today at %1$s</string>
     <string name="device_line">Signed in %1$s · used %2$s</string>
     <string name="device_line_kept">Signed in %1$s · used %2$s · kept signed in</string>
+    <string name="device_line_unused">Signed in %1$s · not used yet</string>
+    <string name="device_line_unused_kept">Signed in %1$s · not used yet · kept signed in</string>
     <string name="device_shared">%1$s, shared</string>
     <string name="device_rule">A sign-in not used for 90 days signs out by itself. To keep one longer, open its menu and choose Keep signed in.</string>
     <string name="device_keep">Keep signed in</string>

@@ -147,6 +147,7 @@ export function deviceLine(d: SignedInDevice, nowMs: number): string {
     const time = signedIn.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     return t('device_line_new', { time })
   }
+  if (d.last_used_at === null) return t(d.keep ? 'device_line_unused_kept' : 'device_line_unused', { date: shortDay(d.created_at) })
   const vars = { date: shortDay(d.created_at), used: lastUsedText(d.last_used_at, nowMs) }
   return t(d.keep ? 'device_line_kept' : 'device_line', vars)
 }

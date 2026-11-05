@@ -158,7 +158,7 @@ export function SignedOutView({ pathname, embedded }: { pathname: string; embedd
         {signedOutTitle(pathname)}
       </h2>
       <p className="text-sm max-w-sm" style={{ color: 'var(--text-dim)' }}>
-        {t('signin_signed_out_by_hq')}
+        {t(hasWebToken() || wasSignedOut() ? 'signin_signed_out_by_hq' : 'signin_first_time')}
       </p>
       {!embedded && (
         <button type="button" onClick={focusSignIn} className={BUTTON_CLASS}>

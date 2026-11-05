@@ -106,21 +106,17 @@ export function NotificationCard({
             {relTime(notification.created_at)}
           </span>
 
-          <span
-            className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
-            style={{
-              background:
-                notification.state === 'pending'
-                  ? 'rgba(0,255,163,0.15)'
-                  : 'rgba(255,255,255,0.06)',
-              color:
-                notification.state === 'pending'
-                  ? 'var(--accent-green, #00ffa3)'
-                  : 'var(--text-dim, #888)',
-            }}
-          >
-            {t(isPending ? 'inbox_tab_needs' : 'inbox_tab_done')}
-          </span>
+          {(!isPending || notification.kind === 'action_needed') && (
+            <span
+              className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                color: isPending ? 'var(--warn)' : 'var(--text-dim)',
+              }}
+            >
+              {t(isPending ? 'inbox_tab_needs' : 'inbox_tab_done')}
+            </span>
+          )}
         </div>
       </div>
 
@@ -149,7 +145,7 @@ export function NotificationCard({
           signInActions
         ) : isPending ? (
           <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
-            {notification.kind === 'action_needed' ? (
+            {notification.actions.includes('approve') ? (
               <ApprovalCard
                 quoteTitle={t('approval_quote_inbox')}
                 tool={notification.metadata.approval?.tool}

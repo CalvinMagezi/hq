@@ -12,6 +12,17 @@ const BUTTON_CHROME = 50
 const BAD_RED_LABELS = ['yes', 'ok', 'okay', 'continue', 'confirm']
 
 /** Whether the two buttons fit on one row at this viewport width, each at the same width. */
+/** Centred in the top layer. `.a-dlg` centres an in-page frame with a transform, which would push a modal off screen. */
+export const CENTRED = {
+  position: 'fixed',
+  inset: 0,
+  margin: 'auto',
+  padding: 0,
+  transform: 'none',
+  width: `min(${MAX_WIDTH}px, 100% - ${SIDE_MARGIN * 2}px)`,
+  height: 'fit-content',
+} as const
+
 export function fitsSideBySide(viewportWidth: number, keepLabel: string, actLabel: string): boolean {
   const inner = Math.min(MAX_WIDTH, viewportWidth - SIDE_MARGIN * 2) - PAD * 2
   const widest = Math.max(keepLabel.length, actLabel.length) * CHAR_PX + BUTTON_CHROME
@@ -111,7 +122,7 @@ export function Dialog(props: DialogProps) {
       data-layout={side ? 'side' : 'stacked'}
       aria-labelledby={titleId}
       aria-describedby={bodyId}
-      style={{ position: 'fixed', inset: 0, margin: 'auto', padding: 0, width: `min(${MAX_WIDTH}px, 100% - ${SIDE_MARGIN * 2}px)`, height: 'fit-content', right: 'auto', bottom: 'auto', left: 'auto', top: 'auto' }}
+      style={CENTRED}
       onCancel={(e) => {
         e.preventDefault()
         if (dismissOutcome('esc', busyRef.current) === 'keep') onKeep()

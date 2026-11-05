@@ -153,3 +153,23 @@ describe('data and backup (check 6)', () => {
     expect(ageWords('2026-11-05T09:00:00Z', now)).toBe('3 h')
   })
 })
+
+import { trailNotifKey } from './settingsGroups'
+import { inInboxTab } from './notificationsApi'
+
+describe('rows say what this browser really does', () => {
+  test('the Notifications row says off while this browser receives nothing, whatever the switches', () => {
+    expect(trailNotifKey({ needs: true, updates: true }, false)).toBe('trail_notif_none')
+    expect(trailNotifKey({ needs: true, updates: true }, true)).toBe('trail_notif_both')
+    expect(trailNotifKey({ needs: false, updates: true }, true)).toBe('trail_notif_updates')
+  })
+
+  test('Needs you holds only what waits for an answer; updates go to Updates', () => {
+    const ask = { state: 'pending', kind: 'action_needed' } as const
+    const news = { state: 'pending', kind: 'value_item' } as const
+    const done = { state: 'dismissed', kind: 'value_item' } as const
+    expect([inInboxTab(ask, 'pending'), inInboxTab(ask, 'all'), inInboxTab(ask, 'resolved')]).toEqual([true, false, false])
+    expect([inInboxTab(news, 'pending'), inInboxTab(news, 'all')]).toEqual([false, true])
+    expect(inInboxTab(done, 'resolved')).toBe(true)
+  })
+})

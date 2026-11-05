@@ -21,6 +21,7 @@ import {
   clearableUpdateIds,
   type NotificationItem,
   type NotificationKind,
+  inInboxTab,
 } from '~/lib/notificationsApi'
 import { toastUndo, toastAlert } from '~/lib/toast'
 import { t, tn } from '~/strings'
@@ -53,7 +54,7 @@ function NotificationsPage() {
     setIsRefreshing(true)
     try {
       const res = await fetchNotificationsClient({
-        state: activeTab === 'all' ? 'all' : activeTab === 'resolved' ? 'resolved' : 'pending',
+        state: activeTab === 'resolved' ? 'resolved' : 'pending',
       })
       setNotifications(res.notifications)
       setNotificationCounts(res.unread_count, res.pending_approvals_count)
@@ -131,8 +132,7 @@ function NotificationsPage() {
   const filteredNotifications = useMemo(() => {
     return notifications.filter((item) => {
       // Tab filter
-      if (activeTab === 'pending' && item.state !== 'pending') return false
-      if (activeTab === 'resolved' && item.state === 'pending') return false
+      if (!inInboxTab(item, activeTab)) return false
 
       // Category filter
       if (selectedCategory === 'value' && item.kind !== 'value_item') return false
@@ -205,7 +205,7 @@ function NotificationsPage() {
           >
             <span>{t('inbox_tab_needs')}</span>
             {pendingApprovalsCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-400 text-black">
+              <span className="px-1.5 py-0.2 rounded-full text-[12px] font-bold text-black" style={{ background: 'var(--warn)' }}>
                 {pendingApprovalsCount}
               </span>
             )}

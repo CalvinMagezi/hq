@@ -15,7 +15,7 @@ import {
   useToasts,
 } from '~/lib/toast'
 import { ApprovalCard, allowLabel, quoteArgs } from './ApprovalCard'
-import { Dialog, dismissOutcome, fitsSideBySide, redLabelProblem } from './Dialog'
+import { CENTRED, Dialog, dismissOutcome, fitsSideBySide, redLabelProblem } from './Dialog'
 import { ToastView, toastPlacement } from './Toast'
 
 const noop = () => {}
@@ -211,5 +211,16 @@ describe('Clear all updates (03)', () => {
   test('only pending updates are cleared; a Needs-you request never is', () => {
     const ids = clearableUpdateIds([item('a', 'value_item', 'pending'), item('b', 'action_needed', 'pending'), item('c', 'value_item', 'dismissed')])
     expect(ids).toEqual(['a'])
+  })
+})
+
+describe('placement in the top layer', () => {
+  test('a modal dialog is centred: every side at 0 and no transform from .a-dlg', () => {
+    // .a-dlg centres an in-page frame with translate(-50%,-50%); on a modal it pushed the box off screen.
+    expect(CENTRED.inset).toBe(0)
+    expect(CENTRED.margin).toBe('auto')
+    expect(CENTRED.transform).toBe('none')
+    expect(Object.keys(CENTRED)).not.toContain('left')
+    expect(Object.keys(CENTRED)).not.toContain('top')
   })
 })

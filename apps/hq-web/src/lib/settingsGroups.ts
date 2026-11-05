@@ -149,3 +149,10 @@ export function formatSize(bytes: number): string {
   if (bytes >= MB / 10) return `${(bytes / MB).toFixed(1)} MB`
   return `${Math.round(bytes / 1024)} KB`
 }
+
+/** The Notifications row's words: the two switches only while this browser really receives them. */
+export function trailNotifKey(prefs: { needs: boolean; updates: boolean }, pushOn: boolean): StringKey {
+  if (!pushOn) return 'trail_notif_none'
+  if (prefs.needs) return prefs.updates ? 'trail_notif_both' : 'trail_notif_needs'
+  return prefs.updates ? 'trail_notif_updates' : 'trail_notif_none'
+}

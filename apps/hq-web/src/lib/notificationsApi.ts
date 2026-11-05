@@ -97,6 +97,15 @@ export function restoreNotifications(ids: string[]): Promise<{ ok: boolean }> {
 }
 
 /** The ids "Clear all updates" would clear: pending updates only, never a Needs-you request. */
+/** Which Inbox tab an item belongs to: Needs you waits for an answer, Updates only tell, Done is answered or cleared. */
+export type InboxTab = 'pending' | 'all' | 'resolved'
+
+export function inInboxTab(item: Pick<NotificationItem, 'state' | 'kind'>, tab: InboxTab): boolean {
+  if (tab === 'resolved') return item.state !== 'pending'
+  if (item.state !== 'pending') return false
+  return tab === 'pending' ? item.kind === 'action_needed' : item.kind !== 'action_needed'
+}
+
 export function clearableUpdateIds(items: NotificationItem[]): string[] {
   return items.filter((i) => i.state === 'pending' && i.kind === 'value_item').map((i) => i.id)
 }
