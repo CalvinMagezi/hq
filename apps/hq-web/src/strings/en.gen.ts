@@ -2064,8 +2064,6 @@ export const en = {
   settings_server_hq_row: "Server HQ",
   settings_server_hq_row_body: "Your server HQ, {host}",
   chat_approval_can_finish: "HQ can finish now",
-<<<<<<< HEAD
-=======
   away_card_title: "While you were away",
   away_card_hours: "last 24 hours",
   away_finished: {"one":"HQ checked and finished {n} task.","other":"HQ checked and finished {n} tasks."},
@@ -2108,13 +2106,11 @@ export const en = {
   web_load_no_reply: "Couldn't load {page}. HQ didn't answer in time. Try again.",
   web_try_again: "Try again",
   web_reload: "Reload",
->>>>>>> ux/w4-phone
   search_field_all: "Search notes, tasks, chats and helpers",
   search_field_notes: "Search notes",
   search_field_tasks: "Search tasks",
   search_field_chats: "Search chats",
   search_field_helpers: "Search helpers",
-<<<<<<< HEAD
   search_field_notes_in: "Search notes in {folder}",
   search_field_lite: "Search notes and tasks",
   search_chip_all: "All",
@@ -2143,7 +2139,6 @@ export const en = {
   search_ask_first: "Ask HQ about the first {n} notes",
   search_none_any: "Nothing matches that.",
   search_none_try: "Try fewer words, or another spelling.",
-=======
   search_scope_all: "All",
   search_scope_notes: "Notes",
   search_scope_tasks: "Tasks",
@@ -2157,23 +2152,15 @@ export const en = {
   search_folder_from_label: "Only in {folder}. Clear to search all notes",
   search_folder_caption: "Searching only in {trail} and the folders inside it.",
   search_helper_row: "{helper} · {where} · {state}",
-  search_ask_one: "Ask HQ about this note",
   search_ask_many: "Ask HQ about these {n} notes",
-  search_ask_first: "Ask HQ about the first {n} notes",
-  search_recent: "Recent searches",
-  search_recent_clear: "Clear recent searches",
-  search_recent_cleared: "Recent searches cleared",
   search_undo: "Undo",
   search_hint_all: "Type to search notes, tasks, chats and helpers.",
-  search_hint_notes: "Type to search your notes.",
   search_none_all: "Nothing matches that.",
->>>>>>> ux/w4-phone
   search_none_notes: "No notes match that.",
   search_none_tasks: "No tasks match that.",
   search_none_chats: "No chats match that.",
   search_none_helpers: "No helpers match that.",
   search_everything: "Search everything",
-<<<<<<< HEAD
   search_loading: "Searching your notes",
   search_saved_note: "Tasks and helpers below are from the copy saved in this browser at {time}.",
   search_back_note: "When HQ is up, notes and chats appear here without a tap.",
@@ -2211,7 +2198,6 @@ export const en = {
   tasks_done_one_body: {"one":"{n} task waits on \"{title}\". HQ tells it it can start.","other":"{n} tasks wait on \"{title}\". HQ tells them they can start."},
   tasks_done_one_keep: "Not now",
   tasks_move_to: "Move {title} to",
-=======
   fail_search_notes_chats_starting: "Couldn't search your notes and chats. HQ is still starting. It will try again by itself.",
   fail_search_notes_chats_restarting: "Couldn't search your notes and chats. HQ is restarting. It will try again by itself.",
   fail_search_notes_chats_stopped: "Couldn't search your notes and chats. HQ has stopped. It will try again when HQ is back.",
@@ -2250,5 +2236,4 @@ export const en = {
   chat_bar_server: "Your server HQ can't be reached. Your draft is kept.",
   chat_bar_signed_out: "This phone is signed out of your server HQ. Your draft is kept.",
   chat_bar_ai_action: "AI service and keys",
->>>>>>> ux/w4-phone
 } as const
