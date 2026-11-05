@@ -187,7 +187,7 @@ export function NotificationDetailDrawer({
                 ) : (
                   <>
                     <Check className="w-4 h-4 text-emerald-400" />
-                    Dismiss
+                    {t('inbox_clear')}
                   </>
                 )}
               </button>

@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useState, type FormEvent, type ReactNode } from 'react'
@@ -155,7 +156,7 @@ function Consent({ id, req }: { id: string; req: ConnectRequest }) {
             disabled={busy}
             className="flex-1 rounded-lg border border-white/10 bg-white/10 hover:bg-white/15 disabled:opacity-40 px-3 py-2 text-xs font-mono text-neutral-100 flex items-center justify-center gap-2"
           >
-            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Approve
+            {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('connect_allow')}
           </button>
           <button
             type="button"
@@ -163,7 +164,7 @@ function Consent({ id, req }: { id: string; req: ConnectRequest }) {
             onClick={() => void decide(false)}
             className="flex-1 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 disabled:opacity-40 px-3 py-2 text-xs font-mono text-neutral-100"
           >
-            Deny
+            {t('connect_decline')}
           </button>
         </div>
       </form>

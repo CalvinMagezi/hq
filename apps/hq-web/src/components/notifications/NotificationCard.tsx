@@ -9,7 +9,6 @@ import {
   Loader2,
   FileCode,
   AlertCircle,
-  Eye,
   Check,
   X,
 } from 'lucide-react'
@@ -76,7 +75,7 @@ export function NotificationCard({
               notification.kind
             )}`}
           >
-            {notification.kind.replace('_', ' ')}
+            {t(notification.kind === 'action_needed' ? 'inbox_badge_needs' : 'inbox_badge_update')}
           </span>
         </div>
 
@@ -99,7 +98,7 @@ export function NotificationCard({
                   : 'var(--text-dim, #888)',
             }}
           >
-            {notification.state}
+            {t(isPending ? 'inbox_tab_needs' : 'inbox_tab_done')}
           </span>
         </div>
       </div>
@@ -107,7 +106,9 @@ export function NotificationCard({
       {/* Title & Description */}
       <div className="mb-3.5">
         <h3 className="text-sm font-semibold text-white break-words group-hover:text-emerald-300 transition-colors">
-          {notification.title}
+          <button type="button" onClick={() => onSelect(notification)} className="text-left" aria-label={t('inbox_open_title', { title: notification.title })}>
+            {notification.title}
+          </button>
         </h3>
         <p className="text-xs text-neutral-400 mt-1 line-clamp-2 leading-relaxed">
           {notification.description}
@@ -116,14 +117,6 @@ export function NotificationCard({
 
       {/* Action Footer */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
-        <button
-          type="button"
-          onClick={() => onSelect(notification)}
-          className="text-xs text-neutral-400 hover:text-emerald-400 flex items-center gap-1.5 transition-colors"
-        >
-          <Eye className="w-3.5 h-3.5" />
-          <span>View Details & Diff</span>
-        </button>
 
         {dialog ? (
           <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
@@ -153,7 +146,7 @@ export function NotificationCard({
                 ) : (
                   <>
                     <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    Dismiss
+                    {t('inbox_clear')}
                   </>
                 )}
               </button>
@@ -162,7 +155,7 @@ export function NotificationCard({
         ) : (
           <div className="flex items-center gap-1.5 text-[11px] text-neutral-500">
             <CheckCircle2 className="w-3.5 h-3.5 text-neutral-400" />
-            <span>Resolved</span>
+            <span>{t('inbox_tab_done')}</span>
           </div>
         )}
       </div>

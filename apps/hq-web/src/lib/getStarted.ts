@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import type { ChatAppsStatus } from './chatAppsApi'
 import { HqHttpError } from './hqAuth'
 import type { PushState } from './webPush'
@@ -65,7 +66,7 @@ export function getStartedItems(s: GetStartedSignals): GetStartedItem[] {
       id: 'chat',
       title: 'Connect Telegram or Discord',
       detail: 'Talk to HQ from the chat app you already use. If you are ever signed out, send /login there for a new link.',
-      linkLabel: 'Chat apps',
+      linkLabel: t('row_messaging'),
       to: '/settings',
       hash: 'chat-apps',
       done: chatAppConnected(s.chatApps),

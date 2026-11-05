@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { agentName } from '~/lib/names'
 import { parseSqliteUtc, type TaskItem, type WorkSession } from '~/lib/tasksApi'
 
 const TICK_MS = 1000
@@ -60,7 +61,7 @@ export function WorkingNowPanel({ sessions, taskById, onSelect }: Props) {
                   <span className="block truncate text-xs text-neutral-100">{task?.title ?? s.task_id}</span>
                   <span className="block truncate text-[11px] text-neutral-500">
                     {s.actor}
-                    {s.harness ? ` on ${s.harness}` : ''}
+                    {s.harness ? ` · ${agentName(s.harness)}` : ''}
                     {s.branch ? `, ${s.branch}` : ''}
                   </span>
                 </span>

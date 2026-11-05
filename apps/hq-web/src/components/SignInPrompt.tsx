@@ -189,7 +189,7 @@ export function SignInPrompt() {
           Sign in to HQ
         </div>
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          {replacing ? 'This device was signed out, or the server no longer accepts its sign-in. ' : ''}
+          {replacing ? `${t('signin_replaced')} ` : ''}
           Open your HQ login link, enter a code from a device that is already signed in, or send{' '}
           <code className="font-mono">/login</code> to your HQ bot on Telegram or Discord.
         </p>

@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, X } from 'lucide-react'
@@ -97,7 +98,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <h2 id="new-agent-title" className="text-sm font-bold text-white">
-            New agent
+            {t('helpers_start_a_helper')}
           </h2>
           <button type="button" onClick={close} disabled={busy} aria-label="Close" className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
             <X className="w-4 h-4" />

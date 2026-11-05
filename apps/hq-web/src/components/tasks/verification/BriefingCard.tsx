@@ -1,3 +1,4 @@
+import { tn } from '~/strings'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle2, Hourglass, Undo2 } from 'lucide-react'
@@ -157,7 +158,7 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <p className="text-xs text-neutral-400 mr-auto">
             {b.open_audits > 0
-              ? `${b.open_audits} completed ${b.open_audits === 1 ? 'task is' : 'tasks are'} waiting for your agree or not.`
+              ? tn('briefing_audits_waiting', b.open_audits)
               : `${b.audit_pool} completed tasks nobody has checked yet.`}
           </p>
           {variant === 'tasks' && onAudit && (

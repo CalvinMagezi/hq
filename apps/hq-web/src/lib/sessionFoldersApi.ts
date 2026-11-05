@@ -1,5 +1,8 @@
 import { hqJson } from './hqAuth'
-import { clockTime } from './connectorApi'
+import { t } from '~/strings'
+import { agentName } from './names'
+import { dateByAge } from './time'
+import { unixToMs } from './connectorApi'
 
 export interface FolderGrant {
   id: number
@@ -22,11 +25,11 @@ export const revokeSessionFolder = (id: number) =>
   hqJson<{ revoked: number }>(`/api/session-folders/${encodeURIComponent(id)}`, 'DELETE')
 
 /** Formats the approved timestamp and requester for a folder grant row. */
-export function formatApprovedText(approvedAt: number, requestedBy: string): string {
-  return `approved ${clockTime(approvedAt)} for ${requestedBy}`
+export function formatApprovedText(approvedAt: number, requestedBy: string, nowMs: number = Date.now()): string {
+  return t('approved_when', { when: dateByAge(unixToMs(approvedAt), nowMs), name: agentName(requestedBy) })
 }
 
 /** Confirmation prompt before revoking access to a folder. */
 export function revokeConfirmMessage(path: string, host: string): string {
-  return `Stop allowing sessions in ${path} on ${host}?`
+  return `Stop allowing helpers in ${path} on ${host}?`
 }
