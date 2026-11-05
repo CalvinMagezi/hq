@@ -30,6 +30,10 @@ pub struct Settings {
     pub device_name: String,
     /// The `hq` program to run. Unset: next to the app, then `~/bin`, `/usr/local/bin`, `PATH`.
     pub hq_path: Option<PathBuf>,
+    /// Lend this computer's model (Ollama) to the hubs it is paired with. Off unless turned on.
+    pub share_model: bool,
+    /// The model hubs should use. Unset: the first one Ollama lists.
+    pub shared_model: Option<String>,
 }
 
 impl Default for Settings {
@@ -41,6 +45,8 @@ impl Default for Settings {
             relay: RELAY_NONE.into(),
             device_name: String::new(),
             hq_path: None,
+            share_model: false,
+            shared_model: None,
         }
     }
 }
@@ -122,6 +128,7 @@ mod tests {
     fn nothing_starts_by_default() {
         let s = Settings::default();
         assert!(!s.start_host_on_launch);
+        assert!(!s.share_model, "the model is not shared unless turned on");
         assert_eq!(s.relay, RELAY_NONE);
     }
 

@@ -212,6 +212,7 @@ impl Desktop {
             config: init.config.bridge.clone(),
             ws_port: init.config.ws_port,
         });
+        pairing.set_sharing(settings.share_model, settings.shared_model.clone());
         Ok(Self {
             dir: init.dir,
             settings: Mutex::new(settings),
@@ -289,6 +290,25 @@ impl Desktop {
     pub fn save_settings(&self, new: Settings) -> Result<()> {
         new.save(&self.dir)?;
         *self.settings.lock().unwrap() = new;
+        Ok(())
+    }
+
+    /// The model server and whether this computer lends it to its hubs.
+    pub async fn share_status(&self) -> crate::share::ShareView {
+        let (on, model) = self.pairing.sharing();
+        crate::share::probe(&self.pairing.model_server(), on, model).await
+    }
+
+    /// Turns sharing on or off at once, and keeps the choice for the next launch.
+    pub fn set_share(&self, on: bool, model: Option<String>) -> Result<()> {
+        let model = model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
+        let mut settings = self.settings();
+        settings.share_model = on;
+        settings.shared_model = model.clone();
+        self.save_settings(settings)?;
+        self.pairing.set_sharing(on, model);
         Ok(())
     }
 

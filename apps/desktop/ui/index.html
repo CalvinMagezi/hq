@@ -63,6 +63,18 @@
           <ul id="forwards" class="list"></ul>
         </div>
 
+        <div id="share-block" class="card">
+          <h3>Share this computer's model</h3>
+          <p class="muted">Lends the model this Mac runs in Ollama to the phone it is paired with as its hub, and to no other device. The phone uses it while it can reach this Mac and its own model when it cannot. Turning this off ends what the phone has open at once.</p>
+          <p class="row">
+            <label><input type="checkbox" id="share-on"> Share this computer's model</label>
+            <select id="share-model" aria-label="Model to share"></select>
+            <button type="button" id="share-check">Check again</button>
+          </p>
+          <p id="share-state" class="muted"></p>
+          <p id="share-warning" class="error" role="alert"></p>
+        </div>
+
         <h3>Paired devices</h3>
         <ul id="peers" class="list"></ul>
         <p id="peers-empty" class="muted">No devices paired yet.</p>

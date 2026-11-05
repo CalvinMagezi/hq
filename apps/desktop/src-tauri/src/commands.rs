@@ -10,6 +10,7 @@ use hq_desktop::{
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
     settings::Settings,
+    share::ShareView,
 };
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -42,6 +43,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         pairing_revoke,
         claude_status,
         claude_change,
+        share_status,
+        share_set,
     ]
 }
 
@@ -153,4 +156,15 @@ async fn claude_status(app: App<'_>) -> Reply<Vec<HubView>> {
 #[tauri::command]
 async fn claude_change(app: App<'_>, hub: String, add: bool) -> Reply<HubView> {
     app.claude_change(hub, add).await.map_err(shown)
+}
+
+#[tauri::command]
+async fn share_status(app: App<'_>) -> Reply<ShareView> {
+    Ok(app.share_status().await)
+}
+
+/// Lends this computer's model to its hubs, or stops at once.
+#[tauri::command]
+fn share_set(app: App<'_>, on: bool, model: Option<String>) -> Reply<()> {
+    app.set_share(on, model).map_err(shown)
 }

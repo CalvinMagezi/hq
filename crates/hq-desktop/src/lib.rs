@@ -14,6 +14,7 @@ pub mod pairing;
 pub mod proxy;
 pub mod qr;
 pub mod settings;
+pub mod share;
 pub mod window;
 
 pub use desktop::{Desktop, DesktopInit, Revoked};

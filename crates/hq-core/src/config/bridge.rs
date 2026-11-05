@@ -10,6 +10,10 @@ pub const MAX_SERVICE_NAME: usize = 32;
 /// host (`docs/PAIRING.md`, "Services and forwards").
 pub const HUB_WEB_SERVICE: &str = "web";
 pub const HUB_GATE_SERVICE: &str = "gate";
+/// The service a machine offers its model on, to its hubs only, when it shares the model.
+pub const SHARED_MODEL_SERVICE: &str = "llm";
+/// Where Ollama listens unless told otherwise.
+pub const DEFAULT_MODEL_SERVER: &str = "127.0.0.1:11434";
 
 /// What this machine offers its paired devices over the bridge, and which of theirs it reaches
 /// through local ports. Empty by default: nothing is offered and nothing is forwarded.
@@ -31,6 +35,37 @@ pub struct BridgeServicesConfig {
     /// Local ports that reach a paired device's service.
     #[serde(default)]
     pub forwards: Vec<BridgeForward>,
+
+    /// Lend this machine's model server to its hubs: the bridge offers it as the `llm` service,
+    /// which only a peer pairing set up as this machine's hub (or the peer of a configured
+    /// forward to a hub's `web`) may open. Unset: nothing is shared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_model: Option<ShareModel>,
+}
+
+/// The model server a machine lends to its hubs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ShareModel {
+    /// The server's loopback `ip:port` or socket path. Default: Ollama's `127.0.0.1:11434`.
+    #[serde(default = "default_model_server")]
+    pub to: String,
+    /// The model hubs should use. Unset: the first one the server lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+fn default_model_server() -> String {
+    DEFAULT_MODEL_SERVER.to_string()
+}
+
+impl Default for ShareModel {
+    fn default() -> Self {
+        Self {
+            to: default_model_server(),
+            model: None,
+        }
+    }
 }
 
 /// Where a service leads and who may open it: `name: addr` lets every paired device in,
@@ -211,6 +246,37 @@ impl BridgeServicesConfig {
         Ok(out)
     }
 
+    /// The shared model server's address, checked, when this machine shares its model. It may
+    /// not also be configured by hand under `services`.
+    pub fn shared_model(&self) -> Result<Option<DoorTarget>, String> {
+        let Some(share) = &self.share_model else {
+            return Ok(None);
+        };
+        if self.services.contains_key(SHARED_MODEL_SERVICE) {
+            return Err(format!(
+                "bridge.share_model and bridge.services.{SHARED_MODEL_SERVICE} both offer the model; keep one"
+            ));
+        }
+        if share.model.as_deref().is_some_and(|m| m.trim().is_empty()) {
+            return Err("bridge.share_model.model: leave it out or name a model".into());
+        }
+        match DoorListen::parse(Some(&share.to)) {
+            Ok(DoorListen::Tcp(addr)) => Ok(Some(DoorTarget::Tcp(addr))),
+            Ok(DoorListen::Unix(path)) => Ok(Some(DoorTarget::Unix(path))),
+            Ok(DoorListen::Default) => Err("bridge.share_model.to: an address is required".into()),
+            Err(e) => Err(format!("bridge.share_model.to: {e}")),
+        }
+    }
+
+    /// The machine ids of configured forwards to a hub's `web`: hubs set up by hand.
+    pub fn configured_hubs(&self) -> Vec<String> {
+        self.forwards
+            .iter()
+            .filter(|f| f.service == HUB_WEB_SERVICE)
+            .map(|f| f.peer.trim().to_string())
+            .collect()
+    }
+
     /// Where this machine reaches a paired hub's web app: the loopback address of the first
     /// forward to the `web` service. `None` when there is no such forward or the forwards are
     /// not valid.
@@ -377,6 +443,28 @@ mod tests {
             "forwards:\n  - peer: abc\n    service: llm\n    listen: 127.0.0.1:47600\n    when: lan\n"
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_shared_model_defaults_to_ollama_and_is_not_offered_twice() {
+        let plain = parse("share_model: {}\n");
+        assert_eq!(
+            plain.shared_model().unwrap(),
+            Some(DoorTarget::Tcp(DEFAULT_MODEL_SERVER.parse().unwrap()))
+        );
+        assert_eq!(plain.share_model.as_ref().unwrap().model, None);
+        assert_eq!(parse("").shared_model().unwrap(), None);
+        for bad in [
+            "share_model:\n  to: 0.0.0.0:11434\n",
+            "share_model:\n  model: \" \"\n",
+            "share_model: {}\nservices:\n  llm: 127.0.0.1:11434\n",
+        ] {
+            assert!(parse(bad).shared_model().is_err(), "{bad}");
+        }
+        let hubs = parse(
+            "forwards:\n  - peer: \" abc \"\n    service: web\n    listen: 127.0.0.1:47480\n  - peer: def\n    service: gate\n    listen: 127.0.0.1:47490\n",
+        );
+        assert_eq!(hubs.configured_hubs(), vec!["abc".to_string()]);
     }
 
     #[test]

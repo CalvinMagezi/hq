@@ -65,6 +65,10 @@ pub struct PairingController {
     /// The forwards' state, set and cleared with `host`.
     forward_views: Mutex<Vec<ForwardView>>,
     offered: Mutex<Vec<String>>,
+    /// Whether the bridge lends this computer's model to its hubs; flipped while it runs.
+    share: hq_bridge::ServiceSwitch,
+    /// The model hubs are told to use. Unset: the first one the server lists.
+    shared_model: Mutex<Option<String>>,
     session: Arc<Mutex<Session>>,
     changed: watch::Sender<u64>,
     on_revoked: Mutex<Option<hq_bridge::RevokeCallback>>,
@@ -203,6 +207,8 @@ impl PairingController {
             host: Mutex::new(None),
             forward_views: Mutex::new(Vec::new()),
             offered: Mutex::new(Vec::new()),
+            share: hq_bridge::ServiceSwitch::new(false),
+            shared_model: Mutex::new(None),
             session: Arc::default(),
             changed: watch::channel(0).0,
             on_revoked: Mutex::new(None),
@@ -221,6 +227,45 @@ impl PairingController {
     pub fn with_services(mut self, hub: HubServices) -> Self {
         self.hub = hub;
         self
+    }
+
+    /// Lends this computer's model to its hubs while the bridge is on, or stops at once: open
+    /// streams to the model end, as a revoke ends a peer's.
+    pub fn set_sharing(&self, on: bool, model: Option<String>) {
+        *self.shared_model.lock().unwrap() = model;
+        self.share.set(on);
+        self.bump();
+    }
+
+    pub fn sharing(&self) -> (bool, Option<String>) {
+        (
+            self.share.is_on(),
+            self.shared_model.lock().unwrap().clone(),
+        )
+    }
+
+    /// The model server the bridge lends: the config's `share_model.to`, else Ollama's address.
+    pub fn model_server(&self) -> String {
+        self.hub
+            .config
+            .share_model
+            .as_ref()
+            .map(|s| s.to.clone())
+            .unwrap_or_else(|| hq_core::config::DEFAULT_MODEL_SERVER.to_string())
+    }
+
+    /// The config the bridge starts with: the owner's, plus the shared model behind the switch
+    /// unless the owner already offers an `llm` service by hand.
+    fn bridge_config(&self) -> hq_core::config::BridgeServicesConfig {
+        let mut config = self.hub.config.clone();
+        let by_hand = config
+            .services
+            .contains_key(hq_core::config::SHARED_MODEL_SERVICE);
+        if !by_hand {
+            let share = config.share_model.get_or_insert_with(Default::default);
+            share.model = self.shared_model.lock().unwrap().clone();
+        }
+        config
     }
 
     /// Ticks whenever the screen should read the snapshot again.
@@ -254,7 +299,17 @@ impl PairingController {
             if let Some(dir) = self.cfg.key.parent() {
                 crate::settings::create_private_dir(dir)?;
             }
-            let services = services_from_config(&self.hub.config, self.hub.ws_port)?;
+            let mut services = services_from_config(&self.bridge_config(), self.hub.ws_port)?;
+            if let Some(services) = services.as_mut()
+                && services
+                    .hubs_only
+                    .contains_key(hq_core::config::SHARED_MODEL_SERVICE)
+            {
+                services.switches.insert(
+                    hq_core::config::SHARED_MODEL_SERVICE.to_string(),
+                    self.share.clone(),
+                );
+            }
             let offered: Vec<String> = services
                 .as_ref()
                 .map(|s| s.targets.keys().cloned().collect())
@@ -468,7 +523,16 @@ impl PairingController {
         PairingSnapshot {
             running: host.is_some(),
             host,
-            services: self.offered.lock().unwrap().clone(),
+            services: self
+                .offered
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|name| {
+                    name.as_str() != hq_core::config::SHARED_MODEL_SERVICE || self.share.is_on()
+                })
+                .cloned()
+                .collect(),
             forwards: self.forward_views.lock().unwrap().clone(),
             ticket: session.ticket.as_ref().map(|t| t.view.clone()),
             pending: session.pending.iter().map(pending_view).collect(),

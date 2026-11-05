@@ -24,6 +24,8 @@
     "allow-pairing-revoke",
     "allow-claude-status",
     "allow-claude-change",
+    "allow-share-status",
+    "allow-share-set",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

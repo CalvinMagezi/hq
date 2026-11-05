@@ -21,6 +21,8 @@ const COMMANDS: &[&str] = &[
     "pairing_revoke",
     "claude_status",
     "claude_change",
+    "share_status",
+    "share_set",
 ];
 
 fn main() {
