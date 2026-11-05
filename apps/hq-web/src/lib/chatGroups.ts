@@ -27,3 +27,8 @@ export function groupChats<T extends { updatedAt: number }>(chats: T[], now: num
   }
   return groups.filter((g) => g.items.length > 0)
 }
+
+/** A chat that was started by voice: its first saved question carries the spoken mark. */
+export function isSpokenThread(messages: { role: string; spoken?: boolean }[] | undefined): boolean {
+  return messages?.find((m) => m.role === 'user')?.spoken === true
+}

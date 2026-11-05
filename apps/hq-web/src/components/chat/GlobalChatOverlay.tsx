@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { t } from '~/strings'
 import { useHQStore } from '~/store/hqStore'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { ChatView } from './ChatView'
@@ -25,7 +26,7 @@ export function GlobalChatOverlay() {
     <div
       className={`fixed inset-0 z-[150] pad-safe-top pb-[var(--safe-bottom)] bg-neutral-950/95 backdrop-blur-2xl ${open ? '' : 'hidden'}`}
       role="dialog"
-      aria-label="Chat"
+      aria-label={t('chat_sheet_aria')}
       aria-hidden={!open}
     >
       <ChatView active={open} onClose={() => setOpen(false)} />

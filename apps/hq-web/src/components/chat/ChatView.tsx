@@ -24,6 +24,7 @@ import { useDraft } from './draftStore'
 import { useFileDrop } from './useFileDrop'
 import { useThreadSessions } from './useThreadSessions'
 import { SessionsPanel } from './SessionsPanel'
+import { ChatApprovals } from './ChatApprovals'
 
 const FOCUS_DELAY_MS = 50
 const SIDEBAR_COLLAPSED_KEY = 'hq.chat.sidebarCollapsed'
@@ -68,6 +69,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
   const connState = useSharedConnection()
   const banner = bannerKey(connState, isSharedComputer())
   const outboxChat = useChatOutbox(activeThreadId)
+  const waitingForOwner = useThreadStore((s) => (activeThreadId ? s.waiting[activeThreadId] === true : false))
 
   const [loadingThreads, setLoadingThreads] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -320,6 +322,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
             busy={watched.busy}
             onDrive={(id, drive) => void watched.setDrive(id, drive)}
             onUnwatch={(id) => void watched.unwatch(id)}
+            onArchive={activeThreadId ? () => void archiveThread(activeThreadId) : undefined}
           />
         )}
 
@@ -331,6 +334,8 @@ export function ChatView({ active, onClose, threadId }: Props) {
           onRegenerate={regenerate}
           onPick={(text) => draft.setText(text)}
         />
+
+        <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} />
 
         <OutboxGroup
           entries={outboxChat.entries}

@@ -123,17 +123,17 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
             </span>
             <span className="flex items-center gap-3">
               {onEdit && (
-                <button type="button" onClick={onEdit} className={ACTION_BUTTON} title="Edit and resend">
+                <button type="button" onClick={onEdit} className={ACTION_BUTTON} title={t('chat_edit_resend')} aria-label={t('chat_edit_resend')}>
                   <Pencil className="w-3.5 h-3.5" />
                 </button>
               )}
               {onRegenerate && (
-                <button type="button" onClick={onRegenerate} className={ACTION_BUTTON} title="Regenerate this reply">
+                <button type="button" onClick={onRegenerate} className={ACTION_BUTTON} title={t('chat_regenerate')} aria-label={t('chat_regenerate')}>
                   <RotateCw className="w-3.5 h-3.5" />
                 </button>
               )}
               {message.content && (
-                <button type="button" onClick={handleCopy} className={ACTION_BUTTON} title="Copy message">
+                <button type="button" onClick={handleCopy} className={ACTION_BUTTON} title={copied ? t('chat_copied') : t('chat_copy')} aria-label={t('chat_copy')}>
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               )}
@@ -151,10 +151,10 @@ function McpLabel({ caller }: { caller: string }) {
     <div
       className="flex items-center gap-1.5 mb-1.5 text-[11px] min-w-0"
       style={{ color: 'var(--text-dim)' }}
-      title="Asked through HQ's MCP endpoint by an outside client"
+      title={t('chat_via_mcp_title')}
     >
       <Plug className="w-3 h-3 shrink-0" />
-      <span className="truncate">via MCP: {caller}</span>
+      <span className="truncate">{t('chat_via_mcp', { caller })}</span>
     </div>
   )
 }
@@ -166,14 +166,14 @@ function DriverLabel({ driver }: { driver: DriverMeta }) {
     <div
       className="flex items-center gap-1.5 mb-1.5 text-[11px] min-w-0"
       style={{ color: 'var(--text-dim)' }}
-      title={drove ? 'HQ acted in this session on your behalf' : 'An update from a session this chat watches'}
+      title={drove ? t('chat_helper_acted') : t('chat_helper_update')}
     >
       <Terminal className="w-3 h-3 shrink-0" />
       <span className="truncate">
-        Session {driver.sessionId}
+        {t('chat_helper_label', { id: driver.sessionId })}
         {driver.reason && ` · ${driver.reason}`}
       </span>
-      {drove && <span className="shrink-0" style={{ color: 'var(--accent-amber)' }}>HQ acted for you</span>}
+      {drove && <span className="shrink-0" style={{ color: 'var(--accent-amber)' }}>{t('chat_acted_for_you')}</span>}
     </div>
   )
 }
