@@ -105,7 +105,7 @@ bridge helper and the `hq` child reread the config.
 | T2 | A turn that uses tools (for example "list my open tasks") | Tool calls run normally | Whether the model's tool calls parsed |
 | T3 | Path type during T1 | `direct` | From the phone app's `keep` trace (`adb shell am start ... --es keep <laptop id>`, then `adb logcat`) |
 | T4 | Phone on mobile data, laptop on home Wi-Fi | Still served by the laptop, path `relay` | Latency difference from T1, data used on the phone for one turn |
-| T5 | Close the laptop lid, then chat | Falls back to `cloud` | **How long the fallback takes.** The forward accepts the local connection and then spends up to 20 s dialing (`DIAL_TIMEOUT` in `services.rs`), so expect a long stall |
+| T5 | Laptop bridge stopped. The phone-side measurement was not usable (the shell's `sleep` set its length). Measured instead in `crates/hq-bridge/tests/services.rs` with two real endpoints: a peer that is gone holds every request for 20 s (`DIAL_TIMEOUT`), one that stays connected but silent, like a closed lid, for 10 s (`HEADER_TIMEOUT`), and every request waits again because the backend chain does not remember a failed backend. Fixed by `fail_fast_secs` (#402). |
 | T6 | Quit Ollama but keep the laptop awake | Falls back to `cloud` | Time to fall back (the service answers "down", which should be fast) |
 | T7 | From another app on the phone (for example a terminal app), `curl http://127.0.0.1:47600/v1/models` | Today: it answers | Confirms gap 3 below |
 
@@ -157,7 +157,7 @@ Each is a small, focused PR with tests. Order by what test zero shows hurts most
 2. **Fast failover.** A request should not wait 20 s for a laptop that is gone. Options: the
    backend chain asks the bridge whether the peer is reachable before choosing that link, or forwards
    for model services use a short dial timeout and close the local connection at once on failure so
-   the HTTP client errors immediately. Test zero measured a stall of at least 35 s (two 20 s dials).
+   the HTTP client errors immediately. Measured: 20 s per request for a peer that is gone, 10 s for one that went silent. Done in #402 as `fail_fast_secs`: the first request pays it (3 s suggested), later ones fail over at once.
    Target: fallback within 2 s of the laptop being unreachable.
 3. **The forward is open to every app on the phone.** `docs/security/PAIRING.md` S8 accepts that any
    local process can use a forward and says to use forwards on single-user machines. Android is not
