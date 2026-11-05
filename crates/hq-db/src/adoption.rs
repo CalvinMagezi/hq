@@ -73,7 +73,9 @@ pub struct UserMessage {
 }
 
 /// How `hq_ask` marks the question it saves (`meta.source.kind`).
-const CLIENT_SOURCE_SQL: &str = "COALESCE(json_extract(meta, '$.source.kind'), '') = 'mcp'";
+/// A malformed `meta` reads as "not a client's question" instead of failing the query.
+const CLIENT_SOURCE_SQL: &str = "COALESCE(CASE WHEN json_valid(meta) \
+     THEN json_extract(meta, '$.source.kind') END, '') = 'mcp'";
 
 fn parse_time(raw: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(raw)
@@ -269,6 +271,12 @@ mod tests {
             assert_eq!(all.len(), 3);
             assert!(all[0].from_client);
             assert_eq!(persons_own(all).len(), 2);
+            c.execute(
+                "INSERT INTO chat_messages (message_id, thread_id, role, content, created_at, meta)
+                 VALUES ('bad', 't', 'user', 'broken meta', ?1, 'not json')",
+                params![rfc3339(NOW - 2 * DAY_SECS)],
+            )?;
+            assert_eq!(user_messages_since(c, NOW - 5 * DAY_SECS)?.len(), 4);
             let recent = user_messages_since(c, NOW - DAY_SECS)?;
             assert_eq!(recent.len(), 1);
             assert_eq!(recent[0].at, NOW - 60);
