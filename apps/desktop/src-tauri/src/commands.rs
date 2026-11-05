@@ -8,7 +8,8 @@ use hq_desktop::{
     agents::AgentsView,
     chooser::Picked,
     claude::HubView,
-    desktop::{HostLog, HubReport},
+    desktop::{HelpersReport, HostLog, HubReport},
+    helpers::TryOutcome,
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
     settings::Settings,
@@ -45,8 +46,14 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         pairing_submit,
         pairing_decline,
         pairing_revoke,
-        claude_status,
-        claude_change,
+        helpers_list,
+        helpers_check,
+        helper_try,
+        helper_try_stop,
+        helper_connect,
+        helper_disconnect,
+        helper_restore,
+        helper_signin,
     ]
 }
 
@@ -180,13 +187,63 @@ async fn pairing_revoke(app: App<'_>, id: String) -> Reply<Revoked> {
     app.revoke(&id).await.map_err(shown)
 }
 
+/// Every helper and where it stands. Reads state and runs nothing.
 #[tauri::command]
-async fn claude_status(app: App<'_>) -> Reply<Vec<HubView>> {
-    app.claude_status().await.map_err(shown)
+async fn helpers_list(app: App<'_>) -> Reply<HelpersReport> {
+    Ok(app.helpers_list().await)
 }
 
-/// Adds a paired hub to Claude Code and Claude Desktop, or removes it.
+/// Checks one helper (or all found) in a sandbox; `again` forgets earlier answers first.
 #[tauri::command]
-async fn claude_change(app: App<'_>, hub: String, add: bool) -> Reply<HubView> {
-    app.claude_change(hub, add).await.map_err(shown)
+async fn helpers_check(
+    app: App<'_>,
+    id: Option<String>,
+    again: Option<bool>,
+) -> Reply<HelpersReport> {
+    Ok(app.helpers_check(id, again.unwrap_or(false)).await)
+}
+
+/// Starts a helper in the Try it folder. `confirmed` is required for general-purpose helpers.
+#[tauri::command]
+async fn helper_try(
+    app: App<'_>,
+    id: String,
+    confirmed: Option<bool>,
+    signin: Option<bool>,
+) -> Reply<TryOutcome> {
+    app.helper_try(&id, confirmed.unwrap_or(false), signin.unwrap_or(false))
+        .await
+        .map_err(shown)
+}
+
+#[tauri::command]
+async fn helper_try_stop(app: App<'_>) -> Reply<()> {
+    app.helper_try_stop().await.map_err(shown)
+}
+
+/// Connects a helper to HQ on this computer, or (Claude only) to a paired hub.
+#[tauri::command]
+async fn helper_connect(app: App<'_>, id: String, hub: Option<String>) -> Reply<Option<HubView>> {
+    app.helper_connect(&id, hub, true).await.map_err(shown)
+}
+
+#[tauri::command]
+async fn helper_disconnect(
+    app: App<'_>,
+    id: String,
+    hub: Option<String>,
+) -> Reply<Option<HubView>> {
+    app.helper_connect(&id, hub, false).await.map_err(shown)
+}
+
+/// Undoes the last disconnect of this helper, within ten minutes.
+#[tauri::command]
+fn helper_restore(app: App<'_>, id: String) -> Reply<()> {
+    app.helper_restore(&id).map_err(shown)
+}
+
+/// Copies a helper's held sign-in link, or opens it when `open` and it is on the helper's own site.
+#[tauri::command]
+fn helper_signin(app: App<'_>, id: String, open: Option<bool>) -> Reply<()> {
+    app.helper_signin(&id, open.unwrap_or(false)).map_err(shown)
 }

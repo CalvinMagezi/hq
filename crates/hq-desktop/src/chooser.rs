@@ -39,7 +39,7 @@ pub struct Picked {
 
 /// Whether anyone but the owner could swap this path for another program: the path or any
 /// folder above it (as written, and as it resolves) is writable by everyone.
-fn world_writable(path: &Path) -> bool {
+pub(crate) fn world_writable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     // A sticky shared folder such as /tmp still lets anyone add a file, so it counts.
     let open = |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.permissions().mode() & 0o002 != 0);

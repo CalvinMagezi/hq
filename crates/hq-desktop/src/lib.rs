@@ -10,6 +10,7 @@ pub mod agents;
 pub mod chooser;
 pub mod claude;
 pub mod desktop;
+pub mod helpers;
 pub mod host;
 pub mod notice;
 pub mod pairing;

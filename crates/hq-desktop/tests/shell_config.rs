@@ -139,6 +139,27 @@ fn only_the_control_window_has_a_capability_and_it_grants_exactly_the_app_comman
         .filter_map(|p| p.strip_prefix("allow-"))
         .map(|c| c.replace('-', "_"))
         .collect();
+    for command in [
+        "helpers_list",
+        "helpers_check",
+        "helper_try",
+        "helper_try_stop",
+        "helper_connect",
+        "helper_disconnect",
+        "helper_restore",
+        "helper_signin",
+    ] {
+        assert!(
+            app_permissions.contains(command),
+            "{command} is not granted"
+        );
+    }
+    for folded in ["claude_status", "claude_change"] {
+        assert!(
+            !app_permissions.contains(folded),
+            "{folded} was folded away"
+        );
+    }
     let others: BTreeSet<&str> = granted
         .iter()
         .filter(|p| !p.starts_with("allow-"))

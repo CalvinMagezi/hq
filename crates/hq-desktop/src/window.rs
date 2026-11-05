@@ -50,6 +50,25 @@ pub fn browser_target(url: &str, origin: &str) -> Option<String> {
     Url::parse(url).ok().map(String::from)
 }
 
+/// The sign-in link the system browser may open for one helper: https, no user name, no control
+/// characters, and a host that is one of the helper's own sites or a subdomain of one.
+pub fn signin_target(helper: &str, link: &str) -> Option<String> {
+    if link
+        .chars()
+        .any(|c| c == '\\' || c.is_control() || c.is_whitespace())
+    {
+        return None;
+    }
+    let sites = crate::helpers::find_spec(helper)?.sites;
+    let url = Url::parse(link).ok()?;
+    let host = url.host_str()?;
+    let own = sites
+        .iter()
+        .any(|s| host == *s || host.strip_suffix(s).is_some_and(|h| h.ends_with('.')));
+    (url.scheme() == "https" && url.username().is_empty() && url.password().is_none() && own)
+        .then(|| String::from(url))
+}
+
 /// The title of the control window.
 pub const CONTROL_TITLE: &str = "HQ Hub";
 
@@ -89,6 +108,20 @@ mod tests {
     use super::*;
 
     const ORIGIN: &str = "http://127.0.0.1:47474";
+
+    #[test]
+    fn a_sign_in_link_opens_only_on_the_helpers_own_site() {
+        let ok = |h, l| signin_target(h, l).is_some();
+        assert!(ok("claude-code", "https://claude.ai/login?x=1"));
+        assert!(ok("claude-code", "https://console.anthropic.com/oauth"));
+        assert!(!ok("claude-code", "http://claude.ai/login"));
+        assert!(!ok("claude-code", "https://claude.ai.evil.example/"));
+        assert!(!ok("claude-code", "https://evilclaude.ai/"));
+        assert!(!ok("claude-code", "https://claude.ai@evil.example/"));
+        assert!(!ok("claude-code", "https://auth.openai.com/"));
+        assert!(!ok("pi", "https://claude.ai/"));
+        assert!(!ok("nobody", "https://claude.ai/"));
+    }
 
     #[test]
     fn the_control_window_stays_on_its_bundled_page() {

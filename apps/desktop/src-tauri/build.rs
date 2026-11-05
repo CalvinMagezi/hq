@@ -22,8 +22,14 @@ const COMMANDS: &[&str] = &[
     "pairing_submit",
     "pairing_decline",
     "pairing_revoke",
-    "claude_status",
-    "claude_change",
+    "helpers_list",
+    "helpers_check",
+    "helper_try",
+    "helper_try_stop",
+    "helper_connect",
+    "helper_disconnect",
+    "helper_restore",
+    "helper_signin",
 ];
 
 fn main() {

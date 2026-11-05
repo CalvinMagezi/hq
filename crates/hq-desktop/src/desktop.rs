@@ -3,6 +3,7 @@
 use crate::agents;
 use crate::chooser;
 use crate::claude;
+use crate::helpers;
 use crate::host::{self, HostController, HostSpec};
 use crate::pairing::{HubServices, PairingConfig, PairingController};
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
@@ -170,6 +171,21 @@ pub struct Desktop {
     hq_problem: Option<String>,
     proxy: AsyncMutex<Option<ProxyHandle>>,
     upstream: SocketAddr,
+    helpers: Arc<helpers::Helpers>,
+    /// The helper being tried and its pane in the host.
+    trying: Mutex<Option<(String, String)>>,
+    latest: Mutex<std::collections::HashMap<&'static str, String>>,
+}
+
+/// Everything the Helpers tab and a helper's page show.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HelpersReport {
+    pub helpers: Vec<helpers::HelperView>,
+    pub hubs: Vec<claude::HubView>,
+    pub host_up: bool,
+    pub locked: bool,
+    pub looks_for_updates: bool,
+    pub try_it_dir: PathBuf,
 }
 
 /// The paired hub's web forward is not this app's own, so the window is not opened on it.
@@ -292,6 +308,9 @@ impl Desktop {
             hq_problem,
             proxy: AsyncMutex::new(None),
             upstream,
+            helpers: Arc::new(helpers::Helpers::new()),
+            trying: Mutex::new(None),
+            latest: Mutex::new(Default::default()),
         })
     }
 
@@ -306,15 +325,210 @@ impl Desktop {
             })
     }
 
-    /// Every paired hub and what Claude Code and Claude Desktop hold for it.
-    pub async fn claude_status(&self) -> Result<Vec<claude::HubView>> {
-        self.with_claude(claude::views).await
+    fn home(&self) -> PathBuf {
+        dirs::home_dir().unwrap_or_default()
     }
 
-    /// Adds a paired hub to Claude Code and Claude Desktop, or takes it out.
-    pub async fn claude_change(&self, hub: String, add: bool) -> Result<claude::HubView> {
-        self.with_claude(move |db, t| claude::change(db, t, &hub, add))
-            .await
+    fn search_dirs(&self) -> Vec<PathBuf> {
+        let path = std::env::var_os("PATH");
+        helpers::search_dirs(Some(&self.home()), path.as_deref())
+    }
+
+    fn try_dir(&self) -> PathBuf {
+        self.settings()
+            .try_it_dir
+            .unwrap_or_else(|| self.dir.join("try-it"))
+    }
+
+    /// Every helper and where it stands, read without running anything.
+    pub async fn helpers_list(&self) -> HelpersReport {
+        let trying = self.trying.lock().unwrap().as_ref().map(|t| t.0.clone());
+        let latest = self.latest.lock().unwrap().clone();
+        let seen = self.dir.join("seen-helpers");
+        let views = self.helpers.list(
+            &self.search_dirs(),
+            &self.home(),
+            &latest,
+            trying.as_deref(),
+            &seen,
+        );
+        let hubs = self.with_claude(claude::views).await.unwrap_or_default();
+        let settings = self.settings();
+        let dir = hq_core::config::native_host_dir();
+        let host_up = self.agents().await.reachable;
+        HelpersReport {
+            helpers: views,
+            hubs,
+            host_up,
+            locked: hq_host::read_lockdown(&dir).is_some(),
+            looks_for_updates: settings.look_for_helper_updates,
+            try_it_dir: self.try_dir(),
+        }
+    }
+
+    /// Checks one helper, or every one found when `id` is none and `again` clears what was learned.
+    pub async fn helpers_check(&self, id: Option<String>, again: bool) -> HelpersReport {
+        if again {
+            self.helpers.checker.forget_all();
+        }
+        let dirs = self.search_dirs();
+        let mut jobs = Vec::new();
+        for s in helpers::SPECS
+            .iter()
+            .filter(|s| id.as_deref().is_none_or(|i| i == s.id))
+        {
+            if let helpers::Found::At(p) = helpers::locate(s.program, &dirs) {
+                let c = self.helpers.checker.clone();
+                jobs.push(tokio::spawn(async move { c.check(p).await }));
+            }
+        }
+        for j in jobs {
+            let _ = j.await;
+        }
+        let report = self.helpers_list().await;
+        self.helpers
+            .remember(&report.helpers, &self.dir.join("seen-helpers"));
+        if self.settings().look_for_helper_updates {
+            self.look_for_updates(&report.helpers).await;
+            return self.helpers_list().await;
+        }
+        report
+    }
+
+    /// Asks the npm registry for the newest version, and only when the person turned that on.
+    async fn look_for_updates(&self, views: &[helpers::HelperView]) {
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        else {
+            return;
+        };
+        for v in views.iter().filter(|v| v.version.is_some()) {
+            let Some(pkg) = helpers::find_spec(v.id).and_then(|s| s.package) else {
+                continue;
+            };
+            let url = format!("https://registry.npmjs.org/{pkg}/latest");
+            let Ok(r) = client.get(url).send().await else {
+                continue;
+            };
+            if let Ok(j) = r.json::<serde_json::Value>().await
+                && let Some(ver) = j.get("version").and_then(|x| x.as_str())
+            {
+                self.latest.lock().unwrap().insert(v.id, ver.to_string());
+            }
+        }
+    }
+
+    /// Starts a helper in the Try it folder. Hermes and OpenClaw start only when `confirmed`.
+    pub async fn helper_try(
+        &self,
+        id: &str,
+        confirmed: bool,
+        signin: bool,
+    ) -> Result<helpers::TryOutcome> {
+        let Some(spec) = helpers::find_spec(id) else {
+            bail!("That helper is not known.");
+        };
+        let locked = hq_host::read_lockdown(&hq_core::config::native_host_dir()).is_some();
+        helpers::may_start(spec, confirmed, locked).map_err(|e| anyhow::anyhow!(e))?;
+        let helpers::Found::At(program) = helpers::locate(spec.program, &self.search_dirs()) else {
+            bail!("That program was not found.");
+        };
+        let dir = self.try_dir();
+        if !helpers::safe_try_dir(&dir, &self.home()) {
+            bail!("The Try it folder is not a safe place. Choose another in Settings.");
+        }
+        self.helper_try_stop().await?;
+        let cfg = self.config.agent_host.clone();
+        let wait = std::time::Duration::from_secs(cfg.launch_bound_secs.clamp(5, 60));
+        let sandbox = helpers::sandbox_plan(spec, &dir, &cfg);
+        let host_dir = hq_core::config::native_host_dir();
+        let (name, outcome, link) = tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&dir)?;
+            helpers::empty_dir(&dir)?;
+            helpers::try_through_host(&host_dir, spec, &program, &dir, sandbox, wait)
+        })
+        .await??;
+        self.helpers.set_link(if signin { link } else { None });
+        *self.trying.lock().unwrap() = Some((id.to_string(), name));
+        Ok(outcome)
+    }
+
+    /// Ends the try, removes its pane and empties the Try it folder.
+    pub async fn helper_try_stop(&self) -> Result<()> {
+        let taken = self.trying.lock().unwrap().take();
+        self.helpers.set_link(None);
+        let dir = self.try_dir();
+        let home = self.home();
+        let host_dir = hq_core::config::native_host_dir();
+        tokio::task::spawn_blocking(move || {
+            if let Some((_, name)) = taken {
+                helpers::stop_through_host(&host_dir, &name);
+            }
+            if helpers::safe_try_dir(&dir, &home) && dir.is_dir() {
+                let _ = helpers::empty_dir(&dir);
+            }
+        })
+        .await?;
+        Ok(())
+    }
+
+    /// Copies the held sign-in link, or opens it when it is on the helper's own site.
+    pub fn helper_signin(&self, id: &str, open: bool) -> Result<()> {
+        let Some(link) = self.helpers.link() else {
+            bail!("There is no sign-in link yet.");
+        };
+        let Some(target) = window::signin_target(id, &link) else {
+            bail!("That link is not on this helper's own sign-in site, so it was not opened.");
+        };
+        let status = if open {
+            std::process::Command::new("/usr/bin/open")
+                .arg(&target)
+                .status()
+        } else {
+            use std::io::Write;
+            let mut c = std::process::Command::new("/usr/bin/pbcopy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()?;
+            c.stdin.take().map(|mut i| i.write_all(target.as_bytes()));
+            c.wait()
+        };
+        if status?.success() {
+            Ok(())
+        } else {
+            bail!("The system could not do that.")
+        }
+    }
+
+    /// Connects or disconnects a helper, on this computer or (Claude only) for a paired hub.
+    pub async fn helper_connect(
+        &self,
+        id: &str,
+        hub: Option<String>,
+        on: bool,
+    ) -> Result<Option<claude::HubView>> {
+        if let Some(hub) = hub {
+            if !matches!(id, "claude-code" | "claude-desktop") {
+                bail!("Only Claude can be added to a paired hub.");
+            }
+            return self
+                .with_claude(move |db, t| claude::change(db, t, &hub, on))
+                .await
+                .map(Some);
+        }
+        let (id, hq, home) = (
+            id.to_string(),
+            claude::hq_program(&self.program())?,
+            self.home(),
+        );
+        let h = self.helpers.clone();
+        let result = tokio::task::spawn_blocking(move || h.connect(&id, &hq, &home, on)).await?;
+        result.map(|_| None)
+    }
+
+    /// Undoes a disconnect, within ten minutes and only if nothing changed the files since.
+    pub fn helper_restore(&self, id: &str) -> Result<()> {
+        self.helpers.restore(id)
     }
 
     async fn with_claude<T: Send + 'static>(

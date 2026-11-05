@@ -40,6 +40,7 @@ must be green on that exact tag before anything is published.
       keystore job runs Gradle and has no minisign key; the job that holds the minisign key runs no
       build code. Plan: before 2027, register the app id and this signing key in Google's Android
       developer verification (not enforced in Uganda earlier), and keep the key for the life of the id.
+- [ ] **Helper install lines.** The install line each helper row shows in HQ Hub (`crates/hq-desktop/src/helpers.rs`, `SPECS`) ships with HQ. Check each against the helper's own page before the release; helpers without a line must still have none.
 - [ ] **Personal defaults.** No owner-specific hostnames, paths or endpoints
       in default config.
 

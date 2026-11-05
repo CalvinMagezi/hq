@@ -16,7 +16,7 @@ Pairing itself: [PAIRING.md](PAIRING.md).
 |---|---|
 | This computer | What HQ is doing on this computer, in one card: working, ready, slow to start, stopped (with what the log says), locked after too many starts, or waiting on a held port. Start, Open HQ, Stop (a red confirmation when helpers are working, a green one otherwise) and Restart for a slow start. A switch that starts HQ when HQ Hub opens, the `hq` program in use with **Change…** (a file panel, or a pasted path), and the log of the last run with Copy details. A locked host is cleared with **Allow helpers again**, which runs `hq host unlock`. |
 | Devices | Switch the app on for paired devices, show a pairing code (QR and the `hqpair://` link), type the six digits the other device shows, list paired devices, revoke one. While the app is on it also lists what it shares with paired devices and the forwards it opened, with "running elsewhere" for a forward whose port another process already holds. |
-| Helpers | The coding helpers on this computer, the ones waiting for you first, with a count on the tab. Below them the Claude entries (see "Using HQ in Claude"). A helper that needs you also raises a macOS notice, "AgentHQ · HQ Hub", once per blocked helper. |
+| Helpers | The coding helpers on this computer, the ones waiting for you first, with a count on the tab. Each helper has its own page (see "Helpers"). A helper that needs you also raises a macOS notice, "AgentHQ · HQ Hub", once per blocked helper. |
 
 The app is named AgentHQ in the Dock and Finder, and its control window is titled HQ Hub. The HQ window is
 titled HQ, or "HQ · HQ on your phone" while a phone is the hub. HQ Hub opens `/`, `/chat`,
@@ -101,17 +101,31 @@ Devices on the same network pair directly. The relay setting defaults to `none`;
 data needs a relay (`relay` in settings: `default` for n0's public relays, which are for development
 and testing only, or a relay URL you run).
 
-## Using HQ in Claude
+## Helpers
 
-The Claude section of the Helpers tab lists each hub this computer is paired with and whether Claude Code and Claude
-Desktop hold it. **Add** writes the entries `hq claude add` does (`docs/PAIRING.md`, "Using HQ in
-Claude") and **Remove** takes out only those. It reads Claude when it opens and after a
-change, not on the three-second refresh, because reading Claude Code runs its program.
+The Helpers tab lists the nine coding helpers, the two general helpers and Claude Desktop, with each one's version and
+what it needs from you. Nothing runs until you press **Check this computer** once. A check reads the version from the
+program's package file when there is one, and otherwise runs the program's version line once, closed off, with no
+network and a two-second limit. Two checks run at a time and each answer is remembered by the program's path, size and
+modified time; **Check all again** forgets them. Where a platform has no sandbox the version stays unknown and nothing is
+run. A program in a folder others can write to is shown as "Program not found" and is never run.
 
-Claude Desktop is told to start `hq`, so the app needs that program's absolute path: the one the
-Start button uses (see "Finding `hq`" below). When it
-cannot find one, Add says so instead of writing a bare `hq`. **Revoke** on a device removes its
-entries in Claude before it revokes.
+A helper's page has:
+
+- **Connected to HQ**: Connect and Remove the connection write what `hq mcp install` and `hq mcp remove` write for that
+  helper. Remove offers **Undo** for ten minutes, restoring the files byte for byte if nothing else changed them. For a
+  paired hub, Claude Code and Claude Desktop also list each hub (what `hq claude add` writes).
+- **Try it**: starts the helper through HQ's host in one fixed folder (`~/.hq/desktop/try-it`, emptied before and after),
+  sends it no prompt, and stops it. A question on its screen is never answered for it, except the folder-trust question
+  for Antigravity. A general helper asks you first, and Try it is off while helpers are stopped.
+- **Sign in**: keeps the helper open for up to ten minutes. The link is read from its screen inside the app and never
+  reaches the page. **Copy sign-in link** copies it; **Open the sign-in page** opens it only when it is `https` and on
+  that helper's own sign-in site.
+- The install line for helpers that have one. HQ Hub never runs an installer.
+
+Claude Desktop is told to start `hq`, so the app needs that program's absolute path: the one the Start button uses (see
+"Finding `hq`" below). Removing a paired device removes its entries in Claude first, and says so if one could not be
+taken out.
 
 ## Settings
 
