@@ -8,6 +8,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import example.hq.spike.R
 import example.hq.spike.data.ChatConnection
+import example.hq.spike.data.StoredMessage
+import example.hq.spike.data.HqServices
+import example.hq.spike.data.HqStatus
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import example.hq.spike.download.DlState
 import example.hq.spike.download.Downloads
 import example.hq.spike.download.LargeDownload
@@ -21,28 +26,57 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class VoicePhase { NeedsModel, Downloading, ModelReady, Preparing, Listening, Thinking, LookingUp, Answering, Idle }
+enum class VoicePhase { NeedsModel, Downloading, ModelReady, Preparing, Listening, Thinking, LookingUp, Answering, Idle, MicNeeded, MicBlocked, Stopped, WaitingForHq }
 
 data class VoiceState(
     val phase: VoicePhase = VoicePhase.Idle,
     val heard: String = "",
     val reply: String = "",
     val problem: String? = null,
+    /** The silent tries in a row, so a second one can say more than the first. */
+    val silent: Int = 0,
+    /** The chat this question landed in, so the sheet can open it. */
+    val threadId: String? = null,
+    /** The turn ended waiting for the owner's OK; the sheet says so instead of showing an error. */
+    val needsOk: Boolean = false,
+    /** The recogniser is still loading while the microphone listens: [Cold] until it shows words. */
+    val cold: Boolean = false,
+    /** Loading took longer than 2.5 s, so the label falls back to Getting ready. */
+    val slowLoad: Boolean = false,
+    /** The socket to HQ dropped while HQ itself is still working. */
+    val reconnecting: Boolean = false,
+    /** An answer came after the sheet closed and no notice was posted. */
+    val afterClose: Boolean = false,
 )
 
 /**
  * One open voice sheet: hear, ask, show the answer as it arrives, then wait for the next tap. A tap while HQ is
  * answering interrupts it and listens again. Follow-up questions stay in the same chat thread.
  */
-class VoiceSession(private val app: Context, private val scope: CoroutineScope, private val connection: ChatConnection) {
+class VoiceSession(
+    private val app: Context,
+    private val scope: CoroutineScope,
+    private val connection: ChatConnection,
+    private val status: StateFlow<HqStatus> = HqServices.get(app).status,
+    private val handoff: VoiceHandoff = VoiceHandoff.get(app),
+) {
     private val models = VoiceModels(app)
     private val words = Words.of(app)
     private val ears = VoiceEngines.ears(app)
-    private val turn = VoiceTurn(connection.events, connection.connected, { content, thread, clientId -> connection.sendChat(content, thread, clientId) })
+    private val client = HqServices.get(app).client
+    private val turn = VoiceTurn(
+        connection.events, connection.connected, { content, thread, clientId -> connection.sendChat(content, thread, clientId, source = StoredMessage.SPOKEN) },
+        resume = { connection.resume(it) },
+        lastReply = { id -> runCatching { client.messages(id).lastOrNull { it.role != "user" }?.content }.getOrNull() },
+        stillRunning = { id -> runCatching { id in client.threads().running }.getOrDefault(false) },
+    )
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state
 
     private var threadId: String? = null
+    private var sentAt = 0L
+    private var clientId = VoiceTurn.newClientId()
+    private var worked = false
     private var job: Job? = null
     /** This sheet's own stop switch for the request it is hearing; dictation for other apps has its own. */
     @Volatile private var hearing = AtomicBoolean(true)
@@ -52,6 +86,8 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
         scope.launch {
             _state.map { it.phase }.distinctUntilChanged().collect { Log.i(TAG, "phase=$it at=${SystemClock.elapsedRealtime()}") }
         }
+        scope.launch { connection.connected.collect { up -> _state.update { it.copy(reconnecting = !up) } } }
+        scope.launch(Dispatchers.IO) { handoff.unseenAnswer()?.let { _state.update { s -> s.copy(afterClose = true) } } }
         scope.launch(Dispatchers.IO) { models.dropRetired() }
         scope.launch { Downloads.states.map { it[VoiceModels.ITEM_ID] }.distinctUntilChanged().collect(::onDownload) }
     }
@@ -80,10 +116,34 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     fun micPressed() = when (_state.value.phase) {
         VoicePhase.NeedsModel, VoicePhase.Downloading, VoicePhase.Preparing -> Unit
+        VoicePhase.MicNeeded, VoicePhase.MicBlocked -> listen()
         VoicePhase.Listening -> hearing.set(true)
         VoicePhase.ModelReady -> listen()
-        VoicePhase.Thinking, VoicePhase.LookingUp, VoicePhase.Answering -> { interrupt(); listen() }
+        VoicePhase.Thinking, VoicePhase.LookingUp, VoicePhase.Answering -> stop()
+        VoicePhase.Stopped -> listen()
         VoicePhase.Idle -> listen()
+        VoicePhase.WaitingForHq -> Unit
+    }
+
+    /** Don't send: the question is dropped, the words stay on the sheet and nothing was sent. */
+    fun dontSend() {
+        job?.cancel()
+        _state.update { it.copy(phase = VoicePhase.Idle, problem = null) }
+    }
+
+    /** Send again: the words that were heard go out once more, as a new request. */
+    fun sendAgain() {
+        val words = _state.value.heard.takeIf { it.isNotBlank() } ?: return
+        run { ask(words) }
+    }
+
+    /** The owner opened the chat: the next-open line has done its job. */
+    fun chatOpened() = handoff.markSeen()
+
+    /** Stop only stops: HQ is told, nothing listens, and the next tap asks again. */
+    private fun stop() {
+        interrupt()
+        _state.update { it.copy(phase = VoicePhase.Stopped) }
     }
 
     fun listen() = run { hearThenAsk() }
@@ -96,6 +156,8 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
                 work()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: Ears.Busy) {
+                refuse(words.s(R.string.voice_mic_busy))
             } catch (e: Exception) {
                 Log.w(TAG, "voice turn failed", e)
                 refuse(words.s(R.string.voice_engine_failed))
@@ -103,11 +165,23 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
         }
     }
 
+    /** Android's dialog answered "Don't allow" once: the button becomes Allow and Type instead is offered. */
+    fun micNeeded() = _state.update { it.copy(phase = VoicePhase.MicNeeded, problem = null) }
+
+    /** Android will not ask again: the sheet says so and points at App info. [still] adds the line for a return with the microphone still off. */
+    fun micBlocked(still: Boolean = false) = _state.update { it.copy(phase = VoicePhase.MicBlocked, problem = if (still) words.s(R.string.voice_mic_still_off) else null) }
+
     fun refuse(problem: String) = _state.update { it.copy(phase = VoicePhase.Idle, problem = problem) }
 
     /** The sheet left the screen: stop hearing, and stop HQ's answer if one is running. */
     fun quiet() {
-        if (_state.value.phase != VoicePhase.Idle) interrupt()
+        val phase = _state.value.phase
+        // Closing keeps HQ working unless the question just went out and no tool has started: then it was a slip.
+        val slip = !worked && SystemClock.elapsedRealtime() - sentAt < SLIP_MS
+        val working = phase == VoicePhase.Thinking || phase == VoicePhase.LookingUp || phase == VoicePhase.Answering
+        if (phase != VoicePhase.Idle) { if (slip) interrupt() else { job?.cancel(); hearing.set(true) } }
+        // HQ keeps working: one watcher takes the question over and says so once, quietly, when it ends.
+        if (working && !slip) handoff.adopt(Pending(clientId, threadId, System.currentTimeMillis()))
         _state.update { it.copy(phase = VoicePhase.Idle) }
     }
 
@@ -122,30 +196,64 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
             _state.update { VoiceState(waitingPhase(engine().state.value)) }
             return
         }
-        _state.update { VoiceState(VoicePhase.Preparing, reply = it.reply) }
-        ears.prepare()
-        _state.update { it.copy(heard = "", problem = null) }
+        if (MicAsk.onCall(app.getSystemService(android.media.AudioManager::class.java)?.mode ?: 0)) return refuse(words.s(R.string.voice_on_call))
+        _state.update { VoiceState(VoicePhase.Preparing, silent = it.silent, threadId = it.threadId) }
+        _state.update { it.copy(heard = "", problem = null, needsOk = false, cold = false, slowLoad = false) }
         val stop = AtomicBoolean(false).also { hearing = it }
         val said = ears.hear(
             stop,
             onRecording = { _state.update { it.copy(phase = VoicePhase.Listening) } },
-            onPartial = { partial -> _state.update { it.copy(heard = partial) } },
+            onPartial = { partial -> _state.update { it.copy(heard = partial, cold = false, slowLoad = false) } },
+            onLoad = { load -> _state.update { it.copy(cold = load != Ears.Load.Ready, slowLoad = load == Ears.Load.Slow) } },
         ).trim()
-        if (said.isEmpty()) return refuse(words.s(R.string.voice_nothing_heard))
-        val question = Invocation.strip(said)
-        _state.update { it.copy(phase = VoicePhase.Thinking, heard = question, reply = "") }
-        turn.ask(question, threadId).collect(::onOutput)
-        _state.update { it.copy(phase = VoicePhase.Idle) }
+        _state.update { it.copy(cold = false, slowLoad = false) }
+        if (said.isEmpty()) {
+            val silent = _state.value.silent + 1
+            _state.update { it.copy(silent = silent) }
+            return refuse(MicAsk.silenceLine(silent, android.os.Build.VERSION.SDK_INT).let { VoiceWords.silence(words, it) })
+        }
+        _state.update { it.copy(silent = 0) }
+        ask(Invocation.strip(said))
+    }
+
+    /** HQ must be up before a question goes: wait for it while it starts, say so at once if it has stopped. */
+    private suspend fun ask(question: String) {
+        _state.update { it.copy(heard = question, reply = "", problem = null, needsOk = false) }
+        if (!connection.connected.value) {
+            if (status.value is HqStatus.Stopped) return refuse(words.s(R.string.voice_fail_hq_stopped))
+            _state.update { it.copy(phase = VoicePhase.WaitingForHq) }
+            withTimeoutOrNull(WAIT_FOR_HQ_MS) { connection.connected.first { it } } ?: return refuse(words.s(R.string.voice_fail_no_reply))
+        }
+        _state.update { it.copy(phase = VoicePhase.Thinking) }
+        sentAt = SystemClock.elapsedRealtime()
+        worked = false
+        clientId = VoiceTurn.newClientId()
+        turn.ask(question, threadId, clientId).collect(::onOutput)
+        _state.update { if (it.phase == VoicePhase.Stopped) it else it.copy(phase = VoicePhase.Idle) }
     }
 
     private fun onOutput(out: TurnOutput) {
         when (out) {
-            is TurnOutput.Thread -> threadId = out.id
+            is TurnOutput.Thread -> { threadId = out.id; example.hq.spike.ui.chat.SpokenThreads.mark(app, out.id); _state.update { it.copy(threadId = out.id) } }
             is TurnOutput.Text -> _state.update { it.copy(phase = VoicePhase.Answering, reply = it.reply + out.chunk) }
-            is TurnOutput.Failed -> _state.update { it.copy(problem = out.reason) }
-            TurnOutput.Working -> _state.update { it.copy(phase = VoicePhase.LookingUp) }
+            is TurnOutput.Failed -> _state.update { it.copy(problem = lineFor(out.reason)) }
+            TurnOutput.NeedsOk -> _state.update { it.copy(needsOk = true) }
+            is TurnOutput.Reset -> _state.update { it.copy(reply = out.text) }
+            TurnOutput.Working -> { worked = true; _state.update { it.copy(phase = VoicePhase.LookingUp) } }
             TurnOutput.Done -> Unit
         }
+    }
+
+    /** The turn's own failure sentences are catalogue words; anything else is HQ's own reason, shown as it came. */
+    private fun lineFor(reason: String) = when (reason) {
+        VoiceTurn.HQ_STOPPED -> words.s(R.string.voice_fail_hq_stopped)
+        VoiceTurn.RESTARTING -> words.s(R.string.voice_fail_restarting)
+        VoiceTurn.NO_REPLY -> words.s(R.string.voice_fail_no_reply)
+        VoiceTurn.STILL_WORKING -> words.s(R.string.voice_still_working)
+        VoiceTurn.LOST_PART -> words.s(R.string.voice_fail_lost_part)
+        VoiceTurn.BUSY -> words.s(R.string.voice_fail_busy)
+        VoiceTurn.NOT_ACCEPTED -> words.s(R.string.voice_fail_not_accepted)
+        else -> reason
     }
 
     private fun interrupt() {
@@ -157,5 +265,7 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     private companion object {
         const val TAG = "HqVoice"
+        const val SLIP_MS = 3_000L
+        const val WAIT_FOR_HQ_MS = 30_000L
     }
 }

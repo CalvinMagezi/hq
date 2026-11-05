@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import example.hq.spike.NotifAccess
 import example.hq.spike.R
 import example.hq.spike.data.HqServices
+import example.hq.spike.data.StoredMessage
+import example.hq.spike.voice.VoiceTurn
 import example.hq.spike.ui.shell.ClientRestore
 import example.hq.spike.ui.shell.Undo
 import example.hq.spike.ui.shell.UndoKind
@@ -49,10 +51,15 @@ data class InboxUi(
     val line: InboxLine? = null,
     val checkedAt: String = "",
     val banner: InboxBanner? = null,
+    /** An approval that was just allowed: the page that says what happens next and offers Keep going. */
+    val allowed: Allowed? = null,
 ) {
     val shownNeeds: List<InboxCard> get() = needs.filter { it.id !in cleared }
     val shownUpdates: List<InboxCard> get() = updates.filter { it.id !in cleared }
 }
+
+/** A voice approval just allowed: [at] is the time it was allowed, [sent] after Keep going has been sent. */
+data class Allowed(val card: InboxCard, val at: String, val sent: Boolean = false)
 
 class InboxActions(
     val onTab: (InboxTab) -> Unit = {},
@@ -65,6 +72,8 @@ class InboxActions(
     val onDismissLine: () -> Unit = {},
     val onBannerNotNow: () -> Unit = {},
     var onServerOpen: () -> Unit = {},
+    val onKeepGoing: (Allowed) -> Unit = {},
+    val onAllowedDone: () -> Unit = {},
 )
 
 class InboxViewModel(app: Application) : AndroidViewModel(app) {
@@ -80,6 +89,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), getApplication<Application>().getString(R.string.undo_update_cleared)) },
         onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
         onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
+        onKeepGoing = ::keepGoing, onAllowedDone = { _state.update { it.copy(allowed = null) } },
     )
 
     init {
@@ -129,6 +139,14 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
     }
 
+    /** One follow-up in the same chat, marked spoken: HQ stopped to wait for the OK and this asks it to finish. */
+    private fun keepGoing(a: Allowed) {
+        val thread = a.card.threadId ?: return
+        val words = getApplication<Application>().getString(R.string.chat_approval_followup)
+        val sent = HqServices.get(getApplication()).connection.sendChat(words, thread, VoiceTurn.newClientId(), source = StoredMessage.SPOKEN)
+        if (sent) _state.update { it.copy(allowed = it.allowed?.copy(sent = true)) }
+    }
+
     private fun answer(card: InboxCard, allow: Boolean) {
         if (_state.value.answering[card.id] == Answer.Sending) return
         _state.update { it.copy(answering = it.answering + (card.id to Answer.Sending)) }
@@ -142,7 +160,13 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
                     if (card.kind == CardKind.HelperAsks && card.sessionId != null && !answerHelper(card, if (allow) "enter" else "esc")) return@launch
                     client.answerNotification(card.id, if (allow) "approve" else "reject")
                 }
-                _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine(if (allow) "Allowed." else "Not now. Nothing was done.")) }
+                val spoken = allow && card.kind == CardKind.Approval && card.quote != null && card.threadId != null
+                _state.update {
+                    it.copy(
+                        answering = it.answering - card.id, details = null, line = InboxLine(if (allow) "Allowed." else "Not now. Nothing was done."),
+                        allowed = if (spoken) Allowed(card, InboxWords.clock(java.time.OffsetDateTime.now().toString())) else it.allowed,
+                    )
+                }
                 refresh()
             } catch (e: HqUnavailable) {
                 if (e.message?.contains("HTTP 409") == true) {

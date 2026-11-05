@@ -42,6 +42,7 @@ import example.hq.spike.ui.settings.SettingsPage
 import example.hq.spike.ui.settings.SettingsViewModel
 import example.hq.spike.ui.settings.settingsFixture
 import example.hq.spike.ui.inbox.InboxCard
+import example.hq.spike.ui.inbox.AllowedPage
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
 import example.hq.spike.ui.firstrun.NotifUpgraderSheet
@@ -229,7 +230,7 @@ class ShellActivity : ComponentActivity() {
     /** Shows what a link names, over the place it belongs to. Waiting for what is not loaded yet is the view model's job. */
     private fun applyLink(t: LinkTarget) {
         when (t.place) {
-            Place.Chat -> t.id?.let(chat::openLinked)
+            Place.Chat -> { t.id?.let(chat::openLinked); if (t.compose) chat.focusComposer() }
             Place.Inbox -> t.id?.let(inbox::openItem)
             Place.Tasks -> t.id?.let { tasks.openById(it) { } }
             Place.Notes -> { t.path?.let(notes::openNote); if (t.search) notes.actions.onOpenSearch() }
@@ -526,6 +527,7 @@ class ShellActivity : ComponentActivity() {
         }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
+        inboxState.allowed?.let { a -> AllowedPage(a, inbox.actions) { thread -> inbox.actions.onAllowedDone(); chat.actions.onOpenChat(thread); go(Place.Chat) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasksState.edge, tasks.actions) }
         if (tasksState.filterOpen) TaskFilterSheet(tasksState, tasks.actions)

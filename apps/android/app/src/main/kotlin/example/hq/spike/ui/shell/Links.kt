@@ -16,6 +16,8 @@ data class LinkTarget(
     val search: Boolean = false,
     /** A web page the app shows in its own screen, by [example.hq.spike.ui.webhost.WebPage.slug]. */
     val web: String? = null,
+    /** hq://chat?compose=1: Chat with the composer focused and the keyboard up, never the microphone. */
+    val compose: Boolean = false,
 )
 
 /** The links of the design's "Navigation and Back" table: hq://chat/{id}, inbox/{id}, tasks/{id}, notes/{path}, helpers[/{id}], settings/{screen}, search. hq://web/{home|usage|board|timeline} opens a web page in the app's own screen. */
@@ -25,7 +27,7 @@ object Links {
     private const val MAX_PATH = 512
     private val ID = Regex("[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 
-    val SETTINGS_SCREENS = setOf("home", "safety", "keys", "messaging", "devices", "spending", "about", "background", "keeprunning", "notifications", "origins", "connectedtools", "computers", "capturewidgets", "storedkeys", "update", "speech")
+    val SETTINGS_SCREENS = setOf("home", "safety", "keys", "messaging", "devices", "spending", "about", "background", "keeprunning", "notifications", "origins", "connectedtools", "computers", "capturewidgets", "storedkeys", "update", "speech", "assistant")
 
     /** Never throws. Null for anything that is not one of our links, so a stray or hostile link does nothing at all. */
     fun parse(raw: String?): LinkTarget? {
@@ -35,7 +37,7 @@ object Links {
         val host = u.host?.lowercase() ?: u.authority?.lowercase() ?: return null
         val rest = (u.path ?: "").removePrefix("/").removeSuffix("/")
         return when (host) {
-            "chat" -> LinkTarget(Place.Chat, id = id(rest))
+            "chat" -> LinkTarget(Place.Chat, id = id(rest), compose = u.query == "compose=1")
             "inbox" -> LinkTarget(Place.Inbox, id = id(rest))
             "tasks" -> LinkTarget(Place.Tasks, id = id(rest))
             "helpers" -> LinkTarget(Place.Helpers, id = id(rest))

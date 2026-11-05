@@ -53,4 +53,28 @@ class VoiceSheetTest {
         rule.onNodeWithText("Ask").performClick()
         assertEquals(1, taps)
     }
+
+    @Test fun aFirstRefusalShowsAllowAndTypeInstead() {
+        var typed = 0
+        rule.setContent { HqTheme { VoiceSheet(VoiceState(VoicePhase.MicNeeded), DlState.Ready, item, {}, { null }, {}, {}, onType = { typed++ }) } }
+        rule.onNodeWithText("Microphone needed").assertIsDisplayed()
+        rule.onNodeWithText("Type instead").performClick()
+        assertEquals(1, typed)
+    }
+
+    @Test fun aBlockedMicrophoneOpensAndroidSettings() {
+        var opened = 0
+        rule.setContent { HqTheme { VoiceSheet(VoiceState(VoicePhase.MicBlocked), DlState.Ready, item, {}, { null }, {}, {}, onSettings = { opened++ }) } }
+        rule.onNodeWithText("Microphone off").assertIsDisplayed()
+        rule.onNodeWithText("Ask again").assertIsDisplayed()
+        rule.onNodeWithText("Open Android settings").performClick()
+        assertEquals(1, opened)
+    }
+
+    @Test fun openInChatShowsOnceTheThreadIsKnown() {
+        var id: String? = null
+        rule.setContent { HqTheme { VoiceSheet(VoiceState(VoicePhase.Answering, reply = "Hi", threadId = "t1"), DlState.Ready, item, {}, { null }, {}, {}, onOpenChat = { id = it }) } }
+        rule.onNodeWithText("Open in chat").performClick()
+        assertEquals("t1", id)
+    }
 }

@@ -318,6 +318,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Opens a chat a link names, but only one that is in the list: an unknown id would blank the open chat and send the next message to nothing. */
+    fun focusComposer() = _state.update { it.copy(focusDraft = it.focusDraft + 1) }
+
     fun openLinked(id: String) {
         if (_state.value.chats.any { it.id == id }) { openThread(id); return }
         viewModelScope.launch {
@@ -329,6 +331,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadMessages(id: String) {
         val page = try { client.messages(id) } catch (e: HqUnavailable) { return }
         val shown = page.sortedBy { it.createdAt }.map(::toUi)
+        if (page.any { it.spoken }) SpokenThreads.mark(getApplication(), id)
         _state.update {
             if (it.threadId != id) return@update it
             // Sends the server has not acknowledged yet stay at the end.
@@ -337,7 +340,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt)
+    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt, m.spoken)
 
     /** Fetches the note first and opens the sheet when it is in hand, so a chip can say "Opening…" and a missing note never flashes an empty sheet. */
     private fun openNote(path: String) {
@@ -437,11 +440,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun refreshChats() {
         val list = try { client.threads() } catch (e: HqUnavailable) { return }
+        val spokenIds = SpokenThreads.all(getApplication())
         val rows = list.threads.map { t ->
             val group = ChatTime.group(t.updatedAt)
             val snippet = ChatPreview.snippet(t.preview) { n -> getApplication<Application>().resources.getQuantityString(R.plurals.chat_files, n, n) }
-            val subtitle = if (group == Group.Today && snippet.isNotEmpty()) "${ChatTime.age(t.updatedAt)} · $snippet" else snippet
-            ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0)
+            val spoken = t.id in spokenIds
+            val body = if (group == Group.Today && snippet.isNotEmpty()) "${ChatTime.age(t.updatedAt)} · $snippet" else snippet
+            val subtitle = if (spoken) listOf(getApplication<Application>().getString(R.string.chat_spoken), body).filter { it.isNotEmpty() }.joinToString(" · ") else body
+            ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0, spoken)
         }
         _state.update { s -> s.copy(chats = rows.filter { it.id != archiving?.first }) }
     }

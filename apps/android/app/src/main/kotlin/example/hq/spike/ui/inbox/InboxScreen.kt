@@ -43,6 +43,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.res.stringResource
 import example.hq.spike.LocalNotif
 import example.hq.spike.NotifOrigin
@@ -151,6 +152,7 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
                 Text(listOf(card.where, InboxWords.ago(card.createdAt)).filter { it.isNotBlank() }.joinToString(" · "), style = SmallText, color = Mts.InkMuted, maxLines = 1)
             }
         }
+        card.quote?.let { QuoteLine(it, card.createdAt) }
         Text(card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
         (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber) }
         AnswerRow(card, answer, offline, actions, onTakeLook)
@@ -350,6 +352,7 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(card.title, style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)
+            card.quote?.let { QuoteLine(it, card.createdAt) }
             card.tool?.let { tool ->
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Mts.Surface100).border(1.dp, Mts.Hairline, RoundedCornerShape(12.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(stringResource(R.string.approval_quote_inbox), style = HqType.BodySmBold, color = Mts.Ink)
@@ -389,5 +392,34 @@ private fun KeyValue(key: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(key, style = HqType.BodySmBold, color = Mts.Ink, modifier = Modifier.width(90.dp))
         Text(value, style = HqType.BodySm, color = Mts.InkMuted)
+    }
+}
+
+/** What the owner said, as the question behind an approval, with the time it was asked (B18). */
+@Composable
+private fun QuoteLine(quote: String, createdAt: String) {
+    val time = InboxWords.clock(createdAt)
+    Text(listOf(stringResource(R.string.chat_spoken_quote, quote), time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
+}
+
+/** After the OK: what happens next, and one button that asks HQ to finish in the same chat. */
+@Composable
+fun AllowedPage(allowed: Allowed, actions: InboxActions, onOpenChat: (String) -> Unit) {
+    BackHandler(onBack = actions.onAllowedDone)
+    val card = allowed.card
+    Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onAllowedDone)
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(stringResource(R.string.chat_approval_allowed_at, allowed.at), style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)
+            Text(stringResource(R.string.chat_approval_can_finish), style = HqType.BodyBold, color = Mts.Ink)
+            card.quote?.let { QuoteLine(it, card.createdAt) }
+            Text(stringResource(R.string.chat_approval_stopped), style = HqType.Body, color = Mts.InkMuted)
+        }
+        Row(Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            card.threadId?.let { id -> TextButton({ onOpenChat(id) }, Modifier.weight(1f).heightIn(min = 48.dp)) { Text(stringResource(R.string.voice_open_chat), style = HqType.BodyBold, color = Mts.Ink) } }
+            TextButton({ actions.onKeepGoing(allowed) }, Modifier.weight(1f).heightIn(min = 48.dp), enabled = !allowed.sent) { Text(stringResource(R.string.chat_keep_going), style = HqType.BodyBold, color = Mts.Ink) }
+        }
     }
 }

@@ -109,6 +109,7 @@ private fun icon(key: String): ImageVector = when (key) {
     "notifications" -> HqIcons.Inbox
     "capture" -> HqIcons.Plus
     "key" -> HqIcons.Key
+    "assistant" -> HqIcons.Mic
     "chat" -> HqIcons.Chat
     "phone" -> HqIcons.Phone
     "shield" -> HqIcons.Shield
@@ -144,6 +145,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Noticed -> "What HQ noticed"
     SettingsPage.Update -> "Update AgentHQ"
     SettingsPage.Speech -> "Speech model"
+    SettingsPage.Assistant -> "Phone assistant"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -162,7 +164,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-                Text(if (ui.page == SettingsPage.Update) stringResource(R.string.upd_page_title) else if (ui.page == SettingsPage.Speech) stringResource(R.string.speech_title) else pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
+                Text(if (ui.page == SettingsPage.Update) stringResource(R.string.upd_page_title) else if (ui.page == SettingsPage.Speech) stringResource(R.string.speech_title) else if (ui.page == SettingsPage.Assistant) stringResource(R.string.assist_row_title) else pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
             }
             when (ui.page) {
                 SettingsPage.Home -> Home(ui, actions)
@@ -182,6 +184,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Technical -> Technical(ui, actions)
                 SettingsPage.Update -> UpdatePage(ui, actions)
                 SettingsPage.Speech -> SpeechPage(ui, actions)
+                SettingsPage.Assistant -> AssistantPage(ui, actions)
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
@@ -319,7 +322,7 @@ private fun Home(ui: SettingsUi, actions: SettingsActions) {
         WithdrawnCard(ui, actions)
         UpdateCard(ui, actions)
         BackupWords.slot(w, ui.backup, ui.now)?.let { slot -> BackupSlot(slot) { actions.onPage(SettingsPage.About) } }
-        SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip).forEachIndexed { gi, g ->
+        SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip, serverRow(w, context)).forEachIndexed { gi, g ->
             Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = if (gi == 0) 8.dp else 20.dp, end = 16.dp, bottom = 4.dp))
             g.lead?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp)) }
             Group {
@@ -1454,4 +1457,11 @@ private fun ReadOnlyList(ui: SettingsUi, empty: String, rows: @Composable () -> 
 @Composable
 private fun MonoRow(text: String) {
     Group { Text(text, style = HqType.BodySm.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = Mts.Ink, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) }
+}
+
+/** The server HQ's own row, only while a server is kept: its name and whether it is signed in. The name is its host, as there is no name field. */
+private fun serverRow(w: example.hq.spike.ui.shell.Words, c: android.content.Context): HomeRow? {
+    val host = example.hq.spike.ServerHq.address(c)?.substringAfter("://")?.substringBefore('/') ?: return null
+    val state = w.s(if (example.hq.spike.ServerHq.signedOut(c)) R.string.state_server_signed_out else R.string.state_connected)
+    return HomeRow(SettingsPage.Devices, "phone", w.s(R.string.settings_server_hq_row), w.s(R.string.settings_server_hq_row_body, host) + " · " + state)
 }

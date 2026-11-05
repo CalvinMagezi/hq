@@ -33,6 +33,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
@@ -53,11 +54,15 @@ private val ReplyShape = RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bot
 private const val USER_BUBBLE_SHARE = 0.84f
 
 @Composable
-fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyList(), onOpenFile: (Attachment) -> Unit = {}, modifier: Modifier = Modifier) {
+fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyList(), onOpenFile: (Attachment) -> Unit = {}, modifier: Modifier = Modifier, spoken: Boolean = false) {
     BoxWithConstraints(modifier.fillMaxWidth()) {
         Column(Modifier.align(Alignment.CenterEnd).widthIn(max = maxWidth * USER_BUBBLE_SHARE).alpha(if (sending) 0.7f else 1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (text.isNotBlank()) {
                 Text(text, style = HqType.Body, color = Mts.Ink, modifier = Modifier.align(Alignment.End).background(Mts.Surface200, UserShape).padding(horizontal = 16.dp, vertical = 12.dp))
+            }
+            if (spoken) {
+                val byVoice = stringResource(R.string.chat_asked_by_voice)
+                Text(stringResource(R.string.chat_spoken), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.align(Alignment.End).semantics { contentDescription = byVoice })
             }
             files.forEach { FileCardView(it, { onOpenFile(it) }) }
         }

@@ -23,14 +23,16 @@ data class UiMessage(
     /** When the server saved it; blank for a reply that just finished in this session. */
     val createdAt: String = "",
     val files: List<Attachment> = emptyList(),
+    /** The owner asked this by voice. */
+    val spoken: Boolean = false,
 ) {
     companion object {
         /** A saved message: the attachment marker the server appends is split off into [files]. */
-        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = ""): UiMessage {
+        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = "", spoken: Boolean = false): UiMessage {
             // Only the user's own messages carry the marker; a model reply that contains one is just text.
             if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt)
             val (text, files) = Attachments.split(content)
-            return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files)
+            return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files, spoken = spoken)
         }
     }
 }
@@ -47,7 +49,7 @@ data class LiveReply(val text: String = "", val steps: List<LiveStep> = emptyLis
 
 enum class Group(val label: String) { Today("Today"), Yesterday("Yesterday"), Week("Previous 7 days"), Older("Older") }
 
-data class ChatRow(val id: String, val title: String, val subtitle: String, val group: Group, val running: Boolean, val unread: Boolean)
+data class ChatRow(val id: String, val title: String, val subtitle: String, val group: Group, val running: Boolean, val unread: Boolean, val spoken: Boolean = false)
 
 data class ChatUiState(
     val threadId: String? = null,
@@ -60,6 +62,8 @@ data class ChatUiState(
     /** When the socket dropped (epoch milliseconds), so the status line can say how old what is shown is. */
     val offlineSince: Long? = null,
     val draft: String = "",
+    /** Goes up each time a link asks for the composer (hq://chat?compose=1); the field takes focus and the keyboard on every change. */
+    val focusDraft: Int = 0,
     /** The empty chat's chips from HQ (`GET /api/capabilities`); null until it answers. */
     val suggestions: List<Suggestion>? = null,
     val notice: Notice? = null,

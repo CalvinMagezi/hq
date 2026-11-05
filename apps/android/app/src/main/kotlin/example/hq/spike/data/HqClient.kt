@@ -76,6 +76,11 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** Stop over HTTP, for when the socket is not open to carry the frame. */
+    suspend fun stopThread(threadId: String) {
+        send(authed("/api/threads/${java.net.URLEncoder.encode(threadId, "UTF-8")}/stop").post(EMPTY_JSON).build()) { }
+    }
+
     suspend fun archive(threadId: String) {
         send(authed("/api/threads/$threadId/archive").post(EMPTY_JSON).build()) { }
     }
@@ -300,7 +305,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     )
 
     /** What HQ says an approval is about: [tool] and [args] verbatim, [loses] and [verb] (one of [LOSING_VERBS]) decided by HQ, never by the card's words. */
-    data class ApprovalFacts(val tool: String, val args: String, val loses: Boolean, val verb: String?)
+    data class ApprovalFacts(val tool: String, val args: String, val loses: Boolean, val verb: String?, val threadId: String? = null)
 
     /**
      * The dialog a helper's alert is about. [approveLabel] names the one answer a button may give (a plain yes, once),
@@ -688,7 +693,7 @@ private fun losingVerb(o: JSONObject): String? = if (o.isNull("verb")) null else
 internal fun approvalFacts(meta: JSONObject?): HqClient.ApprovalFacts? {
     val a = meta?.optJSONObject("approval") ?: return null
     val args = if (a.isNull("args")) "" else a.opt("args")?.let { if (it is String) it else it.toString() }.orEmpty()
-    return HqClient.ApprovalFacts(a.optString("tool", ""), args, a.optBoolean("loses", false), losingVerb(a))
+    return HqClient.ApprovalFacts(a.optString("tool", ""), args, a.optBoolean("loses", false), losingVerb(a), a.optString("thread_id", "").ifBlank { null })
 }
 
 internal fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }

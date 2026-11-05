@@ -20,6 +20,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -131,10 +134,13 @@ private fun MessageRow(state: ChatUiState, actions: ChatActions) {
         Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Add to this chat", onClick = actions.onOpenAdd).semantics { contentDescription = "Add to this chat" }, contentAlignment = Alignment.Center) {
             Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.Ink)
         }
+        val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+        LaunchedEffect(state.focusDraft) { if (state.focusDraft > 0) { focus.requestFocus(); keyboard?.show() } }
         BasicTextField(
             value = state.draft, onValueChange = actions.onDraft, textStyle = HqType.Body.copy(color = Mts.Ink),
             cursorBrush = SolidColor(Mts.Ink), maxLines = MAX_LINES,
-            modifier = Modifier.weight(1f).heightIn(min = 48.dp).clip(FieldShape).background(Mts.Surface100)
+            modifier = Modifier.weight(1f).focusRequester(focus).heightIn(min = 48.dp).clip(FieldShape).background(Mts.Surface100)
                 .border(1.dp, Mts.Line, FieldShape).padding(horizontal = 16.dp, vertical = 11.dp),
             decorationBox = { inner ->
                 Box {

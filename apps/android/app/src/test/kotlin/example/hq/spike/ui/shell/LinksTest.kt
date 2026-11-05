@@ -20,6 +20,13 @@ class LinksTest {
         assertEquals(LinkTarget(Place.Chat), parse("hq://chat"))
     }
 
+    @Test fun theAssistantPageAndTheComposerHaveLinks() {
+        assertEquals("assistant", parse("hq://settings/assistant").screen)
+        assertEquals("speech", parse("hq://settings/speech").screen)
+        assertTrue(parse("hq://chat?compose=1").compose)
+        assertEquals(false, parse("hq://chat").compose)
+    }
+
     @Test fun theUpdatePageHasALink() = assertEquals("update", parse("hq://settings/update").screen)
 
     @Test fun aTrailingSlashChangesNothing() {

@@ -32,13 +32,16 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
     }
 
     /** False when there is no open socket, so the caller can keep the message as a draft. */
-    fun sendChat(content: String, threadId: String?, clientId: String, replaceFrom: String? = null, files: List<Attachment> = emptyList()): Boolean = write(
+    fun sendChat(content: String, threadId: String?, clientId: String, replaceFrom: String? = null, files: List<Attachment> = emptyList(), source: String? = null): Boolean = write(
         JSONObject().put("type", "chat").put("content", content).put("thread_id", threadId ?: JSONObject.NULL).put("client_id", clientId)
             .put("attachments", JSONArray(files.map { JSONObject().put("name", it.name).put("path", it.path).put("mime", it.mime).put("size", it.size) }))
-            .apply { replaceFrom?.let { put("replace_from", it) } },
+            .apply { replaceFrom?.let { put("replace_from", it) }; source?.let { put("source", it) } },
     )
 
     fun stop(threadId: String): Boolean = write(JSONObject().put("type", "stop").put("thread_id", threadId))
+
+    /** Asks HQ for the reply so far on [threadId]; it answers with a `reply_so_far` event. */
+    fun resume(threadId: String): Boolean = write(JSONObject().put("type", "resume").put("thread_id", threadId))
 
     private fun write(frame: JSONObject): Boolean = socket?.send(frame.toString()) ?: false
 
