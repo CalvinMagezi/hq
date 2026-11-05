@@ -185,31 +185,39 @@ function useOlderPages(
 
 /** An empty chat: what HQ can do here, untried things first, each one a tap from the composer. */
 function EmptyChat({ threadId, onPick }: { threadId: string | null; onPick?: (text: string) => void }) {
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000, retry: false })
-  const chips = onPick ? emptyChatChips(capabilities.data) : []
+  // The chips load only in a live page. Rendered during the build's prerender, the query's cache
+  // timer keeps the prerender process alive and the build never finishes.
+  const [live, setLive] = useState(false)
+  useEffect(() => setLive(true), [])
+  const prompt = threadId ? 'Start a conversation' : 'Type a message or command to begin'
   return (
     <div className="flex flex-col items-center justify-center h-full text-center text-neutral-500 py-12">
       <img src={HQ_MARK} alt="" className="w-12 h-12 object-contain mb-3 opacity-60" />
-      {chips.length === 0 ? (
-        <p className="text-sm">{threadId ? 'Start a conversation' : 'Type a message or command to begin'}</p>
-      ) : (
-        <>
-          <p className="text-sm text-neutral-300">What would you like to do?</p>
-          <div className="mt-4 grid gap-2 w-full max-w-md">
-            {chips.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => onPick?.(c.example)}
-                title={c.example}
-                className="min-h-11 px-4 py-2 rounded-xl border border-white/10 text-left text-sm text-neutral-200 hover:bg-white/5"
-              >
-                {c.says}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      {live && onPick ? <Suggestions prompt={prompt} onPick={onPick} /> : <p className="text-sm">{prompt}</p>}
     </div>
+  )
+}
+
+function Suggestions({ prompt, onPick }: { prompt: string; onPick: (text: string) => void }) {
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000, retry: false })
+  const chips = emptyChatChips(capabilities.data)
+  if (chips.length === 0) return <p className="text-sm">{prompt}</p>
+  return (
+    <>
+      <p className="text-sm text-neutral-300">What would you like to do?</p>
+      <div className="mt-4 grid gap-2 w-full max-w-md">
+        {chips.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onPick(c.example)}
+            title={c.example}
+            className="min-h-11 px-4 py-2 rounded-xl border border-white/10 text-left text-sm text-neutral-200 hover:bg-white/5"
+          >
+            {c.says}
+          </button>
+        ))}
+      </div>
+    </>
   )
 }
