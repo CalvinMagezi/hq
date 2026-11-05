@@ -327,11 +327,19 @@ backends:
       kind: openrouter
       model: <model>
 
-# On the laptop: offer the local model.
+# On the laptop: offer the local model to the phone only.
 bridge:
   services:
-    llm: 127.0.0.1:11434
+    llm:
+      to: 127.0.0.1:11434
+      peers: [<phone id>]
 ```
+
+A service written as `name: address` is open to every paired device. Written as `to:` and `peers:`,
+it is open only to the machine ids listed (`hq bridge peers`); any other paired device is told the
+service does not exist, as for a name that is not offered. Give a service that asks for no
+credential of its own, such as a local model, a `peers` list, so a tablet or second laptop paired
+later does not get it by default.
 
 Give the forward `fail_fast_secs` when the service has a fallback. Without it, a request through a
 forward to a device that is away waits for the dial (up to 20 s) or for the service's answer (10 s

@@ -150,6 +150,49 @@ async fn an_unknown_service_is_refused_by_name() {
 }
 
 #[tokio::test]
+async fn a_service_with_a_peers_list_admits_only_those_peers() {
+    let (web, llm) = (echo_server().await, echo_server().await);
+    let phone = Machine::new("phone", None).await;
+    let tablet = Machine::new("tablet", None).await;
+    let mut offered = offering("web", web);
+    offered.targets.insert("llm".into(), DoorTarget::Tcp(llm));
+    offered
+        .peers
+        .insert("llm".into(), [phone.bridge.id()].into());
+    let laptop = Machine::new("laptop", Some(offered)).await;
+    for device in [&phone, &tablet] {
+        laptop.knows(device);
+        device.knows(&laptop);
+    }
+
+    let from_phone = with_timeout(phone.bridge.connect_service(&laptop.id()))
+        .await
+        .unwrap();
+    assert!(with_timeout(open_service(&from_phone, "llm")).await.is_ok());
+    let port = forward(&phone, &laptop.id(), "llm").await;
+    assert_eq!(
+        with_timeout(round_trip(port, b"hello")).await.as_deref(),
+        Some(&b"hello"[..])
+    );
+
+    // Another paired device is told the service does not exist, and keeps the open ones.
+    let from_tablet = with_timeout(tablet.bridge.connect_service(&laptop.id()))
+        .await
+        .unwrap();
+    let err = with_timeout(open_service(&from_tablet, "llm"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("no service called llm"), "{err}");
+    assert!(
+        with_timeout(open_service(&from_tablet, "web"))
+            .await
+            .is_ok()
+    );
+    let port = forward(&tablet, &laptop.id(), "llm").await;
+    assert_eq!(with_timeout(round_trip(port, b"hello")).await, None);
+}
+
+#[tokio::test]
 async fn a_machine_that_is_not_paired_gets_nothing() {
     let (phone, _mac) = pair().await;
     let stranger = Machine::new("stranger", None).await;

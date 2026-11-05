@@ -26,11 +26,64 @@ pub struct BridgeServicesConfig {
     /// Named services a paired device may open, each to a fixed loopback `ip:port` or an absolute
     /// unix socket path on this machine. The device names a service; it never names an address.
     #[serde(default)]
-    pub services: BTreeMap<String, String>,
+    pub services: BTreeMap<String, ServiceEntry>,
 
     /// Local ports that reach a paired device's service.
     #[serde(default)]
     pub forwards: Vec<BridgeForward>,
+}
+
+/// Where a service leads and who may open it: `name: addr` lets every paired device in,
+/// `name: {to: addr, peers: [id, ...]}` only the devices listed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ServiceEntry {
+    Addr(String),
+    Limited(LimitedService),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LimitedService {
+    pub to: String,
+    /// The machine ids (`hq bridge peers`) that may open this service.
+    pub peers: Vec<String>,
+}
+
+impl ServiceEntry {
+    pub fn to(&self) -> &str {
+        match self {
+            Self::Addr(to) | Self::Limited(LimitedService { to, .. }) => to,
+        }
+    }
+}
+
+impl From<String> for ServiceEntry {
+    fn from(to: String) -> Self {
+        Self::Addr(to)
+    }
+}
+
+impl From<&str> for ServiceEntry {
+    fn from(to: &str) -> Self {
+        Self::Addr(to.to_string())
+    }
+}
+
+/// A service with its address and peers checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedService {
+    pub target: DoorTarget,
+    /// `None`: every paired device. Otherwise only these machine ids, lowercase hex.
+    pub peers: Option<Vec<String>>,
+}
+
+/// A machine id as `hq bridge peers` prints it: 64 hex digits.
+const MACHINE_ID_LEN: usize = 64;
+
+fn machine_id(text: &str) -> Option<String> {
+    let id = text.trim().to_ascii_lowercase();
+    (id.len() == MACHINE_ID_LEN && id.bytes().all(|b| b.is_ascii_hexdigit())).then_some(id)
 }
 
 /// One local port that reaches a service on a paired device.
@@ -65,6 +118,23 @@ pub struct CheckedForward {
     pub fail_fast: Option<std::time::Duration>,
 }
 
+/// An empty list would shut the service to everyone, which is almost surely a mistake: say so.
+fn checked_peers(name: &str, peers: &[String]) -> Result<Vec<String>, String> {
+    if peers.is_empty() {
+        return Err(format!(
+            "bridge.services.{name}.peers: list at least one machine id, or use the `{name}: addr` form to let every paired device in"
+        ));
+    }
+    peers
+        .iter()
+        .map(|p| {
+            machine_id(p).ok_or_else(|| {
+                format!("bridge.services.{name}.peers: {p:?} is not a machine id (64 hex digits, `hq bridge peers`)")
+            })
+        })
+        .collect()
+}
+
 /// A service name is short lowercase ASCII, so it never needs escaping in logs or on the wire.
 pub fn valid_service_name(name: &str) -> bool {
     !name.is_empty()
@@ -91,16 +161,17 @@ impl BridgeServicesConfig {
             .transpose()
     }
 
-    /// The services, checked: valid names, and each target a loopback port or a socket path.
-    pub fn services(&self) -> Result<BTreeMap<String, DoorTarget>, String> {
+    /// The services, checked: valid names, each target a loopback port or a socket path, and each
+    /// peers list a non-empty list of machine ids.
+    pub fn services(&self) -> Result<BTreeMap<String, CheckedService>, String> {
         let mut out = BTreeMap::new();
-        for (name, target) in &self.services {
+        for (name, entry) in &self.services {
             if !valid_service_name(name) {
                 return Err(format!(
                     "bridge.services: {name:?} is not a service name (lowercase letters, digits and -, at most {MAX_SERVICE_NAME})"
                 ));
             }
-            let target = match DoorListen::parse(Some(target)) {
+            let target = match DoorListen::parse(Some(entry.to())) {
                 Ok(DoorListen::Default) => {
                     return Err(format!("bridge.services.{name}: an address is required"));
                 }
@@ -108,7 +179,11 @@ impl BridgeServicesConfig {
                 Ok(DoorListen::Unix(path)) => DoorTarget::Unix(path),
                 Err(e) => return Err(format!("bridge.services.{name}: {e}")),
             };
-            out.insert(name.clone(), target);
+            let peers = match entry {
+                ServiceEntry::Addr(_) => None,
+                ServiceEntry::Limited(limited) => Some(checked_peers(name, &limited.peers)?),
+            };
+            out.insert(name.clone(), CheckedService { target, peers });
         }
         Ok(out)
     }
@@ -197,8 +272,15 @@ mod tests {
     fn services_point_at_loopback_ports_or_socket_paths_only() {
         let ok = parse("services:\n  web: 127.0.0.1:5690\n  gate: /run/hq/gate.sock\n");
         let s = ok.services().unwrap();
-        assert_eq!(s["web"], DoorTarget::Tcp("127.0.0.1:5690".parse().unwrap()));
-        assert_eq!(s["gate"], DoorTarget::Unix("/run/hq/gate.sock".into()));
+        assert_eq!(
+            s["web"].target,
+            DoorTarget::Tcp("127.0.0.1:5690".parse().unwrap())
+        );
+        assert_eq!(
+            s["gate"].target,
+            DoorTarget::Unix("/run/hq/gate.sock".into())
+        );
+        assert_eq!(s["web"].peers, None);
         for bad in [
             "services:\n  web: 0.0.0.0:5690\n",
             "services:\n  web: 192.168.1.2:80\n",
@@ -209,6 +291,44 @@ mod tests {
             "services:\n  \"a b\": 127.0.0.1:5690\n",
         ] {
             assert!(parse(bad).services().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_service_may_name_the_peers_that_open_it() {
+        let id = "ab".repeat(32);
+        let yaml = format!(
+            "services:\n  web: 127.0.0.1:5690\n  llm:\n    to: 127.0.0.1:11434\n    peers: [\"{}\"]\n",
+            id.to_uppercase()
+        );
+        let config = parse(&yaml);
+        let s = config.services().unwrap();
+        assert_eq!(
+            s["web"].peers, None,
+            "the plain form still admits every peer"
+        );
+        assert_eq!(s["llm"].peers, Some(vec![id.clone()]), "ids are lowercased");
+        assert_eq!(
+            serde_yaml::from_str::<BridgeServicesConfig>(&serde_yaml::to_string(&config).unwrap())
+                .unwrap(),
+            config,
+            "both forms survive a write"
+        );
+        for bad in [
+            "services:\n  llm:\n    to: 127.0.0.1:11434\n    peers: []\n".to_string(),
+            "services:\n  llm:\n    to: 127.0.0.1:11434\n    peers: [abc]\n".to_string(),
+            format!("services:\n  llm:\n    to: 0.0.0.0:11434\n    peers: [\"{id}\"]\n"),
+        ] {
+            assert!(parse(&bad).services().is_err(), "{bad}");
+        }
+        for unparsable in [
+            format!("services:\n  llm:\n    to: 127.0.0.1:11434\n    peer: [\"{id}\"]\n"),
+            "services:\n  llm:\n    to: 127.0.0.1:11434\n".to_string(),
+        ] {
+            assert!(
+                serde_yaml::from_str::<BridgeServicesConfig>(&unparsable).is_err(),
+                "{unparsable}"
+            );
         }
     }
 
