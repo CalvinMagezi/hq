@@ -151,6 +151,11 @@ status:
 | WR24 | A helper's sign-in gets up to 10 minutes. | Recommended |
 | WR25 | "Allow helpers again" is a green button (allowing loses nothing). | Recommended |
 | WR26 | Send stays on while HQ is away on phone and web; messages wait in Waiting to send; off on a shared computer. | Recommended |
+| WR27 | A dialog's two buttons stack when they do not fit side by side on one line (layout decides, not a zoom reading); the safe choice is then on top. Closes web OD-W1. | Recommended |
+| WR28 | Lite: `/settings/spending` opens This browser with "This HQ is HQ Lite. It has no Spending limits." Closes OD-W2. | Recommended |
+| WR29 | In the HQ window, Copy link works (clipboard on a click); Share is hidden. Closes OD-W3. | Recommended |
+| WR30 | The outbox holds at most 100 items; the 101st shows "Couldn't add this. 100 things are already waiting to send." Closes OD-W4. | Recommended |
+| WR31 | Try it waits up to HQ's own launch limit, `agent_host.launch_bound_secs` (25 s by default, `crates/hq-tools/src/agent_host/mod.rs`). | Recommended |
 
 ## Owner to confirm, in one list
 
