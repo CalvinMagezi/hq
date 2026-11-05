@@ -192,10 +192,10 @@ function NotificationsPage() {
             onClick={loadData}
             disabled={isRefreshing}
             className="px-3 py-1.5 rounded-xl border border-white/10 text-xs text-neutral-300 hover:text-white hover:bg-white/5 transition-all flex items-center gap-1.5 disabled:opacity-50"
-            title="Refresh feed"
+            title={t('inbox_refresh_feed')}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Refresh</span>
+            <span className="hidden sm:inline">{t('inbox_refresh')}</span>
           </button>
 
           {activeTab === 'pending' && unreadCount > 0 && clearableUpdateIds(notifications).length > 0 && (
@@ -281,7 +281,7 @@ function NotificationsPage() {
               : 'text-neutral-400 border-white/10 hover:border-white/20 hover:text-neutral-200'
           }`}
         >
-          All Categories
+          {t('inbox_cat_all')}
         </button>
 
         <button
@@ -294,7 +294,7 @@ function NotificationsPage() {
           }`}
         >
           <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-          <span>Value Insights</span>
+          <span>{t('inbox_cat_value')}</span>
         </button>
 
 
@@ -308,7 +308,7 @@ function NotificationsPage() {
           }`}
         >
           <FileCode className="w-3.5 h-3.5 text-purple-400" />
-          <span>Code & System</span>
+          <span>{t('inbox_cat_system')}</span>
         </button>
 
       </div>
@@ -339,7 +339,7 @@ function NotificationsPage() {
             <div className="p-4 rounded-2xl bg-white/5 text-neutral-500 mb-3">
               <Inbox className="w-8 h-8" />
             </div>
-            <h3 className="text-sm font-bold text-neutral-300">No notifications found</h3>
+            <h3 className="text-sm font-bold text-neutral-300">{t('inbox_none_found')}</h3>
             <p className="text-xs text-neutral-500 max-w-sm mt-1">
               {activeTab === 'pending'
                 ? 'All proposals and suggestions have been approved or dismissed.'

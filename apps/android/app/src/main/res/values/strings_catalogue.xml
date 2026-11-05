@@ -2972,4 +2972,26 @@
     <string name="inbox_answer_sent_at">%1$s Sent at %2$s.</string>
     <string name="inbox_answer_allowed">Allowed.</string>
     <string name="inbox_answer_declined">Declined.</string>
+    <string name="inbox_refresh_feed">Refresh the list</string>
+    <string name="inbox_refresh">Refresh</string>
+    <string name="inbox_cat_all">Everything</string>
+    <string name="inbox_cat_value">Worth a look</string>
+    <string name="inbox_cat_system">Code and system</string>
+    <string name="inbox_none_found">Nothing here</string>
+    <string name="inbox_d_summary">What it says</string>
+    <string name="inbox_d_open">Open</string>
+    <string name="inbox_d_details">Details</string>
+    <string name="inbox_d_id">Number</string>
+    <string name="inbox_d_created">Made</string>
+    <string name="inbox_d_score">Weight</string>
+    <string name="ver_updates_title">Updates</string>
+    <string name="ver_updates_body">HQ installs signed releases on its own.</string>
+    <string name="ver_updates_value">By itself</string>
+    <string name="ver_support_body">Versions, with keys blanked.</string>
+    <string name="settings_app_not_set_up">Not set up</string>
+    <string name="settings_app_pitch">Talk to HQ from %1$s. It needs a bot you make in %1$s, about five minutes.</string>
+    <string name="settings_app_set_up">Set up %1$s</string>
+    <string name="signed_out_inbox_line">Sign in to see what needs you. Nothing from this HQ stays in this browser.</string>
+    <string name="tasks_none_yet_title">No tasks yet</string>
+    <string name="tasks_none_yet_body">Add one and it shows up here.</string>
 </resources>

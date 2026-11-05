@@ -43,7 +43,7 @@
   "components/MarkdownViewer.tsx": 3,
   "components/PdfViewer.tsx": 3,
   "components/SelectionToolbar.tsx": 1,
-  "components/notifications/NotificationDetailDrawer.tsx": 8,
+  "components/notifications/NotificationDetailDrawer.tsx": 2,
   "components/notifications/NotificationCard.tsx": 1,
   "components/vault/HomeSections.tsx": 5,
   "components/vault/VaultSidebar.tsx": 7,
@@ -52,7 +52,6 @@
   "routes/__root.tsx": 3,
   "routes/notes.tsx": 5,
   "routes/connect.tsx": 2,
-  "routes/inbox.tsx": 6,
   "routes/tasks.tsx": 5,
   "routes/notes/index.tsx": 7,
   "routes/notes/$.tsx": 8

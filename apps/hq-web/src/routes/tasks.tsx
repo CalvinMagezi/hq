@@ -514,10 +514,15 @@ function TasksPage() {
             <div className="p-4 rounded-2xl bg-white/5 text-neutral-500 mb-3">
               <CheckSquare className="w-8 h-8" />
             </div>
-            <h3 className="text-sm font-bold text-neutral-300">{t('tasks_none_found')}</h3>
+            <h3 className="text-sm font-bold text-neutral-300">{tasks.length === 0 ? t('tasks_none_yet_title') : t('tasks_none_found')}</h3>
             <p className="text-xs text-neutral-500 max-w-sm mt-1">
-              {statusTab === 'active' ? t('tasks_none_active') : t('tasks_none_match')}
+              {tasks.length === 0 ? t('tasks_none_yet_body') : statusTab === 'active' ? t('tasks_none_active') : t('tasks_none_match')}
             </p>
+            {tasks.length === 0 && (
+              <button type="button" onClick={() => setFormOpen(true)} className="hq-btn-primary mt-3">
+                {t('tasks_new_task')}
+              </button>
+            )}
           </div>
         ) : view === 'board' ? (
           <TaskBoardView tasks={filtered} allById={taskById} onSelect={(t) => setSelectedTaskId(t.id)} onMove={handleStatusMove} />

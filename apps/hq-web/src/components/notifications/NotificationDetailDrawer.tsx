@@ -98,7 +98,7 @@ export function NotificationDetailDrawer({
           {/* Summary / Description */}
           <div>
             <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">
-              Summary
+              {t('inbox_d_summary')}
             </h3>
             <p className="text-sm text-neutral-200 leading-relaxed whitespace-pre-wrap">
               {notification.description}
@@ -113,7 +113,7 @@ export function NotificationDetailDrawer({
                 className="hq-btn-ghost mt-3"
               >
                 <ArrowUpRight className="w-3.5 h-3.5" />
-                <span>Open</span>
+                <span>{t('inbox_d_open')}</span>
               </button>
             )}
           </div>
@@ -127,22 +127,22 @@ export function NotificationDetailDrawer({
             }}
           >
             <h4 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
-              Item Details
+              {t('inbox_d_details')}
             </h4>
             <div className="grid grid-cols-2 gap-3 text-xs ">
               <div>
-                <span className="text-neutral-500 block">ID:</span>
+                <span className="text-neutral-500 block">{t('inbox_d_id')}</span>
                 <span className="text-neutral-300 break-all">{notification.id}</span>
               </div>
               <div>
-                <span className="text-neutral-500 block">Created:</span>
+                <span className="text-neutral-500 block">{t('inbox_d_created')}</span>
                 <span className="text-neutral-300">
                   {new Date(notification.created_at).toLocaleString()}
                 </span>
               </div>
               {notification.metadata.score !== undefined && (
                 <div>
-                  <span className="text-neutral-500 block">Score:</span>
+                  <span className="text-neutral-500 block">{t('inbox_d_score')}</span>
                   <span className="text-amber-400 font-bold">
                     {notification.metadata.score.toFixed(2)}
                   </span>

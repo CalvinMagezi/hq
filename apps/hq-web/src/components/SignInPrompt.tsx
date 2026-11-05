@@ -168,12 +168,12 @@ export function SignedOutView({ pathname, embedded }: { pathname: string; embedd
     <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
       <KeyRound className="w-6 h-6" style={{ color: 'var(--warn)' }} aria-hidden="true" />
       <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-        {signedOutTitle(pathname)}
+        {pathname.startsWith('/inbox') ? t('state_signed_out') : signedOutTitle(pathname)}
       </h2>
       <p className="text-sm max-w-sm" style={{ color: 'var(--text-dim)' }}>
-        {t('signed_out_line')}
+        {pathname.startsWith('/inbox') ? t('signed_out_inbox_line') : t('signed_out_line')}
       </p>
-      <button type="button" onClick={openSignIn} className="a-btn">
+      <button type="button" onClick={openSignIn} className="a-btn min-h-11">
         {t('signed_out_button')}
       </button>
     </div>

@@ -312,6 +312,7 @@ function ChatAppCard({ platform, data, restarter }: CardProps) {
     if (canRestart) await restarter.run()
   }
   const [asking, setAsking] = useState<'disconnect' | 'unlink' | null>(null)
+  const [settingUp, setSettingUp] = useState(false)
   const appName = COPY[platform].title
   const disconnect = () => {
     setAsking(null)
@@ -337,7 +338,13 @@ function ChatAppCard({ platform, data, restarter }: CardProps) {
     <div className="hq-card rounded-2xl px-5">
       <Line label={COPY[platform].title}><RelayLine app={app} /></Line>
       {envLocked && <Line label={t('settings_app_bot')}>{t('settings_app_env_locked')}</Line>}
-      {!connected && editable && <ConnectForm platform={platform} onSave={save} />}
+      {!connected && editable && !settingUp && (
+        <Line label={t('settings_app_not_set_up')}>
+          <span className="block a-muted a-body-sm">{t('settings_app_pitch', { app: appName })}</span>
+          <button type="button" className="hq-btn-ghost" onClick={() => setSettingUp(true)}>{t('settings_app_set_up', { app: appName })}</button>
+        </Line>
+      )}
+      {!connected && editable && settingUp && <ConnectForm platform={platform} onSave={save} />}
       {connected && (
         <Line label={t('settings_app_bot')}>
           {app.bot ? `@${app.bot.username}` : (
