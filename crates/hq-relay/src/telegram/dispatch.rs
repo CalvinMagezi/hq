@@ -123,10 +123,12 @@ pub(super) async fn dispatch_hq(
     };
     let served_by = fallback_seen.lock().ok().and_then(|m| m.clone());
     let in_force = config.backends_in_force();
-    // A lent model being away (a laptop closed or gone) is the expected case, not a fault.
+    // A lent model being away (a laptop closed or gone) is the expected case, not a fault: the
+    // configured primary answering then is a normal turn. Anything further down is flagged.
     let lent = in_force.primary != config.backends.primary;
     match served_by {
-        Some(served_by) if in_force.is_configured() && !lent => {
+        Some(served_by) if lent && served_by == config.backends.primary => result_text,
+        Some(served_by) if in_force.is_configured() => {
             flag_fallback(&in_force.primary, result_text, &served_by)
         }
         _ => result_text,

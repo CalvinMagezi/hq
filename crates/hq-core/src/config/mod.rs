@@ -1033,25 +1033,28 @@ pub fn runtime_identity_block(config: &HqConfig) -> String {
 /// One sentence telling an agent which model and provider it is running on,
 /// from the same chain `resolve_session_model` reads, so the two never differ.
 pub fn runtime_identity(config: &HqConfig) -> String {
-    let model = resolve_session_model(config);
-    let primary = config
-        .backends
+    // The chain in force: a model a paired machine lends comes first while it is listed.
+    let backends = config.backends_in_force();
+    let primary = backends
         .is_configured()
-        .then(|| config.backends.backend(&config.backends.primary))
+        .then(|| backends.backend(&backends.primary))
         .flatten();
     let Some(primary) = primary else {
-        return format!("`{model}`");
+        return format!("`{}`", resolve_session_model(config));
     };
+    let model = primary
+        .model
+        .clone()
+        .unwrap_or_else(|| resolve_session_model(config));
     let mut line = format!(
         "`{model}` through {} (backend `{}`)",
         provider_label(primary),
         primary.name
     );
-    let fallbacks: Vec<String> = config
-        .backends
+    let fallbacks: Vec<String> = backends
         .fallbacks
         .iter()
-        .filter_map(|n| config.backends.backend(n))
+        .filter_map(|n| backends.backend(n))
         .map(|b| {
             format!(
                 "`{}` through {}",

@@ -41,8 +41,11 @@ pub const MAX_MODEL_CHARS: usize = 128;
 pub const SHARED_FAIL_FAST: Duration = Duration::from_secs(3);
 /// How often the hub checks its rows and the machine checks what it shares.
 const TICK: Duration = Duration::from_secs(2);
-/// A hub that could not be told is tried again after this long.
+/// A hub that could not be told is tried again after this long, then twice as long each time.
 const RETRY: Duration = Duration::from_secs(30);
+const MAX_BACKOFF: Duration = Duration::from_secs(10 * 60);
+/// A hub that was told is told again this often, in case it lost what it held.
+const REFRESH: Duration = Duration::from_secs(10 * 60);
 /// A hub that does not speak the protocol (an older release) is asked again only this rarely.
 const UNSUPPORTED_RETRY: Duration = Duration::from_secs(60 * 60);
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -187,37 +190,102 @@ pub async fn announce(dialer: &Dialer, hub: &str, offered: Option<&Offered>) -> 
         .context("the hub did not answer in time")?
 }
 
-/// Whether `e` says the hub does not speak `hq/share/1` (an older release).
-fn unsupported(e: &anyhow::Error) -> bool {
+/// Whether `e` says the hub does not speak `hq/share/1` (an older release): the handshake
+/// fails on the protocol name (TLS alert 120, "no application protocol").
+pub fn is_unsupported(e: &anyhow::Error) -> bool {
     let text = format!("{e:#}").to_ascii_lowercase();
-    text.contains("alpn") || text.contains("no application protocol")
+    [
+        "alpn",
+        "no application protocol",
+        "known protocol",
+        "error 120",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
+/// What the announcer knows about one hub.
+#[derive(Clone)]
+struct Told {
+    /// What the hub holds, `None` while unknown.
+    held: Option<Option<Offered>>,
+    /// After a failure, no new try before this.
+    retry_at: Instant,
+    /// The wait after the next failure.
+    backoff: Duration,
+    /// When the hub is told again even if nothing changed.
+    refresh_at: Instant,
+}
+
+impl Told {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            held: None,
+            retry_at: now,
+            backoff: RETRY,
+            refresh_at: now,
+        }
+    }
+
+    fn due(&self, wanted: &Option<Offered>) -> bool {
+        let now = Instant::now();
+        now >= self.retry_at && (self.held.as_ref() != Some(wanted) || now >= self.refresh_at)
+    }
 }
 
 /// Keeps every hub of this machine told what it lends: at start, whenever `source` changes, and
-/// again later for a hub that was away. `also` lists hubs set up by hand (configured forwards to
-/// their `web`); the rest are the `hub` rows of `bridge_setup`.
+/// again every [`REFRESH`] in case the hub lost it (a revoke and a new pairing clear its row).
+/// Hubs are told at once, so one that is away delays no other; one that does not answer is asked
+/// again after a wait that doubles up to [`MAX_BACKOFF`]. `also` lists hubs set up by hand
+/// (configured forwards to their `web`); the rest are the `hub` rows of `bridge_setup`.
 pub fn spawn_announcer(dialer: Dialer, source: ShareSource, also: Vec<String>) -> JoinHandle<()> {
     tokio::spawn(async move {
-        // What each hub holds: `None` while unknown, so at start every hub is told once, even
-        // "nothing", which clears a model it kept from before this machine stopped sharing while
-        // its bridge was off.
-        let mut told: HashMap<String, (Option<Option<Offered>>, Instant)> = HashMap::new();
+        // Unknown at start, so every hub is told once, even "nothing", which clears a model it
+        // kept from before this machine stopped sharing while its bridge was off.
+        let mut told: HashMap<String, Told> = HashMap::new();
         loop {
             let wanted = source();
-            for hub in hubs(dialer.db(), &also).await {
-                let (held, next) = told.get(&hub).cloned().unwrap_or((None, Instant::now()));
-                if held.as_ref() == Some(&wanted) || Instant::now() < next {
-                    continue;
-                }
-                let entry = match announce(&dialer, &hub, wanted.as_ref()).await {
-                    Ok(()) => (Some(wanted.clone()), Instant::now()),
-                    Err(e) if unsupported(&e) => (held, Instant::now() + UNSUPPORTED_RETRY),
+            let due: Vec<(String, Told)> = hubs(dialer.db(), &also)
+                .await
+                .into_iter()
+                .map(|hub| {
+                    let state = told.get(&hub).cloned().unwrap_or_else(Told::new);
+                    (hub, state)
+                })
+                .filter(|(_, state)| state.due(&wanted))
+                .collect();
+            let mut asks = tokio::task::JoinSet::new();
+            for (hub, state) in due {
+                let (dialer, wanted) = (dialer.clone(), wanted.clone());
+                asks.spawn(async move {
+                    let result = announce(&dialer, &hub, wanted.as_ref()).await;
+                    (hub, state, wanted, result)
+                });
+            }
+            while let Some(Ok((hub, state, wanted, result))) = asks.join_next().await {
+                let now = Instant::now();
+                let next = match result {
+                    Ok(()) => Told {
+                        held: Some(wanted),
+                        retry_at: now,
+                        backoff: RETRY,
+                        refresh_at: now + REFRESH,
+                    },
+                    Err(e) if is_unsupported(&e) => Told {
+                        retry_at: now + UNSUPPORTED_RETRY,
+                        ..state
+                    },
                     Err(e) => {
                         tracing::debug!(hub = %hub, "bridge share: {e:#}");
-                        (held, Instant::now() + RETRY)
+                        Told {
+                            retry_at: now + state.backoff,
+                            backoff: (state.backoff * 2).min(MAX_BACKOFF),
+                            ..state
+                        }
                     }
                 };
-                told.insert(hub, entry);
+                told.insert(hub, next);
             }
             tokio::time::sleep(TICK).await;
         }
@@ -253,7 +321,11 @@ pub fn shared_socket(bridge_dir: &Path, name: &str) -> PathBuf {
 /// `bridge_dir` listing them, both following the rows (a revoke removes the row, then both).
 pub fn spawn_shared_forwards(dialer: Dialer, bridge_dir: PathBuf) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut open: HashMap<String, (SharedBackend, JoinHandle<()>)> = HashMap::new();
+        let mut open = OpenShared {
+            dir: bridge_dir,
+            forwards: HashMap::new(),
+            failed: HashMap::new(),
+        };
         let mut written: Option<Vec<SharedBackend>> = None;
         loop {
             let db = dialer.db().clone();
@@ -262,7 +334,7 @@ pub fn spawn_shared_forwards(dialer: Dialer, bridge_dir: PathBuf) -> JoinHandle<
                     .into_iter()
                     .map(|(setup, model)| {
                         let backend = SharedBackend {
-                            socket: shared_socket(&bridge_dir, &setup.peer_name),
+                            socket: shared_socket(&open.dir, &setup.peer_name),
                             name: setup.peer_name,
                             model: model.model,
                             prompted_tools: model.tools == Some(false),
@@ -270,11 +342,11 @@ pub fn spawn_shared_forwards(dialer: Dialer, bridge_dir: PathBuf) -> JoinHandle<
                         (setup.peer_id, backend)
                     })
                     .collect();
-                reconcile(&dialer, &mut open, &wanted).await;
+                open.reconcile(&dialer, &wanted);
                 let listed: Vec<SharedBackend> =
-                    open.values().map(|(backend, _)| backend.clone()).collect();
+                    open.forwards.values().map(|(b, _)| b.clone()).collect();
                 if written.as_ref() != Some(&listed) {
-                    match write_shared(&bridge_dir, &listed) {
+                    match write_shared(&open.dir, &listed) {
                         Ok(()) => written = Some(listed),
                         Err(e) => tracing::warn!("bridge share: {e:#}"),
                     }
@@ -285,40 +357,66 @@ pub fn spawn_shared_forwards(dialer: Dialer, bridge_dir: PathBuf) -> JoinHandle<
     })
 }
 
-async fn reconcile(
-    dialer: &Dialer,
-    open: &mut HashMap<String, (SharedBackend, JoinHandle<()>)>,
-    wanted: &[(String, SharedBackend)],
-) {
-    open.retain(|peer, (backend, task)| {
-        let keep = wanted.iter().any(|(p, b)| p == peer && b == backend) && !task.is_finished();
-        if !keep {
+/// The forwards the hub opened for lent models. Dropped with its task (the bridge stops), it
+/// stops them and removes their sockets and the listing, so HQ never names a dead socket.
+struct OpenShared {
+    dir: PathBuf,
+    forwards: HashMap<String, (SharedBackend, JoinHandle<()>)>,
+    /// Peers whose socket could not be opened, and when to try again, so a lasting failure is
+    /// logged once rather than every tick.
+    failed: HashMap<String, Instant>,
+}
+
+impl Drop for OpenShared {
+    fn drop(&mut self) {
+        for (backend, task) in self.forwards.values() {
             task.abort();
             let _ = std::fs::remove_file(&backend.socket);
         }
-        keep
-    });
-    for (peer, backend) in wanted {
-        if open.contains_key(peer) {
-            continue;
-        }
-        match listen(&backend.socket) {
-            Ok(listener) => {
-                let options = ForwardOptions {
-                    fail_fast: Some(SHARED_FAIL_FAST),
-                    direct_only: false,
-                };
-                let task = tokio::spawn(run_forward(
-                    dialer.clone(),
-                    peer.clone(),
-                    SHARED_MODEL_SERVICE.to_string(),
-                    listener,
-                    options,
-                ));
-                open.insert(peer.clone(), (backend.clone(), task));
+        let _ = write_shared(&self.dir, &[]);
+    }
+}
+
+impl OpenShared {
+    fn reconcile(&mut self, dialer: &Dialer, wanted: &[(String, SharedBackend)]) {
+        self.forwards.retain(|peer, (backend, task)| {
+            let keep = wanted.iter().any(|(p, b)| p == peer && b == backend) && !task.is_finished();
+            if !keep {
+                task.abort();
+                let _ = std::fs::remove_file(&backend.socket);
             }
-            Err(e) => {
-                tracing::warn!(socket = %backend.socket.display(), "bridge share forward: {e:#}")
+            keep
+        });
+        self.failed
+            .retain(|peer, _| wanted.iter().any(|(p, _)| p == peer));
+        for (peer, backend) in wanted {
+            let waiting = self.failed.get(peer).is_some_and(|at| Instant::now() < *at);
+            if self.forwards.contains_key(peer) || waiting {
+                continue;
+            }
+            match listen(&backend.socket) {
+                Ok(listener) => {
+                    let options = ForwardOptions {
+                        fail_fast: Some(SHARED_FAIL_FAST),
+                        direct_only: false,
+                    };
+                    let task = tokio::spawn(run_forward(
+                        dialer.clone(),
+                        peer.clone(),
+                        SHARED_MODEL_SERVICE.to_string(),
+                        listener,
+                        options,
+                    ));
+                    self.failed.remove(peer);
+                    self.forwards.insert(peer.clone(), (backend.clone(), task));
+                }
+                Err(e) => {
+                    if !self.failed.contains_key(peer) {
+                        tracing::warn!(socket = %backend.socket.display(), "bridge share forward: {e:#}");
+                    }
+                    self.failed
+                        .insert(peer.clone(), Instant::now() + MAX_BACKOFF);
+                }
             }
         }
     }

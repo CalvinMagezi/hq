@@ -26,14 +26,15 @@ pub struct BackendInfo {
 /// The ordered chain (primary first, then fallbacks) as display records.
 /// Unknown names referenced by the chain are included but flagged with no kind.
 pub fn chain_listing(config: &HqConfig) -> Vec<BackendInfo> {
-    let backends = config.backends_in_force();
-    backends
+    // The configured chain, which `/model` changes; a lent model is shown by the session info.
+    config
+        .backends
         .chain_order()
         .into_iter()
         .map(|name| {
-            let entry = backends.backend(&name);
+            let entry = config.backends.backend(&name);
             BackendInfo {
-                is_primary: name == backends.primary,
+                is_primary: name == config.backends.primary,
                 kind: entry
                     .map(|e| format!("{:?}", e.kind))
                     .unwrap_or_else(|| "unknown".to_string()),
@@ -148,9 +149,8 @@ pub async fn reset_banner_from_config() -> String {
 pub async fn reset_banner(model: &str, config: &HqConfig) -> String {
     // The provider label is the configured primary backend when an explicit
     // chain exists, else the flat default (matching how turns are routed).
-    let backends = config.backends_in_force();
-    let provider = if backends.is_configured() {
-        backends.primary
+    let provider = if config.backends.is_configured() {
+        config.backends.primary.clone()
     } else {
         "default".to_string()
     };

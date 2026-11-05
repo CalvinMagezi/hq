@@ -484,8 +484,13 @@ never written to `config.yaml`.
 | L4 | A revoked machine | Stays the hub's primary | Revoking deletes the row with the model; within a few seconds the forward closes and the listing drops it | `revoking_the_machine_takes_its_model_off_the_hub` |
 | L5 | The hub's generic API key | Goes to the lent model | The listed backend names `HQ_SHARED_MODEL_KEY`, never set, so the config's `openai_api_key` is not used for it (#404); the socket endpoint gets the `local` placeholder | `a_shared_model_goes_in_front_and_the_configured_primary_becomes_its_fallback` |
 
-An older hub does not speak `hq/share/1`; the machine is refused at the handshake, logs it at debug and
-asks again an hour later. Prompts and replies to a lent model cross the bridge like any service
+A "machine" here is any device the owner paired that ran setup as a machine (section 15): pairing,
+with its six digits, is the owner's consent, so a paired laptop that shares its model can become the
+hub's primary. Revoke a device to take that back. An install with no `backends:` chain never uses a
+lent model. An older hub does not speak `hq/share/1`; the machine is refused at the handshake, logs it
+at debug and asks again an hour later. A hub that is away is asked again after 30 s, doubling up to
+10 minutes; one that was told is told again every 10 minutes, in case a revoke and a new pairing
+cleared its row. Prompts and replies to a lent model cross the bridge like any service
 stream: end to end encrypted between the two paired keys, through the relay when there is no direct
 path (unless the hub's forward is `when: direct`, which pairing does not set).
 

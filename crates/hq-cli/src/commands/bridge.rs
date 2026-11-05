@@ -25,6 +25,8 @@ const KEY_FILE: &str = "bridge.key";
 const BRIDGE_SUBDIR: &str = "bridge";
 /// How long one question to the lent model server may take: it is on this machine.
 const MODEL_SERVER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How often the lent model server is asked again.
+const MODEL_SERVER_RECHECK: std::time::Duration = std::time::Duration::from_secs(60);
 const DEFAULT_NAME: &str = "hq";
 const DEFAULT_PINGS: usize = 5;
 const SHOWN_CHARS: usize = 120;
@@ -701,10 +703,14 @@ async fn start_set_up(bridge: &Bridge, role: Role) -> Result<()> {
     if role == Role::Hub {
         bridge.keep_shared_models(HqConfig::hq_dir().join(BRIDGE_SUBDIR))?;
     }
-    if let Some(config) = &config
-        && config.bridge.share_model.is_some()
+    // A machine always keeps its hubs told, "nothing" included, so dropping
+    // `bridge.share_model` from the config takes the model off them too.
+    if role == Role::Machine
+        || config
+            .as_ref()
+            .is_some_and(|c| c.bridge.share_model.is_some())
     {
-        lend_model(bridge, config).await;
+        lend_model(bridge, config.as_ref());
     }
     gate_hint(config.as_ref(), role);
     if role != Role::Machine {
@@ -720,24 +726,38 @@ async fn start_set_up(bridge: &Bridge, role: Role) -> Result<()> {
 }
 
 /// Tells this machine's hubs about `bridge.share_model`: the model named there, or the first
-/// one the model server lists, with what the server says about it.
-async fn lend_model(bridge: &Bridge, config: &HqConfig) {
-    let Some(share) = &config.bridge.share_model else {
-        return;
-    };
-    let offered = match share_offer(share).await {
-        Ok(offered) => offered,
-        Err(e) => {
-            tracing::warn!("bridge.share_model: {e:#}; hubs are not told about the model");
-            return;
-        }
-    };
-    println!("Lending {} to this machine's hubs.", offered.model);
-    let also = config.bridge.configured_hubs();
-    bridge.announce_shared_model(Arc::new(move || Some(offered.clone())), also);
+/// one the model server lists, with what the server says about it. The server is asked again
+/// every [`MODEL_SERVER_RECHECK`], so a server that was down at start, or a model pulled later,
+/// is picked up; while it cannot answer, hubs are told nothing is lent.
+fn lend_model(bridge: &Bridge, config: Option<&HqConfig>) {
+    let share = config.and_then(|c| c.bridge.share_model.clone());
+    let also = config
+        .map(|c| c.bridge.configured_hubs())
+        .unwrap_or_default();
+    let lent: Arc<std::sync::Mutex<Option<hq_bridge::share::Offered>>> = Arc::default();
+    if let Some(share) = share {
+        let fill = lent.clone();
+        tokio::spawn(async move {
+            let mut said: Option<String> = None;
+            loop {
+                let offer = share_offer(&share).await;
+                let now = match &offer {
+                    Ok(o) => format!("Lending {} to this machine's hubs.", o.model),
+                    Err(e) => format!("bridge.share_model: {e:#}; hubs are told nothing is lent"),
+                };
+                if said.as_deref() != Some(now.as_str()) {
+                    tracing::info!("{now}");
+                    said = Some(now);
+                }
+                *fill.lock().unwrap() = offer.ok();
+                tokio::time::sleep(MODEL_SERVER_RECHECK).await;
+            }
+        });
+    }
+    bridge.announce_shared_model(Arc::new(move || lent.lock().unwrap().clone()), also);
 }
 
-/// What `share` lends, asked of the model server once at start.
+/// What `share` lends, as the model server says now.
 async fn share_offer(share: &hq_core::config::ShareModel) -> Result<hq_bridge::share::Offered> {
     #[derive(serde::Deserialize)]
     struct Named {

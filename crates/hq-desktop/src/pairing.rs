@@ -28,6 +28,8 @@ pub const MAX_DIGIT_TRIES: u32 = 3;
 const SAS_DIGITS: usize = 6;
 const SHOWN_NAME_CHARS: usize = 60;
 const SHORT_ID_CHARS: usize = 8;
+/// How often the model server is asked for a first model while it has none to name.
+const FIRST_MODEL_RECHECK: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct PairingConfig {
     pub key: PathBuf,
@@ -263,9 +265,16 @@ impl PairingController {
         let (switch, chosen) = (self.share.clone(), self.shared_model.clone());
         let first: Arc<Mutex<Option<String>>> = Arc::default();
         let (server, fill) = (self.model_server(), first.clone());
+        // Asked again until the server answers with a model, then left alone.
         tokio::spawn(async move {
-            let view = crate::share::probe(&server, true, None).await;
-            *fill.lock().unwrap() = view.models.first().map(|m| m.name.clone());
+            loop {
+                let view = crate::share::probe(&server, true, None).await;
+                if let Some(model) = view.models.first() {
+                    *fill.lock().unwrap() = Some(model.name.clone());
+                    return;
+                }
+                tokio::time::sleep(FIRST_MODEL_RECHECK).await;
+            }
         });
         let source = Arc::new(move || {
             if !switch.is_on() {
@@ -275,7 +284,8 @@ impl PairingController {
                 .lock()
                 .unwrap()
                 .clone()
-                .or_else(|| first.lock().unwrap().clone())?;
+                .or_else(|| first.lock().unwrap().clone())
+                .filter(|m| hq_bridge::share::valid_model(m))?;
             Some(hq_bridge::share::Offered {
                 model,
                 tools: None,

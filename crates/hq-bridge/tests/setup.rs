@@ -4,7 +4,7 @@
 //! server standing in for the paired-devices door or the host gate.
 #![cfg(unix)]
 
-use hq_bridge::share::{Offered, announce, shared_socket};
+use hq_bridge::share::{Offered, announce, is_unsupported, shared_socket};
 use hq_bridge::{
     Bridge, BridgeConfig, DoorTarget, JoinResult, Role, SETUP_ALPN, Services, SetupConfig, Ticket,
     Tuning,
@@ -579,4 +579,20 @@ async fn revoking_the_machine_takes_its_model_off_the_hub() {
         eventually(|| !listing.exists()).await,
         "revoking removes the row, then the listing"
     );
+}
+
+#[tokio::test]
+async fn a_peer_that_does_not_take_models_is_told_apart_from_one_that_is_away() {
+    // A machine takes no models, like a hub from before `hq/share/1`: refused at the handshake.
+    let (hub, machine, _) = paired_and_set_up().await;
+    let refused = with_timeout(announce(
+        &hub.bridge.dialer(),
+        &machine.id(),
+        Some(&offered("qwen3:8b")),
+    ))
+    .await
+    .unwrap_err();
+    assert!(is_unsupported(&refused), "{refused:#}");
+    let away = anyhow::anyhow!("the hub did not answer in time");
+    assert!(!is_unsupported(&away));
 }
