@@ -7,6 +7,8 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
+import example.hq.spike.measure.Counters
+import example.hq.spike.measure.DataPurpose
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -25,7 +27,7 @@ data class ModelSource(val url: String, val sha256: String, val bytes: Long, val
  * The speech models, fetched once from the sherpa-onnx releases on GitHub. Only the models travel: the download
  * request carries no audio, no words and no account. Everything lives in app storage that is not backed up.
  */
-class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClient()) {
+class VoiceModels(private val context: Context, private val http: OkHttpClient = OkHttpClient()) {
     private val root = File(context.noBackupFilesDir, "voice")
     val stt = File(root, "stt")
 
@@ -71,7 +73,12 @@ class VoiceModels(context: Context, private val http: OkHttpClient = OkHttpClien
                     have = 0
                 }
                 val base = have
-                FileOutputStream(partial, resumed).use { out -> copy(response.body.byteStream(), out, digest) { got -> progress(base + got) } }
+                var read = 0L
+                try {
+                    FileOutputStream(partial, resumed).use { out -> copy(response.body.byteStream(), out, digest) { got -> read = got; progress(base + got) } }
+                } finally {
+                    Counters.get(context).addBytes(DataPurpose.SpeechModel, Counters.metered(context), read)
+                }
             }
         }
         val got = digest.digest().joinToString("") { "%02x".format(it) }

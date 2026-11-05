@@ -26,7 +26,7 @@ data class SettingsSnapshot(
     val vault: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
@@ -419,6 +419,17 @@ object SettingsWords {
         appendLine("AgentHQ hub build $build")
         appendLine("Run mode: ${if (active) "Active: relays and scheduler on" else "Standby: web app only"}. Serving this device on 127.0.0.1:$port")
         appendLine("Health: ${health?.toString() ?: "no answer"}")
+    }
+
+    /** What the owner reads, and then copies, on Technical details. Versions, states and counts only: never a title, a name, an address or a key. */
+    data class DetailFacts(val version: String, val build: String, val android: String, val backgroundOn: Boolean, val hq: String)
+
+    /** The text of the Copy details sheet: what the app is, and the "What HQ noticed" numbers as English keys. */
+    fun copyDetails(f: DetailFacts, noticed: example.hq.spike.measure.CounterSnapshot): String = buildString {
+        appendLine("AgentHQ ${f.version} (build ${f.build}) on Android ${f.android}")
+        appendLine("Background work: ${onOff(f.backgroundOn)}")
+        appendLine("HQ: ${f.hq}")
+        append(example.hq.spike.measure.Noticed.block(noticed))
     }
 
     /** What the dialog says before the run mode changes: what stops or starts, and that hq restarts for a moment. */

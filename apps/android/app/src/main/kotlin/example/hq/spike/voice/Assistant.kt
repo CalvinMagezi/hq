@@ -31,7 +31,13 @@ class AssistantService : VoiceInteractionService() {
         // Android would otherwise copy the text of whatever is on screen (and a screenshot) into this app on every
         // press. HQ does not use it, so it is never collected.
         setDisabledShowContext(VoiceInteractionSession.SHOW_WITH_ASSIST or VoiceInteractionSession.SHOW_WITH_SCREENSHOT)
+        example.hq.spike.measure.Counters.get(this).set(example.hq.spike.measure.Counter.AssistantChosen, 1)
         Log.i(TAG, "assistant ready")
+    }
+
+    override fun onShutdown() {
+        super.onShutdown()
+        example.hq.spike.measure.Counters.get(this).set(example.hq.spike.measure.Counter.AssistantChosen, 0)
     }
 }
 

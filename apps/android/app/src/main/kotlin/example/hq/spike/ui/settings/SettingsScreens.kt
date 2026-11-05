@@ -43,6 +43,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.widthIn
@@ -68,6 +69,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import example.hq.spike.measure.Counters
+import example.hq.spike.measure.CellWords
+import example.hq.spike.measure.Noticed
+import example.hq.spike.measure.NoticeLine
 import example.hq.spike.update.UpdateLogic
 import example.hq.spike.update.UpdateState
 import example.hq.spike.ui.chat.blocks.IconAction
@@ -127,6 +132,8 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.SetupApp -> "Set up"
     SettingsPage.PairApp -> "Pair"
     SettingsPage.StoredKeys -> FirstRunWords.KEYS_TITLE
+    SettingsPage.Technical -> "Technical details"
+    SettingsPage.Noticed -> "What HQ noticed"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -162,6 +169,8 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.SetupApp -> SetupApp(ui, actions)
                 SettingsPage.PairApp -> PairApp(ui, actions)
                 SettingsPage.StoredKeys -> StoredKeysPage()
+                SettingsPage.Technical -> Technical(ui, actions)
+                SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
                 SettingsPage.Computers -> ReadOnlyList(ui, "No computer is listed.") { Facts(SettingsWords.computerRows(ui.snap.settings)) }
@@ -1062,14 +1071,185 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
         UpdateGroup(ui, actions)
         Label("Support")
         Group {
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button, onClick = actions.onCopyDiagnostics).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(HqIcons.Copy, null, Modifier.size(22.dp), tint = Mts.Ink)
-                Text("Copy diagnostics", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { actions.onPage(SettingsPage.Technical) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_technical_title), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(R.string.settings_technical_sub), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
             }
             Divider()
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !ui.restarting, role = Role.Button) { actions.onRestart(true) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (ui.restarting) "Restarting HQ\u2026" else "Restart HQ", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
                 if (ui.restarting) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- technical details and what HQ noticed
+
+private val NARROW_DP = 360
+private val CELL_WIDTH = 72.dp
+
+@Composable
+private fun Technical(ui: SettingsUi, actions: SettingsActions) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val counters = remember { Counters.get(context) }
+    val info = remember { context.packageManager.getPackageInfo(context.packageName, 0) }
+    val code = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+    val version = info.versionName.orEmpty().ifBlank { "dev" }
+    val hqVersion = ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() }
+    val hq = if (ui.snap.health != null) stringResource(R.string.state_connected) else stringResource(R.string.technical_hq_not_answering)
+    var sheet by remember { mutableStateOf<String?>(null) }
+    val facts = SettingsWords.DetailFacts(version, code.toString(), android.os.Build.VERSION.RELEASE.orEmpty(), ui.mode == "active", hq)
+    Page {
+        Facts(
+            listOf(
+                FactRow(stringResource(R.string.technical_version), hqVersion ?: stringResource(R.string.technical_hq_not_answering)),
+                FactRow(stringResource(R.string.technical_build), code.toString()),
+                FactRow(stringResource(R.string.technical_android), facts.android),
+                FactRow(stringResource(R.string.technical_hq), hq),
+            ),
+        )
+        Group {
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { actions.onPage(SettingsPage.Noticed) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.noticed_title), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(R.string.noticed_sub), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
+            Divider()
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { sheet = SettingsWords.copyDetails(facts, counters.snapshot()) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(HqIcons.Copy, null, Modifier.size(22.dp), tint = Mts.Ink)
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.copy_details_title), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(R.string.copy_details_sub), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+            }
+        }
+        Text(stringResource(R.string.technical_note), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp))
+    }
+    sheet?.let { CopyDetailsSheet(it) { sheet = null } }
+}
+
+/** Shows the exact text before it goes on the clipboard; Copy puts that text there and nothing else. */
+@Composable
+internal fun CopyDetailsSheet(text: String, onClose: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val copied = stringResource(R.string.copy_details_copied)
+    BackHandler(onBack = onClose)
+    Sheet(onClose) {
+        Text(stringResource(R.string.copy_details_title), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 8.dp))
+        Text(stringResource(R.string.copy_details_body), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 12.dp))
+        Box(Modifier.weight(1f, fill = false).fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Mts.Surface100).verticalScroll(rememberScrollState()).padding(12.dp)) {
+            Text(text, style = SmallText, fontFamily = FontFamily.Monospace, color = Mts.Ink)
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+            DialogButton(stringResource(R.string.copy_details_not_now), onClose)
+            DialogButton(stringResource(R.string.copy_details_copy)) {
+                context.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
+                android.widget.Toast.makeText(context, copied, android.widget.Toast.LENGTH_SHORT).show()
+                onClose()
+            }
+        }
+    }
+}
+
+/** A card at the foot of the page over a scrim; a tap outside closes it. */
+@Composable
+private fun Sheet(onClose: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose))
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = 560.dp).clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)).background(Mts.Surface200).navigationBarsPadding().padding(24.dp), content = content)
+    }
+}
+
+/** The counters, this version and the last, read only from the counter file: it works with HQ stopped. */
+@Composable
+internal fun NoticedPage(counters: Counters) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var snap by remember { mutableStateOf(counters.snapshot()) }
+    var line by remember { mutableStateOf<NoticeLine?>(null) }
+    var askClear by remember { mutableStateOf(false) }
+    val config = LocalConfiguration.current
+    val narrow = config.screenWidthDp <= NARROW_DP && config.fontScale >= 2f
+    val words = CellWords({ a, b -> context.getString(R.string.noticed_of, a.toString(), b.toString()) }, stringResource(R.string.noticed_yes), stringResource(R.string.noticed_no))
+    val asksPermission = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+    val notAsked = stringResource(R.string.noticed_not_asked)
+    Page {
+        Text(stringResource(R.string.noticed_intro), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp))
+        if (!snap.on) Box(Modifier.padding(top = 12.dp)) { Notice(stringResource(R.string.noticed_off_note, Noticed.day(snap.stoppedOn)), HqIcons.Info, warn = true) }
+        Row(Modifier.fillMaxWidth().padding(start = 32.dp, top = 16.dp, end = 32.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(R.string.noticed_since, Noticed.day(snap.current.since)), style = HqType.BodySmBold, color = Mts.InkMuted, modifier = Modifier.weight(1f))
+            Text(snap.current.version, style = HqType.BodySmBold, color = Mts.Ink, textAlign = TextAlign.End, modifier = Modifier.width(CELL_WIDTH))
+            if (!narrow) snap.previous?.let { Text(it.version, style = HqType.BodySmBold, color = Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.width(CELL_WIDTH)) }
+        }
+        if (narrow) snap.previous?.let { Text(stringResource(R.string.noticed_narrow_caption, it.version), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 32.dp, end = 32.dp)) }
+        Noticed.lines.groupBy { it.group }.forEach { (group, rows) ->
+            Label(stringResource(group))
+            Group {
+                rows.forEachIndexed { i, l ->
+                    if (i > 0) Divider()
+                    val skipped = l.asksPermission && !asksPermission
+                    val now = if (skipped) notAsked else Noticed.cell(snap.current, l, words)
+                    val before = if (skipped) null else snap.previous?.let { Noticed.cell(it, l, words) }
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { line = l }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(l.label), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f))
+                        if (narrow) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(now, style = HqType.BodySmBold, color = Mts.Ink, textAlign = TextAlign.End)
+                                before?.let { Text(it, style = SmallText, color = Mts.InkMuted, textAlign = TextAlign.End) }
+                            }
+                        } else {
+                            Text(now, style = HqType.BodySmBold, color = Mts.Ink, textAlign = TextAlign.End, modifier = if (skipped) Modifier.widthIn(max = VALUE_MAX) else Modifier.width(CELL_WIDTH))
+                            if (!skipped) before?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.width(CELL_WIDTH)) }
+                        }
+                    }
+                }
+            }
+        }
+        Label(stringResource(R.string.noticed_switch))
+        Group {
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { counters.setOn(!snap.on); snap = counters.snapshot() }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.noticed_switch), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(if (snap.on) R.string.noticed_switch_on else R.string.noticed_switch_off), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                Switch(
+                    checked = snap.on, onCheckedChange = null,
+                    colors = SwitchDefaults.colors(checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen, uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line),
+                )
+            }
+            Divider()
+            Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { askClear = true }.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.Center) {
+                Text(stringResource(R.string.noticed_clear), style = HqType.BodyBold, color = Mts.Ink)
+                Text(stringResource(R.string.noticed_clear_sub), style = HqType.BodySm, color = Mts.InkMuted)
+            }
+        }
+        Text(stringResource(R.string.noticed_foot), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp))
+    }
+    line?.let { l ->
+        BackHandler { line = null }
+        Sheet({ line = null }) {
+            Text(stringResource(l.label), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 8.dp))
+            Text(stringResource(l.what), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(bottom = 8.dp))
+            Text(stringResource(l.only), style = HqType.BodySm, color = Mts.InkMuted)
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) { DialogButton(stringResource(R.string.noticed_done)) { line = null } }
+        }
+    }
+    if (askClear) {
+        BackHandler { askClear = false }
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { askClear = false })
+            Column(Modifier.align(Alignment.Center).padding(24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp)) {
+                Text(stringResource(R.string.noticed_clear_title), style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
+                Text(stringResource(R.string.noticed_clear_body), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 20.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    DialogButton(stringResource(R.string.noticed_clear_keep)) { askClear = false }
+                    DialogButton(stringResource(R.string.noticed_clear_confirm)) { counters.clear(); snap = counters.snapshot(); askClear = false }
+                }
             }
         }
     }

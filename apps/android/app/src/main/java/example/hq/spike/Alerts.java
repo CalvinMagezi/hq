@@ -7,6 +7,8 @@ import android.content.SharedPreferences;
 import android.util.Log;
 import java.io.IOException;
 import java.io.InputStream;
+import example.hq.spike.measure.Counters;
+import example.hq.spike.measure.DataPurpose;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -172,6 +174,7 @@ final class Alerts {
         if (server == null) return;
         SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         ServerHq.Reply reply = ServerHq.call(server.getAddress(), "/api/notifications?state=pending&limit=30", server.getToken(), null, prefs.getString(SERVER_ETAG, null));
+        Counters.get(c).addBytes(DataPurpose.ServerChecks, Counters.metered(c), reply.body.length());
         if (reply.status == 304) return;
         if (reply.status == 401) {
             ServerHq.markSignedOut(c);

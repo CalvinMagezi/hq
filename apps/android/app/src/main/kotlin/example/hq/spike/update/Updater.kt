@@ -1,5 +1,7 @@
 package example.hq.spike.update
 
+import example.hq.spike.measure.Counters
+import example.hq.spike.measure.DataPurpose
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -259,18 +261,22 @@ object Updater {
             val length = response.body.contentLength()
             if (length > UpdateLogic.APK_MAX_BYTES) throw UpdateException("The update is larger than expected. Nothing was installed.")
             var total = 0L
-            response.body.byteStream().use { input ->
-                apk.outputStream().use { out ->
-                    val buffer = ByteArray(BUFFER_BYTES)
-                    while (true) {
-                        val n = input.read(buffer)
-                        if (n < 0) break
-                        total += n
-                        if (total > UpdateLogic.APK_MAX_BYTES) throw UpdateException("The update is larger than expected. Nothing was installed.")
-                        digest.update(buffer, 0, n)
-                        out.write(buffer, 0, n)
+            try {
+                response.body.byteStream().use { input ->
+                    apk.outputStream().use { out ->
+                        val buffer = ByteArray(BUFFER_BYTES)
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            total += n
+                            if (total > UpdateLogic.APK_MAX_BYTES) throw UpdateException("The update is larger than expected. Nothing was installed.")
+                            digest.update(buffer, 0, n)
+                            out.write(buffer, 0, n)
+                        }
                     }
                 }
+            } finally {
+                Counters.get(context).addBytes(DataPurpose.AppUpdates, Counters.metered(context), total)
             }
         }
         val hex = digest.digest().joinToString("") { "%02x".format(it) }

@@ -137,6 +137,7 @@ class ShellActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        countNoticeTap(intent)
         val link = linkOf(intent) ?: return
         // Shared text is kept even when the pages cannot be closed: it joins the chat's draft, and nothing typed there is lost.
         val shared = intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)
@@ -241,6 +242,11 @@ class ShellActivity : ComponentActivity() {
         return step
     }
 
+    /** Only the app's own "HQ answered" notice carries the extra, so a shared link or a widget is never counted. */
+    private fun countNoticeTap(intent: Intent) {
+        if (intent.getBooleanExtra(AlertPoster.EXTRA_NOTICE_TAP, false)) example.hq.spike.measure.Counters.get(this).bump(example.hq.spike.measure.Counter.NoticeTapped)
+    }
+
     private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -270,6 +276,7 @@ class ShellActivity : ComponentActivity() {
         val fixtureName = intent.getStringExtra("fixture")
         // A rotation or a restore runs onCreate again with the launch intent; the link was applied the first time.
         if (savedInstanceState == null) {
+            countNoticeTap(intent)
             linkOf(intent)?.let(::applyLink)
             intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)?.let(chat.actions.onDraft)
         }

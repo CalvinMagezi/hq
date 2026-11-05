@@ -12,6 +12,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import example.hq.spike.data.HqClient.InboxItem
+import example.hq.spike.measure.Counter
+import example.hq.spike.measure.Counters
 import example.hq.spike.ui.inbox.CardKind
 import example.hq.spike.ui.shell.Links
 import example.hq.spike.ui.inbox.InboxCard
@@ -30,6 +32,7 @@ object AlertPoster {
     const val APP_UPDATES = "app_updates"
     const val DOWNLOADS = "downloads"
     const val HUB = "hub"
+    const val EXTRA_NOTICE_TAP = "notice_tap"
     private const val ID_BASE = 100
     private const val ID_SPAN = 100_000
     private const val SDK_AUTH_ACTION = 31
@@ -133,6 +136,7 @@ object AlertPoster {
         for (id in shown.reversed()) {
             val card = InboxWords.card(itemOf(items.getValue(id)))
             nm.notify(notificationId(id), build(c, card, details, quiet = false))
+            Counters.get(c).apply { bump(Counter.NoticePosted); if (ServerHq.isServer(card.id)) bump(Counter.NoticeServerTapped, 1) }
         }
         if (fresh.size > shown.size) {
             val more = fresh.size - shown.size
@@ -174,13 +178,15 @@ object AlertPoster {
     }
 
     /** Taps open what the notification is about: the helper for a helper's question, else the Inbox item; the Inbox when it is about nothing in particular. */
-    internal fun open(c: Context, link: String = "hq://inbox"): PendingIntent {
+    internal fun open(c: Context, link: String = "hq://inbox", counted: Boolean = false): PendingIntent {
         val intent = Intent(c, ShellActivity::class.java).setData(Uri.parse(link)).putExtra(Links.EXTRA, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // The tap is counted by the shell, only for an "HQ answered" notice this app posted.
+        if (counted) intent.putExtra(EXTRA_NOTICE_TAP, true)
         return PendingIntent.getActivity(c, link.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     /** What a tap on [card] opens: for a question from the server HQ, that HQ's own web app, since this phone's pages do not know its helpers. */
-    internal fun tapFor(c: Context, card: InboxCard): PendingIntent = if (ServerHq.isServer(card.id)) openServer(c) else open(c, linkFor(card))
+    internal fun tapFor(c: Context, card: InboxCard): PendingIntent = if (ServerHq.isServer(card.id)) openServer(c) else open(c, linkFor(card), counted = true)
 
     /** The server HQ's notifications page in the browser, or this app's Inbox when no server is kept. */
     internal fun openServer(c: Context): PendingIntent {

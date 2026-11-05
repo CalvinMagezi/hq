@@ -41,7 +41,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 - [x] mobile/wave-0/02-safe-mode.md: when HQ cannot start (two crashes in a row, or from the "Save notes" shortcut) the app opens a plain screen in its own process to save the notes as a .zip (N6, no password) through the system picker; Restore takes that .zip with no secret (names that climb out of the folder and copies that would not fit are refused), then forgets the old phone's sign-ins; an update installs only when HQ is idle (a chat reply, a backup, notes waiting to send, the speech model downloading), with Wait, Stop it and install, or Not now; the channel file's new fields parse with safe defaults, and withdrawn versions are refused. First draft by Copilot (Sonnet 5.5), reviewed: an unpacked-size cap added, Settings and Restore wired. Try: long-press the app icon › Save notes: save the copy to Downloads; on a test install, Restore it.
 - [x] mobile/wave-0/03-data-transfer.md: data-extraction rules (only the vault moves to a new phone, cloud backup takes nothing), an install marker, the Moved first-run step (keys added again, Start fresh, notes only when the database copied badly) that runs `hq vault moved`, dead keys hidden, the old-phone card. First draft by Copilot (Sonnet 5.5), reviewed. Open: the .zip restore path comes with safe mode. Try: on a test install, copy `files/hqhome/.vault` from another install with adb and open the app: it says "Your notes came with you" with the counts and asks for keys again.
 - [x] The phone's Connection model and words (resolutions.md D-5): `data/Connection.kt` with the first-wins order, stopped judged by progress (A7), and the A2 reason and outcome sentences from the catalogue. No UI yet: the sheet is wave 2, the shell moves onto it in wave 4.
-- [ ] mobile/wave-0/04-measure.md
+- [x] mobile/wave-0/04-measure.md: "What HQ noticed" on the phone: counts only (grants, locked presses, notices posted and tapped, bytes by purpose and metered or not), kept in `noBackupFilesDir/counters.json` (8 KB cap, this version and the one before), never sent; Settings › Technical details › What HQ noticed, and Copy details carries the block. First draft by Copilot (Sonnet 5.5), reviewed. Call sites whose code comes later (the Connection sheet, Undo, NotifAccess) count from then. Try: Settings › Backup and about › Technical details › What HQ noticed.
 
 ## Wave 1 to wave 4
 
@@ -71,6 +71,37 @@ For the hub: `cd apps/desktop && bun install && bun run build:ui && bun run taur
 Not covered yet: "Your server HQ needs your OK" (see Found by the owner), and the amber colour on "Port in use" (the hub's tokens arrive in wave 3).
 
 Gates at hand-over: workspace clippy clean; `cargo test --workspace` 5432 passed, 0 failed, 44 ignored (94 binaries), then hq-web and hq-desktop re-run green after the review fixes; web 364 tests and the build pass; desktop typecheck passes. Android not built: nothing in these four changes touches the app.
+
+### Wave 0, shared parts and the phone (2026-11-05)
+
+Laptop (from `~/Documents/GitHub/hq-ux-run`, branch `ccr-66a72c4c-52kq29`), as for the live bugs above:
+`cd apps/hq-web && bun install && bun run build && cd ../.. && ./scripts/install-hq.sh`, then `hq web --json`.
+After any rebuild of the web app, restart HQ: it reads the shell's script hashes once at start.
+
+1. Status line: top right reads "Connected". Choose it: a side sheet says "Nothing to fix." and the address.
+2. `hq web stop`: within about 8 s "Your HQ can't be reached", with the last answer and the next try
+   counting down. `hq web --json`: "HQ is back. Lists are up to date."
+3. Starting: stop HQ, start it, and open `/api/hello` quickly: the start step, then `"starting": null`.
+4. Waiting to send: open a chat, stop HQ, send "test": it shows under "Waiting to send". Start HQ: it is
+   sent once (reload the page: still one copy).
+5. Shared computer: in a private window, tick "This is a shared computer" before signing in with a code.
+   Close the tab and open HQ again: it asks to sign in. Push is not offered.
+6. Two HQs: in HQ Hub open this computer's HQ, then the phone's: each shows only its own saved notes.
+
+Phone (needs the phone plugged in, and a test build: `apps/android/README.md`, with `-Phq.appId` set to a
+test id so it installs beside the real app):
+
+7. Lock screen: Settings › Notifications. Details are off. Have a helper ask while the phone is locked:
+   "Claude needs your OK", Open only. Turn details on (it asks for a screen lock), unlock: the request with
+   Decline · Allow once · Open; Allow once asks for the unlock.
+8. Safe mode: long-press the app icon › "Save notes": save the copy to Downloads (about the vault's size).
+9. Moving phones: on a second test install, Restore that .zip (no passphrase): "Your notes came with you",
+   keys asked again, Other devices empty.
+10. Updates: with a reply running, Settings › Backup and about › Install update: "Install now?" with Wait
+    until it's done, Stop it and install, Not now.
+
+Device checks still to log in `mobile/device-checks.md`: wave 0 rows (lock-screen swap on a real lock,
+Smart Switch or Google copy, a 4 GB zip on 8.1).
 
 ## Found by the owner
 

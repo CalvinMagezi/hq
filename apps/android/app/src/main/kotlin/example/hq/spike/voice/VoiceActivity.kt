@@ -2,6 +2,8 @@ package example.hq.spike.voice
 
 import android.Manifest
 import android.app.KeyguardManager
+import example.hq.spike.measure.Counter
+import example.hq.spike.measure.Counters
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -116,6 +118,7 @@ class VoiceActivity : ComponentActivity() {
         keyguard.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
             override fun onDismissSucceeded() {
                 dismissing = false
+                Counters.get(this@VoiceActivity).bump(Counter.LockedUnlocked)
                 unlocked.value = true
                 then()
             }
@@ -127,6 +130,7 @@ class VoiceActivity : ComponentActivity() {
     }
 
     private fun gaveUp() {
+        Counters.get(this).bump(Counter.LockedCancelled)
         dismissing = false
         finish()
     }
