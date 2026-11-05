@@ -39,11 +39,18 @@ pub fn services_from_config(
     if let Some(target) = shared {
         let target = door_target(target, "bridge.share_model", ws_port)?;
         out.insert(SHARED_MODEL_SERVICE.to_string(), target);
-        let also = config
-            .configured_hubs()
-            .iter()
-            .filter_map(|id| id.parse::<iroh::EndpointId>().ok())
-            .collect::<BTreeSet<_>>();
+        let mut also = BTreeSet::new();
+        for id in config.configured_hubs() {
+            match id.to_ascii_lowercase().parse::<iroh::EndpointId>() {
+                Ok(id) => {
+                    also.insert(id);
+                }
+                Err(_) => tracing::warn!(
+                    peer = %id,
+                    "bridge.share_model: a web forward's peer is not a machine id; it is not counted as a hub"
+                ),
+            }
+        }
         hubs_only.insert(SHARED_MODEL_SERVICE.to_string(), also);
     }
     Ok(Some(Services {

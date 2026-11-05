@@ -2,6 +2,7 @@
 //! before and while the bridge lends it to this computer's hubs. Read only; the switch itself is
 //! a [`hq_bridge::ServiceSwitch`] on the bridge's `llm` service.
 
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -11,6 +12,8 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 pub const MIN_CONTEXT: u64 = 32_768;
 /// Models asked about their capabilities, at most.
 const MAX_MODELS: usize = 24;
+/// Capability questions in flight at once.
+const PARALLEL_ASKS: usize = 6;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ModelView {
@@ -74,20 +77,22 @@ pub async fn probe(server: &str, on: bool, model: Option<String>) -> ShareView {
             )),
         };
     };
-    let mut models = Vec::new();
-    for named in tags.models.into_iter().take(MAX_MODELS) {
-        let show: Option<Show> = post_json(
-            &client,
-            &format!("{base}/api/show"),
-            serde_json::json!({ "model": named.name }),
-        )
+    let asks = tags.models.into_iter().take(MAX_MODELS).map(|named| {
+        let (client, url) = (&client, format!("{base}/api/show"));
+        async move {
+            let body = serde_json::json!({ "model": named.name });
+            let show: Option<Show> = post_json(client, &url, body).await;
+            let tools = show.is_some_and(|s| s.capabilities.iter().any(|c| c == "tools"));
+            ModelView {
+                name: named.name,
+                tools,
+            }
+        }
+    });
+    let models: Vec<ModelView> = futures::stream::iter(asks)
+        .buffered(PARALLEL_ASKS)
+        .collect()
         .await;
-        let tools = show.is_some_and(|s| s.capabilities.iter().any(|c| c == "tools"));
-        models.push(ModelView {
-            name: named.name,
-            tools,
-        });
-    }
     let chosen = model
         .clone()
         .or_else(|| models.first().map(|m| m.name.clone()));

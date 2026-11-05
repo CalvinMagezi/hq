@@ -232,6 +232,9 @@ impl PairingController {
     /// Lends this computer's model to its hubs while the bridge is on, or stops at once: open
     /// streams to the model end, as a revoke ends a peer's.
     pub fn set_sharing(&self, on: bool, model: Option<String>) {
+        let model = model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
         *self.shared_model.lock().unwrap() = model;
         self.share.set(on);
         self.bump();
@@ -254,14 +257,21 @@ impl PairingController {
             .unwrap_or_else(|| hq_core::config::DEFAULT_MODEL_SERVER.to_string())
     }
 
+    /// The owner offers `llm` by hand in `bridge.services`: the switch does not govern it.
+    pub fn shared_by_hand(&self) -> bool {
+        self.hub
+            .config
+            .services
+            .contains_key(hq_core::config::SHARED_MODEL_SERVICE)
+    }
+
     /// The config the bridge starts with: the owner's, plus the shared model behind the switch
-    /// unless the owner already offers an `llm` service by hand.
+    /// unless the owner already offers an `llm` service by hand. The service is registered even
+    /// while the switch is off, so turning it on needs no restart; off, it answers like a name
+    /// that is not offered.
     fn bridge_config(&self) -> hq_core::config::BridgeServicesConfig {
         let mut config = self.hub.config.clone();
-        let by_hand = config
-            .services
-            .contains_key(hq_core::config::SHARED_MODEL_SERVICE);
-        if !by_hand {
+        if !self.shared_by_hand() {
             let share = config.share_model.get_or_insert_with(Default::default);
             share.model = self.shared_model.lock().unwrap().clone();
         }
@@ -529,7 +539,9 @@ impl PairingController {
                 .unwrap()
                 .iter()
                 .filter(|name| {
-                    name.as_str() != hq_core::config::SHARED_MODEL_SERVICE || self.share.is_on()
+                    name.as_str() != hq_core::config::SHARED_MODEL_SERVICE
+                        || self.share.is_on()
+                        || self.shared_by_hand()
                 })
                 .cloned()
                 .collect(),

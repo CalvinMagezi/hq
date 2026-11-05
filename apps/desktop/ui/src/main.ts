@@ -439,13 +439,22 @@ function renderShare(share: Share) {
   $('share-warning').textContent = share.warning ?? ''
 }
 
+// A probe can take seconds; only the newest one may draw, so an older answer never undoes a toggle.
+let shareAsked = 0
+let shareShown: Share | null = null
 async function refreshShare() {
-  renderShare(await invoke<Share>('share_status'))
+  const asked = ++shareAsked
+  const share = await invoke<Share>('share_status')
+  if (asked !== shareAsked) return
+  shareShown = share
+  renderShare(share)
 }
 
 async function saveShare() {
   const on = $<HTMLInputElement>('share-on').checked
-  const model = $<HTMLSelectElement>('share-model').value || null
+  // With Ollama away the list is empty: keep the model chosen before rather than clearing it.
+  const model = $<HTMLSelectElement>('share-model').value || shareShown?.model || null
+  shareAsked++
   await invoke('share_set', { on, model })
   toast(on ? 'Sharing this computer\'s model.' : 'Stopped sharing.')
   await refreshShare()
