@@ -3279,4 +3279,5 @@ export const en = {
   signed_out_inbox_line: "Sign in to see what needs you. Nothing from this HQ stays in this browser.",
   tasks_none_yet_title: "No tasks yet",
   tasks_none_yet_body: "Add one and it shows up here.",
+  helpers_tell_failed: "Couldn't send that. Look at its screen.",
 } as const
