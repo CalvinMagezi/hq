@@ -558,7 +558,7 @@ mod tests {
     fn bridge(gate: bool, web_forward: bool) -> hq_core::config::BridgeServicesConfig {
         hq_core::config::BridgeServicesConfig {
             services: gate
-                .then(|| ("gate".to_string(), "127.0.0.1:7747".to_string()))
+                .then(|| ("gate".to_string(), "127.0.0.1:7747".into()))
                 .into_iter()
                 .collect(),
             forwards: web_forward

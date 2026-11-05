@@ -15,7 +15,7 @@ use iroh::{
     protocol::{AcceptError, ProtocolHandler},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -61,6 +61,9 @@ pub fn valid_name(name: &str) -> bool {
 #[derive(Debug, Clone)]
 pub struct Services {
     pub targets: BTreeMap<String, DoorTarget>,
+    /// Services only some paired peers may open, by name. A service missing here admits every
+    /// paired peer.
+    pub peers: BTreeMap<String, BTreeSet<EndpointId>>,
     /// Streams piped at once, over all peers.
     pub max_streams: usize,
 }
@@ -69,8 +72,16 @@ impl Services {
     pub fn new(targets: BTreeMap<String, DoorTarget>) -> Self {
         Self {
             targets,
+            peers: BTreeMap::new(),
             max_streams: DEFAULT_MAX_STREAMS,
         }
+    }
+
+    /// The target `peer` may reach by `name`. A service it may not open looks the same as one
+    /// that does not exist, so a peer learns nothing about what others are offered.
+    fn target_for(&self, name: &str, peer: &EndpointId) -> Option<&DoorTarget> {
+        let allowed = self.peers.get(name).is_none_or(|ids| ids.contains(peer));
+        allowed.then(|| self.targets.get(name)).flatten()
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -82,6 +93,14 @@ impl Services {
                 bail!("{name:?} is not a service name");
             }
             check_target(target, &format!("service {name}"))?;
+        }
+        for (name, ids) in &self.peers {
+            if !self.targets.contains_key(name) {
+                bail!("peers are listed for {name:?}, which is not offered");
+            }
+            if ids.is_empty() {
+                bail!("service {name} lists no peers");
+            }
         }
         if self.max_streams == 0 || self.max_streams > Semaphore::MAX_PERMITS {
             bail!(
@@ -134,7 +153,7 @@ impl ProtocolHandler for ServiceProtocol {
                     };
                     let services = self.services.clone();
                     tokio::spawn(async move {
-                        serve_stream(send, recv, &services).await;
+                        serve_stream(send, recv, &services, &id).await;
                         drop(permit);
                     });
                 }
@@ -154,11 +173,16 @@ impl ProtocolHandler for ServiceProtocol {
 }
 
 /// Reads the service name, answers with one status byte, and pipes on success.
-async fn serve_stream(mut send: SendStream, mut recv: RecvStream, services: &Services) {
+async fn serve_stream(
+    mut send: SendStream,
+    mut recv: RecvStream,
+    services: &Services,
+    peer: &EndpointId,
+) {
     let Ok(Ok(name)) = tokio::time::timeout(HEADER_TIMEOUT, read_name(&mut recv)).await else {
         return;
     };
-    let Some(target) = services.targets.get(&name) else {
+    let Some(target) = services.target_for(&name, peer) else {
         let _ = send.write_all(&[STATUS_UNKNOWN]).await;
         let _ = send.finish();
         return;

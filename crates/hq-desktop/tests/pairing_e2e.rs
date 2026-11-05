@@ -408,7 +408,7 @@ async fn the_app_offers_its_gate_and_opens_forwards_and_reports_a_port_taken_els
         },
         Some(HubServices {
             config: BridgeServicesConfig {
-                services: [("gate".to_string(), gate_addr.to_string())].into(),
+                services: [("gate".to_string(), gate_addr.to_string().into())].into(),
                 forwards: vec![forward("web", free_addr), forward("other", taken_addr)],
                 ..Default::default()
             },
