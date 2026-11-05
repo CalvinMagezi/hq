@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Dialog } from '~/components/ui/Dialog'
+import { t } from '~/strings'
 import { hasWebToken, saveWebToken } from '~/lib/hqAuth'
 import {
   codeLink,
@@ -124,8 +126,9 @@ function DeviceRows({ list, onChanged }: { list: DeviceList; onChanged: () => vo
   const [error, setError] = useState<string | null>(null)
   const now = Date.now()
 
+  const [asking, setAsking] = useState<{ id: string; label: string } | null>(null)
+
   const signOut = async (id: string, current: boolean) => {
-    if (current && !window.confirm('Sign this device out? You will need a code, a login link or /login to get back in.')) return
     setBusyId(id)
     setError(null)
     try {
@@ -156,7 +159,7 @@ function DeviceRows({ list, onChanged }: { list: DeviceList; onChanged: () => vo
             </div>
             <button
               type="button"
-              onClick={() => signOut(d.id, d.current)}
+              onClick={() => (d.current ? setAsking({ id: d.id, label: d.label }) : void signOut(d.id, false))}
               disabled={busyId !== null}
               className="hq-btn-ghost flex-shrink-0 disabled:opacity-40"
             >
@@ -165,6 +168,20 @@ function DeviceRows({ list, onChanged }: { list: DeviceList; onChanged: () => vo
           </li>
         ))}
       </ul>
+      {asking && (
+        <Dialog
+          kind="red"
+          title={t('sign_out_device_title', { device: asking.label })}
+          body={t('sign_out_device_body')}
+          keepLabel={t('sign_out_device_keep')}
+          actLabel={t('sign_out_device_act')}
+          busyLabel={t('confirm_busy_signing_out')}
+          busy={busyId !== null}
+          error={error}
+          onKeep={() => setAsking(null)}
+          onAct={() => void signOut(asking.id, true)}
+        />
+      )}
       {list.operator_link_active && (
         <p className="text-xs text-neutral-400">
           The original login link from whoever set up your server still works
@@ -195,32 +212,25 @@ function SignOutEverywhere() {
     }
   }
 
-  if (!confirming) {
-    return (
-      <div>
-        <button type="button" onClick={() => setConfirming(true)} className="hq-btn-ghost">
-          Sign out everywhere
-        </button>
-      </div>
-    )
-  }
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-white/10 px-4 py-3">
-      <p className="text-neutral-100">Sign out every device?</p>
-      <p className="text-xs text-neutral-400">
-        Every phone, browser and installed app must sign in again, including this one, which is signed back in for you
-        right away. The original login link from whoever set up your server stops working too, other devices stop getting
-        notifications. Use this when a phone is lost or a link was shared by mistake.
-      </p>
-      <div className="flex flex-wrap gap-3">
-        <button type="button" onClick={rotate} disabled={busy} className="hq-btn-ghost disabled:opacity-40" style={{ color: 'var(--accent-red)' }}>
-          Yes, sign out everywhere
-        </button>
-        <button type="button" onClick={() => setConfirming(false)} disabled={busy} className="hq-btn-ghost disabled:opacity-40">
-          Cancel
-        </button>
-      </div>
-      <ErrorLine message={error} />
+    <div>
+      <button type="button" onClick={() => setConfirming(true)} className="hq-btn-ghost">
+        {t('sign_out_all_act')}
+      </button>
+      {confirming && (
+        <Dialog
+          kind="red"
+          title={t('sign_out_all_title')}
+          body={t('sign_out_all_body')}
+          keepLabel={t('sign_out_all_keep')}
+          actLabel={t('sign_out_all_act')}
+          busyLabel={t('confirm_busy_signing_out')}
+          busy={busy}
+          error={error}
+          onKeep={() => setConfirming(false)}
+          onAct={() => void rotate()}
+        />
+      )}
     </div>
   )
 }

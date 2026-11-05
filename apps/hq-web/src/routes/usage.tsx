@@ -2,6 +2,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { toastUndo, toastAlert } from '~/lib/toast'
+import { t } from '~/strings'
 import {
   budgetsQuery,
   exhaustionSentence,
@@ -96,6 +98,27 @@ function BudgetsPanel() {
   const defs = data?.definitions ?? []
   const limit = Number(form.limit)
   const valid = form.name.trim() !== '' && Number.isFinite(limit) && limit > 0 && (form.action !== 'downgrade' || form.downgrade.trim() !== '')
+  // Undo puts the whole list back as it was, so the deleted limit returns with every setting.
+  const deleteLimit = (name: string) => {
+    const before = defs
+    const rest = { background_run_usd: data?.background_run_usd ?? null, allow_unpriced_models: data?.allow_unpriced_models ?? [] }
+    save.mutate(
+      before.filter((d) => d.name !== name),
+      {
+        onSuccess: () =>
+          toastUndo(
+            t('done_limit_deleted', { name }),
+            async () => {
+              await saveBudgets(before, rest)
+              await qc.invalidateQueries({ queryKey: ['usage-budgets'] })
+            },
+            t('restored_limit'),
+            'undo.limit_deleted',
+          ),
+        onError: () => toastAlert(t('fail_delete_limit_no_reply')),
+      },
+    )
+  }
   const add = () => {
     const def: BudgetDef = {
       name: form.name.trim(),
@@ -119,7 +142,7 @@ function BudgetsPanel() {
         <p className="text-xs text-neutral-400">No budgets are set, so nothing is limited. Add one below; it applies to every call straight away.</p>
       )}
       {data?.budgets.map((b) => (
-        <BudgetRow key={b.name} b={b} onDelete={() => save.mutate(defs.filter((d) => d.name !== b.name))} />
+        <BudgetRow key={b.name} b={b} onDelete={() => deleteLimit(b.name)} />
       ))}
       <form
         className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end pt-2 border-t border-white/10"

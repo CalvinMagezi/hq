@@ -107,6 +107,8 @@ export interface PendingDialog {
   options: DialogOption[]
   truncated: boolean
   cwd?: string | null
+  loses?: boolean
+  verb?: string | null
 }
 
 export interface AnswerPayload {

@@ -14,6 +14,9 @@ export interface TaskDecision {
   options: { id: number; label: string; remember?: boolean; typed?: boolean }[]
   /** The one-time yes a button may pick; null when only the agent's own page can answer. */
   approve: { id: number; label: string | null } | null
+  /** Allowing this loses something, so the button is red and names it. */
+  loses?: boolean
+  verb?: string | null
 }
 
 export function fetchTaskDecisions(taskId: string): Promise<{ decisions: TaskDecision[] }> {

@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckCircle2, Loader2, OctagonX, X } from 'lucide-react'
@@ -87,7 +88,7 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <h2 id="stop-all-title" className="text-sm font-bold text-white">
-            Stop every agent
+            {t('stop_all_title')}
           </h2>
           <button type="button" onClick={close} disabled={busy} aria-label="Close" className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
             <X className="w-4 h-4" />
@@ -99,8 +100,7 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
           ) : (
             <>
               <p id="stop-all-what" className="text-xs text-neutral-300 leading-relaxed">
-                Every agent on the computer is killed at once, and it starts none until someone at that computer runs{' '}
-                <code className="text-neutral-100">hq host unlock</code>. Stopped agents do not come back by themselves.
+                {t('stop_all_body')}
               </p>
               <div>
                 <label htmlFor="stop-all-computer" className="block mb-1 text-[11px] text-neutral-400">
@@ -143,12 +143,14 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
               Done
             </button>
           ) : (
-            <button type="button" onClick={() => void stop()} disabled={busy} className="hq-btn-primary w-full">
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <OctagonX className="w-4 h-4" />}
-              <span className="truncate">
-                {busy ? 'Stopping' : target ? `Stop agents on ${computerName(target)}` : 'Stop every agent everywhere'}
-              </span>
-            </button>
+            <div className="flex flex-col gap-2">
+              <button type="button" onClick={close} disabled={busy} className="a-btn secondary block">
+                {t('stop_all_keep')}
+              </button>
+              <button type="button" onClick={() => void stop()} disabled={busy} aria-busy={busy || undefined} className="a-btn danger block">
+                {busy ? t('confirm_busy_stopping') : t('stop_all_act')}
+              </button>
+            </div>
           )}
         </div>
       </div>

@@ -16,9 +16,14 @@ import {
   fetchNotificationsClient,
   executeNotificationAction,
   markAllNotificationsRead,
+  restoreNotification,
+  restoreNotifications,
+  clearableUpdateIds,
   type NotificationItem,
   type NotificationKind,
 } from '~/lib/notificationsApi'
+import { toastUndo, toastAlert } from '~/lib/toast'
+import { t, tn } from '~/strings'
 import { NotificationCard } from '~/components/notifications/NotificationCard'
 import { NotificationDetailDrawer } from '~/components/notifications/NotificationDetailDrawer'
 
@@ -75,6 +80,17 @@ function NotificationsPage() {
         if (selectedNotification && selectedNotification.id === id) {
           setSelectedNotification(null)
         }
+        if (action === 'dismiss' && notifications.find((n) => n.id === id)?.kind === 'value_item') {
+          toastUndo(
+            t('undo_update_cleared'),
+            async () => {
+              await restoreNotification(id)
+              await loadData()
+            },
+            t('restored_updates'),
+            'undo.inbox_cleared',
+          )
+        }
       }
     } catch (e) {
       // A refused action (an agent's question approved as a notice, say) must not look like it worked.
@@ -92,12 +108,23 @@ function NotificationsPage() {
     }
   }
 
-  const handleMarkAllRead = async () => {
+  // Only updates are cleared in bulk; a Needs-you request waits for its own answer.
+  const handleClearUpdates = async () => {
+    const ids = clearableUpdateIds(notifications)
     try {
       await markAllNotificationsRead()
       await loadData()
-    } catch (e) {
-      console.error('Failed to mark all as read:', e)
+      toastUndo(
+        tn('updates_cleared', ids.length),
+        async () => {
+          await restoreNotifications(ids)
+          await loadData()
+        },
+        t('restored_updates'),
+        'undo.inbox_cleared',
+      )
+    } catch {
+      toastAlert(t('fail_clear_updates_no_reply'))
     }
   }
 
@@ -153,14 +180,14 @@ function NotificationsPage() {
             <span className="hidden sm:inline">Refresh</span>
           </button>
 
-          {activeTab === 'pending' && unreadCount > 0 && (
+          {activeTab === 'pending' && unreadCount > 0 && clearableUpdateIds(notifications).length > 0 && (
             <button
               type="button"
-              onClick={handleMarkAllRead}
+              onClick={handleClearUpdates}
               className="hq-btn-ghost"
             >
               <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Mark all read</span>
+              <span>{t('inbox_clear_all_updates')}</span>
             </button>
           )}
         </div>

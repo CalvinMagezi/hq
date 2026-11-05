@@ -1,3 +1,5 @@
+import { ApprovalCard } from '~/components/ui/ApprovalCard'
+import { t } from '~/strings'
 import React from 'react'
 import {
   CheckCircle2,
@@ -128,57 +130,17 @@ export function NotificationCard({
         ) : isPending ? (
           <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
             {notification.kind === 'action_needed' ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onAction(notification.id, 'dismiss')}
-                  disabled={loadingAction !== null}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-white/10 transition-colors disabled:opacity-50"
-                  title="Dismiss"
-                >
-                  {loadingAction === `dismiss-${notification.id}` ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <X className="w-3.5 h-3.5" />
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onAction(notification.id, 'reject')}
-                  disabled={loadingAction !== null}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all flex items-center gap-1 disabled:opacity-50"
-                >
-                  {loadingAction === `reject-${notification.id}` ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <XCircle className="w-3.5 h-3.5" />
-                      Reject
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onAction(notification.id, 'approve')}
-                  disabled={loadingAction !== null}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all disabled:opacity-50"
-                  style={{
-                    background: 'var(--accent-green, #00ffa3)',
-                    color: '#000',
-                  }}
-                >
-                  {loadingAction === `approve-${notification.id}` ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      Approve
-                    </>
-                  )}
-                </button>
-              </>
+              <ApprovalCard
+                quoteTitle={t('approval_quote_inbox')}
+                tool={notification.metadata.approval?.tool}
+                args={notification.metadata.approval?.args}
+                inWords={notification.description}
+                loses={notification.metadata.approval?.loses}
+                verb={notification.metadata.approval?.verb}
+                busy={loadingAction !== null}
+                onDecline={() => onAction(notification.id, 'reject')}
+                onAllow={() => onAction(notification.id, 'approve')}
+              />
             ) : (
               <button
                 type="button"

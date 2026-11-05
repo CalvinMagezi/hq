@@ -1,3 +1,5 @@
+import { Dialog } from '../ui/Dialog'
+import { t } from '~/strings'
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Archive, ArchiveRestore, Check, Eye, Loader2, Pencil, Play, Square, X } from 'lucide-react'
@@ -100,35 +102,32 @@ export function RenameTitle({ session: s, action }: ActionProps) {
   )
 }
 
-/** Stop asks twice, since it ends the agent's work. */
+/** Stop asks first, since it ends the agent's work. */
 export function StopButton({ session: s, action }: ActionProps) {
   const [confirming, setConfirming] = useState(false)
-  if (!confirming) {
-    return (
+  const helper = s.label || s.id
+  return (
+    <>
       <button type="button" disabled={action.busy} onClick={() => setConfirming(true)} className={ACTION_BUTTON_CLASS}>
         <Square className="w-3.5 h-3.5" />
         Stop
       </button>
-    )
-  }
-  return (
-    <div className="flex items-center gap-1.5" role="group" aria-label="Confirm stop">
-      <button
-        type="button"
-        disabled={action.busy}
-        onClick={async () => {
-          if (await action.run(() => globalSessionsApi.stop(s.id), 'Could not stop this agent.')) setConfirming(false)
-        }}
-        className={ACTION_BUTTON_CLASS}
-        style={{ color: 'var(--accent-red)' }}
-      >
-        {action.busy ? Spinner : <Square className="w-3.5 h-3.5" />}
-        Yes, stop it
-      </button>
-      <button type="button" disabled={action.busy} onClick={() => setConfirming(false)} className={ACTION_BUTTON_CLASS}>
-        Keep going
-      </button>
-    </div>
+      {confirming && (
+        <Dialog
+          kind="red"
+          title={t('stop_helper_title', { helper })}
+          body={t('stop_helper_body')}
+          keepLabel={t('stop_helper_keep')}
+          actLabel={t('stop_helper_act', { helper })}
+          busyLabel={t('confirm_busy_stopping')}
+          busy={action.busy}
+          onKeep={() => setConfirming(false)}
+          onAct={async () => {
+            if (await action.run(() => globalSessionsApi.stop(s.id), t('fail_stop_helper_no_reply', { helper }))) setConfirming(false)
+          }}
+        />
+      )}
+    </>
   )
 }
 

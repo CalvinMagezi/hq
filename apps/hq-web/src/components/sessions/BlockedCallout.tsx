@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { globalSessionsApi, type AnswerPayload, type DialogKind, type HarnessSession, type PendingDialog } from '~/lib/sessionsApi'
@@ -75,12 +76,12 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
           )}
           {kind === 'approval' && (
             <div className="flex items-center gap-2">
-              <button type="button" disabled={held} onClick={() => answer('enter')} className={BIG_BUTTON_CLASS} >
-                {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-                Approve
+              <button type="button" disabled={held} onClick={() => answer('esc')} className={BIG_BUTTON_CLASS}>
+                {t('notice_action_decline')}
               </button>
-              <button type="button" disabled={held} onClick={() => answer('esc')} className={BIG_BUTTON_CLASS} >
-                Decline
+              <button type="button" disabled={held} onClick={() => answer('enter')} className={BIG_BUTTON_CLASS}>
+                {busy && <Loader2 className="w-4 h-4 animate-spin" />}
+                {t('notice_action_allow_once')}
               </button>
             </div>
           )}
