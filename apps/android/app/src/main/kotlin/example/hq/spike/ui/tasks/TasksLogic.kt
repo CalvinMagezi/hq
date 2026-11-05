@@ -113,6 +113,9 @@ object TasksLogic {
         return priorityWords(t.priority)?.takeIf { t.priority == "urgent" || t.priority == "high" }?.let { IdTag(it, danger = false) }
     }
 
+    /** The sub-tasks line: "None yet" with no sub-tasks, else "1 of 3 done". */
+    fun subtaskLabel(done: Int, total: Int): String = if (total == 0) "None yet" else example.hq.spike.ui.shell.Counts.progress(done, total, null)
+
     /** "2d", or "5h" within a day, from the server's `YYYY-MM-DD HH:MM:SS` UTC time. */
     fun stuckFor(since: String?, now: LocalDateTime): String? {
         val then = try { LocalDateTime.parse(since?.replace(' ', 'T') ?: return null) } catch (e: DateTimeParseException) { return null }
@@ -130,15 +133,15 @@ object TasksLogic {
             t.status == "blocked" -> listOfNotNull(t.waitingOn?.takeIf { it.isNotBlank() }?.let { "Waiting on $it" }, t.blockedReason?.takeIf { it.isNotBlank() })
             t.status == "ready_for_review" -> listOfNotNull(forWho, readyAgo(t.readyAt, now)?.let { "moved $it" })
             else -> listOfNotNull(
-                "hq is working".takeIf { working },
-                "${t.subtaskDone} of ${t.subtaskCount} sub-tasks".takeIf { t.subtaskCount > 0 },
+                "HQ is working on it".takeIf { working },
+                example.hq.spike.ui.shell.Counts.progress(t.subtaskDone, t.subtaskCount).takeIf { t.subtaskCount > 0 },
                 dueWords(t.dueDate, today), forWho, tag,
             )
         }
         return parts.joinToString(" \u00b7 ")
     }
 
-    private fun plural(n: Int) = if (n == 1) "1 task" else "$n tasks"
+    private fun plural(n: Int) = example.hq.spike.ui.shell.Counts.tasks(n)
 
     private fun dayLabel(d: LocalDate, today: LocalDate): String {
         val long = d.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
@@ -177,14 +180,14 @@ object TasksLogic {
         val sep = Run(" · ")
         return when (t.status) {
             "blocked" -> listOf(Run("Stuck", bold = true, amber = true)) + listOfNotNull(t.blockedReason?.takeIf { it.isNotBlank() }?.let { listOf(sep, Run(it)) }).flatten()
-            "ready_for_review" -> listOf(Run("Ready to check", bold = true, amber = true)) + (readyAgo(t.readyAt, now)?.let { listOf(sep, Run("hq finished " + it.replace(' ', NBSP))) } ?: emptyList())
+            "ready_for_review" -> listOf(Run("Ready to check", bold = true, amber = true)) + (readyAgo(t.readyAt, now)?.let { listOf(sep, Run("HQ finished " + it.replace(' ', NBSP))) } ?: emptyList())
             else -> {
                 val parts = mutableListOf<List<Run>>()
                 priorityWords(t.priority)?.let { parts += listOf(Run(it, bold = true)) }
                 dueWords(t.dueDate, today)?.let { parts += listOf(Run(it)) }
                 parse(t.startDate)?.takeIf { it.isAfter(today) }?.let { parts += listOf(Run(if (it == today.plusDays(1)) "starts tomorrow" else "starts " + it.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault())))) }
                 startedWords(t, today)?.let { parts += listOf(Run(it)) }
-                if (t.subtaskCount > 0) parts += listOf(Run("${t.subtaskDone} of ${t.subtaskCount} steps${NBSP}done"))
+                if (t.subtaskCount > 0) parts += listOf(Run(example.hq.spike.ui.shell.Counts.progress(t.subtaskDone, t.subtaskCount)))
                 if (t.assignees.isNotEmpty() && t.status == "to_do") parts += listOf(Run("for ${t.assignees.first()}"))
                 parts.flatMapIndexed { i, p -> if (i == 0) p else listOf(sep) + p }
             }

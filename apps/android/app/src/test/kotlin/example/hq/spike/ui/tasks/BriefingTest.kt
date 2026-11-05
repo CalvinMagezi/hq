@@ -11,8 +11,8 @@ class BriefingTest {
         Briefing("Alpha", shown, counts, emptyList(), emptyList(), emptyList(), reviews, gaps, emptyList(), fresh)
 
     @Test fun theStatusLineCountsEachStatusAndSaysHowManyTasks() {
-        assertEquals("2 in progress, 1 to do (3 tasks)", BriefingWords.statusLine(briefing(listOf("in_progress" to 2, "to_do" to 1), 3)))
-        assertEquals("1 to do (1 task)", BriefingWords.statusLine(briefing(listOf("to_do" to 1), 1)))
+        assertEquals("2 in progress, 1 to do (3\u00A0tasks)", BriefingWords.statusLine(briefing(listOf("in_progress" to 2, "to_do" to 1), 3)))
+        assertEquals("1 to do (1\u00A0task)", BriefingWords.statusLine(briefing(listOf("to_do" to 1), 1)))
         assertEquals("", BriefingWords.statusLine(briefing()))
     }
 

@@ -90,10 +90,10 @@ class BackgroundWorkTest {
         assertEquals("AgentHQ hub build x\nRun mode: Standby: web app only. Serving this device on 127.0.0.1:5678\nHealth: no answer\n", SettingsWords.diagnostics("x", false, null, 5678))
     }
 
-    @Test fun theHomeRowAdmitsThereIsNoBackup() {
+    @Test fun theHomeRowWarnsWhenNotesAreOnlyOnThePhone() {
         val row = SettingsWords.home(SettingsSnapshot(), java.time.Instant.EPOCH).flatMap { it.rows }.first { it.page == SettingsPage.About }
         assertEquals("Backup and about", row.title)
-        assertEquals("No backup yet", row.status)
+        assertEquals("Your notes are only on this phone", row.status)
         assertTrue(row.warn)
     }
 

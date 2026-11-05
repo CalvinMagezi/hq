@@ -51,6 +51,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -163,7 +164,7 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
         if (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval)) {
             TextButton(stringResource(R.string.inbox_decline), enabled = !sending && !offline) { actions.onNotNow(card) }
             val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
-            if (NoticeWords.losing(card)) DangerButton(if (sending) "Answering…" else stringResource(R.string.inbox_allow_delete), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
+            if (NoticeWords.losing(card)) DangerButton(if (sending) stringResource(R.string.approval_answering) else card.verb?.let { stringResource(R.string.approval_allow_verb, it) } ?: stringResource(R.string.inbox_allow), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
             else PrimaryButton(if (sending) "Answering…" else label, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
         } else if (card.kind == CardKind.TaskReview) {
             PrimaryButton(card.allowLabel, Modifier.weight(1f)) { onTakeLook(card) }
@@ -349,6 +350,14 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(card.title, style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)
+            card.tool?.let { tool ->
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Mts.Surface100).border(1.dp, Mts.Hairline, RoundedCornerShape(12.dp)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(R.string.approval_quote_inbox), style = HqType.BodySmBold, color = Mts.Ink)
+                    Text(tool, style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
+                    card.toolArgs?.let { Text(it, style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink) }
+                }
+                Text(stringResource(R.string.approval_in_words), style = HqType.BodySmBold, color = Mts.Ink)
+            }
             Text(card.fullBody.ifEmpty { card.body }, style = HqType.Body, color = Mts.InkMuted)
             if (card.canAllow || card.kind == CardKind.Approval) {
                 Outcome(HqIcons.Check, Mts.BrandBlue, "If you allow it", "HQ records your yes. What asked then goes ahead.")

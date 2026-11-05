@@ -59,8 +59,8 @@ class TasksLogicTest {
         val g = TasksLogic.upcoming(tasks, today)
         assertTrue(g[0].title.startsWith("Tomorrow · "))
         assertEquals(2, g[1].tasks.size)
-        assertEquals("Later · 1 task", g[2].title)
-        assertEquals("No date · 1 task", g[3].title)
+        assertEquals("Later · 1\u00A0task", g[2].title)
+        assertEquals("No date · 1\u00A0task", g[3].title)
         assertTrue(g.none { grp -> grp.tasks.any { it.id == "f" } })
     }
 
@@ -69,12 +69,12 @@ class TasksLogicTest {
         assertEquals("Stuck · needs a reboot window", stuck.joinToString("") { it.text })
         assertTrue(stuck[0].amber && stuck[0].bold)
         val ready = TasksLogic.meta(task("b", "ready_for_review", readyAt = "2026-10-21 09:00:00"), today, LocalDateTime.of(2026, 10, 21, 12, 0))
-        assertEquals("Ready to check · hq finished 3\u00A0h\u00A0ago", ready.joinToString("") { it.text })
+        assertEquals("Ready to check · HQ finished 3\u00A0h\u00A0ago", ready.joinToString("") { it.text })
     }
 
     @Test fun anOrdinaryRowShowsPriorityDueAndSteps() {
         val m = TasksLogic.meta(task("c", "in_progress", priority = "high", due = "2026-10-24", steps = 1 to 3), today)
-        assertEquals("High · due Saturday · 1 of 3 steps\u00A0done", m.joinToString("") { it.text })
+        assertEquals("High · due Saturday · 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done", m.joinToString("") { it.text })
         assertEquals("due Oct 30", TasksLogic.dueWords("2026-10-30", today))
         assertEquals("due today", TasksLogic.dueWords("2026-10-21", today))
         assertNull(TasksLogic.dueWords(null, today))

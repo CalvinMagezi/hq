@@ -33,6 +33,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -121,8 +123,14 @@ private fun FolderChips(names: List<String>, onOpen: (String) -> Unit) {
 }
 
 @Composable
-internal fun SectionLabel(text: String) {
-    Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 4.dp))
+internal fun SectionLabel(text: String, count: Int? = null) {
+    androidx.compose.foundation.layout.Row(
+        Modifier.padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 4.dp).semantics(mergeDescendants = true) { heading() },
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted)
+        if (count != null) Text(example.hq.spike.ui.shell.Counts.badge(count), style = HqType.Group, color = Mts.InkMuted)
+    }
 }
 
 @Composable

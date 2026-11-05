@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -184,7 +185,7 @@ private fun Pill(label: String, selected: Boolean, onClick: () -> Unit) {
     ) { Text(label, style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1) }
 }
 
-/** A task on its own page. A task that hq finished leads with a card to mark it done or send it back. */
+/** A task on its own page. A task that HQ finished leads with a card to mark it done or send it back. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TaskPage(d: TaskDetail, today: LocalDate, actions: TasksActions) {
@@ -308,10 +309,13 @@ private fun Facts(t: TaskItem, today: LocalDate) {
 private fun SubTasks(d: TaskDetail, actions: TasksActions) {
     val subs = d.subtasks
     if (subs.isEmpty() && d.prompt != "sub" && d.task.parentId != null) return
-    Label(if (subs.isEmpty()) "Sub-tasks" else "Sub-tasks · ${subs.count { it.status == "complete" }} of ${subs.size}")
+    Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.SpaceBetween) {
+        Label("Sub-tasks")
+        Text(TasksLogic.subtaskLabel(subs.count { it.status == "complete" }, subs.size), style = HqType.BodySm, color = Mts.InkMuted)
+    }
     if (subs.isNotEmpty()) {
         val done = subs.count { it.status == "complete" }.toFloat() / subs.size
-        Box(Modifier.fillMaxWidth().size(width = 0.dp, height = 4.dp).background(Mts.Surface200, RoundedCornerShape(2.dp))) { Box(Modifier.fillMaxWidth(done).size(width = 0.dp, height = 4.dp).background(Mts.BrandGreen, RoundedCornerShape(2.dp))) }
+        Box(Modifier.fillMaxWidth().size(width = 0.dp, height = 4.dp).background(Mts.Surface200, RoundedCornerShape(2.dp))) { Box(Modifier.fillMaxWidth(done).size(width = 0.dp, height = 4.dp).background(Mts.BrandBlue, RoundedCornerShape(2.dp))) }
     }
     subs.forEach { s ->
         val on = s.status == "complete"

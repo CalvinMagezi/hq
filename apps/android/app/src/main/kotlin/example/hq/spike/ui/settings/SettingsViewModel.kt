@@ -330,11 +330,20 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** Read from the app's own files each time Settings refreshes; the config file is parsed only for its `backup:` block. */
     private fun backupFacts(): BackupFacts {
         val files = ctx().filesDir
-        val config = runCatching { BackupWords.parseConfig(java.io.File(files, "hqhome/config.yaml").readText()) }.getOrNull()
-        val dir = config?.dir?.let { java.io.File(it) }?.takeIf { runCatching { it.canonicalPath.startsWith(files.canonicalPath + "/") }.getOrDefault(false) } ?: java.io.File(files, "backups")
-        val status = runCatching { BackupWords.parseStatus(java.io.File(dir, "backup-status.json").readText()) }.getOrNull()
+        var readable = true
+        // A missing file is "absent"; a file that is there but cannot be read is "could not check".
+        fun read(f: java.io.File): String? = try { f.readText() } catch (e: java.io.FileNotFoundException) { if (f.exists()) readable = false; null } catch (e: java.io.IOException) { readable = false; null }
+        val config = read(java.io.File(files, "hqhome/config.yaml"))?.let { BackupWords.parseConfig(it) }
+        val named = config?.dir?.let { java.io.File(it) }
+        val inside = named?.let { runCatching { it.canonicalPath.startsWith(files.canonicalPath + "/") }.getOrDefault(false) } ?: true
+        val dir = if (inside && named != null) named else java.io.File(files, "backups")
+        val status = read(java.io.File(dir, "backup-status.json"))?.let { BackupWords.parseStatus(it) }
         val newest = dir.listFiles { f -> f.name.startsWith("hq-backup-") && f.name.endsWith(".hqbak") }?.maxByOrNull { it.lastModified() }
-        return BackupFacts(config, status, newest?.lastModified(), newest?.name)
+        val seen = java.io.File(files, "backup-first-seen")
+        val enabled = config?.enabled == true
+        val firstSeen = if (enabled) (seen.takeIf { it.exists() }?.readText()?.toLongOrNull() ?: System.currentTimeMillis().also { runCatching { seen.writeText(it.toString()) } }) else null
+        val offPhone = java.io.File(files, "backup-off-phone").takeIf { it.exists() }?.readText()?.trim()?.toLongOrNull()
+        return BackupFacts(config, status, newest?.lastModified(), newest?.name, readable, !inside && enabled, firstSeen, offPhone)
     }
 
     private fun readKeepFacts(): KeepFacts {

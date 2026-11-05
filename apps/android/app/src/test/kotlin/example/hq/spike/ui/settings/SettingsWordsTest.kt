@@ -287,7 +287,7 @@ class SettingsWordsTest {
     @Test fun theHomeListSaysItIsCheckingUntilItHasAskedAndNeverThenSaysNotAnswering() {
         val groups = SettingsWords.home(SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
         assertEquals("On", groups[0].rows.single().status)
-        assertTrue(groups.drop(1).flatMap { it.rows }.all { it.status == "Checking…" })
+        assertTrue(groups.drop(1).flatMap { it.rows }.filter { it.page != SettingsPage.About }.all { it.status == "Checking…" })
         assertTrue(SettingsWords.home(SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "Not answering" })
     }
 

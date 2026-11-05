@@ -69,7 +69,7 @@ class AllTabTest {
 
     @Test fun anOpenTaskNamesItsProgressDueDateAndOwner() {
         val task = t("3").copy(subtaskCount = 3, subtaskDone = 1, dueDate = "2026-10-24", assignees = listOf("hq"), tags = listOf("mobile-first"))
-        assertEquals("hq is working \u00b7 1 of 3 sub-tasks \u00b7 due Saturday \u00b7 for hq \u00b7 mobile-first", TasksLogic.allMeta(task, today, true, now))
+        assertEquals("HQ is working on it \u00b7 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done \u00b7 due Saturday \u00b7 for hq \u00b7 mobile-first", TasksLogic.allMeta(task, today, true, now))
         assertEquals("", TasksLogic.allMeta(t("4"), today, false, now))
     }
 

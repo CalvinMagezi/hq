@@ -42,6 +42,7 @@ class NoticePostingTest {
     private fun card(kind: CardKind, id: String = "val_1", title: String, body: String, canAllow: Boolean = false, dialog: Boolean = false) =
         InboxCard(
             id, kind, title, body, "", "", CardIcon.Info, if (kind == CardKind.HelperAsks) "s-1" else null, canAllow, "Allow", null, "", "",
+            loses = title.startsWith("Delete"), verb = "remove",
             excerpt = if (kind == CardKind.HelperAsks) listOf("Run this command?", "cargo build --release") else emptyList(),
         )
 

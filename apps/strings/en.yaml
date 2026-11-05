@@ -832,7 +832,7 @@ banner_server_waiting:
   other: "{n} are waiting on your server HQ."
 banner_open: "Open"
 inbox_decline: "Decline"
-inbox_allow_delete: "Allow delete"
+inbox_allow: "Allow"
 
 # One dialog, approval cards, Undo toasts (web wave 1 specs 02 and 03)
 stop_all_title: "Stop every helper?"

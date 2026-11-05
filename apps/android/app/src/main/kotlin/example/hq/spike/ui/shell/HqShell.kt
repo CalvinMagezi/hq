@@ -207,7 +207,7 @@ private fun PlaceIcon(place: Place, selected: Boolean, badge: Int) {
         if (badge > 0) {
             // The design puts the badge 4 dp above the pill and 10 dp in from its right edge.
             Text(
-                if (badge > 99) "99+" else badge.toString(), style = HqType.Badge, color = Mts.OnGreen, textAlign = TextAlign.Center,
+                Counts.badge(badge), style = HqType.Badge, color = Mts.OnGreen, textAlign = TextAlign.Center,
                 modifier = Modifier.align(Alignment.TopEnd).offset(x = (-10).dp, y = (-4).dp)
                     .widthIn(min = 16.dp).heightIn(min = 16.dp).background(Mts.BrandGreen, RoundedCornerShape(8.dp))
                     .padding(horizontal = 4.dp),

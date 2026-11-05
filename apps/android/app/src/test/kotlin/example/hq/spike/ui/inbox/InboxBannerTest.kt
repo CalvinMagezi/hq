@@ -29,7 +29,7 @@ class InboxBannerTest {
     private val off = NotifFactsNow(34, false, true, 4, false, false)
 
     private fun card(title: String, body: String, label: String = "Allow") =
-        InboxCard("n1", CardKind.Approval, title, body, "", "2025-01-01T00:00:00Z", CardIcon.Info, null, true, label, null, "", "pending")
+        InboxCard("n1", CardKind.Approval, title, body, "", "2025-01-01T00:00:00Z", CardIcon.Info, null, true, label, null, "", "pending", loses = title.startsWith("Delete"), verb = "delete")
 
     private fun show(ui: InboxUi, actions: InboxActions = InboxActions(), turnOn: (NotifOrigin) -> Unit = {}) {
         rule.setContent { HqTheme { CompositionLocalProvider(LocalNotif provides NotifUi(off, turnOn)) { InboxScreen(ui, actions, onTakeLook = {}) } } }

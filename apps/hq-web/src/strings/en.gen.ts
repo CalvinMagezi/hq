@@ -751,7 +751,7 @@ export const en = {
   banner_server_waiting: {"one":"{n} is waiting on your server HQ.","other":"{n} are waiting on your server HQ."},
   banner_open: "Open",
   inbox_decline: "Decline",
-  inbox_allow_delete: "Allow delete",
+  inbox_allow: "Allow",
   stop_all_title: "Stop every helper?",
   stop_all_body: "Every helper on the computers you pick stops now. Their work so far is kept. New helpers can't start there until you allow them again in HQ Hub on that computer.",
   stop_all_keep: "Keep them running",

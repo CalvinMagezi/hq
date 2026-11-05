@@ -133,7 +133,7 @@ object SettingsWords {
         return "${money(head.optDouble("spent_usd"))} of ${money(head.optDouble("limit_usd"))} $period".trim()
     }
 
-    fun home(snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true): List<HomeGroup> = withChecking(loaded, listOf(
+    fun home(snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true, backup: BackupFacts = BackupFacts()): List<HomeGroup> = withChecking(loaded, listOf(
         HomeGroup("This phone", phone),
         HomeGroup(
             "Your accounts", listOf(
@@ -147,17 +147,14 @@ object SettingsWords {
         HomeGroup(
             "Your data", listOf(
                 HomeRow(SettingsPage.Spending, "gauge", "Spending limits", spendingStatus(snap.budgets)),
-                HomeRow(SettingsPage.About, "arch", "Backup and about", NO_BACKUP, warn = true),
+                HomeRow(SettingsPage.About, "arch", "Backup and about", BackupWords.homeLine(backup, now), warn = BackupWords.warns(backup, now)),
             ),
         ),
     ))
 
     /** Until the first read has finished, the rows that come from HQ say so, rather than "Not answering". */
     private fun withChecking(loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
-        if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { it.copy(status = "Checking…") }) }
-
-    /** No route says whether a backup was made, so this stays until one does; it is never inferred. */
-    const val NO_BACKUP = "No backup yet"
+        if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { if (it.page == SettingsPage.About) it else it.copy(status = "Checking…") }) }
 
     fun aboutStatus(h: JSONObject?): String = h?.text("version")?.let { "HQ $it" } ?: if (h == null) NOT_ANSWERED else "HQ is running"
 

@@ -255,7 +255,7 @@ private fun NavRow(row: HomeRow, first: Boolean, onClick: () -> Unit) {
         Icon(icon(row.key), null, Modifier.size(24.dp), tint = Mts.Ink)
         Column(Modifier.weight(1f)) {
             Text(row.title, style = HqType.BodyBold, color = Mts.Ink)
-            Text(row.status, style = HqType.BodySm, color = if (row.warn) Mts.Amber else Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(row.status, style = HqType.BodySm, color = if (row.warn) Mts.Amber else Mts.InkMuted)
         }
         if (row.warn) Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
         Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
@@ -305,7 +305,7 @@ private fun NoAnswer(text: String = "HQ is not running, so there is nothing to s
 @Composable
 private fun Home(ui: SettingsUi, actions: SettingsActions) {
     Page {
-        SettingsWords.home(ui.snap, ui.now, ui.phone, ui.loaded).forEachIndexed { gi, g ->
+        SettingsWords.home(ui.snap, ui.now, ui.phone, ui.loaded, ui.backup).forEachIndexed { gi, g ->
             Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = if (gi == 0) 8.dp else 20.dp, end = 16.dp, bottom = 4.dp))
             Group {
                 g.rows.forEachIndexed { i, r -> NavRow(r, i == 0) { if (r.page != null) actions.onPage(r.page) else actions.onPhoneRow(r.key) } }
@@ -1307,7 +1307,7 @@ private fun BackupCard(card: BackupWords.Card) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (warn) HqIcons.Warning else HqIcons.Check, null, Modifier.size(22.dp), tint = tint)
-            Text(card.title, style = HqType.BodyBold, color = tint)
+            Text(card.title, style = HqType.BodyBold, color = Mts.Ink)
         }
         Text(card.body, style = HqType.BodySm, color = Mts.Ink)
         if (card.offerSetUp) Row(

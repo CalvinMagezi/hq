@@ -788,7 +788,7 @@
     </plurals>
     <string name="banner_open">Open</string>
     <string name="inbox_decline">Decline</string>
-    <string name="inbox_allow_delete">Allow delete</string>
+    <string name="inbox_allow">Allow</string>
     <string name="stop_all_title">Stop every helper\?</string>
     <string name="stop_all_body">Every helper on the computers you pick stops now. Their work so far is kept. New helpers can\'t start there until you allow them again in HQ Hub on that computer.</string>
     <string name="stop_all_keep">Keep them running</string>
