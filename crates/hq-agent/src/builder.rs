@@ -11,11 +11,10 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 use tracing::info;
 
 use hq_core::config::HqConfig;
-use hq_core::types::{PermissionMode, PermissionPreset, SecurityProfile, SessionEvent};
+use hq_core::types::{PermissionMode, PermissionPreset, SecurityProfile};
 use hq_llm::provider::LlmProvider;
 
 use crate::session::{AgentSession, SessionConfig, SessionMode};
@@ -215,9 +214,7 @@ pub fn mailbox_denial_notifier(vault_path: PathBuf) -> crate::governance::Denial
 /// # Usage
 ///
 /// ```ignore
-/// let (tx, _rx) = broadcast::channel(256);
 /// let mut session = SessionBuilder::from_config(&config)
-///     .event_channel(tx)
 ///     .system_prompt("You are a helpful agent.".into())
 ///     .build()
 ///     .await?;
@@ -229,7 +226,6 @@ pub struct SessionBuilder {
     /// Harness-specific instructions appended after the soul (not a replacement).
     /// Callers that built `soul + RELAY_INSTRUCTIONS` strings should switch to this.
     harness_instructions: Option<String>,
-    event_tx: Option<broadcast::Sender<SessionEvent>>,
     extra_allowed_paths: Vec<PathBuf>,
     working_dir: Option<PathBuf>,
     provider_override: Option<Arc<dyn LlmProvider>>,
@@ -292,7 +288,6 @@ impl SessionBuilder {
             config: config.clone(),
             system_prompt: None,
             harness_instructions: None,
-            event_tx: None,
             extra_allowed_paths: Vec::new(),
             working_dir: None,
             provider_override: None,
@@ -377,12 +372,6 @@ impl SessionBuilder {
     /// Set the system prompt (overrides context-assembled prompt).
     pub fn system_prompt(mut self, prompt: String) -> Self {
         self.system_prompt = Some(prompt);
-        self
-    }
-
-    /// Subscribe to session events via a broadcast channel.
-    pub fn event_channel(mut self, tx: broadcast::Sender<SessionEvent>) -> Self {
-        self.event_tx = Some(tx);
         self
     }
 
@@ -676,14 +665,6 @@ impl SessionBuilder {
             session.set_telemetry_db(db.clone());
         }
         session.set_vault_path(vault_path.clone());
-
-        // Wire the broadcast channel.
-        if let Some(tx) = self.event_tx.take() {
-            session.on_event(move |event| {
-                // Best-effort: ignore send errors (no receivers)
-                let _ = tx.send(event);
-            });
-        }
 
         self.apply_system_prompt(
             &mut session,

@@ -244,7 +244,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn notification_chat_is_owner_not_presence_guest() {
+    fn owner_chat_is_not_the_presence_guest() {
         let tmp = TempDir::new().unwrap();
         let vault = tmp.path();
         std::fs::create_dir_all(vault.join("_system")).unwrap();
@@ -261,7 +261,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            hq_core::telegram_access::notification_chat_id(vault, &relay),
+            hq_core::telegram_access::owner_chat_id(vault, &relay),
             Some(111)
         );
     }

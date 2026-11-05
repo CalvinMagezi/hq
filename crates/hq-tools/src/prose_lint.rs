@@ -3,10 +3,7 @@
 //! The callable half of the mechanical layer: `hq_core::prose_quality`
 //! defines the rules, this exposes them as a tool the document-generation
 //! skills (`~/.agents/skills/{docx,pptx,xlsx,pdf}/SKILL.md`) can call before
-//! delivering a draft. The LLM-judged tone/structure layer this deliberately
-//! does not re-check is `hq_core::critic::PROSE_CRITIC_SYSTEM`
-//! (`hq_agent::adversarial::review_prose`), run in-process rather than as a
-//! callable tool.
+//! delivering a draft.
 
 use anyhow::Result;
 use async_trait::async_trait;

@@ -265,13 +265,7 @@ pub(crate) fn is_app_path(link: &str) -> bool {
 }
 
 fn clip(s: &str, max: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max - 1).collect();
-    out.push('…');
-    out
+    hq_core::text::truncate_chars_ellipsis(s.trim(), max)
 }
 
 /// The endpoint's host, for logs: the path is a per-device secret.

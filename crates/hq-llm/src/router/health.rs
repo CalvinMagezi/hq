@@ -48,7 +48,7 @@ pub(super) fn classify_anyhow_error(error: &anyhow::Error) -> LlmError {
 }
 
 /// Short label for telemetry's `error_class` column. Mirrors the `LlmError`
-/// variants but flattened to a stable string the leaderboard queries can group.
+/// variants but flattened to a stable string aggregate queries can group.
 pub(crate) fn classify_error_for_telemetry(error: &anyhow::Error) -> String {
     telemetry_label(error).to_string()
 }

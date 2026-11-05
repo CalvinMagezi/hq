@@ -425,36 +425,13 @@ impl SessionBuilder {
                 .with_taint(taint.clone()),
             );
 
-            // Forward child session-events to the parent's broadcast channel so
-            // sub-agent tool calls stay visible, mirroring the old spawner's
-            // event forwarding. Lifecycle-only envelopes carry no SessionEvent
-            // and are dropped here; the surface-migration todo threads the full
-            // correlated envelope stream into the parent session.
-            let child_ctx = if let Some(tx) = self.event_tx.clone() {
-                let sink: crate::agents::EnvelopeSink = Arc::new(move |env| {
-                    if let Some(ev) = env.as_session_event() {
-                        let _ = tx.send(ev.clone());
-                    }
-                });
-                crate::agents::ChildExecContext {
-                    parent_run_id: None,
-                    envelope_sink: Some(sink),
-                    parent_messages: None,
-                    parent_turn_id: self.child_parent_turn_id.clone(),
-                    completion_sink: self.child_completion_sink.clone(),
-                    progress_sink: self.child_progress_sink.clone(),
-                    origin: self.run_origin(),
-                    auto_followup: self.config.collaboration.supervision_followup,
-                }
-            } else {
-                crate::agents::ChildExecContext {
-                    parent_turn_id: self.child_parent_turn_id.clone(),
-                    completion_sink: self.child_completion_sink.clone(),
-                    progress_sink: self.child_progress_sink.clone(),
-                    origin: self.run_origin(),
-                    auto_followup: self.config.collaboration.supervision_followup,
-                    ..Default::default()
-                }
+            let child_ctx = crate::agents::ChildExecContext {
+                parent_turn_id: self.child_parent_turn_id.clone(),
+                completion_sink: self.child_completion_sink.clone(),
+                progress_sink: self.child_progress_sink.clone(),
+                origin: self.run_origin(),
+                auto_followup: self.config.collaboration.supervision_followup,
+                ..Default::default()
             };
             tools.push(Box::new(
                 crate::agents::SpawnSubagentsTool::new(agent_service.clone())

@@ -49,9 +49,6 @@ struct Handler {
     /// unrestricted — see `RelayConfig::discord_allowed_user_ids`. Never applied
     /// to bot-authored messages (those are mention-gated separately).
     discord_allowed_user_ids: Vec<u64>,
-    /// Extra channel-category names to resolve on top of the built-in ones
-    /// — see `RelayConfig::discord_notification_categories`.
-    discord_notification_categories: Vec<String>,
     /// Discord channel that family members are scoped to.
     discord_family_channel_id: Option<u64>,
     /// Family members scoped to `discord_family_channel_id`.
@@ -219,22 +216,6 @@ impl EventHandler for Handler {
             None,
         );
 
-        if let Some(guild) = ready.guilds.first() {
-            if ready.guilds.len() > 1 {
-                tracing::warn!(
-                    count = ready.guilds.len(),
-                    "discord: bot is in multiple guilds; category channel resolution only checks the first"
-                );
-            }
-            crate::discord_channels::resolve_and_persist_channels(
-                &ctx.http,
-                guild.id,
-                &self.vault_path,
-                &self.discord_notification_categories,
-            )
-            .await;
-        }
-
         let commands = vec![
             CreateCommand::new("reset").description("Clear conversation history"),
             CreateCommand::new("model")
@@ -266,7 +247,6 @@ pub async fn run_discord_relay(
     vault: Arc<VaultClient>,
     db: Arc<Database>,
     discord_allowed_user_ids: Vec<u64>,
-    discord_notification_categories: Vec<String>,
     discord_family_channel_id: Option<u64>,
     discord_family_users: Vec<hq_core::config::DiscordFamilyUser>,
     thread_events: Option<tokio::sync::broadcast::Sender<String>>,
@@ -324,7 +304,6 @@ pub async fn run_discord_relay(
         skill_index,
         active_channel_id,
         discord_allowed_user_ids,
-        discord_notification_categories,
         discord_family_channel_id,
         discord_family_users,
         family_threads,

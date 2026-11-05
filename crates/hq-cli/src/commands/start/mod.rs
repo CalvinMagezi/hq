@@ -158,7 +158,6 @@ fn spawn_discord(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Database>
     };
     let (vault, db) = (vault.clone(), db.clone());
     let allowed_user_ids = config.relay.discord_allowed_user_ids.clone();
-    let notification_categories = config.relay.discord_notification_categories.clone();
     let family_channel_id = config.relay.discord_family_channel_id;
     let family_users = config.relay.discord_family_users.clone();
     tokio::spawn(async move {
@@ -168,7 +167,6 @@ fn spawn_discord(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Database>
             vault,
             db,
             allowed_user_ids,
-            notification_categories,
             family_channel_id,
             family_users,
             None,
@@ -322,7 +320,6 @@ async fn start_discord(
         vault,
         db,
         config.relay.discord_allowed_user_ids.clone(),
-        config.relay.discord_notification_categories.clone(),
         config.relay.discord_family_channel_id,
         config.relay.discord_family_users.clone(),
         None,

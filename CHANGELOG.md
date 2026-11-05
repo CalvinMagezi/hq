@@ -124,6 +124,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Removed
 
+- **Leftovers from relay notifications.** The Discord relay no longer lists the guild's channels at startup to write `_system/DISCORD-CHANNELS.md`, which nothing read since relays became chat only. The config keys `relay.discord_notification_categories` and `relay.notifications_token` did nothing and are now ignored if present. Unused code went with them: the `hq_core::discord_notify` module, `hq_convert::DetectedFormat`, the model-card aggregates in `hq_db::tool_usage`, `hq_db::task_outcomes::leaderboard` and about twenty other functions no caller used.
 - **Herdr is retired.** Coding-agent sessions run only on HQ's built-in host (`hq host`); the herdr backend, `deploy/herdr.service` and `scripts/hq-herdr-gate` are gone. A host named `local` now means the built-in host on this machine. Config keys from the old setup (`herdr.binary`, `herdr.session`, a host's `kind` and `session`) are ignored; a configured remote host must be paired again with `hq host join` and `hq host add`.
 
 ### Changed

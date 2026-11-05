@@ -27,7 +27,6 @@ pub mod types;
 
 pub use inbound::InboundConverter;
 pub use ocr::OcrEngine;
-pub use types::DetectedFormat;
 
 /// Runs an external tool to completion and returns its stdout, or a message
 /// naming `name` with the exit status and stderr.

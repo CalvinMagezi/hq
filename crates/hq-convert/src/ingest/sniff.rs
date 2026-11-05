@@ -117,12 +117,6 @@ impl Kind {
             Kind::Markdown | Kind::Epub | Kind::Zip | Kind::Unknown => Support::Unsupported,
         }
     }
-
-    /// Formats a person can open in an Office suite but whose binary layout no
-    /// native reader here understands.
-    pub fn is_legacy_office(self) -> bool {
-        matches!(self, Kind::Doc | Kind::Ppt)
-    }
 }
 
 /// Whether a file of some kind can be converted on this host.

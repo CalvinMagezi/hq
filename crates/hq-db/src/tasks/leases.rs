@@ -232,20 +232,6 @@ pub fn lease_for_token(conn: &Connection, token: &str) -> Result<Option<WorkSess
         .optional()?)
 }
 
-/// The live lease a token names, or an error that says what to do next.
-pub fn require_live_lease(conn: &Connection, token: &str, ttl_secs: i64) -> Result<WorkSession> {
-    expire_stale_leases(conn, ttl_secs)?;
-    match lease_for_token(conn, token)? {
-        None => anyhow::bail!("unknown lease token; claim the task with task_claim"),
-        Some(lease) if lease.ended_at.is_some() => anyhow::bail!(
-            "lease {} ended ({}); claim the task again with task_claim",
-            lease.id,
-            lease.end_reason.as_deref().unwrap_or("ended")
-        ),
-        Some(lease) => Ok(lease),
-    }
-}
-
 /// A lease seen more recently than this is not written again by the call that uses it.
 const TOUCH_AFTER_SECS: i64 = 10;
 

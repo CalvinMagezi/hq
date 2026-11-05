@@ -15,11 +15,9 @@ use tracing::debug;
 use hq_core::types::{ChatMessage, MessageRole};
 use hq_llm::provider::{ChatRequest, LlmProvider};
 
-// The vocabulary moved to `hq-core` so `hq-tools` could reach it; re-exported
-// here because four call sites import it from this path.
+// The review vocabulary lives in `hq-core`; re-exported for callers of the critic.
 pub use hq_core::critic::{
-    Concern, CriticResult, DIFF_CRITIC_SYSTEM, PROSE_CRITIC_SYSTEM, Severity, clip,
-    parse_critic_response,
+    Concern, CriticResult, DIFF_CRITIC_SYSTEM, Severity, clip, parse_critic_response,
 };
 
 /// Review a real diff against acceptance criteria.
@@ -84,15 +82,6 @@ pub fn review_verdict(result: &anyhow::Result<CriticResult>) -> (String, bool) {
         ));
     }
     (out, critique.has_blockers())
-}
-
-/// Review business-document prose (report/proposal/deliverable drafts) for
-/// tone and structure. Callers should run `hq_core::prose_quality::SlopDetector`
-/// first — this dimension deliberately skips banned-word/em-dash/emoji
-/// checking, which the mechanical pass already covers.
-pub async fn review_prose(draft: &str, provider: &dyn LlmProvider) -> Result<CriticResult> {
-    let content = format!("## Draft\n{}", clip(draft, 6000));
-    run_critic(PROSE_CRITIC_SYSTEM, &content, provider).await
 }
 
 /// Build the diff-review prompt. Split out from `critique_diff` so the ledger

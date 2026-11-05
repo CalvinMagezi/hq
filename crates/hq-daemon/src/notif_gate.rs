@@ -61,12 +61,6 @@ pub fn parse_event_header(content: &str) -> Option<EventHeader> {
     None
 }
 
-/// The `notif.<source>.<kind>` trait key a message maps to, if it carries a
-/// parseable header. Used to attach reaction buttons that teach this exact trait.
-pub fn trait_key_for(content: &str) -> Option<String> {
-    parse_event_header(content).map(|h| format!("notif.{}.{}", h.source, h.kind))
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateDecision {
     Drop,
@@ -224,13 +218,6 @@ mod tests {
     #[test]
     fn no_header_returns_none() {
         assert!(parse_event_header("just a plain message").is_none());
-    }
-
-    #[test]
-    fn trait_key_for_builds_namespaced_key() {
-        let c = "[hq-event flow=ci source=github kind=ci.failed]\n\nred";
-        assert_eq!(trait_key_for(c).as_deref(), Some("notif.github.ci.failed"));
-        assert!(trait_key_for("plain message").is_none());
     }
 
     #[test]
