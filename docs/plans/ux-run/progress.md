@@ -21,7 +21,8 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 - [x] web/wave-0/01-live-bugs.md: the hub proxy and a taken port. Try: on the Mac, run `hq bridge serve` in a terminal so it holds the web forward, then turn pairing on in HQ Hub. The Host tab shows "Couldn't open HQ on your phone" with "Port in use" and Open HQ is off. Stop the terminal one, press Look again, Open HQ works. The tag is grey for now: the amber token arrives with the hub redesign (wave 3). The proxy also checks the forward on every request, so a port taken after the window opened gets nothing.
 - [x] web/wave-0/01-live-bugs.md: wipe the browser on a refused sign-in. Try: sign a laptop browser out from another device's Settings › Devices, then use it: every place shows "Sign in to see your notes" (or chats, tasks, settings, what needs you) and nothing from HQ. DevTools › Application: no `hq-query-cache`, `hq-store`, `hq-thread-store`, `hq-web-token` or `hq-api` cache. A second tab of the same HQ empties too. Reload offline: still nothing.
 - [x] web/wave-0/01-live-bugs.md: guard drive, goal and answer routes. Try: nothing to see; a current web app and the phone app keep working (both send the header). A cross-site POST to `/api/harness-sessions/{id}/drive` now gets 403.
-- [ ] web/wave-0/02-shared-parts.md
+- [x] web/wave-0/02-shared-parts.md
+  - [x] Wave 0 shared parts complete (all items below).
   - [x] The one string catalogue (N19): `apps/strings/en.yaml`, `scripts/strings/build.ts`, the inline-string ratchet. Try: nothing to see yet.
   - [x] The saved copy keyed by HQ id, capped at 256 KB a place and 2 MB in all, kept until replaced; the wipe and the worker's cache follow the id. Try: in HQ Hub open this computer's HQ, then the phone's: each shows only its own saved notes (DevTools › Application shows `hq-store:{id}` per HQ).
   - [x] The outbox (Waiting to send, client ids, the 100 cap, 24 h for messages) and the What HQ noticed counters, as modules; wired into Chat once the Connection state lands. Built by Copilot (Sonnet 5.5), reviewed; the drain was rewritten so a message added mid-send is never lost.
@@ -100,6 +101,8 @@ test id so it installs beside the real app):
    keys asked again, Other devices empty.
 10. Updates: with a reply running, Settings › Backup and about › Install update: "Install now?" with Wait
     until it's done, Stop it and install, Not now.
+
+Gates at hand-over: workspace clippy clean; `cargo test --workspace` 5444 passed, 0 failed, 44 ignored (94 binaries); web 401 tests, typecheck and build; Android assembleDebug, 606 unit tests, lint with no issues and no baseline.
 
 Device checks still to log in `mobile/device-checks.md`: wave 0 rows (lock-screen swap on a real lock,
 Smart Switch or Google copy, a 4 GB zip on 8.1).
