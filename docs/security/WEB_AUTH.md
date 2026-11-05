@@ -136,6 +136,12 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   `web_bind`/`ws_port`) opts in, and before any token is sent the target's
   `/health` must answer with `"service": "agent-hq"`, so another program on
   that port never receives it. `--local` forces the in-process backend.
+- **`GET /api/hello`** answers without the web token, like `/health`: the install id
+  (random, kept in `.vault/_data/hq_id`), the edition, the version, the oldest client the
+  server supports and, while HQ is opening, the start step. A browser keys its saved copy
+  by the id before it signs in. Nothing in it is content or a credential. While HQ opens,
+  every other route on the port answers 503 `{"starting": true}`
+  (`crates/hq-web/src/hello.rs`).
 - **Session-changing requests.** `send`, `adopt`, `stop`, `resume`, `rename`,
   `archive`, `drive`, `goal`, `unwatch` and `answer` under `/api/harness-sessions/`,
   and answering an Inbox item (`/api/notifications/{id}/answer` and `/action`), must

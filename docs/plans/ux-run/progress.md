@@ -22,6 +22,8 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 - [x] web/wave-0/01-live-bugs.md: wipe the browser on a refused sign-in. Try: sign a laptop browser out from another device's Settings › Devices, then use it: every place shows "Sign in to see your notes" (or chats, tasks, settings, what needs you) and nothing from HQ. DevTools › Application: no `hq-query-cache`, `hq-store`, `hq-thread-store`, `hq-web-token` or `hq-api` cache. A second tab of the same HQ empties too. Reload offline: still nothing.
 - [x] web/wave-0/01-live-bugs.md: guard drive, goal and answer routes. Try: nothing to see; a current web app and the phone app keep working (both send the header). A cross-site POST to `/api/harness-sessions/{id}/drive` now gets 403.
 - [ ] web/wave-0/02-shared-parts.md
+  - [x] The one string catalogue (N19): `apps/strings/en.yaml`, `scripts/strings/build.ts`, the inline-string ratchet. Try: nothing to see yet.
+  - [x] `GET /api/hello` and the starting flag. Try: `hq web stop`, then start HQ and open `/api/hello` in a browser quickly: it shows the start step, then `"starting": null`.
 
 ## Phone wave 0 (safety and shared parts)
 

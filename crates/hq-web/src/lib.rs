@@ -1,6 +1,7 @@
 //! Embedded web UI server with API endpoints and WebSocket.
 
 mod api;
+pub mod hello;
 pub use api::HEALTH_SERVICE;
 pub use vault_api::{lite_hides, lite_hides_resolved};
 pub mod auth;
@@ -264,6 +265,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
     let router = oauth::routes(Router::new(), &state)
         .route("/ws", get(ws::ws_handler))
         .route("/health", get(api::health_handler))
+        .route(hello::HELLO_PATH, get(hello::hello_handler))
         .route("/api/vault-status", get(api::vault_status_handler))
         .route("/api/ws-ticket", post(auth::ws_ticket_handler))
         .route(
@@ -826,6 +828,20 @@ mod web_auth_router_tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(status(&app, own).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn hello_answers_a_signed_out_browser_and_the_rest_of_the_api_does_not() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.web_auth_token = Some("t".repeat(32));
+        let app = create_router(Arc::new(state));
+        let get = |path: &str| local("GET", path).body(Body::empty()).unwrap();
+        assert_eq!(status(&app, get(hello::HELLO_PATH)).await, StatusCode::OK);
+        assert_eq!(
+            status(&app, get("/api/spaces")).await,
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     /// A page on another loopback port passes the origin check, so session-changing
