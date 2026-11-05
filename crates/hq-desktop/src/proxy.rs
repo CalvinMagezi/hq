@@ -351,11 +351,19 @@ async fn forward(state: &ProxyState, req: Request) -> Response {
             HeaderName::from_static("cross-origin-resource-policy"),
             HeaderValue::from_static("same-origin"),
         );
+        out.insert(
+            HeaderName::from_static(HUB_WINDOW_HEADER),
+            HeaderValue::from_static(HUB_WINDOW_VALUE),
+        );
     }
     response
         .body(Body::from_stream(upstream.bytes_stream()))
         .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
 }
+
+/// Tells the web app it is HQ's window inside HQ Hub, so its Settings group reads "This window".
+pub const HUB_WINDOW_HEADER: &str = "x-hq-window";
+pub const HUB_WINDOW_VALUE: &str = "hub";
 
 /// Marks the proxy's own 502, so the window can tell "HQ can't be reached" from an error HQ sent.
 pub const UPSTREAM_GONE_HEADER: &str = "x-hq-proxy";

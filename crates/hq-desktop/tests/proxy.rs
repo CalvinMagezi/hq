@@ -201,6 +201,7 @@ async fn responses_gain_a_second_policy_and_lose_cross_origin_grants() {
     assert!(res.headers().get("access-control-allow-origin").is_none());
     assert_eq!(res.headers()["x-content-type-options"], "nosniff");
     assert_eq!(res.headers()["referrer-policy"], "no-referrer");
+    assert_eq!(res.headers()["x-hq-window"], "hub");
     // Both cookies survive, and the proxy does not rewrite them.
     let cookies: Vec<_> = res
         .headers()
