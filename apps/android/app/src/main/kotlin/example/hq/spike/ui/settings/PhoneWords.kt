@@ -33,6 +33,7 @@ data class NotifFacts(
     val showDetails: Boolean = false,
     val secure: Boolean = true,
     val upgraderNote: Boolean = false,
+    val needsImportance: Int = 4,
     val server: ServerFacts = ServerFacts(),
 )
 
@@ -53,7 +54,7 @@ object PhoneWords {
     private const val IMPORTANCE_DEFAULT = 3
     private const val IMPORTANCE_LOW = 2
     private const val IMPORTANCE_MIN = 1
-    private const val HUB_CHANNEL = "hub"
+    private const val HUB_CHANNEL = AlertPoster.HUB
     private val NUMBER_WORDS = listOf("Zero", "One", "Two", "Three", "Four", "Five")
     private val ORDINALS = listOf("zeroth", "first", "second", "third", "fourth", "fifth", "sixth")
 
@@ -134,7 +135,7 @@ object PhoneWords {
 
     /** The line under a channel's name, from the catalogue; a channel turned off in Android says so. */
     @androidx.annotation.StringRes
-    fun channelLineRes(c: ChannelFacts): Int = if (c.importance <= 0) R.string.channel_off_line else when (c.id) {
+    fun channelLineRes(c: ChannelFacts, appOff: Boolean = false): Int = if (appOff || c.importance <= 0) R.string.channel_off_line else when (c.id) {
         AlertPoster.NEEDS -> R.string.channel_needs_line
         AlertPoster.UPDATES -> R.string.channel_updates_line
         AlertPoster.APP_UPDATES -> R.string.channel_app_updates_line

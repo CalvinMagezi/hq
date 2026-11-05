@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performClick
 import example.hq.spike.ui.theme.HqTheme
@@ -46,6 +47,33 @@ class NotificationsPageTest {
         show(NotifFacts(secure = false))
         rule.onNodeWithText("Needs a screen lock").assertIsDisplayed()
         rule.onNodeWithText("Open Android settings").assertIsDisplayed()
+    }
+
+    @Test fun appOffShowsTheCardTurnOnAndOffOnEveryChannel() {
+        val channels = listOf(ChannelFacts("needs", "Needs you", 4, true), ChannelFacts("updates", "Updates", 3, false))
+        show(NotifFacts(allowed = false, channels = channels))
+        rule.onNodeWithText("Notifications are off for AgentHQ").assertIsDisplayed()
+        rule.onNodeWithText("Approvals wait in the Inbox until they are on again.").assertIsDisplayed()
+        rule.onNodeWithText("Turn on").assertIsDisplayed()
+        assertEquals(2, rule.onAllNodesWithText("Off in Android settings").fetchSemanticsNodes().size)
+    }
+
+    @Test fun needsYouOffShowsTheAmberCardAndTurnOn() {
+        show(NotifFacts(needsImportance = 0))
+        rule.onNodeWithText("Needs you is off").assertIsDisplayed()
+        rule.onNodeWithText("Questions wait in the Inbox without telling you.").assertIsDisplayed()
+        rule.onNodeWithText("Turn on").assertIsDisplayed()
+    }
+
+    @Test fun aQuieterNeedsYouGetsANoteAndNoCard() {
+        show(NotifFacts(needsImportance = 3))
+        rule.onNodeWithText("Needs you makes a sound but no longer pops up on screen.").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("Turn on").fetchSemanticsNodes().size)
+    }
+
+    @Test fun aSilentNeedsYouGetsTheQuietNote() {
+        show(NotifFacts(needsImportance = 2))
+        rule.onNodeWithText("Needs you arrives silently, without a pop-up.").assertIsDisplayed()
     }
 
     @Test fun theUpgraderCardShowsOnceAndIsMarkedSeen() {

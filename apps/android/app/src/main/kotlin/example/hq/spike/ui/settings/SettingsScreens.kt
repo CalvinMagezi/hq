@@ -84,6 +84,9 @@ import example.hq.spike.ui.shell.UndoSnackbar
 import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.webhost.LocalOpenWeb
+import example.hq.spike.AlertPoster
+import example.hq.spike.LocalNotif
+import example.hq.spike.NotifOrigin
 import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.delay
@@ -762,11 +765,20 @@ internal fun Notifications(ui: SettingsUi, actions: SettingsActions) {
         if (n.upgraderNote) {
             Box(Modifier.padding(top = 4.dp)) { InfoCard(stringResource(R.string.notif_upgrader_title), stringResource(R.string.notif_upgrader_body)) }
         }
-        Box(Modifier.padding(top = 4.dp)) {
-            if (n.allowed) NoticeCard("Allowed.", "AgentHQ can post notifications.", false)
-            else NoticeCard("Notifications are off for AgentHQ", "Approvals wait in the Inbox until they are on again.", true)
+        val notif = LocalNotif.current
+        val turnOn: () -> Unit = { notif?.turnOn(NotifOrigin.Later) ?: if (n.allowed) actions.onChannel(AlertPoster.NEEDS) else actions.onFix(PhoneFix.Notifications) }
+        if (!n.allowed) {
+            Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.notify_app_off_title), stringResource(R.string.notify_app_off_body), true) }
+            Box(Modifier.padding(start = 16.dp, top = 8.dp)) { DialogButton(stringResource(R.string.notify_turn_on), onClick = turnOn) }
+        } else if (n.needsImportance == 0) {
+            Box(Modifier.padding(top = 4.dp)) { NoticeCard(stringResource(R.string.notify_needs_off_title), stringResource(R.string.notify_needs_off_body), true) }
+            Box(Modifier.padding(start = 16.dp, top = 8.dp)) { DialogButton(stringResource(R.string.notify_turn_on), onClick = turnOn) }
+        } else if (n.needsImportance in 1..3) {
+            Text(
+                stringResource(if (n.needsImportance == 3) R.string.notify_needs_default_note else R.string.notify_needs_quiet_note),
+                style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 4.dp, end = 20.dp),
+            )
         }
-        if (!n.allowed) Box(Modifier.padding(start = 16.dp, top = 8.dp)) { DialogButton("Open settings") { actions.onFix(PhoneFix.Notifications) } }
         Label(stringResource(R.string.notif_group_show))
         DetailsRow(n, onChange = { on -> if (on) asking = true else actions.onDetails(false) })
         if (n.secure) {
@@ -784,7 +796,7 @@ internal fun Notifications(ui: SettingsUi, actions: SettingsActions) {
                 Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button) { actions.onChannel(c.id) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(PhoneWords.channelNameRes(c.id)), style = HqType.BodyBold, color = Mts.Ink)
-                        Text(stringResource(PhoneWords.channelLineRes(c)), style = HqType.BodySm, color = Mts.InkMuted)
+                        Text(stringResource(PhoneWords.channelLineRes(c, appOff = !n.allowed)), style = HqType.BodySm, color = Mts.InkMuted)
                     }
                     Icon(HqIcons.External, null, Modifier.size(20.dp), tint = Mts.InkMuted)
                 }

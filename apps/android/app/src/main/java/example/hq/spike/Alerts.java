@@ -113,8 +113,27 @@ final class Alerts {
         synchronized (SHOWN) {
             for (String id : seen) if (!items.containsKey(id)) SHOWN.remove(id);
         }
+        // While Needs you cannot reach the owner, questions are counted for the Inbox banner instead; when it can again, they go out once.
+        boolean on = NotifAccess.INSTANCE.read(c).getNeedsOn();
+        String waitKey = seenKey.equals(SEEN) ? NotifAccess.WAITING : NotifAccess.SERVER_WAITING;
+        List<String> waiting = NotifAccess.INSTANCE.ids(prefs.getString(waitKey, ""));
+        waiting.retainAll(items.keySet());
+        if (stored != null && !on) {
+            for (String id : fresh) if (AlertPoster.needsYou(items.get(id)) && !waiting.contains(id)) waiting.add(id);
+        }
+        List<String> replay = new ArrayList<>();
+        if (on) {
+            for (String id : items.keySet()) if (waiting.contains(id) && AlertPoster.needsYou(items.get(id))) replay.add(id);
+            waiting.clear();
+        }
+        prefs.edit().putString(waitKey, String.join(SEP, waiting)).apply();
+        if (stored != null && on && !replay.isEmpty()) {
+            Map<String, JSONObject> back = new LinkedHashMap<>();
+            for (String id : AlertPoster.post(c, items, replay, MAX_PER_POLL, true)) back.put(id, items.get(id));
+            track(back);
+        }
         if (fresh.isEmpty() && stored != null) return;
-        if (stored != null) {
+        if (stored != null && on) {
             List<String> shown = AlertPoster.post(c, items, fresh, MAX_PER_POLL);
             Map<String, JSONObject> mine = new LinkedHashMap<>();
             for (String id : shown) mine.put(id, items.get(id));

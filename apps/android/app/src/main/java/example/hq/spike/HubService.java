@@ -32,7 +32,7 @@ import java.util.function.Supplier;
 /** Keeps `hq` and, when the owner supplied a Caddyfile, Caddy running as children of this app, and turns unread HQ notifications into Android ones. */
 public class HubService extends Service {
     static final String TAG = "HQHUB";
-    static final String CHANNEL = "hub";
+    static final String CHANNEL = AlertPoster.HUB;
     public static final int PORT = BuildConfig.HQ_PORT;
     private static final int NOTIFICATION_ID = 1;
     private static final long BACKOFF_MIN_MS = 2_000;
@@ -249,6 +249,8 @@ public class HubService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "startForeground failed: " + e);
         }
+        // The running notice moved to a Min channel under a new id; the old Low one can go only now that nothing shows on it.
+        nm.deleteNotificationChannel(AlertPoster.OLD_HUB);
         if (started.compareAndSet(false, true)) {
             int gen = generation.incrementAndGet();
             new Thread(() -> supervise(gen, "hq", this::hqProcess, true), "hq-supervisor").start();

@@ -70,6 +70,7 @@ fun FirstRunHost(ui: FirstRunUi, actions: FirstRunActions) {
             Step.Moved -> MovedStep(ui, actions)
             Step.Model -> ModelStep(ui, actions)
             Step.Chat -> ChatStep(ui, actions)
+            Step.Notify -> NotifyStep(ui, actions)
             Step.Start -> StartStep(ui, actions)
             Step.Restore -> RestoreStep(ui, actions)
         }
@@ -91,7 +92,7 @@ private fun WelcomeStep(actions: FirstRunActions) {
 }
 
 @Composable
-private fun Heading(title: String, body: String) {
+fun Heading(title: String, body: String) {
     Text(title, style = Title, color = Mts.Ink)
     Text(body, style = HqType.Body, color = Mts.InkMuted)
 }
@@ -167,6 +168,7 @@ private fun StartStep(ui: FirstRunUi, actions: FirstRunActions) {
         Heading(FirstRunWords.START_TITLE, FirstRunWords.START_BODY)
     }
     ui.error?.let { Message(it) }
+    StartNotifCard()
     GreenPill(if (ui.busy) FirstRunWords.STARTING else FirstRunWords.START, busy = ui.busy, onClick = actions.onStart)
     TextAction(FirstRunWords.BACK, enabled = !ui.busy, onClick = actions.onBack)
 }

@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.HubService
 import example.hq.spike.KeyVault
+import example.hq.spike.NotifAccess
+import example.hq.spike.NotifStep
 import example.hq.spike.R
 import java.io.File
 import java.io.IOException
@@ -44,6 +46,8 @@ data class FirstRunUi(
     val movedChecking: Boolean = false,
     val movedForgot: Boolean = false,
     val confirmFresh: Boolean = false,
+    /** The owner passed on notifications, or Android refused: the "Notifications are off" frame shows. */
+    val notifOff: Boolean = false,
 )
 
 class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app) {
@@ -61,7 +65,7 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
     val actions = FirstRunActions(
         onNewHq = { go(Step.Model) },
         onRestore = { go(Step.Restore) },
-        onBack = { go(FirstRunLogic.back(mutableUi.value.step ?: Step.Welcome, mutableUi.value.moved)) },
+        onBack = ::back,
         onProvider = { p -> mutableUi.update { it.copy(provider = p, error = null, checkResult = null) } },
         onKey = { v -> mutableUi.update { it.copy(key = v, error = null, checkResult = null) } },
         onShowKey = { mutableUi.update { it.copy(showKey = !it.showKey) } },
@@ -74,6 +78,8 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
         onChatNext = { chatNext(skip = false) },
         onChatSkip = { chatNext(skip = true) },
         onStart = ::start,
+        onNotifNotNow = { mutableUi.update { it.copy(notifOff = true) } },
+        onNotifNext = { go(Step.Start) },
         onBackup = { uri, name -> mutableUi.update { it.copy(backup = uri, backupName = name, error = null) } },
         onUseKeyFile = { on -> mutableUi.update { it.copy(useKeyFile = on, error = null) } },
         onPassphrase = { v -> mutableUi.update { it.copy(passphrase = v, error = null) } },
@@ -155,10 +161,19 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
         }
     }
 
-    private fun go(step: Step) {
+    private fun go(target: Step) {
+        val step = if (target == Step.Notify && notifDone()) Step.Start else target
         store.save(step)
-        mutableUi.update { it.copy(step = step, error = null, checkResult = null, restored = false) }
+        mutableUi.update { it.copy(step = step, error = null, checkResult = null, restored = false, notifOff = false) }
     }
+
+    private fun back() {
+        val from = mutableUi.value.step ?: Step.Welcome
+        val target = FirstRunLogic.back(from, mutableUi.value.moved)
+        if (target == Step.Notify && notifDone()) go(FirstRunLogic.back(Step.Notify)) else go(target)
+    }
+
+    private fun notifDone(): Boolean = NotifAccess.next(NotifAccess.read(getApplication())) == NotifStep.Done
 
     private fun check() {
         val s = mutableUi.value
@@ -216,7 +231,7 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
             return
         }
         if (tokens.isEmpty()) {
-            go(Step.Start)
+            go(Step.Notify)
             return
         }
         mutableUi.update { it.copy(busy = true, error = null) }
@@ -226,7 +241,7 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
                 mutableUi.update { it.copy(busy = false, error = FirstRunWords.ERR_NOT_SAVED) }
             } else {
                 mutableUi.update { it.copy(busy = false, telegram = "", discord = "") }
-                go(Step.Start)
+                go(Step.Notify)
             }
         }
     }
@@ -288,7 +303,7 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
                     is RestoreOutcome.Failed -> it.copy(restoring = false, error = FirstRunWords.restoreFailedWith(outcome.reason))
                 }
             }
-            if (outcome == RestoreOutcome.Done) store.save(Step.Start)
+            if (outcome == RestoreOutcome.Done) store.save(Step.Notify)
         }
     }
 
@@ -314,6 +329,8 @@ class FirstRunActions(
     val onChatNext: () -> Unit,
     val onChatSkip: () -> Unit,
     val onStart: () -> Unit,
+    val onNotifNotNow: () -> Unit = {},
+    val onNotifNext: () -> Unit = {},
     val onBackup: (Uri, String?) -> Unit,
     val onUseKeyFile: (Boolean) -> Unit,
     val onPassphrase: (String) -> Unit,

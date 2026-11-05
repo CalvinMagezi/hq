@@ -68,7 +68,12 @@ class PhoneWordsTest {
         assertEquals(R.string.channel_updates_line, PhoneWords.channelLineRes(ChannelFacts("updates", "Updates", 3, false)))
         assertEquals(R.string.channel_app_updates_line, PhoneWords.channelLineRes(ChannelFacts("app_updates", "App updates", 2, false)))
         assertEquals(R.string.channel_downloads_line, PhoneWords.channelLineRes(ChannelFacts("downloads", "Downloads", 2, false)))
-        assertEquals(R.string.channel_hub_line, PhoneWords.channelLineRes(ChannelFacts("hub", "HQ is running", 1, false)))
+        assertEquals(R.string.channel_hub_line, PhoneWords.channelLineRes(ChannelFacts("hub_min", "HQ is running", 1, false)))
+    }
+
+    @Test fun everyChannelReadsOffWhileTheAppSwitchIsOff() {
+        assertEquals(R.string.channel_off_line, PhoneWords.channelLineRes(ChannelFacts("updates", "Updates", 3, false), appOff = true))
+        assertEquals(R.string.channel_updates_line, PhoneWords.channelLineRes(ChannelFacts("updates", "Updates", 3, false), appOff = false))
     }
 
     @Test fun aChannelTurnedOffSaysSo() {

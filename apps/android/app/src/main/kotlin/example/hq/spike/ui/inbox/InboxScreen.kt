@@ -42,7 +42,11 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import example.hq.spike.LocalNotif
+import example.hq.spike.NotifOrigin
+import example.hq.spike.NoticeWords
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -120,10 +124,11 @@ private fun Modifier.widthIn20() = this.then(Modifier.defaultMinSize(minWidth = 
 private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
     val cards = ui.shownNeeds
     if (cards.isEmpty() && ui.loaded && !ui.offline) {
-        CaughtUp(ui)
+        CaughtUp(ui, actions)
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        ui.banner?.let { b -> item(key = "notif-banner") { NotifBanner(b, actions) } }
         if (ui.offline) item { Text(if (cards.isEmpty()) "HQ is not answering yet, so what is waiting on you cannot be shown." else "HQ is not running. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
         items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
     }
@@ -156,8 +161,10 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
     val sending = answer == Answer.Sending
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval)) {
-            PrimaryButton(if (sending) "Answering…" else card.allowLabel, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
-            TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
+            TextButton(stringResource(R.string.inbox_decline), enabled = !sending && !offline) { actions.onNotNow(card) }
+            val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
+            if (NoticeWords.losing(card)) DangerButton(if (sending) "Answering…" else stringResource(R.string.inbox_allow_delete), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
+            else PrimaryButton(if (sending) "Answering…" else label, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
         } else if (card.kind == CardKind.TaskReview) {
             PrimaryButton(card.allowLabel, Modifier.weight(1f)) { onTakeLook(card) }
             TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
@@ -178,6 +185,41 @@ internal fun PrimaryButton(label: String, modifier: Modifier = Modifier, enabled
     ) { Text(label, style = HqType.BodySmBold, color = Mts.OnGreen, maxLines = 1) }
 }
 
+/** The one red button: it answers yes to a request that deletes or loses something. */
+@Composable
+internal fun DangerButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Danger).alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, style = HqType.BodySmBold, color = Mts.OnDanger, maxLines = 1) }
+}
+
+/** Shown on the Needs tab while notifications cannot reach the owner, with Turn on and a seven-day Not now. */
+@Composable
+internal fun NotifBanner(banner: InboxBanner, actions: InboxActions) {
+    val notif = LocalNotif.current
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            if (banner.waited > 0) pluralStringResource(R.plurals.banner_waited, banner.waited, banner.waited) else stringResource(R.string.banner_none_yet),
+            style = HqType.BodySm, color = Mts.Ink,
+        )
+        if (banner.server > 0) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(pluralStringResource(R.plurals.banner_server_waiting, banner.server, banner.server), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.weight(1f))
+                TextButton(stringResource(R.string.banner_open), onClick = actions.onServerOpen)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            PrimaryButton(stringResource(R.string.notify_turn_on), Modifier.weight(1f)) { notif?.turnOn(NotifOrigin.Later) }
+            TextButton(stringResource(R.string.notify_not_now), onClick = actions.onBannerNotNow)
+        }
+    }
+}
+
 @Composable
 internal fun TextButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
@@ -192,9 +234,10 @@ private fun Avatar(icon: ImageVector) {
 
 /** Nothing waits on the owner: a check, when it was last looked, and what was decided today. */
 @Composable
-private fun CaughtUp(ui: InboxUi) {
+private fun CaughtUp(ui: InboxUi, actions: InboxActions) {
     val today = ui.done.filter { InboxWords.sameDay(it.createdAt) }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        ui.banner?.let { b -> item(key = "notif-banner") { Box(Modifier.padding(top = 12.dp)) { NotifBanner(b, actions) } } }
         item {
             Column(Modifier.fillMaxWidth().padding(start = 24.dp, top = 48.dp, end = 24.dp, bottom = 28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.size(64.dp).background(Mts.Surface200, CircleShape), contentAlignment = Alignment.Center) { Icon(HqIcons.Check, null, Modifier.size(32.dp), tint = Mts.BrandGreen) }

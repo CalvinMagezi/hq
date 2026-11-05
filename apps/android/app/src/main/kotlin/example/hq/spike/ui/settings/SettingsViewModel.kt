@@ -303,10 +303,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         return listOf(
             HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
             HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(it, Instant.now()).checked.any { r -> !r.ok } }),
-            HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else "Needs you ${if (on(AlertPoster.NEEDS)) "on" else "off"} · Updates ${if (on(AlertPoster.UPDATES)) "on" else "off"}", warn = !allowed),
+            HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
             HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
             HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
         )
+    }
+
+    /** "Needs you on · Updates on · App updates on": a part that is off reads with the word off in place of on. */
+    private fun homeNotifLine(parts: List<Pair<Int, Boolean>>): String = parts.joinToString(" \u00b7 ") { (res, on) ->
+        val s = ctx().getString(res)
+        if (on) s else s.removeSuffix(" on") + " off"
     }
 
     private fun SettingsUi.withFacts(): SettingsUi = if (frozen) this else copy(keep = keepFacts(), notif = notifFacts(), capture = captureFacts(), backup = backupFacts())
@@ -591,6 +597,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         upgraderShown = note
         return NotifFacts(
             nm.areNotificationsEnabled(), channels, AlertPoster.showDetails(ctx()), AlertPoster.deviceSecure(ctx()), note,
+            needsImportance = nm.getNotificationChannel(AlertPoster.NEEDS)?.importance ?: IMPORTANCE_HIGH_FACT,
             server = ServerFacts(ServerHq.address(ctx()), ServerHq.signedOut(ctx())),
         )
     }
@@ -713,7 +720,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val MODE_MAX = 64L
         const val EXIT_SCAN = 10
-        const val HUB_CHANNEL = "hub"
+        const val HUB_CHANNEL = AlertPoster.HUB
+        const val IMPORTANCE_HIGH_FACT = 4
         const val SAMSUNG_BATTERY_PACKAGE = "com.samsung.android.lool"
         const val SAMSUNG_BATTERY_PAGE = "com.samsung.android.sm.battery.ui.BatteryActivity"
         const val HTTP_NOT_FOUND = 404
