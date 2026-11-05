@@ -43,6 +43,9 @@ data class BusyStatus(val busy: Boolean, val chatTurns: Int, val backup: Boolean
 /** Why an install is waiting, in the order the dialog names them. */
 enum class BusyReason { Chat, Backup, Outbox, Download }
 
+/** Why an update stopped, each with its own line and next step. */
+enum class ProblemKind { Stopped, Blocked, AutoBlocker, NotVerified, NotAllowed, CheckFailed, NotInstalled }
+
 /** Which release stream the owner follows: `stable` is what an owner promoted, `main` is every build of main. */
 enum class UpdateChannel(val id: String, val tag: String) {
     Stable("stable", "channel-stable"),
@@ -56,7 +59,7 @@ enum class UpdateChannel(val id: String, val tag: String) {
 sealed interface UpdateVerdict {
     data object UpToDate : UpdateVerdict
     data class Available(val manifest: ChannelManifest) : UpdateVerdict
-    data class NeedsNewerAndroid(val minSdk: Int) : UpdateVerdict
+    data class NeedsNewerAndroid(val minSdk: Int, val version: String = "") : UpdateVerdict
 
     /** The installed build was withdrawn; [fix] is the build that replaces it, when this manifest names one the phone can take. */
     data class InstalledWithdrawn(val version: String, val fix: ChannelManifest?) : UpdateVerdict
@@ -70,12 +73,18 @@ sealed interface UpdateState {
     data object Checking : UpdateState
     data object UpToDate : UpdateState
     data class Available(val manifest: ChannelManifest) : UpdateState
-    data class NeedsNewerAndroid(val minSdk: Int) : UpdateState
+    data class NeedsNewerAndroid(val minSdk: Int, val version: String = "") : UpdateState
     data class Busy(val manifest: ChannelManifest, val reason: BusyReason) : UpdateState
     data class Waiting(val manifest: ChannelManifest, val chats: Int) : UpdateState
     data class InstalledWithdrawn(val version: String, val fix: ChannelManifest?) : UpdateState
     data class Pulled(val version: String) : UpdateState
     data object Downloading : UpdateState
+    /** This build has no release repo to ask. */
+    data object Off : UpdateState
+    /** The file is here and checked; Android's install is the only step left. */
+    data class Downloaded(val manifest: ChannelManifest) : UpdateState
+    /** The install or the check could not go on; [manifest] is what a tap tries again. */
+    data class Problem(val kind: ProblemKind, val manifest: ChannelManifest? = null) : UpdateState
     data object Installing : UpdateState
     data class Failed(val reason: String) : UpdateState
 }
@@ -194,7 +203,7 @@ object UpdateLogic {
         return when {
             candidate <= installedCode -> UpdateVerdict.UpToDate
             candidate in manifest.withdrawn -> if (wasOffered) UpdateVerdict.Pulled(manifest.version) else UpdateVerdict.UpToDate
-            sdk < manifest.minSdk -> UpdateVerdict.NeedsNewerAndroid(manifest.minSdk)
+            sdk < manifest.minSdk -> UpdateVerdict.NeedsNewerAndroid(manifest.minSdk, manifest.version)
             !ignoreRollout && bucket >= manifest.rollout -> UpdateVerdict.UpToDate
             else -> UpdateVerdict.Available(manifest)
         }
@@ -221,17 +230,35 @@ object UpdateLogic {
     fun due(lastCheckMs: Long, nowMs: Long): Boolean = lastCheckMs <= 0 || nowMs < lastCheckMs || nowMs - lastCheckMs >= CHECK_EVERY_MS
 
     /** The Android release name for an API level, because owners know "Android 10", not "29". */
-    fun androidName(sdk: Int): String = when (sdk) {
-        26, 27 -> "Android 8"
-        28 -> "Android 9"
-        29 -> "Android 10"
-        30 -> "Android 11"
-        31, 32 -> "Android 12"
-        33 -> "Android 13"
-        34 -> "Android 14"
-        35 -> "Android 15"
-        36 -> "Android 16"
-        else -> "a newer Android"
+    fun androidName(sdk: Int): String = androidNumber(sdk)?.let { "Android $it" } ?: "a newer Android"
+
+    /** The release number alone ("8.1", "12L"), or null for a level this table does not know yet. */
+    fun androidNumber(sdk: Int): String? = when (sdk) {
+        26 -> "8.0"
+        27 -> "8.1"
+        28 -> "9"
+        29 -> "10"
+        30 -> "11"
+        31 -> "12"
+        32 -> "12L"
+        33 -> "13"
+        34 -> "14"
+        35 -> "15"
+        36 -> "16"
+        else -> null
+    }
+
+    /** What Android's installer answered, as a problem; null for success. Samsung's Auto Blocker and a failed signature check are named. */
+    fun problemOf(status: Int, message: String?): ProblemKind? {
+        val m = message.orEmpty()
+        return when {
+            status == PackageInstaller.STATUS_SUCCESS -> null
+            m.contains("auto blocker", true) -> ProblemKind.AutoBlocker
+            status == PackageInstaller.STATUS_FAILURE_ABORTED -> ProblemKind.Stopped
+            status == PackageInstaller.STATUS_FAILURE_BLOCKED -> ProblemKind.Blocked
+            m.contains("verif", true) || m.contains("developer", true) -> ProblemKind.NotVerified
+            else -> ProblemKind.NotInstalled
+        }
     }
 
     /** The line Settings shows for a state; failures say what to do, not what the code did. */
@@ -245,6 +272,7 @@ object UpdateLogic {
         is UpdateState.Busy, is UpdateState.Waiting, is UpdateState.InstalledWithdrawn, is UpdateState.Pulled -> ""
         UpdateState.Downloading -> "Downloading\u2026"
         UpdateState.Installing -> "Waiting for you to confirm the install"
+        UpdateState.Off, is UpdateState.Downloaded, is UpdateState.Problem -> ""
         is UpdateState.Failed -> state.reason
     }
 
@@ -263,6 +291,23 @@ object UpdateLogic {
             is UpdateState.Waiting -> if (state.chats > 0) r.getQuantityString(example.hq.spike.R.plurals.update_waiting_chats, state.chats, state.chats.toString()) else context.getString(example.hq.spike.R.string.update_waiting_other)
             is UpdateState.InstalledWithdrawn -> context.getString(example.hq.spike.R.string.update_withdrawn_title, state.version)
             is UpdateState.Pulled -> context.getString(example.hq.spike.R.string.update_pulled_body, state.version)
+            UpdateState.Off -> context.getString(example.hq.spike.R.string.upd_l_off)
+            is UpdateState.Downloaded -> context.getString(example.hq.spike.R.string.upd_l_downloaded, state.manifest.version)
+            is UpdateState.Problem -> context.getString(
+                when (state.kind) {
+                    ProblemKind.Stopped -> example.hq.spike.R.string.upd_l_stopped
+                    ProblemKind.Blocked -> example.hq.spike.R.string.upd_l_blocked
+                    ProblemKind.AutoBlocker -> example.hq.spike.R.string.upd_l_auto_blocker
+                    ProblemKind.NotVerified -> example.hq.spike.R.string.upd_l_not_verified
+                    ProblemKind.NotAllowed -> example.hq.spike.R.string.upd_l_not_allowed
+                    ProblemKind.CheckFailed -> example.hq.spike.R.string.upd_l_check_failed
+                    ProblemKind.NotInstalled -> example.hq.spike.R.string.upd_l_not_installed
+                },
+            )
+            UpdateState.Idle -> context.getString(example.hq.spike.R.string.upd_l_not_checked)
+            UpdateState.Checking -> context.getString(example.hq.spike.R.string.upd_l_checking)
+            UpdateState.UpToDate -> context.getString(example.hq.spike.R.string.upd_l_up_to_date)
+            is UpdateState.NeedsNewerAndroid -> androidNumber(state.minSdk)?.let { context.getString(example.hq.spike.R.string.upd_l_too_old, state.version, it) } ?: context.getString(example.hq.spike.R.string.upd_l_too_old_unnamed, state.version)
             else -> words(state)
         }
     }

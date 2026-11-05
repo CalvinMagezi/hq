@@ -75,6 +75,7 @@ import example.hq.spike.measure.CellWords
 import example.hq.spike.measure.Noticed
 import example.hq.spike.measure.NoticeLine
 import example.hq.spike.update.UpdateLogic
+import example.hq.spike.update.Updater
 import example.hq.spike.update.UpdateState
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.chat.Spinner
@@ -141,6 +142,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.StoredKeys -> FirstRunWords.KEYS_TITLE
     SettingsPage.Technical -> "Technical details"
     SettingsPage.Noticed -> "What HQ noticed"
+    SettingsPage.Update -> "Update AgentHQ"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -159,7 +161,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-                Text(pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
+                Text(if (ui.page == SettingsPage.Update) stringResource(R.string.upd_page_title) else pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
             }
             when (ui.page) {
                 SettingsPage.Home -> Home(ui, actions)
@@ -167,7 +169,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Keys -> Keys(ui, actions)
                 SettingsPage.Messaging -> Messaging(ui, actions)
                 SettingsPage.Devices -> Devices(ui, actions)
-                SettingsPage.Spending -> Spending(ui)
+                SettingsPage.Spending -> Spending(ui, actions)
                 SettingsPage.About -> About(ui, actions)
                 SettingsPage.Background -> Background(ui, actions)
                 SettingsPage.KeepRunning -> KeepRunning(ui, actions)
@@ -177,6 +179,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.PairApp -> PairApp(ui, actions)
                 SettingsPage.StoredKeys -> StoredKeysPage()
                 SettingsPage.Technical -> Technical(ui, actions)
+                SettingsPage.Update -> UpdatePage(ui, actions)
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
@@ -200,11 +203,12 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         }
         ui.undoLine?.let { UndoSnackbar(it, actions.onUndoDiscard, Modifier.align(Alignment.BottomCenter)) }
         ui.line?.let { Snack(it, actions.onDismissLine, Modifier.align(Alignment.BottomCenter)) }
+        ui.dlUndo?.let { UndoSnackbar(stringResource(if (it == DlUndo.Forget) R.string.dl_set_forgot else R.string.dl_set_removed), actions.onDlUndo, Modifier.align(Alignment.BottomCenter)) }
     }
 }
 
 @Composable
-private fun Snack(text: String, onDismiss: () -> Unit, modifier: Modifier) {
+internal fun Snack(text: String, onDismiss: () -> Unit, modifier: Modifier) {
     LaunchedEffect(text) { delay(LINE_MS); onDismiss() }
     Row(modifier.padding(8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(horizontal = 16.dp).semantics { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = HqType.BodySm, color = Mts.Surface100)
@@ -219,23 +223,23 @@ private fun OpenScreen(text: String, screen: Class<*>) {
 }
 
 @Composable
-private fun Page(content: @Composable () -> Unit) {
+internal fun Page(content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) { content() }
 }
 
 @Composable
-private fun Label(text: String) = Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 4.dp))
+internal fun Label(text: String) = Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 4.dp))
 
 @Composable
-private fun Group(content: @Composable () -> Unit) {
+internal fun Group(content: @Composable () -> Unit) {
     Column(Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Mts.Surface100)) { content() }
 }
 
 @Composable
-private fun Divider() = Box(Modifier.fillMaxWidth().size(0.dp, 1.dp).background(Mts.Hairline))
+internal fun Divider() = Box(Modifier.fillMaxWidth().size(0.dp, 1.dp).background(Mts.Hairline))
 
 @Composable
-private fun Notice(text: String, icon: ImageVector = HqIcons.Lock, warn: Boolean = false) {
+internal fun Notice(text: String, icon: ImageVector = HqIcons.Lock, warn: Boolean = false) {
     val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (warn) Mts.Amber else Mts.Hairline, shape).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -278,7 +282,7 @@ private fun Fact(row: FactRow, first: Boolean, onOpen: (SettingsPage) -> Unit = 
 }
 
 @Composable
-private fun Facts(rows: List<FactRow>, onOpen: (SettingsPage) -> Unit = {}) = Group { rows.forEachIndexed { i, r -> Fact(r, i == 0, onOpen) } }
+internal fun Facts(rows: List<FactRow>, onOpen: (SettingsPage) -> Unit = {}) = Group { rows.forEachIndexed { i, r -> Fact(r, i == 0, onOpen) } }
 
 @Composable
 private fun Waiting(ui: SettingsUi) {
@@ -309,6 +313,8 @@ private fun Home(ui: SettingsUi, actions: SettingsActions) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val strip = ui.savedAt?.takeIf { ui.stale }?.let { w.s(R.string.bk_strip_saved, android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(it.toEpochMilli()))) }
     Page {
+        WithdrawnCard(ui, actions)
+        UpdateCard(ui, actions)
         BackupWords.slot(w, ui.backup, ui.now)?.let { slot -> BackupSlot(slot) { actions.onPage(SettingsPage.About) } }
         SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip).forEachIndexed { gi, g ->
             Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = if (gi == 0) 8.dp else 20.dp, end = 16.dp, bottom = 4.dp))
@@ -625,11 +631,11 @@ private fun Devices(ui: SettingsUi, actions: SettingsActions) {
 // ---------------------------------------------------------------- spending limits
 
 @Composable
-private fun Spending(ui: SettingsUi) {
+private fun Spending(ui: SettingsUi, actions: SettingsActions) {
     val w = example.hq.spike.ui.shell.rememberWords()
     Page {
         val b = ui.snap.budgets
-        if (Unanswered(ui, "budgets", b != null) || b == null) return@Page
+        if (Unanswered(ui, "budgets", b != null) || b == null) { MobileData(ui, actions); return@Page }
         val cards = SettingsWords.budgetCards(w, b, ui.now)
         Label("Budgets")
         if (cards.isEmpty()) Notice(SettingsWords.noBudgets(b), HqIcons.Info)
@@ -645,6 +651,7 @@ private fun Spending(ui: SettingsUi) {
             Label("By AI service")
             Facts(services)
         }
+        MobileData(ui, actions)
         val openWeb = LocalOpenWeb.current
         Text(stringResource(R.string.settings_changing_a_limit_is), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
         TextLink("Open the full usage page", Mts.BrandBlue) { openWeb(WebPage.Usage) }
@@ -1088,6 +1095,7 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
         )
         Label(stringResource(R.string.settings_app_updates))
         UpdateGroup(ui, actions)
+        StorageGroup(ui, actions)
         Label("Support")
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Button) { actions.onPage(SettingsPage.Technical) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1274,16 +1282,18 @@ internal fun NoticedPage(counters: Counters) {
     }
 }
 
-/** Checks for a newer AgentHQ build on GitHub Releases; the install only starts when the owner taps it. */
+/** The App updates rows: one that opens the Update page when a version is waiting (or checks when none is), and the test-versions switch. */
 @Composable
 private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
     val state = ui.update
-    val working = state == UpdateState.Checking || state == UpdateState.Downloading
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val working = state == UpdateState.Checking
+    val waiting = Updater.manifestOf(state) != null && state !is UpdateState.Installing
     Group {
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !working, role = Role.Button) { if (state is UpdateState.Available) actions.onInstallUpdate(state.manifest) else actions.onCheckUpdate() }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !working, role = Role.Button) { if (waiting) actions.onPage(SettingsPage.Update) else actions.onCheckUpdate() }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                Text(if (state is UpdateState.Available) "Install update" else "Check for updates", style = HqType.BodyBold, color = Mts.Ink)
-                Text(UpdateLogic.wordsFor(androidx.compose.ui.platform.LocalContext.current, state), style = HqType.BodySm, color = if (state is UpdateState.Failed) Mts.Amber else Mts.InkMuted)
+                Text(stringResource(if (waiting) R.string.upd_row_install else R.string.upd_row_check), style = HqType.BodyBold, color = Mts.Ink)
+                Text(UpdateLogic.wordsFor(context, state), style = HqType.BodySm, color = if (state is UpdateState.Problem || state is UpdateState.Failed) Mts.Amber else Mts.InkMuted)
             }
             if (working) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
         }
@@ -1382,7 +1392,7 @@ private fun BackupCard(ui: SettingsUi, actions: SettingsActions) {
 }
 
 @Composable
-private fun CardFrame(shape: androidx.compose.ui.graphics.Shape, warn: Boolean, content: @Composable () -> Unit) {
+internal fun CardFrame(shape: androidx.compose.ui.graphics.Shape, warn: Boolean, content: @Composable () -> Unit) {
     Column(
         Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (warn) Mts.Amber else Mts.Line, shape).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1391,7 +1401,7 @@ private fun CardFrame(shape: androidx.compose.ui.graphics.Shape, warn: Boolean, 
 
 /** The title is ink either way: a warning gets an amber mark, a good card a grey check. */
 @Composable
-private fun CardTitle(text: String, warn: Boolean) {
+internal fun CardTitle(text: String, warn: Boolean) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(if (warn) HqIcons.Warning else HqIcons.Check, null, Modifier.size(22.dp), tint = if (warn) Mts.Amber else Mts.InkMuted)
         Text(text, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.semantics { heading() })
@@ -1400,7 +1410,7 @@ private fun CardTitle(text: String, warn: Boolean) {
 
 /** Full width, so it stays whole at the largest text size. Green when [filled], outlined otherwise. */
 @Composable
-private fun CardButton(label: String, filled: Boolean, onClick: () -> Unit) {
+internal fun CardButton(label: String, filled: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).then(if (filled) Modifier.background(Mts.BrandGreen, CircleShape) else Modifier.border(1.dp, Mts.Line, CircleShape))
             .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 24.dp, vertical = 8.dp),

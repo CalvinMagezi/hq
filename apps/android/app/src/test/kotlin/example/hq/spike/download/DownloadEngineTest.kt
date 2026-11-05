@@ -132,6 +132,15 @@ class LargeDownloadTest {
         assertEquals(s.need - 5_000_000, s.short)
     }
 
+    @Test fun tryAgainAfterAMismatchAsksAgainFromNothing() {
+        val d = make(Env(data), "b".repeat(64))
+        d.request()
+        assertEquals(DlState.Mismatch, d.state.value)
+        d.tryAgain()
+        assertEquals(DlState.Mismatch, d.state.value)
+        assertEquals(0L, d.kept())
+    }
+
     @Test fun hashMismatchDeletesEverything() {
         val d = make(Env(data), "b".repeat(64))
         d.request()

@@ -65,7 +65,7 @@ public class HubService extends Service {
     private static final long HELD_POLL_MS = 1_000;
 
     /** The notification glyph, looked up by name because the build makes no R class. */
-    static int statIcon(Context c) {
+    public static int statIcon(Context c) {
         int id = c.getResources().getIdentifier("ic_stat_agenthq", "drawable", c.getPackageName());
         return id != 0 ? id : android.R.drawable.stat_notify_sync;
     }
@@ -240,6 +240,12 @@ public class HubService extends Service {
             copyRelease();
             return START_STICKY;
         }
+        if (intent != null && example.hq.spike.download.DownloadNotices.ACTION.equals(intent.getAction())) {
+            example.hq.spike.download.Downloads.INSTANCE.act(
+                    intent.getStringExtra(example.hq.spike.download.DownloadNotices.EXTRA_ID),
+                    intent.getStringExtra(example.hq.spike.download.DownloadNotices.EXTRA_OP));
+            if (started.get()) return START_STICKY;
+        }
         NotificationManager nm = getSystemService(NotificationManager.class);
         for (NotificationChannel ch : AlertPoster.channels(this)) nm.createNotificationChannel(ch);
         Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
@@ -253,6 +259,7 @@ public class HubService extends Service {
         nm.deleteNotificationChannel(AlertPoster.OLD_HUB);
         if (started.compareAndSet(false, true)) {
             int gen = generation.incrementAndGet();
+            example.hq.spike.download.Downloads.INSTANCE.start(getApplicationContext());
             new Thread(() -> supervise(gen, "hq", this::hqProcess, true), "hq-supervisor").start();
             new Thread(() -> supervise(gen, "caddy", this::caddyProcess, false), "caddy-supervisor").start();
             new Thread(() -> Alerts.watch(getApplicationContext(), () -> gen == generation.get()), "alerts").start();

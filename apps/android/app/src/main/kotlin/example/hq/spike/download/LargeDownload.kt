@@ -185,6 +185,18 @@ class LargeDownload(val item: Item, private val dir: File, private val env: Down
         request()
     }
 
+    /** "Try again" after a mismatch or a failing server: a mismatch kept nothing and asks afresh, a failing server keeps its bytes. */
+    @Synchronized fun tryAgain() {
+        val s = flow.value
+        if (s is DlState.Mismatch) { consent = false; set(DlState.Ready) } else if (s is DlState.ServerFailing) set(DlState.Ready) else return
+        request()
+    }
+
+    /** Undo for removing an unfinished download from Storage: puts the kept bytes back as a paused download, fetching nothing. */
+    @Synchronized fun undoKeep() {
+        if (part.exists()) { save("paused"); set(DlState.PausedOwner(kept())) }
+    }
+
     /** Removes the partial file and everything saved about it. */
     @Synchronized fun discard() {
         part.delete(); meta.delete()

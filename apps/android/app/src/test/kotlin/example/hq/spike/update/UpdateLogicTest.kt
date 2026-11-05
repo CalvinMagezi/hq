@@ -54,7 +54,7 @@ class UpdateLogicTest {
 
     @Test fun anOlderAndroidIsToldWhy() {
         val m = UpdateLogic.parse(json(code = "8", minSdk = "30"))!!
-        assertEquals(UpdateVerdict.NeedsNewerAndroid(30), UpdateLogic.verdict(m, 7, 28))
+        assertEquals(UpdateVerdict.NeedsNewerAndroid(30, m.version), UpdateLogic.verdict(m, 7, 28))
         assertEquals(UpdateVerdict.UpToDate, UpdateLogic.verdict(m, 8, 28))
     }
 

@@ -109,6 +109,16 @@ data class SettingsUi(
     /** The in-app updater: what it last found, and whether the owner follows every build of main instead of promoted ones. */
     val update: UpdateState = UpdateState.Idle,
     val updateMain: Boolean = false,
+    val updateDot: Boolean = false,
+    val updateHidden: Boolean = false,
+    val updateFacts: Updater.Facts = Updater.Facts(),
+    /** Every large download's state, by id, and the Wi-Fi and unfinished-download figures the Mobile data and Storage groups show. */
+    val downloads: Map<String, example.hq.spike.download.DlState> = emptyMap(),
+    val wifiFree: Int = 0,
+    val wifiPaid: Int = 0,
+    val askAnyNetwork: Boolean = false,
+    val unfinishedBytes: Long = 0,
+    val dlUndo: DlUndo? = null,
     /** When HQ last answered, and whether what is shown now includes values kept from that earlier answer. */
     val savedAt: Instant? = null,
     val stale: Boolean = false,
@@ -120,6 +130,9 @@ data class SettingsUi(
     /** A key is being checked or a bot token saved: Back waits, so it does not close the page that work belongs to. */
     fun busyBehind(): Boolean = keySheet?.checking == true || setup?.saving == true
 }
+
+/** What the Undo bar after a Mobile data or Storage change puts back. */
+enum class DlUndo { Forget, Remove }
 
 class SettingsActions(
     val onOpen: () -> Unit = {},
@@ -178,6 +191,12 @@ class SettingsActions(
     val onSaveCopyCancel: () -> Unit = {},
     val onSaveCopyClear: () -> Unit = {},
     val onGotIt: () -> Unit = {},
+    val onUpdatePageOpened: () -> Unit = {},
+    val onUpdateNotNow: () -> Unit = {},
+    val onAskAnyNetwork: (Boolean) -> Unit = {},
+    val onForgetWifi: () -> Unit = {},
+    val onRemoveUnfinished: () -> Unit = {},
+    val onDlUndo: () -> Unit = {},
 )
 
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
@@ -237,6 +256,29 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onSaveCopyCancel = BackupCopy::cancel,
         onSaveCopyClear = BackupCopy::clear,
         onGotIt = { java.io.File(ctx().filesDir, GOT_IT).writeText("1"); _state.update { it.withFacts() } },
+        onUpdatePageOpened = { viewModelScope.launch(Dispatchers.IO) { Updater.pageOpened(ctx()); _state.update { it.withDownloadFacts() } } },
+        onUpdateNotNow = { viewModelScope.launch(Dispatchers.IO) { Updater.notNow(ctx()) } },
+        onAskAnyNetwork = { on -> example.hq.spike.download.Downloads.setAskAnyNetwork(ctx(), on); _state.update { it.copy(askAnyNetwork = on) } },
+        onForgetWifi = {
+            forgotten = example.hq.spike.download.PaidWifi(example.hq.spike.download.PrefsAnswers(ctx())).forget()
+            _state.update { it.withDownloadFacts().copy(dlUndo = DlUndo.Forget) }
+        },
+        onRemoveUnfinished = {
+            viewModelScope.launch(Dispatchers.IO) {
+                val any = example.hq.spike.download.Downloads.removeUnfinished(ctx())
+                _state.update { it.withDownloadFacts().copy(dlUndo = if (any) DlUndo.Remove else null) }
+            }
+        },
+        onDlUndo = {
+            viewModelScope.launch(Dispatchers.IO) {
+                when (_state.value.dlUndo) {
+                    DlUndo.Forget -> example.hq.spike.download.PaidWifi(example.hq.spike.download.PrefsAnswers(ctx())).restore(forgotten)
+                    DlUndo.Remove -> example.hq.spike.download.Downloads.undoRemove(ctx())
+                    null -> {}
+                }
+                _state.update { it.withDownloadFacts().copy(dlUndo = null) }
+            }
+        },
         onUpdateMain = { main ->
             Updater.setChannel(ctx(), if (main) UpdateChannel.Main else UpdateChannel.Stable)
             _state.update { it.copy(updateMain = main) }
@@ -245,8 +287,23 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         _state.update { it.copy(updateMain = Updater.channel(app) == UpdateChannel.Main) }
-        viewModelScope.launch { Updater.state.collect { s -> _state.update { it.copy(update = s) } } }
+        viewModelScope.launch { Updater.state.collect { s -> _state.update { it.copy(update = s).withDownloadFacts() } } }
+        viewModelScope.launch { Updater.dot.collect { d -> _state.update { it.copy(updateDot = d) } } }
+        viewModelScope.launch { Updater.hidden.collect { h -> _state.update { it.copy(updateHidden = h) } } }
+        viewModelScope.launch { Updater.line.collect { l -> if (l != null) { _state.update { it.copy(line = ctx().getString(l.id, l.arg)) }; Updater.clearLine() } } }
+        viewModelScope.launch { example.hq.spike.download.Downloads.states.collect { d -> _state.update { it.copy(downloads = d) } } }
         viewModelScope.launch { BackupCopy.state.collect { c -> _state.update { it.copy(copy = c).withFacts() } } }
+    }
+
+    private var forgotten: Map<String, Boolean> = emptyMap()
+
+    private fun SettingsUi.withDownloadFacts(): SettingsUi {
+        val c = ctx()
+        val wifi = example.hq.spike.download.PaidWifi(example.hq.spike.download.PrefsAnswers(c))
+        return copy(
+            updateFacts = Updater.facts(c), wifiFree = wifi.free(), wifiPaid = wifi.paid(),
+            askAnyNetwork = example.hq.spike.download.Downloads.askAnyNetwork(c), unfinishedBytes = example.hq.spike.download.Downloads.unfinishedBytes(c),
+        )
     }
 
     /** Closes Settings and every page inside it. */
@@ -259,7 +316,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Opens Settings on its home page. What is on it comes from [refreshNow], which the page runs while it is showing. */
     private fun open() {
-        _state.update { it.copy(open = true, stack = emptyList(), line = null, askMode = null, askRestart = false, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts() }
+        _state.update { it.copy(open = true, stack = emptyList(), line = null, askMode = null, askRestart = false, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts().withDownloadFacts() }
     }
 
     /**

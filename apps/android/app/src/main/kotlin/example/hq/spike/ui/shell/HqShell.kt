@@ -60,6 +60,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import example.hq.spike.R
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import example.hq.spike.data.HqStatus
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -100,6 +102,7 @@ fun HqShell(
     topActions: @Composable (Place) -> Unit = {},
     balance: BalanceChip? = null,
     onBalance: (ChipTarget) -> Unit = {},
+    updateDot: Boolean = false,
     request: Place? = null,
     onRequestHandled: () -> Unit = {},
     aboveBar: @Composable BoxScope.(Place) -> Unit = {},
@@ -117,7 +120,7 @@ fun HqShell(
     CompositionLocalProvider(LocalGoTo provides { current = it }) {
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance, actions = { topActions(current) })
+                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance, updateDot = updateDot, actions = { topActions(current) })
                 Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
                 if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
             }
@@ -137,7 +140,7 @@ fun NotBuilt(place: Place) {
 }
 
 @Composable
-fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}, actions: @Composable () -> Unit = {}) {
+fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}, updateDot: Boolean = false, actions: @Composable () -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().height(TopBarHeight).background(Mts.Surface000).padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -152,7 +155,13 @@ fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Un
         balance?.let { BalancePill(it) { onBalance(it.target) } }
         IconButton(onSearch, Modifier.size(TouchTarget)) { Icon(HqIcons.Search, "Search", Modifier.size(24.dp), tint = Mts.Ink) }
         actions()
-        IconButton(onSettings, Modifier.size(TouchTarget)) { Icon(HqIcons.Gear, "Settings", Modifier.size(24.dp), tint = Mts.Ink) }
+        val gearWords = stringResource(if (updateDot) R.string.upd_gear_dot else R.string.settings_title)
+        IconButton(onSettings, Modifier.size(TouchTarget)) {
+            Box(contentAlignment = Alignment.TopEnd) {
+                Icon(HqIcons.Gear, gearWords, Modifier.size(24.dp), tint = Mts.Ink)
+                if (updateDot) Box(Modifier.size(8.dp).background(Mts.BrandBlue, CircleShape).testTag("update-dot"))
+            }
+        }
     }
 }
 
