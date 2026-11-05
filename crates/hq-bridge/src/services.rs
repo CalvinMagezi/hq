@@ -295,6 +295,8 @@ pub async fn run_forward(
         tokio::spawn(async move {
             match open_stream(&dialer, &peer, &service, &link, fail_fast).await {
                 Ok((send, recv)) => local.pipe(send, recv, SERVICE_IDLE).await,
+                // Expected while the peer is away, and as often as the caller asks: not a warning.
+                Err(e) if e.is::<Unreachable>() => tracing::debug!(%service, "bridge forward: {e}"),
                 Err(e) => tracing::warn!(%service, "bridge forward: {e:#}"),
             }
             drop(permit);
@@ -315,22 +317,37 @@ async fn open_stream(
     };
     if link.down.load(Ordering::SeqCst) {
         retry_in_background(dialer, peer, service, link);
-        bail!("{peer} is unreachable; trying it again in the background");
+        return Err(Unreachable.into());
     }
     let outcome = tokio::time::timeout(limit, stream_to(dialer, peer, service, &link.conn)).await;
     if let Ok(Ok(stream)) = outcome {
         return Ok(stream);
     }
+    // Only marked: other connections may be streaming over the kept connection, so closing it is
+    // left to the background try, which alone uses it while the mark is set.
     link.down.store(true, Ordering::SeqCst);
-    // A connection that stopped answering is not reused: the background try dials afresh.
-    if let Some(conn) = link.conn.lock().await.take() {
-        conn.close(0u32.into(), b"unanswered");
-    }
     retry_in_background(dialer, peer, service, link);
     match outcome {
         Ok(Err(e)) => Err(e),
         _ => Err(anyhow!("{peer} did not answer within {limit:?}")),
     }
+}
+
+/// A fail-fast forward ended a connection because its peer is marked unreachable.
+#[derive(Debug)]
+struct Unreachable;
+
+impl std::fmt::Display for Unreachable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the peer is unreachable; trying it again in the background")
+    }
+}
+
+impl std::error::Error for Unreachable {}
+
+/// The kept connection's id, if there is one.
+async fn kept_id(link: &Link) -> Option<usize> {
+    link.conn.lock().await.as_ref().map(Connection::stable_id)
 }
 
 /// Tries the peer's service once in the background, one try at a time, and clears the
@@ -347,12 +364,23 @@ fn retry_in_background(dialer: &Dialer, peer: &str, service: &str, link: &Arc<Li
         link.clone(),
     );
     tokio::spawn(async move {
+        let tried = kept_id(&link).await;
         // The stream only proves the service answers; dropping it ends it on the far side.
         if stream_to(&dialer, &peer, &service, &link.conn)
             .await
             .is_ok()
         {
             link.down.store(false, Ordering::SeqCst);
+        } else {
+            // A kept connection that did not answer (a closed lid looks open) is not tried again:
+            // the next try dials afresh. Only that one is closed, never a newer one.
+            let mut slot = link.conn.lock().await;
+            if tried.is_some()
+                && slot.as_ref().map(Connection::stable_id) == tried
+                && let Some(conn) = slot.take()
+            {
+                conn.close(0u32.into(), b"unanswered");
+            }
         }
         link.retrying.store(false, Ordering::SeqCst);
     });
