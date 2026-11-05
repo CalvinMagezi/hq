@@ -72,8 +72,48 @@ function sameKey(sub: PushSubscription, publicKey: string): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
-function sendToServer(sub: PushSubscription): Promise<unknown> {
-  return hqJson('/api/notifications/push/subscribe', 'POST', sub.toJSON())
+const PREFS_KEY = 'hq.push.prefs'
+
+/** What this browser asked to be told about: per browser, like the subscription itself. */
+export interface PushPrefs {
+  needs: boolean
+  updates: boolean
+  details: boolean
+}
+
+export const DEFAULT_PUSH_PREFS: PushPrefs = { needs: true, updates: true, details: false }
+
+export function readPushPrefs(): PushPrefs {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? 'null') as Partial<PushPrefs> | null
+    return {
+      needs: raw?.needs ?? DEFAULT_PUSH_PREFS.needs,
+      updates: raw?.updates ?? DEFAULT_PUSH_PREFS.updates,
+      details: raw?.details ?? DEFAULT_PUSH_PREFS.details,
+    }
+  } catch {
+    return { ...DEFAULT_PUSH_PREFS }
+  }
+}
+
+function savePushPrefs(prefs: PushPrefs) {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+    // Reply alerts are the Updates switch (lib/replyAlerts.ts reads this key).
+    localStorage.setItem('hq.chat.replyAlerts', prefs.updates ? '1' : '0')
+  } catch {
+    // Storage can be blocked; the server still holds the choice.
+  }
+}
+
+/** The subscribe body: the subscription plus the kinds this browser wants and whether to show details. */
+export function subscribeBody(sub: PushSubscriptionJSON, prefs: PushPrefs) {
+  const kinds = [prefs.needs && 'needs', prefs.updates && 'updates'].filter(Boolean) as string[]
+  return { ...sub, kinds, details: prefs.details }
+}
+
+function sendToServer(sub: PushSubscription, prefs: PushPrefs = readPushPrefs()): Promise<unknown> {
+  return hqJson('/api/notifications/push/subscribe', 'POST', subscribeBody(sub.toJSON(), prefs))
 }
 
 export async function getPushState(): Promise<PushState> {
@@ -87,7 +127,7 @@ export async function getPushState(): Promise<PushState> {
 }
 
 /** Asks for permission (call it from a tap) and subscribes this device. */
-export async function enablePush(): Promise<PushState> {
+export async function enablePush(prefs: PushPrefs = readPushPrefs()): Promise<PushState> {
   if (!pushSupported()) return 'unsupported'
   const server = await serverStatus()
   if (!server.enabled || !server.public_key) return 'server-off'
@@ -103,7 +143,8 @@ export async function enablePush(): Promise<PushState> {
     userVisibleOnly: true,
     applicationServerKey: keyBytes(server.public_key),
   })
-  await sendToServer(sub)
+  await sendToServer(sub, prefs)
+  savePushPrefs(prefs)
   return 'on'
 }
 
@@ -117,10 +158,23 @@ export async function disablePush(): Promise<PushState> {
   return 'off'
 }
 
+/** Applies new switches: both kinds off unsubscribes, otherwise the subscription is sent again with them. */
+export async function applyPushPrefs(prefs: PushPrefs): Promise<PushState> {
+  if (!prefs.needs && !prefs.updates) {
+    savePushPrefs(prefs)
+    return disablePush()
+  }
+  const sub = pushSupported() && Notification.permission === 'granted' ? await currentSubscription() : null
+  if (!sub) return enablePush(prefs)
+  await sendToServer(sub, prefs)
+  savePushPrefs(prefs)
+  return 'on'
+}
+
 /** Sends a test notification to this device. Resolves with the server's error, if any. */
 export async function sendTestPush(): Promise<string | null> {
   const sub = await currentSubscription()
-  if (!sub) return 'This device is not subscribed.'
+  if (!sub) return 'not_subscribed'
   const res = await hqJson<{ sent: number; results: { sent: boolean; error?: string }[] }>(
     '/api/notifications/push/test',
     'POST',

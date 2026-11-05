@@ -20,7 +20,19 @@ import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as VaultIndexRouteImport } from './routes/vault/index'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as VaultSplatRouteImport } from './routes/vault/$'
+import { Route as SettingsVersionRouteImport } from './routes/settings/version'
+import { Route as SettingsTimeRouteImport } from './routes/settings/time'
+import { Route as SettingsSpendingRouteImport } from './routes/settings/spending'
+import { Route as SettingsSafetyRouteImport } from './routes/settings/safety'
+import { Route as SettingsMessagingRouteImport } from './routes/settings/messaging'
+import { Route as SettingsKeysRouteImport } from './routes/settings/keys'
+import { Route as SettingsFoldersRouteImport } from './routes/settings/folders'
+import { Route as SettingsDevicesRouteImport } from './routes/settings/devices'
+import { Route as SettingsDataRouteImport } from './routes/settings/data'
+import { Route as SettingsBrowserRouteImport } from './routes/settings/browser'
+import { Route as SettingsBackupRouteImport } from './routes/settings/backup'
 
 const VaultRoute = VaultRouteImport.update({
   id: '/vault',
@@ -77,10 +89,70 @@ const VaultIndexRoute = VaultIndexRouteImport.update({
   path: '/',
   getParentRoute: () => VaultRoute,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const VaultSplatRoute = VaultSplatRouteImport.update({
   id: '/$',
   path: '/$',
   getParentRoute: () => VaultRoute,
+} as any)
+const SettingsVersionRoute = SettingsVersionRouteImport.update({
+  id: '/version',
+  path: '/version',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsTimeRoute = SettingsTimeRouteImport.update({
+  id: '/time',
+  path: '/time',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSpendingRoute = SettingsSpendingRouteImport.update({
+  id: '/spending',
+  path: '/spending',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSafetyRoute = SettingsSafetyRouteImport.update({
+  id: '/safety',
+  path: '/safety',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsMessagingRoute = SettingsMessagingRouteImport.update({
+  id: '/messaging',
+  path: '/messaging',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsKeysRoute = SettingsKeysRouteImport.update({
+  id: '/keys',
+  path: '/keys',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsFoldersRoute = SettingsFoldersRouteImport.update({
+  id: '/folders',
+  path: '/folders',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsDevicesRoute = SettingsDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsDataRoute = SettingsDataRouteImport.update({
+  id: '/data',
+  path: '/data',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsBrowserRoute = SettingsBrowserRouteImport.update({
+  id: '/browser',
+  path: '/browser',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsBackupRoute = SettingsBackupRouteImport.update({
+  id: '/backup',
+  path: '/backup',
+  getParentRoute: () => SettingsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -89,12 +161,24 @@ export interface FileRoutesByFullPath {
   '/connect': typeof ConnectRoute
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
   '/usage': typeof UsageRoute
   '/vault': typeof VaultRouteWithChildren
+  '/settings/backup': typeof SettingsBackupRoute
+  '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/data': typeof SettingsDataRoute
+  '/settings/devices': typeof SettingsDevicesRoute
+  '/settings/folders': typeof SettingsFoldersRoute
+  '/settings/keys': typeof SettingsKeysRoute
+  '/settings/messaging': typeof SettingsMessagingRoute
+  '/settings/safety': typeof SettingsSafetyRoute
+  '/settings/spending': typeof SettingsSpendingRoute
+  '/settings/time': typeof SettingsTimeRoute
+  '/settings/version': typeof SettingsVersionRoute
   '/vault/$': typeof VaultSplatRoute
+  '/settings/': typeof SettingsIndexRoute
   '/vault/': typeof VaultIndexRoute
 }
 export interface FileRoutesByTo {
@@ -103,11 +187,22 @@ export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
-  '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
   '/usage': typeof UsageRoute
+  '/settings/backup': typeof SettingsBackupRoute
+  '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/data': typeof SettingsDataRoute
+  '/settings/devices': typeof SettingsDevicesRoute
+  '/settings/folders': typeof SettingsFoldersRoute
+  '/settings/keys': typeof SettingsKeysRoute
+  '/settings/messaging': typeof SettingsMessagingRoute
+  '/settings/safety': typeof SettingsSafetyRoute
+  '/settings/spending': typeof SettingsSpendingRoute
+  '/settings/time': typeof SettingsTimeRoute
+  '/settings/version': typeof SettingsVersionRoute
   '/vault/$': typeof VaultSplatRoute
+  '/settings': typeof SettingsIndexRoute
   '/vault': typeof VaultIndexRoute
 }
 export interface FileRoutesById {
@@ -117,12 +212,24 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
-  '/settings': typeof SettingsRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
   '/usage': typeof UsageRoute
   '/vault': typeof VaultRouteWithChildren
+  '/settings/backup': typeof SettingsBackupRoute
+  '/settings/browser': typeof SettingsBrowserRoute
+  '/settings/data': typeof SettingsDataRoute
+  '/settings/devices': typeof SettingsDevicesRoute
+  '/settings/folders': typeof SettingsFoldersRoute
+  '/settings/keys': typeof SettingsKeysRoute
+  '/settings/messaging': typeof SettingsMessagingRoute
+  '/settings/safety': typeof SettingsSafetyRoute
+  '/settings/spending': typeof SettingsSpendingRoute
+  '/settings/time': typeof SettingsTimeRoute
+  '/settings/version': typeof SettingsVersionRoute
   '/vault/$': typeof VaultSplatRoute
+  '/settings/': typeof SettingsIndexRoute
   '/vault/': typeof VaultIndexRoute
 }
 export interface FileRouteTypes {
@@ -138,7 +245,19 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/usage'
     | '/vault'
+    | '/settings/backup'
+    | '/settings/browser'
+    | '/settings/data'
+    | '/settings/devices'
+    | '/settings/folders'
+    | '/settings/keys'
+    | '/settings/messaging'
+    | '/settings/safety'
+    | '/settings/spending'
+    | '/settings/time'
+    | '/settings/version'
     | '/vault/$'
+    | '/settings/'
     | '/vault/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -147,11 +266,22 @@ export interface FileRouteTypes {
     | '/connect'
     | '/notifications'
     | '/sessions'
-    | '/settings'
     | '/setup'
     | '/tasks'
     | '/usage'
+    | '/settings/backup'
+    | '/settings/browser'
+    | '/settings/data'
+    | '/settings/devices'
+    | '/settings/folders'
+    | '/settings/keys'
+    | '/settings/messaging'
+    | '/settings/safety'
+    | '/settings/spending'
+    | '/settings/time'
+    | '/settings/version'
     | '/vault/$'
+    | '/settings'
     | '/vault'
   id:
     | '__root__'
@@ -165,7 +295,19 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/usage'
     | '/vault'
+    | '/settings/backup'
+    | '/settings/browser'
+    | '/settings/data'
+    | '/settings/devices'
+    | '/settings/folders'
+    | '/settings/keys'
+    | '/settings/messaging'
+    | '/settings/safety'
+    | '/settings/spending'
+    | '/settings/time'
+    | '/settings/version'
     | '/vault/$'
+    | '/settings/'
     | '/vault/'
   fileRoutesById: FileRoutesById
 }
@@ -175,7 +317,7 @@ export interface RootRouteChildren {
   ConnectRoute: typeof ConnectRoute
   NotificationsRoute: typeof NotificationsRoute
   SessionsRoute: typeof SessionsRoute
-  SettingsRoute: typeof SettingsRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   SetupRoute: typeof SetupRoute
   TasksRoute: typeof TasksRoute
   UsageRoute: typeof UsageRoute
@@ -261,6 +403,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultIndexRouteImport
       parentRoute: typeof VaultRoute
     }
+    '/settings/': {
+      id: '/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/vault/$': {
       id: '/vault/$'
       path: '/$'
@@ -268,8 +417,119 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultSplatRouteImport
       parentRoute: typeof VaultRoute
     }
+    '/settings/version': {
+      id: '/settings/version'
+      path: '/version'
+      fullPath: '/settings/version'
+      preLoaderRoute: typeof SettingsVersionRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/time': {
+      id: '/settings/time'
+      path: '/time'
+      fullPath: '/settings/time'
+      preLoaderRoute: typeof SettingsTimeRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/spending': {
+      id: '/settings/spending'
+      path: '/spending'
+      fullPath: '/settings/spending'
+      preLoaderRoute: typeof SettingsSpendingRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/safety': {
+      id: '/settings/safety'
+      path: '/safety'
+      fullPath: '/settings/safety'
+      preLoaderRoute: typeof SettingsSafetyRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/messaging': {
+      id: '/settings/messaging'
+      path: '/messaging'
+      fullPath: '/settings/messaging'
+      preLoaderRoute: typeof SettingsMessagingRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/keys': {
+      id: '/settings/keys'
+      path: '/keys'
+      fullPath: '/settings/keys'
+      preLoaderRoute: typeof SettingsKeysRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/folders': {
+      id: '/settings/folders'
+      path: '/folders'
+      fullPath: '/settings/folders'
+      preLoaderRoute: typeof SettingsFoldersRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/devices': {
+      id: '/settings/devices'
+      path: '/devices'
+      fullPath: '/settings/devices'
+      preLoaderRoute: typeof SettingsDevicesRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/data': {
+      id: '/settings/data'
+      path: '/data'
+      fullPath: '/settings/data'
+      preLoaderRoute: typeof SettingsDataRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/browser': {
+      id: '/settings/browser'
+      path: '/browser'
+      fullPath: '/settings/browser'
+      preLoaderRoute: typeof SettingsBrowserRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/backup': {
+      id: '/settings/backup'
+      path: '/backup'
+      fullPath: '/settings/backup'
+      preLoaderRoute: typeof SettingsBackupRouteImport
+      parentRoute: typeof SettingsRoute
+    }
   }
 }
+
+interface SettingsRouteChildren {
+  SettingsBackupRoute: typeof SettingsBackupRoute
+  SettingsBrowserRoute: typeof SettingsBrowserRoute
+  SettingsDataRoute: typeof SettingsDataRoute
+  SettingsDevicesRoute: typeof SettingsDevicesRoute
+  SettingsFoldersRoute: typeof SettingsFoldersRoute
+  SettingsKeysRoute: typeof SettingsKeysRoute
+  SettingsMessagingRoute: typeof SettingsMessagingRoute
+  SettingsSafetyRoute: typeof SettingsSafetyRoute
+  SettingsSpendingRoute: typeof SettingsSpendingRoute
+  SettingsTimeRoute: typeof SettingsTimeRoute
+  SettingsVersionRoute: typeof SettingsVersionRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsBackupRoute: SettingsBackupRoute,
+  SettingsBrowserRoute: SettingsBrowserRoute,
+  SettingsDataRoute: SettingsDataRoute,
+  SettingsDevicesRoute: SettingsDevicesRoute,
+  SettingsFoldersRoute: SettingsFoldersRoute,
+  SettingsKeysRoute: SettingsKeysRoute,
+  SettingsMessagingRoute: SettingsMessagingRoute,
+  SettingsSafetyRoute: SettingsSafetyRoute,
+  SettingsSpendingRoute: SettingsSpendingRoute,
+  SettingsTimeRoute: SettingsTimeRoute,
+  SettingsVersionRoute: SettingsVersionRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
 
 interface VaultRouteChildren {
   VaultSplatRoute: typeof VaultSplatRoute
@@ -289,7 +549,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectRoute: ConnectRoute,
   NotificationsRoute: NotificationsRoute,
   SessionsRoute: SessionsRoute,
-  SettingsRoute: SettingsRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   SetupRoute: SetupRoute,
   TasksRoute: TasksRoute,
   UsageRoute: UsageRoute,

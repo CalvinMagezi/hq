@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-/** localStorage key for the header clock's time zone. Empty or missing means this device's zone. */
+/** localStorage key for the zone this browser shows times in. Empty or missing means this device's zone. */
 export const CLOCK_ZONE_KEY = 'hq.clock.timeZone'
 const CLOCK_ZONE_EVENT = 'hq:clock-zone'
 
