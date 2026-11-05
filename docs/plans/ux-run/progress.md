@@ -85,7 +85,35 @@ the safer side.
 - [x] 03-destructive.md: red dialogs through `ui/shell/Confirm.kt`, Undo through `ui/shell/Undo.kt`, server restore routes for chats, updates and tasks (ten minutes, 409 "changed" after).
 - [x] 01-notifications.md: the first-run Notifications step, the upgrader sheet once, Turn on in three places, folding, the replay when notifications come back (C-11), "Messaging apps" (B15).
 - [x] 02-backup.md and 05-progress.md: the backup row and Home card from facts, Save a copy with its states, `GET /api/backup/status`, progress counts and 99+; the Inbox's red Allow {verb} now comes from HQ (`metadata.approval`), never the card's words.
-- [ ] 04-plain-words.md: first slice merged; the rest and times as instants in progress.
+- [x] 04-plain-words.md: every owner sentence through the catalogue, real plurals, 12 or 24-hour time by the phone, `Instants.parse` for every time HQ sends.
+
+### Web wave 2
+
+- [x] 01-route-table.md: one route table (`/chat`, `/notes`, `/tasks`, `/inbox`, `/helpers`, `/settings`), every stored link and QR code redirects with its id, the manifest and shortcuts. Server: HQ writes the new link forms (`/helpers/{id}`, `/inbox`, `/chat/{id}`, `/tasks/{id}`).
+- [x] 02-embed-and-lite.md: `?embed=1` beside `?host=android`, the Lite shell by the edition.
+- [x] 03-version-and-data.md: "A newer HQ is running" with drafts kept, change events over the socket (server: `inbox:change`, `notes:change`, `helpers:change`, `budget:change`, `settings:change`), nothing runs while hidden, Data used. Chat first load about 303 kB gzip (baseline).
+- [x] 04-time-zones.md: HQ's zone in `/api/hello`, every hq-db time sent as RFC 3339 with Z, the display zone per browser.
+
+### Phone wave 2
+
+- [x] 01-downloads.md and 02-updates.md: the download engine (paid data and paid Wi-Fi asks, resume, hash check, Undo), the updater on it, installed only when idle, staged and withdrawn versions, the Update page. The releases repo comes from `-Phq.releasesRepo` (no owner name in the source).
+- [ ] 03-assistant-model.md and 04-startup.md: in progress.
+
+### HQ Hub (web wave 3)
+
+- [x] 05-commands-and-platforms.md and 01-this-pc.md: the new commands (allow-listed `open_main_window(path)`, `host_log` with keys hidden, `pick_program` refusing shared folders, local `host_unlock`), a native chooser and notice with no plugin, AgentHQ and HQ Hub names, the Claude Desktop entry rewrite after the rename (WR22), This computer.
+- [x] 02-devices.md, 03-helpers-tab.md, 04-helper-detail.md: Devices, the Helpers tab (versions from package files, sandboxed checks, two at a time), Try it, Connect and Remove with Undo, sign-in links only on the helper's own site. The sign-in sites per helper are the vendors' own domains, chosen by the worker: please glance at them in `crates/hq-desktop/src/helpers.rs`.
+- Not checked in a running app: the hub needs a `tauri build`, done once at the end for the cutover check.
+
+### Phone wave 3
+
+- [ ] Waits for the owner's locked Home hold log on the A32 (HQ as the assistant, a PIN set), `mobile/device-checks.md`.
+
+### Server parts for wave 4 (built ahead)
+
+- `/api/search?folder=` filtered before the limit; notes save with `base` and 409; `source: voice` and `client_id` in a message's meta, `turn_end.waiting_for_owner`, "You said" on a voice turn's approvals; `POST /api/threads/{id}/stop` and `resume`. The task field on the start route stays "later" (WR17).
+
+Workspace gates after these: clippy clean; `cargo test --workspace` 5512 passed, 0 failed, 44 ignored (94 binaries).
 
 ## Try this now
 
