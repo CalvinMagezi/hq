@@ -60,6 +60,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -304,9 +305,14 @@ private fun NoAnswer(text: String = "HQ is not running, so there is nothing to s
 
 @Composable
 private fun Home(ui: SettingsUi, actions: SettingsActions) {
+    val w = example.hq.spike.ui.shell.rememberWords()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val strip = ui.savedAt?.takeIf { ui.stale }?.let { w.s(R.string.bk_strip_saved, android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(it.toEpochMilli()))) }
     Page {
-        SettingsWords.home(ui.snap, ui.now, ui.phone, ui.loaded, ui.backup).forEachIndexed { gi, g ->
+        BackupWords.slot(w, ui.backup, ui.now)?.let { slot -> BackupSlot(slot) { actions.onPage(SettingsPage.About) } }
+        SettingsWords.home(w, ui.snap, ui.now, ui.phone, ui.loaded, ui.backup, strip).forEachIndexed { gi, g ->
             Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = if (gi == 0) 8.dp else 20.dp, end = 16.dp, bottom = 4.dp))
+            g.lead?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp)) }
             Group {
                 g.rows.forEachIndexed { i, r -> NavRow(r, i == 0) { if (r.page != null) actions.onPage(r.page) else actions.onPhoneRow(r.key) } }
             }
@@ -1065,7 +1071,7 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
 @Composable
 private fun About(ui: SettingsUi, actions: SettingsActions) {
     Page {
-        BackupCard(BackupWords.card(ui.backup, Instant.now()))
+        BackupCard(ui, actions)
         MovingCard()
         Label("About")
         Facts(
@@ -1295,31 +1301,106 @@ private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
     }
 }
 
-/** What backups on this phone are doing; the button to set one up is drawn but off, since the app cannot set it up yet. */
+/** The Home card that stands in for a warning on the backup row: tapping it opens Backup and about. */
 @Composable
-private fun BackupCard(card: BackupWords.Card) {
+private fun BackupSlot(slot: BackupWords.Slot, onOpen: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
-    val warn = card.tone == BackupWords.Tone.Warn
-    val tint = if (warn) Mts.Amber else Mts.BrandGreen
     Column(
-        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (warn) Mts.Amber else Mts.Line, shape).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape)
+            .clickable(role = Role.Button, onClick = onOpen).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (warn) HqIcons.Warning else HqIcons.Check, null, Modifier.size(22.dp), tint = tint)
-            Text(card.title, style = HqType.BodyBold, color = Mts.Ink)
+            Icon(HqIcons.Warning, null, Modifier.size(22.dp), tint = Mts.Amber)
+            Text(slot.title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.semantics { heading() })
         }
-        Text(card.body, style = HqType.BodySm, color = Mts.Ink)
-        if (card.offerSetUp) Row(
-            Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).padding(horizontal = 24.dp).semantics { disabled(); contentDescription = "Set up backup, needs a decision" },
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(stringResource(R.string.settings_set_up_backup), style = HqType.BodySmBold, color = Mts.Ink)
-            Box(Modifier.heightIn(min = 24.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, Mts.Line, RoundedCornerShape(12.dp)).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                Text(stringResource(R.string.settings_needs_a_decision), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+        Text(slot.body, style = HqType.BodySm, color = Mts.Ink)
+    }
+}
+
+/** What backups on this phone are doing, and Save a copy now: idle, running, done or failed. */
+@Composable
+private fun BackupCard(ui: SettingsUi, actions: SettingsActions) {
+    val w = example.hq.spike.ui.shell.rememberWords()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip")) { uri -> if (uri != null) actions.onSaveCopy(uri) }
+    val save = { picker.launch(example.hq.spike.safe.NotesCopy.fileName(java.time.LocalDateTime.now())) }
+    var details by remember { mutableStateOf<String?>(null) }
+    val shape = RoundedCornerShape(12.dp)
+    fun time(ms: Long) = android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(ms))
+    when (val c = ui.copy) {
+        is BackupCopy.State.Busy -> CardFrame(shape, false) {
+            CardTitle(w.s(R.string.bk_busy_title), false)
+            Text(w.s(R.string.bk_busy_body, "${c.percent}%", c.doneMb, c.totalMb), style = HqType.BodySm, color = Mts.Ink)
+            val label = w.s(R.string.bk_busy_percent, c.percent)
+            Box(
+                Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Mts.Surface200)
+                    .semantics { contentDescription = label; progressBarRangeInfo = androidx.compose.ui.semantics.ProgressBarRangeInfo(c.percent / 100f, 0f..1f) },
+            ) { Box(Modifier.fillMaxWidth(c.percent / 100f).height(4.dp).background(Mts.BrandBlue)) }
+            CardButton(w.s(R.string.bk_cancel), false, actions.onSaveCopyCancel)
+        }
+        is BackupCopy.State.Done -> CardFrame(shape, c.onPhone) {
+            CardTitle(w.s(if (c.onPhone) R.string.bk_here_too_title else R.string.bk_done_title), c.onPhone)
+            Text(if (c.onPhone) w.s(R.string.bk_here_too_body) else w.s(R.string.bk_done_body, time(c.atMs)), style = HqType.BodySm, color = Mts.Ink)
+            CardButton(w.s(R.string.bk_got_it), false, actions.onSaveCopyClear)
+            if (c.onPhone) CardButton(w.s(R.string.bk_save_copy), true, save)
+        }
+        is BackupCopy.State.Failed -> CardFrame(shape, true) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                Icon(HqIcons.Warning, null, Modifier.size(22.dp), tint = Mts.Amber)
+                Text(c.message, style = HqType.BodySm, color = Mts.Ink)
+            }
+            CardButton(w.s(R.string.bk_save_copy), true, save)
+            CardButton(w.s(R.string.bk_got_it), false, actions.onSaveCopyClear)
+        }
+        BackupCopy.State.Idle -> {
+            val card = BackupWords.card(w, ui.backup, Instant.now())
+            val warn = card.tone == BackupWords.Tone.Warn
+            CardFrame(shape, warn) {
+                CardTitle(card.title, warn)
+                Text(card.body, style = HqType.BodySm, color = Mts.Ink)
+                card.said?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted) }
+                card.small?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted) }
+                card.lock?.let { Text(it, style = HqType.BodySm, color = Mts.InkMuted) }
+                card.actions.forEach { a ->
+                    when (a) {
+                        BackupWords.Action.SaveCopy -> CardButton(w.s(R.string.bk_save_copy), warn, save)
+                        BackupWords.Action.OpenBackground -> CardButton(w.s(R.string.bk_open_background), false) { actions.onPage(SettingsPage.Background) }
+                        BackupWords.Action.GotIt -> CardButton(w.s(R.string.bk_got_it), false, actions.onGotIt)
+                        BackupWords.Action.CopyDetails -> CardButton(w.s(R.string.bk_copy_details), false) { details = BackupWords.details(ui.backup, Instant.now()) }
+                    }
+                }
             }
         }
     }
+    details?.let { CopyDetailsSheet(it) { details = null } }
+}
+
+@Composable
+private fun CardFrame(shape: androidx.compose.ui.graphics.Shape, warn: Boolean, content: @Composable () -> Unit) {
+    Column(
+        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (warn) Mts.Amber else Mts.Line, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) { content() }
+}
+
+/** The title is ink either way: a warning gets an amber mark, a good card a grey check. */
+@Composable
+private fun CardTitle(text: String, warn: Boolean) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (warn) HqIcons.Warning else HqIcons.Check, null, Modifier.size(22.dp), tint = if (warn) Mts.Amber else Mts.InkMuted)
+        Text(text, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.semantics { heading() })
+    }
+}
+
+/** Full width, so it stays whole at the largest text size. Green when [filled], outlined otherwise. */
+@Composable
+private fun CardButton(label: String, filled: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).then(if (filled) Modifier.background(Mts.BrandGreen, CircleShape) else Modifier.border(1.dp, Mts.Line, CircleShape))
+            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 24.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, style = HqType.BodySmBold, color = if (filled) Mts.OnGreen else Mts.Ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
 }
 
 /** What the old phone should know before a move: only notes travel, and the copy button waits for the safe-mode .zip. */

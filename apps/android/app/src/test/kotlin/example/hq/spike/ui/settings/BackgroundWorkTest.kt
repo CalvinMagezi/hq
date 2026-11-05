@@ -6,7 +6,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class BackgroundWorkTest {
     private val health = JSONObject("""{"status":"ok"}""")
     private fun chat(telegram: String, discord: String = """{"enabled":false,"token_set":false}""") = JSONObject("""{"telegram":$telegram,"discord":$discord}""")
@@ -91,9 +97,9 @@ class BackgroundWorkTest {
     }
 
     @Test fun theHomeRowWarnsWhenNotesAreOnlyOnThePhone() {
-        val row = SettingsWords.home(SettingsSnapshot(), java.time.Instant.EPOCH).flatMap { it.rows }.first { it.page == SettingsPage.About }
+        val row = SettingsWords.home(testWords(), SettingsSnapshot(), java.time.Instant.EPOCH).flatMap { it.rows }.first { it.page == SettingsPage.About }
         assertEquals("Backup and about", row.title)
-        assertEquals("Your notes are only on this phone", row.status)
+        assertEquals("Not set up \u00b7 only on this phone", row.status)
         assertTrue(row.warn)
     }
 

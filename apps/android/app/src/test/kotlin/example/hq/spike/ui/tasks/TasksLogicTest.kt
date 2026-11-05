@@ -9,7 +9,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class TasksLogicTest {
     private val today = LocalDate.of(2026, 10, 21)
 
@@ -59,21 +65,23 @@ class TasksLogicTest {
         val g = TasksLogic.upcoming(tasks, today)
         assertTrue(g[0].title.startsWith("Tomorrow · "))
         assertEquals(2, g[1].tasks.size)
-        assertEquals("Later · 1\u00A0task", g[2].title)
-        assertEquals("No date · 1\u00A0task", g[3].title)
+        assertEquals("Later", g[2].title)
+        assertEquals(1, g[2].count)
+        assertEquals("No date", g[3].title)
+        assertEquals(1, g[3].count)
         assertTrue(g.none { grp -> grp.tasks.any { it.id == "f" } })
     }
 
     @Test fun rowsSayStuckAndReadyInTheBoardsWords() {
-        val stuck = TasksLogic.meta(task("a", "blocked", reason = "needs a reboot window"), today)
+        val stuck = TasksLogic.meta(testWords(), task("a", "blocked", reason = "needs a reboot window"), today)
         assertEquals("Stuck · needs a reboot window", stuck.joinToString("") { it.text })
         assertTrue(stuck[0].amber && stuck[0].bold)
-        val ready = TasksLogic.meta(task("b", "ready_for_review", readyAt = "2026-10-21 09:00:00"), today, LocalDateTime.of(2026, 10, 21, 12, 0))
+        val ready = TasksLogic.meta(testWords(), task("b", "ready_for_review", readyAt = "2026-10-21 09:00:00"), today, LocalDateTime.of(2026, 10, 21, 12, 0))
         assertEquals("Ready to check · HQ finished 3\u00A0h\u00A0ago", ready.joinToString("") { it.text })
     }
 
     @Test fun anOrdinaryRowShowsPriorityDueAndSteps() {
-        val m = TasksLogic.meta(task("c", "in_progress", priority = "high", due = "2026-10-24", steps = 1 to 3), today)
+        val m = TasksLogic.meta(testWords(), task("c", "in_progress", priority = "high", due = "2026-10-24", steps = 1 to 3), today)
         assertEquals("High · due Saturday · 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done", m.joinToString("") { it.text })
         assertEquals("due Oct 30", TasksLogic.dueWords("2026-10-30", today))
         assertEquals("due today", TasksLogic.dueWords("2026-10-21", today))
@@ -118,7 +126,7 @@ class TasksLogicTest {
     }
 
     @Test fun theRowMetaCarriesThatReason() {
-        val words = TasksLogic.meta(task("a", priority = "high", start = "2026-10-21", due = "2026-12-06"), today).joinToString("") { it.text }
+        val words = TasksLogic.meta(testWords(), task("a", priority = "high", start = "2026-10-21", due = "2026-12-06"), today).joinToString("") { it.text }
         assertEquals("High · due Dec 6 · starts today", words)
     }
 

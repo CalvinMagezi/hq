@@ -6,7 +6,13 @@ import java.time.LocalDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class AllTabTest {
     private val today = LocalDate.parse("2026-10-22")
     private val now = LocalDateTime.parse("2026-10-22T12:00:00")
@@ -60,22 +66,22 @@ class AllTabTest {
     }
 
     @Test fun theThirdLineSaysWhatTheTaskIsWaitingOnOrWhoItIsFor() {
-        assertEquals("Waiting on you \u00b7 needs a reboot window", TasksLogic.allMeta(t("1", "blocked").copy(waitingOn = "you", blockedReason = "needs a reboot window"), today, false, now))
-        assertEquals("needs a reboot window", TasksLogic.allMeta(t("1", "blocked").copy(blockedReason = "needs a reboot window"), today, false, now))
+        assertEquals("Waiting on you \u00b7 needs a reboot window", TasksLogic.allMeta(testWords(), t("1", "blocked").copy(waitingOn = "you", blockedReason = "needs a reboot window"), today, false, now))
+        assertEquals("needs a reboot window", TasksLogic.allMeta(testWords(), t("1", "blocked").copy(blockedReason = "needs a reboot window"), today, false, now))
         val ready = t("2", "ready_for_review").copy(assignees = listOf("hq"), readyAt = "2026-10-22 09:00:00", updatedAt = "2026-10-22 11:59:00")
-        assertEquals("for hq \u00b7 moved 3 h ago", TasksLogic.allMeta(ready, today, false, now))
-        assertEquals("for hq", TasksLogic.allMeta(ready.copy(readyAt = null), today, false, now))
+        assertEquals("for hq \u00b7 moved 3 h ago", TasksLogic.allMeta(testWords(), ready, today, false, now))
+        assertEquals("for hq", TasksLogic.allMeta(testWords(), ready.copy(readyAt = null), today, false, now))
     }
 
     @Test fun anOpenTaskNamesItsProgressDueDateAndOwner() {
         val task = t("3").copy(subtaskCount = 3, subtaskDone = 1, dueDate = "2026-10-24", assignees = listOf("hq"), tags = listOf("mobile-first"))
-        assertEquals("HQ is working on it \u00b7 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done \u00b7 due Saturday \u00b7 for hq \u00b7 mobile-first", TasksLogic.allMeta(task, today, true, now))
-        assertEquals("", TasksLogic.allMeta(t("4"), today, false, now))
+        assertEquals("HQ is working on it \u00b7 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done \u00b7 due Saturday \u00b7 for hq \u00b7 mobile-first", TasksLogic.allMeta(testWords(), task, today, true, now))
+        assertEquals("", TasksLogic.allMeta(testWords(), t("4"), today, false, now))
     }
 
     @Test fun doneAndArchivedRowsSayWhen() {
-        assertEquals("Done 3 h ago", TasksLogic.allMeta(t("5", "complete").copy(completedAt = "2026-10-22 09:00:00"), today, false, now))
-        assertEquals("Archived 2 d ago", TasksLogic.allMeta(t("6").copy(archivedAt = "2026-10-20 11:00:00"), today, false, now))
+        assertEquals("Done 3 h ago", TasksLogic.allMeta(testWords(), t("5", "complete").copy(completedAt = "2026-10-22 09:00:00"), today, false, now))
+        assertEquals("Archived 2 d ago", TasksLogic.allMeta(testWords(), t("6").copy(archivedAt = "2026-10-20 11:00:00"), today, false, now))
     }
 
     @Test fun eachChipHasWordsForAnEmptyList() {

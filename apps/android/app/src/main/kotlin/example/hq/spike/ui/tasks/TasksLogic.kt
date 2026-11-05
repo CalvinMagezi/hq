@@ -1,5 +1,7 @@
 package example.hq.spike.ui.tasks
 
+import example.hq.spike.ui.shell.Counts
+import example.hq.spike.ui.shell.Words
 import example.hq.spike.data.HqClient.TaskItem
 import java.time.DayOfWeek
 import java.time.Duration
@@ -23,7 +25,7 @@ data class IdTag(val text: String, val danger: Boolean)
  * A heading and the tasks under it. The badge counts them; [collapsible] groups (Later, No date) show only their count until tapped;
  * a group with a [preview] shows that many and a row to show the rest.
  */
-data class TaskGroup(val key: String, val title: String, val tasks: List<TaskItem>, val badge: Boolean = true, val collapsible: Boolean = false, val preview: Int? = null)
+data class TaskGroup(val key: String, val title: String, val tasks: List<TaskItem>, val badge: Boolean = true, val collapsible: Boolean = false, val preview: Int? = null, val count: Int? = null)
 
 /** One piece of a row's second line: some words, bold or not, plain or highlighted. */
 data class Run(val text: String, val bold: Boolean = false, val amber: Boolean = false)
@@ -68,9 +70,9 @@ object TasksLogic {
         val soon = dated.filter { (d, _) -> !d.isAfter(today.plusDays(SOON_DAYS)) }.groupBy({ it.first }, { it.second }).toSortedMap()
         val groups = soon.map { (d, ts) -> TaskGroup("d-$d", dayLabel(d, today), ts.sortedWith(byUrgency), badge = false) }.toMutableList()
         val later = dated.filter { (d, _) -> d.isAfter(today.plusDays(SOON_DAYS)) }.map { it.second }.sortedWith(byUrgency)
-        if (later.isNotEmpty()) groups += TaskGroup("later", "Later · ${plural(later.size)}", later, badge = false, collapsible = true)
+        if (later.isNotEmpty()) groups += TaskGroup("later", "Later", later, badge = false, collapsible = true, count = later.size)
         val undated = live.filter { when_(it) == null && it.status == "to_do" }.sortedWith(byUrgency)
-        if (undated.isNotEmpty()) groups += TaskGroup("nodate", "No date · ${plural(undated.size)}", undated, badge = false, collapsible = true)
+        if (undated.isNotEmpty()) groups += TaskGroup("nodate", "No date", undated, badge = false, collapsible = true, count = undated.size)
         return groups
     }
 
@@ -114,7 +116,7 @@ object TasksLogic {
     }
 
     /** The sub-tasks line: "None yet" with no sub-tasks, else "1 of 3 done". */
-    fun subtaskLabel(done: Int, total: Int): String = if (total == 0) "None yet" else example.hq.spike.ui.shell.Counts.progress(done, total, null)
+    fun subtaskLabel(w: Words, done: Int, total: Int): String = if (total == 0) "None yet" else Counts.progress(w, done, total, subTasks = false)
 
     /** "2d", or "5h" within a day, from the server's `YYYY-MM-DD HH:MM:SS` UTC time. */
     fun stuckFor(since: String?, now: LocalDateTime): String? {
@@ -124,7 +126,7 @@ object TasksLogic {
     }
 
     /** The third line of an All row: what it is waiting on, who it is for, how far along, and when. */
-    fun allMeta(t: TaskItem, today: LocalDate, working: Boolean, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)): String {
+    fun allMeta(w: Words, t: TaskItem, today: LocalDate, working: Boolean, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)): String {
         val forWho = t.assignees.firstOrNull()?.let { "for $it" }
         val tag = t.tags.firstOrNull()
         val parts = when {
@@ -134,14 +136,12 @@ object TasksLogic {
             t.status == "ready_for_review" -> listOfNotNull(forWho, readyAgo(t.readyAt, now)?.let { "moved $it" })
             else -> listOfNotNull(
                 "HQ is working on it".takeIf { working },
-                example.hq.spike.ui.shell.Counts.progress(t.subtaskDone, t.subtaskCount).takeIf { t.subtaskCount > 0 },
+                Counts.progress(w, t.subtaskDone, t.subtaskCount).takeIf { t.subtaskCount > 0 },
                 dueWords(t.dueDate, today), forWho, tag,
             )
         }
         return parts.joinToString(" \u00b7 ")
     }
-
-    private fun plural(n: Int) = example.hq.spike.ui.shell.Counts.tasks(n)
 
     private fun dayLabel(d: LocalDate, today: LocalDate): String {
         val long = d.format(DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault()))
@@ -176,7 +176,7 @@ object TasksLogic {
     fun priorityWords(p: String?) = when (p) { "urgent" -> "Urgent"; "high" -> "High"; "low" -> "Low"; else -> null }
 
     /** The second line of a row, in the board's words: Stuck and Ready to check in amber, the rest plain. */
-    fun meta(t: TaskItem, today: LocalDate, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)): List<Run> {
+    fun meta(w: Words, t: TaskItem, today: LocalDate, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)): List<Run> {
         val sep = Run(" · ")
         return when (t.status) {
             "blocked" -> listOf(Run("Stuck", bold = true, amber = true)) + listOfNotNull(t.blockedReason?.takeIf { it.isNotBlank() }?.let { listOf(sep, Run(it)) }).flatten()
@@ -187,7 +187,7 @@ object TasksLogic {
                 dueWords(t.dueDate, today)?.let { parts += listOf(Run(it)) }
                 parse(t.startDate)?.takeIf { it.isAfter(today) }?.let { parts += listOf(Run(if (it == today.plusDays(1)) "starts tomorrow" else "starts " + it.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault())))) }
                 startedWords(t, today)?.let { parts += listOf(Run(it)) }
-                if (t.subtaskCount > 0) parts += listOf(Run(example.hq.spike.ui.shell.Counts.progress(t.subtaskDone, t.subtaskCount)))
+                if (t.subtaskCount > 0) parts += listOf(Run(Counts.progress(w, t.subtaskDone, t.subtaskCount)))
                 if (t.assignees.isNotEmpty() && t.status == "to_do") parts += listOf(Run("for ${t.assignees.first()}"))
                 parts.flatMapIndexed { i, p -> if (i == 0) p else listOf(sep) + p }
             }

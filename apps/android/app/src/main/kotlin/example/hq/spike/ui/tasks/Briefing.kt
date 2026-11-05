@@ -52,8 +52,8 @@ object BriefingWords {
     fun empty(name: String) = "$name has no active tasks, so there is nothing to brief."
 
     /** "2 in progress, 1 to do (3 tasks)", or "(1 task)". */
-    fun statusLine(b: Briefing): String =
-        b.statusCounts.joinToString(", ") { (status, n) -> "$n ${TasksLogic.statusWords(status).lowercase()}" } + if (b.tasksShown > 0) " (${example.hq.spike.ui.shell.Counts.tasks(b.tasksShown)})" else ""
+    fun statusLine(w: example.hq.spike.ui.shell.Words, b: Briefing): String =
+        b.statusCounts.joinToString(", ") { (status, n) -> "$n ${TasksLogic.statusWords(status).lowercase()}" } + if (b.tasksShown > 0) " (${example.hq.spike.ui.shell.Counts.tasks(w, b.tasksShown)})" else ""
 
     /** "2 accepted, 1 unreviewed": states in a fixed order, none left out for being zero. */
     fun reviewSummary(counts: List<Pair<String, Int>>): String {

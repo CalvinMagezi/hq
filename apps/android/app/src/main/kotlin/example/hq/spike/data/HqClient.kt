@@ -456,6 +456,22 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     suspend fun json(path: String): JSONObject = send(authed(path).build()) { JSONObject(it) }
 
+    /** What a server HQ says about its backups at `/api/backup/status`. [lastOkMs] is epoch milliseconds, null when it never finished one. */
+    data class ServerBackup(val configured: Boolean, val lastOkMs: Long?, val failed: Boolean, val overdue: Boolean, val everyHours: Int)
+
+    /** The server's backup report, or null when it does not say: an older server without the route, or any failure. */
+    suspend fun backupStatus(): ServerBackup? = try {
+        send(authed("/api/backup/status").build()) { text ->
+            val o = JSONObject(text)
+            ServerBackup(o.optBoolean("configured"), parseWhen(o.optString("last_ok_at", "")), o.optBoolean("failed"), o.optBoolean("overdue"), o.optInt("every_hours"))
+        }
+    } catch (e: IOException) { null } catch (e: org.json.JSONException) { null }
+
+    private fun parseWhen(text: String): Long? = text.takeIf { it.isNotBlank() }?.let {
+        runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull()
+            ?: runCatching { java.time.LocalDateTime.parse(it.replace(' ', 'T')).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }.getOrNull()
+    }
+
     /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */
     data class NoteItem(val path: String, val title: String, val preview: String, val mtime: String, val pinned: Boolean)
 

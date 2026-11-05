@@ -306,12 +306,12 @@ private fun Facts(t: TaskItem, today: LocalDate) {
 }
 
 @Composable
-private fun SubTasks(d: TaskDetail, actions: TasksActions) {
+internal fun SubTasks(d: TaskDetail, actions: TasksActions) {
     val subs = d.subtasks
     if (subs.isEmpty() && d.prompt != "sub" && d.task.parentId != null) return
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.SpaceBetween) {
         Label("Sub-tasks")
-        Text(TasksLogic.subtaskLabel(subs.count { it.status == "complete" }, subs.size), style = HqType.BodySm, color = Mts.InkMuted)
+        Text(TasksLogic.subtaskLabel(example.hq.spike.ui.shell.rememberWords(), subs.count { it.status == "complete" }, subs.size), style = HqType.BodySm, color = Mts.InkMuted)
     }
     if (subs.isNotEmpty()) {
         val done = subs.count { it.status == "complete" }.toFloat() / subs.size

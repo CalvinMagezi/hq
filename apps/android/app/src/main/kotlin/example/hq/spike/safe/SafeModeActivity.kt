@@ -207,7 +207,7 @@ class SafeModeActivity : Activity() {
                 NotesCopy.write(p, stream, cancelled = { cancel }, onDatabaseCopied = { if (held) { release(); held = false } }) { pr -> main.post { progress(pr) } }
             }
             NotesCopy.clearPending(filesDir)
-            NotesCopy.recordCopy(filesDir, System.currentTimeMillis())
+            NotesCopy.recordCopy(filesDir, System.currentTimeMillis(), NotesCopy.onThisPhone(uri.authority, runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()))
             val name = displayName(uri)
             main.post { copying = false; window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); done(result, name, placeTitle(uri)) }
         } catch (e: NotesCopy.Cancelled) {

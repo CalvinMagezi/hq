@@ -7,7 +7,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class SettingsWordsTest {
     private val now = Instant.parse("2026-10-21T12:00:00Z")
 
@@ -213,7 +219,7 @@ class SettingsWordsTest {
     }
 
     @Test fun homeHasTheBoardsGroupsInOrder() {
-        val groups = SettingsWords.home(SettingsSnapshot(settings = settings), now)
+        val groups = SettingsWords.home(testWords(), SettingsSnapshot(settings = settings), now)
         assertEquals(listOf("This phone", "Your accounts", "How HQ behaves", "Your data"), groups.map { it.title })
         assertEquals(listOf("AI service and keys", "Messaging apps", "Other devices"), groups[1].rows.map { it.title })
         assertEquals(SettingsWords.CLAUDE_VIA_LAPTOP, groups[1].note)
@@ -285,10 +291,10 @@ class SettingsWordsTest {
     }
 
     @Test fun theHomeListSaysItIsCheckingUntilItHasAskedAndNeverThenSaysNotAnswering() {
-        val groups = SettingsWords.home(SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
+        val groups = SettingsWords.home(testWords(), SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
         assertEquals("On", groups[0].rows.single().status)
         assertTrue(groups.drop(1).flatMap { it.rows }.filter { it.page != SettingsPage.About }.all { it.status == "Checking…" })
-        assertTrue(SettingsWords.home(SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "Not answering" })
+        assertTrue(SettingsWords.home(testWords(), SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "Not answering" })
     }
 
     @Test fun anOffsetInIsoTextIsReadWithoutInstantParse() {

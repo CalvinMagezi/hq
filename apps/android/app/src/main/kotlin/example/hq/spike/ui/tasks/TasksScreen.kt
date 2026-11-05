@@ -213,7 +213,7 @@ private fun WorkingStrip(sessions: List<example.hq.spike.data.HqClient.WorkSessi
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun AllRow(t: TaskItem, today: LocalDate, working: Boolean, selected: Set<String>, bulkable: Boolean, actions: TasksActions) {
     val tag = TasksLogic.idTag(t)
-    val meta = TasksLogic.allMeta(t, today, working)
+    val meta = TasksLogic.allMeta(example.hq.spike.ui.shell.rememberWords(), t, today, working)
     val selecting = selected.isNotEmpty()
     val on = t.id in selected
     Row(
@@ -274,7 +274,7 @@ private fun MoreRow(hidden: Int, open: Boolean, onToggle: () -> Unit) {
 private fun GroupHeader(g: TaskGroup, open: Boolean, onToggle: (String) -> Unit) {
     val mod = if (g.collapsible) Modifier.clickable(role = Role.Button, onClickLabel = if (open) "Hide" else "Show") { onToggle(g.key) } else Modifier
     Row(mod.fillMaxWidth().padding(start = 16.dp, top = if (g.badge) 16.dp else 18.dp, end = 16.dp, bottom = if (g.badge) 8.dp else 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted)
+        Text((g.title + (g.count?.let { " · " + example.hq.spike.ui.shell.Counts.tasks(example.hq.spike.ui.shell.rememberWords(), it) } ?: "")).uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted)
         if (g.badge) Box(Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp).background(Mts.Surface200, RoundedCornerShape(10.dp)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
             Text("${g.tasks.size}", style = HqType.Caption.copy(fontWeight = FontWeight.Bold, lineHeight = 20.sp), color = Mts.Ink)
         }
@@ -315,7 +315,7 @@ private fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions) {
             }
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                 Text(t.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = TITLE_LINES, overflow = TextOverflow.Ellipsis)
-                val meta = TasksLogic.meta(t, today)
+                val meta = TasksLogic.meta(example.hq.spike.ui.shell.rememberWords(), t, today)
                 if (meta.isNotEmpty()) Text(
                     buildAnnotatedString { meta.forEach { r -> withStyle(SpanStyle(color = if (r.amber) Mts.Amber else Mts.InkMuted, fontWeight = if (r.bold) FontWeight.Bold else FontWeight.Normal)) { append(r.text) } } },
                     style = HqType.BodySm, maxLines = META_LINES, overflow = TextOverflow.Ellipsis,

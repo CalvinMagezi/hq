@@ -8,26 +8,32 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import example.hq.spike.testing.testWords
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class CountsTest {
     private val nb = '\u00a0'
 
     @Test fun progressKeepsTheCountTogether() {
-        assertEquals("1${nb}of${nb}3${nb}sub-tasks${nb}done", Counts.progress(1, 3))
-        assertEquals("1${nb}of${nb}3${nb}done", Counts.progress(1, 3, null))
+        assertEquals("1${nb}of${nb}3${nb}sub-tasks${nb}done", Counts.progress(testWords(), 1, 3))
+        assertEquals("1${nb}of${nb}3${nb}done", Counts.progress(testWords(), 1, 3, subTasks = false))
     }
 
     @Test fun badgesStopAtNinetyNine() {
         assertEquals("99", Counts.badge(99))
         assertEquals("99+", Counts.badge(100))
-        assertEquals("Show all${nb}12", Counts.showAll(12))
-        assertEquals("1${nb}task", Counts.tasks(1))
-        assertEquals("2${nb}tasks", Counts.tasks(2))
+        assertEquals("Show all${nb}12", Counts.showAll(testWords(), 12))
+        assertEquals("1${nb}task", Counts.tasks(testWords(), 1))
+        assertEquals("2${nb}tasks", Counts.tasks(testWords(), 2))
     }
 
     @Test fun noSubtasksSaysNoneYet() {
-        assertEquals("None yet", TasksLogic.subtaskLabel(0, 0))
-        assertEquals("1${nb}of${nb}3${nb}done", TasksLogic.subtaskLabel(1, 3))
+        assertEquals("None yet", TasksLogic.subtaskLabel(testWords(), 0, 0))
+        assertEquals("1${nb}of${nb}3${nb}done", TasksLogic.subtaskLabel(testWords(), 1, 3))
     }
 
     @Test fun theOldWordsAreGoneFromTheSource() {

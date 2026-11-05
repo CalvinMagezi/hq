@@ -9,7 +9,7 @@ object SearchWords {
     const val NO_MATCH = "Nothing matches that."
     const val NOTES_DOWN = "Could not search notes. HQ is not answering."
 
-    fun seeAll(count: Int) = example.hq.spike.ui.shell.Counts.showAll(count)
+    fun seeAll(w: example.hq.spike.ui.shell.Words, count: Int) = example.hq.spike.ui.shell.Counts.showAll(w, count)
 
     /** The chip: its name, and how many it found once something is typed. */
     fun chip(scope: SearchScope, found: Int, searching: Boolean) = if (searching) "${scope.label} $found" else scope.label
