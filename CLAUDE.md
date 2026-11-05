@@ -132,7 +132,10 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   chips (`GET /api/capabilities`, web and Android), a short usage-free "Things you can offer"
   block in the owner's own sessions, and the weekly device-only `adoption-digest` daemon task
   (`crates/hq-cli/src/commands/start/daemon/tasks_periodic/adoption_digest.rs`, queries in
-  `hq_db::adoption`). A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
+  `hq_db::adoption`). `hq adoption` prints the same report and `hq offers replay` runs the phase 2
+  offer detectors (`hq_tools::capabilities::offers`) over past chats, counts only
+  (`crates/hq-cli/src/commands/adoption.rs`); `scripts/phone-hq.sh <args>` runs either on a phone
+  over adb. A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
   Plan: `docs/plans/simple-hq.md`. Off with `daemon.adoption_digest: false`.
 - **Tool failure digest**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/tool_failure_digest.rs`
   is a weekly daemon task that groups the week's failed tool calls (`tool_usage`) by a

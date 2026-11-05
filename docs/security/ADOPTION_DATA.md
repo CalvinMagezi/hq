@@ -27,6 +27,7 @@ log in `.vault/_data/vault.db`), with no model.
 |---|---|---|
 | Ordering the empty chat's chips, untried capabilities first (`GET /api/capabilities`) | the owner's web app and phone app | no |
 | The weekly digest in the inbox | the owner's web inbox and phone app | no |
+| `hq adoption` and `hq offers replay`, the same numbers on the command line | the terminal of the machine HQ runs on | no |
 
 `/api/capabilities` sits behind the web token or a signed-in device token
 (`docs/security/WEB_AUTH.md`); MCP keys and claude.ai connector tokens cannot reach it.
@@ -48,6 +49,15 @@ log in `.vault/_data/vault.db`), with no model.
   `crates/hq-tools/tests/adoption_stays_local.rs` fails if the modules that read or report
   adoption data import an HTTP client, a model client, the relays, web push, sockets or child
   processes.
+
+## Reading the numbers from a phone
+
+`scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` run the two commands on a
+phone over `adb`, inside the app's sandbox and with the phone's own binary. Only their output
+crosses the cable, and that output is counts and the catalog's own wording, never a message.
+Do not copy `vault.db` or chat history off the phone to compute these elsewhere: a laptop session,
+and above all an AI coding session, would then hold the person's chats, and a coding agent sends
+what it reads to its model provider.
 
 ## "I can also do this for you"
 
@@ -80,6 +90,8 @@ Stated plainly so nobody relies on more than is true:
 ## Changing this
 
 Adding a new kind of adoption data: put its code in one of the files the guard test reads (or add
-the file to it), and if it produces inbox items, add their source to `DEVICE_ONLY_SOURCES`.
+the file to it), and if it produces inbox items, add their source to `DEVICE_ONLY_SOURCES`. A
+report that prints adoption data prints counts and catalog wording only; `hq offers replay`'s
+`a_report_serializes_with_counts_only` is the pattern.
 Sending any of it anywhere new is a change to this policy, not an implementation detail; it needs
 the owner's explicit decision in review and an update to this page.

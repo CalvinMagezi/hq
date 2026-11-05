@@ -15,6 +15,7 @@
 //! `docs/security/ADOPTION_DATA.md`.
 
 pub mod adoption;
+pub mod offers;
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -93,6 +94,16 @@ impl Install {
             ocr: hq_convert::OcrEngine::available(),
             email: which::which(hq_core::paths::resolve_gws_binary()).is_ok(),
             helpers: !config.profile.is_mobile() || !config.agent_host.hosts.is_empty(),
+        }
+    }
+
+    /// The same install with a model taken as given. Reports about use need it: someone who
+    /// chats with HQ has a model, and a command run outside the app (over `adb`, say) may not
+    /// see the key the app hands HQ, which would make every capability look unavailable.
+    pub fn assuming_model(self) -> Self {
+        Self {
+            model: true,
+            ..self
         }
     }
 

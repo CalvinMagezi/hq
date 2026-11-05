@@ -244,9 +244,17 @@ Where the build of phases 0 and 1 differs from the text above:
 - Adoption data stays on the device (`docs/security/ADOPTION_DATA.md`): the digest is
   device-only and never pushed, and a guard test fails if adoption code imports a way out.
 - Not built yet: the "What HQ can do" page and the one-step items in `hq doctor` and settings.
+- Built ahead of phase 2: `hq adoption` prints the phase 0 report on the command line, and the
+  phase 2 detectors exist (`hq_tools::capabilities::offers`: photo or document attached, a pasted
+  list of three or more, a to-do with a day, something to send or print, the same question a
+  third time in two weeks) so `hq offers replay` can run them over past chats. It prints, per
+  detector, how often it fired, how often HQ used that capability within ten minutes anyway, and
+  how often it would have been the one offer under that reply. Nothing shows an offer yet. On a
+  phone, `scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` run them in the
+  app's sandbox so only the counts leave it.
 
-**Phase 2: offers.** The post-turn detectors, the one-line offer under a reply, Yes/Not now, and the
-30-day memory of declines. The date detector and the reminder ship here. Offers are chosen by HQ
+**Phase 2: offers.** The post-turn detectors (written, tuned with `hq offers replay`), the one-line
+offer under a reply, Yes/Not now, and the 30-day memory of declines. The date detector and the reminder ship here. Offers are chosen by HQ
 on the device and drawn by the apps; the "I can also do this for you" line for an untried
 capability is one of them, so the model is never told what the person has not used.
 

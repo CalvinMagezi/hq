@@ -117,7 +117,7 @@ pub async fn run_adoption_digest(db: &Database, config: &HqConfig) -> Result<()>
     // runs this task keeps (a test in hq-mcp checks they are registered).
     let offers = resolve(
         catalog(),
-        &Install::detect(config),
+        &Install::detect(config).assuming_model(),
         &|_: &str| true,
         &used_tools(db),
     );

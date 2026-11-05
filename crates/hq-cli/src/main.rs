@@ -10,6 +10,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod android_runtime;
 mod commands;
 mod render;
+use commands::adoption::OffersAction;
 use commands::backup::{BackupCommand, RestoreArgs};
 use commands::connector::ConnectorAction;
 use commands::edge::EdgeAction;
@@ -654,6 +655,17 @@ enum Commands {
         site: Option<String>,
     },
 
+    /// How HQ is used on this machine: capabilities, corrections, return visits (counts only)
+    Adoption {
+        /// Print JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// The "I can also do this for you" offers: `hq offers replay` tunes them on past chats
+    #[command(subcommand)]
+    Offers(OffersAction),
+
     /// Show version and build info
     Version,
 }
@@ -883,7 +895,9 @@ fn init_tracing() {
             .get(1)
             .is_some_and(|a| a == "search" || a == "vault" || a == "web")
             && before_dashes.clone().any(|a| a == "--json"))
-        || (args.get(1).is_some_and(|a| a == "web") && before_dashes.clone().any(|a| a == "link"));
+        || (args.get(1).is_some_and(|a| a == "web") && before_dashes.clone().any(|a| a == "link"))
+        // Adoption reports are read over `adb` and piped; their logs stay out of the numbers.
+        || args.get(1).is_some_and(|a| a == "adoption" || a == "offers");
     // iroh logs full endpoint ids at info; the edge keeps them out of its log unless asked.
     let is_edge = args
         .iter()
@@ -1312,6 +1326,8 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Bridge(action) => commands::bridge::run(config, action).await,
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Claude(action) => commands::claude::run(config, action),
+        Commands::Adoption { json } => commands::adoption::run_adoption(config, json),
+        Commands::Offers(action) => commands::adoption::run_offers(config, action),
         Commands::Decisions { days, site } => {
             commands::decisions::run(config, days, site.as_deref())
         }
