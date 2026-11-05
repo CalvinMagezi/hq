@@ -508,7 +508,7 @@
     <string name="settings_bot_token">Bot token</string>
     <string name="settings_hq_tries_them_in">HQ tries them in this order and uses the first one that answers.</string>
     <string name="tasks_none_yet">None yet</string>
-    <string name="settings_checking">Checking…</string>
+    <string name="settings_checking">Not read yet</string>
     <string name="settings_the_model_is_set">The app cannot change which AI HQ uses yet.</string>
     <string name="settings_asking_hq">Asking HQ…</string>
     <string name="tasks_filter">Filter</string>
@@ -1189,7 +1189,7 @@
         <item quantity="other">[%1$s files]</item>
     </plurals>
     <plurals name="settings_one_thing_to_fix">
-        <item quantity="one">One thing to fix</item>
+        <item quantity="one">%1$s thing to fix</item>
         <item quantity="other">%1$s things to fix</item>
     </plurals>
     <plurals name="settings_may_stop_until">

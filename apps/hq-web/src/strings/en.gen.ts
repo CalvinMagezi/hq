@@ -480,7 +480,7 @@ export const en = {
   settings_bot_token: "Bot token",
   settings_hq_tries_them_in: "HQ tries them in this order and uses the first one that answers.",
   tasks_none_yet: "None yet",
-  settings_checking: "Checking…",
+  settings_checking: "Not read yet",
   settings_the_model_is_set: "The app cannot change which AI HQ uses yet.",
   settings_asking_hq: "Asking HQ…",
   tasks_filter: "Filter",
@@ -1091,6 +1091,6 @@ export const en = {
   chat_read_notes: {"one":"Read {n} note","other":"Read {n} notes"},
   chat_steps: {"one":"{n} step","other":"{n} steps"},
   chat_files: {"one":"[{n} file]","other":"[{n} files]"},
-  settings_one_thing_to_fix: {"one":"One thing to fix","other":"{n} things to fix"},
+  settings_one_thing_to_fix: {"one":"{n} thing to fix","other":"{n} things to fix"},
   settings_may_stop_until: {"one":"Android may stop AgentHQ until it is set.","other":"Android may stop AgentHQ until they are set."},
 } as const
