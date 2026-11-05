@@ -294,6 +294,8 @@ public class HubService extends Service {
         fixed.put("HOME", home.getPath());
         fixed.put("TMPDIR", getCacheDir().getPath());
         fixed.put("HQ_PROFILE", "mobile");
+        // The phone's zone, so "tomorrow" in an offer and a reminder's waking hours are the person's, not UTC.
+        fixed.put("TZ", java.util.TimeZone.getDefault().getID());
         fixed.put("HQ_VAULT_PATH", new File(home, ".vault").getPath());
         fixed.put("HQ_CONFIG_PATH", new File(home, "config.yaml").getPath());
         fixed.put("HQ_WEB_STATIC_DIR", new File(getFilesDir(), "web").getPath());

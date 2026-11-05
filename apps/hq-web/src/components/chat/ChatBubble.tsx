@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Copy, Check, Pencil, Plug, RotateCw, Terminal, User } from 'lucide-react'
-import type { ToolStep } from '~/store/threadStore'
+import type { ChatOffer, ToolStep } from '~/store/threadStore'
 import type { DriverMeta } from '~/lib/sessionsApi'
 import type { ChatAttachment } from '~/lib/chatUploads'
 import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~/lib/stepCredits'
@@ -25,6 +25,7 @@ interface DisplayMessage {
   driver?: DriverMeta
   /** The MCP client that asked this question, when it did not come from this chat's composer. */
   viaMcp?: string
+  offer?: ChatOffer
 }
 
 interface Props {
@@ -35,6 +36,8 @@ interface Props {
   onEdit?: () => void
   /** Offered on the last reply. */
   onRegenerate?: () => void
+  /** Answers the offer under this reply. */
+  onOffer?: (yes: boolean) => void
 }
 
 // Hover reveals actions on a desktop; a touch screen has no hover, so they always show there.
@@ -45,7 +48,7 @@ const ACTION_BUTTON =
  * One chat message. A streaming reply renders through this same layout
  * (thinking, tools, then text), so nothing moves when it becomes a saved message.
  */
-export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Props) {
+export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffer }: Props) {
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
   const steps = message.toolSteps ?? []
@@ -103,6 +106,7 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
           message.content && <MarkdownViewer content={message.content} bare />
         )}
         {waiting && <div className="text-xs text-neutral-500 animate-pulse">HQ is working...</div>}
+        {!isUser && !live && message.offer && onOffer && <OfferLine offer={message.offer} onAnswer={onOffer} />}
 
         {!live && (
           <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-white/5 opacity-60 text-xs " style={{ color: 'var(--text-dim)' }}>
@@ -133,6 +137,26 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** One thing HQ can also do here, with Yes and Not now. Not a notification: it sits under the reply. */
+function OfferLine({ offer, onAnswer }: { offer: ChatOffer; onAnswer: (yes: boolean) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-white/5 text-[13px]" style={{ color: 'var(--text-dim)' }}>
+      <span className="flex-1 min-w-[12rem]">{offer.line}</span>
+      <button
+        type="button"
+        onClick={() => onAnswer(true)}
+        className="h-8 px-3 rounded-full border border-white/15 hover:bg-white/10 transition-colors"
+        style={{ color: 'var(--accent-blue)' }}
+      >
+        Yes
+      </button>
+      <button type="button" onClick={() => onAnswer(false)} className="h-8 px-3 rounded-full hover:bg-white/5 transition-colors">
+        Not now
+      </button>
     </div>
   )
 }

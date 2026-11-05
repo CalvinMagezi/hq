@@ -8,7 +8,9 @@ use chrono::Datelike;
 use hq_core::config::HqConfig;
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
+use hq_db::offers::OfferStats;
 use hq_tools::capabilities::adoption::{AdoptionReport, report};
+use hq_tools::capabilities::offers::offer_says;
 use hq_tools::capabilities::{Install, catalog, resolve, used_tools};
 use tracing::info;
 
@@ -38,6 +40,25 @@ fn named(list: &[String]) -> String {
         .join("; ");
     if list.len() > MAX_NAMED {
         out.push_str(&format!("; and {} more", list.len() - MAX_NAMED));
+    }
+    out
+}
+
+/// One line per kind of offer shown under a reply this week, or one muted.
+fn offers_lines(offers: &[OfferStats]) -> String {
+    if offers.is_empty() {
+        return "No offers were shown under replies this week.\n".to_string();
+    }
+    let mut out = String::from("Offers under replies this week:\n");
+    for o in offers {
+        out.push_str(&format!(
+            "  {}: shown {}, yes {}, not now {}{}\n",
+            offer_says(&o.offer).to_lowercase(),
+            o.shown,
+            o.accepted,
+            o.declined,
+            if o.muted { ", muted for now" } else { "" }
+        ));
     }
     out
 }
@@ -100,6 +121,7 @@ pub fn digest_item(r: &AdoptionReport, week: &str) -> Option<ValueItem> {
         Some(false) => body.push_str(" It was not used in week four.\n"),
         None => body.push('\n'),
     }
+    body.push_str(&offers_lines(&r.offers_this_week));
     body.push_str(
         "\nCounted on this machine from chat messages and tool calls. Nothing was sent anywhere.",
     );
@@ -155,6 +177,13 @@ mod tests {
             active_days_7: 5,
             active_days_28: 19,
             returned_week_four: Some(true),
+            offers_this_week: vec![OfferStats {
+                offer: "pasted_list".into(),
+                shown: 3,
+                accepted: 1,
+                declined: 2,
+                muted: true,
+            }],
         }
     }
 
@@ -176,6 +205,9 @@ mod tests {
         assert!(item.body.contains("1 this week, 4 last week"));
         assert!(item.body.contains("5 minutes after the first message"));
         assert!(item.body.contains("used again in week four"));
+        assert!(item.body.contains(
+            "turn a list you paste into separate tasks: shown 3, yes 1, not now 2, muted for now"
+        ));
         assert!(item.body.contains("Nothing was sent anywhere"));
         assert!(!item.body.contains('\u{2014}'));
         assert_eq!(item.dedup_key.as_deref(), Some("adoption-2026-W45"));
@@ -201,6 +233,7 @@ mod tests {
                 .contains("No useful result beyond plain chat yet.")
         );
         assert!(item.body.contains("So far in its first four weeks"));
+        assert!(item.body.contains("No offers were shown"));
     }
 
     #[test]
