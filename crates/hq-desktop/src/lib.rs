@@ -18,6 +18,7 @@ pub mod proxy;
 pub mod qr;
 pub mod rename;
 pub mod settings;
+pub mod share;
 pub mod window;
 pub mod words;
 

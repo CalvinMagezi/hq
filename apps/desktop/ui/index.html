@@ -93,6 +93,17 @@
           </div>
 
           <h3 id="peers-title"></h3>
+          <div id="share-block" class="a-card">
+            <div class="a-card-head"><b>Share this computer's model</b></div>
+            <p class="hub-why">Lends the model this Mac runs in Ollama to the phone it is paired with as its hub, and to no other device. The phone uses it while it can reach this Mac and its own model when it cannot. Turning this off ends what the phone has open at once.</p>
+            <p class="row">
+              <label><input type="checkbox" id="share-on"> Share this computer's model</label>
+              <select id="share-model" aria-label="Model to share"></select>
+              <button type="button" class="a-btn compact quiet" id="share-check">Check again</button>
+            </p>
+            <p id="share-state" class="hub-why"></p>
+            <p id="share-warning" class="hub-error" role="alert"></p>
+          </div>
           <ul id="peers" class="list"></ul>
           <p id="peers-empty" class="muted"></p>
           <div class="a-set hub-set"><div class="a-row"><div class="a-row-main"><b id="relay-title"></b><span id="relay-note"></span></div><span id="relay-state" class="a-state"></span></div></div>

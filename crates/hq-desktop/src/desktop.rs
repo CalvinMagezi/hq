@@ -299,6 +299,7 @@ impl Desktop {
             config: init.config.bridge.clone(),
             ws_port: init.config.ws_port,
         });
+        pairing.set_sharing(settings.share_model, settings.shared_model.clone());
         Ok(Self {
             dir: init.dir,
             settings: Mutex::new(settings),
@@ -743,10 +744,43 @@ impl Desktop {
         self.settings.lock().unwrap().clone()
     }
 
-    /// Saves settings. Ports, relay and name take effect the next time the app opens.
-    pub fn save_settings(&self, new: Settings) -> Result<()> {
+    /// Saves settings. Ports, relay and name take effect the next time the app opens. The share
+    /// choice is kept as it is: only [`Desktop::set_share`] changes it, so a screen holding an
+    /// older copy of the settings cannot turn sharing back on.
+    pub fn save_settings(&self, mut new: Settings) -> Result<()> {
+        let mut current = self.settings.lock().unwrap();
+        new.share_model = current.share_model;
+        new.shared_model = current.shared_model.clone();
         new.save(&self.dir)?;
-        *self.settings.lock().unwrap() = new;
+        *current = new;
+        Ok(())
+    }
+
+    /// The model server and whether this computer lends it to its hubs.
+    pub async fn share_status(&self) -> crate::share::ShareView {
+        let (on, model) = self.pairing.sharing();
+        crate::share::probe(&self.pairing.model_server(), on, model).await
+    }
+
+    /// Turns sharing on or off at once, and keeps the choice for the next launch. The switch
+    /// flips before the choice is saved, so a failed save never leaves the model shared.
+    pub fn set_share(&self, on: bool, model: Option<String>) -> Result<()> {
+        if self.pairing.shared_by_hand() {
+            bail!(
+                "this computer's config.yaml offers llm by hand (bridge.services.llm); change it there"
+            );
+        }
+        let model = model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
+        self.pairing.set_sharing(on, model.clone());
+        let mut current = self.settings.lock().unwrap();
+        let mut next = current.clone();
+        next.share_model = on;
+        next.shared_model = model;
+        next.save(&self.dir)
+            .context("sharing changed now, but the choice could not be kept for the next launch")?;
+        *current = next;
         Ok(())
     }
 

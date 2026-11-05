@@ -13,6 +13,7 @@ use hq_desktop::{
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
     settings::Settings,
+    share::ShareView,
 };
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -54,6 +55,8 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         helper_disconnect,
         helper_restore,
         helper_signin,
+        share_status,
+        share_set,
     ]
 }
 
@@ -246,4 +249,15 @@ fn helper_restore(app: App<'_>, id: String) -> Reply<()> {
 #[tauri::command]
 fn helper_signin(app: App<'_>, id: String, open: Option<bool>) -> Reply<()> {
     app.helper_signin(&id, open.unwrap_or(false)).map_err(shown)
+}
+
+#[tauri::command]
+async fn share_status(app: App<'_>) -> Reply<ShareView> {
+    Ok(app.share_status().await)
+}
+
+/// Lends this computer's model to its hubs, or stops at once.
+#[tauri::command]
+fn share_set(app: App<'_>, on: bool, model: Option<String>) -> Reply<()> {
+    app.set_share(on, model).map_err(shown)
 }

@@ -33,6 +33,8 @@
     "allow-helper-disconnect",
     "allow-helper-restore",
     "allow-helper-signin",
+    "allow-share-status",
+    "allow-share-set",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

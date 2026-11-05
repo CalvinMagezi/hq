@@ -43,6 +43,10 @@ pub struct Settings {
     pub connection_sheet_day: Option<String>,
     /// Set once the Claude entries that pointed into the old HQ.app have been looked at. Kept by the app.
     pub bundle_rename_handled: bool,
+    /// Lend this computer's model (Ollama) to the hubs it is paired with. Off unless turned on.
+    pub share_model: bool,
+    /// The model hubs should use. Unset: the first one Ollama lists.
+    pub shared_model: Option<String>,
 }
 
 impl Default for Settings {
@@ -60,6 +64,8 @@ impl Default for Settings {
             recent_start_secs: Vec::new(),
             connection_sheet_day: None,
             bundle_rename_handled: false,
+            share_model: false,
+            shared_model: None,
         }
     }
 }
@@ -154,6 +160,7 @@ mod tests {
     fn nothing_starts_by_default() {
         let s = Settings::default();
         assert!(!s.start_host_on_launch);
+        assert!(!s.share_model, "the model is not shared unless turned on");
         assert_eq!(s.relay, RELAY_NONE);
     }
 

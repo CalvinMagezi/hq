@@ -64,8 +64,39 @@ pub struct Services {
     /// Services only some paired peers may open, by name. A service missing here admits every
     /// paired peer.
     pub peers: BTreeMap<String, BTreeSet<EndpointId>>,
+    /// Services only hubs may open: a peer pairing set up as this machine's hub (a `hub` row in
+    /// `bridge_setup`, read at every stream so a revoke or a new hub counts at once), or one of
+    /// the ids listed (the peers of configured forwards to a hub's `web`).
+    pub hubs_only: BTreeMap<String, BTreeSet<EndpointId>>,
+    /// Services that can be turned off and on while the bridge runs. Off, a service is refused
+    /// as if it did not exist and its open streams end.
+    pub switches: BTreeMap<String, ServiceSwitch>,
     /// Streams piped at once, over all peers.
     pub max_streams: usize,
+}
+
+/// Turns one service off and on while the bridge runs.
+#[derive(Debug, Clone)]
+pub struct ServiceSwitch(Arc<tokio::sync::watch::Sender<bool>>);
+
+impl ServiceSwitch {
+    pub fn new(on: bool) -> Self {
+        Self(Arc::new(tokio::sync::watch::Sender::new(on)))
+    }
+
+    pub fn set(&self, on: bool) {
+        self.0.send_replace(on);
+    }
+
+    pub fn is_on(&self) -> bool {
+        *self.0.borrow()
+    }
+
+    /// Resolves once the switch is off.
+    async fn turned_off(&self) {
+        let mut rx = self.0.subscribe();
+        let _ = rx.wait_for(|on| !on).await;
+    }
 }
 
 impl Services {
@@ -73,15 +104,24 @@ impl Services {
         Self {
             targets,
             peers: BTreeMap::new(),
+            hubs_only: BTreeMap::new(),
+            switches: BTreeMap::new(),
             max_streams: DEFAULT_MAX_STREAMS,
         }
     }
 
-    /// The target `peer` may reach by `name`. A service it may not open looks the same as one
-    /// that does not exist, so a peer learns nothing about what others are offered.
-    fn target_for(&self, name: &str, peer: &EndpointId) -> Option<&DoorTarget> {
-        let allowed = self.peers.get(name).is_none_or(|ids| ids.contains(peer));
-        allowed.then(|| self.targets.get(name)).flatten()
+    /// The target `peer` may reach by `name`. A service it may not open, or one switched off,
+    /// looks the same as one that does not exist, so a peer learns nothing about the others.
+    fn target_for(&self, name: &str, peer: &EndpointId, db: &Database) -> Option<&DoorTarget> {
+        let listed = self.peers.get(name).is_none_or(|ids| ids.contains(peer));
+        let hub = self
+            .hubs_only
+            .get(name)
+            .is_none_or(|also| also.contains(peer) || is_hub(db, peer));
+        let on = self.switches.get(name).is_none_or(ServiceSwitch::is_on);
+        (listed && hub && on)
+            .then(|| self.targets.get(name))
+            .flatten()
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -93,6 +133,10 @@ impl Services {
                 bail!("{name:?} is not a service name");
             }
             check_target(target, &format!("service {name}"))?;
+        }
+        let gated = self.hubs_only.keys().chain(self.switches.keys());
+        if let Some(name) = gated.into_iter().find(|n| !self.targets.contains_key(*n)) {
+            bail!("{name:?} is gated but not offered");
         }
         for (name, ids) in &self.peers {
             if !self.targets.contains_key(name) {
@@ -152,8 +196,9 @@ impl ProtocolHandler for ServiceProtocol {
                         continue;
                     };
                     let services = self.services.clone();
+                    let db = self.db.clone();
                     tokio::spawn(async move {
-                        serve_stream(send, recv, &services, &id).await;
+                        serve_stream(send, recv, &services, &id, &db).await;
                         drop(permit);
                     });
                 }
@@ -178,11 +223,12 @@ async fn serve_stream(
     mut recv: RecvStream,
     services: &Services,
     peer: &EndpointId,
+    db: &Database,
 ) {
     let Ok(Ok(name)) = tokio::time::timeout(HEADER_TIMEOUT, read_name(&mut recv)).await else {
         return;
     };
-    let Some(target) = services.target_for(&name, peer) else {
+    let Some(target) = services.target_for(&name, peer, db) else {
         let _ = send.write_all(&[STATUS_UNKNOWN]).await;
         let _ = send.finish();
         return;
@@ -192,9 +238,25 @@ async fn serve_stream(
         let _ = send.finish();
         return;
     };
-    if send.write_all(&[STATUS_OK]).await.is_ok() {
-        local.pipe(send, recv, SERVICE_IDLE).await;
+    if send.write_all(&[STATUS_OK]).await.is_err() {
+        return;
     }
+    match services.switches.get(&name) {
+        // Dropping the pipe resets both directions, as a revoke would.
+        Some(switch) => tokio::select! {
+            _ = local.pipe(send, recv, SERVICE_IDLE) => {}
+            _ = switch.turned_off() => {}
+        },
+        None => local.pipe(send, recv, SERVICE_IDLE).await,
+    }
+}
+
+/// Whether pairing set `peer` up as this machine's hub. An unreadable database admits no one.
+fn is_hub(db: &Database, peer: &EndpointId) -> bool {
+    hq_db::bridge_setup::get(db, &peer.to_string())
+        .ok()
+        .flatten()
+        .is_some_and(|s| s.is_hub())
 }
 
 async fn read_name(recv: &mut RecvStream) -> Result<String> {

@@ -30,6 +30,8 @@ const COMMANDS: &[&str] = &[
     "helper_disconnect",
     "helper_restore",
     "helper_signin",
+    "share_status",
+    "share_set",
 ];
 
 fn main() {

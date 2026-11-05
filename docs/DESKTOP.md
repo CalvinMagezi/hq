@@ -101,6 +101,23 @@ Devices on the same network pair directly. The relay setting defaults to `none`;
 data needs a relay (`relay` in settings: `default` for n0's public relays, which are for development
 and testing only, or a relay URL you run).
 
+## Sharing this computer's model
+
+The Devices screen has a **Share this computer's model** switch, off by default. On, the app's bridge
+offers this Mac's Ollama (`127.0.0.1:11434`, or `bridge.share_model.to` in the config) as the `llm`
+service to the devices pairing set up as this Mac's hubs, and to no other paired device. Off, the
+service is refused as if it did not exist and the streams a hub has open to it end at once, with no
+restart of the bridge, so the phone's web app and the gate stay connected.
+
+Next to the switch the app lists Ollama's models (marking those without tool calls, which HQ's tools
+need) and warns when the chosen model's context is below 32,768 tokens: HQ's chat prompt is about
+26,000 tokens and Ollama cuts a longer prompt without an error. The context is known only once the
+model is loaded; until then the app says what to check. The model list is read when the tab opens and
+on **Check again**, not on the three-second refresh, because asking Ollama about every model takes a
+moment. On a Mac whose bridge is `hq bridge serve` (a launchd service) rather than the app, the same
+service comes from `bridge.share_model` in `~/.hq/config.yaml` ([PAIRING.md](PAIRING.md)).
+
+
 ## Helpers
 
 The Helpers tab lists the nine coding helpers, the two general helpers and Claude Desktop, with each one's version and
@@ -141,6 +158,8 @@ refused.
 | `device_name` | the host name | What this Mac is called to the devices it pairs with |
 | `hq_path` | unset | The `hq` program to run. Unset: see "Finding `hq`". **Change…** sets it |
 | `look_for_helper_updates`, `try_it_dir`, `usual_start_secs`, `recent_start_secs`, `connection_sheet_day`, `bundle_rename_handled` | see below | Written by the app, kept when the window saves the rest |
+| `share_model` | `false` | Lend this Mac's model to its hubs ("Share this computer's model" on the Devices screen) |
+| `shared_model` | unset | The model hubs are told to use. Unset: the first one Ollama lists |
 
 The app-written keys hold what it learned: the usual start time (the median of the last five starts) and whether the rename was handled. Port, relay, name and `hq_path` changes apply the next time the app opens. The host's own output goes to
 `~/.hq/desktop/host.log` (owner-only). The app reads the same `~/.hq/config.yaml` as `hq`.
