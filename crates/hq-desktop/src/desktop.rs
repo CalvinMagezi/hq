@@ -1,11 +1,14 @@
 //! The app as a whole: settings, the host, pairing and the proxy, wired from the HQ config. The Tauri shell holds one of these and calls into it.
 
 use crate::agents;
+use crate::chooser;
 use crate::claude;
 use crate::host::{self, HostController, HostSpec};
 use crate::pairing::{HubServices, PairingConfig, PairingController};
 use crate::proxy::{self, ProxyConfig, ProxyHandle};
+use crate::rename;
 use crate::settings::{Settings, create_private_dir};
+use crate::window;
 use anyhow::{Context, Result, bail};
 use hq_bridge::{RelayMode, Tuning};
 use hq_core::config::HqConfig;
@@ -24,6 +27,64 @@ const SHUTDOWN_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 const SHUTDOWN_STEP: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_DEVICE_NAME: &str = "hq-desktop";
 const DEFAULT_MACOS_SHELL: &str = "/bin/zsh";
+
+/// The `hq` the app runs, as the tab shows it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProgramView {
+    pub path: PathBuf,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LockdownView {
+    pub reason: String,
+    /// `operator`, `cli` or `breaker`.
+    pub source: String,
+    pub at: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HelpersSummary {
+    pub reachable: bool,
+    pub working: Vec<String>,
+    pub needs_you: Vec<String>,
+}
+
+/// What the This computer tab shows, in one read.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HubReport {
+    #[serde(flatten)]
+    pub host: host::HostFacts,
+    pub usual_secs: Option<u64>,
+    /// None when no `hq` was found: the tab shows the card for choosing one.
+    pub program: Option<ProgramView>,
+    pub serves_hub: bool,
+    /// A paired hub's web app replaces HQ on this computer.
+    pub hub_web: bool,
+    pub free_bytes: Option<u64>,
+    pub almost_full: bool,
+    pub lockdown: Option<LockdownView>,
+    pub helpers: HelpersSummary,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HostLog {
+    pub path: PathBuf,
+    pub lines: Vec<String>,
+    pub version: Option<String>,
+    pub exit_code: Option<i32>,
+}
+
+/// Bytes free on the disk holding `dir` (or its nearest folder that exists).
+fn free_bytes(dir: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let existing = dir.ancestors().find(|p| p.exists())?;
+    let c = std::ffi::CString::new(existing.as_os_str().as_bytes()).ok()?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c` is a valid C string and `stat` is a zeroed statvfs the call fills in.
+    let ok = unsafe { libc::statvfs(c.as_ptr(), &mut stat) } == 0;
+    ok.then(|| stat.f_bavail as u64 * stat.f_frsize as u64)
+}
 
 pub struct DesktopInit {
     /// The app's own folder (`~/.hq/desktop`): settings and the host's log.
@@ -102,7 +163,9 @@ pub struct Desktop {
     pub host: HostController,
     pub pairing: PairingController,
     /// The `hq` program the host runs, and the one Claude Desktop is told to start.
-    hq_program: PathBuf,
+    hq_program: Mutex<PathBuf>,
+    /// Whether HQ's program was found when the app opened or has been picked since.
+    program_found: std::sync::atomic::AtomicBool,
     /// Why no `hq` was found when the app opened, for the window.
     hq_problem: Option<String>,
     proxy: AsyncMutex<Option<ProxyHandle>>,
@@ -173,12 +236,7 @@ impl Desktop {
         // A missing program is reported when the app opens and again by whatever needs it.
         let (program, hq_problem) = match find_hq(&init, settings.hq_path.as_deref()) {
             Ok(program) => (program, None),
-            Err(e) => (
-                PathBuf::from("hq"),
-                Some(format!(
-                    "{e}. Install HQ, or set the path to its hq program in Settings."
-                )),
-            ),
+            Err(e) => (PathBuf::from("hq"), Some(e.to_string())),
         };
         let hq_program = program.clone();
         let host = HostController::new(HostSpec::for_config(
@@ -229,7 +287,8 @@ impl Desktop {
             config: init.config,
             host,
             pairing,
-            hq_program,
+            program_found: std::sync::atomic::AtomicBool::new(hq_problem.is_none()),
+            hq_program: Mutex::new(hq_program),
             hq_problem,
             proxy: AsyncMutex::new(None),
             upstream,
@@ -262,7 +321,7 @@ impl Desktop {
         &self,
         work: impl FnOnce(&Database, &hq_bridge::claude::Targets) -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        let bin = claude::hq_program(&self.hq_program)?;
+        let bin = claude::hq_program(&self.program())?;
         claude::blocking(self.config.db_path(), bin, work).await
     }
 
@@ -271,7 +330,7 @@ impl Desktop {
     pub async fn revoke(&self, id: &str) -> Result<Revoked> {
         let peer = id.to_string();
         let db_path = self.config.db_path();
-        let bin = self.hq_program.clone();
+        let bin = self.program();
         let cleanup = tokio::task::spawn_blocking(move || {
             let db = Database::open(&db_path)?;
             cleanup_peer_outside_bridge(&db, &bin, &peer)
@@ -287,9 +346,160 @@ impl Desktop {
         })
     }
 
-    /// Set when the app opened without finding HQ's program.
+    /// Set when the app opened without finding HQ's program. The window shows a card for it
+    /// (see `HubReport::program`), so the text names only what was looked for.
     pub fn hq_problem(&self) -> Option<&str> {
         self.hq_problem.as_deref()
+    }
+
+    /// Whether a paired hub's web app replaces HQ on this computer.
+    pub fn hub_web_active(&self) -> bool {
+        self.config.bridge.hub_web_listen().is_some()
+    }
+
+    /// The `hq` this app runs.
+    pub fn program(&self) -> PathBuf {
+        self.hq_program.lock().unwrap().clone()
+    }
+
+    /// Checks a program the person picked and, if it is HQ, uses it from now on and remembers it.
+    /// The refusal is one of `refused`, `not_hq` and `not_found`.
+    pub async fn pick_program(&self, path: PathBuf) -> Result<chooser::Picked, chooser::Refusal> {
+        let picked = tokio::task::spawn_blocking(move || chooser::check_program(&path))
+            .await
+            .map_err(|_| chooser::Refusal::NotHq)??;
+        let mut settings = self.settings();
+        settings.hq_path = Some(picked.path.clone());
+        self.save_settings(settings)
+            .map_err(|_| chooser::Refusal::Refused)?;
+        self.host.set_program(picked.path.clone());
+        *self.hq_program.lock().unwrap() = picked.path.clone();
+        self.program_found
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(picked)
+    }
+
+    /// Everything the This computer tab words itself from.
+    pub async fn report(&self) -> HubReport {
+        let settings = self.settings();
+        let facts = self.host.facts(settings.usual_start_secs).await;
+        if let Some(secs) = self.host.take_finished_start_secs() {
+            let mut s = self.settings();
+            s.recent_start_secs.push(secs);
+            let skip = s
+                .recent_start_secs
+                .len()
+                .saturating_sub(host::RECENT_STARTS);
+            s.recent_start_secs.drain(..skip);
+            s.usual_start_secs = host::median(&s.recent_start_secs);
+            let _ = self.save_settings(s);
+        }
+        let dir = hq_core::config::native_host_dir();
+        let helpers = self.agents().await;
+        let lockdown = hq_host::read_lockdown(&dir).map(|l| LockdownView {
+            reason: l.reason,
+            source: l.source,
+            at: l.at,
+        });
+        let found = self.program_found.load(std::sync::atomic::Ordering::SeqCst);
+        let program = found.then(|| {
+            let path = self.program();
+            let version = host::hq_version_within(&path, host::VERSION_TIMEOUT);
+            ProgramView { path, version }
+        });
+        let free_bytes = free_bytes(&HqConfig::hq_dir());
+        let attention = |need| {
+            helpers
+                .agents
+                .iter()
+                .filter(move |a| a.need == need)
+                .map(|a| a.name.clone())
+                .collect::<Vec<_>>()
+        };
+        HubReport {
+            usual_secs: settings.usual_start_secs,
+            host: facts,
+            program,
+            serves_hub: self.config.bridge.serves_hub(),
+            hub_web: self.config.bridge.hub_web_listen().is_some(),
+            free_bytes,
+            almost_full: free_bytes.is_some_and(|b| b < host::ALMOST_FULL_BYTES),
+            lockdown,
+            helpers: HelpersSummary {
+                reachable: helpers.reachable,
+                working: attention(agents::Need::Working),
+                needs_you: attention(agents::Need::Blocked),
+            },
+        }
+    }
+
+    /// The last lines of the host's log (keys hidden) for the log sheet and Copy details.
+    pub async fn host_log(&self) -> HostLog {
+        let path = self.host.log_path().to_path_buf();
+        let lines = tokio::task::spawn_blocking(move || host::read_log_tail(&path))
+            .await
+            .unwrap_or_default();
+        let program = self.program();
+        let version = tokio::task::spawn_blocking(move || {
+            host::hq_version_within(&program, host::VERSION_TIMEOUT)
+        })
+        .await
+        .ok()
+        .flatten();
+        let exit_code = match self.host.status().await {
+            host::HostStatus::Exited { code } => code,
+            _ => None,
+        };
+        HostLog {
+            path: self.host.log_path().to_path_buf(),
+            lines,
+            version,
+            exit_code,
+        }
+    }
+
+    /// Lets coding helpers start again after a lockdown by running `hq host unlock`. It runs the
+    /// person's own `hq` with no arguments from the page, and never touches the lockdown file.
+    pub async fn host_unlock(&self) -> Result<()> {
+        let program = self.program();
+        let out = tokio::task::spawn_blocking(move || {
+            host::run_within(&program, &["host", "unlock"], host::VERSION_TIMEOUT)
+        })
+        .await?;
+        if out.is_none() {
+            bail!("hq host unlock did not finish");
+        }
+        Ok(())
+    }
+
+    /// Points Claude Desktop entries written before the rename at the program's new place.
+    /// Runs once; returns the entries it changed.
+    pub async fn rewrite_after_rename(&self) -> Vec<String> {
+        if self.settings().bundle_rename_handled {
+            return Vec::new();
+        }
+        let program = self.program();
+        let Some(config) = hq_bridge::claude::desktop_config_path() else {
+            return Vec::new();
+        };
+        let db_path = self.config.db_path();
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let changed = tokio::task::spawn_blocking(move || {
+            let hubs: Vec<String> = Database::open(&db_path)
+                .ok()
+                .and_then(|db| hq_bridge::claude::hubs(&db).ok())
+                .map(|h| h.into_iter().map(|h| h.name).collect())
+                .unwrap_or_default();
+            rename::rewrite_claude_desktop(&config, &program, &hubs, &today)
+        })
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+        let mut s = self.settings();
+        s.bundle_rename_handled = true;
+        let _ = self.save_settings(s);
+        changed
     }
 
     pub fn settings(&self) -> Settings {
@@ -344,6 +554,15 @@ impl Desktop {
     /// its own HQ signs itself in. The fragment never goes to the proxy or HQ; it stays in the
     /// window. A paired hub has its own token, so the person signs in to it once in the window.
     pub async fn main_window_url(&self) -> Result<String> {
+        self.main_window_url_at("/").await
+    }
+
+    /// The main window's address at one page of HQ's web app (see `window::main_path_allowed`).
+    /// A page that is not allowed is refused before the proxy starts.
+    pub async fn main_window_url_at(&self, path: &str) -> Result<String> {
+        let Some(path) = window::main_path_allowed(path) else {
+            bail!("that page cannot be opened from here");
+        };
         let origin = self.proxy_origin().await?;
         let local_token = self
             .config
@@ -351,8 +570,8 @@ impl Desktop {
             .as_deref()
             .filter(|t| !t.trim().is_empty() && self.config.bridge.hub_web_listen().is_none());
         Ok(match local_token {
-            Some(token) => format!("{origin}/#token={token}"),
-            None => format!("{origin}/"),
+            Some(token) => format!("{origin}{path}#token={token}"),
+            None => format!("{origin}{path}"),
         })
     }
 
@@ -512,7 +731,8 @@ mod tests {
         .unwrap();
         let problem = desktop.hq_problem().expect("a missing hq is reported");
         assert!(problem.contains(&missing.display().to_string()));
-        assert!(problem.contains("Settings"));
+        assert!(!problem.contains("Settings"));
+        assert!(desktop.report().await.program.is_none());
     }
 
     #[tokio::test]
@@ -578,5 +798,119 @@ mod tests {
         assert!(desktop.proxy.lock().await.is_none(), "no proxy was started");
         assert!(desktop.main_window_url().await.is_err());
         assert!(held.accept().is_err(), "nothing reached the other program");
+    }
+
+    fn plain_desktop(dir: &Path, program: Option<&Path>) -> Desktop {
+        if let Some(program) = program {
+            Settings {
+                hq_path: Some(program.to_path_buf()),
+                ..Settings::default()
+            }
+            .save(&dir.join("desktop"))
+            .unwrap();
+        }
+        Desktop::open(DesktopInit {
+            dir: dir.join("desktop"),
+            bridge_key: dir.join("bridge").join("bridge.key"),
+            config: HqConfig {
+                ws_port: crate::host::tests_support_unused_port(),
+                ..HqConfig::default()
+            },
+            app_dir: None,
+            home: None,
+            path_var: None,
+            login_shell: None,
+        })
+        .unwrap()
+    }
+
+    fn fake_hq(dir: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("hq");
+        let record = dir.join("args.txt");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'hq 0.0.0'; else echo \"$@\" >> {}; fi\n",
+                record.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn a_page_the_window_may_not_open_is_refused_before_anything_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let desktop = plain_desktop(dir.path(), None);
+        let mut settings = desktop.settings();
+        settings.proxy_port = crate::host::tests_support_unused_port();
+        desktop.save_settings(settings).unwrap();
+        for bad in [
+            "https://example.com",
+            "/helpers/..",
+            "/settings",
+            "/chat?x=1",
+        ] {
+            assert!(desktop.main_window_url_at(bad).await.is_err(), "{bad}");
+        }
+        assert!(desktop.proxy.lock().await.is_none());
+        let url = desktop.main_window_url_at("/helpers/a1").await.unwrap();
+        assert!(url.ends_with("/helpers/a1"));
+    }
+
+    #[tokio::test]
+    async fn unlock_runs_the_programs_own_host_unlock_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let hq = fake_hq(dir.path());
+        let desktop = plain_desktop(dir.path(), Some(&hq));
+        desktop.host_unlock().await.unwrap();
+        let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
+        assert_eq!(args.trim(), "host unlock");
+    }
+
+    #[tokio::test]
+    async fn a_picked_program_is_checked_then_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let desktop = plain_desktop(dir.path(), None);
+        assert_eq!(
+            desktop
+                .pick_program(PathBuf::from("/tmp/hq"))
+                .await
+                .unwrap_err(),
+            chooser::Refusal::Refused
+        );
+        let bin = dir.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let hq = fake_hq(&bin);
+        let picked = desktop.pick_program(hq.clone()).await.unwrap();
+        assert_eq!(picked.version, "hq 0.0.0");
+        assert_eq!(desktop.settings().hq_path, Some(hq.clone()));
+        assert_eq!(desktop.report().await.program.unwrap().path, hq);
+    }
+
+    #[tokio::test]
+    async fn the_report_says_a_paired_hub_replaces_hq_on_this_computer() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = HqConfig::default();
+        config.bridge.forwards = vec![hq_core::config::BridgeForward {
+            peer: "phone".into(),
+            service: "web".into(),
+            listen: "127.0.0.1:47480".into(),
+        }];
+        config.bridge.services = [("gate".to_string(), "127.0.0.1:7747".to_string())].into();
+        let desktop = Desktop::open(DesktopInit {
+            dir: dir.path().join("desktop"),
+            bridge_key: dir.path().join("bridge").join("bridge.key"),
+            config,
+            app_dir: None,
+            home: None,
+            path_var: None,
+            login_shell: None,
+        })
+        .unwrap();
+        let report = desktop.report().await;
+        assert!(report.hub_web && report.serves_hub);
     }
 }

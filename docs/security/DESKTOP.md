@@ -224,3 +224,12 @@ Each guard below was broken one at a time and `cargo test -p hq-desktop` run; ev
 | The screen refresh waits on the bridge lock | `the_screen_refresh_does_not_wait_for_the_bridge_lock` |
 
 40 guards, 40 caught. The script edits the source, runs the tests and restores the file; it covers the proxy, the host, the pairing controller, settings, the navigation allow-lists and the shell's configuration files.
+
+## 9. Hub commands (wave 3)
+
+- New control commands: `host_log` (the last 200 lines of the host log with secret-looking values replaced by `[hidden]`), `host_unlock` (runs `hq host unlock` and nothing else) and `pick_program`. They are in `build.rs`, the handler list and the capability, and `shell_config.rs` fails if the three disagree.
+- `pick_program` takes either an `NSOpenPanel` choice or a pasted path. Both go through `chooser::check_program`: a path that is, or sits under, a world-writable directory is refused before anything runs, then the file must answer `--version` with `hq <version>` within five seconds.
+- `open_main_window(path)` accepts only `/`, `/chat`, `/settings/devices`, `/helpers/<id>` and `/inbox/<id>` with an id of letters, digits, `_` and `-` (at most 64). Anything with a query or fragment is refused before the proxy starts.
+- The blocked-helper notice carries a helper name and a fixed sentence, never a message body. It is posted by `UNUserNotificationCenter` and has no click handler, so a click only brings the app forward.
+- The rename rewrite touches only Claude Desktop entries named `hq` or `hq-<hub>` whose args are exactly `mcp-serve --remote <hub>` and whose command is the old `HQ.app` path. It writes a temp file, renames it over the original and keeps a dated backup.
+- Adoption and usage data stay on the device: the start times and last runs are in memory or in `settings.json`, never sent anywhere.

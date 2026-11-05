@@ -50,6 +50,40 @@ pub fn browser_target(url: &str, origin: &str) -> Option<String> {
     Url::parse(url).ok().map(String::from)
 }
 
+/// The title of the control window.
+pub const CONTROL_TITLE: &str = "HQ Hub";
+
+/// The title of the window that shows HQ's web app: plain "HQ", or with a note that it is the
+/// HQ on the person's phone when a paired hub replaces the one on this computer.
+pub fn main_title(hub_web: bool) -> &'static str {
+    if hub_web {
+        "HQ · HQ on your phone"
+    } else {
+        "HQ"
+    }
+}
+
+/// The page of HQ's web app a notice or a card may open, or none. Only these are allowed:
+/// `/`, `/chat`, `/settings/devices`, `/helpers/<id>` and `/inbox/<id>`, with no query, no
+/// fragment and an id of letters, digits, `-` and `_`. Anything else (a full address, `..`, a
+/// backslash) is refused, so a card can never steer the window elsewhere.
+pub fn main_path_allowed(path: &str) -> Option<String> {
+    let id_ok = |id: &str| {
+        (1..=64).contains(&id.len())
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    };
+    let allowed = match path {
+        "/" | "/chat" | "/settings/devices" => true,
+        _ => path
+            .strip_prefix("/helpers/")
+            .or_else(|| path.strip_prefix("/inbox/"))
+            .is_some_and(id_ok),
+    };
+    allowed.then(|| path.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +149,45 @@ mod tests {
         ] {
             assert!(!main_page_allowed(bad, ORIGIN), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_windows_are_titled_for_what_they_show() {
+        assert_eq!(CONTROL_TITLE, "HQ Hub");
+        assert_eq!(main_title(false), "HQ");
+        assert_eq!(main_title(true), "HQ · HQ on your phone");
+    }
+
+    #[test]
+    fn the_window_opens_only_the_pages_a_card_may_name() {
+        for ok in [
+            "/",
+            "/chat",
+            "/settings/devices",
+            "/helpers/abc_12-X",
+            "/inbox/9f3",
+        ] {
+            assert_eq!(main_path_allowed(ok).as_deref(), Some(ok));
+        }
+        for bad in [
+            "",
+            "https://example.com",
+            "//example.com",
+            "/helpers/",
+            "/helpers/..",
+            "/helpers/a/b",
+            "/helpers/a?x=1",
+            "/helpers/a#t",
+            "/inbox/a\\b",
+            "/settings",
+            "/helpers/%2e%2e",
+            "chat",
+        ] {
+            assert_eq!(main_path_allowed(bad), None, "{bad}");
+        }
+        assert_eq!(
+            main_path_allowed(&format!("/helpers/{}", "a".repeat(65))),
+            None
+        );
     }
 }

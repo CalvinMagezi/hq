@@ -17,3 +17,6 @@ if (!built.success) {
 }
 await cp('ui/index.html', 'ui/dist/index.html')
 await cp('ui/style.css', 'ui/dist/style.css')
+// The shared dark styles and the font files they name, from the web app, so both windows look alike.
+await cp('../hq-web/src/styles/aligned-ui.css', 'ui/dist/aligned-ui.css')
+await cp('../hq-web/public/fonts', 'ui/dist/fonts', { recursive: true })

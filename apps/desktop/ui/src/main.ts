@@ -2,13 +2,8 @@
 // (names, ids, notes) goes into the page with textContent, never as markup.
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-
-type HostStatus =
-  | { state: 'stopped' }
-  | { state: 'starting'; pid: number }
-  | { state: 'running'; pid: number }
-  | { state: 'external' }
-  | { state: 'exited'; code: number | null }
+import { t, tn } from '../../../hq-web/src/strings'
+import { clock as clockOf, describe, sizeText, stopIsRisky, type Report } from './thisComputer'
 
 interface Settings {
   start_host_on_launch: boolean
@@ -17,6 +12,12 @@ interface Settings {
   relay: string
   device_name: string
   hq_path: string | null
+  look_for_helper_updates: boolean
+  try_it_dir: string | null
+  usual_start_secs: number | null
+  recent_start_secs: number[]
+  connection_sheet_day: string | null
+  bundle_rename_handled: boolean
 }
 
 interface Qr {
@@ -110,12 +111,13 @@ function message(e: unknown): string {
   return typeof e === 'string' ? e : e instanceof Error ? e.message : 'That did not work.'
 }
 
-let toastTimer: number | undefined
+// A notice stays until the person closes it: it never times out.
 function toast(text: string) {
-  $('toast').textContent = text
-  window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => ($('toast').textContent = ''), 3000)
+  $('toast-text').textContent = text
+  $('toast').hidden = false
 }
+$('toast-close').textContent = t('close')
+$('toast-close').addEventListener('click', () => ($('toast').hidden = true))
 
 async function guarded(errorId: string, work: () => Promise<void>) {
   try {
@@ -132,11 +134,11 @@ function clock(seconds: number): string {
 
 async function copy(text: string) {
   await navigator.clipboard.writeText(text)
-  toast('Copied')
+  toast(t('copy_details_copied'))
 }
 
 // Tabs
-const TABS = ['host', 'devices', 'claude'] as const
+const TABS = ['computer', 'devices', 'helpers'] as const
 function showTab(name: (typeof TABS)[number]) {
   for (const tab of TABS) {
     $(`tab-${tab}`).hidden = tab !== name
@@ -145,56 +147,117 @@ function showTab(name: (typeof TABS)[number]) {
       ?.setAttribute('aria-selected', String(tab === name))
   }
   // Reading Claude runs its program, so it happens on opening the tab and after a change.
-  if (name === 'claude') void guarded('claude-error', refreshClaude)
+  if (name === 'helpers') void guarded('claude-error', refreshClaude)
   void refresh()
 }
 document.querySelectorAll<HTMLButtonElement>('nav [data-tab]').forEach((b) =>
   b.addEventListener('click', () => showTab(b.dataset.tab as (typeof TABS)[number])),
 )
+document.querySelector('[data-tab="computer"]')!.firstChild!.textContent = t('hub_tab_computer')
+document.querySelector('[data-tab="devices"]')!.firstChild!.textContent = t('hub_tab_devices')
+document.querySelector('[data-tab="helpers"]')!.firstChild!.textContent = `${t('hub_tab_helpers')} `
 
-// Host
+// This computer
 const HUB_WEB_SERVICE = 'web'
-const HOST_LABEL: Record<HostStatus['state'], string> = {
-  stopped: 'Stopped',
-  starting: 'Starting',
-  running: 'Running',
-  external: 'Running elsewhere',
-  exited: 'Exited',
-}
+let report: Report | undefined
+let agentsView: Agents | undefined
 
-/** The phone hub's web forward when another program holds its port: the window must not open on it. */
 async function heldHubForward(): Promise<Forward | undefined> {
   const pairing = await invoke<Pairing>('pairing_snapshot')
   return pairing.forwards.find((f) => f.service === HUB_WEB_SERVICE && f.running_elsewhere)
 }
 
+async function hubName(): Promise<string | null> {
+  const pairing = await invoke<Pairing>('pairing_snapshot')
+  const forward = pairing.forwards.find((f) => f.service === HUB_WEB_SERVICE)
+  return pairing.peers.find((p) => p.short_id === forward?.peer_short)?.name ?? null
+}
+
+function show(id: string, on: boolean) {
+  $(id).hidden = !on
+}
+
+function shortPath(path: string): string {
+  return path.replace(/^\/Users\/[^/]+/, '~')
+}
+
+function tone(el: HTMLElement, value: string) {
+  el.className = `a-state ${value}`
+}
+
 async function refreshHost() {
-  const status = await invoke<HostStatus>('host_status')
-  $('host-state').textContent = HOST_LABEL[status.state]
-  let detail = ''
-  if (status.state === 'external') detail = 'Started outside this app, so this app will not stop it.'
-  if (status.state === 'exited') detail = `Ended by itself (code ${status.code ?? 'unknown'}). See ~/.hq/desktop/host.log.`
-  if (status.state === 'running' || status.state === 'starting') detail = `Started by this app (process ${status.pid}).`
-  $('host-detail').textContent = detail
-  const ours = status.state === 'running' || status.state === 'starting'
-  const answering = ours || status.state === 'external'
-  $<HTMLButtonElement>('host-start').disabled = answering
-  $<HTMLButtonElement>('host-stop').disabled = !ours
-  const held = await heldHubForward()
-  $('hub-held').hidden = !held
-  if (held) $('hub-held-detail').textContent = `web forward to ${held.peer_short}: ${held.listen}, held by another program`
-  $<HTMLButtonElement>('open-hq').disabled = !answering || held !== undefined
-  const settings = await invoke<Settings>('settings_get')
-  $<HTMLInputElement>('set-start-on-launch').checked = settings.start_host_on_launch
+  const [r, held, hub, settings] = await Promise.all([
+    invoke<Report>('host_status'),
+    heldHubForward(),
+    hubName(),
+    invoke<Settings>('settings_get'),
+  ])
+  report = r
+  const v = describe(r, held !== undefined, hub)
+  $('hub-title').textContent = v.title
+  const state = $('hub-state')
+  state.textContent = v.state
+  tone(state, v.tone)
+  $('hub-card').className = `a-card${v.tone === 'needs' ? ' needs' : ''}`
+  $('hub-lines').replaceChildren(...v.lines.map((l) => el('p', l)))
+  const answering = r.state === 'running' || r.state === 'external'
+  const ours = r.state === 'running' || r.state === 'starting'
+  const going = v.kind === 'on' || v.kind === 'phone_on'
+  const noProgram = v.kind === 'not_found'
+  show('host-start', !ours && r.state !== 'external' && !noProgram && v.kind !== 'locked' && v.kind !== 'port_held')
+  $('host-start').textContent = r.serves_hub ? t('hub_phone_start') : t('hub_start')
+  show('open-hq', !noProgram && v.kind !== 'locked')
+  $<HTMLButtonElement>('open-hq').disabled = !answering || v.openWhy !== null
+  $('hub-open-why').textContent = noProgram || v.kind === 'locked' ? '' : (v.openWhy ?? '')
+  show('host-stop', ours && !noProgram)
+  $('host-stop').textContent = r.serves_hub ? t('hub_phone_stop') : t('hub_stop_act')
+  show('host-restart', v.kind === 'slow')
+  show('choose-program', noProgram)
+  show('look-again', noProgram || v.kind === 'port_held')
+  show('allow-helpers', v.kind === 'locked')
+  show('copy-details', v.kind === 'stopped')
+  show('paste-row', noProgram)
+  if (v.kind === 'not_found') {
+    $('hub-lines').append(el('p', t('hub_looked_in'), 'hub-why'))
+  }
+  show('helpers-row', going && r.helpers.working.length + r.helpers.needs_you.length > 0)
+  $('helpers-row-title').textContent = tn('hub_helpers_row', r.helpers.working.length)
+  const needs = r.helpers.needs_you.length
+  show('helpers-row-state', needs > 0)
+  $('helpers-row-state').textContent = needs > 0 ? t('hub_helpers_row_needs', { count: needs }) : ''
+  show('first-signin', r.hub_web)
+  $('first-signin-title').textContent = t('hub_first_signin_title')
+  $('first-signin-note').textContent = t('hub_first_signin_note')
+  $('launch-title').textContent = t('hub_launch_title')
+  $('launch-note').textContent = `${t('hub_launch_row')}. ${t('hub_launch_note')}`
+  $('set-start-on-launch').setAttribute('aria-checked', String(settings.start_host_on_launch))
+  $('program-title').textContent = t('hub_program_title')
+  $('program-value').textContent = r.program
+    ? r.program.version
+      ? t('hub_program_value', { path: shortPath(r.program.path), version: r.program.version.replace(/^hq /, '') })
+      : t('hub_program_value_unknown', { path: shortPath(r.program.path) })
+    : t('hub_not_found_state')
+  $('change-program').textContent = t('hub_change')
+  $('log-title').textContent = t('hub_log_title')
+  $('log-value').textContent = r.last_run
+    ? t('hub_log_last_run', { from: clockOf(r.last_run.started_at), to: clockOf(r.last_run.ended_at) })
+    : t('hub_log_none')
+  $('open-log').textContent = t('hub_log_open')
+  $('paste-label').textContent = t('hub_paste_path')
+  $('tab-need').textContent = String(needs)
+  show('tab-need', needs > 0)
+  if (r.almost_full && r.state === 'stopped' && r.free_bytes !== null) {
+    $('hub-lines').append(el('p', `${t('reason_almost_full')} ${t('hub_almost_full_fix', { size: sizeText(200 * 1024 * 1024 - r.free_bytes) })}`))
+  }
 }
 
 const NEED_LABEL: Record<Need, string> = {
-  blocked: 'Needs you',
-  done: 'Finished',
-  working: 'Working',
-  idle: 'Idle',
-  unknown: 'Running',
-  exited: 'Ended',
+  blocked: t('helper_state_needs'),
+  done: t('helper_state_finished'),
+  working: t('helper_state_working'),
+  idle: t('helper_state_ready'),
+  unknown: t('helper_state_working'),
+  exited: t('helper_state_stopped'),
 }
 const SECS_PER_MIN = 60
 
@@ -204,6 +267,7 @@ function quiet(seconds: number): string {
 
 async function refreshAgents() {
   const view = await invoke<Agents>('host_agents')
+  agentsView = view
   const list = $('agents')
   list.replaceChildren(
     ...view.agents.map((a) => {
@@ -211,31 +275,119 @@ async function refreshAgents() {
       const who = el('span')
       who.append(el('strong', a.name), el('span', ` ${a.agent ?? ''} ${a.title || a.cwd}`, 'muted'))
       const state = el('span', '', 'row')
-      state.append(el('span', quiet(a.quiet_secs), 'muted'), el('span', NEED_LABEL[a.need], a.need === 'blocked' ? 'badge error' : 'badge'))
+      state.append(el('span', quiet(a.quiet_secs), 'muted'), el('span', NEED_LABEL[a.need], a.need === 'blocked' ? 'a-state needs' : 'a-state'))
       li.append(who, state)
       return li
     }),
   )
-  $('agents-empty').textContent = !view.reachable
-    ? 'No host answers on this Mac.'
-    : view.agents.length === 0
-      ? 'No agents running.'
-      : ''
+  $('agents-empty').textContent = !view.reachable ? t('hub_log_elsewhere') : view.agents.length === 0 ? t('hub_log_none') : ''
+}
+
+// One dialog serves every confirmation. Escape and the quiet button both keep things as they are.
+function confirmDialog(opts: { title: string; body: string; keep: string; act: string; danger: boolean }): Promise<boolean> {
+  return new Promise((resolve) => {
+    $('dlg-title').textContent = opts.title
+    $('dlg-body').textContent = opts.body
+    const keep = $<HTMLButtonElement>('dlg-keep')
+    const act = $<HTMLButtonElement>('dlg-act')
+    keep.textContent = opts.keep
+    act.textContent = opts.act
+    act.className = `a-btn${opts.danger ? ' danger' : ''}`
+    show('scrim', true)
+    show('dlg', true)
+    keep.focus()
+    const done = (value: boolean) => {
+      show('scrim', false)
+      show('dlg', false)
+      keep.removeEventListener('click', onKeep)
+      act.removeEventListener('click', onAct)
+      document.removeEventListener('keydown', onKey)
+      resolve(value)
+    }
+    const onKeep = () => done(false)
+    const onAct = () => done(true)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') done(false)
+    }
+    keep.addEventListener('click', onKeep)
+    act.addEventListener('click', onAct)
+    document.addEventListener('keydown', onKey)
+  })
+}
+
+async function showLog() {
+  const log = await invoke<{ path: string; lines: string[]; version: string | null; exit_code: number | null }>('host_log')
+  $('sheet-title').textContent = t('hub_log_sheet_title')
+  $('sheet-note').textContent = `${t('hub_log_hidden_note')} ${t('hub_log_path', { path: shortPath(log.path) })}`
+  $('sheet-log').textContent = log.lines.length ? log.lines.join('\n') : t('hub_log_none')
+  $('sheet-close').textContent = t('close')
+  show('scrim', true)
+  show('sheet', true)
+}
+function closeSheet() {
+  show('scrim', false)
+  show('sheet', false)
+}
+$('sheet-close').addEventListener('click', closeSheet)
+$('scrim').addEventListener('click', closeSheet)
+
+async function copyDetails() {
+  if (!report) return
+  const log = await invoke<{ path: string; lines: string[]; version: string | null; exit_code: number | null }>('host_log')
+  const at = report.exited_at ? clockOf(report.exited_at) : ''
+  const head = [
+    log.exit_code === null ? t('hub_exit_no_code', { time: at }) : t('hub_exit_code', { code: log.exit_code, time: at }),
+    t('hub_log_path', { path: shortPath(log.path) }),
+    log.version ?? '',
+  ].filter(Boolean)
+  await copy([...head, '', ...log.lines].join('\n'))
+}
+
+async function pickProgram(path?: string) {
+  $('program-error').textContent = ''
+  try {
+    await invoke('pick_program', { path: path ?? null })
+  } catch (e) {
+    const code = message(e)
+    if (code === 'cancelled') return
+    $('program-error').textContent =
+      code === 'refused' ? t('hub_refused_program') : code === 'not_hq' ? t('hub_not_hq_program') : t('hub_missing_program')
+  }
+  await refreshHost()
 }
 
 $('host-start').addEventListener('click', () =>
   guarded('host-error', async () => {
-    await invoke('host_start')
+    await invoke('host_start', { restart: false })
     await refreshHost()
   }),
 )
 $('host-stop').addEventListener('click', () =>
   guarded('host-error', async () => {
+    if (!report) return
+    const risky = stopIsRisky(report)
+    const names = report.helpers.working.join(', ')
+    const phone = report.serves_hub
+    const yes = await confirmDialog({
+      title: phone ? t('hub_stop_here_title') : t('hub_stop_title'),
+      body: phone ? t('hub_stop_here_body') : risky ? t('hub_stop_working', { names }) : t('hub_stop_idle'),
+      keep: phone ? t('hub_stop_here_keep') : t('stop_helper_keep'),
+      act: phone ? t('hub_phone_stop') : t('hub_stop_act'),
+      danger: risky,
+    })
+    if (!yes) return
     await invoke('host_stop')
     await refreshHost()
   }),
 )
-$('hub-look-again').addEventListener('click', () =>
+$('host-restart').addEventListener('click', () =>
+  guarded('host-error', async () => {
+    await invoke('host_stop')
+    await invoke('host_start', { restart: true })
+    await refreshHost()
+  }),
+)
+$('look-again').addEventListener('click', () =>
   guarded('host-error', async () => {
     // Forwards are opened when pairing starts, so a restart tries the port again.
     await invoke('pairing_stop')
@@ -243,12 +395,33 @@ $('hub-look-again').addEventListener('click', () =>
     await refreshHost()
   }),
 )
-$('open-hq').addEventListener('click', () => guarded('host-error', () => invoke('open_main_window')))
-$('set-start-on-launch').addEventListener('change', (e) =>
+$('choose-program').addEventListener('click', () => void pickProgram())
+$('change-program').addEventListener('click', () => void pickProgram())
+$('paste-use').addEventListener('click', () => void pickProgram($<HTMLInputElement>('paste-path').value.trim()))
+$('open-log').addEventListener('click', () => guarded('host-error', showLog))
+$('copy-details').addEventListener('click', () => guarded('host-error', copyDetails))
+$('allow-helpers').addEventListener('click', () =>
+  guarded('host-error', async () => {
+    const yes = await confirmDialog({
+      title: t('hub_allow_title'),
+      body: t('hub_allow_body'),
+      keep: t('hub_allow_keep'),
+      act: t('hub_allow_confirm'),
+      danger: false,
+    })
+    if (!yes) return
+    await invoke('host_unlock')
+    toast(t('hub_allowed_done'))
+    await refreshHost()
+  }),
+)
+$('open-hq').addEventListener('click', () => guarded('host-error', () => invoke('open_main_window', { path: '/' })))
+$('set-start-on-launch').addEventListener('click', () =>
   guarded('host-error', async () => {
     const settings = await invoke<Settings>('settings_get')
-    settings.start_host_on_launch = (e.target as HTMLInputElement).checked
+    settings.start_host_on_launch = !settings.start_host_on_launch
     await invoke('settings_save', { settings })
+    await refreshHost()
   }),
 )
 
@@ -447,12 +620,12 @@ async function refreshClaude() {
 
 // Refresh
 async function refresh() {
-  const visible = TABS.find((t) => !$(`tab-${t}`).hidden)
-  const host = async () => {
+  const visible = TABS.find((tab) => !$(`tab-${tab}`).hidden)
+  const computer = async () => {
     await refreshHost()
     await refreshAgents()
   }
-  const work = { host, devices: refreshDevices, claude: async () => {} }[visible ?? 'host']
+  const work = { computer, devices: refreshDevices, helpers: refreshAgents }[visible ?? 'computer']
   try {
     await work()
   } catch (e) {
@@ -463,6 +636,10 @@ async function refresh() {
 const POLL_MS = 3000
 window.setInterval(() => void refresh(), POLL_MS)
 void listen('state-changed', () => void refresh())
+void listen<string[]>('claude-entries-moved', (e) => {
+  $('claude-moved').textContent = t('hub_claude_moved', { names: e.payload.join(', ') })
+  show('claude-moved', true)
+})
 void invoke<string | null>('startup_warning').then((w) => {
   if (w) $('host-error').textContent = w
 })

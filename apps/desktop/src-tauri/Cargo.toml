@@ -21,9 +21,19 @@ tauri-build = { version = "=2.7.3", default-features = false , features = [] }
 hq-desktop = { path = "../../../crates/hq-desktop" }
 hq-core = { path = "../../../crates/hq-core" }
 tauri = { version = "=2.12.4", default-features = false, features = ["wry", "compression"] }
+tokio = { version = "1", features = ["time", "sync"] }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# The open panel for choosing the hq program and the one system notice. Pinned to the versions
+# the web view already pulls in, so nothing new is compiled.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+block2 = "=0.6.2"
+objc2-app-kit = "=0.3.2"
+objc2-foundation = "=0.3.2"
+objc2-user-notifications = { version = "=0.3.2", features = ["block2"] }
 
 [profile.release]
 lto = "thin"

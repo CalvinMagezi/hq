@@ -6,7 +6,9 @@ use crate::Startup;
 use hq_desktop::{
     Desktop, Revoked,
     agents::AgentsView,
+    chooser::Picked,
     claude::HubView,
+    desktop::{HostLog, HubReport},
     host::HostStatus,
     pairing::{PairingSnapshot, Submitted, TicketView},
     settings::Settings,
@@ -28,6 +30,9 @@ pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static 
         host_start,
         host_stop,
         host_agents,
+        host_log,
+        host_unlock,
+        pick_program,
         settings_get,
         settings_save,
         open_main_window,
@@ -51,13 +56,16 @@ fn startup_warning(startup: State<'_, Startup>) -> Option<String> {
 }
 
 #[tauri::command]
-async fn host_status(app: App<'_>) -> Reply<HostStatus> {
-    Ok(app.host.status().await)
+async fn host_status(app: App<'_>) -> Reply<HubReport> {
+    Ok(app.report().await)
 }
 
 #[tauri::command]
-async fn host_start(app: App<'_>) -> Reply<HostStatus> {
-    app.host.start().await.map_err(shown)
+async fn host_start(app: App<'_>, restart: Option<bool>) -> Reply<HostStatus> {
+    app.host
+        .start_with(restart.unwrap_or(false))
+        .await
+        .map_err(shown)
 }
 
 #[tauri::command]
@@ -70,6 +78,32 @@ async fn host_agents(app: App<'_>) -> Reply<AgentsView> {
     Ok(app.agents().await)
 }
 
+/// The last lines of the host's log with keys hidden, for the log sheet and Copy details.
+#[tauri::command]
+async fn host_log(app: App<'_>) -> Reply<HostLog> {
+    Ok(app.host_log().await)
+}
+
+/// Lets coding helpers start again after a lockdown, by running `hq host unlock`.
+#[tauri::command]
+async fn host_unlock(app: App<'_>) -> Reply<()> {
+    app.host_unlock().await.map_err(shown)
+}
+
+/// Chooses the `hq` program: an open panel, or a pasted path when `path` is given. The pick is
+/// checked before it is used; the error is `refused`, `not_hq` or `not_found`, and `cancelled`
+/// when the panel was closed.
+#[tauri::command]
+async fn pick_program(handle: AppHandle, app: App<'_>, path: Option<String>) -> Reply<Picked> {
+    let path = match path {
+        Some(path) => std::path::PathBuf::from(path),
+        None => crate::choose_program_file(&handle)
+            .await
+            .ok_or_else(|| "cancelled".to_string())?,
+    };
+    app.pick_program(path).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn settings_get(app: App<'_>) -> Settings {
     app.settings()
@@ -77,12 +111,14 @@ fn settings_get(app: App<'_>) -> Settings {
 
 #[tauri::command]
 fn settings_save(app: App<'_>, settings: Settings) -> Reply<()> {
+    // What the app learned on its own is not the page's to set.
+    let settings = settings.keeping_app_fields(&app.settings());
     app.save_settings(settings).map_err(shown)
 }
 
 #[tauri::command]
-async fn open_main_window(handle: AppHandle, app: App<'_>) -> Reply<()> {
-    crate::show_main(&handle, &app).await
+async fn open_main_window(handle: AppHandle, app: App<'_>, path: Option<String>) -> Reply<()> {
+    crate::show_main(&handle, &app, path.as_deref().unwrap_or("/")).await
 }
 
 /// Hands an address on the app's own proxy to the system browser, so the consent page can be
