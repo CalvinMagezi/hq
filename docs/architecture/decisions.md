@@ -20,7 +20,6 @@ Same Definition / Provider / Consumer split as `capability-seams.md`.
 
   | Site | Where | Default | Acts on |
   |---|---|---|---|
-  | `email_fyi` | `hq_daemon::email_gate`, FYI branch of `email_triage::handle` | enforce, hide below 0.30 | keeps promotions and newsletters out of the owner's chat |
   | `memory_turn` | `hq_memory::turn_gate::admit`, native chat turns | enforce, skip below 0.15 | skips extraction for confidently ephemeral turns |
   | `notify_gate` | declared in `hq_core::config::decisions` (`SITE_NOTIFY_GATE`); no consumer calls it yet | shadow | reserved for `hq_daemon::notif_gate::gate_decision`, which today decides drop/digest/urgent for relay messages from learned `_system/USER.md` traits |
   | `task_placement` | `hq_tools::tasks::choose_placement_via_jev`, called from the `task_create_from_note` tool | off | picks the best-fitting existing Space/Folder/List for a note being promoted to a task |
@@ -48,15 +47,14 @@ decisions:
       model: typesafe/jev-1.13
       credential_env: OPENROUTER_API_KEY
   sites:                       # optional: a site not listed uses its default above
-    email_fyi: { mode: enforce, threshold: 0.30 }
     memory_turn: { mode: enforce, threshold: 0.15 }
 ```
 
 `decisions:` is read once at daemon start; changing it needs a restart. The
 handle is initialized only in the daemon process, so an `hq` CLI run or any
 other separate process has no handle and behaves as if the section were off.
-Every gate above runs inside the daemon (email triage, native sessions, chat
-ingest), so all of them are covered.
+Every gate above runs inside the daemon (native sessions, chat ingest), so all
+of them are covered.
 
 ## Site modes
 
@@ -73,7 +71,7 @@ ingest), so all of them are covered.
 
 ```bash
 hq decisions                 # last 7 days, every site
-hq decisions --days 1 --site email_fyi
+hq decisions --days 1 --site memory_turn
 ```
 
 Per site it prints calls, errors, cost, outcomes, latency percentiles, a score

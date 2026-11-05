@@ -1,7 +1,7 @@
 use super::*;
 use hq_tools::agent_host::scripted::ScriptedHost;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A pane redraw as a terminal would have logged it: cursor hiding, screen
 /// erase, an OSC title, colour runs, and carriage returns between rows.
@@ -102,36 +102,37 @@ fn store_snapshot(db: &Database, id: &str, snapshot: &str) {
         .unwrap();
 }
 
-fn mailbox_dir(vault: &Path) -> PathBuf {
-    vault.join(hq_core::mailbox::MAILBOX_DIR).join("relay")
+/// What the supervisor told the owner about sessions that ended or finished a turn: the inbox
+/// items it wrote, as (kind, title, body), oldest first.
+fn notices(db: &Database) -> Vec<(String, String, String)> {
+    db.with_conn(|c| {
+        let mut stmt = c.prepare(
+            "SELECT kind, title, body FROM value_items
+              WHERE dedup_key LIKE 'session-exit-%' OR dedup_key LIKE 'session-finished-%'
+              ORDER BY created_at, rowid",
+        )?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })
+    .unwrap()
 }
 
-fn mailbox_files(vault: &Path) -> Vec<String> {
-    std::fs::read_dir(mailbox_dir(vault))
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .map(|e| e.file_name().to_string_lossy().to_string())
-                .filter(|n| n.ends_with(".json"))
-                .collect()
-        })
-        .unwrap_or_default()
+fn only_notice(db: &Database) -> (String, String, String) {
+    let mut all = notices(db);
+    assert_eq!(all.len(), 1, "expected one inbox notice, got {all:?}");
+    all.remove(0)
 }
 
-fn only_message(vault: &Path) -> String {
-    let files = mailbox_files(vault);
-    assert_eq!(files.len(), 1, "expected one relay message, got {files:?}");
-    std::fs::read_to_string(mailbox_dir(vault).join(&files[0])).unwrap()
+/// The notice's text as the owner reads it in the inbox.
+fn only_body(db: &Database) -> String {
+    only_notice(db).2
 }
 
-/// The message body as the operator receives it, unescaped from the JSON.
-fn only_body(vault: &Path) -> String {
-    let raw = only_message(vault);
-    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    value
-        .get("content")
-        .and_then(|c| c.as_str())
-        .unwrap()
-        .to_string()
+/// Whether the one notice asks the owner to act, rather than being news.
+fn needs_action(db: &Database) -> bool {
+    only_notice(db).0 == hq_core::types::ValueKind::ActionNeeded.as_str()
 }
 
 /// Summarizer stub. `Ok` text is delivered as the summary, `Err` forces the
@@ -152,10 +153,10 @@ fn stub_summarizer(outcome: std::result::Result<&'static str, &'static str>) -> 
 /// an unreachable host and posts nothing, so behaviour tests get room.
 const TEST_HOST_BUDGET: Duration = Duration::from_secs(60);
 
-async fn sweep(vault: &Path, db: &Database, host: &ScriptedHost, s: Option<&Summarizer>) {
+async fn sweep(db: &Database, host: &ScriptedHost, s: Option<&Summarizer>) {
     let host = host.clone();
     let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(host.clone()) as Host));
-    supervise(vault, db, s, resolve, Sweep::within(TEST_HOST_BUDGET))
+    supervise(db, s, resolve, Sweep::within(TEST_HOST_BUDGET))
         .await
         .unwrap();
 }
@@ -169,7 +170,7 @@ fn status_of(db: &Database, id: &str) -> String {
 }
 
 #[tokio::test]
-async fn dead_session_posts_final_output_to_relay() {
+async fn dead_session_puts_its_final_output_in_the_inbox() {
     let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-dead");
@@ -180,10 +181,10 @@ async fn dead_session_posts_final_output_to_relay() {
         "```rust\nfn main() {}\n```\nFINAL ANSWER: 42\n",
     );
 
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+    sweep(&db, &gone_host(tmp.path()), None).await;
 
     assert_eq!(status_of(&db, "hs-dead"), registry::STATUS_EXITED);
-    let msg = only_message(tmp.path());
+    let msg = only_body(&db);
     assert!(msg.contains("hs-dead"));
     assert!(msg.contains("FINAL ANSWER: 42"));
     assert!(msg.contains("harness_session_resume"));
@@ -199,10 +200,10 @@ async fn second_sweep_sends_nothing_more() {
     store_snapshot(&db, "hs-once", "done");
     let host = gone_host(tmp.path());
 
-    sweep(tmp.path(), &db, &host, None).await;
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
+    sweep(&db, &host, None).await;
 
-    assert_eq!(mailbox_files(tmp.path()).len(), 1);
+    assert_eq!(notices(&db).len(), 1);
 }
 
 #[tokio::test]
@@ -211,9 +212,9 @@ async fn a_session_that_died_before_any_snapshot_still_notifies() {
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-nosnap");
 
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+    sweep(&db, &gone_host(tmp.path()), None).await;
 
-    let body = only_body(tmp.path());
+    let body = only_body(&db);
     assert!(body.contains("hs-nosnap"));
     assert!(body.contains("no output was captured for this session"));
 }
@@ -225,9 +226,9 @@ async fn ansi_dense_snapshot_is_delivered_clean() {
     seed(&db, "hs-ansi");
     store_snapshot(&db, "hs-ansi", ANSI_SAMPLE);
 
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+    sweep(&db, &gone_host(tmp.path()), None).await;
 
-    let body = only_body(tmp.path());
+    let body = only_body(&db);
     assert!(body.contains("FINAL ANSWER: 42"));
     assert!(body.contains("> working"));
     assert!(!body.contains('\x1b'), "escape survived: {body:?}");
@@ -246,10 +247,10 @@ async fn alive_session_is_snapshotted_not_reported() {
     seed(&db, "hs-alive");
     let host = fake_host(tmp.path(), &[("hs-alive", "working", 3)], "PANE-READY");
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
 
     assert_eq!(status_of(&db, "hs-alive"), registry::STATUS_RUNNING);
-    assert!(mailbox_files(tmp.path()).is_empty());
+    assert!(notices(&db).is_empty());
     let snapshot = db
         .with_conn(|c| registry::last_snapshot(c, "hs-alive"))
         .unwrap()
@@ -259,27 +260,17 @@ async fn alive_session_is_snapshotted_not_reported() {
 
 #[tokio::test]
 async fn an_unreachable_host_leaves_its_sessions_running() {
-    let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-away");
     store_snapshot(&db, "hs-away", "last known screen");
 
     let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
-    supervise(
-        tmp.path(),
-        &db,
-        None,
-        resolve,
-        Sweep::within(HOST_SWEEP_BUDGET),
-    )
-    .await
-    .unwrap();
+    supervise(&db, None, resolve, Sweep::within(HOST_SWEEP_BUDGET))
+        .await
+        .unwrap();
 
     assert_eq!(status_of(&db, "hs-away"), registry::STATUS_RUNNING);
-    assert!(
-        mailbox_files(tmp.path()).is_empty(),
-        "laptop asleep is not an exit"
-    );
+    assert!(notices(&db).is_empty(), "laptop asleep is not an exit");
 }
 
 #[tokio::test]
@@ -295,7 +286,6 @@ async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
 
     let started = Instant::now();
     supervise(
-        tmp.path(),
         &db,
         None,
         resolve,
@@ -310,7 +300,7 @@ async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
         started.elapsed()
     );
     assert_eq!(status_of(&db, "hs-hung"), registry::STATUS_RUNNING);
-    assert!(mailbox_files(tmp.path()).is_empty());
+    assert!(notices(&db).is_empty());
 }
 
 fn alert_count(db: &Database) -> i64 {
@@ -335,8 +325,8 @@ async fn a_blocked_agent_alerts_once_until_its_state_changes() {
         "Do you want to proceed?",
     );
 
-    sweep(tmp.path(), &db, &blocked, None).await;
-    sweep(tmp.path(), &db, &blocked, None).await;
+    sweep(&db, &blocked, None).await;
+    sweep(&db, &blocked, None).await;
     assert_eq!(alert_count(&db), 1, "same block must not re-alert");
     assert_eq!(status_of(&db, "hs-blocked"), registry::STATUS_RUNNING);
 
@@ -345,7 +335,7 @@ async fn a_blocked_agent_alerts_once_until_its_state_changes() {
         &[("hs-blocked", "blocked", 9)],
         "Approve the edit?",
     );
-    sweep(tmp.path(), &db, &blocked_again, None).await;
+    sweep(&db, &blocked_again, None).await;
     assert_eq!(alert_count(&db), 2, "a new block is a new alert");
 }
 
@@ -371,8 +361,8 @@ async fn a_block_at_a_dialog_hq_can_read_ties_the_alert_to_that_dialog() {
     seed(&db, "hs-path");
     let host = host_with_dialog(tmp.path(), "hs-path", 12);
 
-    sweep(tmp.path(), &db, &host, None).await;
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert_eq!(alert_count(&db), 1);
     let item_id: String = db
         .with_conn(|c| {
@@ -406,22 +396,18 @@ async fn a_finished_agent_alerts_once_and_stays_running() {
         "All tests pass. Nothing left to do.",
     );
 
-    sweep(tmp.path(), &db, &done, None).await;
-    sweep(tmp.path(), &db, &done, None).await;
+    sweep(&db, &done, None).await;
+    sweep(&db, &done, None).await;
 
-    let body = only_body(tmp.path());
+    let body = only_body(&db);
     assert!(body.contains("finished its task"), "{body}");
     assert!(body.contains("All tests pass"), "{body}");
-    let msg: serde_json::Value = serde_json::from_str(&only_message(tmp.path())).unwrap();
-    assert!(
-        msg["meta"].get(hq_core::mailbox::META_INTERRUPT).is_none(),
-        "a finished turn goes to the digest, not an interrupt: {msg}"
-    );
+    assert!(!needs_action(&db), "a finished turn is news, not a blocker");
     assert_eq!(status_of(&db, "hs-done"), registry::STATUS_RUNNING);
 
     let idle = fake_host(tmp.path(), &[("hs-done", "idle", 6)], "");
-    sweep(tmp.path(), &db, &idle, None).await;
-    assert_eq!(mailbox_files(tmp.path()).len(), 1, "idle is not an alert");
+    sweep(&db, &idle, None).await;
+    assert_eq!(notices(&db).len(), 1, "idle is not an alert");
 }
 
 #[tokio::test]
@@ -433,35 +419,30 @@ async fn an_exit_is_recorded_on_the_task_once_across_sweeps() {
     let host = gone_host(tmp.path());
 
     // The second sweep stands in for a daemon restart re-reading the registry.
-    sweep(tmp.path(), &db, &host, None).await;
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
+    sweep(&db, &host, None).await;
 
     assert_eq!(
         task_state(&db, &task),
         (hq_db::tasks::STATUS_BLOCKED.into(), 1)
     );
-    let body = only_body(tmp.path());
+    let body = only_body(&db);
     assert!(body.contains("Task FR-001 is blocked"), "{body}");
     assert!(
-        interrupts(tmp.path()),
-        "stopped work on a task is a blocker, not digest news"
+        needs_action(&db),
+        "stopped work on a task is a blocker, not news"
     );
 }
 
-fn interrupts(vault: &Path) -> bool {
-    let msg: serde_json::Value = serde_json::from_str(&only_message(vault)).unwrap();
-    msg["meta"].get(hq_core::mailbox::META_INTERRUPT).is_some()
-}
-
 #[tokio::test]
-async fn an_exit_without_a_task_stays_a_digest_update() {
+async fn an_exit_without_a_task_is_news_not_a_blocker() {
     let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-plain");
 
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+    sweep(&db, &gone_host(tmp.path()), None).await;
 
-    assert!(!interrupts(tmp.path()));
+    assert!(!needs_action(&db));
 }
 
 #[tokio::test]
@@ -472,10 +453,10 @@ async fn routine_sweeps_of_a_working_task_session_notify_nothing() {
     let working = fake_host(tmp.path(), &[("hs-busy", "working", 2)], "editing files");
 
     for _ in 0..3 {
-        sweep(tmp.path(), &db, &working, None).await;
+        sweep(&db, &working, None).await;
     }
 
-    assert!(mailbox_files(tmp.path()).is_empty());
+    assert!(notices(&db).is_empty());
     assert_eq!(alert_count(&db), 0);
     assert_eq!(
         task_state(&db, &task),
@@ -485,20 +466,13 @@ async fn routine_sweeps_of_a_working_task_session_notify_nothing() {
 
 #[tokio::test]
 async fn an_unreachable_host_leaves_the_task_untouched() {
-    let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     let task = seed_with_task(&db, "hs-laptop");
 
     let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
-    supervise(
-        tmp.path(),
-        &db,
-        None,
-        resolve,
-        Sweep::within(HOST_SWEEP_BUDGET),
-    )
-    .await
-    .unwrap();
+    supervise(&db, None, resolve, Sweep::within(HOST_SWEEP_BUDGET))
+        .await
+        .unwrap();
 
     assert_eq!(
         task_state(&db, &task),
@@ -513,18 +487,15 @@ async fn a_finished_turn_puts_the_task_up_for_review_not_complete() {
     let task = seed_with_task(&db, "hs-review");
     let done = fake_host(tmp.path(), &[("hs-review", "done", 3)], "All tests pass.");
 
-    sweep(tmp.path(), &db, &done, None).await;
-    sweep(tmp.path(), &db, &done, None).await;
+    sweep(&db, &done, None).await;
+    sweep(&db, &done, None).await;
 
     assert_eq!(
         task_state(&db, &task),
         (hq_db::tasks::STATUS_READY_FOR_REVIEW.into(), 1)
     );
-    assert!(only_body(tmp.path()).contains("Task FR-001 is ready for review"));
-    assert!(
-        !interrupts(tmp.path()),
-        "a finished turn is a digest update"
-    );
+    assert!(only_body(&db).contains("Task FR-001 is ready for review"));
+    assert!(!needs_action(&db), "a finished turn is a digest update");
 }
 
 #[tokio::test]
@@ -534,8 +505,8 @@ async fn a_task_session_blocked_on_a_dialog_raises_one_action_item() {
     let task = seed_with_task(&db, "hs-ask");
     let blocked = fake_host(tmp.path(), &[("hs-ask", "blocked", 7)], "Approve the edit?");
 
-    sweep(tmp.path(), &db, &blocked, None).await;
-    sweep(tmp.path(), &db, &blocked, None).await;
+    sweep(&db, &blocked, None).await;
+    sweep(&db, &blocked, None).await;
 
     assert_eq!(alert_count(&db), 1);
     let body: String = db
@@ -580,12 +551,12 @@ async fn a_watched_session_wakes_its_chat_instead_of_the_relay() {
     watch_from_chat(&db, "hs-web");
 
     let done = fake_host(tmp.path(), &[("hs-web", "done", 4)], "All tests pass.");
-    sweep(tmp.path(), &db, &done, None).await;
+    sweep(&db, &done, None).await;
     let row = row_of(&db, "hs-web");
     assert_eq!(row.pm_wake.as_deref(), Some(WAKE_FINISHED));
     assert_eq!(row.last_agent_status.as_deref(), Some("done"));
     assert!(
-        mailbox_files(tmp.path()).is_empty(),
+        notices(&db).is_empty(),
         "web chat only: nothing for Telegram"
     );
     assert_eq!(
@@ -594,7 +565,7 @@ async fn a_watched_session_wakes_its_chat_instead_of_the_relay() {
     );
 
     let blocked = fake_host(tmp.path(), &[("hs-web", "blocked", 5)], "Approve the edit?");
-    sweep(tmp.path(), &db, &blocked, None).await;
+    sweep(&db, &blocked, None).await;
     assert_eq!(row_of(&db, "hs-web").pm_wake.as_deref(), Some(WAKE_BLOCKED));
     assert_eq!(
         value_item_count(&db),
@@ -602,11 +573,11 @@ async fn a_watched_session_wakes_its_chat_instead_of_the_relay() {
         "one web-inbox badge for the block"
     );
 
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+    sweep(&db, &gone_host(tmp.path()), None).await;
     let row = row_of(&db, "hs-web");
     assert_eq!(row.status, registry::STATUS_EXITED);
     assert_eq!(row.pm_wake.as_deref(), Some(WAKE_EXITED));
-    assert!(mailbox_files(tmp.path()).is_empty());
+    assert!(notices(&db).is_empty());
     assert_eq!(
         value_item_count(&db),
         1,
@@ -622,7 +593,7 @@ async fn a_working_watched_session_only_updates_its_seen_status() {
     watch_from_chat(&db, "hs-quiet");
     let working = fake_host(tmp.path(), &[("hs-quiet", "working", 1)], "editing");
 
-    sweep(tmp.path(), &db, &working, None).await;
+    sweep(&db, &working, None).await;
 
     let row = row_of(&db, "hs-quiet");
     assert_eq!(row.last_agent_status.as_deref(), Some("working"));
@@ -637,9 +608,9 @@ async fn summary_replaces_the_raw_excerpt() {
     store_snapshot(&db, "hs-sum", "RAW PANE TEXT\nFINAL ANSWER: 42");
 
     let summarizer = stub_summarizer(Ok("Done: refactored auth, no open items."));
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), Some(&summarizer)).await;
+    sweep(&db, &gone_host(tmp.path()), Some(&summarizer)).await;
 
-    let body = only_body(tmp.path());
+    let body = only_body(&db);
     assert!(body.contains("Done: refactored auth, no open items."));
     assert!(!body.contains("RAW PANE TEXT"));
     assert!(!body.contains(OUTPUT_OPEN));
@@ -654,9 +625,9 @@ async fn summarizer_failure_falls_back_to_the_raw_excerpt() {
     store_snapshot(&db, "hs-fail", "RAW PANE TEXT\nFINAL ANSWER: 42");
 
     let summarizer = stub_summarizer(Err("provider unreachable"));
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), Some(&summarizer)).await;
+    sweep(&db, &gone_host(tmp.path()), Some(&summarizer)).await;
 
-    let body = only_body(tmp.path());
+    let body = only_body(&db);
     assert!(body.contains("RAW PANE TEXT"));
     assert!(body.contains("FINAL ANSWER: 42"));
     assert!(body.contains(OUTPUT_OPEN));
@@ -685,7 +656,7 @@ async fn an_exit_lands_in_the_inbox_with_its_outcome_and_output() {
     seed(&db, "hs-inbox");
     store_snapshot(&db, "hs-inbox", "RAW PANE TEXT\nFINAL ANSWER: 42");
 
-    sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+    sweep(&db, &gone_host(tmp.path()), None).await;
 
     let items =
         hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
@@ -798,8 +769,8 @@ async fn a_driven_session_has_the_survey_dismissed_without_spending_allowances()
     drive_on(&db, "hs-s");
     let (host, log) = keylogging_host(tmp.path(), "hs-s", "done", SURVEY_SCREEN);
 
-    sweep(tmp.path(), &db, &host, None).await;
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
+    sweep(&db, &host, None).await;
 
     let keys = keys_logged(&log);
     assert_eq!(keys.len(), 2, "{keys:?}");
@@ -822,7 +793,7 @@ async fn an_observe_only_session_is_never_typed_into() {
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-o");
     let (host, log) = keylogging_host(tmp.path(), "hs-o", "done", SURVEY_SCREEN);
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert!(keys_logged(&log).is_empty());
 }
 
@@ -836,7 +807,7 @@ async fn a_trust_dialog_is_reported_not_answered() {
         "Do you trust the files in this folder?\n 1. Yes, proceed\n 2. No, exit\n{SURVEY_SCREEN}"
     );
     let (host, log) = keylogging_host(tmp.path(), "hs-t", "blocked", &screen);
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert!(keys_logged(&log).is_empty());
     assert_eq!(alert_count(&db), 1);
 }
@@ -849,7 +820,7 @@ async fn dismissals_stop_at_the_cap_and_notify_once() {
     drive_on(&db, "hs-c");
     let (host, log) = keylogging_host(tmp.path(), "hs-c", "done", SURVEY_SCREEN);
     for _ in 0..registry::DISMISSAL_CAP + 3 {
-        sweep(tmp.path(), &db, &host, None).await;
+        sweep(&db, &host, None).await;
     }
     assert_eq!(keys_logged(&log).len() as i64, registry::DISMISSAL_CAP);
     let notices: i64 = db
@@ -878,7 +849,7 @@ async fn a_finished_alert_and_wake_survive_a_state_change_after_the_keypress() {
             .pm_wake
     };
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert_eq!(keys_logged(&log).len(), 1);
     assert_eq!(
         wake(&db).as_deref(),
@@ -895,7 +866,7 @@ async fn a_finished_alert_and_wake_survive_a_state_change_after_the_keypress() {
         Ok(())
     })
     .unwrap();
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert_eq!(
         wake(&db).as_deref(),
         Some(WAKE_FINISHED),
@@ -910,7 +881,7 @@ async fn survey_text_on_a_working_agent_gets_no_key() {
     seed(&db, "hs-w");
     drive_on(&db, "hs-w");
     let (host, log) = keylogging_host(tmp.path(), "hs-w", "working", SURVEY_SCREEN);
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert!(keys_logged(&log).is_empty());
 }
 
@@ -922,7 +893,7 @@ async fn a_survey_beside_a_drafted_input_box_gets_no_key() {
     drive_on(&db, "hs-x");
     let screen = format!("{SURVEY_SCREEN}\n│ > fix the login bug │");
     let (host, log) = keylogging_host(tmp.path(), "hs-x", "done", &screen);
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert!(keys_logged(&log).is_empty());
 }
 
@@ -934,7 +905,7 @@ async fn a_survey_that_does_not_close_is_dismissed_once_then_reported() {
     drive_on(&db, "hs-u");
     let (host, log) = keylogging_host_with(tmp.path(), "hs-u", "done", SURVEY_SCREEN, false);
     for _ in 0..4 {
-        sweep(tmp.path(), &db, &host, None).await;
+        sweep(&db, &host, None).await;
     }
     assert_eq!(
         keys_logged(&log).len(),
@@ -961,7 +932,7 @@ async fn the_observed_draft_pane_gets_no_key() {
     drive_on(&db, "hs-g");
     let screen = format!("{SURVEY_SCREEN}\n\n\n❯ 00000");
     let (host, log) = keylogging_host(tmp.path(), "hs-g", "done", &screen);
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert!(keys_logged(&log).is_empty());
 }
 
@@ -1003,7 +974,7 @@ async fn a_stack_run_whose_process_ended_is_read_closed_and_put_into_review() {
     .unwrap();
     let host = exited_host(tmp.path(), "hs-run", "REPORT\nThree suppliers found.\n");
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
 
     assert_eq!(status_of(&db, "hs-run"), registry::STATUS_EXITED);
     let (status, _) = task_state(&db, &task);
@@ -1025,7 +996,7 @@ async fn a_stack_run_whose_process_ended_is_read_closed_and_put_into_review() {
         calls.contains("workspace close w1"),
         "the dead pane is closed: {calls}"
     );
-    assert!(only_message(tmp.path()).contains("Three suppliers found"));
+    assert!(only_body(&db).contains("Three suppliers found"));
 }
 
 #[tokio::test]
@@ -1046,7 +1017,7 @@ async fn a_stack_run_that_exited_non_zero_blocks_its_task_whatever_is_on_screen(
         Some(1),
     );
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
 
     assert_eq!(status_of(&db, "hs-crash"), registry::STATUS_EXITED);
     let (status, _) = task_state(&db, &task);
@@ -1080,7 +1051,7 @@ async fn a_stack_run_on_a_host_that_reports_no_exit_code_is_judged_by_its_screen
         .unwrap();
     let host = exited_host_with_code(tmp.path(), "hs-empty", "   \n", None);
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
 
     assert_eq!(status_of(&db, "hs-empty"), registry::STATUS_EXITED);
     let (status, _) = task_state(&db, &task);
@@ -1217,7 +1188,6 @@ fn an_outage_whose_sessions_all_stopped_ends_quietly() {
 
 #[tokio::test]
 async fn a_sweep_records_a_silent_host_as_an_outage() {
-    let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-away");
     let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
@@ -1225,9 +1195,7 @@ async fn a_sweep_records_a_silent_host_as_an_outage() {
         host_budget: HOST_SWEEP_BUDGET,
         unreachable_after: Some(Duration::ZERO),
     };
-    supervise(tmp.path(), &db, None, resolve, sweep)
-        .await
-        .unwrap();
+    supervise(&db, None, resolve, sweep).await.unwrap();
 
     let open = hq_db::host_outages::list(&db).unwrap();
     assert_eq!(open.len(), 1);
@@ -1277,14 +1245,8 @@ async fn a_finished_turn_names_the_commit_it_made_once() {
     })
     .unwrap();
 
-    sweep(
-        tmp.path(),
-        &db,
-        &host_at_commit(tmp.path(), "hs-w", 3, "bbb222"),
-        None,
-    )
-    .await;
-    let body = only_body(tmp.path());
+    sweep(&db, &host_at_commit(tmp.path(), "hs-w", 3, "bbb222"), None).await;
+    let body = only_body(&db);
     assert!(
         body.contains("It committed bbb222 \"add the parser\" on branch feature."),
         "{body}"
@@ -1295,15 +1257,15 @@ async fn a_finished_turn_names_the_commit_it_made_once() {
     assert_eq!(events.iter().filter(|e| e.kind == "commit").count(), 1);
 
     // The next finished turn with nothing new committed says nothing about a commit.
-    std::fs::remove_dir_all(mailbox_dir(tmp.path())).unwrap();
-    sweep(
-        tmp.path(),
-        &db,
-        &host_at_commit(tmp.path(), "hs-w", 4, "bbb222"),
-        None,
-    )
-    .await;
-    let body = only_body(tmp.path());
+    db.with_conn(|c| {
+        Ok(c.execute(
+            "DELETE FROM value_items WHERE dedup_key LIKE 'session-finished-%'",
+            [],
+        )?)
+    })
+    .unwrap();
+    sweep(&db, &host_at_commit(tmp.path(), "hs-w", 4, "bbb222"), None).await;
+    let body = only_body(&db);
     assert!(!body.contains("committed"), "{body}");
 }
 
@@ -1362,7 +1324,7 @@ async fn a_command_the_policy_allows_is_answered_once_and_raises_nothing() {
     with_builder(&db, "hs-ok");
     let host = host_at_command(tmp.path(), "hs-ok", 5, "cargo test");
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     let outcome = policy_outcome(&db, "hs-ok").await;
     assert_eq!(outcome["decision"], "allow");
     assert_eq!(outcome["outcome"], "allowed");
@@ -1383,7 +1345,7 @@ async fn a_command_the_policy_denies_is_declined_without_asking_anyone() {
     with_builder(&db, "hs-push");
     let host = host_at_command(tmp.path(), "hs-push", 6, "git push origin main");
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     let outcome = policy_outcome(&db, "hs-push").await;
     assert_eq!(outcome["decision"], "deny");
     assert_eq!(outcome["rule"], "git push");
@@ -1399,7 +1361,7 @@ async fn a_command_the_policy_does_not_name_reaches_the_owner_with_the_reason() 
     with_builder(&db, "hs-curl");
     let host = host_at_command(tmp.path(), "hs-curl", 7, "curl https://example.com");
 
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert!(answers(tmp.path()).is_empty(), "nothing is pressed");
     assert_eq!(alert_count(&db), 1);
     let body: String = db
@@ -1426,7 +1388,7 @@ async fn without_a_policy_every_dialog_still_goes_to_the_owner() {
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-old");
     let host = host_at_command(tmp.path(), "hs-old", 8, "cargo test");
-    sweep(tmp.path(), &db, &host, None).await;
+    sweep(&db, &host, None).await;
     assert!(answers(tmp.path()).is_empty());
     assert_eq!(alert_count(&db), 1);
 }
@@ -1446,21 +1408,15 @@ async fn a_session_s_life_is_written_as_events_for_the_stream() {
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-life");
 
-    sweep(
-        tmp.path(),
-        &db,
-        &host_with_dialog(tmp.path(), "hs-life", 4),
-        None,
-    )
-    .await;
+    sweep(&db, &host_with_dialog(tmp.path(), "hs-life", 4), None).await;
     let dir2 = tempfile::tempdir().unwrap();
     let working = fake_host(dir2.path(), &[("hs-life", "working", 5)], "compiling");
-    sweep(tmp.path(), &db, &working, None).await;
+    sweep(&db, &working, None).await;
     let dir3 = tempfile::tempdir().unwrap();
     let done = fake_host(dir3.path(), &[("hs-life", "done", 6)], "All done.");
-    sweep(tmp.path(), &db, &done, None).await;
+    sweep(&db, &done, None).await;
     let dir4 = tempfile::tempdir().unwrap();
-    sweep(tmp.path(), &db, &gone_host(dir4.path()), None).await;
+    sweep(&db, &gone_host(dir4.path()), None).await;
 
     let events = event_kinds(&db, "hs-life");
     let kinds: Vec<&str> = events.iter().map(|(k, _)| k.as_str()).collect();
@@ -1516,7 +1472,7 @@ async fn a_finished_turn_posts_what_the_policy_decided_on_the_task() {
         .unwrap();
     }
     let done = fake_host(tmp.path(), &[("hs-pol", "done", 3)], "Done.");
-    sweep(tmp.path(), &db, &done, None).await;
+    sweep(&db, &done, None).await;
     let comments = db
         .with_conn(|c| hq_db::tasks::list_comments(c, &task))
         .unwrap();

@@ -26,7 +26,7 @@
 
 use anyhow::{Result, anyhow, bail};
 use hq_core::config::HqConfig;
-use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, ValueKind};
+use hq_core::types::{ChatMessage, MessageRole, ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
 use hq_tools::agent_host::{AgentInfo, AgentStatus, GitHead, Host, HostBackend};
@@ -37,7 +37,6 @@ use hq_tools::harness_session::{
 };
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -266,15 +265,10 @@ fn llm_summarizer(timeout_secs: u64) -> Summarizer {
     })
 }
 
-pub async fn run_session_supervisor(
-    vault_path: &Path,
-    db: &Database,
-    config: &HqConfig,
-) -> Result<()> {
+pub async fn run_session_supervisor(db: &Database, config: &HqConfig) -> Result<()> {
     let summarizer = summarizer_for(config);
     let resolve: HostResolver = Arc::new(|name| hq_tools::agent_host::host(Some(name)));
     supervise(
-        vault_path,
         db,
         summarizer.as_ref(),
         resolve,
@@ -325,7 +319,6 @@ struct Seen<'a> {
 /// once when it blocks on a dialog.
 fn sweep_alive(
     db: &Database,
-    vault_path: &Path,
     row: &registry::HarnessSessionRow,
     seen: Seen<'_>,
     resolve: &HostResolver,
@@ -369,7 +362,7 @@ fn sweep_alive(
         // the driver's wake, and a state change after the keypress must not lose it.
         AgentStatus::Blocked if dismissed => {}
         AgentStatus::Blocked => alert_blocked(db, row, agent, screen, resolve),
-        AgentStatus::Done => alert_finished(db, vault_path, row, agent, screen, head),
+        AgentStatus::Done => alert_finished(db, row, agent, screen, head),
         _ => {}
     }
 }
@@ -515,7 +508,6 @@ async fn keep_resume_current(
 }
 
 async fn supervise(
-    vault_path: &Path,
     db: &Database,
     summarizer: Option<&Summarizer>,
     resolve: HostResolver,
@@ -568,7 +560,7 @@ async fn supervise(
                     dismissed,
                     head,
                 };
-                sweep_alive(db, vault_path, &row, seen, &resolve);
+                sweep_alive(db, &row, seen, &resolve);
                 keep_resume_current(db, &row, &agent, &resolve).await;
                 alive.push((row, *agent));
                 continue;
@@ -683,7 +675,6 @@ async fn supervise(
             (None, None) => "Final output: no output was captured for this session.".to_string(),
         };
 
-        let subject = format!("Harness session '{label}' finished");
         let exit_code = exited.as_ref().and_then(|a| a.exit_code);
         let body = format!(
             "{}{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}{worktree_line}",
@@ -697,22 +688,20 @@ async fn supervise(
             },
             row.id
         );
-        // The inbox is where the owner reads it; chat relays drop notices.
+        // An exit that left its task blocked needs the owner; any other exit is news.
+        let kind = if exit_interrupts(link.as_ref()) {
+            ValueKind::ActionNeeded
+        } else {
+            ValueKind::Fyi
+        };
         let item = ValueItem::new(
             "session-supervisor",
-            ValueKind::Fyi,
+            kind,
             format!("Harness session '{label}' ended"),
-            body.clone(),
+            body,
         )
         .with_dedup_key(format!("session-exit-{}", row.id));
         let _ = hq_db::value_items::emit(db, &item);
-        post_relay_nudge(
-            vault_path,
-            &row.id,
-            &subject,
-            &body,
-            exit_interrupts(link.as_ref()),
-        );
     }
 
     for (row, agent) in &alive {

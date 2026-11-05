@@ -1,11 +1,10 @@
-//! Notification gate — decides drop/digest/urgent for relay messages by reading
+//! Notification gate: decides drop/digest/urgent for an incoming event by reading
 //! learned `notif.<source>.<kind>` preferences from `_system/USER.md`.
 //!
-//! Called by both relay pollers (Telegram + Discord) right before they forward a
-//! mailbox message, so every producer (the mail-ingest webhooks, native
-//! producers, agents) is gated at the one point
-//! where the user is actually told. Fail-safe: any
-//! error yields `Digest` (keep), never a silent `Drop`.
+//! Its one caller is the agent worker, which drops learned noise before spending
+//! any tokens on it. Digest and urgent are both "keep" there; nothing tells them
+//! apart since relays stopped carrying notices. Fail-safe: any error yields
+//! `Digest` (keep), never a silent `Drop`.
 
 use crate::user_model::{UserModel, UserTrait, load_user_model, save_user_model};
 use chrono::Utc;

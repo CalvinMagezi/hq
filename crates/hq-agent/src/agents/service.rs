@@ -665,7 +665,7 @@ impl AgentService {
         // recursion-guarded spawn_subagents tool); external children run
         // tool-free (pure reasoning/drafting).
         let mut guardian = self.child_guardian(resolution.allowed_paths.clone());
-        guardian.set_denial_notifier(crate::builder::mailbox_denial_notifier(
+        guardian.set_denial_notifier(crate::builder::inbox_denial_notifier(
             self.vault_path.clone(),
         ));
         guardian.set_taint(self.taint.clone());

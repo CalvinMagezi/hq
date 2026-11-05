@@ -173,35 +173,24 @@ impl AgentTool for HqToolAdapter {
     }
 }
 
-/// Build a `DenialNotifier` that surfaces a hard tool denial to the operator
-/// by dropping a message in the `relay` mailbox — the same delivery path
-/// `agent_send_message(recipient="relay")` uses, which the mailbox poller
-/// forwards to whichever of Telegram/Discord the operator is active on
-/// within ~45s. This is the one place that turns a governance denial into
-/// operator-visible output; `governance.rs` itself only knows about the
-/// callback type, so unit tests there can never trigger a real mailbox
-/// write. Fire-and-forget: a write failure is logged and swallowed, never
-/// allowed to affect the tool call it's reporting on.
-pub fn mailbox_denial_notifier(vault_path: PathBuf) -> crate::governance::DenialNotifier {
+/// Build a `DenialNotifier` that puts a hard tool denial in the owner's inbox. This is the one
+/// place that turns a governance denial into something the owner sees; `governance` itself only
+/// knows the callback type, so its unit tests never write to a database. One open item per tool:
+/// an agent that keeps hitting the same wall says so once. Fire-and-forget: a write failure is
+/// logged and swallowed, never allowed to affect the tool call it reports on.
+pub fn inbox_denial_notifier(vault_path: PathBuf) -> crate::governance::DenialNotifier {
     Arc::new(move |tool_name: &str, reason: &str| {
         let vault_path = vault_path.clone();
-        let mut msg = hq_core::mailbox::new_message(
-            "hq",
-            "relay",
-            hq_core::types::MailboxMessageType::Nudge,
-            Some("HQ tool access denied"),
-            &format!("Tool '{tool_name}' was denied: {reason}"),
-            None,
-        );
-        // Same-tick delivery: an operator should know about a governance
-        // denial immediately, not on the next digest cycle.
-        msg.meta.insert(
-            hq_core::mailbox::META_INTERRUPT.to_string(),
-            "true".to_string(),
-        );
-        tokio::spawn(async move {
-            if let Err(e) = hq_core::mailbox::send_message(&vault_path, &msg) {
-                tracing::warn!(error = %e, "failed to surface tool denial to relay mailbox");
+        let item = hq_core::types::ValueItem::new(
+            "governance",
+            hq_core::types::ValueKind::Fyi,
+            format!("HQ refused the tool '{tool_name}'"),
+            format!("Tool '{tool_name}' was denied: {reason}"),
+        )
+        .with_dedup_key(format!("tool-denied-{tool_name}"));
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = hq_db::value_items::emit_at(&vault_path, &item) {
+                tracing::warn!(error = %e, "failed to put a tool denial in the inbox");
             }
         });
     })
@@ -640,7 +629,7 @@ impl SessionBuilder {
         if self.role == SessionRole::Orchestrator {
             session.set_role_denial(Arc::new(crate::session::role_denial::RoleDenial::new(
                 ORCHESTRATOR_REMOVED_TOOLS,
-                mailbox_denial_notifier(vault_path.clone()),
+                inbox_denial_notifier(vault_path.clone()),
                 vec![vault_path.join("Notebooks"), std::env::temp_dir()],
             )));
         }
