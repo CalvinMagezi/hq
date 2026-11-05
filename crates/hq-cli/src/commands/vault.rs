@@ -266,6 +266,23 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 println!("  - {} ({})", note.title, note.path);
             }
         }
+        "moved" => {
+            // The phone app runs this once, before HQ first starts on a phone the vault moved to.
+            let db = hq_db::Database::open_existing(&config.db_path())?;
+            let gone = hq_db::moved::forget_old_phone(&db, chrono::Utc::now().timestamp())?;
+            if args.iter().any(|a| a == "--json") {
+                println!("{}", serde_json::to_string(&gone)?);
+            } else {
+                println!(
+                    "Forgot the old phone's {} device sign-ins, {} paired devices, {} claude.ai grants and {} push subscriptions{}.",
+                    gone.device_sign_ins,
+                    gone.paired_devices,
+                    gone.connector_grants,
+                    gone.push_subscriptions,
+                    if gone.edge { " and its edge" } else { "" }
+                );
+            }
+        }
         "inventory" => super::vault_import::inventory(config, args, &deny).await?,
         "import" => super::vault_import::import(config, args, &deny).await?,
         "repair" => {
@@ -317,6 +334,9 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             );
             println!(
                 "  repair [--apply]     Find (and with --apply remove) search rows left behind by deleted notes, and merge frontmatter left inside note bodies"
+            );
+            println!(
+                "  moved [--json]       On a phone the vault moved to: forget the old phone's sign-ins, pairings, grants and push"
             );
             println!("  stats                Show vault statistics");
             println!("  context              Show system context");

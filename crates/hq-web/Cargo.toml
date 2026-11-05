@@ -23,6 +23,7 @@ hq-tools = { workspace = true }
 chrono = { workspace = true }
 serde_yaml = { workspace = true }
 hq-db = { workspace = true }
+hq-backup = { workspace = true }
 hq-vault = { workspace = true }
 rusqlite = { workspace = true }
 tokio-rustls = "0.26"

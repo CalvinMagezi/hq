@@ -268,6 +268,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/health", get(api::health_handler))
         .route(hello::HELLO_PATH, get(hello::hello_handler))
         .route("/api/status/ai", get(status_ai::status_ai_handler))
+        .route("/api/status/busy", get(status_ai::status_busy_handler))
         .route("/api/vault-status", get(api::vault_status_handler))
         .route("/api/ws-ticket", post(auth::ws_ticket_handler))
         .route(
@@ -874,7 +875,7 @@ mod web_auth_router_tests {
         let app = create_router(Arc::new(state));
         let get = |path: &str| local("GET", path).body(Body::empty()).unwrap();
         assert_eq!(status(&app, get(hello::HELLO_PATH)).await, StatusCode::OK);
-        for refused in ["/api/spaces", "/api/status/ai"] {
+        for refused in ["/api/spaces", "/api/status/ai", "/api/status/busy"] {
             assert_eq!(
                 status(&app, get(refused)).await,
                 StatusCode::UNAUTHORIZED,
