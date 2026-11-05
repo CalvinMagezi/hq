@@ -84,7 +84,7 @@ object ConnectionWords {
     fun of(c: Connection): Words = when (c) {
         Connection.Connected -> Words(R.string.state_connected, tone = ConnectionTone.Quiet)
         is Connection.Starting -> Words(R.string.state_starting, listOf(c.seconds.toString()), ConnectionTone.Working)
-        is Connection.Restarting -> Words(R.string.state_hub_restarting, tone = ConnectionTone.Working)
+        is Connection.Restarting -> Words(R.string.conn_status_restarting, listOf(c.seconds.toString()), ConnectionTone.Working)
         is Connection.Stopped -> Words(R.string.state_hub_stopped, tone = ConnectionTone.Warn)
         is Connection.Reconnecting -> Words(R.string.state_reconnecting, tone = ConnectionTone.Working)
         is Connection.ServerUnreachable -> Words(R.string.state_server_unreachable, tone = ConnectionTone.Warn)

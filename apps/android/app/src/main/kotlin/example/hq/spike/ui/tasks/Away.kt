@@ -54,6 +54,13 @@ data class Away(
 
 /** The sentences of the card and the page, built from the briefing's counts. Zero parts are left out. */
 object AwayWords {
+    /** The line for a briefing that could not be read, by what the connection was doing (A2: it retries by itself only while starting). */
+    @androidx.annotation.StringRes fun loadFailure(c: example.hq.spike.data.Connection): Int = when (c) {
+        is example.hq.spike.data.Connection.Starting, is example.hq.spike.data.Connection.Restarting -> R.string.fail_load_away_starting
+        is example.hq.spike.data.Connection.Stopped -> R.string.fail_load_away_stopped
+        else -> R.string.fail_load_away_no_reply
+    }
+
     /** Who a reopened task went back to: the helper on it, else "you". Null means the owner. */
     fun sendBackTo(assignee: String?): String? = assignee?.trim()?.takeIf { it.isNotEmpty() && !it.equals("me", true) && !it.equals("you", true) }
 

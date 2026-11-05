@@ -735,7 +735,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         return NotifFacts(
             nm.areNotificationsEnabled(), channels, AlertPoster.showDetails(ctx()), AlertPoster.deviceSecure(ctx()), note,
             needsImportance = nm.getNotificationChannel(AlertPoster.NEEDS)?.importance ?: IMPORTANCE_HIGH_FACT,
-            server = ServerFacts(ServerHq.address(ctx()), ServerHq.signedOut(ctx())),
+            server = ServerFacts(ServerHq.address(ctx()), ServerHq.signedOut(ctx()), ServerHq.keyLost(ctx()), example.hq.spike.ui.firstrun.FirstRunStore(ctx()).movedSeen()),
         )
     }
 

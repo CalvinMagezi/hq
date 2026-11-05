@@ -105,6 +105,9 @@ data class ContextRef(val kind: Kind, val ref: String, val label: String) {
 
 enum class FileStatus { Uploading, Ready, Failed }
 
+/** Why a file chip failed; the words come from the catalogue. */
+enum class FileError { TooBig, Empty, UploadFailed }
+
 /** A file picked for the next message, from pick to upload result. [uri] stays so a failed upload can be tried again. */
 data class PendingFile(
     val id: String,
@@ -113,15 +116,11 @@ data class PendingFile(
     val size: Long,
     val mime: String,
     val status: FileStatus,
-    val error: String? = null,
+    val error: FileError? = null,
     val uploaded: Attachment? = null,
 ) {
     /** A failed upload can be tried again; a file that is too big or empty cannot. */
-    val retryable: Boolean get() = status == FileStatus.Failed && uploaded == null && error == UPLOAD_FAILED
-
-    companion object {
-        const val UPLOAD_FAILED = "upload failed"
-    }
+    val retryable: Boolean get() = status == FileStatus.Failed && uploaded == null && error == FileError.UploadFailed
 }
 
 /** The note or task picker: what is typed and what matched. */

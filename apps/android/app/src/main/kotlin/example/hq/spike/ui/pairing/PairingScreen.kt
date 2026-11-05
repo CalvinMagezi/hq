@@ -215,6 +215,10 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
         val peers = bridge.peers
         when {
             peers == null -> Body(if (bridge.enabled) "Looking…" else "Turn paired devices on to see them.")
+            peers.isEmpty() && example.hq.spike.ui.firstrun.FirstRunStore(LocalContext.current).movedSeen() -> {
+                Text(stringResource(R.string.moved_none_paired_title), style = HqType.BodyBold, color = Mts.Ink)
+                Body(stringResource(R.string.moved_none_paired_body))
+            }
             peers.isEmpty() -> Body("No device is paired.")
             else -> peers.forEach { PeerRow(it) { vm.askRemove(it) } }
         }

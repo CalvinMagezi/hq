@@ -170,8 +170,8 @@ private fun richFixture(name: String?): ChatUiState? {
             draft = "Check these",
             files = listOf(
                 PendingFile("f1", "", "soak-log.txt", 1_258_291, "text/plain", FileStatus.Ready),
-                PendingFile("f2", "", "A-very-long-video-name.mp4", 40_000_000, "video/mp4", FileStatus.Failed, "over 25 MB"),
-                PendingFile("f3", "", "photo.jpg", 2_000_000, "image/jpeg", FileStatus.Failed, PendingFile.UPLOAD_FAILED),
+                PendingFile("f2", "", "A-very-long-video-name.mp4", 40_000_000, "video/mp4", FileStatus.Failed, FileError.TooBig),
+                PendingFile("f3", "", "photo.jpg", 2_000_000, "image/jpeg", FileStatus.Failed, FileError.UploadFailed),
             ),
         )
         "press" -> chat("Samsung battery steps", "How do I stop Samsung putting the app to sleep?", reply("r1", "Open Settings, then Battery, find AgentHQ and choose Unrestricted.")).let { it.copy(pressed = "r1") }

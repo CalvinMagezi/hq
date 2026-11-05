@@ -52,6 +52,9 @@ object ServerHq {
     /** The server HQ's own state for the status line: when it stopped answering, or null when it answers or there is none. */
     fun unreachableSince(c: Context): Long? = unreachableSince.takeIf { it > 0 && current(c) != null }
 
+    /** A server HQ's address came with the notes to a new phone but its key did not: Android seals keys to the phone that made them. */
+    fun keyLost(c: Context): Boolean = address(c) != null && !signedOut(c) && SecretStore.serverToken(c) == null
+
     fun signedOut(c: Context): Boolean = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SIGNED_OUT, false)
 
     /** The server answered 401: its token was signed out there. The phone stops asking until the owner signs in again. */

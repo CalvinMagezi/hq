@@ -80,6 +80,7 @@ fun AwayPage(ui: AwayUi, tasks: List<TaskItem>, actions: TasksActions, onTask: (
             }
         }
         LazyColumn(Modifier.weight(1f), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
+            if (ui.phone == null) ui.phoneFailure?.let { item { Text(stringResource(it), style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) } }
             val showServerHeading = ui.server != null || ui.serverStale
             if (showServerHeading) item { Heading(stringResource(R.string.away_phone_heading)) }
             ui.phone?.let { part(it, assignee, actions, onTask, w) }

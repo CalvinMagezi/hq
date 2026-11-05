@@ -51,6 +51,8 @@ data class ConnectionFacts(
     val stoppedAtStep: Int? = null,
     val details: List<String> = emptyList(),
     val serverAddress: String? = null,
+    /** What the internet is right now, as the catalogue words for it (Wi-Fi or mobile data); null when unknown. */
+    @androidx.annotation.StringRes val internet: Int? = null,
 )
 
 /** The Connection sheet (wave-2/04-startup.md frames 3 to 7): the state in words, the four steps while HQ starts, and the way out when it has stopped. */
@@ -85,9 +87,10 @@ fun ConnectionSheet(status: Connection, facts: ConnectionFacts, actions: Connect
 @Composable
 private fun StartingBody(step: Int, seconds: Long, usual: Long?, facts: ConnectionFacts, actions: ConnectionActions, onClose: () -> Unit) {
     Text(stringResource(R.string.conn_title_starting), style = HqType.H2, color = Mts.Ink)
-    Text(stringResource(R.string.conn_body_starting), style = HqType.BodySm, color = Mts.InkMuted)
+    Text(stringResource(if (facts.serverAddress != null) R.string.conn_server_body else R.string.conn_body_starting), style = HqType.BodySm, color = Mts.InkMuted)
     facts.serverAddress?.let { Fact(R.string.conn_fact_server, stringResource(R.string.conn_server_value, it)) }
     Fact(R.string.conn_fact_phone, stringResource(R.string.conn_phone_step, step, seconds))
+    facts.internet?.let { Fact(R.string.conn_fact_internet, stringResource(it)) }
     StartSteps(step, seconds, showCount = false)
     usual?.let { Text(stringResource(R.string.conn_usual, it), style = HqType.BodySm, color = Mts.InkMuted) }
     if (StartRules.slow(seconds, usual)) Amber(HqIcons.Clock, stringResource(R.string.conn_slow))

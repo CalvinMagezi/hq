@@ -853,7 +853,6 @@
     <string name="hub_notif_needs_body">HQ Hub shows a notice on this computer. Its only button is Open.</string>
     <string name="hub_notif_updates_title">Updates</string>
     <string name="hub_notif_updates_body">This window has no web push. Your phone shows its own notifications.</string>
-    <string name="settings_load_failed">These settings can\'t load right now.</string>
     <string name="notif_in_browser">In this browser</string>
     <string name="notif_needs_desc">Questions and approvals from helpers and tasks.</string>
     <string name="notif_updates_desc">What HQ finished, like \"HQ answered\" after you leave a chat.</string>
@@ -1627,12 +1626,13 @@
     <string name="start_title">Starting HQ</string>
     <string name="start_body">HQ is starting on this phone. The first start after a reboot can take up to a minute.</string>
     <string name="start_capture_hint">Have a thought\? It is saved now and sent when HQ is up.</string>
-    <string name="start_chat_banner">HQ is starting. Your draft is kept; Send turns on when it is up.</string>
     <string name="conn_status_restarting">Restarting HQ · %1$s s</string>
     <string name="conn_title_starting">HQ is starting</string>
     <string name="conn_body_starting">HQ runs on this phone. After a reboot it can take up to a minute. You can read and write while you wait.</string>
     <string name="conn_fact_phone">HQ on this phone</string>
     <string name="conn_fact_internet">Internet</string>
+    <string name="conn_net_wifi">Wi-Fi</string>
+    <string name="conn_net_mobile">Mobile data</string>
     <string name="conn_fact_saved">Saved on this phone at</string>
     <string name="conn_fact_stopped_at">Stopped at</string>
     <string name="conn_fact_server">Your server HQ</string>
@@ -2473,7 +2473,6 @@
     <string name="helpers_tell_instead">Tell %1$s what to do instead</string>
     <string name="helpers_tell_label">What should %1$s do instead\?</string>
     <string name="helpers_tell_send">Send</string>
-    <string name="helpers_tell_failed">Couldn\'t send that. Look at its screen.</string>
     <string name="helpers_not_taken">%1$s did not take that answer. Check its screen.</string>
     <string name="helpers_unreadable">HQ can\'t read this question. Here is its screen.</string>
     <string name="helpers_right_now">Right now</string>

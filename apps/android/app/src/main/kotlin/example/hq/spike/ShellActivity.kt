@@ -451,6 +451,16 @@ class ShellActivity : ComponentActivity() {
         }
     }
 
+    private fun internetNow(): Int? {
+        val cm = getSystemService(android.net.ConnectivityManager::class.java) ?: return null
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return null) ?: return null
+        return when {
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> R.string.conn_net_wifi
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> R.string.conn_net_mobile
+            else -> null
+        }
+    }
+
     @androidx.compose.runtime.Composable
     private fun ConnectionHost(status: Connection, freeBytes: Long?) {
         val w = example.hq.spike.ui.shell.Words.of(this)
@@ -459,6 +469,7 @@ class ShellActivity : ComponentActivity() {
             freeBytes = freeBytes,
             savedAt = saved?.let { w.clock(java.time.Instant.ofEpochMilli(it)) },
             stoppedAtStep = (status as? Connection.Stopped)?.step?.plus(1),
+            internet = internetNow(),
             details = StartupWords.failedLines(w, HubService.lastStart(this), HubService.lastExit(this), (status as? Connection.Stopped)?.let { (System.currentTimeMillis() - it.sinceMs) / 1000 } ?: StartRules.STILL_OPENING_S),
         )
         example.hq.spike.ui.connection.ConnectionSheet(
