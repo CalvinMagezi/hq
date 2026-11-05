@@ -2235,4 +2235,26 @@
     <string name="inbox_notify_turn_on">Turn on notifications</string>
     <string name="inbox_notify_blocked">Notifications are blocked for this site. Allow them in the browser settings, then try again.</string>
     <string name="inbox_notify_on">Notifications from HQ are on in this browser.</string>
+    <string name="helpers_locked_banner">All helpers are stopped. Allow them again in HQ Hub on that computer.</string>
+    <string name="helpers_locked_fact_owner">%1$s · you stopped every helper at %2$s</string>
+    <string name="helpers_locked_fact_breaker">%1$s · too many started at once, so HQ stopped them at %2$s</string>
+    <string name="helpers_locked_fact_other">%1$s · its helpers were stopped at %2$s</string>
+    <string name="helpers_locked_technical">or run hq host unlock on that computer</string>
+    <string name="helpers_technical_details">Technical details</string>
+    <string name="helpers_technical_hint">Its screen and keys. Closed until you open it.</string>
+    <string name="helpers_typing_label">Typing to the helper</string>
+    <string name="helpers_typing_hint">While on, keys and Esc in its screen go to %1$s. Ctrl ] always leaves the screen.</string>
+    <string name="helpers_interrupt_press_again">Press again</string>
+    <string name="helpers_interrupt_armed">Press Ctrl C again within 4 s to stop what %1$s is doing.</string>
+    <string name="helpers_screen_closed_read">Its screen is read once, to show what it asked.</string>
+    <string name="stop_all_unreachable">That computer can\'t be reached, so its helpers were not stopped.</string>
+    <string name="stop_all_locked_host">%1$s · stopped</string>
+    <string name="stop_all_try_again">Try again</string>
+    <string name="tasks_done_one_title">Mark this done\?</string>
+    <plurals name="tasks_done_one_body">
+        <item quantity="one">%1$s task waits on \"%2$s\". HQ tells it it can start.</item>
+        <item quantity="other">%1$s tasks wait on \"%2$s\". HQ tells them they can start.</item>
+    </plurals>
+    <string name="tasks_done_one_keep">Not now</string>
+    <string name="tasks_move_to">Move %1$s to</string>
 </resources>

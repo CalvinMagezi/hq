@@ -1,6 +1,6 @@
 import { hqJson } from './hqAuth'
 import type { TaskStatus } from './tasksApi'
-import type { SessionEvent } from './autoAnswers'
+import type { ServerAnswer } from './autoAnswers'
 
 export type SessionStatus = 'running' | 'exited' | 'stopped' | 'orphaned'
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done'
@@ -31,8 +31,6 @@ export interface WatchedSession {
   pending_wake: string | null
   last_driven_at: string | null
   created_at: string
-  /** The session's recorded events, when the server sends them; the answers HQ gave are read from these. */
-  events?: SessionEvent[]
   task: { id: string; display_id: string; title: string; status: TaskStatus } | null
 }
 
@@ -296,6 +294,10 @@ export const globalSessionsApi = {
     const res = await hqJson<{ sessions?: HarnessSession[] }>(`/api/harness-sessions${queryString(filters)}`)
     return res.sessions ?? []
   },
+
+  /** What HQ answered on its own for this helper (Drive, a command policy); the owner's own answers are left out. */
+  answers: async (id: string): Promise<ServerAnswer[]> =>
+    (await hqJson<{ answers?: ServerAnswer[] }>(`${sessionPath(id)}/answers`)).answers ?? [],
 
   get: async (id: string): Promise<HarnessSession> => (await hqJson<{ session: HarnessSession }>(sessionPath(id))).session,
 

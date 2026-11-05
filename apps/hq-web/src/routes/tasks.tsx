@@ -24,6 +24,7 @@ import {
 import { toastUndo, toastAlert } from '~/lib/toast'
 import { Dialog } from '~/components/ui/Dialog'
 import { t, tn } from '~/strings'
+import { asksBeforeDone, dependentsOf } from '~/lib/doneAsk'
 import { TaskListView, type ListSections } from '~/components/tasks/TaskListView'
 import { BulkActionBar } from '~/components/tasks/BulkActionBar'
 import { bulkMessage, failureNotice, runBulk, splitUnchanged, uniqueWarnings } from '~/components/tasks/bulk'
@@ -279,6 +280,7 @@ function TasksPage() {
   }
 
   const [bulkDonePending, setBulkDonePending] = useState<TaskItem[] | null>(null)
+  const [doneAsk, setDoneAsk] = useState<{ id: string; patch: Record<string, unknown> } | null>(null)
 
   const withBusy = async (fn: () => Promise<void>, fallback: string) => {
     setBusy(true)
@@ -292,7 +294,16 @@ function TasksPage() {
     }
   }
 
-  const handleUpdate = (id: string, patch: Record<string, unknown>) =>
+  const handleUpdate = (id: string, patch: Record<string, unknown>) => {
+    const previous = taskById.get(id)
+    if (asksBeforeDone(previous, patch, taskById.values()) > 0) {
+      setDoneAsk({ id, patch })
+      return Promise.resolve()
+    }
+    return applyUpdate(id, patch)
+  }
+
+  const applyUpdate = (id: string, patch: Record<string, unknown>) =>
     withBusy(async () => {
       const previous = taskById.get(id)
       const task = await updateTaskClient(id, patch)
@@ -588,6 +599,22 @@ function TasksPage() {
                   }
                 : undefined
             }
+          />
+        )}
+
+        {doneAsk && taskById.get(doneAsk.id) && (
+          <Dialog
+            kind="ask"
+            title={t('tasks_done_one_title')}
+            body={tn('tasks_done_one_body', dependentsOf({ id: doneAsk.id }, taskById.values()).length, { title: taskById.get(doneAsk.id)?.title ?? '' })}
+            keepLabel={t('tasks_done_one_keep')}
+            actLabel={t('tasks_mark_done')}
+            onKeep={() => setDoneAsk(null)}
+            onAct={() => {
+              const ask = doneAsk
+              setDoneAsk(null)
+              void applyUpdate(ask.id, ask.patch)
+            }}
           />
         )}
 

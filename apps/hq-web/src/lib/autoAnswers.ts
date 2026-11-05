@@ -1,9 +1,10 @@
-/** A session event as the registry records it; `detail` is JSON text for an `answered` event. */
-export interface SessionEvent {
-  kind: string
+/** One answer as `GET /api/harness-sessions/{id}/answers` lists it: HQ's own, never the owner's. */
+export interface ServerAnswer {
   by?: string | null
-  detail?: string | null
   at?: string | null
+  kind?: string | null
+  choice?: unknown
+  registered?: unknown
 }
 
 export interface AutoAnswer {
@@ -13,22 +14,12 @@ export interface AutoAnswer {
   declined: boolean
 }
 
-const OWNER = 'owner'
-
-/** The answers someone other than the owner gave a helper's dialogs, oldest first, read from its `answered` events. */
-export function autoAnswers(events: SessionEvent[] | undefined): AutoAnswer[] {
+/** The answers HQ gave a helper's dialogs, oldest first, from the server's answers list. */
+export function autoAnswers(answers: ServerAnswer[] | undefined): AutoAnswer[] {
   const out: AutoAnswer[] = []
-  for (const e of events ?? []) {
-    if (e.kind !== 'answered') continue
-    let detail: { by?: string; choice?: unknown; kind?: string } = {}
-    try {
-      detail = JSON.parse(e.detail ?? '{}') as typeof detail
-    } catch {
-      continue
-    }
-    const by = detail.by ?? e.by ?? ''
-    if (!by || by === OWNER) continue
-    out.push({ at: e.at ?? null, by, kind: detail.kind ?? 'dialog', declined: detail.choice === 'decline' })
+  for (const a of answers ?? []) {
+    if (!a.by || a.by === 'owner') continue
+    out.push({ at: a.at ?? null, by: a.by, kind: a.kind ?? 'dialog', declined: a.choice === 'decline' })
   }
-  return out.sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
+  return out.sort((x, y) => (x.at ?? '').localeCompare(y.at ?? ''))
 }

@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { attachCommand, canSend, isBlocked, type HarnessSession } from '~/lib/sessionsApi'
 import { folderName, screenPollMs } from '~/lib/workbench'
-import { SessionTerminal } from './SessionTerminal'
+import { TechnicalDetails } from './TechnicalDetails'
 import { SessionSendBox } from './SessionSendBox'
 import { SessionBadges, SessionTaskLink } from './SessionRow'
 import { BlockedCallout } from './BlockedCallout'
@@ -73,7 +73,7 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
           extras
         )}
       </header>
-      <SessionTerminal sessionId={s.id} refreshKey={sentCount} active pollMs={screenPollMs(s)} onText={setScreenText} />
+      <TechnicalDetails session={s} refreshKey={sentCount} pollMs={screenPollMs(s)} onText={setScreenText} onSent={afterSend} />
       <Footer session={s} screenText={screenText} onSent={afterSend} onChanged={onChanged} />
     </div>
   )

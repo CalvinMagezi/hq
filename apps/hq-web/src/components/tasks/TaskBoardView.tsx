@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { STATUS_LABELS, STATUS_ORDER, type TaskItem, type TaskStatus } from '~/lib/tasksApi'
+import { t } from '~/strings'
 import { TaskCard } from './TaskCard'
 import { parentLabelFor } from './hierarchy'
 import { usePointerDrag, type DragPoint } from './usePointerDrag'
@@ -72,6 +73,19 @@ export function TaskBoardView({ tasks, allById, onSelect, onMove }: Props) {
                   className={`select-none [-webkit-touch-callout:none] ${drag?.task.id === task.id ? 'opacity-30' : ''}`}
                 >
                   <TaskCard task={task} parentLabel={parentLabelFor(task, allById)} compact />
+                  <select
+                    value={task.status}
+                    aria-label={t('tasks_move_to', { title: task.title })}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onChange={(e) => onMove(task, e.target.value as TaskStatus)}
+                    className="mt-1 w-full min-h-11 rounded-lg bg-transparent text-xs text-neutral-400 border border-white/10 px-2"
+                  >
+                    {STATUS_ORDER.map((s) => (
+                      <option key={s} value={s}>
+                        {STATUS_LABELS[s]}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               ))}
             </div>

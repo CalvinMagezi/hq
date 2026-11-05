@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { Archive, EyeOff, Loader2, Terminal } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
@@ -8,7 +8,7 @@ import { agentName, computerName } from '~/lib/names'
 import { t, tn } from '~/strings'
 import { autoAnswers, type AutoAnswer } from '~/lib/autoAnswers'
 import { Dialog } from '../ui/Dialog'
-import type { WatchedSession } from '~/lib/sessionsApi'
+import { globalSessionsApi, type WatchedSession } from '~/lib/sessionsApi'
 import { STATUS_BADGE_CLASS } from '../tasks/TaskCard'
 import { HelperPill } from '../sessions/SessionRow'
 
@@ -130,7 +130,7 @@ function SessionRow({ session: s, busy, onDrive, onUnwatch }: RowProps) {
       <GoalLines session={s} />
       <StatusLine session={s} />
       <DriveSwitch drive={s.drive} busy={busy} onChange={onDrive} />
-      <AnswerLog answers={autoAnswers(s.events)} />
+      <AnswerLog sessionId={s.id} />
       {!s.drive && s.drive_off_reason && (
         <p className="mt-1 text-xs" style={{ color: 'var(--warn)' }}>
           {t('helpers_drive_off_reason', { reason: s.drive_off_reason })}
@@ -223,8 +223,9 @@ function DriveSwitch({ drive, busy, onChange }: { drive: boolean; busy: boolean;
   )
 }
 
-/** Every answer HQ gave for the helper, with its time. Empty until the server lists the helper's events. */
-function AnswerLog({ answers }: { answers: AutoAnswer[] }) {
+/** Every answer HQ gave for the helper, with its time, asked of the server's answers list. */
+function AnswerLog({ sessionId }: { sessionId: string }) {
+  const answers = useAnswers(sessionId)
   return (
     <div className="mt-1.5 text-neutral-400">
       <p className="font-semibold text-neutral-300">{tn('chat_say_yes_log', answers.length)}</p>
@@ -239,6 +240,21 @@ function AnswerLog({ answers }: { answers: AutoAnswer[] }) {
       )}
     </div>
   )
+}
+
+function useAnswers(sessionId: string): AutoAnswer[] {
+  const [answers, setAnswers] = useState<AutoAnswer[]>([])
+  useEffect(() => {
+    let live = true
+    globalSessionsApi
+      .answers(sessionId)
+      .then((list) => live && setAnswers(autoAnswers(list)))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [sessionId])
+  return answers
 }
 
 function answerLine(a: AutoAnswer): string {

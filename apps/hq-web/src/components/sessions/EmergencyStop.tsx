@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { CheckCircle2, Loader2, OctagonX, X } from 'lucide-react'
 import { workbenchApi, type LockdownResult, type WorkbenchHost } from '~/lib/sessionsApi'
 import { computerName } from '~/lib/workbench'
+import { lockFact, unreachableHosts } from '~/lib/lockdown'
 import { ErrorText } from './ErrorText'
 import { useModal } from './useModal'
 
@@ -96,7 +97,7 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
           {result ? (
-            <StopReport result={result} />
+            <StopReport result={result} onRetry={() => void stop()} />
           ) : (
             <>
               <p id="stop-all-what" className="text-xs text-neutral-300 leading-relaxed">
@@ -159,41 +160,53 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
   )
 }
 
-function StopReport({ result }: { result: LockdownResult }) {
+function StopReport({ result, onRetry }: { result: LockdownResult; onRetry: () => void }) {
+  const failed = unreachableHosts(result)
   return (
-    <ul className="space-y-2" role="status">
-      {result.hosts.map((h) => (
-        <li key={h.host} className="flex items-start gap-2 text-xs">
-          {h.locked ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--accent-green)' }} />
-          ) : (
-            <OctagonX className="w-4 h-4 shrink-0" style={{ color: 'var(--accent-amber)' }} />
-          )}
-          <span className="min-w-0 break-words text-neutral-200">
-            {h.locked
-              ? `${computerName(h.host)} is stopped and locked.`
-              : `${computerName(h.host)} did not lock: it may be offline or need an HQ update. Run hq host lockdown on it.`}
-          </span>
-        </li>
-      ))}
-    </ul>
+    <div role="status" className="space-y-2">
+      <ul className="space-y-2">
+        {result.hosts
+          .filter((h) => h.locked)
+          .map((h) => (
+            <li key={h.host} className="flex items-start gap-2 text-xs">
+              <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--ink)' }} />
+              <span className="min-w-0 break-words text-neutral-200">{t('stop_all_locked_host', { computer: computerName(h.host) })}</span>
+            </li>
+          ))}
+      </ul>
+      {failed.length > 0 && (
+        <div className="flex items-start gap-2 text-xs">
+          <OctagonX className="w-4 h-4 shrink-0" style={{ color: 'var(--warn)' }} />
+          <div className="min-w-0 space-y-2">
+            <p className="break-words text-neutral-200">{t('stop_all_unreachable')}</p>
+            <button type="button" onClick={onRetry} className="a-btn secondary">
+              {t('stop_all_try_again')}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
-/** Names each computer that is locked down and how to lift it. */
+/** Says which computers refuse to start helpers and who stopped them. There is no way to lift it here: only HQ Hub on that computer can. */
 export function LockdownBanner({ hosts }: { hosts: WorkbenchHost[] }) {
   const locked = hosts.filter((h) => h.lockdown)
   if (locked.length === 0) return null
   return (
-    <div role="status" className="mx-4 mb-3 px-3 py-2 rounded-xl text-xs text-neutral-200 border" style={{ borderColor: 'var(--accent-green)' }}>
+    <div role="status" className="mx-4 mb-3 px-3 py-2 rounded-xl text-xs text-neutral-200 border" style={{ borderColor: 'var(--warn)' }}>
+      <p className="font-semibold" style={{ color: 'var(--warn)' }}>
+        {t('helpers_locked_banner')}
+      </p>
       {locked.map((h) => (
         <p key={h.host} className="break-words">
-          <span className="font-semibold" style={{ color: 'var(--accent-green)' }}>
-            {computerName(h.host)} is locked down
-          </span>{' '}
-          ({h.lockdown?.reason}). Run <code>hq host unlock</code> on it to start agents again.
+          {h.lockdown && lockFact(h.host, h.lockdown)}
         </p>
       ))}
+      <details>
+        <summary className="flex items-center min-h-11 cursor-pointer text-neutral-400 select-none">{t('helpers_technical_details')}</summary>
+        <p className="break-words text-neutral-400">{t('helpers_locked_technical')}</p>
+      </details>
     </div>
   )
 }

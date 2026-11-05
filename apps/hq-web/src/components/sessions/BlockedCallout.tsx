@@ -37,8 +37,22 @@ interface Props {
  *  otherwise Approve and Decline appear only for a plain yes or no question. */
 export function BlockedCallout({ session, screenText, onSent }: Props) {
   const { send, busy, error } = useSend(session.id, onSent)
-  const tail = tailLines(screenText, CALLOUT_LINES)
-  const kind = classifyBlocked(screenText)
+  const [once, setOnce] = useState('')
+  // Technical details starts closed, so the question is read once here instead of from a stream.
+  useEffect(() => {
+    if (screenText) return
+    let live = true
+    globalSessionsApi
+      .screen(session.id, 40)
+      .then((r) => live && setOnce(r.lines.join('\n')))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [session.id, screenText])
+  const text = screenText || once
+  const tail = tailLines(text, CALLOUT_LINES)
+  const kind = classifyBlocked(text)
   const read = readDialog(session)
   const [answered, setAnswered] = useState<string | null>(null)
   const held = busy || answerHeld(answered, tail)
@@ -57,12 +71,12 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
 
   return (
     <section
-      aria-label="This agent is waiting for you"
-      className="sticky bottom-0 shrink-0 hq-composer border-t px-3 py-3 space-y-2"
+      aria-label={t('helpers_waiting_for_you')}
+      className="shrink-0 hq-composer border-t px-3 py-3 space-y-2"
       style={{ borderColor: 'var(--warn)' }}
     >
       <h3 className="text-sm font-semibold" style={{ color: 'var(--warn)' }}>
-        This agent is waiting for you
+        {t('helpers_waiting_for_you')}
       </h3>
       {read ? (
         <DialogAnswer sessionId={session.id} dialog={read.dialog} seq={read.seq} onSent={onSent} />

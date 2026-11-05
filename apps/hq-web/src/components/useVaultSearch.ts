@@ -6,8 +6,8 @@ import { searchDebounceMs } from '~/lib/dataUsage'
 import { SEARCH_DEBOUNCE_MS } from '~/lib/search'
 
 /** Debounced vault search with arrow, Enter and Escape handling for the search input. */
-export function useVaultSearch(onClose: () => void, folder?: string | null) {
-    const [query, setQuery] = useState('')
+export function useVaultSearch(onClose: () => void, folder?: string | null, initialQuery = '') {
+    const [query, setQuery] = useState(initialQuery)
     const [results, setResults] = useState<SearchHit[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const [failed, setFailed] = useState(false)

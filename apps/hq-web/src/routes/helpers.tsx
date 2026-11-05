@@ -156,7 +156,7 @@ function WorkbenchPage() {
               )}
             </div>
             {selected && (
-              <div className="hidden 2xl:flex">
+              <div className="hidden min-[1400px]:flex">
                 <SessionInspector session={selected} />
               </div>
             )}

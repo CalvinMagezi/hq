@@ -54,17 +54,16 @@ test('turn_end with waiting_for_owner puts the chat in the needs-your-OK state',
   expect(useThreadStore.getState().waiting.w1).toBe(false)
 })
 
-test('answers HQ gave are read from the answered events, the owner own answers left out', () => {
-  const events = [
-    { kind: 'answered', by: 'a Drive turn', at: '2026-11-05 11:12:00', detail: JSON.stringify({ by: 'a Drive turn', kind: 'question', choice: { option: 1 } }) },
-    { kind: 'answered', by: 'owner', at: '2026-11-05 11:13:00', detail: JSON.stringify({ by: 'owner', kind: 'edit', choice: { option: 1 } }) },
-    { kind: 'answered', by: 'the command policy', at: '2026-11-05 11:14:00', detail: JSON.stringify({ by: 'the command policy', kind: 'command', choice: 'decline' }) },
-    { kind: 'stopped', by: 'x' },
-    { kind: 'answered', by: 'broken', detail: '{' },
+test('answers HQ gave come from the answers list, the owner own answers left out', () => {
+  const list = [
+    { by: 'a Drive turn', at: '2026-11-05T11:12:00Z', kind: 'question', choice: { option: 1 } },
+    { by: 'owner', at: '2026-11-05T11:13:00Z', kind: 'edit', choice: { option: 1 } },
+    { by: 'the command policy', at: '2026-11-05T11:11:00Z', kind: 'command', choice: 'decline' },
+    { at: '2026-11-05T11:15:00Z' },
   ]
-  const out = autoAnswers(events)
-  expect(out.map((a) => a.by)).toEqual(['a Drive turn', 'the command policy'])
-  expect(out[1].declined).toBe(true)
+  const out = autoAnswers(list)
+  expect(out.map((a) => a.by)).toEqual(['the command policy', 'a Drive turn'])
+  expect(out[0].declined).toBe(true)
   expect(autoAnswers(undefined)).toEqual([])
 })
 

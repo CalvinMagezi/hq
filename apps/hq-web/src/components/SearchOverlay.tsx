@@ -35,6 +35,7 @@ import {
 } from '~/lib/search'
 import type { SearchHit } from '~/lib/vaultApi'
 import { useVaultSearch } from './useVaultSearch'
+import { forgetSearch, readBack, rememberSearch } from '~/lib/searchBack'
 
 type Kind = Exclude<SearchScope, 'all'>
 
@@ -50,6 +51,8 @@ interface Row {
 interface OpenDetail {
   scope?: SearchScope
   folder?: string
+  q?: string
+  scroll?: number
 }
 
 const CHIP_KEYS = {
@@ -105,11 +108,20 @@ export function SearchOverlay() {
       }
     }
     const onOpen = (e: Event) => show((e as CustomEvent<OpenDetail | null>).detail ?? {})
+    // Back from an opened result lands on the entry marked at that time: Search reopens once, as it was left.
+    const onPop = () => {
+      const back = readBack(window.location.search, window.history.state)
+      if (!back) return
+      forgetSearch()
+      show({ q: back.q, scope: back.scope, ...(back.folder ? { folder: back.folder } : {}), scroll: back.scroll })
+    }
     window.addEventListener('keydown', onKey)
     window.addEventListener('hq:open-search', onOpen)
+    window.addEventListener('popstate', onPop)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('hq:open-search', onOpen)
+      window.removeEventListener('popstate', onPop)
     }
   }, [open])
 
@@ -136,7 +148,7 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
   const hqId = currentHqId()
   const [recent, setRecent] = useState(() => readRecent(hqId))
 
-  const notes = useVaultSearch(() => undefined, folder)
+  const notes = useVaultSearch(() => undefined, folder, start.q)
   const { query, setQuery, again } = notes
   const typed = query.trim().length > 0
 
@@ -174,13 +186,19 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
   const chatHits = useMemo(() => (typed && wantsChats ? matchChats(threads, query) : []), [typed, wantsChats, threads, query])
   const noteHits: SearchHit[] = typed && wantsNotes && !notes.failed ? notes.results : []
 
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (start.scroll && listRef.current) listRef.current.scrollTop = start.scroll
+  }, [start.scroll, noteHits.length, taskHits.length])
+
   const go = useCallback(
     (row: Row) => {
       setRecent((r) => writeRecent(hqId, withRecent(r, query)))
+      if (query.trim()) rememberSearch({ q: query, scope, folder, scroll: listRef.current?.scrollTop ?? 0 })
       close()
       row.open()
     },
-    [hqId, query, close],
+    [hqId, query, scope, folder, close],
   )
 
   const rows = useMemo<Record<Kind, Row[]>>(
@@ -342,7 +360,7 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
           </p>
         )}
 
-        <div id={listId} role="listbox" aria-label={t('search_results_label')} className="flex-1 overflow-y-auto">
+        <div ref={listRef} id={listId} role="listbox" aria-label={t('search_results_label')} className="flex-1 overflow-y-auto">
           {!typed && (
             <div className="px-4 py-3">
               {recent.length > 0 && (
