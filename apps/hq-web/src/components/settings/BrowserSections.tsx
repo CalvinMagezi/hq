@@ -11,6 +11,7 @@ import { HqHttpError, refuseSignIn } from '~/lib/hqAuth'
 import { signOutCurrentDevice } from '~/lib/deviceSignIn'
 import { useInstallOffer } from '~/components/InstallPrompt'
 import { t } from '~/strings'
+import { supportDetails } from '~/lib/supportDetails'
 
 const HTTP_BAD_REQUEST = 400
 
@@ -45,6 +46,42 @@ export function VersionPage() {
         <span className="a-muted">{t('ver_browser_line', { version: APP_VERSION })}</span>
         {hello && <span className="a-muted">{t('ver_hq_line', { version: hello.version })}</span>}
       </div>
+      <div className="a-card">
+        <b>{t('ver_updates_title')}</b>
+        <span className="a-muted">{t('ver_updates_body')}</span>
+        <span className="a-muted">{t('ver_updates_value')}</span>
+      </div>
+      <SupportCard lines={[t('ver_browser_line', { version: APP_VERSION }), hello ? t('ver_hq_line', { version: hello.version }) : '']} />
+    </div>
+  )
+}
+
+function SupportCard({ lines }: { lines: string[] }) {
+  const [text, setText] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="a-card">
+      <b>{t('copy_details_title')}</b>
+      <span className="a-muted">{t('ver_support_body')}</span>
+      {text === null ? (
+        <button type="button" className="a-btn secondary" onClick={() => setText(supportDetails(lines))}>
+          {t('copy_details_title')}
+        </button>
+      ) : (
+        <>
+          <span className="a-muted">{t('copy_details_body')}</span>
+          <pre className="a-body-sm whitespace-pre-wrap break-words">{text}</pre>
+          <div className="flex gap-2">
+            <button type="button" className="a-btn" onClick={() => void navigator.clipboard?.writeText(text).then(() => setCopied(true))}>
+              {t('copy_details_copy')}
+            </button>
+            <button type="button" className="a-btn secondary" onClick={() => setText(null)}>
+              {t('copy_details_not_now')}
+            </button>
+          </div>
+          {copied && <span role="status" className="a-muted">{t('copy_details_copied')}</span>}
+        </>
+      )}
     </div>
   )
 }

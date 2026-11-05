@@ -17,6 +17,7 @@ import {
   placementPatch,
   spanOf,
   spanToPatch,
+  monthRange,
   visibleRange,
   type DragMode,
   type Span,
@@ -73,8 +74,8 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
   const actual = useMemo(() => actualSpans(sessions), [sessions])
   const unscheduled = useMemo(() => tasks.filter((t) => spanOf(t) === null), [tasks])
   const range = useMemo(
-    () => visibleRange(tasks.map(spanOf).filter((s): s is Span => s !== null), today),
-    [tasks, today]
+    () => (zoom === 'month' ? monthRange(today) : visibleRange(tasks.map(spanOf).filter((s): s is Span => s !== null), today)),
+    [tasks, today, zoom]
   )
   const dayCount = range.end - range.start + 1
   const width = dayCount * dayPx
@@ -137,7 +138,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
             ))}
           </div>
 
-          <div className="relative" style={{ width }}>
+          <div className="relative overflow-hidden" style={{ width }}>
             <GanttHeader rangeStart={range.start} dayCount={dayCount} dayPx={dayPx} zoom={zoom} />
             <div
               ref={timelineRef}

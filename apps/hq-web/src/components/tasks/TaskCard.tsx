@@ -109,13 +109,15 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false, select,
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           {select && (
             // The card's own click does the toggling; the box only shows the state (and takes the keyboard).
-            <input
-              type="checkbox"
-              checked={select.ticked}
-              onChange={() => {}}
-              aria-label={t('task_select', { id: task.display_id })}
-              className="w-4 h-4 shrink-0 cursor-pointer accent-white"
-            />
+            <span className="inline-flex items-center justify-center w-12 h-12 -m-4 shrink-0" data-hit="select">
+              <input
+                type="checkbox"
+                checked={select.ticked}
+                onChange={() => {}}
+                aria-label={t('task_select', { id: task.display_id })}
+                className="w-5 h-5 cursor-pointer accent-white"
+              />
+            </span>
           )}
           {task.priority && (
             <span
@@ -161,18 +163,18 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false, select,
             </span>
           )}
           {task.assignees.length > 0 && (
-            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-200 border-white/10 max-w-[240px]`} title="Assigned to">
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-200 border-white/10 max-w-[240px]`} title={t('task_assigned_to')}>
               <span className="truncate">{t('task_for', { who: task.assignees.join(', ') })}</span>
             </span>
           )}
           {workingNow && (
-            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-100 border-white/10 max-w-[220px]`} title="A session holds a work lease on this task">
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-100 border-white/10 max-w-[220px]`} title={t('task_work_lease_hint')}>
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse shrink-0" />
               <span className="truncate">{t('task_is_working', { who: workingNow })}</span>
             </span>
           )}
           {stale && (
-            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-300 border-white/10 shrink-0`} title="In progress, but nobody holds it and nothing has changed for a while">
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-300 border-white/10 shrink-0`} title={t('task_stale_hint')}>
               <Clock className="w-2.5 h-2.5 shrink-0" />
               <span>{tn('task_no_change', idleDays(task))}</span>
             </span>

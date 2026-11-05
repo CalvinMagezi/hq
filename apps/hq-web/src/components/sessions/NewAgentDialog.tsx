@@ -33,6 +33,20 @@ interface Props {
   onStarted: (sessionId: string) => void
 }
 
+const PHONE_QUERY = '(max-width: 639px)'
+
+function useIsPhone(): boolean {
+  const [phone, setPhone] = useState(false)
+  useEffect(() => {
+    const q = window.matchMedia(PHONE_QUERY)
+    const sync = () => setPhone(q.matches)
+    sync()
+    q.addEventListener('change', sync)
+    return () => q.removeEventListener('change', sync)
+  }, [])
+  return phone
+}
+
 /** Pick a computer, a folder and an agent, say what to do first, and start. */
 export function NewAgentDialog({ onClose, onStarted }: Props) {
   const [hosts, setHosts] = useState<WorkbenchHosts | null>(null)
@@ -47,6 +61,8 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<LaunchReport | null>(null)
+  const phone = useIsPhone()
+  const [foldOpen, setFoldOpen] = useState(false)
 
   useEffect(() => {
     workbenchApi
@@ -167,12 +183,14 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
                 </div>
               )}
 
-              <div>
-                <label htmlFor="agent-name" className={LABEL_CLASS}>
-                  {t('helpers_new_name')}
-                </label>
-                <input id="agent-name" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={`${FIELD_CLASS} h-11 sm:h-9`} />
-              </div>
+              {!phone && (
+                <div>
+                  <label htmlFor="agent-name" className={LABEL_CLASS}>
+                    {t('helpers_new_name')}
+                  </label>
+                  <input id="agent-name" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={`${FIELD_CLASS} h-11 sm:h-9`} />
+                </div>
+              )}
 
               <div>
                 <label htmlFor="agent-computer" className={LABEL_CLASS}>
@@ -207,15 +225,21 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
                 </div>
               )}
 
-              {!generalPurpose && (
-                <details>
-                  <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-400 select-none">{t('helpers_new_advanced')}</summary>
-                  <label htmlFor="agent-branch" className={LABEL_CLASS}>
-                    {t('helpers_new_branch')}
-                  </label>
-                  <input id="agent-branch" value={branch} onChange={(e) => setBranch(e.target.value)} maxLength={120} className={`${FIELD_CLASS} h-11 sm:h-9`} />
-                  <p className="mt-1 text-[11px] text-neutral-500">{t('helpers_new_branch_hint')}</p>
+              {phone ? (
+                <details open={foldOpen || label !== '' || branch !== ''} onToggle={(e) => setFoldOpen(e.currentTarget.open)}>
+                  <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-400 select-none">{t('helpers_new_name_advanced')}</summary>
+                  <div className="space-y-4">
+                    <NameField label={label} onChange={setLabel} />
+                    {!generalPurpose && <BranchField branch={branch} onChange={setBranch} />}
+                  </div>
                 </details>
+              ) : (
+                !generalPurpose && (
+                  <details>
+                    <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-400 select-none">{t('helpers_new_advanced')}</summary>
+                    <BranchField branch={branch} onChange={setBranch} />
+                  </details>
+                )
               )}
             </>
           )}
@@ -267,6 +291,29 @@ function LaunchNotice({ report }: { report: LaunchReport }) {
           <pre className="max-h-48 overflow-auto rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">{report.blocked.screen}</pre>
         </>
       )}
+    </div>
+  )
+}
+
+function NameField({ label, onChange }: { label: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label htmlFor="agent-name" className={LABEL_CLASS}>
+        {t('helpers_new_name')}
+      </label>
+      <input id="agent-name" value={label} onChange={(e) => onChange(e.target.value)} maxLength={80} className={`${FIELD_CLASS} h-11 sm:h-9`} />
+    </div>
+  )
+}
+
+function BranchField({ branch, onChange }: { branch: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label htmlFor="agent-branch" className={LABEL_CLASS}>
+        {t('helpers_new_branch')}
+      </label>
+      <input id="agent-branch" value={branch} onChange={(e) => onChange(e.target.value)} maxLength={120} className={`${FIELD_CLASS} h-11 sm:h-9`} />
+      <p className="mt-1 text-[11px] text-neutral-500">{t('helpers_new_branch_hint')}</p>
     </div>
   )
 }

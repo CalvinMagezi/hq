@@ -60,9 +60,9 @@ const VIEW_KEY = 'hq.tasks.view'
 const isTasksView = (v: unknown): v is TasksView => v === 'list' || v === 'board' || v === 'timeline'
 
 const VIEWS: { id: TasksView; label: string; icon: typeof List }[] = [
-  { id: 'list', label: 'List', icon: List },
-  { id: 'board', label: 'Board', icon: Columns3 },
-  { id: 'timeline', label: 'Timeline', icon: GanttChart },
+  { id: 'list', label: t('tasks_field_list'), icon: List },
+  { id: 'board', label: t('web_board'), icon: Columns3 },
+  { id: 'timeline', label: t('web_timeline'), icon: GanttChart },
 ]
 
 /** How far back the timeline draws actual work, and how often it refreshes. */
@@ -351,7 +351,7 @@ function TasksPage() {
           'undo.task_done',
         )
       }
-    }, 'Update failed')
+    }, t('tasks_update_failed'))
 
   // Optimistic writes for drag-and-drop: show the change at once, revert if the server refuses it.
   const applyOptimistic = async (task: TaskItem, patch: UpdateTaskInput, conflictMessage: string) => {
@@ -363,7 +363,7 @@ function TasksPage() {
     } catch (e) {
       upsertTask(task)
       const conflict = e instanceof HqHttpError && e.status === HTTP_CONFLICT
-      setNotice(conflict ? conflictMessage : errorMessage(e, 'Update failed'))
+      setNotice(conflict ? conflictMessage : errorMessage(e, t('tasks_update_failed')))
       if (conflict) loadTasks()
     }
   }
@@ -372,18 +372,18 @@ function TasksPage() {
     applyOptimistic(
       task,
       { status, expected_status: task.status },
-      `${task.display_id} was moved by someone else in the meantime, so the board has been refreshed.`
+      t('tasks_moved_by_other', { id: task.display_id })
     )
 
   const handleReschedule = (task: TaskItem, patch: UpdateTaskInput) =>
-    applyOptimistic(task, patch, `${task.display_id} changed in the meantime, so the timeline has been refreshed.`)
+    applyOptimistic(task, patch, t('tasks_timeline_changed', { id: task.display_id }))
 
   const handleCreateSubtask = async (parent: TaskItem, title: string) => {
     try {
       const task = await createTaskClient({ title, parent_task_id: parent.id, created_by: 'operator' })
       upsertTask(task)
     } catch (e) {
-      setNotice(errorMessage(e, 'Could not add the sub-task'))
+      setNotice(errorMessage(e, t('tasks_sub_add_failed')))
     }
   }
 
@@ -411,7 +411,7 @@ function TasksPage() {
     withBusy(async () => {
       upsertTask(await restoreTaskClient(id))
       await archived.refresh()
-    }, 'Restore failed')
+    }, t('tasks_restore_failed'))
 
   // One PATCH per task, a few at a time: each keeps its own checks, notifications and
   // soft-dependency warnings, and one task failing leaves the rest done.
@@ -456,7 +456,7 @@ function TasksPage() {
       targets,
       0,
       (task) => ({ status: 'complete', expected_status: task.status }),
-      `moved to ${STATUS_LABELS.complete}`
+      t('tasks_bulk_phrase_done', { status: STATUS_LABELS.complete })
     )
     if (done.length === 0) return
     toastUndo(
@@ -514,10 +514,15 @@ function TasksPage() {
             <div className="p-4 rounded-2xl bg-white/5 text-neutral-500 mb-3">
               <CheckSquare className="w-8 h-8" />
             </div>
-            <h3 className="text-sm font-bold text-neutral-300">No tasks found</h3>
+            <h3 className="text-sm font-bold text-neutral-300">{tasks.length === 0 ? t('tasks_none_yet_title') : t('tasks_none_found')}</h3>
             <p className="text-xs text-neutral-500 max-w-sm mt-1">
-              {statusTab === 'active' ? 'Nothing active right now.' : 'No tasks match the current filters.'}
+              {tasks.length === 0 ? t('tasks_none_yet_body') : statusTab === 'active' ? t('tasks_none_active') : t('tasks_none_match')}
             </p>
+            {tasks.length === 0 && (
+              <button type="button" onClick={() => setFormOpen(true)} className="hq-btn-primary mt-3">
+                {t('tasks_new_task')}
+              </button>
+            )}
           </div>
         ) : view === 'board' ? (
           <TaskBoardView tasks={filtered} allById={taskById} onSelect={(t) => setSelectedTaskId(t.id)} onMove={handleStatusMove} />
@@ -603,7 +608,7 @@ function TasksPage() {
             {briefingFor === selection.initiativeId ? (
               <InitiativeBriefing
                 initiativeId={selection.initiativeId}
-                name={initiativeById.get(selection.initiativeId)?.name ?? 'Initiative'}
+                name={initiativeById.get(selection.initiativeId)?.name ?? t('tasks_initiative')}
                 onClose={() => setBriefingFor(null)}
               />
             ) : (
@@ -613,7 +618,7 @@ function TasksPage() {
                 className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 hq-field text-neutral-300 hover:text-neutral-100"
               >
                 <ClipboardList className="w-3.5 h-3.5" />
-                Briefing
+                {t('tasks_briefing')}
               </button>
             )}
           </div>
@@ -759,8 +764,8 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
           <CheckSquare className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold text-white tracking-tight" style={{ fontFamily: 'var(--font-heading)' }}>Tasks</h1>
-          <p className="text-xs text-neutral-400 mt-0.5">{activeCount} active</p>
+          <h1 className="text-2xl font-semibold text-white tracking-tight" style={{ fontFamily: 'var(--font-heading)' }}>{t('place_tasks')}</h1>
+          <p className="text-xs text-neutral-400 mt-0.5">{t('fact_active', { n: activeCount })}</p>
         </div>
       </div>
 
@@ -768,12 +773,12 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         <button
           type="button"
           onClick={onRefresh}
-          aria-label="Refresh tasks"
+          aria-label={t('tasks_refresh')}
           disabled={isRefreshing}
           className="hq-btn-ghost disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">Refresh</span>
+          <span className="hidden sm:inline">{t('spend_refresh')}</span>
         </button>
         <button
           type="button"
@@ -781,8 +786,8 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
           className="hq-btn-primary !h-9 !px-4"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span className="hidden min-[420px]:inline">New Task</span>
-          <span className="min-[420px]:hidden sr-only">New Task</span>
+          <span className="hidden min-[420px]:inline">{t('tasks_new_task')}</span>
+          <span className="min-[420px]:hidden sr-only">{t('tasks_new_task')}</span>
         </button>
       </div>
     </div>
