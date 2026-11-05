@@ -182,9 +182,9 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 client.setPinned(ready.note.path, pin)
-                _state.update { s -> s.copy(reader = ready.copy(note = ready.note.copy(pinned = pin)), notice = Notice(if (pin) "Pinned to the top of Notes" else "Unpinned")) }
+                _state.update { s -> s.copy(reader = ready.copy(note = ready.note.copy(pinned = pin)), notice = Notice(getApplication<Application>().getString(if (pin) example.hq.spike.R.string.notes_pinned else example.hq.spike.R.string.notes_unpinned))) }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Couldn\'t change the pin. HQ didn\'t answer in time. Try again.")) }
+                _state.update { it.copy(notice = Notice(getApplication<Application>().getString(example.hq.spike.R.string.notes_pin_no_reply))) }
             }
         }
     }
@@ -194,9 +194,9 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         val note = (_state.value.reader as? ReaderPhase.Ready)?.note ?: return
         viewModelScope.launch {
             val said = try {
-                if (client.createTaskOnce(noteTaskBody(note.path, note.title))) "This note already has a task" else "Task added to your Inbox"
+                getApplication<Application>().getString(if (client.createTaskOnce(noteTaskBody(note.path, note.title))) example.hq.spike.R.string.notes_has_task else example.hq.spike.R.string.notes_task_added)
             } catch (e: HqUnavailable) {
-                if (e.status == 0) "Couldn\'t add the task. HQ didn\'t answer in time. Try again." else "Could not add the task."
+                getApplication<Application>().getString(if (e.status == 0) example.hq.spike.R.string.notes_task_no_reply else example.hq.spike.R.string.notes_task_failed)
             }
             _state.update { it.copy(notice = Notice(said)) }
         }
@@ -212,7 +212,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun edit() {
         val ready = _state.value.reader as? ReaderPhase.Ready ?: return
         if (ready.note.truncated) {
-            _state.update { it.copy(menu = false, notice = Notice("This note is too long to edit on the phone.")) }
+            _state.update { it.copy(menu = false, notice = Notice(getApplication<Application>().getString(example.hq.spike.R.string.notes_too_long_edit))) }
             return
         }
         val body = NoteText.withoutFirstBlock(ready.note.body)
@@ -234,7 +234,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         val w = _state.value.write ?: return
         if (w.status == SaveStatus.Saving) return
         if (w.isNew && w.title.isBlank() && w.text.text.isBlank()) {
-            _state.update { it.copy(notice = Notice("Write something first.")) }
+            _state.update { it.copy(notice = Notice(getApplication<Application>().getString(example.hq.spike.R.string.notes_write_first))) }
             return
         }
         edit { it.copy(status = SaveStatus.Saving, leaving = false) }

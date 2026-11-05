@@ -20,36 +20,36 @@ class BackgroundWorkTest {
 
     @Test fun hqIsRunningWhenItAnswersAndRestartingWhileItIs() {
         val snap = SettingsSnapshot(health = health, chatApps = chat(telegramOn))
-        assertEquals(FactRow("HQ", "Running", good = true), SettingsWords.rightNow(snap, true, false)[0])
-        assertEquals(FactRow("HQ", "Restarting"), SettingsWords.rightNow(snap, true, true)[0])
-        assertEquals(FactRow("HQ", "No answer yet"), SettingsWords.rightNow(SettingsSnapshot(), true, false)[0])
+        assertEquals(FactRow("HQ", "Running", good = true), SettingsWords.rightNow(testWords(), snap, true, false)[0])
+        assertEquals(FactRow("HQ", "Restarting"), SettingsWords.rightNow(testWords(), snap, true, true)[0])
+        assertEquals(FactRow("HQ", "No answer yet"), SettingsWords.rightNow(testWords(), SettingsSnapshot(), true, false)[0])
     }
 
     @Test fun aChatAppIsConnectedOnlyWhenSetUpActiveAndTheRelayIsCurrent() {
         val snap = SettingsSnapshot(health = health, chatApps = chat(telegramOn))
-        assertEquals(listOf("Connected", "Not set up"), SettingsWords.rightNow(snap, true, false).drop(1).map { it.value })
-        assertEquals(listOf("Paused", "Not set up"), SettingsWords.rightNow(snap, false, false).drop(1).map { it.value })
+        assertEquals(listOf("Connected", "Not set up"), SettingsWords.rightNow(testWords(), snap, true, false).drop(1).map { it.value })
+        assertEquals(listOf("Paused", "Not set up"), SettingsWords.rightNow(testWords(), snap, false, false).drop(1).map { it.value })
     }
 
     @Test fun aRelayFromAnEarlierRunIsNotConnectedYet() {
         val old = chat("""{"enabled":true,"token_set":true,"relay":{"status":"connected","current":false}}""")
-        assertEquals("Not connected yet", SettingsWords.rightNow(SettingsSnapshot(health = health, chatApps = old), true, false)[1].value)
+        assertEquals("Not connected yet", SettingsWords.rightNow(testWords(), SettingsSnapshot(health = health, chatApps = old), true, false)[1].value)
     }
 
     @Test fun aRelayThatFailedSaysError() {
         val bad = chat("""{"enabled":true,"token_set":true,"relay":{"status":"error","current":true}}""")
-        assertEquals("Error", SettingsWords.rightNow(SettingsSnapshot(health = health, chatApps = bad), true, false)[1].value)
+        assertEquals("Error", SettingsWords.rightNow(testWords(), SettingsSnapshot(health = health, chatApps = bad), true, false)[1].value)
     }
 
     @Test fun onlyRunningIsGreen() {
-        val rows = SettingsWords.rightNow(SettingsSnapshot(health = health, chatApps = chat(telegramOn)), true, false)
+        val rows = SettingsWords.rightNow(testWords(), SettingsSnapshot(health = health, chatApps = chat(telegramOn)), true, false)
         assertEquals(listOf(true, false, false), rows.map { it.good })
     }
 
     @Test fun theDialogNamesWhatStopsAndWhatStarts() {
-        assertEquals(SettingsWords.ModeWords("Pause background work?", "HQ will stop answering your chats and running scheduled tasks. It restarts for a moment.", "Pause"), SettingsWords.modeDialog(false))
-        assertEquals("Start background work?", SettingsWords.modeDialog(true).title)
-        assertEquals("Start", SettingsWords.modeDialog(true).confirm)
+        assertEquals(SettingsWords.ModeWords("Pause background work?", "HQ will stop answering your chats and running scheduled tasks. It restarts for a moment.", "Pause"), SettingsWords.modeDialog(testWords(), false))
+        assertEquals("Start background work?", SettingsWords.modeDialog(testWords(), true).title)
+        assertEquals("Start", SettingsWords.modeDialog(testWords(), true).confirm)
     }
 
     @Test fun hqIsBackOnceItsStartTimeChanges() {
@@ -82,11 +82,11 @@ class BackgroundWorkTest {
 
     @Test fun theListsReadTheirRows() {
         assertEquals(listOf("https://hq.example.ts.net", "http://localhost:5678"), SettingsWords.originRows(settings))
-        val tools = SettingsWords.toolRows(settings)
+        val tools = SettingsWords.toolRows(testWords(), settings)
         assertEquals("diagrams", tools[0].title)
         assertEquals("example.com\nUsed only while you are in the chat.", tools[0].text)
         assertEquals("search.example.com", tools[1].text)
-        assertEquals(listOf("mac-mini" to "Default", "This phone" to null), SettingsWords.computerRows(settings).map { it.title to it.text })
+        assertEquals(listOf("mac-mini" to "Default", "This phone" to null), SettingsWords.computerRows(testWords(), settings).map { it.title to it.text })
         assertEquals(emptyList<String>(), SettingsWords.originRows(null))
     }
 
@@ -105,21 +105,21 @@ class BackgroundWorkTest {
 
     @Test fun onlyTheThreeCheckableProvidersGetAKeyButton() {
         val s = JSONObject("""{"provider_keys":[{"name":"OpenRouter","id":"open_router","configured":true,"source":"env"},{"name":"Anthropic","id":"anthropic","configured":false,"source":null},{"name":"Google AI","id":"google","configured":true,"source":"file"},{"name":"DeepSeek","configured":true}]}""")
-        assertNull(SettingsWords.keyAction(s, "OpenRouter", true, "env"))
-        assertEquals(SettingsWords.KeyAction("anthropic", "Add"), SettingsWords.keyAction(s, "Anthropic", false, null))
-        assertEquals(SettingsWords.KeyAction("google", "Replace"), SettingsWords.keyAction(s, "Google AI", true, "file"))
-        assertNull(SettingsWords.keyAction(s, "DeepSeek", true, null))
+        assertNull(SettingsWords.keyAction(testWords(), s, "OpenRouter", true, "env"))
+        assertEquals(SettingsWords.KeyAction("anthropic", "Add"), SettingsWords.keyAction(testWords(), s, "Anthropic", false, null))
+        assertEquals(SettingsWords.KeyAction("google", "Replace"), SettingsWords.keyAction(testWords(), s, "Google AI", true, "file"))
+        assertNull(SettingsWords.keyAction(testWords(), s, "DeepSeek", true, null))
     }
 
     @Test fun theKeySheetSaysAddOrReplaceAndWhyItFailed() {
-        assertEquals("Add your Anthropic key", SettingsWords.keyWords("Anthropic", false).title)
-        assertEquals("Replace your Google AI key", SettingsWords.keyWords("Google AI", true).title)
-        assertEquals(SettingsWords.KEY_REFUSED, SettingsWords.keyFailure(400))
-        assertEquals(SettingsWords.KEY_NO_ANSWER, SettingsWords.keyFailure(0))
-        assertEquals(SettingsWords.KEY_ENV, SettingsWords.keyFailure(409))
-        assertEquals(SettingsWords.KEY_NO_ANSWER, SettingsWords.keyFailure(503))
-        assertEquals(SettingsWords.KEY_OTHER, SettingsWords.keyFailure(403))
-        assertEquals("Anthropic key saved.", SettingsWords.keySaved("Anthropic"))
+        assertEquals("Add your Anthropic key", SettingsWords.keyWords(testWords(), "Anthropic", false).title)
+        assertEquals("Replace your Google AI key", SettingsWords.keyWords(testWords(), "Google AI", true).title)
+        assertEquals(SettingsWords.keyRefused(testWords()), SettingsWords.keyFailure(testWords(), 400))
+        assertEquals(SettingsWords.keyNoAnswer(testWords()), SettingsWords.keyFailure(testWords(), 0))
+        assertEquals(SettingsWords.keyEnv(testWords()), SettingsWords.keyFailure(testWords(), 409))
+        assertEquals(SettingsWords.keyNoAnswer(testWords()), SettingsWords.keyFailure(testWords(), 503))
+        assertEquals(SettingsWords.keyOther(testWords()), SettingsWords.keyFailure(testWords(), 403))
+        assertEquals("Anthropic key saved.", SettingsWords.keySaved(testWords(), "Anthropic"))
         assertEquals("https://openrouter.ai/keys", SettingsWords.keyHelpUrl("open_router"))
         assertNull(SettingsWords.keyHelpUrl("deepseek"))
     }
@@ -127,12 +127,12 @@ class BackgroundWorkTest {
     @Test fun aSignInCodeIsReadInTwoGroupsOfFive() {
         assertEquals("8KQ3M-W2T7P", SettingsWords.groupCode("8KQ3MW2T7P"))
         assertEquals("SHORT", SettingsWords.groupCode("SHORT"))
-        assertEquals("Works once, for 9:41. Enter the code on the other device.", SettingsWords.codeHelp("9:41"))
+        assertEquals("Works once, for 9:41. Enter the code on the other device.", SettingsWords.codeHelp(testWords(), "9:41"))
     }
 
     @Test fun aChatAppFailureUsesTheServersWordsWhenItGaveSome() {
-        assertEquals("HQ did not reply. Try again.", SettingsWords.chatAppFailure(0, null))
-        assertEquals("Token rejected by Telegram", SettingsWords.chatAppFailure(400, "Token rejected by Telegram"))
-        assertEquals(SettingsWords.TOKEN_REFUSED, SettingsWords.chatAppFailure(400, null))
+        assertEquals("HQ did not reply. Try again.", SettingsWords.chatAppFailure(testWords(), 0, null))
+        assertEquals("Token rejected by Telegram", SettingsWords.chatAppFailure(testWords(), 400, "Token rejected by Telegram"))
+        assertEquals(SettingsWords.tokenRefused(testWords()), SettingsWords.chatAppFailure(testWords(), 400, null))
     }
 }

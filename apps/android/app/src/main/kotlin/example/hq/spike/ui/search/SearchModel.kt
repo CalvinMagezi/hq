@@ -52,5 +52,5 @@ object SearchMatch {
     fun tidy(q: String): String = q.trim().replace(Regex("\\s+"), " ")
 
     /** The words of a task's state, as the Tasks list says them. */
-    fun statusWords(t: TaskItem): String = TasksLogic.statusWords(t.status)
+    fun statusWords(w: example.hq.spike.ui.shell.Words, t: TaskItem): String = TasksLogic.statusWords(w, t.status)
 }

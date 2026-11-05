@@ -12,6 +12,7 @@ import example.hq.spike.ui.inbox.CardKind
 import example.hq.spike.ui.helpers.AnswerCheck
 import example.hq.spike.ui.helpers.AnswerWords
 import example.hq.spike.ui.helpers.HelperWords
+import example.hq.spike.ui.shell.Words
 import example.hq.spike.ui.inbox.InboxCard
 import java.net.URL
 import java.time.LocalTime
@@ -44,6 +45,7 @@ class AnswerReceiver : BroadcastReceiver() {
         // A second tap before the card has changed would send the same key twice.
         if (!inFlight.add(id)) return
         val pending = goAsync()
+        val w = Words.of(context)
         val deadline = SystemClock.elapsedRealtime() + DEADLINE_MS
         val nm = context.getSystemService(NotificationManager::class.java)
         val nid = AlertPoster.notificationId(id)
@@ -52,7 +54,7 @@ class AnswerReceiver : BroadcastReceiver() {
             var keySent = false
             try {
                 // The tap changes the asking card at once, with no buttons.
-                nm.notify(nid, say(context, AnswerWords.sending, null))
+                nm.notify(nid, say(context, AnswerWords.sending(w), null))
                 // Read here, off the main thread: a token is opened with the Keystore key.
                 val target = Hq.of(context, id)
                 if (target == null) {
@@ -66,15 +68,15 @@ class AnswerReceiver : BroadcastReceiver() {
                     val status = postStatus("/api/notifications/$itemId/answer", JSONObject().put("choice", choice), target, deadline)
                     val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
                     when (status) {
-                        in 200..299 -> nm.notify(nid, say(context, AnswerWords.answered(true, answer == "approve", AnswerWords.asker(title), at), null))
-                        409 -> nm.notify(nid, say(context, AnswerWords.movedOn, null))
+                        in 200..299 -> nm.notify(nid, say(context, AnswerWords.answered(w, true, answer == "approve", AnswerWords.asker(title), at), null))
+                        409 -> nm.notify(nid, say(context, AnswerWords.movedOn(w), null))
                         else -> throw java.io.IOException("status $status")
                     }
                     return@Thread
                 }
                 // An answer given elsewhere stands: the server would take a second one over it. A check that cannot be made lets this one go.
                 if (answeredElsewhere(itemId, target, deadline)) {
-                    nm.notify(nid, say(context, AnswerWords.alreadyAnswered, null))
+                    nm.notify(nid, say(context, AnswerWords.alreadyAnswered(w), null))
                     return@Thread
                 }
                 if (kind == CardKind.HelperAsks.name && session != null) {
@@ -84,7 +86,7 @@ class AnswerReceiver : BroadcastReceiver() {
                     val lines = screen.optJSONArray("lines")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
                     val check = HelperWords.checkAnswer(HelperWords.blocked(excerpt), lines, key, screen.optString("source") == "live")
                     if (check != AnswerCheck.Ok) {
-                        nm.notify(nid, say(context, AnswerWords.Say("Not sent", HelperWords.checkWords(check)), null))
+                        nm.notify(nid, say(context, AnswerWords.Say("Not sent", HelperWords.checkWords(w, check)), null))
                         return@Thread
                     }
                     // Counted as sent once the request has gone out: an answer that then timed out may still have reached the helper, and a retry would press the key again.
@@ -93,10 +95,10 @@ class AnswerReceiver : BroadcastReceiver() {
                 post("/api/notifications/$itemId/action", JSONObject().put("action", answer), target, deadline)
                 val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
                 val helper = kind == CardKind.HelperAsks.name && session != null
-                nm.notify(nid, say(context, AnswerWords.answered(helper, answer == "approve", AnswerWords.asker(title), at), null))
+                nm.notify(nid, say(context, AnswerWords.answered(w, helper, answer == "approve", AnswerWords.asker(title), at), null))
             } catch (e: Exception) {
                 // Once the key is in, a retry must not send it again: it would land on whatever the helper asks next.
-                if (keySent) nm.notify(nid, say(context, AnswerWords.sentNotRecorded, null))
+                if (keySent) nm.notify(nid, say(context, AnswerWords.sentNotRecorded(w), null))
                 else nm.notify(nid, say(context, failure(context, e), intent))
             } finally {
                 AlertPoster.answeredNow(id)
@@ -192,7 +194,7 @@ class AnswerReceiver : BroadcastReceiver() {
         val b = Notification.Builder(c, AlertPoster.NEEDS).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setAutoCancel(true).setOnlyAlertOnce(true)
             .setContentIntent(AlertPoster.open(c)).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(AlertPoster.publicVersion(c, AlertPoster.NEEDS))
         words.body?.let { b.setContentText(it) }
-        if (words === AnswerWords.sending) b.setProgress(0, 0, true).setTimeoutAfter(SENDING_STUCK_MS)
+        if (words == AnswerWords.sending(Words.of(c))) b.setProgress(0, 0, true).setTimeoutAfter(SENDING_STUCK_MS)
         else if (retry == null) b.setTimeoutAfter(CLEAR_AFTER_MS)
         else {
             val again = Notification.Action.Builder(icon, c.getString(R.string.notice_action_try_again), PendingIntent.getBroadcast(c, retry.getStringExtra(ID).hashCode(), Intent(retry), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))

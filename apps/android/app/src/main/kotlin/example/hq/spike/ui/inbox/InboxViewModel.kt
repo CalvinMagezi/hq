@@ -184,7 +184,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         val screen = client.helperScreen(card.sessionId!!, CHECK_LINES)
         val check = HelperWords.checkAnswer(HelperWords.blocked(card.excerpt), screen.lines, key, screen.live)
         if (check != AnswerCheck.Ok) {
-            _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed(HelperWords.checkWords(check)))) }
+            _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed(HelperWords.checkWords(example.hq.spike.ui.shell.Words.of(getApplication<Application>()), check)))) }
             refresh()
             return false
         }

@@ -232,7 +232,7 @@ class VoiceSession(
         _state.update { if (it.phase == VoicePhase.Stopped) it else it.copy(phase = VoicePhase.Idle) }
     }
 
-    private fun onOutput(out: TurnOutput) {
+    internal fun onOutput(out: TurnOutput) {
         when (out) {
             is TurnOutput.Thread -> { threadId = out.id; example.hq.spike.ui.chat.SpokenThreads.mark(app, out.id); _state.update { it.copy(threadId = out.id) } }
             is TurnOutput.Text -> _state.update { it.copy(phase = VoicePhase.Answering, reply = it.reply + out.chunk) }

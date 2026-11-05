@@ -142,7 +142,7 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
             }
             Column(Modifier.weight(1f)) {
                 Text(row.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val subtitle = if (row.running) "Working" else row.subtitle
+                val subtitle = if (row.running) stringResource(R.string.chat_row_working) else row.subtitle
                 if (subtitle.isNotEmpty()) Text(subtitle, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (row.unread) Box(Modifier.size(10.dp).background(Mts.BrandBlue, CircleShape))

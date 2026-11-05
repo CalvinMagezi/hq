@@ -21,21 +21,21 @@ class AllTabTest {
         TaskItem(id, "P-$id", "Task $id", "", status, priority, null, null, emptyList(), emptyList(), parent, 0, 0, null, null, "2026-10-20 10:00:00")
 
     @Test fun theActiveChipGroupsOpenTasksByStatus() {
-        val g = TasksLogic.allList(listOf(t("1", "in_progress"), t("2", "blocked"), t("3", "ready_for_review"), t("4"), t("5", "complete")), AllChip.Active, emptyList())
+        val g = TasksLogic.allList(testWords(), listOf(t("1", "in_progress"), t("2", "blocked"), t("3", "ready_for_review"), t("4"), t("5", "complete")), AllChip.Active, emptyList())
         assertEquals(listOf("In progress", "Stuck", "Ready to check", "To do"), g.map { it.title })
     }
 
     @Test fun stuckAndReadyShowOnlyTheirOwnGroup() {
         val tasks = listOf(t("1", "blocked"), t("2", "ready_for_review"), t("3"))
-        assertEquals(listOf("Stuck"), TasksLogic.allList(tasks, AllChip.Stuck, emptyList()).map { it.title })
-        assertEquals(listOf("Ready to check"), TasksLogic.allList(tasks, AllChip.Review, emptyList()).map { it.title })
+        assertEquals(listOf("Stuck"), TasksLogic.allList(testWords(), tasks, AllChip.Stuck, emptyList()).map { it.title })
+        assertEquals(listOf("Ready to check"), TasksLogic.allList(testWords(), tasks, AllChip.Review, emptyList()).map { it.title })
     }
 
     @Test fun doneIsOneListNewestFirstWithNoHeading() {
         val older = t("1", "complete").copy(completedAt = "2026-10-01 10:00:00")
         val newer = t("2", "complete").copy(completedAt = "2026-10-20 10:00:00")
         val sub = t("3", "complete", parent = "1")
-        val g = TasksLogic.allList(listOf(older, newer, sub, t("4")), AllChip.Done, emptyList()).single()
+        val g = TasksLogic.allList(testWords(), listOf(older, newer, sub, t("4")), AllChip.Done, emptyList()).single()
         assertEquals(listOf("2", "1"), g.tasks.map { it.id })
         assertEquals("", g.title)
     }
@@ -43,8 +43,8 @@ class AllTabTest {
     @Test fun archivedIsTheServersListNewestFirst() {
         val a = t("a").copy(archivedAt = "2026-10-01 10:00:00")
         val b = t("b").copy(archivedAt = "2026-10-21 10:00:00")
-        assertEquals(listOf("b", "a"), TasksLogic.allList(emptyList(), AllChip.Archived, listOf(a, b)).single().tasks.map { it.id })
-        assertEquals(emptyList<TaskGroup>(), TasksLogic.allList(emptyList(), AllChip.Archived, emptyList()))
+        assertEquals(listOf("b", "a"), TasksLogic.allList(testWords(), emptyList(), AllChip.Archived, listOf(a, b)).single().tasks.map { it.id })
+        assertEquals(emptyList<TaskGroup>(), TasksLogic.allList(testWords(), emptyList(), AllChip.Archived, emptyList()))
     }
 
     @Test fun onlyStuckAndReadyCarryACount() {
@@ -55,14 +55,14 @@ class AllTabTest {
     }
 
     @Test fun theTagOnTheFirstLineIsHowLongItIsStuckOrAHighPriority() {
-        assertEquals(IdTag("Blocked 2d", true), TasksLogic.idTag(t("1", "blocked").copy(blockedSince = "2026-10-20 12:00:00"), now))
-        assertEquals(IdTag("Blocked 5h", true), TasksLogic.idTag(t("1", "blocked").copy(blockedSince = "2026-10-22 07:00:00"), now))
-        assertEquals(IdTag("Blocked", true), TasksLogic.idTag(t("1", "blocked"), now))
-        assertEquals(IdTag("Blocked <1h", true), TasksLogic.idTag(t("1", "blocked").copy(blockedSince = "2026-10-22 11:30:00"), now))
-        assertEquals(IdTag("High", false), TasksLogic.idTag(t("2", priority = "high"), now))
-        assertEquals(IdTag("Urgent", false), TasksLogic.idTag(t("2", priority = "urgent"), now))
-        assertNull(TasksLogic.idTag(t("3", priority = "low"), now))
-        assertNull(TasksLogic.idTag(t("4"), now))
+        assertEquals(IdTag("Blocked 2d", true), TasksLogic.idTag(testWords(), t("1", "blocked").copy(blockedSince = "2026-10-20 12:00:00"), now))
+        assertEquals(IdTag("Blocked 5h", true), TasksLogic.idTag(testWords(), t("1", "blocked").copy(blockedSince = "2026-10-22 07:00:00"), now))
+        assertEquals(IdTag("Blocked", true), TasksLogic.idTag(testWords(), t("1", "blocked"), now))
+        assertEquals(IdTag("Blocked <1h", true), TasksLogic.idTag(testWords(), t("1", "blocked").copy(blockedSince = "2026-10-22 11:30:00"), now))
+        assertEquals(IdTag("High", false), TasksLogic.idTag(testWords(), t("2", priority = "high"), now))
+        assertEquals(IdTag("Urgent", false), TasksLogic.idTag(testWords(), t("2", priority = "urgent"), now))
+        assertNull(TasksLogic.idTag(testWords(), t("3", priority = "low"), now))
+        assertNull(TasksLogic.idTag(testWords(), t("4"), now))
     }
 
     @Test fun theThirdLineSaysWhatTheTaskIsWaitingOnOrWhoItIsFor() {
@@ -85,6 +85,6 @@ class AllTabTest {
     }
 
     @Test fun eachChipHasWordsForAnEmptyList() {
-        AllChip.entries.forEach { assertEquals(false, TasksLogic.emptyAll(it).isBlank()) }
+        AllChip.entries.forEach { assertEquals(false, TasksLogic.emptyAll(testWords(), it).isBlank()) }
     }
 }

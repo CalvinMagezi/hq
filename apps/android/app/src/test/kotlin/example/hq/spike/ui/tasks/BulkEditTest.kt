@@ -50,7 +50,7 @@ class BulkEditTest {
     }
 
     @Test fun everyStatusHasWordsAndPriorityEndsWithNone() {
-        BulkEdit.STATUS_CHOICES.forEach { assertEquals(false, TasksLogic.statusWords(it) == it) }
+        BulkEdit.STATUS_CHOICES.forEach { assertEquals(false, TasksLogic.statusWords(testWords(), it) == it) }
         assertEquals("None", BulkEdit.PRIORITY_CHOICES.last().second)
     }
 

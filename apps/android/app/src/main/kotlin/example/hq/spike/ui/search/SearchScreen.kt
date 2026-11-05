@@ -302,7 +302,7 @@ private fun NoteHitRow(hit: SearchHit, query: String, onClick: () -> Unit) {
 private fun TaskHitRow(task: TaskItem, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).rowLine().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(task.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
-        Text(listOf(task.displayId, SearchMatch.statusWords(task)).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2)
+        Text(listOf(task.displayId, SearchMatch.statusWords(example.hq.spike.ui.shell.rememberWords(), task)).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2)
     }
 }
 

@@ -196,12 +196,13 @@ class VoiceTurn(
         /** Tools can run for a while, but each step reports; this long with nothing at all is a stuck turn. */
         const val QUIET_WAIT_MS = 180_000L
         private const val WATCH_TICK_MS = 500L
-        const val HQ_STOPPED = "Couldn't send your question. HQ has stopped. Start HQ to try again."
-        const val RESTARTING = "Couldn't get the whole answer. HQ is restarting. Try again in a moment."
-        const val NO_REPLY = "Couldn't send your question. HQ didn't answer in time. Try again."
-        const val STILL_WORKING = "HQ is still working on it. The answer will be in the chat."
-        const val LOST_PART = "Couldn't show the whole answer here. Open in chat to read it."
-        const val BUSY = "HQ is still answering the last question."
-        const val NOT_ACCEPTED = "HQ did not accept the question."
+        /** Failure codes, not sentences: the sheet turns each into its catalogue line. */
+        const val HQ_STOPPED = "hq-turn:hq_stopped"
+        const val RESTARTING = "hq-turn:restarting"
+        const val NO_REPLY = "hq-turn:no_reply"
+        const val STILL_WORKING = "hq-turn:still_working"
+        const val LOST_PART = "hq-turn:lost_part"
+        const val BUSY = "hq-turn:busy"
+        const val NOT_ACCEPTED = "hq-turn:not_accepted"
     }
 }

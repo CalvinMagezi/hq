@@ -133,7 +133,7 @@ private fun NameRow(title: String, spoken: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(24.dp)
     Row(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
-            .clickable(role = Role.Button, onClickLabel = "Show your chats", onClick = onClick).padding(horizontal = 16.dp),
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.chat_show_chats), onClick = onClick).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(if (spoken) HqIcons.Mic else HqIcons.Chat, null, Modifier.size(20.dp), tint = Mts.InkMuted)

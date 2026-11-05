@@ -3,6 +3,7 @@ package example.hq.spike.ui.helpers
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import example.hq.spike.R
+import example.hq.spike.ui.shell.Words
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.HelperHost
@@ -73,9 +74,14 @@ data class HelpersUi(
     val start: StartForm? = null,
     val line: HelperLine? = null,
     val now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC),
+    /** The catalogue reader the cards' words come from; the view model sets it and the screen sets it for fixtures. */
+    val words: Words? = null,
 ) {
-    val cards: List<HelperCard> get() = (rows.filter { !it.archived }.map { HelperWords.card(it, asks[it.id], now, lastWords[it.id]) } + edgeRuns.map { HelperWords.edgeCard(it, now) })
-        .sortedWith(HelperWords.order)
+    val cards: List<HelperCard> get() {
+        val w = words ?: return emptyList()
+        return (rows.filter { !it.archived }.map { HelperWords.card(w, it, asks[it.id], now, lastWords[it.id]) } + edgeRuns.map { HelperWords.edgeCard(w, it, now) })
+            .sortedWith(HelperWords.order)
+    }
     fun count(filter: HelperFilter) = cards.count { matches(it, filter) }
     val openCard: HelperCard? get() = open?.let { o -> cards.firstOrNull { it.id == o.id } }
 }
@@ -121,7 +127,8 @@ class HelpersActions(
 
 class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     private val client = HqServices.get(app).client
-    private val _state = MutableStateFlow(HelpersUi())
+    private val _state = MutableStateFlow(HelpersUi(words = Words.of(app)))
+    private fun w() = Words.of(getApplication())
     val state: StateFlow<HelpersUi> = _state
     private var frozen = false
     private var screenJob: Job? = null
@@ -140,8 +147,8 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onToggleFinished = { _state.update { it.copy(finishedOpen = !it.finishedOpen) } },
         onOpen = ::open,
         onClose = ::close,
-        onAllow = { id, shown -> answer(id, "enter", "Allowed once.", shown) },
-        onNotNow = { id, shown -> answer(id, "esc", "Not now. It waits.", shown) },
+        onAllow = { id, shown -> answer(id, "enter", w().s(R.string.helpers_allowed_once), shown) },
+        onNotNow = { id, shown -> answer(id, "esc", w().s(R.string.helpers_not_now_waits), shown) },
         onToggleRaw = { editOpen { it.copy(raw = !it.raw) } },
         onSeeHelper = { editOpen { it.copy(page = HelperPage.Detail) } },
         onSeeAsk = { editOpen { it.copy(page = HelperPage.Ask) } },
@@ -221,7 +228,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         // A run of the edge worker has no terminal to show: its work is a chat, so that chat opens.
         if (id.startsWith(HelperWords.EDGE_PREFIX)) {
             val thread = _state.value.edgeRuns.firstOrNull { HelperWords.EDGE_PREFIX + it.askId == id }?.threadId
-            if (thread.isNullOrBlank()) say(HelperWords.followFailed(null)) else _state.update { it.copy(followed = thread) }
+            if (thread.isNullOrBlank()) say(HelperWords.followFailed(w(), null)) else _state.update { it.copy(followed = thread) }
             return
         }
         val card = _state.value.cards.firstOrNull { it.id == id } ?: return
@@ -235,7 +242,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         if (_state.value.cards.any { it.id == id }) { open(id); return }
         viewModelScope.launch {
             refresh()
-            if (_state.value.cards.any { it.id == id }) open(id) else say("That helper is not in the list.")
+            if (_state.value.cards.any { it.id == id }) open(id) else say(w().s(R.string.helpers_not_in_list))
         }
     }
 
@@ -287,11 +294,11 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                     say(done)
                     refresh()
                 } else {
-                    refuse(id, HelperWords.checkWords(check))
+                    refuse(id, HelperWords.checkWords(w(), check))
                 }
             } catch (e: HqUnavailable) {
-                if (e.message?.contains("HTTP 409") == true) { closeIfOpen(id); say(if (decision != null) "Already answered." else "That helper is no longer running."); refresh() }
-                else tell(id, "Couldn't send your answer. HQ didn't answer in time. It may be restarting.")
+                if (e.message?.contains("HTTP 409") == true) { closeIfOpen(id); say(w().s(if (decision != null) R.string.helpers_already_answered else R.string.helpers_no_longer_running)); refresh() }
+                else tell(id, w().s(R.string.helpers_answer_no_reply))
             } finally {
                 answering.remove(id)
             }
@@ -328,10 +335,10 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 client.sendHelperText(id, text)
                 editFor(id) { it.copy(sending = false, draft = if (clearDraft) "" else it.draft) }
-                say("Sent.")
+                say(w().s(R.string.helpers_sent))
             } catch (e: HqUnavailable) {
                 val conflict = e.message?.contains("HTTP 409") == true
-                val why = if (conflict) "HQ would not pass that on: the helper is waiting at a question, or is no longer running." else "Couldn't send that. HQ didn't answer in time. Try again."
+                val why = w().s(if (conflict) R.string.helpers_send_refused else R.string.helpers_send_no_reply)
                 editFor(id) { it.copy(sending = false, error = why) }
             }
         }
@@ -347,7 +354,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 generation++
                 answered.remove(id)
             } catch (e: HqUnavailable) {
-                editFor(id) { it.copy(error = "Couldn't send that key. HQ didn't answer in time. Try again.") }
+                editFor(id) { it.copy(error = w().s(R.string.helpers_key_no_reply)) }
             } finally {
                 answering.remove(id)
             }
@@ -379,12 +386,12 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val thread = try { client.followHelper(o.id) } catch (e: HqUnavailable) {
                 editFor(o.id) { it.copy(following = false) }
-                say(HelperWords.followFailed(e.status))
+                say(HelperWords.followFailed(w(), e.status))
                 return@launch
             }
             editFor(o.id) { it.copy(following = false) }
             // Opening the chat closes the helper page, so it is done only if the owner is still looking at this helper.
-            if (thread.isBlank()) say(HelperWords.followFailed(null)) else if (_state.value.open?.id == o.id) _state.update { it.copy(followed = thread) }
+            if (thread.isBlank()) say(HelperWords.followFailed(w(), null)) else if (_state.value.open?.id == o.id) _state.update { it.copy(followed = thread) }
         }
     }
 
@@ -400,9 +407,9 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 refresh()
             } catch (e: HqUnavailable) {
                 val why = when {
-                    e.message?.contains("HTTP 400") == true -> "HQ did not accept that name. Use plain words."
-                    e.message?.contains("HTTP 404") == true -> "That helper is not there any more."
-                    else -> "Couldn't rename it. HQ didn't answer in time. Try again."
+                    e.message?.contains("HTTP 400") == true -> w().s(R.string.helpers_rename_rejected)
+                    e.message?.contains("HTTP 404") == true -> w().s(R.string.helpers_rename_gone)
+                    else -> w().s(R.string.helpers_rename_no_reply)
                 }
                 editFor(id) { it.copy(rename = null, error = why) }
             }
@@ -432,7 +439,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val id = client.startHelper(f.harness, host, f.job.trim(), HelperWords.oneLineLabel(f.job))
                 _state.update { it.copy(start = null) }
-                say("Started.")
+                say(w().s(R.string.helpers_started))
                 refresh()
                 open(id)
             } catch (e: HqUnavailable) {
@@ -444,11 +451,11 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startReason(e: HqUnavailable) = when {
-        e.message?.contains("HTTP 409") == true -> "Couldn't start it. That computer is not ready for another helper."
-        e.message?.contains("HTTP 404") == true -> "Couldn't start it. HQ does not know that computer, or this edition cannot start helpers."
-        e.message?.contains("HTTP 400") == true -> "Couldn't start it. HQ did not accept that text. Try shorter, plain words."
-        e.message?.startsWith("HTTP ") == true -> "Couldn't start it. HQ answered with an error."
-        else -> "HQ didn't answer in time. The helper may still be starting. Check the list before you try again."
+        e.message?.contains("HTTP 409") == true -> w().s(R.string.helpers_start_conflict)
+        e.message?.contains("HTTP 404") == true -> w().s(R.string.helpers_start_unknown)
+        e.message?.contains("HTTP 400") == true -> w().s(R.string.helpers_start_rejected)
+        e.message?.startsWith("HTTP ") == true -> w().s(R.string.helpers_start_error)
+        else -> w().s(R.string.helpers_start_no_reply)
     }
 
     private companion object {
