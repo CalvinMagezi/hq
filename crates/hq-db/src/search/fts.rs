@@ -64,30 +64,56 @@ pub fn indexed_count(conn: &Connection) -> Result<usize> {
 /// Full-text keyword search using FTS5 MATCH with snippets.
 /// Returns results sorted by FTS5 rank (most relevant first).
 pub fn keyword_search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    keyword_search_in(conn, query, limit, None)
+}
+
+/// [`keyword_search`] inside one folder: only notes whose path starts with `prefix`
+/// (`Notebooks/Projects/`), filtered before the limit so a folder's matches are never cut by others.
+pub fn keyword_search_in(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    prefix: Option<&str>,
+) -> Result<Vec<SearchResult>> {
     let all_terms = join_terms(query, " ");
     if all_terms.is_empty() {
         return Ok(Vec::new());
     }
-    let hits = match_query(conn, &all_terms, limit)?;
+    let hits = match_query(conn, &all_terms, limit, prefix)?;
     // A sentence rarely has every word in one note, so fall back to any-term ranking.
     let any_terms = join_terms(query, " OR ");
     if hits.is_empty() && any_terms != all_terms {
-        return match_query(conn, &any_terms, limit);
+        return match_query(conn, &any_terms, limit, prefix);
     }
     Ok(hits)
 }
 
-fn match_query(conn: &Connection, escaped: &str, limit: usize) -> Result<Vec<SearchResult>> {
+/// `prefix` as a LIKE pattern that matches only that literal start.
+fn like_prefix(prefix: &str) -> String {
+    let escaped = prefix
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("{escaped}%")
+}
+
+fn match_query(
+    conn: &Connection,
+    escaped: &str,
+    limit: usize,
+    prefix: Option<&str>,
+) -> Result<Vec<SearchResult>> {
     let mut stmt = conn.prepare(
         "SELECT path, title, snippet(notes_fts, 2, '<mark>', '</mark>', '...', 30) as snippet,
                 tags, rank
          FROM notes_fts
-         WHERE notes_fts MATCH ?1
+         WHERE notes_fts MATCH ?1 AND (?3 IS NULL OR path LIKE ?3 ESCAPE '\\')
          ORDER BY rank
          LIMIT ?2",
     )?;
+    let pattern = prefix.map(like_prefix);
 
-    let rows = stmt.query_map(rusqlite::params![escaped, limit], |row| {
+    let rows = stmt.query_map(rusqlite::params![escaped, limit, pattern], |row| {
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
@@ -251,4 +277,47 @@ pub fn get_tagged_note_paths(conn: &Connection, tag: &str) -> Result<Vec<String>
         paths.push(row?);
     }
     Ok(paths)
+}
+
+#[cfg(test)]
+mod folder_tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_search_keeps_only_that_folder_and_filters_before_the_limit() {
+        let db = crate::Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            for i in 0..5 {
+                index_note(
+                    c,
+                    &format!("Notebooks/Other/n{i}.md"),
+                    "battery",
+                    "battery battery battery",
+                    "",
+                )?;
+            }
+            index_note(
+                c,
+                "Notebooks/Projects/Agent-HQ/plan.md",
+                "plan",
+                "the battery plan",
+                "",
+            )?;
+            index_note(
+                c,
+                "Notebooks/Projects/Agent_HQx/odd.md",
+                "odd",
+                "battery",
+                "",
+            )?;
+            let hits = keyword_search_in(c, "battery", 1, Some("Notebooks/Projects/Agent-HQ/"))?;
+            let paths: Vec<_> = hits.iter().map(|h| h.note_path.as_str()).collect();
+            assert_eq!(paths, ["Notebooks/Projects/Agent-HQ/plan.md"]);
+            // `_` and `%` in a folder name are literal, not LIKE wildcards.
+            let none = keyword_search_in(c, "battery", 10, Some("Notebooks/Projects/Agent_HQ/"))?;
+            assert!(none.is_empty(), "{none:?}");
+            Ok(())
+        })
+        .unwrap();
+    }
 }
