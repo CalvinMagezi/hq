@@ -12,7 +12,7 @@ import okhttp3.Request
 enum class Provider(val label: String, val credential: String, val keyLine: String?, val keyUrl: String?) {
     OpenRouter("OpenRouter", "OPENROUTER_API_KEY", "Get a key at openrouter.ai/keys", "https://openrouter.ai/keys"),
     Anthropic("Anthropic", "ANTHROPIC_API_KEY", "Get a key at console.anthropic.com", "https://console.anthropic.com/settings/keys"),
-    Other("Other OpenAI-compatible", "CUSTOM_API_KEY", null, null);
+    Other("Another AI service", "CUSTOM_API_KEY", null, null);
 
     val needsBaseUrl: Boolean get() = this == Other
 }

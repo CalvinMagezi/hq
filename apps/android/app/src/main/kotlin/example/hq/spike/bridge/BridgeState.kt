@@ -54,7 +54,7 @@ object BridgeReducer {
         is BridgeEvent.Joined -> s.copy(join = JoinState.Done(e.id, e.name))
         is BridgeEvent.JoinFailed -> s.copy(join = JoinState.Failed(e.why))
         is BridgeEvent.Peers -> s.copy(peers = e.peers)
-        is BridgeEvent.Revoked -> s.copy(peers = s.peers?.filterNot { it.id == e.id }, line = if (e.changed) "Device removed." else "That device was already removed.")
+        is BridgeEvent.Revoked -> s.copy(peers = s.peers?.filterNot { it.id == e.id }, line = if (e.changed) "${s.peers?.firstOrNull { it.id == e.id }?.name?.ifBlank { null } ?: "Device"} removed." else "That device was already removed.")
         is BridgeEvent.Failed -> when (e.cmd) {
             // These two have a screen waiting for an answer that will not come, so they end it.
             "join" -> s.copy(join = JoinState.Failed(e.message))
@@ -73,7 +73,7 @@ object BridgeReducer {
         join = if (s.join is JoinState.Connecting || s.join is JoinState.ShowDigits) JoinState.Failed(BRIDGE_STOPPED) else s.join,
     )
 
-    const val BRIDGE_STOPPED = "The bridge stopped. Try again."
+    const val BRIDGE_STOPPED = "Pairing stopped. Try again."
 
     /** A join left running when its screen closed is no longer something to show. */
     fun resetJoin(s: BridgeState): BridgeState = s.copy(join = JoinState.Idle)

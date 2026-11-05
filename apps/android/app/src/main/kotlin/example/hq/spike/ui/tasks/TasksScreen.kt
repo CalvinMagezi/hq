@@ -121,7 +121,7 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
         if (ui.offline) item { Text(stringResource(R.string.tasks_hq_is_not_running), style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
         if (onAll) item(key = "chips") { AllChips(ui, actions.onChip) }
         if (onAll && ui.scope != TaskScope.Everything) item(key = "scope") { ScopeChip(TaskFilters.label(ui.tree, ui.scope) ?: "Filtered") { actions.onScope(TaskScope.Everything) } }
-        if (onAll && ui.sessions.isNotEmpty() && ui.chip == AllChip.Active) item(key = "strip") { WorkingStrip(ui.sessions, onHelpers) }
+        if (onAll && ui.sessions.isNotEmpty() && ui.chip == AllChip.Active) item(key = "strip") { WorkingStrip(ui.sessions, ui.tasks, onHelpers) }
         if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(if (onAll && ui.chip == AllChip.Archived && !ui.archivedLoaded) "Asking HQ\u2026" else if (onAll) TasksLogic.emptyAll(ui.chip) else emptyWords(ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         groups.forEach { g ->
             if (g.title.isNotBlank()) item(key = "h-${g.key}") { GroupHeader(g, g.key in ui.expanded, actions.onToggleGroup) }
@@ -185,12 +185,13 @@ private fun AllChips(ui: TasksUi, onChip: (AllChip) -> Unit) {
     }
 }
 
-/** "1 helper working": which helper and where, and a way to the Helpers place. */
+/** "1 helper working": who is at it and on which task, and a way to the Helpers place. */
 @Composable
-private fun WorkingStrip(sessions: List<example.hq.spike.data.HqClient.WorkSession>, onOpen: () -> Unit) {
+private fun WorkingStrip(sessions: List<example.hq.spike.data.HqClient.WorkSession>, tasks: List<TaskItem>, onOpen: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
-    val first = sessions.first()
+    val w = example.hq.spike.ui.shell.rememberWords()
     val count = sessions.size
+    val line = TasksLogic.stripLine(w, sessions, tasks)
     Row(
         Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp).fillMaxWidth().heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).clickable(role = Role.Button, onClick = onOpen).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
@@ -198,11 +199,10 @@ private fun WorkingStrip(sessions: List<example.hq.spike.data.HqClient.WorkSessi
         Box(Modifier.size(8.dp).background(Mts.Amber, CircleShape))
         Text(
             buildAnnotatedString {
-                withStyle(SpanStyle(color = Mts.Ink, fontWeight = FontWeight.Bold)) { append(if (count == 1) "1 helper working" else "$count helpers working") }
-                val where = first.cwd.trimEnd('/').substringAfterLast('/').ifBlank { first.harness }
-                withStyle(SpanStyle(color = Mts.InkMuted)) { append(" \u00b7 ${first.actor.ifBlank { first.harness }} on $where") }
+                withStyle(SpanStyle(color = Mts.Ink, fontWeight = FontWeight.Bold)) { append(w.n(R.plurals.tasks_strip_working, count, count)) }
+                withStyle(SpanStyle(color = Mts.InkMuted)) { append(" \u00b7 $line") }
             },
-            style = HqType.BodySm, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+            style = HqType.BodySm, modifier = Modifier.weight(1f),
         )
         Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
     }

@@ -42,6 +42,6 @@ object ConfirmCopy {
     /** The host of a server address for the body, or the address as typed when it has none. */
     fun hostOf(address: String?): String = address.orEmpty().let { a -> runCatching { java.net.URI(a).host }.getOrNull() ?: a }
 
-    /** "OPENROUTER_API_KEY" as the person reads it: "Openrouter". */
-    fun keyLabel(name: String): String = name.removeSuffix("_API_KEY").replace('_', ' ').lowercase().replaceFirstChar(Char::uppercase)
+    /** "OPENROUTER_API_KEY" as the person reads it: "OpenRouter". */
+    fun keyLabel(name: String): String = example.hq.spike.ui.firstrun.KeyNames.display(name)
 }

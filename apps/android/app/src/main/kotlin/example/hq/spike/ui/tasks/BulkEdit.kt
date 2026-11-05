@@ -36,12 +36,10 @@ object BulkEdit {
         else -> "could not be saved"
     }
 
-    private fun tasks(n: Int) = if (n == 1) "1 task" else "$n tasks"
-
     private fun priorityWords(p: String?) = PRIORITY_CHOICES.firstOrNull { it.first == p }?.second ?: "None"
 
     /** "3 tasks moved to Done, 1 already there. 2 could not be updated: FR-12 was changed by someone else". */
-    fun summary(change: Bulk, results: List<Applied>): String {
+    fun summary(w: example.hq.spike.ui.shell.Words, change: Bulk, results: List<Applied>): String {
         val changed = results.count { it == Applied.Changed }
         val already = results.count { it == Applied.Already }
         val failed = results.filterIsInstance<Applied.Failed>()
@@ -50,8 +48,8 @@ object BulkEdit {
             is Bulk.Priority -> if (change.to == null) "set to no priority" else "set to ${priorityWords(change.to)}"
         }
         val done = buildList {
-            if (changed > 0) add("${tasks(changed)} $to")
-            if (already > 0) add(if (changed > 0) "$already already there" else "${tasks(already)} already ${if (change is Bulk.Status) "there" else "that"}")
+            if (changed > 0) add("${example.hq.spike.ui.shell.Counts.tasks(w, changed)} $to")
+            if (already > 0) add(if (changed > 0) "$already already there" else "${example.hq.spike.ui.shell.Counts.tasks(w, already)} already ${if (change is Bulk.Status) "there" else "that"}")
         }.joinToString(", ")
         val bad = if (failed.isEmpty()) "" else "${failed.size} could not be updated: " + failed.joinToString("; ") { "${it.displayId} ${it.why}" }
         // Moving a task to Ready to check puts one item per task in the Inbox, whoever moved it.

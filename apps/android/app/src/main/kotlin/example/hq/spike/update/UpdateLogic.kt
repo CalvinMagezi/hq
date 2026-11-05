@@ -217,13 +217,27 @@ object UpdateLogic {
     /** True when it has been a day since the last check, or the clock moved back past it. */
     fun due(lastCheckMs: Long, nowMs: Long): Boolean = lastCheckMs <= 0 || nowMs < lastCheckMs || nowMs - lastCheckMs >= CHECK_EVERY_MS
 
+    /** The Android release name for an API level, because owners know "Android 10", not "29". */
+    fun androidName(sdk: Int): String = when (sdk) {
+        26, 27 -> "Android 8"
+        28 -> "Android 9"
+        29 -> "Android 10"
+        30 -> "Android 11"
+        31, 32 -> "Android 12"
+        33 -> "Android 13"
+        34 -> "Android 14"
+        35 -> "Android 15"
+        36 -> "Android 16"
+        else -> "a newer Android"
+    }
+
     /** The line Settings shows for a state; failures say what to do, not what the code did. */
     fun words(state: UpdateState): String = when (state) {
         UpdateState.Idle -> "Not checked yet"
         UpdateState.Checking -> "Checking\u2026"
         UpdateState.UpToDate -> "Up to date"
         is UpdateState.Available -> "Version ${state.manifest.version} is ready"
-        is UpdateState.NeedsNewerAndroid -> "A newer version needs Android ${state.minSdk}"
+        is UpdateState.NeedsNewerAndroid -> "A newer version needs ${androidName(state.minSdk)} or newer."
         // The new states are worded from the string catalogue, which needs a Context: see wordsFor.
         is UpdateState.Busy, is UpdateState.Waiting, is UpdateState.InstalledWithdrawn, is UpdateState.Pulled -> ""
         UpdateState.Downloading -> "Downloading\u2026"

@@ -240,7 +240,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                     moved.forEach { t -> BulkEdit.patchFor(Bulk.Status(t.status), t.copy(status = "complete"))?.let { client.patchTask(t.id, it) } }
                     refresh()
                 }
-            } else say(BulkEdit.summary(change, results))
+            } else say(BulkEdit.summary(example.hq.spike.ui.shell.Words.of(getApplication()), change, results))
             refresh()
         }
     }
@@ -580,8 +580,8 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(quick = null) }
                 say(
                     when {
-                        repo != null -> "Task added for the edge worker"
-                        q.repo != null -> "Task added, but not for the worker: ${q.repo} is no longer allowed"
+                        repo != null -> "Task added. HQ starts on it in a few minutes."
+                        q.repo != null -> "Task added, but HQ will not code it. ${q.repo} is no longer on its list."
                         else -> "Task added"
                     },
                 )

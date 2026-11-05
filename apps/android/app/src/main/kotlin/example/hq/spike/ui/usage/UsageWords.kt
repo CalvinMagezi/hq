@@ -1,5 +1,8 @@
 package example.hq.spike.ui.usage
 
+import example.hq.spike.R
+import example.hq.spike.ui.settings.SettingsWords
+import example.hq.spike.ui.shell.Words
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -102,15 +105,18 @@ object UsageWords {
     /** The provider row HQ built for one backend (status, balance, spend), from /api/usage/providers. */
     fun providerRow(providers: JSONObject?, backend: String): JSONObject? = providers.arr("backends").items().firstOrNull { it.optString("backend") == backend }
 
-    fun statusWords(status: String?): String = when (status) {
-        "ok" -> "Working"
-        "subscription" -> "Subscription"
-        "no_key" -> "No key set"
-        "refused" -> "Balance not readable"
-        "error" -> "Usage not readable"
-        "ledger_only" -> "No balance from the provider"
-        "local" -> "Runs on this phone"
-        else -> ""
+    private const val CHIP_NAME_MAX = 12
+
+    fun statusWords(w: Words, status: String?): String = when (status) {
+        null, "" -> ""
+        "ok" -> w.s(R.string.usage_status_ok)
+        "subscription" -> w.s(R.string.usage_status_subscription)
+        "no_key" -> w.s(R.string.usage_status_no_key)
+        "refused" -> w.s(R.string.usage_status_refused)
+        "error" -> w.s(R.string.usage_status_error)
+        "ledger_only" -> w.s(R.string.usage_status_ledger_only)
+        "local" -> w.s(R.string.usage_status_local)
+        else -> w.s(R.string.words_other)
     }
 
     // ---------------------------------------------------------------- numbers
@@ -145,17 +151,25 @@ object UsageWords {
      * Budget that needs attention first (it is what is about to block a call), then the balance of the service HQ uses first,
      * then of the next one that has something to show.
      */
-    fun chip(s: UsageSnapshot): BalanceChip? = budgetChip(s.budgets) ?: serviceChips(s).firstOrNull()
+    fun chip(w: Words, s: UsageSnapshot): BalanceChip? = budgetChip(w, s.budgets) ?: serviceChips(s).firstOrNull()
 
-    private fun budgetChip(b: JSONObject?): BalanceChip? {
+    /** A global budget reads Today, This week or This month; a scoped one reads its service or model, or "Limit" past 12 characters. */
+    private fun budgetChip(w: Words, b: JSONObject?): BalanceChip? {
         val worst = b.arr("budgets").items().filter { it.optString("state") != "ok" }.maxByOrNull { it.optDouble("pct", 0.0) } ?: return null
-        val pct = worst.optDouble("pct", Double.NaN)
-        val name = worst.optString("name").ifBlank { "Limit" }
-        val period = when (worst.optString("period")) { "day" -> "daily"; "week" -> "weekly"; "month" -> "monthly"; else -> "" }
-        val scope = worst.optString("scope").takeIf { it.isNotBlank() && it != "global" }?.let { " on $it" }.orEmpty()
-        val title = "Budget $name: ${usd(worst.num("spent_usd"))} of ${usd(worst.num("limit_usd"))} $period$scope".replace("  ", " ")
+        val pct = worst.optDouble("pct", Double.NaN).let { if (it.isFinite()) "${it.roundToInt()}%" else "-" }
+        val period = worst.optString("period")
+        val scope = worst.optString("scope")
+        val what = if (scope.isBlank() || scope == "global") {
+            w.s(when (period) { "day" -> R.string.usage_chip_today; "week" -> R.string.usage_chip_week; "month" -> R.string.usage_chip_month; else -> R.string.usage_chip_limit })
+        } else {
+            SettingsWords.serviceName(scope.substringAfter(':').substringAfterLast('/'))
+                .takeIf { it.length <= CHIP_NAME_MAX } ?: w.s(R.string.usage_chip_limit)
+        }
+        val spent = usd(worst.num("spent_usd"))
+        val limit = usd(worst.num("limit_usd"))
+        val title = w.s(when (period) { "day" -> R.string.usage_chip_title_day; "week" -> R.string.usage_chip_title_week; "month" -> R.string.usage_chip_title_month; else -> R.string.usage_chip_title_any }, spent, limit, pct)
         val tone = if (worst.optString("state") == "exceeded") ChipTone.Exceeded else ChipTone.Warning
-        return BalanceChip("$name ${if (pct.isFinite()) "${pct.roundToInt()}%" else "-"}", title, ChipTarget.Spending, tone)
+        return BalanceChip(w.s(R.string.usage_chip, what, pct), title, ChipTarget.Spending, tone)
     }
 
     /** One chip candidate per service, in the order HQ tries them; the order of the web app's chip when no order is set. */

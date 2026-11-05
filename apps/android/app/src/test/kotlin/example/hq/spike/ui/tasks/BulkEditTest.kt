@@ -1,11 +1,20 @@
 package example.hq.spike.ui.tasks
 
+import example.hq.spike.testing.testWords
+
 import example.hq.spike.data.HqClient.TaskItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class BulkEditTest {
+    @org.junit.Before fun english() = java.util.Locale.setDefault(java.util.Locale.ENGLISH)
+
     private fun t(status: String = "to_do", priority: String? = null) =
         TaskItem("i", "FR-1", "T", "", status, priority, null, null, emptyList(), emptyList(), null, 0, 0, null, null, "2026-10-20 10:00:00")
 
@@ -28,16 +37,16 @@ class BulkEditTest {
 
     @Test fun theSummaryCountsWhatMovedWhatWasAlreadyThereAndWhatFailed() {
         val r = listOf(Applied.Changed, Applied.Changed, Applied.Changed, Applied.Already)
-        assertEquals("3 tasks moved to Done, 1 already there", BulkEdit.summary(Bulk.Status("complete"), r))
+        assertEquals("3\u00A0tasks moved to Done, 1 already there", BulkEdit.summary(testWords(), Bulk.Status("complete"), r))
         val failed = r + Applied.Failed("FR-12", BulkEdit.failure(409)) + Applied.Failed("FR-13", BulkEdit.failure(404))
-        assertEquals("3 tasks moved to Done, 1 already there. 2 could not be updated: FR-12 was changed by someone else; FR-13 is not there any more", BulkEdit.summary(Bulk.Status("complete"), failed))
+        assertEquals("3\u00A0tasks moved to Done, 1 already there. 2 could not be updated: FR-12 was changed by someone else; FR-13 is not there any more", BulkEdit.summary(testWords(), Bulk.Status("complete"), failed))
     }
 
     @Test fun theSummaryReadsForOneTaskAndForPriorities() {
-        assertEquals("1 task set to High", BulkEdit.summary(Bulk.Priority("high"), listOf(Applied.Changed)))
-        assertEquals("2 tasks set to no priority", BulkEdit.summary(Bulk.Priority(null), listOf(Applied.Changed, Applied.Changed)))
-        assertEquals("2 tasks already there", BulkEdit.summary(Bulk.Status("blocked"), listOf(Applied.Already, Applied.Already)))
-        assertEquals("1 task already that", BulkEdit.summary(Bulk.Priority("low"), listOf(Applied.Already)))
+        assertEquals("1\u00A0task set to High", BulkEdit.summary(testWords(), Bulk.Priority("high"), listOf(Applied.Changed)))
+        assertEquals("2\u00A0tasks set to no priority", BulkEdit.summary(testWords(), Bulk.Priority(null), listOf(Applied.Changed, Applied.Changed)))
+        assertEquals("2\u00A0tasks already there", BulkEdit.summary(testWords(), Bulk.Status("blocked"), listOf(Applied.Already, Applied.Already)))
+        assertEquals("1\u00A0task already that", BulkEdit.summary(testWords(), Bulk.Priority("low"), listOf(Applied.Already)))
     }
 
     @Test fun everyStatusHasWordsAndPriorityEndsWithNone() {
@@ -46,7 +55,7 @@ class BulkEditTest {
     }
 
     @Test fun movingToReadyToCheckSaysTheyAreWaitingInTheInbox() {
-        assertEquals("2 tasks moved to Ready to check. Each is waiting in your Inbox", BulkEdit.summary(Bulk.Status("ready_for_review"), listOf(Applied.Changed, Applied.Changed)))
+        assertEquals("2\u00A0tasks moved to Ready to check. Each is waiting in your Inbox", BulkEdit.summary(testWords(), Bulk.Status("ready_for_review"), listOf(Applied.Changed, Applied.Changed)))
     }
 
     @Test fun finishingManyAsksFirst() {

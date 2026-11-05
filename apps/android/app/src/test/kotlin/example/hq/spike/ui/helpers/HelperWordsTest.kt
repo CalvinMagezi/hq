@@ -449,7 +449,7 @@ class HelperWordsTest {
         val c = HelperWords.edgeCard(run("pending"), now)
         assertEquals(HelperState.Working, c.state)
         assertEquals("Show the plant count", c.title)
-        assertEquals("HQ edge worker", c.agent)
+        assertEquals("HQ", c.agent)
         assertEquals("this phone", c.where)
         assertEquals("Working on PERSONAL-INBOX-163", c.line)
         assertEquals("10 min", c.time)

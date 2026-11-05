@@ -84,7 +84,7 @@ private fun PageBar(title: String, status: Pair<String, Color>?, onBack: () -> U
             status?.let { (text, color) ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(Modifier.size(8.dp).background(color, CircleShape))
-                    Text(text, style = HqType.Caption, color = Mts.InkMuted, maxLines = 1)
+                    Text(text, style = HqType.Caption, color = Mts.InkMuted)
                 }
             }
         }
@@ -92,13 +92,13 @@ private fun PageBar(title: String, status: Pair<String, Color>?, onBack: () -> U
     }
 }
 
-private fun statusOf(card: HelperCard): Pair<String, Color> {
+private fun statusOf(w: example.hq.spike.ui.shell.Words, card: HelperCard): Pair<String, Color> {
     val color = when (card.state) {
         HelperState.Working -> Mts.BrandBlue
         HelperState.NeedsOk, HelperState.Offline, HelperState.Lost -> Mts.Amber
         else -> Mts.Line
     }
-    return listOf(HelperWords.stateWords(card.state), card.time).filter { it.isNotBlank() }.joinToString(" · ") to color
+    return listOf(HelperWords.stateWords(w, card.state, card.own), card.time).filter { it.isNotBlank() }.joinToString(" · ") to color
 }
 
 private fun Modifier.page() = fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().imePadding().navigationBarsPadding()
@@ -113,7 +113,7 @@ private fun HelperPageView(card: HelperCard, open: HelperOpen, ui: HelpersUi, ac
     BackHandler(onBack = actions.onClose)
     val running = card.state != HelperState.Finished && card.state != HelperState.Stopped
     Column(Modifier.page()) {
-        PageBar(card.title, statusOf(card), actions.onClose) { IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { actions.onMenu(true) } }
+        PageBar(card.title, statusOf(example.hq.spike.ui.shell.rememberWords(), card), actions.onClose) { IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { actions.onMenu(true) } }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (card.state == HelperState.NeedsOk && card.ask != null) AskBanner(card, actions.onSeeAsk)
             RightNow(card, open, ui)
@@ -211,7 +211,7 @@ private fun AskPage(card: HelperCard, open: HelperOpen, actions: HelpersActions)
                 Box(Modifier.size(40.dp).background(Mts.Surface200, CircleShape), contentAlignment = Alignment.Center) { Icon(HqIcons.Code, null, Modifier.size(22.dp), tint = Mts.Ink) }
                 Column {
                     Text(card.agent, style = HqType.BodyBold, color = Mts.Ink)
-                    Text("on ${card.where} · job: ${card.title}", style = SmallText, color = Mts.InkMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("on ${card.where} · job: ${card.title}", style = SmallText, color = Mts.InkMuted)
                 }
             }
             Text(HelperWords.askTitle(card.agent, ask), style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)
@@ -272,7 +272,7 @@ private val KEYS = listOf("enter" to "enter", "esc" to "esc", "↑" to "up", "�
 private fun TechnicalPage(card: HelperCard, open: HelperOpen, actions: HelpersActions) {
     BackHandler { actions.onTechnical(false) }
     Column(Modifier.page()) {
-        PageBar("Technical details", statusOf(card), { actions.onTechnical(false) })
+        PageBar("Technical details", statusOf(example.hq.spike.ui.shell.rememberWords(), card), { actions.onTechnical(false) })
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState(), reverseScrolling = true).padding(start = 16.dp, end = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.helpers_terminal_read_only), style = SmallText, color = Mts.InkMuted)
             Terminal(HelperWords.rawTail(open.screen, TECH_LINES))

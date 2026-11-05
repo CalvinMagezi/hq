@@ -132,7 +132,7 @@ private fun QuickPills(q: QuickState, edge: HqClient.EdgeWorker?, actions: Tasks
         Pill("Today", false) { actions.onQuick(q.copy(text = (q.text.trim() + " today").trim())) }
         Pill("Next week", false) { actions.onQuick(q.copy(text = (q.text.trim() + " next week").trim())) }
         Pill("Add details", false) { actions.onQuick(q.copy(more = true)) }
-        if (edge.takesTasks()) Pill("For the edge worker", false) { actions.onQuick(q.copy(more = true, repo = edge?.repos?.singleOrNull())) }
+        if (edge.takesTasks()) Pill("Let HQ code it", false) { actions.onQuick(q.copy(more = true, repo = edge?.repos?.singleOrNull())) }
     }
 }
 
@@ -145,10 +145,10 @@ private fun HqClient.EdgeWorker?.takesTasks() = this != null && enabled && repos
 private fun EdgeFields(q: QuickState, edge: HqClient.EdgeWorker, actions: TasksActions) {
     Text(stringResource(R.string.tasks_edge_worker), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Pill("Not for the worker", q.repo == null) { actions.onQuick(q.copy(repo = null)) }
+        Pill("Not for HQ", q.repo == null) { actions.onQuick(q.copy(repo = null)) }
         edge.repos.forEach { repo -> Pill(repo.substringAfter('/'), q.repo == repo) { actions.onQuick(q.copy(repo = repo)) } }
     }
-    if (q.repo != null) Text("HQ works it on this phone within a few minutes and opens a pull request in ${q.repo}. Say in the notes what to change and how you will know it is done.", style = SmallText, color = Mts.InkMuted)
+    if (q.repo != null) Text("HQ starts work on it here in a few minutes. It sends the change to ${q.repo} on GitHub for you to check. Say in the notes what to change.", style = SmallText, color = Mts.InkMuted)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -266,7 +266,7 @@ private fun ReadyCard(t: TaskItem, actions: TasksActions) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(stringResource(R.string.tasks_ready_for_you_to), style = HqType.BodyBold, color = Mts.Amber)
-        Text("hq says this is finished${TasksLogic.readyAgo(t.readyAt, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC))?.let { ", $it" } ?: ""}. Look it over, then mark it done.", style = HqType.BodySm, color = Mts.Ink)
+        Text("HQ says this is finished${TasksLogic.readyAgo(t.readyAt, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC))?.let { ", $it" } ?: ""}. Look it over, then mark it done.", style = HqType.BodySm, color = Mts.Ink)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = actions.onMarkDone), contentAlignment = Alignment.Center) { Text(stringResource(R.string.tasks_mark_done), style = HqType.BodySmBold, color = Mts.OnGreen) }
             Box(Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { actions.onPrompt("sendback") }, contentAlignment = Alignment.Center) { Text(stringResource(R.string.tasks_send_back), style = HqType.BodySmBold, color = Mts.Ink) }
@@ -298,7 +298,7 @@ private fun StatusRow(t: TaskItem, actions: TasksActions) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun Facts(t: TaskItem, today: LocalDate) {
-    val facts = listOfNotNull(t.assignees.firstOrNull()?.let { "for $it" }, t.tags.firstOrNull(), TasksLogic.parse(t.startDate)?.let { "Starts " + it.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")) }, TasksLogic.parse(t.dueDate)?.let { "Due " + it.format(java.time.format.DateTimeFormatter.ofPattern("MMM d")) })
+    val facts = listOfNotNull(t.assignees.firstOrNull()?.let { if (it.equals("hq", ignoreCase = true)) "for HQ" else "for $it" }, t.tags.firstOrNull(), TasksLogic.parse(t.startDate)?.let { "Starts " + it.format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)) }, TasksLogic.parse(t.dueDate)?.let { "Due " + it.format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)) })
     if (facts.isEmpty()) return
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         facts.forEach { Box(Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Hairline, CircleShape).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) { Text(it, style = HqType.Caption.copy(fontSize = 13.sp), color = Mts.InkMuted) } }

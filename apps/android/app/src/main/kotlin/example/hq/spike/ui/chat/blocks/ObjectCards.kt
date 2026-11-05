@@ -91,7 +91,7 @@ fun ReadNotes(paths: List<String>, stateOf: (String) -> ChipState, onOpen: (Stri
     val shown = if (all || paths.size <= FOLD_AFTER + 1) paths else paths.take(FOLD_AFTER)
     Column {
         Text(
-            (if (paths.size == 1) "Read 1 note" else "Read ${paths.size} notes").uppercase(),
+            androidx.compose.ui.res.pluralStringResource(R.plurals.chat_read_notes, paths.size, paths.size).uppercase(),
             style = HqType.Badge.copy(letterSpacing = 0.06.em), color = Mts.InkMuted,
         )
         FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -73,7 +73,7 @@ class KeyShapeTest {
         assertEquals("k", an.headers["x-api-key"])
         assertEquals("https://example.com/v1/models", KeyCheck.request(Provider.Other, "k", " https://example.com/v1/ ").url)
         assertEquals(FirstRunWords.KEY_OK, KeyCheck.message(200))
-        assertEquals("The service answered 401.", KeyCheck.message(401))
+        assertEquals("The service did not accept this key.", KeyCheck.message(401))
         assertTrue(KeyCheck.message(null).startsWith("Could not reach"))
     }
 

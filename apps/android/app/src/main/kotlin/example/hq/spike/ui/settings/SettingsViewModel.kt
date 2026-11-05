@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import example.hq.spike.AlertPoster
 import example.hq.spike.R
 import example.hq.spike.ui.shell.Undo
+import example.hq.spike.ui.shell.Words
 import example.hq.spike.HubService
 import example.hq.spike.ServerHq
 import example.hq.spike.capture.CapturePrefs
@@ -339,7 +340,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val allowed = nm.areNotificationsEnabled()
         return listOf(
             HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
-            HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(it, Instant.now()).checked.any { r -> !r.ok } }),
+            HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(Words.of(ctx()), keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(Words.of(ctx()), it, Instant.now()).checked.any { r -> !r.ok } }),
             HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
             HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
             HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
@@ -461,7 +462,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (failure != null) { _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, error = failure)) }; return@launch }
             refreshNow()
-            val linked = _state.value.snap.chatApps.let { SettingsWords.appCard(it, setup.platform, SettingsWords.appName(setup.platform)).owner == "Linked" }
+            val linked = _state.value.snap.chatApps.let { SettingsWords.appCard(Words.of(ctx()), it, setup.platform, SettingsWords.appName(setup.platform)).owner == "Linked" }
             _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, saved = true), line = SettingsWords.SAVED_RESTARTED) }
             if (!linked) pairApp(setup.platform, false, replacePage = true)
             else _state.update { if (it.stack.lastOrNull() == SettingsPage.SetupApp) it.copy(stack = it.stack.dropLast(1), setup = null) else it.copy(setup = null) }
@@ -491,7 +492,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val pair = _state.value.pair ?: return
         if (pair.expiresAt <= java.time.Instant.now().epochSecond) return
         val body = try { client.json("/api/chat-apps") } catch (e: HqUnavailable) { return }
-        val linked = SettingsWords.appCard(body, pair.platform, SettingsWords.appName(pair.platform)).owner == "Linked"
+        val linked = SettingsWords.appCard(Words.of(ctx()), body, pair.platform, SettingsWords.appName(pair.platform)).owner == "Linked"
         _state.update { s ->
             val withBody = s.copy(snap = s.snap.copy(chatApps = body))
             if (linked && s.page == SettingsPage.PairApp) withBody.copy(stack = s.stack.dropLast(1), pair = null, line = "Linked.") else withBody

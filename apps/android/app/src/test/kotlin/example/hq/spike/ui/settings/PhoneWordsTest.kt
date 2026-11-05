@@ -1,5 +1,7 @@
 package example.hq.spike.ui.settings
 
+import example.hq.spike.testing.testWords
+
 import android.app.ApplicationExitInfo
 import java.time.Instant
 import example.hq.spike.R
@@ -8,12 +10,19 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class PhoneWordsTest {
+    @org.junit.Before fun english() = java.util.Locale.setDefault(java.util.Locale.ENGLISH)
+
     private val now = Instant.parse("2026-10-22T12:00:00Z")
 
     @Test fun everythingFineOnASamsungNamesTheOneThingItCannotCheck() {
-        val page = PhoneWords.keepRunning(KeepFacts(autoRevokeOff = true, samsung = true), now)
+        val page = PhoneWords.keepRunning(testWords(), KeepFacts(autoRevokeOff = true, samsung = true), now)
         assertEquals("One thing Android may still stop", page.noticeTitle)
         assertEquals("Three settings are fine. A fourth, in Samsung's own battery menu, cannot be checked from here.", page.notice)
         assertTrue(page.warn)
@@ -22,37 +31,37 @@ class PhoneWordsTest {
     }
 
     @Test fun twoCheckedSettingsReadAsTwoWhenThereIsNoAutoRevoke() {
-        val page = PhoneWords.keepRunning(KeepFacts(autoRevokeOff = null, samsung = true), now)
+        val page = PhoneWords.keepRunning(testWords(), KeepFacts(autoRevokeOff = null, samsung = true), now)
         assertEquals("Two settings are fine. A third, in Samsung's own battery menu, cannot be checked from here.", page.notice)
     }
 
     @Test fun aSettingThatIsNotFineOffersItsAndroidPage() {
-        val page = PhoneWords.keepRunning(KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false), now)
-        assertEquals("Three things to fix", page.noticeTitle)
+        val page = PhoneWords.keepRunning(testWords(), KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false), now)
+        assertEquals("3 things to fix", page.noticeTitle)
         assertEquals(listOf(PhoneFix.Battery, PhoneFix.AutoRevoke, PhoneFix.Notifications), page.checked.map { it.fix })
         assertTrue(page.warn)
     }
 
     @Test fun backgroundRestrictedIsWorseThanOptimised() {
-        assertEquals("Restricted", PhoneWords.keepRunning(KeepFacts(backgroundRestricted = true), now).checked[0].value)
+        assertEquals("Restricted", PhoneWords.keepRunning(testWords(), KeepFacts(backgroundRestricted = true), now).checked[0].value)
     }
 
     @Test fun everythingFineOffASamsungIsPlainlyFine() {
-        val page = PhoneWords.keepRunning(KeepFacts(autoRevokeOff = true), now)
+        val page = PhoneWords.keepRunning(testWords(), KeepFacts(autoRevokeOff = true), now)
         assertFalse(page.warn)
         assertFalse(page.sleepingApps)
-        assertEquals("Good", PhoneWords.keepSummary(KeepFacts(autoRevokeOff = true), now))
+        assertEquals("Good", PhoneWords.keepSummary(testWords(), KeepFacts(autoRevokeOff = true), now))
     }
 
     @Test fun theHomeRowCountsWhatIsToFix() {
-        assertEquals("2 to fix", PhoneWords.keepSummary(KeepFacts(batteryUnrestricted = false, notificationsAllowed = false), now))
-        assertEquals("Good · 1 thing to check", PhoneWords.keepSummary(KeepFacts(samsung = true), now))
+        assertEquals("2 to fix", PhoneWords.keepSummary(testWords(), KeepFacts(batteryUnrestricted = false, notificationsAllowed = false), now))
+        assertEquals("Good · 1 thing to check", PhoneWords.keepSummary(testWords(), KeepFacts(samsung = true), now))
     }
 
     @Test fun theHistoryRowSaysWhenAndWhy() {
-        val row = PhoneWords.keepRunning(KeepFacts(lastStop = LastStop(ApplicationExitInfo.REASON_LOW_MEMORY, now.minusSeconds(2 * 86_400L))), now).history
+        val row = PhoneWords.keepRunning(testWords(), KeepFacts(lastStop = LastStop(ApplicationExitInfo.REASON_LOW_MEMORY, now.minusSeconds(2 * 86_400L))), now).history
         assertEquals(FactRow("Last stopped by Android", "2 d ago · low memory"), row)
-        assertEquals("Nothing recorded", PhoneWords.keepRunning(KeepFacts(), now).history.value)
+        assertEquals("Nothing recorded", PhoneWords.keepRunning(testWords(), KeepFacts(), now).history.value)
     }
 
     @Test fun onlyAnExitAndroidChoseCounts() {

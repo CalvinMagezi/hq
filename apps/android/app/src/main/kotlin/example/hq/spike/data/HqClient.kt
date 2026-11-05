@@ -54,6 +54,15 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** HQ's own time zone, from the open /api/hello route; null when HQ does not answer or names no zone. */
+    suspend fun hello(): HqZone? = withContext(Dispatchers.IO) {
+        try {
+            http.newCall(Request.Builder().url("$base/api/hello").build()).execute().use { r -> if (r.isSuccessful) HqZone.parse(r.body?.string().orEmpty()) else null }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
     suspend fun threads(limit: Int = THREAD_PAGE): ThreadList = send(authed("/api/threads?limit=$limit").build()) { body ->
         val o = JSONObject(body)
         ThreadList(o.getJSONArray("threads").objects().map(ChatThread::from), o.optJSONArray("running").strings().toSet())
@@ -468,8 +477,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     } catch (e: IOException) { null } catch (e: org.json.JSONException) { null }
 
     private fun parseWhen(text: String): Long? = text.takeIf { it.isNotBlank() }?.let {
-        runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull()
-            ?: runCatching { java.time.LocalDateTime.parse(it.replace(' ', 'T')).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }.getOrNull()
+        Instants.parse(it)?.toEpochMilli()
     }
 
     /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */

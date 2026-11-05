@@ -1,5 +1,6 @@
 package example.hq.spike.ui.helpers
 
+import example.hq.spike.R
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.HelperRow
 import java.time.Duration
@@ -43,7 +44,10 @@ data class HelperCard(
     val generic: Boolean = false,
     /** The folder it ran in, to tell two nameless helpers apart. */
     val folder: String = "",
-)
+) {
+    /** HQ's own work on this phone, which is told apart from a coding helper. */
+    val own: Boolean get() = id.startsWith(HelperWords.EDGE_PREFIX)
+}
 
 /** The words the Helpers board uses, kept out of the screens so they can be tested. */
 object HelperWords {
@@ -99,6 +103,12 @@ object HelperWords {
         else -> HelperState.Ready
     }
 
+    fun stateWords(w: example.hq.spike.ui.shell.Words, state: HelperState, own: Boolean = false): String = when {
+        own && state == HelperState.Working -> w.s(R.string.helpers_own_working)
+        own && state == HelperState.Finished -> w.s(R.string.helpers_own_done)
+        else -> stateWords(state)
+    }
+
     fun stateWords(state: HelperState): String = when (state) {
         HelperState.NeedsOk -> "Needs your OK"
         HelperState.Working -> "Working on it"
@@ -110,9 +120,7 @@ object HelperWords {
     }
 
     /** A UTC time as HQ writes it: SQLite's "2026-11-03 07:43:52", or RFC 3339 with an offset (the edge worker's runs). */
-    private fun parse(time: String): LocalDateTime? = try { LocalDateTime.parse(time.replace(' ', 'T')) } catch (e: DateTimeParseException) {
-        try { java.time.OffsetDateTime.parse(time).atZoneSameInstant(java.time.ZoneOffset.UTC).toLocalDateTime() } catch (e: DateTimeParseException) { null }
-    }
+    private fun parse(time: String): LocalDateTime? = example.hq.spike.data.Instants.parseUtc(time)
 
     /** "12 min", "2 h", "3 d": how long ago, with no "ago", for the line under a title. */
     fun span(from: String, now: LocalDateTime): String? {
@@ -366,7 +374,7 @@ object HelperWords {
     }
 
     const val EDGE_PREFIX = "edge:"
-    private const val EDGE_AGENT = "HQ edge worker"
+    private const val EDGE_AGENT = "HQ"
     private const val EDGE_PLACE = "this phone"
 
     /** The order on the list: waiting for the owner first, then working, then the rest, newest first within each. */

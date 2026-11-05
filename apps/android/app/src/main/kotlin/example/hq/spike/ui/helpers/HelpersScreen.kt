@@ -98,7 +98,13 @@ private fun Feed(ui: HelpersUi, actions: HelpersActions) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (ui.offline) item { Text(stringResource(R.string.helpers_hq_is_not_running), style = HqType.BodySm, color = Mts.Amber) }
         if (shown.isEmpty() && ui.loaded && !ui.offline) item { Text(emptyWords(ui.filter), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(vertical = 8.dp)) }
-        items(live, key = { it.id }) { HelperCardView(it, actions) }
+        val own = live.filter { it.own }
+        val others = live.filter { !it.own }
+        items(others, key = { it.id }) { HelperCardView(it, actions) }
+        if (own.isNotEmpty()) {
+            item(key = "own-title") { Text(stringResource(R.string.helpers_own_work).uppercase(), style = HqType.Group, color = Mts.InkMuted, modifier = Modifier.padding(top = 8.dp)) }
+            items(own, key = { it.id }) { HelperCardView(it, actions) }
+        }
         if (past.isNotEmpty()) {
             val open = ui.finishedOpen || ui.filter == HelperFilter.Finished
             item(key = "finished") { FinishedRow(past, open) { actions.onToggleFinished() } }
@@ -125,10 +131,10 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
             Text(c.title, style = HqType.BodyBold.copy(fontSize = 17.sp), color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            StatePill(c.state)
+            StatePill(c.state, c.own)
         }
-        Text(listOf("${c.agent} · on ${c.where}", c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(c.line, style = HqType.BodySm, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(listOf("${c.agent} · on ${c.where}", c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
+        Text(c.line, style = HqType.BodySm, color = Mts.Ink)
         if (c.state == HelperState.Working) WorkingBar()
         if (waiting && c.ask != null && HelperWords.canAnswerInline(c.ask)) {
             if (c.ask.kind == AskKind.Command) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Mts.Surface000).padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -172,7 +178,7 @@ internal fun OutlineButton(label: String, modifier: Modifier = Modifier, enabled
 }
 
 @Composable
-internal fun StatePill(state: HelperState) {
+internal fun StatePill(state: HelperState, own: Boolean = false) {
     val (color, spin) = when (state) {
         HelperState.NeedsOk -> Mts.Amber to false
         HelperState.Working -> Mts.BrandBlue to true
@@ -184,7 +190,7 @@ internal fun StatePill(state: HelperState) {
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         if (spin) Spinner(14, color)
-        Text(HelperWords.stateWords(state), style = HqType.NavLabel, color = color, maxLines = 1)
+        Text(HelperWords.stateWords(example.hq.spike.ui.shell.rememberWords(), state, own), style = HqType.NavLabel, color = color)
     }
 }
 
@@ -197,7 +203,7 @@ private fun FinishedRow(past: List<HelperCard>, open: Boolean, onToggle: () -> U
     ) {
         Column(Modifier.weight(1f)) {
             Text(stringResource(R.string.helpers_finished), style = HqType.BodyBold, color = Mts.Ink)
-            Text(listOf(past.first().title, past.first().time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOf(past.first().title, past.first().time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
         }
         Text("${past.size}", style = HqType.BodySm, color = Mts.InkMuted)
         Icon(if (open) HqIcons.ChevronUp else HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
@@ -209,8 +215,8 @@ private fun PastRow(c: HelperCard, onClick: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Hairline, shape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Text(c.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(listOf(HelperWords.stateWords(c.state), c.agent, c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1)
-        if (c.generic && c.folder.isNotBlank()) Text(c.folder, style = SmallText, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(listOf(HelperWords.stateWords(example.hq.spike.ui.shell.rememberWords(), c.state, c.own), c.agent, c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
+        if (c.generic && c.folder.isNotBlank()) Text(c.folder, style = SmallText, color = Mts.InkMuted)
     }
 }
 

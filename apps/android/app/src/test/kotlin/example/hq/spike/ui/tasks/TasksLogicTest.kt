@@ -83,7 +83,7 @@ class TasksLogicTest {
     @Test fun anOrdinaryRowShowsPriorityDueAndSteps() {
         val m = TasksLogic.meta(testWords(), task("c", "in_progress", priority = "high", due = "2026-10-24", steps = 1 to 3), today)
         assertEquals("High · due Saturday · 1\u00A0of\u00A03\u00A0sub-tasks\u00A0done", m.joinToString("") { it.text })
-        assertEquals("due Oct 30", TasksLogic.dueWords("2026-10-30", today))
+        assertEquals("due Oct 30, 2026", TasksLogic.dueWords("2026-10-30", today))
         assertEquals("due today", TasksLogic.dueWords("2026-10-21", today))
         assertNull(TasksLogic.dueWords(null, today))
     }
@@ -116,7 +116,7 @@ class TasksLogicTest {
 
     @Test fun aToDoOnTheTodayListSaysWhyItIsThere() {
         assertEquals("starts today", TasksLogic.startedWords(task("a", start = "2026-10-21", due = "2026-12-06"), today))
-        assertEquals("started Oct 1", TasksLogic.startedWords(task("b", start = "2026-10-01"), today))
+        assertEquals("started Oct 1, 2026", TasksLogic.startedWords(task("b", start = "2026-10-01"), today))
         assertNull(TasksLogic.startedWords(task("c", start = "2026-10-21", due = "2026-10-21"), today))
         assertNull(TasksLogic.startedWords(task("d", "in_progress", start = "2026-10-01"), today))
         assertNull(TasksLogic.startedWords(task("e", start = "2026-10-30"), today))
@@ -127,7 +127,7 @@ class TasksLogicTest {
 
     @Test fun theRowMetaCarriesThatReason() {
         val words = TasksLogic.meta(testWords(), task("a", priority = "high", start = "2026-10-21", due = "2026-12-06"), today).joinToString("") { it.text }
-        assertEquals("High · due Dec 6 · starts today", words)
+        assertEquals("High · due Dec 6, 2026 · starts today", words)
     }
 
     @Test fun aTaskForTheEdgeWorkerNamesItsRepositoryFirst() {

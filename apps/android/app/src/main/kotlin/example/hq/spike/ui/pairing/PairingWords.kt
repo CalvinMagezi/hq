@@ -7,14 +7,14 @@ import example.hq.spike.bridge.TicketEnd
 /** The words of the pairing screens. Pure, so each sentence is tested from the state that makes it. */
 object PairingWords {
     const val TITLE = "Pair a device"
-    const val INTRO = "A device you pair can reach this phone directly, with no account and no VPN. Only devices you pair here can."
+    const val INTRO = "A device you pair can reach this phone directly, with no account. Only devices you pair here can."
     const val SHOW_TITLE = "Show a code"
     const val SHOW_HELP = "On the other device, scan this code, or paste the link."
     const val SCAN_TITLE = "Scan a code"
     const val SCAN_HELP = "Point the camera at the code on the other device."
     const val NOT_OURS = "That is not an HQ pairing code."
     const val FINISH_FIRST = "Finish or cancel the pairing you are in before opening another link."
-    const val NOT_REMOVED = "Could not remove it: the bridge is not running. Try again in a moment."
+    const val NOT_REMOVED = "Could not remove it. Pairing is off. Switch it on and try again."
     const val CAMERA_NEEDED = "Scanning needs the camera. You can paste the link instead."
     const val CONFIRM_TITLE = "Pair with another device?"
     const val CONFIRM_BODY = "A link asks this phone to pair with another device. Go on only if you just showed this code on a device of yours. Anyone can send you a link like this."

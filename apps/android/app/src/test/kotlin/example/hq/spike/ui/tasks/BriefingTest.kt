@@ -25,8 +25,8 @@ class BriefingTest {
     @Test fun reviewStatesComeInAFixedOrderAndZeroesAreLeftOut() {
         assertEquals("2 accepted, 1 unreviewed", BriefingWords.reviewSummary(listOf("unreviewed" to 1, "accepted" to 2, "disputed" to 0)))
         assertEquals("no reviews recorded", BriefingWords.reviewSummary(emptyList()))
-        assertEquals("Notes: no reviews recorded. 1 gap in attribution or links.", BriefingWords.gapsLine(briefing(gaps = 1)))
-        assertEquals("Notes: 1 accepted. 2 gaps in attribution or links.", BriefingWords.gapsLine(briefing(reviews = listOf("accepted" to 1), gaps = 2)))
+        assertEquals("Notes: no reviews recorded. 1 gap in attribution or links.", BriefingWords.gapsLine(testWords(), briefing(gaps = 1)))
+        assertEquals("Notes: 1 accepted. 2 gaps in attribution or links.", BriefingWords.gapsLine(testWords(), briefing(reviews = listOf("accepted" to 1), gaps = 2)))
     }
 
     @Test fun ageReadsServerTimesWithAndWithoutAZone() {
@@ -58,8 +58,8 @@ class BriefingTest {
     }
 
     @Test fun contributorsAndNotesReadAsOneLine() {
-        assertEquals("1 note, 2 leases, last 1h ago", BriefingWords.contributorLine(Contributor("a", 1, 2, "2026-10-22T11:00:00Z"), now))
-        assertEquals("3 notes", BriefingWords.contributorLine(Contributor("a", 3, 0, null), now))
+        assertEquals("1 note, 2 leases, last 1h ago", BriefingWords.contributorLine(testWords(), Contributor("a", 1, 2, "2026-10-22T11:00:00Z"), now))
+        assertEquals("3 notes", BriefingWords.contributorLine(testWords(), Contributor("a", 3, 0, null), now))
         assertEquals("HQ-12, by claude, version recorded 3h ago", BriefingWords.noteLine(BriefNote("N/a.md", "HQ-12", "claude", "2026-10-22T09:00:00Z", null), now))
     }
 }

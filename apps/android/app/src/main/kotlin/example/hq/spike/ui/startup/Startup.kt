@@ -3,7 +3,7 @@ package example.hq.spike.ui.startup
 import android.content.Context
 import example.hq.spike.data.HqStatus
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import example.hq.spike.ui.shell.Words
 
 /** Whether the app has ever heard HQ answer: the first start has nothing cached to show, so it gets its own screen. */
 object FirstLaunch {
@@ -36,8 +36,8 @@ object StartupWords {
     const val STARTING_BANNER = "HQ is starting. Your draft is kept; Send turns on when it is up."
 
     /** The two lines in the box: what timed out, and what is known about the last start. */
-    fun failedLines(lastStartMs: Long, exitCode: Int?, zone: ZoneId = ZoneId.systemDefault()): List<String> {
-        val start = if (lastStartMs <= 0) "never" else java.time.Instant.ofEpochMilli(lastStartMs).atZone(zone).toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"))
+    fun failedLines(w: Words, lastStartMs: Long, exitCode: Int?, zone: ZoneId = ZoneId.systemDefault()): List<String> {
+        val start = if (lastStartMs <= 0) "never" else w.clock(java.time.Instant.ofEpochMilli(lastStartMs), zone)
         return listOf("Health check timed out after $GIVE_UP_SECONDS s.", "Last start: $start \u00b7 exit code ${exitCode?.toString() ?: "none"}")
     }
 
