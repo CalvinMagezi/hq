@@ -13,6 +13,8 @@ interface NotificationMetadata {
   dialog?: NotificationDialog
   /** The tool call the request would run, as the server recorded it. */
   approval?: ApprovalQuote
+  /** Set on the item a new sign-in leaves: the device that signed in. */
+  sign_in?: { device_id: string }
 }
 
 /** What a request would run, and whether allowing it loses something (a delete, an overwrite). */

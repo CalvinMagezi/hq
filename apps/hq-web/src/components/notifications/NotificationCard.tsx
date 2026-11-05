@@ -15,6 +15,10 @@ import {
 import type { NotificationItem, NotificationKind, NotificationState } from '~/lib/notificationsApi'
 import { relTime } from '~/lib/time'
 import { DialogAnswer, openDialog } from './DialogAnswer'
+import { SignInActions, SignInBody } from './SignInItem'
+import { useQuery } from '@tanstack/react-query'
+import { listDevices, signOutDevice } from '~/lib/deviceSignIn'
+import { toastAlert } from '~/lib/toast'
 
 interface Props {
   notification: NotificationItem
@@ -33,6 +37,9 @@ export function NotificationCard({
 }: Props) {
   const isPending = notification.state === 'pending'
   const dialog = openDialog(notification)
+  const signInId = notification.metadata.sign_in?.device_id
+  const devices = useQuery({ queryKey: ['auth-devices'], queryFn: listDevices, enabled: !!signInId && isPending })
+  const device = devices.data?.devices.find((d) => d.id === signInId)?.label ?? null
 
   const getKindIcon = (kind: NotificationKind) => {
     switch (kind) {
@@ -55,6 +62,20 @@ export function NotificationCard({
         return 'bg-purple-500/10 text-purple-400 border-purple-500/20'
     }
   }
+
+  const signInActions =
+    isPending && signInId ? (
+      <SignInActions
+        device={device}
+        busy={loadingAction !== null}
+        onItWasMe={() => void onAction(notification.id, 'approve')}
+        onSignOut={async () => {
+          await signOutDevice(signInId)
+          toastAlert(t('sign_out_device_done', { device: device ?? t('new_signin_unknown') }))
+          onAnswered(notification.id, 'decline')
+        }}
+      />
+    ) : null
 
   return (
     <div
@@ -110,9 +131,13 @@ export function NotificationCard({
             {notification.title}
           </button>
         </h3>
-        <p className="text-xs text-neutral-400 mt-1 line-clamp-2 leading-relaxed">
-          {notification.description}
-        </p>
+        {signInId ? (
+          <SignInBody device={device} createdAt={notification.created_at} />
+        ) : (
+          <p className="text-xs text-neutral-400 mt-1 line-clamp-2 leading-relaxed">
+            {notification.description}
+          </p>
+        )}
       </div>
 
       {/* Action Footer */}
@@ -120,6 +145,8 @@ export function NotificationCard({
 
         {dialog ? (
           <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
+        ) : signInActions ? (
+          signInActions
         ) : isPending ? (
           <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
             {notification.kind === 'action_needed' ? (

@@ -7,11 +7,13 @@ import { readDataUsed } from '~/lib/dataUsed'
 import { fetchHello } from '~/lib/hello'
 import { useInHub } from '~/lib/hubWindow'
 import { reloadForNewer, useNewerHq } from '~/lib/newerHq'
-import { refuseSignIn } from '~/lib/hqAuth'
+import { HqHttpError, refuseSignIn } from '~/lib/hqAuth'
+import { signOutCurrentDevice } from '~/lib/deviceSignIn'
 import { useInstallOffer } from '~/components/InstallPrompt'
 import { t } from '~/strings'
 
 const TICK_MS = 15_000
+const HTTP_BAD_REQUEST = 400
 
 /** Time zone: how times show in this browser, kept here only. */
 export function TimeZonePage() {
@@ -98,8 +100,25 @@ export function DataUsedPage() {
   )
 }
 
-/** The stacked dialog behind Sign out this browser: it keeps nothing of HQ. */
+/** The stacked dialog behind Sign out this browser: signs it out on HQ, then wipes what it saved. */
 export function SignOutDialog({ onClose }: { onClose: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const signOut = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await signOutCurrentDevice()
+    } catch (e) {
+      // The operator link has no device of its own to remove; only Sign out everywhere ends it.
+      const operatorLink = e instanceof HqHttpError && e.status === HTTP_BAD_REQUEST
+      setError(operatorLink ? t('sign_out_browser_operator') : t('sign_out_browser_failed'))
+      setBusy(false)
+      return
+    }
+    onClose()
+    refuseSignIn()
+  }
   return (
     <Dialog
       kind="red"
@@ -107,11 +126,11 @@ export function SignOutDialog({ onClose }: { onClose: () => void }) {
       body={t('signout_browser_body')}
       keepLabel={t('sign_out_device_keep')}
       actLabel={t('row_sign_out_browser')}
+      busyLabel={t('confirm_busy_signing_out')}
+      busy={busy}
+      error={error}
       onKeep={onClose}
-      onAct={() => {
-        onClose()
-        refuseSignIn()
-      }}
+      onAct={() => void signOut()}
     />
   )
 }

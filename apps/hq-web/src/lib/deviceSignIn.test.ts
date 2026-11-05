@@ -84,18 +84,18 @@ test('a good code comes back as the token, sent without any Authorization header
   expect(sent[0].url).toBe('/api/auth/exchange')
   expect(headers.get('X-HQ-Client')).toBe('web')
   expect(headers.has('Authorization')).toBe(false)
-  expect(JSON.parse(String(sent[0].init.body))).toEqual({ code: 'ABCDEFGH2J' })
+  expect(JSON.parse(String(sent[0].init.body))).toEqual({ code: 'ABCDEFGH2J', shared: false })
 })
 
 test('a short code is refused before it costs an attempt', async () => {
   const sent = serverAnswers(200, { token: 'web-token' })
-  await expect(exchangeCode('abc')).rejects.toThrow('10 letters')
+  await expect(exchangeCode('abc')).rejects.toThrow('That code did not work')
   expect(sent).toHaveLength(0)
 })
 
 test('a wrong code and too many tries get their own messages', async () => {
   serverAnswers(401, { error: 'that code is not valid' })
-  await expect(exchangeCode('ABCDE-FGH2J')).rejects.toThrow('wrong, already used or expired')
+  await expect(exchangeCode('ABCDE-FGH2J')).rejects.toThrow('That code did not work')
   serverAnswers(429, { error: 'too many attempts' })
   await expect(exchangeCode('ABCDE-FGH2J')).rejects.toThrow('Too many tries')
 })
