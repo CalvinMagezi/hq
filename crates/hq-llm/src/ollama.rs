@@ -197,7 +197,9 @@ impl LlmProvider for OllamaProvider {
         // num_ctx consistently.  Real SSE streaming can be added later once
         // the byte-level parser is in place; for local inference (30-60 s/turn)
         // the buffering latency is negligible.
-        Ok(prompted_tools::buffered_stream(self.chat(request).await?))
+        Ok(crate::provider::response_to_stream(
+            self.chat(request).await?,
+        ))
     }
 }
 

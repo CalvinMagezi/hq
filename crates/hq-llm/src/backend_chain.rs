@@ -474,23 +474,26 @@ mod tests {
                 parameters: serde_json::json!({"type": "object"}),
             }];
             let mut stream = provider.chat_stream(&asked).await.unwrap();
-            let (mut text, mut calls) = (String::new(), Vec::new());
+            let (mut text, mut name, mut args) = (String::new(), None, String::new());
             while let Some(chunk) = stream.next().await {
                 match chunk.unwrap() {
                     StreamChunk::Text(t) => text.push_str(&t),
                     StreamChunk::ToolCallDelta {
-                        name,
+                        index,
+                        name: n,
                         arguments_delta,
                         ..
-                    } => calls.push((name, arguments_delta)),
+                    } => {
+                        assert_eq!(index, 0, "one call");
+                        name = n.or(name);
+                        args.push_str(&arguments_delta);
+                    }
                     _ => {}
                 }
             }
             assert_eq!(text, "Checking.");
-            assert_eq!(
-                calls,
-                vec![(Some("task_list".to_string()), r#"{"limit":3}"#.to_string())]
-            );
+            assert_eq!(name.as_deref(), Some("task_list"));
+            assert_eq!(args, r#"{"limit":3}"#);
             let seen = seen.lock().unwrap().clone();
             assert_eq!(seen.len(), 1, "{seen:?}");
             assert!(

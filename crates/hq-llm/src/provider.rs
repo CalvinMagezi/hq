@@ -214,9 +214,64 @@ pub trait LlmProvider: Send + Sync {
     }
 }
 
+/// Convert a non-streaming `ChatResponse` into a synthetic stream.
+pub(crate) fn response_to_stream(
+    resp: ChatResponse,
+) -> Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>> {
+    let mut chunks: Vec<Result<StreamChunk>> = Vec::new();
+
+    if let Some(reasoning) = resp.message.reasoning_content.filter(|r| !r.is_empty()) {
+        chunks.push(Ok(StreamChunk::Reasoning(reasoning)));
+    }
+
+    if !resp.model.is_empty() {
+        chunks.push(Ok(StreamChunk::ModelInfo(resp.model)));
+    }
+
+    if !resp.message.content.is_empty() {
+        chunks.push(Ok(StreamChunk::Text(resp.message.content)));
+    }
+
+    for (i, tc) in resp.message.tool_calls.iter().enumerate() {
+        chunks.push(Ok(StreamChunk::ToolCallDelta {
+            index: i,
+            id: Some(tc.id.clone()),
+            name: Some(tc.name.clone()),
+            arguments_delta: String::new(),
+        }));
+        let args_str = match &tc.arguments {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        chunks.push(Ok(StreamChunk::ToolCallDelta {
+            index: i,
+            id: None,
+            name: None,
+            arguments_delta: args_str,
+        }));
+    }
+
+    chunks.push(Ok(StreamChunk::Usage {
+        input_tokens: resp.input_tokens,
+        output_tokens: resp.output_tokens,
+        cache_read_tokens: resp.cache_read_tokens,
+        cache_write_tokens: resp.cache_write_tokens,
+    }));
+    if resp.provider_cost_usd.is_some() || resp.reasoning_tokens > 0 {
+        chunks.push(Ok(StreamChunk::Billing {
+            cost_usd: resp.provider_cost_usd,
+            reasoning_tokens: resp.reasoning_tokens,
+        }));
+    }
+
+    chunks.push(Ok(StreamChunk::Done));
+
+    Box::pin(futures::stream::iter(chunks))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::LlmError;
+    use super::{ChatMessage, ChatResponse, LlmError, StreamChunk, response_to_stream};
 
     #[test]
     fn from_http_classifies_by_status_and_overflow_phrases() {
@@ -255,5 +310,38 @@ mod tests {
             panic!("expected Auth");
         };
         assert_eq!(message.len(), 200);
+    }
+
+    #[tokio::test]
+    async fn a_buffered_reply_keeps_its_reasoning_and_billing() {
+        use tokio_stream::StreamExt;
+        let resp = ChatResponse {
+            message: ChatMessage {
+                image_parts: Vec::new(),
+                role: hq_core::types::MessageRole::Assistant,
+                content: "hi".into(),
+                tool_calls: vec![],
+                tool_call_id: None,
+                reasoning_content: Some("thinking".into()),
+            },
+            input_tokens: 1,
+            output_tokens: 2,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 1,
+            provider_cost_usd: Some(0.01),
+            model: "m".into(),
+        };
+        let chunks: Vec<_> = response_to_stream(resp).collect().await;
+        let chunks: Vec<_> = chunks.into_iter().map(Result::unwrap).collect();
+        assert!(matches!(&chunks[0], StreamChunk::Reasoning(r) if r == "thinking"));
+        assert!(chunks.iter().any(|c| matches!(
+            c,
+            StreamChunk::Billing {
+                cost_usd: Some(_),
+                reasoning_tokens: 1
+            }
+        )));
+        assert!(matches!(chunks.last(), Some(StreamChunk::Done)));
     }
 }

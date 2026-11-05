@@ -36,7 +36,7 @@ use async_trait::async_trait;
 use hq_core::types::{ChatMessage, MessageRole, ToolCall, ToolDefinition};
 use tokio_stream::Stream;
 
-use crate::provider::{ChatRequest, ChatResponse, LlmProvider, StreamChunk};
+use crate::provider::{ChatRequest, ChatResponse, LlmProvider, StreamChunk, response_to_stream};
 
 /// A provider whose model ignores the `tools` field: requests with tools carry them in the
 /// system prompt, and `<tool_call>` tags in the reply become native tool calls. Such replies are
@@ -79,41 +79,12 @@ impl LlmProvider for PromptedToolsProvider {
         if request.tools.is_empty() {
             return self.inner.chat_stream(request).await;
         }
-        Ok(buffered_stream(self.chat(request).await?))
+        Ok(response_to_stream(self.chat(request).await?))
     }
 
     fn is_instrumented(&self) -> bool {
         self.inner.is_instrumented()
     }
-}
-
-/// A finished reply as the chunks a stream would have carried.
-pub(crate) fn buffered_stream(
-    resp: ChatResponse,
-) -> Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>> {
-    let mut chunks: Vec<Result<StreamChunk>> = Vec::new();
-    if !resp.message.content.is_empty() {
-        chunks.push(Ok(StreamChunk::Text(resp.message.content)));
-    }
-    for (i, tc) in resp.message.tool_calls.into_iter().enumerate() {
-        chunks.push(Ok(StreamChunk::ToolCallDelta {
-            index: i,
-            id: Some(tc.id),
-            name: Some(tc.name),
-            arguments_delta: serde_json::to_string(&tc.arguments).unwrap_or_default(),
-        }));
-    }
-    chunks.push(Ok(StreamChunk::Usage {
-        input_tokens: resp.input_tokens,
-        output_tokens: resp.output_tokens,
-        cache_read_tokens: resp.cache_read_tokens,
-        cache_write_tokens: resp.cache_write_tokens,
-    }));
-    if !resp.model.is_empty() {
-        chunks.push(Ok(StreamChunk::ModelInfo(resp.model)));
-    }
-    chunks.push(Ok(StreamChunk::Done));
-    Box::pin(tokio_stream::iter(chunks))
 }
 
 /// Model-id prefixes that require the shim. Kept small and conservative:
@@ -179,6 +150,19 @@ fn flatten_tool_results(messages: &mut Vec<ChatMessage>) {
                 pending.push(tag);
             }
             MessageRole::Assistant => {
+                // Results the model has not seen yet go before its next reply, as their own user
+                // turn, so the history keeps alternating.
+                if !pending.is_empty() {
+                    out.push(ChatMessage {
+                        image_parts: Vec::new(),
+                        role: MessageRole::User,
+                        content: pending.join("\n"),
+                        tool_calls: Vec::new(),
+                        tool_call_id: None,
+                        reasoning_content: None,
+                    });
+                    pending.clear();
+                }
                 // Carry assistant text but strip tool_calls (we re-emit them
                 // as free text in the same format the model produced). If
                 // there are tool_calls but no content, synthesize the XML so
@@ -501,5 +485,34 @@ mod tests {
         assert!(msgs[1].content.contains("call_7"));
         assert!(msgs[1].content.contains("42"));
         assert!(msgs[1].content.contains("what next?"));
+    }
+
+    #[test]
+    fn a_result_goes_before_the_reply_that_used_it() {
+        let msg = |role, content: &str, call: Option<&str>| ChatMessage {
+            image_parts: Vec::new(),
+            role,
+            content: content.into(),
+            tool_calls: vec![],
+            tool_call_id: call.map(str::to_string),
+            reasoning_content: None,
+        };
+        let mut msgs = vec![
+            msg(MessageRole::User, "how many tasks?", None),
+            msg(MessageRole::Assistant, "", None),
+            msg(MessageRole::Tool, "7", Some("call_1")),
+            msg(MessageRole::Assistant, "You have 7.", None),
+            msg(MessageRole::User, "and done ones?", None),
+        ];
+        msgs[1].tool_calls = vec![ToolCall {
+            id: "call_1".into(),
+            name: "task_list".into(),
+            arguments: json!({}),
+        }];
+        flatten_tool_results(&mut msgs);
+        let roles: Vec<_> = msgs.iter().map(|m| format!("{:?}", m.role)).collect();
+        assert_eq!(roles, ["User", "Assistant", "User", "Assistant", "User"]);
+        assert!(msgs[2].content.contains("<tool_result") && msgs[2].content.contains('7'));
+        assert_eq!(msgs[4].content, "and done ones?");
     }
 }
