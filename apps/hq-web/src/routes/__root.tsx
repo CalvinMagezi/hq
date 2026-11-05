@@ -26,6 +26,7 @@ import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
 import { HeaderClock } from '~/components/HeaderClock'
 import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
+import alignedCss from '~/styles/aligned-ui.css?url'
 import appCss from '../../app.css?url'
 import { relTime } from '~/lib/time'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
@@ -51,6 +52,8 @@ export const Route = createRootRoute({
       { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
     ],
     links: [
+      // The design system's classes (a-*), before app.css so today's places keep their look.
+      { rel: 'stylesheet', href: alignedCss },
       { rel: 'stylesheet', href: appCss },
       { rel: 'manifest', href: '/manifest.json' },
       { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/icons/hq-favicon-32.png' },
