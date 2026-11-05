@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Check, Pencil, Plug, RotateCw, Terminal, User } from 'lucide-react'
+import { Mic, Copy, Check, Pencil, Plug, RotateCw, Terminal, User } from 'lucide-react'
 import type { ToolStep } from '~/store/threadStore'
 import type { DriverMeta } from '~/lib/sessionsApi'
 import type { ChatAttachment } from '~/lib/chatUploads'
@@ -7,6 +7,7 @@ import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~
 import { ToolCallBlock } from './ToolCallBlock'
 import { ThinkingPanel } from './ThinkingPanel'
 import { MessageAttachments } from './AttachmentChips'
+import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
 const COPIED_FLASH_MS = 1500
@@ -25,6 +26,8 @@ interface DisplayMessage {
   driver?: DriverMeta
   /** The MCP client that asked this question, when it did not come from this chat's composer. */
   viaMcp?: string
+  /** Asked by voice. */
+  spoken?: boolean
 }
 
 interface Props {
@@ -92,6 +95,11 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
         }
       >
         {isUser && message.viaMcp && <McpLabel caller={message.viaMcp} />}
+        {isUser && message.spoken && (
+          <span className="flex items-center gap-1 text-[11px] mb-1" style={{ color: 'var(--ink-muted)' }}>
+            <Mic className="w-3 h-3" aria-hidden="true" /> {t('chat_spoken')}
+          </span>
+        )}
         {!isUser && message.driver && <DriverLabel driver={message.driver} />}
         {!isUser && message.reasoning && <ThinkingPanel content={message.reasoning} live={live} />}
         {!isUser && steps.length > 0 && <ToolCallBlock steps={steps} credits={message.stepCredits} live={live} />}
@@ -102,13 +110,13 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
         ) : (
           message.content && <MarkdownViewer content={message.content} bare />
         )}
-        {waiting && <div className="text-xs text-neutral-500 animate-pulse">HQ is working...</div>}
+        {waiting && <div className="text-xs text-neutral-500 animate-pulse">{t('chat_working')}</div>}
 
         {!live && (
           <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-white/5 opacity-60 text-xs " style={{ color: 'var(--text-dim)' }}>
             <span>
               {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              {message.stopped && <span className="ml-2" style={{ color: 'var(--accent-amber)' }}>stopped</span>}
+              {message.stopped && <span className="ml-2" style={{ color: 'var(--accent-amber)' }}>{t('chat_stopped')}</span>}
               {replyCredits !== null && (
                 <span className="ml-2" title={CREDITS_TOOLTIP}>{formatCredits(replyCredits)}</span>
               )}

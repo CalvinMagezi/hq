@@ -4,6 +4,7 @@ import { HqHttpError } from './hqAuth'
 import {
   DEFAULT_GET_STARTED_PREFS,
   chatAppConnected,
+  progressLine,
   getStartedItems,
   getStartedVisible,
   isGetStartedPrefs,
@@ -38,10 +39,17 @@ test('a chat app counts only with a saved token and a paired owner', () => {
 test('items start undone and link to their settings sections', () => {
   const items = getStartedItems(signals())
   expect(items.map((i) => [i.id, i.to, i.hash, i.done])).toEqual([
+    ['notifications', '/inbox', undefined, false],
     ['phone', '/settings', 'devices', false],
     ['chat', '/settings', 'chat-apps', false],
-    ['notifications', '/inbox', undefined, false],
   ])
+})
+
+test('the card counts what is done and names the connected app', () => {
+  const items = getStartedItems(signals({ push: 'on', chatApps: apps(app(true, true), app(false, false)) }))
+  expect(progressLine(items)).toBe('2 of 3 done')
+  expect(items.find((i) => i.id === 'chat')?.doneDetail).toBe('Done. Telegram is connected.')
+  expect(items.map((i) => i.title)).toEqual(['Let HQ reach you', 'Open HQ on your phone', 'Messaging apps (optional)'])
 })
 
 test('the phone step is done when installed or marked done', () => {

@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ArrowDown, Loader2, RotateCw } from 'lucide-react'
-import { emptyChatChips, fetchCapabilities } from '~/lib/capabilitiesApi'
+import { t } from '~/strings'
+import { useWS } from '~/context/WebSocketContext'
 import { useLiveTurn, useThreadStore, type ThreadMessage } from '~/store/threadStore'
 import { loadOlderMessages } from '~/lib/threadApi'
-import { ChatBubble, HQ_MARK } from './ChatBubble'
+import { ChatBubble } from './ChatBubble'
+import { StartScreen } from './StartScreen'
 import { LiveTurnView } from './LiveTurnView'
 import { StreamErrorBoundary } from './StreamErrorBoundary'
 import { useStickToBottom } from './useStickToBottom'
@@ -30,6 +31,8 @@ interface Props {
 /** The scrolling message history: older pages on demand, the live reply, and a jump-to-latest button. */
 export function MessageList({ threadId, messages, followSignal, onEdit, onRegenerate, onPick }: Props) {
   const liveTurn = useLiveTurn(threadId)
+  const { connected } = useWS()
+  const unansweredKey = connected ? 'fail_finish_reply_no_reply' : 'fail_finish_reply_unreachable'
   const olderAvailable = useThreadStore((s) => (threadId ? s.olderAvailable[threadId] ?? false : false))
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -63,12 +66,12 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
                 className="flex items-center gap-1.5 h-9 px-3 rounded-full border border-white/10 text-xs text-neutral-400 hover:text-white hover:bg-white/5 disabled:opacity-60"
               >
                 {olderPage.loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                {olderPage.loading ? 'Loading earlier messages' : 'Load earlier messages'}
+                {olderPage.loading ? t('chat_loading_earlier') : t('chat_load_earlier')}
               </button>
             </div>
           )}
 
-          {messages.length === 0 && !liveTurn && <EmptyChat threadId={threadId} onPick={onPick} />}
+          {messages.length === 0 && !liveTurn && <StartScreen onPick={onPick} />}
 
           {messages.map((m, i) => (
             <StreamErrorBoundary key={m.messageId} plainText={m.content} resetKey={m.content}>
@@ -86,6 +89,7 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
                 stopped: m.stopped,
                 driver: m.driver,
                 viaMcp: m.viaMcp,
+                spoken: m.spoken,
               }}
               onEdit={m.role === 'user' && !liveTurn && isSaved(m) && !isMcpLocked(messages, i) ? () => onEdit(m) : undefined}
               onRegenerate={canRegenerate && m === last ? onRegenerate : undefined}
@@ -96,13 +100,13 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
           {unanswered && (
             <div role="alert" className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] text-xs text-neutral-200">
               <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-              <span className="flex-1 min-w-0">HQ did not finish a reply to this message.</span>
+              <span className="flex-1 min-w-0">{t(unansweredKey)}</span>
               <button
                 type="button"
                 onClick={onRegenerate}
                 className="flex items-center gap-1.5 h-9 px-3 rounded-full border border-white/15 hover:bg-white/10"
               >
-                <RotateCw className="w-3.5 h-3.5" /> Retry
+                <RotateCw className="w-3.5 h-3.5" /> {t('chat_retry')}
               </button>
             </div>
           )}
@@ -116,10 +120,9 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
           type="button"
           onClick={() => scrollToBottom(true)}
           className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 h-10 px-4 rounded-full border border-white/15 bg-neutral-900/90 backdrop-blur text-xs text-neutral-200 shadow-lg hover:bg-neutral-800"
-          title="Scroll to the newest message"
-        >
+                  >
           <ArrowDown className="w-3.5 h-3.5" />
-          {hasUnseen ? 'New messages' : 'Latest'}
+          {hasUnseen ? t('chat_new_messages') : t('chat_latest')}
           {hasUnseen && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
         </button>
       )}
@@ -181,43 +184,4 @@ function useOlderPages(
   }, [available, threadId, loading, scrollRef, sentinelRef])
 
   return { load, loading }
-}
-
-/** An empty chat: what HQ can do here, untried things first, each one a tap from the composer. */
-function EmptyChat({ threadId, onPick }: { threadId: string | null; onPick?: (text: string) => void }) {
-  // The chips load only in a live page. Rendered during the build's prerender, the query's cache
-  // timer keeps the prerender process alive and the build never finishes.
-  const [live, setLive] = useState(false)
-  useEffect(() => setLive(true), [])
-  const prompt = threadId ? 'Start a conversation' : 'Type a message or command to begin'
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-center text-neutral-500 py-12">
-      <img src={HQ_MARK} alt="" className="w-12 h-12 object-contain mb-3 opacity-60" />
-      {live && onPick ? <Suggestions prompt={prompt} onPick={onPick} /> : <p className="text-sm">{prompt}</p>}
-    </div>
-  )
-}
-
-function Suggestions({ prompt, onPick }: { prompt: string; onPick: (text: string) => void }) {
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: fetchCapabilities, staleTime: 60_000, retry: false })
-  const chips = emptyChatChips(capabilities.data)
-  if (chips.length === 0) return <p className="text-sm">{prompt}</p>
-  return (
-    <>
-      <p className="text-sm text-neutral-300">What would you like to do?</p>
-      <div className="mt-4 grid gap-2 w-full max-w-md">
-        {chips.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => onPick(c.example)}
-            title={c.example}
-            className="min-h-11 px-4 py-2 rounded-xl border border-white/10 text-left text-sm text-neutral-200 hover:bg-white/5"
-          >
-            {c.says}
-          </button>
-        ))}
-      </div>
-    </>
-  )
 }

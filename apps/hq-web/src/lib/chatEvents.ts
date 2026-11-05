@@ -21,6 +21,7 @@ const CHAT_EVENTS = new Set([
   'chat_duplicate',
   'relay_message',
   'stream_lag',
+  'reply_so_far',
 ])
 
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
@@ -109,6 +110,7 @@ function applyEvent(type: string, msg: ChatEvent, tid: string) {
       const replaced = str(msg.replace_from)
       // An edit or regenerate from any tab replaced these; the sender already dropped them.
       if (replaced) store.removeFrom(tid, replaced)
+      store.setWaitingForOwner(tid, false)
       try {
         if (saved) store.confirmUserMessage(tid, toThreadMessage(saved), str(msg.client_id))
       } finally {
@@ -122,6 +124,7 @@ function applyEvent(type: string, msg: ChatEvent, tid: string) {
       break
     case 'turn_end':
       finishTurn(tid, str(msg.message_id), msg.stopped === true)
+      store.setWaitingForOwner(tid, msg.waiting_for_owner === true)
       break
     case 'thread_title':
       store.updateThread(tid, { title: str(msg.title) ?? '' })
@@ -144,6 +147,15 @@ function applyEvent(type: string, msg: ChatEvent, tid: string) {
       break
     case 'step_credits':
       store.addStepCredit(tid, typeof msg.turn === 'number' ? msg.turn : 0, typeof msg.delta === 'number' ? msg.delta : null)
+      break
+    case 'reply_so_far':
+      // The answer to a resume: what the reply wrote while this page was away, or its end.
+      if (msg.running === true) {
+        store.startTurn(tid)
+        store.setLiveContent(tid, str(msg.content) ?? '')
+      } else {
+        finishTurn(tid, str(msg.message_id), false)
+      }
       break
     case 'chat_duplicate':
       // HQ already had this message (a resend from the outbox): show its saved copy, not a second one.

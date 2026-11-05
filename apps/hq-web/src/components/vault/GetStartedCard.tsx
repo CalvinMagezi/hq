@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Check, Circle } from 'lucide-react'
+import { t } from '~/strings'
 import { CHAT_APPS_QUERY_KEY, fetchChatApps } from '~/lib/chatAppsApi'
 import { needsSignIn, onSignInChange } from '~/lib/hqAuth'
 import { getPushState, isStandalone, type PushState } from '~/lib/webPush'
@@ -11,6 +12,7 @@ import {
   GET_STARTED_KEY,
   getStartedItems,
   getStartedVisible,
+  progressLine,
   isGetStartedPrefs,
   serverUnreachable,
   type GetStartedItem,
@@ -42,20 +44,23 @@ function usePushCheck(enabled: boolean): PushCheck {
   return check
 }
 
-function ItemRow({ item, onMarkDone }: { item: GetStartedItem; onMarkDone?: () => void }) {
+function ItemRow({ item, onMarkDone, phoneHidden }: { item: GetStartedItem; onMarkDone?: () => void; phoneHidden?: boolean }) {
   const Icon = item.done ? Check : Circle
   return (
-    <li className="flex items-start gap-3 py-3 border-t border-white/5 first:border-t-0">
+    <li className={`${phoneHidden ? 'hidden sm:flex' : 'flex'} items-start gap-3 py-3 border-t border-white/5 first:border-t-0`}>
       <Icon
         className="w-4 h-4 mt-0.5 shrink-0"
         style={{ color: item.done ? 'var(--accent-green)' : 'var(--text-dim)' }}
         aria-hidden="true"
       />
       <div className="flex flex-col gap-1 min-w-0 flex-1">
-        <span className={`text-sm font-bold ${item.done ? 'line-through' : ''}`} style={{ color: item.done ? 'var(--text-dim)' : 'var(--text-primary)' }}>
+        <span className="text-sm font-bold" style={{ color: item.done ? 'var(--text-dim)' : 'var(--text-primary)' }}>
           {item.title}
-          <span className="sr-only">{item.done ? ' (done)' : ' (to do)'}</span>
+          {item.done && <span className="ml-2 text-xs font-normal">{t('gs_done')}</span>}
         </span>
+        {item.done && item.doneDetail && (
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-dim)' }}>{item.doneDetail}</p>
+        )}
         {!item.done && (
           <>
             <p className="text-xs leading-relaxed" style={{ color: 'var(--text-dim)' }}>{item.detail}</p>
@@ -75,7 +80,7 @@ function ItemRow({ item, onMarkDone }: { item: GetStartedItem; onMarkDone?: () =
                   className="px-3 rounded-lg text-xs"
                   style={{ color: 'var(--text-dim)', minHeight: TAP_TARGET_PX }}
                 >
-                  Mark done
+                  {t('gs_mark_done')}
                 </button>
               )}
             </div>
@@ -86,8 +91,8 @@ function ItemRow({ item, onMarkDone }: { item: GetStartedItem; onMarkDone?: () =
   )
 }
 
-/** First-run checklist on the home screen: the things an owner would not otherwise find. */
-export function GetStartedCard() {
+/** First-run checklist for the Chat start screen: the things an owner would not otherwise find. `compact` shows only the next step on a phone. */
+export function GetStartedCard({ compact = false }: { compact?: boolean } = {}) {
   const [prefs, setPrefs] = usePersistedState(GET_STARTED_KEY, DEFAULT_GET_STARTED_PREFS, isGetStartedPrefs)
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const chatApps = useQuery({ queryKey: CHAT_APPS_QUERY_KEY, queryFn: fetchChatApps, enabled: !prefs.hidden })
@@ -114,8 +119,9 @@ export function GetStartedCard() {
     <section className="mb-10" aria-labelledby="get-started-title">
       <div className="flex items-center gap-2 mb-4">
         <h2 id="get-started-title" className="text-[11px] tracking-widest uppercase font-bold" style={{ color: 'var(--text-dim)' }}>
-          Get started
+          {t('gs_title')}
         </h2>
+        <span className="text-[11px]" style={{ color: 'var(--text-dim)' }}>{progressLine(items)}</span>
         <div className="flex-1 h-px bg-white/5" />
         <button
           type="button"
@@ -123,7 +129,7 @@ export function GetStartedCard() {
           className="px-3 rounded-lg bg-white/5 text-[11px] font-bold"
           style={{ color: 'var(--text-primary)', minHeight: TAP_TARGET_PX }}
         >
-          Hide
+          {t('gs_hide')}
         </button>
       </div>
       <ul className="glass-card rounded-xl px-4">
@@ -131,6 +137,7 @@ export function GetStartedCard() {
           <ItemRow
             key={item.id}
             item={item}
+            phoneHidden={compact && item.id !== items.find((i) => !i.done)?.id}
             onMarkDone={item.id === 'phone' ? () => setPrefs((p) => ({ ...p, phoneDone: true })) : undefined}
           />
         ))}
