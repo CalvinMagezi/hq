@@ -1,6 +1,6 @@
 # Shared compute, phase 1: the phone uses the laptop's model
 
-Status: test zero run 2026-11-05 (results in section 5 below); feature work not started. Phase 1 of a larger idea (devices lending model capacity to each other);
+Status: test zero run 2026-11-05 (results in section 5 below); all six feature items merged 2026-11-05 (see "Shipped" below); the real-phone checks wait for a phone release. Phase 1 of a larger idea (devices lending model capacity to each other);
 phase 2 and beyond are listed at the end and are out of scope here.
 
 ## The problem
@@ -173,6 +173,24 @@ Each is a small, focused PR with tests. Order by what test zero shows hurts most
    removes both.
 6. **Tool calling for local models served elsewhere.** Let an `openai-compatible` entry opt into the
    prompted-tools shim, so models like Gemma 4 work through the forward too.
+
+## Shipped (2026-11-05)
+
+| Item | PR | What landed |
+|---|---|---|
+| 1. Opt-in switch | #407 | Desktop "Share this computer's model" switch (off by default, live, ends open streams), `bridge.share_model` for `hq bridge serve`, `llm` offered to this machine's hubs only, Ollama model list with tool support and a context warning |
+| 2. Fast failover | #402 | `bridge.forwards[].fail_fast_secs` |
+| 3. Forward open to every app | #400, #403 | Forwards on a private unix socket and `unix_socket` backends; per-service `peers` lists |
+| 4. Same network only | #406 | `bridge.forwards[].when: direct` |
+| 5. Pairing sets it up | #408 | `hq/share/1`: the machine tells its hubs, the hub opens a fail-fast socket forward and lists it; HQ puts it in front of the configured chain (`HqConfig::backends_in_force`) |
+| 6. Prompted tools | #405 | `backends[].prompted_tools` for `openai-compatible` |
+| Credential leak (finding 5) | #404 | A named `credential_env` never borrows the generic key |
+
+Finding while doing item 6: on Ollama 0.40.14, `gemma4:e2b` answers native `tools` correctly.
+Left for later (TECHDEBT.md): "only on mains power", a lent model's context in the session budget,
+and a hub-side switch. Still to run on the real phone after a release: sharing turned on from the
+Mac, a phone chat served by the laptop, the lid closed (fallback in about 3 s), another app on the
+phone refused, a second paired device refused.
 
 ## Done when
 
