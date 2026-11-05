@@ -30,6 +30,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import example.hq.spike.R
+import example.hq.spike.download.DlState
+import example.hq.spike.download.Downloads
+import example.hq.spike.download.Item
+import example.hq.spike.download.LargeDownload
+import example.hq.spike.download.Op
+import example.hq.spike.download.perform
+import example.hq.spike.ui.download.DownloadDialogs
+import example.hq.spike.ui.download.DownloadRow
+import example.hq.spike.ui.shell.Words
+import example.hq.spike.ui.shell.rememberWords
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -58,7 +74,7 @@ class VoiceActivity : ComponentActivity() {
     private var askOnResume = false
 
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) session.listen() else session.refuse(MIC_REFUSED)
+        if (granted) session.listen() else session.refuse(getString(R.string.voice_mic_refused))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,7 +86,9 @@ class VoiceActivity : ComponentActivity() {
         setContent {
             HqTheme {
                 val state by session.state.collectAsState()
-                if (unlocked.value) VoiceSheet(state, onMic = ::micPressed, onClose = ::finish)
+                val downloads by Downloads.states.collectAsState()
+                val item = remember { VoiceModels(applicationContext).item() }
+                if (unlocked.value) VoiceSheet(state, downloads[item.id] ?: DlState.Ready, item, onOp = { op -> session.engine().perform(op) }, engine = { Downloads.get(item.id) }, onMic = ::micPressed, onClose = ::finish)
             }
         }
         askOnResume = true
@@ -137,48 +155,54 @@ class VoiceActivity : ComponentActivity() {
 
 
     companion object {
-        private const val MIC_REFUSED = "AgentHQ needs the microphone to hear you. Nothing you say leaves this phone as sound."
-
         fun intent(context: Context): Intent = Intent(context, VoiceActivity::class.java)
 
     }
 }
 
+/** The sheet. While there is no model on the phone the shared download row and its asks sit where the round button does. */
 @Composable
-private fun VoiceSheet(state: VoiceState, onMic: () -> Unit, onClose: () -> Unit) {
+internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -> Unit, engine: () -> LargeDownload?, onMic: () -> Unit, onClose: () -> Unit) {
+    val w = rememberWords()
+    val needsModel = state.phase == VoicePhase.NeedsModel || state.phase == VoicePhase.Downloading
     Box(Modifier.fillMaxSize().background(Mts.Surface000.copy(alpha = SCRIM_ALPHA)).clickable(onClick = onClose), contentAlignment = Alignment.BottomCenter) {
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = SHEET_RADIUS.dp, topEnd = SHEET_RADIUS.dp)).background(Mts.Surface100)
                 .clickable(enabled = false, onClick = {}).navigationBarsPadding().padding(SHEET_PADDING.dp),
             verticalArrangement = Arrangement.spacedBy(GAP.dp),
         ) {
-            val percent = state.progress?.let { " ${(it * PERCENT).toInt()}%" }.orEmpty()
-            Text(state.phase.label + percent, style = HqType.Caption, color = Mts.InkMuted)
-            state.notice?.let { Text(it, style = HqType.BodySm, color = Mts.Ink) }
+            Text(VoiceWords.label(w, state.phase), style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.semantics { heading() })
+            VoiceWords.body(w, state.phase, dl)?.let { Text(it, style = HqType.BodySm, color = Mts.Ink) }
             if (state.heard.isNotBlank()) Text(state.heard, style = HqType.BodyBold, color = Mts.Ink)
             if (state.reply.isNotBlank()) {
                 Text(state.reply, style = HqType.Body, color = Mts.Ink, modifier = Modifier.heightIn(max = REPLY_MAX_HEIGHT.dp).verticalScroll(rememberScrollState()))
             }
             state.problem?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { MicButton(state.phase, onMic) }
+            if (needsModel) {
+                DownloadRow(item, dl, onOp)
+                DownloadDialogs(item, dl, engine)
+                if (state.phase == VoicePhase.NeedsModel) TextButton(onClose, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.confirm_not_now), style = HqType.BodyBold, color = Mts.InkMuted) }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { MicButton(w, state.phase, onMic) }
+            }
         }
     }
 }
 
 @Composable
-private fun MicButton(phase: VoicePhase, onMic: () -> Unit) {
+private fun MicButton(w: Words, phase: VoicePhase, onMic: () -> Unit) {
     val live = phase == VoicePhase.Listening
+    val action = VoiceWords.action(w, phase)
     Box(
         Modifier.size(MIC_SIZE.dp).clip(CircleShape).background(if (live) Mts.BrandBlue else Mts.Surface200)
-            .clickable(role = Role.Button, onClickLabel = phase.action, onClick = onMic),
+            .clickable(role = Role.Button, onClickLabel = action, onClick = onMic),
         contentAlignment = Alignment.Center,
     ) {
-        Text(phase.action, style = HqType.Caption, color = if (live) Mts.Surface000 else Mts.Ink)
+        Text(action, style = HqType.Caption, color = if (live) Mts.Surface000 else Mts.Ink)
     }
 }
 
 private const val SCRIM_ALPHA = 0.5f
-private const val PERCENT = 100
 private const val SHEET_RADIUS = 20
 private const val SHEET_PADDING = 20
 private const val GAP = 12

@@ -97,6 +97,8 @@ fun HqShell(
     status: HqStatus = HqStatus.Live,
     onSearch: () -> Unit = {},
     onSettings: () -> Unit = {},
+    /** The status line is one button that opens the Connection sheet. */
+    onStatus: () -> Unit = {},
     /** What a place adds to the bar: a line in front of the status ("43 active") and buttons between search and settings. */
     subline: (Place) -> String? = { null },
     topActions: @Composable (Place) -> Unit = {},
@@ -112,15 +114,18 @@ fun HqShell(
     var current by rememberSaveable { mutableStateOf(startAt) }
     LaunchedEffect(request) { if (request != null) { current = request; onRequestHandled() } }
     BackHandler(enabled = current != Place.Chat) { current = Place.Chat }
-    val (statusText, statusColor) = when (status) {
-        HqStatus.Live -> "Live" to Mts.BrandGreen
-        is HqStatus.Starting -> "Starting HQ \u00b7 ${status.seconds} s" to Mts.Amber
-        is HqStatus.Saved -> "Saved \u00b7 ${status.age}" to Mts.Amber
+    val statusText = when (status) {
+        HqStatus.Live -> stringResource(R.string.state_connected)
+        is HqStatus.Starting -> stringResource(R.string.state_starting, status.seconds.toString())
+        is HqStatus.Restarting -> stringResource(R.string.conn_status_restarting, status.seconds.toString())
+        is HqStatus.Stopped -> stringResource(R.string.state_hub_stopped)
+        is HqStatus.Saved -> "Saved \u00b7 ${status.age}"
     }
+    val statusColor = if (status == HqStatus.Live) Mts.BrandGreen else Mts.Amber
     CompositionLocalProvider(LocalGoTo provides { current = it }) {
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance, updateDot = updateDot, actions = { topActions(current) })
+                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance, updateDot = updateDot, actions = { topActions(current) }, stopped = status is HqStatus.Stopped, onStatus = onStatus)
                 Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
                 if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
             }
@@ -140,16 +145,18 @@ fun NotBuilt(place: Place) {
 }
 
 @Composable
-fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}, updateDot: Boolean = false, actions: @Composable () -> Unit = {}) {
+fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}, updateDot: Boolean = false, actions: @Composable () -> Unit = {}, stopped: Boolean = false, onStatus: () -> Unit = {}) {
     Row(
-        Modifier.fillMaxWidth().height(TopBarHeight).background(Mts.Surface000).padding(start = 16.dp, end = 4.dp),
+        Modifier.fillMaxWidth().heightIn(min = TopBarHeight).background(Mts.Surface000).padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f).height(TouchTarget), verticalArrangement = Arrangement.Center) {
+        Column(Modifier.weight(1f).heightIn(min = TouchTarget).clickable(role = Role.Button, onClickLabel = stringResource(R.string.conn_open_label), onClick = onStatus), verticalArrangement = Arrangement.Center) {
             Text(title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(Modifier.size(8.dp).background(statusColor, CircleShape))
-                Text(status, style = HqType.Caption, color = Mts.InkMuted, maxLines = 1)
+            Row(
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (stopped) Icon(HqIcons.Stop, null, Modifier.size(12.dp), tint = statusColor) else Box(Modifier.size(8.dp).background(statusColor, CircleShape))
+                Text(status, style = HqType.Caption, color = if (stopped) statusColor else Mts.InkMuted)
             }
         }
         balance?.let { BalancePill(it) { onBalance(it.target) } }

@@ -29,7 +29,7 @@ data class SettingsSnapshot(
     val vault: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed, Update }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed, Update, Speech }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 

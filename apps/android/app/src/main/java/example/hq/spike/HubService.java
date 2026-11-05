@@ -259,8 +259,10 @@ public class HubService extends Service {
         nm.deleteNotificationChannel(AlertPoster.OLD_HUB);
         if (started.compareAndSet(false, true)) {
             int gen = generation.incrementAndGet();
+            example.hq.spike.voice.VoiceEngines.INSTANCE.listen(getApplicationContext());
             example.hq.spike.download.Downloads.INSTANCE.start(getApplicationContext());
             new Thread(() -> supervise(gen, "hq", this::hqProcess, true), "hq-supervisor").start();
+            new Thread(() -> watchNotice(gen), "hq-notice").start();
             new Thread(() -> supervise(gen, "caddy", this::caddyProcess, false), "caddy-supervisor").start();
             new Thread(() -> Alerts.watch(getApplicationContext(), () -> gen == generation.get()), "alerts").start();
             new Thread(() -> Updater.INSTANCE.watch(getApplicationContext(), () -> gen == generation.get()), "update-check").start();
@@ -291,10 +293,52 @@ public class HubService extends Service {
         else registerReceiver(lockReceiver, filter);
     }
 
+    /** True while hq's child process lives. */
+    public static boolean hqAlive() {
+        Process p = hqProc;
+        return p != null && p.isAlive();
+    }
+
+    /** True once the service is in the foreground: the first of the four start steps. */
+    public static boolean hubUp() {
+        return started.get();
+    }
+
+    /** True while hq is being stopped on purpose so it starts again with a new setting. */
+    public static boolean restarting() {
+        return restartAsked;
+    }
+
     private Notification notification(boolean active) {
-        String text = active ? "Answering your chats and running scheduled tasks." : "Only the app is on. Chats and scheduled tasks are paused.";
-        return new Notification.Builder(this, CHANNEL).setContentTitle("HQ is running")
-                .setContentText(text).setSmallIcon(statIcon(this)).build();
+        example.hq.spike.data.HqStatus status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
+        example.hq.spike.ui.startup.RunningNotice.Text t = example.hq.spike.ui.startup.RunningNotice.INSTANCE.of(
+                example.hq.spike.ui.shell.Words.Companion.of(this), status, active, false);
+        Intent open = new Intent(this, example.hq.spike.ShellActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (t.getOpensSheet()) open.putExtra(example.hq.spike.ShellActivity.EXTRA_SHEET, "connection");
+        android.app.PendingIntent tap = android.app.PendingIntent.getActivity(this, 0, open, android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+        return new Notification.Builder(this, CHANNEL).setContentTitle(t.getTitle())
+                .setContentText(t.getBody()).setContentIntent(tap).setOnlyAlertOnce(true).setSmallIcon(statIcon(this)).build();
+    }
+
+    /** Posts the notice again when its words change (a step, a restart, a stop), never for the seconds. */
+    private void watchNotice(int gen) {
+        String shown = null;
+        while (gen == generation.get()) {
+            try {
+                boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
+                example.hq.spike.data.HqStatus status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
+                String key = example.hq.spike.ui.startup.RunningNotice.INSTANCE.key(example.hq.spike.ui.shell.Words.Companion.of(this), status, active);
+                if (!key.equals(shown)) {
+                    shown = key;
+                    getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(active));
+                }
+                Thread.sleep(2000);
+            } catch (InterruptedException e) {
+                return;
+            } catch (RuntimeException e) {
+                Log.w(TAG, "notice update failed: " + e);
+            }
+        }
     }
 
     private static final String PREFS = "hub";

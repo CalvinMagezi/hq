@@ -119,6 +119,9 @@ data class SettingsUi(
     val askAnyNetwork: Boolean = false,
     val unfinishedBytes: Long = 0,
     val dlUndo: DlUndo? = null,
+    /** Bytes the speech model takes on this phone, or -1 when it is not downloaded; and the delete question. */
+    val speechBytes: Long = -1,
+    val askDeleteSpeech: Boolean = false,
     /** When HQ last answered, and whether what is shown now includes values kept from that earlier answer. */
     val savedAt: Instant? = null,
     val stale: Boolean = false,
@@ -197,6 +200,8 @@ class SettingsActions(
     val onForgetWifi: () -> Unit = {},
     val onRemoveUnfinished: () -> Unit = {},
     val onDlUndo: () -> Unit = {},
+    val onAskDeleteSpeech: (Boolean) -> Unit = {},
+    val onDeleteSpeech: () -> Unit = {},
 )
 
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
@@ -279,6 +284,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.withDownloadFacts().copy(dlUndo = null) }
             }
         },
+        onAskDeleteSpeech = { ask -> _state.update { it.copy(askDeleteSpeech = ask) } },
+        onDeleteSpeech = {
+            viewModelScope.launch(Dispatchers.IO) {
+                example.hq.spike.voice.VoiceModels(ctx()).delete()
+                _state.update { it.withDownloadFacts().copy(askDeleteSpeech = false, stack = it.stack.filter { p -> p != SettingsPage.Speech }, line = ctx().getString(R.string.speech_deleted), phone = phoneRows()) }
+            }
+        },
         onUpdateMain = { main ->
             Updater.setChannel(ctx(), if (main) UpdateChannel.Main else UpdateChannel.Stable)
             _state.update { it.copy(updateMain = main) }
@@ -303,6 +315,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         return copy(
             updateFacts = Updater.facts(c), wifiFree = wifi.free(), wifiPaid = wifi.paid(),
             askAnyNetwork = example.hq.spike.download.Downloads.askAnyNetwork(c), unfinishedBytes = example.hq.spike.download.Downloads.unfinishedBytes(c),
+            speechBytes = example.hq.spike.voice.VoiceModels(c).let { if (it.ready()) it.onPhoneBytes() else -1L },
         )
     }
 
@@ -395,12 +408,14 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val nm = c.getSystemService(NotificationManager::class.java)
         fun on(id: String) = nm.getNotificationChannel(id)?.importance?.let { it != NotificationManager.IMPORTANCE_NONE } ?: true
         val allowed = nm.areNotificationsEnabled()
-        return listOf(
+        val speech = example.hq.spike.voice.VoiceModels(c).let { if (it.ready()) it.onPhoneBytes() else -1L }
+        return listOfNotNull(
             HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
             HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(Words.of(ctx()), keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(Words.of(ctx()), it, Instant.now()).checked.any { r -> !r.ok } }),
             HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
             HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
             HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
+            speech.takeIf { it >= 0 }?.let { HomeRow(SettingsPage.Speech, "speech", c.getString(R.string.speech_title), c.getString(R.string.speech_home_status, example.hq.spike.download.DownloadRules.sizeMb(it))) },
         )
     }
 

@@ -6,6 +6,18 @@ import example.hq.spike.ui.shell.Words
 /** What a button on a download row does. */
 enum class Op { Download, DownloadLeft, Pause, Resume, Cancel, TryAgain }
 
+/** Does what a row's button says. */
+fun LargeDownload?.perform(op: Op) {
+    val e = this ?: return
+    when (op) {
+        Op.Pause -> e.pause()
+        Op.Resume -> e.resume()
+        Op.Cancel -> e.cancel()
+        Op.TryAgain -> e.tryAgain()
+        Op.Download, Op.DownloadLeft -> e.request()
+    }
+}
+
 data class Btn(val op: Op, val label: String)
 
 /** What a row shows for one download state: its lines, how far along it is, and its buttons. */
@@ -32,7 +44,8 @@ object DownloadWords {
         fun at(bytes: Long) = w.s(R.string.dl_paused_owner, done(w, bytes), size(w, item.size))
         return when (state) {
             DlState.Ready, is DlState.Asking, is DlState.NoSpace, is DlState.Cancelled ->
-                RowModel(w.s(R.string.dl_size_download, size(w, item.size)), buttons = listOf(Btn(Op.Download, w.s(R.string.dl_btn_download_install))))
+                if (item.speech) RowModel(w.s(R.string.speech_row, size(w, item.size)), buttons = listOf(Btn(Op.Download, w.s(R.string.dl_btn_download_size, size(w, item.size)))))
+                else RowModel(w.s(R.string.dl_size_download, size(w, item.size)), buttons = listOf(Btn(Op.Download, w.s(R.string.dl_btn_download_install))))
             DlState.WaitingWifi -> RowModel(w.s(R.string.dl_waiting), warn = true, buttons = listOf(Btn(Op.Download, w.s(R.string.dl_btn_download_size, size(w, item.size))), Btn(Op.Cancel, w.s(R.string.dl_btn_cancel))))
             is DlState.Downloading ->
                 if (small) RowModel(w.s(R.string.dl_small), spinner = true)

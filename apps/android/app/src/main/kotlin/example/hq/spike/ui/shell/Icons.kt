@@ -74,6 +74,8 @@ object HqIcons {
     val TextCursor = outline("text-cursor", "M8 4h8", "M12 4v16", "M8 20h8")
     val Close = outline("close", "M18 6 6 18", "m6 6 12 12")
     val Check = outline("check", "M20 6 9 17l-5-5")
+    val Clock = outline("clock", "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20z", "M12 6v6l4 2")
+    val Stop = outline("stop", "M7.86 2h8.28L22 7.86v8.28L16.14 22H7.86L2 16.14V7.86z")
     val Plus = outline("plus", "M5 12h14", "M12 5v14")
     val Warning = outline(
         "warning", "m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3", "M12 9v4", "M12 17h.01",

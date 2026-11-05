@@ -6,10 +6,14 @@ import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import example.hq.spike.R
 import example.hq.spike.data.ChatConnection
+import example.hq.spike.download.DlState
+import example.hq.spike.download.Downloads
+import example.hq.spike.download.LargeDownload
+import example.hq.spike.ui.shell.Words
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,24 +21,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class VoicePhase(val label: String, val action: String) {
-    NeedsModels("Voice needs its speech models", "Get"),
-    Downloading("Downloading speech models", "Wait"),
-    Preparing("Getting ready", "Wait"),
-    Listening("Listening", "Done"),
-    Thinking("Thinking", "Stop"),
-    LookingUp("Looking it up", "Stop"),
-    Answering("Answering", "Stop"),
-    Idle("Tap to ask", "Ask"),
-}
+enum class VoicePhase { NeedsModel, Downloading, ModelReady, Preparing, Listening, Thinking, LookingUp, Answering, Idle }
 
 data class VoiceState(
     val phase: VoicePhase = VoicePhase.Idle,
     val heard: String = "",
     val reply: String = "",
     val problem: String? = null,
-    val notice: String? = null,
-    val progress: Float? = null,
 )
 
 /**
@@ -43,6 +36,7 @@ data class VoiceState(
  */
 class VoiceSession(private val app: Context, private val scope: CoroutineScope, private val connection: ChatConnection) {
     private val models = VoiceModels(app)
+    private val words = Words.of(app)
     private val ears = VoiceEngines.ears(app)
     private val turn = VoiceTurn(connection.events, connection.connected, { content, thread, clientId -> connection.sendChat(content, thread, clientId) })
     private val _state = MutableStateFlow(VoiceState())
@@ -59,12 +53,35 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
             _state.map { it.phase }.distinctUntilChanged().collect { Log.i(TAG, "phase=$it at=${SystemClock.elapsedRealtime()}") }
         }
         scope.launch(Dispatchers.IO) { models.dropRetired() }
+        scope.launch { Downloads.states.map { it[VoiceModels.ITEM_ID] }.distinctUntilChanged().collect(::onDownload) }
+    }
+
+    /** The model's job on the shared download engine, made on first use so the sheet's row has something to act on. */
+    fun engine(): LargeDownload = Downloads.engine(app, models.item())
+
+    private fun waitingPhase(s: DlState?) = when (s) {
+        DlState.WaitingWifi, is DlState.Downloading, is DlState.PausedWifi, is DlState.PausedOwner, is DlState.CutOff, DlState.Checking -> VoicePhase.Downloading
+        else -> VoicePhase.NeedsModel
+    }
+
+    /** Follows the download while the sheet shows the model's row. When the model lands it says so and waits: nothing listens by itself. */
+    private fun onDownload(s: DlState?) {
+        val phase = _state.value.phase
+        if (phase != VoicePhase.NeedsModel && phase != VoicePhase.Downloading) return
+        if (s is DlState.Done) {
+            scope.launch(Dispatchers.IO) {
+                if (models.finish()) _state.update { VoiceState(VoicePhase.ModelReady) }
+                else _state.update { it.copy(phase = VoicePhase.NeedsModel, problem = words.s(R.string.speech_unpack_failed)) }
+            }
+        } else {
+            _state.update { it.copy(phase = waitingPhase(s)) }
+        }
     }
 
     fun micPressed() = when (_state.value.phase) {
-        VoicePhase.NeedsModels -> download()
+        VoicePhase.NeedsModel, VoicePhase.Downloading, VoicePhase.Preparing -> Unit
         VoicePhase.Listening -> hearing.set(true)
-        VoicePhase.Preparing, VoicePhase.Downloading -> Unit
+        VoicePhase.ModelReady -> listen()
         VoicePhase.Thinking, VoicePhase.LookingUp, VoicePhase.Answering -> { interrupt(); listen() }
         VoicePhase.Idle -> listen()
     }
@@ -81,7 +98,7 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "voice turn failed", e)
-                refuse(ENGINE_FAILED)
+                refuse(words.s(R.string.voice_engine_failed))
             }
         }
     }
@@ -100,45 +117,22 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
         hearing.set(true)
     }
 
-    /** Starts the models' download only after the owner tapped "Get" under the notice of what is fetched and what is not sent. */
-    private fun download() = run { downloadThenListen(VoiceEngines.download(app)) }
-
-    /** Follows the process-wide download; leaving the sheet stops this wait, not the download. */
-    private suspend fun downloadThenListen(running: Deferred<Unit>) {
-        _state.update { VoiceState(VoicePhase.Downloading, notice = DOWNLOAD_NOTICE) }
-        val showing = scope.launch { VoiceEngines.progress.collect { part -> _state.update { it.copy(progress = part) } } }
-        try {
-            running.await()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "model download failed", e)
-            _state.update { VoiceState(VoicePhase.NeedsModels, notice = DOWNLOAD_NOTICE, problem = DOWNLOAD_FAILED) }
-            return
-        } finally {
-            showing.cancel()
-        }
-        hearThenAsk()
-    }
-
     private suspend fun hearThenAsk() {
         if (!models.ready()) {
-            val running = VoiceEngines.downloading()
-            if (running != null) return downloadThenListen(running)
-            _state.update { VoiceState(VoicePhase.NeedsModels, notice = DOWNLOAD_NOTICE) }
+            _state.update { VoiceState(waitingPhase(engine().state.value)) }
             return
         }
         _state.update { VoiceState(VoicePhase.Preparing, reply = it.reply) }
         ears.prepare()
         _state.update { it.copy(heard = "", problem = null) }
         val stop = AtomicBoolean(false).also { hearing = it }
-        val words = ears.hear(
+        val said = ears.hear(
             stop,
             onRecording = { _state.update { it.copy(phase = VoicePhase.Listening) } },
             onPartial = { partial -> _state.update { it.copy(heard = partial) } },
         ).trim()
-        if (words.isEmpty()) return refuse(NOTHING_HEARD)
-        val question = Invocation.strip(words)
+        if (said.isEmpty()) return refuse(words.s(R.string.voice_nothing_heard))
+        val question = Invocation.strip(said)
         _state.update { it.copy(phase = VoicePhase.Thinking, heard = question, reply = "") }
         turn.ask(question, threadId).collect(::onOutput)
         _state.update { it.copy(phase = VoicePhase.Idle) }
@@ -163,11 +157,5 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     private companion object {
         const val TAG = "HqVoice"
-        const val NOTHING_HEARD = "I did not catch that. Tap and try again."
-        const val ENGINE_FAILED = "Voice could not start on this phone. The details are in the app log."
-        const val DOWNLOAD_FAILED = "The download did not finish or did not match. Check the connection and tap Get again."
-        val DOWNLOAD_NOTICE = "Your speech is recognised on this phone, so it needs about ${VoiceModels.DOWNLOAD_MB} MB of speech " +
-            "models, downloaded once from the sherpa-onnx project on GitHub. The download sends nothing about you. " +
-            "After that, your voice never leaves the phone: only the words of your request go to HQ's chat model."
     }
 }
