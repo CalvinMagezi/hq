@@ -19,11 +19,6 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
 
-[features]
-# Local TurboQuant CUDA inference server; off by default so hosts without one
-# skip the startup probe of localhost:14747.
-turboquant = []
-
 [dev-dependencies]
 serde_yaml = { workspace = true }
 tempfile = "3"

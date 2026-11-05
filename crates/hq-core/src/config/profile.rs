@@ -451,16 +451,6 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             "note titles and excerpts embedded for semantic search",
         ));
     }
-    if let Some(host) = env("TURBOQUANT_BASE_URL").as_deref().and_then(host_of)
-        && !is_loopback(&host)
-    {
-        items.push(item(
-            "turboquant",
-            "TurboQuant endpoint (TURBOQUANT_BASE_URL)",
-            &[host.as_str()],
-            "prompts",
-        ));
-    }
 
     if cfg.self_update.enabled {
         items.push(item(
@@ -904,20 +894,13 @@ mod tests {
             ("SILICONFLOW_API_KEY", "k"),
             ("NOVITA_API_KEY", "k"),
             ("OLLAMA_HOST", "http://gpu.example.com:11434"),
-            ("TURBOQUANT_BASE_URL", "http://tq.example.com/v1"),
             ("OPENROUTER_API_KEY", "k"),
             ("OPENROUTER_BASE_URL", "https://gateway.example.com/api/v1"),
         ]);
         let lookup = |n: &str| env.get(n).map(|v| v.to_string());
         let report = egress_report(&lite(), &lookup);
         let got = ids(&report);
-        for id in [
-            "siliconflow",
-            "novita",
-            "ollama",
-            "turboquant",
-            "openrouter",
-        ] {
+        for id in ["siliconflow", "novita", "ollama", "openrouter"] {
             assert!(got.contains(&id), "{id} missing from {got:?}");
         }
         let openrouter = report.iter().find(|e| e.id == "openrouter").unwrap();
@@ -928,10 +911,7 @@ mod tests {
             "{openrouter:?}"
         );
 
-        let local: HashMap<&str, &str> = HashMap::from([
-            ("OLLAMA_HOST", "127.0.0.1:11434"),
-            ("TURBOQUANT_BASE_URL", "http://localhost:9/v1"),
-        ]);
+        let local: HashMap<&str, &str> = HashMap::from([("OLLAMA_HOST", "127.0.0.1:11434")]);
         let lookup = |n: &str| local.get(n).map(|v| v.to_string());
         assert!(
             egress_report(&lite(), &lookup).is_empty(),

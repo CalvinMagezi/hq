@@ -179,7 +179,7 @@ pub struct HqConfig {
     #[serde(default = "default_model")]
     pub default_model: String,
 
-    /// When true, only local providers (Ollama, TurboQuant) are loaded by the LLM router.
+    /// When true, only local providers (Ollama) are loaded by the LLM router.
     /// Cloud providers (Cerebras, Groq, DeepSeek, etc.) are skipped even if API keys are set.
     /// Defaults to false: a fresh install with no local Ollama should route on whatever
     /// cloud keys are actually configured, not silently assume a local model is present.
