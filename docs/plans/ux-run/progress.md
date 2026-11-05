@@ -15,7 +15,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 ## Web wave 0 (live bugs and shared parts)
 
 - [x] web/wave-0/01-live-bugs.md: web push content and buttons. Try: with push on, have a helper ask; the lock screen shows "{Helper} needs your OK" / "Open HQ to see what it wants to do." with no buttons and no command. Settings test push reads "HQ" / "Notifications from HQ are on in this browser." A finished reply alert reads "HQ answered" / "Tap to read." Not built: the "Your server HQ needs your OK" title (see the note under Found by the owner).
-- [ ] web/wave-0/01-live-bugs.md: the hub proxy and a taken port
+- [x] web/wave-0/01-live-bugs.md: the hub proxy and a taken port. Try: on the Mac, run `hq bridge serve` in a terminal so it holds the web forward, then turn pairing on in HQ Hub. The Host tab shows "Couldn't open HQ on your phone" with "Port in use" and Open HQ is off. Stop the terminal one, press Look again, Open HQ works. The tag is grey for now: the amber token arrives with the hub redesign (wave 3). The proxy also checks the forward on every request, so a port taken after the window opened gets nothing.
 - [ ] web/wave-0/01-live-bugs.md: wipe the browser on a refused sign-in
 - [x] web/wave-0/01-live-bugs.md: guard drive, goal and answer routes. Try: nothing to see; a current web app and the phone app keep working (both send the header). A cross-site POST to `/api/harness-sessions/{id}/drive` now gets 403.
 - [ ] web/wave-0/02-shared-parts.md

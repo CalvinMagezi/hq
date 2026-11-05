@@ -153,12 +153,19 @@ document.querySelectorAll<HTMLButtonElement>('nav [data-tab]').forEach((b) =>
 )
 
 // Host
+const HUB_WEB_SERVICE = 'web'
 const HOST_LABEL: Record<HostStatus['state'], string> = {
   stopped: 'Stopped',
   starting: 'Starting',
   running: 'Running',
   external: 'Running elsewhere',
   exited: 'Exited',
+}
+
+/** The phone hub's web forward when another program holds its port: the window must not open on it. */
+async function heldHubForward(): Promise<Forward | undefined> {
+  const pairing = await invoke<Pairing>('pairing_snapshot')
+  return pairing.forwards.find((f) => f.service === HUB_WEB_SERVICE && f.running_elsewhere)
 }
 
 async function refreshHost() {
@@ -173,7 +180,10 @@ async function refreshHost() {
   const answering = ours || status.state === 'external'
   $<HTMLButtonElement>('host-start').disabled = answering
   $<HTMLButtonElement>('host-stop').disabled = !ours
-  $<HTMLButtonElement>('open-hq').disabled = !answering
+  const held = await heldHubForward()
+  $('hub-held').hidden = !held
+  if (held) $('hub-held-detail').textContent = `web forward to ${held.peer_short}: ${held.listen}, held by another program`
+  $<HTMLButtonElement>('open-hq').disabled = !answering || held !== undefined
   const settings = await invoke<Settings>('settings_get')
   $<HTMLInputElement>('set-start-on-launch').checked = settings.start_host_on_launch
 }
@@ -222,6 +232,14 @@ $('host-start').addEventListener('click', () =>
 $('host-stop').addEventListener('click', () =>
   guarded('host-error', async () => {
     await invoke('host_stop')
+    await refreshHost()
+  }),
+)
+$('hub-look-again').addEventListener('click', () =>
+  guarded('host-error', async () => {
+    // Forwards are opened when pairing starts, so a restart tries the port again.
+    await invoke('pairing_stop')
+    await invoke('pairing_start')
     await refreshHost()
   }),
 )
@@ -346,7 +364,9 @@ function renderForwards(state: Pairing) {
   list.replaceChildren()
   for (const name of state.services) list.append(el('li', `This computer offers its ${name} service to paired devices.`))
   for (const f of state.forwards) {
-    const where = f.running_elsewhere ? 'running elsewhere' : 'listening'
+    const where = f.running_elsewhere
+      ? 'Port in use. Another program holds this port. HQ Hub won\'t send your sign-in there.'
+      : 'listening'
     list.append(el('li', `The ${f.service} service of device ${f.peer_short} is on ${f.listen} (${where}).`))
   }
   $('forwards-block').hidden = list.children.length === 0

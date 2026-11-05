@@ -190,7 +190,16 @@ struct ProxyState {
     upstream: SocketAddr,
     port: u16,
     csp: HeaderValue,
+    gate: Option<UpstreamGate>,
 }
+
+/// Asked before every request: whether the upstream is still one this app trusts with a sign-in.
+/// A paired hub's forward can be given up and taken by another program while the proxy runs.
+pub type UpstreamGate = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// The answer while the gate is shut, in the words the window shows.
+pub const HELD_PORT_LINE: &str =
+    "Another program holds this port. HQ Hub won't send your sign-in there.";
 
 pub struct ProxyHandle {
     pub addr: SocketAddr,
@@ -218,6 +227,11 @@ impl ProxyHandle {
 }
 
 pub async fn start(config: ProxyConfig) -> Result<ProxyHandle> {
+    start_gated(config, None).await
+}
+
+/// [`start`] with a gate asked before every request; while it is shut, nothing is forwarded.
+pub async fn start_gated(config: ProxyConfig, gate: Option<UpstreamGate>) -> Result<ProxyHandle> {
     config.validate()?;
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
@@ -241,6 +255,7 @@ pub async fn start(config: ProxyConfig) -> Result<ProxyHandle> {
         upstream: config.upstream,
         port: addr.port(),
         csp: HeaderValue::from_str(&extra_csp(addr.port()))?,
+        gate,
     });
     let app = Router::new().fallback(handle).with_state(state);
     let (stop, stopped) = oneshot::channel::<()>();
@@ -261,6 +276,9 @@ pub async fn start(config: ProxyConfig) -> Result<ProxyHandle> {
 async fn handle(State(state): State<Arc<ProxyState>>, req: Request) -> Response {
     if let Err(refusal) = judge(req.method(), req.uri(), req.headers(), state.port) {
         return refusal.status().into_response();
+    }
+    if state.gate.as_ref().is_some_and(|open| !open()) {
+        return (StatusCode::SERVICE_UNAVAILABLE, HELD_PORT_LINE).into_response();
     }
     let is_upgrade = req
         .headers()

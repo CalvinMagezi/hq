@@ -410,3 +410,43 @@ async fn a_second_proxy_on_a_taken_port_says_so_and_a_non_loopback_one_never_bin
     .await;
     assert!(open.is_err());
 }
+
+/// While the gate is shut (the hub's forward is no longer this app's), nothing is forwarded,
+/// so a program that took the port never sees the window's `Authorization`.
+#[tokio::test]
+async fn a_shut_gate_forwards_nothing() {
+    let seen = Seen::default();
+    let app = Router::new()
+        .fallback(any(echo_request))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let open = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let gate_open = open.clone();
+    let gate: proxy::UpstreamGate = Arc::new(move || gate_open.load(Ordering::SeqCst));
+    let proxy = proxy::start_gated(
+        ProxyConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            upstream,
+        },
+        Some(gate),
+    )
+    .await
+    .unwrap();
+    let url = format!("http://127.0.0.1:{}/api/tasks", proxy.addr.port());
+    let res = client()
+        .get(&url)
+        .header("authorization", "Bearer t")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.text().await.unwrap(), proxy::HELD_PORT_LINE);
+    assert_eq!(seen.0.load(Ordering::SeqCst), 0, "nothing went upstream");
+    open.store(true, Ordering::SeqCst);
+    let res = client().get(&url).send().await.unwrap();
+    assert!(res.status().is_success());
+    assert_eq!(seen.0.load(Ordering::SeqCst), 1);
+    proxy.shutdown().await;
+}

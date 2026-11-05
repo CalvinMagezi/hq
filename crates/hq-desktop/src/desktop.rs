@@ -109,6 +109,17 @@ pub struct Desktop {
     upstream: SocketAddr,
 }
 
+/// The paired hub's web forward is not this app's own, so the window is not opened on it.
+#[derive(Debug, thiserror::Error)]
+#[error("{}", if *held_elsewhere { proxy::HELD_PORT_LINE } else { FORWARD_WAIT_LINE })]
+pub struct ForwardNotOurs {
+    pub listen: SocketAddr,
+    /// Another program had the port first; otherwise pairing is off and nothing holds it here.
+    pub held_elsewhere: bool,
+}
+
+pub const FORWARD_WAIT_LINE: &str = "Open HQ waits until HQ Hub holds the port itself.";
+
 /// Where the window's HQ is reachable from this machine: the paired hub's web app on its forward
 /// when the config has one, else this machine's own web server. The app talks to either only over
 /// loopback, so a host that listens on one non-loopback address cannot be used.
@@ -292,16 +303,37 @@ impl Desktop {
         Ok(())
     }
 
-    /// Starts the loopback proxy if it is not running and returns its origin.
+    /// Starts the loopback proxy if it is not running and returns its origin. With a paired hub,
+    /// only while this app holds the hub's web forward itself: a port another program holds
+    /// would get the window's sign-in, so it is refused, never used as a fallback.
     pub async fn proxy_origin(&self) -> Result<String> {
         let mut slot = self.proxy.lock().await;
+        let hub = self.config.bridge.hub_web_listen();
+        let held = hub.map(|listen| (listen, self.pairing.holds_forward(listen)));
+        if let Some((listen, ours)) = held
+            && ours != Some(true)
+        {
+            if let Some(running) = slot.take() {
+                running.shutdown().await;
+            }
+            let held_elsewhere = ours == Some(false);
+            return Err(ForwardNotOurs {
+                listen,
+                held_elsewhere,
+            }
+            .into());
+        }
         if slot.is_none() {
             let port = self.settings().proxy_port;
+            let gate = hub.map(|listen| self.pairing.forward_gate(listen));
             *slot = Some(
-                proxy::start(ProxyConfig {
-                    listen: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
-                    upstream: self.upstream,
-                })
+                proxy::start_gated(
+                    ProxyConfig {
+                        listen: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),
+                        upstream: self.upstream,
+                    },
+                    gate,
+                )
                 .await?,
             );
         }
@@ -509,5 +541,42 @@ mod tests {
         assert!(desktop.proxy.lock().await.is_none());
         assert!(!dir.path().join("bridge").exists());
         assert!(!dir.path().join("desktop").join("settings.json").exists());
+    }
+
+    /// A hub web forward on a port another program holds: the window is refused and that
+    /// program is never sent a request (or the sign-in that would ride on it).
+    #[tokio::test]
+    async fn a_hub_forward_this_app_does_not_hold_is_refused_not_proxied() {
+        let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        held.set_nonblocking(true).unwrap();
+        let listen = held.local_addr().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = HqConfig {
+            ws_port: crate::host::tests_support_unused_port(),
+            ..HqConfig::default()
+        };
+        config.bridge.forwards = vec![hq_core::config::BridgeForward {
+            peer: "phone".into(),
+            service: "web".into(),
+            listen: listen.to_string(),
+        }];
+        let desktop = Desktop::open(DesktopInit {
+            dir: dir.path().join("desktop"),
+            bridge_key: dir.path().join("bridge").join("bridge.key"),
+            config,
+            app_dir: None,
+            home: None,
+            path_var: None,
+            login_shell: None,
+        })
+        .unwrap();
+        let err = desktop.proxy_origin().await.unwrap_err();
+        let refused = err
+            .downcast_ref::<ForwardNotOurs>()
+            .expect("ForwardNotOurs");
+        assert_eq!(refused.listen, listen);
+        assert!(desktop.proxy.lock().await.is_none(), "no proxy was started");
+        assert!(desktop.main_window_url().await.is_err());
+        assert!(held.accept().is_err(), "nothing reached the other program");
     }
 }

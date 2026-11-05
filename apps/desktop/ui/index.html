@@ -26,6 +26,14 @@
         <button type="button" id="host-stop">Stop host</button>
         <button type="button" id="open-hq">Open HQ</button>
       </p>
+      <div id="hub-held" class="card" role="status" hidden>
+        <p class="row"><strong>Couldn't open HQ on your phone</strong><span class="badge">Port in use</span></p>
+        <p>Another program holds this port. HQ Hub won't send your sign-in there.</p>
+        <p class="muted">Often it is another HQ pairing started in a terminal. Close it, then look again.</p>
+        <p class="muted">Open HQ waits until HQ Hub holds the port itself.</p>
+        <details><summary>Technical details</summary><p><code id="hub-held-detail"></code></p></details>
+        <p><button type="button" id="hub-look-again">Look again</button></p>
+      </div>
       <p class="muted">Open HQ shows the HQ on your phone. The first time, it asks you to sign in: on the phone, open Settings, Devices, press Sign in another device, and type the code it shows into the window's Use code box. You stay signed in after that.</p>
       <p><label><input type="checkbox" id="set-start-on-launch"> Start the host when this app opens</label></p>
       <p id="host-error" class="error" role="alert"></p>
