@@ -16,7 +16,7 @@ pub enum Answerer {
     /// Something acting on its own; the text names it for the refusal.
     Automated(&'static str),
     /// The session's command policy: rules the owner chose, applied by the supervisor. Never
-    /// picks a "remember" option; whether it may say yes to a losing command is the owner's call.
+    /// picks a "remember" option; it may say yes to a losing command its rules allow (owner decision L2).
     Policy,
 }
 
@@ -124,7 +124,7 @@ pub fn refusal(dialog: &PendingDialog, choice: &Choice, who: Answerer) -> Option
             "option {id} ({}) lets the agent do more from now on without asking, so only the owner may pick it (from the web Sessions panel or their phone). {by} may pick a one-time answer or decline.",
             option.label
         )),
-        // The owner's command policy keeps deciding what its rules say (owner to confirm).
+        // The owner's command policy keeps deciding what its rules say (owner decision L2).
         Answerer::Automated(by) if dialog.may_lose() => Some(match dialog.losing_verb() {
             Some(verb) => format!(
                 "this dialog asks to {verb} something, so only the owner may say yes to it (from their Inbox or phone). {by} may decline it or leave it for the owner."
