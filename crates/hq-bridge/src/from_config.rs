@@ -96,6 +96,7 @@ pub async fn start_forwards(bridge: &Bridge, config: &BridgeServicesConfig) -> R
                 f.peer,
                 f.service,
                 listener,
+                f.fail_fast,
             ))),
             Err(e) if e.kind() == ErrorKind::AddrInUse => status.running_elsewhere = true,
             Err(e) => {

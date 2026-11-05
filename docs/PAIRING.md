@@ -312,6 +312,7 @@ bridge:
     - peer: <laptop id>
       service: llm
       listen: /data/data/<app id>/files/hqhome/.hq/bridge/llm.sock
+      fail_fast_secs: 3                # move to the cloud quickly when the laptop is away
 
 backends:
   primary: laptop
@@ -331,6 +332,16 @@ bridge:
   services:
     llm: 127.0.0.1:11434
 ```
+
+Give the forward `fail_fast_secs` when the service has a fallback. Without it, a request through a
+forward to a device that is away waits for the dial (up to 20 s) or for the service's answer (10 s
+when the device stopped answering, such as a laptop whose lid closed), and every request waits
+again. With `fail_fast_secs: 3`, the first request gives up after 3 s, the device is marked
+unreachable, and later requests end at once, so the backend chain moves to the next backend
+straight away. Each request while the device is unreachable asks for one background try (one at a
+time, nothing on a timer); once a try reaches the service, requests go through again. Leave it
+unset for forwards with no fallback, such as the web app or the host gate, where a slow answer is
+better than none. It takes 1 to 20.
 
 Ollama's default context (4096 tokens on smaller machines) is shorter than HQ's prompt, and Ollama
 cuts the prompt without an error; set `OLLAMA_CONTEXT_LENGTH` (or the Ollama app's context length) to

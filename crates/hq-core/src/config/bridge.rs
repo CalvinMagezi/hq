@@ -45,7 +45,16 @@ pub struct BridgeForward {
     /// absolute unix socket path in a directory only this user can enter, which only this user's
     /// processes can open (use it on a phone, where every app shares the loopback).
     pub listen: String,
+    /// Give up on the device after this many seconds, and while it stays unreachable close new
+    /// connections at once, trying it again in the background. For a service with a fallback,
+    /// such as a model the backend chain can replace with another; unset, a connection waits for
+    /// the device as long as a dial may take.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fail_fast_secs: Option<u64>,
 }
+
+/// Longest `fail_fast_secs`: past this a forward already waits that long without the option.
+pub const MAX_FAIL_FAST_SECS: u64 = 20;
 
 /// A forward with its address checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +62,7 @@ pub struct CheckedForward {
     pub peer: String,
     pub service: String,
     pub listen: DoorTarget,
+    pub fail_fast: Option<std::time::Duration>,
 }
 
 /// A service name is short lowercase ASCII, so it never needs escaping in logs or on the wire.
@@ -147,7 +157,17 @@ impl BridgeServicesConfig {
             if out.iter().any(|o| o.listen == listen) {
                 return Err(format!("bridge.forwards: {listen} is listed twice"));
             }
+            let fail_fast = match f.fail_fast_secs {
+                None => None,
+                Some(secs @ 1..=MAX_FAIL_FAST_SECS) => Some(std::time::Duration::from_secs(secs)),
+                Some(secs) => {
+                    return Err(format!(
+                        "bridge.forwards: fail_fast_secs {secs} must be between 1 and {MAX_FAIL_FAST_SECS}"
+                    ));
+                }
+            };
             out.push(CheckedForward {
+                fail_fast,
                 peer: f.peer.trim().to_string(),
                 service: f.service.clone(),
                 listen,
@@ -189,6 +209,27 @@ mod tests {
             "services:\n  \"a b\": 127.0.0.1:5690\n",
         ] {
             assert!(parse(bad).services().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn fail_fast_is_off_unless_set_and_bounded_when_it_is() {
+        let with = |secs: &str| {
+            parse(&format!(
+                "forwards:\n  - peer: abc\n    service: llm\n    listen: 127.0.0.1:47600\n{secs}"
+            ))
+            .forwards()
+        };
+        assert_eq!(with("").unwrap()[0].fail_fast, None);
+        assert_eq!(
+            with("    fail_fast_secs: 3\n").unwrap()[0].fail_fast,
+            Some(std::time::Duration::from_secs(3))
+        );
+        for bad in ["0", "21"] {
+            assert!(
+                with(&format!("    fail_fast_secs: {bad}\n")).is_err(),
+                "{bad}"
+            );
         }
     }
 

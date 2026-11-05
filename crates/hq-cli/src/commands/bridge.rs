@@ -990,6 +990,7 @@ mod tests {
             peer: id.to_uppercase(),
             service: "web".into(),
             listen: "127.0.0.1:47480".into(),
+            fail_fast_secs: None,
         }];
         let setup = setup_config(Some(&config), Role::Machine);
         assert!(setup.reserved_names.contains(&"laptop".to_string()));

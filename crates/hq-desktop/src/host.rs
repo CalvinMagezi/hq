@@ -566,6 +566,7 @@ mod tests {
                     peer: "abc".into(),
                     service: "web".into(),
                     listen: "127.0.0.1:47480".into(),
+                    fail_fast_secs: None,
                 })
                 .into_iter()
                 .collect(),
