@@ -1529,3 +1529,8 @@ async fn a_finished_turn_posts_what_the_policy_decided_on_the_task() {
         comments.iter().map(|c| &c.body).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn a_session_alert_opens_the_helper_page() {
+    assert_eq!(alerts::session_page("hs-1"), "/helpers/hs-1");
+}

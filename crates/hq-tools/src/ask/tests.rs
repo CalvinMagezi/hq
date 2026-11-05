@@ -115,7 +115,7 @@ async fn a_quick_reply_is_returned_in_the_same_call() {
     assert_eq!(out["status"], "answered");
     assert_eq!(out["answer"], "It is 42.");
     let thread = out["thread_id"].as_str().unwrap();
-    assert_eq!(out["links"]["chat"], format!("/chat?thread={thread}"));
+    assert_eq!(out["links"]["chat"], format!("/chat/{thread}"));
     assert!(out["turn_id"].as_str().unwrap().starts_with("turn-"));
     assert_eq!(out["mode"], "read_only");
     assert!(out["untrusted_data"].is_string());

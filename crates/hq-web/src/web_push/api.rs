@@ -173,7 +173,7 @@ pub(crate) async fn test_handler(
     let payload = serde_json::to_vec(&json!({
         "title": "HQ",
         "body": "Notifications from HQ are on in this browser.",
-        "url": "/notifications",
+        "url": "/inbox",
         "tag": "hq-push-test",
     }))
     .map_err(ApiError::internal)?;

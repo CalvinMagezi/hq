@@ -34,7 +34,7 @@ const TITLE_CHARS: usize = 120;
 /// Waiting items a returning subscription gets again at most; the worker folds the rest.
 const REPLAY_MAX: usize = 50;
 /// Where a tap goes when the item names no page.
-const DEFAULT_LINK: &str = "/notifications";
+const DEFAULT_LINK: &str = "/inbox";
 
 /// Inbox sources that are always pushed: what agents send through `notify_owner`, and a new
 /// device signing in, which the owner must hear about even with no chat app connected.
@@ -568,6 +568,10 @@ mod tests {
         let v = parsed(&item, None, false);
         assert_eq!(v["title"].as_str().unwrap().chars().count(), TITLE_CHARS);
         assert_eq!(v["url"], DEFAULT_LINK);
+        assert_eq!(
+            DEFAULT_LINK, "/inbox",
+            "HQ writes the new link forms (web wave 2, rule 5)"
+        );
         item.link = Some("/chat?thread=t1".into());
         assert_eq!(parsed(&item, None, false)["url"], "/chat?thread=t1");
     }

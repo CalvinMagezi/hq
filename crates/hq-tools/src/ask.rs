@@ -354,7 +354,7 @@ fn view(row: &AskRow, deduplicated: bool) -> Value {
         "ask_id": row.ask_id,
         "thread_id": row.thread_id,
         "turn_id": row.turn_id,
-        "links": { "chat": format!("/chat?thread={}", row.thread_id) },
+        "links": { "chat": format!("/chat/{}", row.thread_id) },
         "status": row.status,
         "mode": row.mode,
         "created_at": row.created_at,

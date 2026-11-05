@@ -98,8 +98,8 @@ fn default_prompt(task: &t::Task, acceptance: &str) -> String {
 
 fn links(thread: Option<&str>, task_id: &str) -> Value {
     json!({
-        "chat": thread.map(|t| format!("/chat?thread={t}")),
-        "task": format!("/tasks?task={task_id}"),
+        "chat": thread.map(|t| format!("/chat/{t}")),
+        "task": format!("/tasks/{task_id}"),
     })
 }
 

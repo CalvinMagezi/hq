@@ -1024,10 +1024,10 @@
     <string name="bk_off_none_later">When it can, this page will offer it.</string>
     <string name="bk_could_not_folder">Backups go to a folder this app cannot open. It cannot say if they work.</string>
     <string name="bk_could_not_read">The app could not read the backup settings. It cannot say if backups are on. Try again in a minute. If this stays, restart HQ.</string>
-    <string name="bk_server_body">Your notes live on your server HQ, %1$s. This phone cannot see its backups yet.</string>
-    <string name="bk_server_body_age">Your notes live on your server HQ, %1$s. Last backup %2$s.</string>
-    <string name="bk_server_body_failed">Your notes live on your server HQ, %1$s. Its last backup did not finish.</string>
-    <string name="bk_server_body_none">Your notes live on your server HQ, %1$s. It has no backups set up.</string>
+    <string name="bk_server_body">Your notes are kept on your server HQ, %1$s. This phone cannot see its backups yet.</string>
+    <string name="bk_server_body_age">Your notes are kept on your server HQ, %1$s. Last backup %2$s.</string>
+    <string name="bk_server_body_failed">Your notes are kept on your server HQ, %1$s. Its last backup did not finish.</string>
+    <string name="bk_server_body_none">Your notes are kept on your server HQ, %1$s. It has no backups set up.</string>
     <string name="bk_save_copy">Save a copy now</string>
     <string name="bk_open_background">Open Background work</string>
     <string name="bk_got_it">Got it</string>
