@@ -160,6 +160,7 @@ pub struct Space {
     pub id: String,
     pub name: String,
     pub slug: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 
@@ -169,6 +170,7 @@ pub struct Folder {
     pub space_id: String,
     pub name: String,
     pub slug: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 
@@ -182,6 +184,7 @@ pub struct Initiative {
     pub slug: String,
     pub id_prefix: String,
     pub next_sequence: i64,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 
@@ -198,7 +201,9 @@ pub struct Task {
     #[serde(skip_serializing)]
     pub clickup_task_id: Option<String>,
     pub created_by: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub updated_at: String,
     /// `None` = top level. Sub-tasks nest one level only.
     pub parent_task_id: Option<String>,
@@ -215,11 +220,14 @@ pub struct Task {
     pub subtask_done: i64,
     /// UTC `YYYY-MM-DD HH:MM:SS` of the first move into in_progress. `None` = unknown
     /// (legacy task) or never started; later attempts are in `list_task_events`.
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub work_started_at: Option<String>,
     /// UTC timestamp of the first move into ready_for_review, `None` as above.
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub first_ready_for_review_at: Option<String>,
     /// UTC timestamp of the latest move into complete, cleared when the task
     /// reopens. `None` = not complete, or completed before it was recorded.
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub completed_at: Option<String>,
     /// Planned effort in minutes. `None` = no estimate.
     pub estimate_minutes: Option<i64>,
@@ -232,6 +240,7 @@ pub struct Task {
     /// A finished turn or an exit of a session on this task does not move it.
     pub long_horizon: bool,
     /// UTC timestamp it was archived. `None` = active. Archived tasks are hidden from lists.
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub archived_at: Option<String>,
     /// Caller-supplied idempotency key, unique within the task's space.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -244,6 +253,7 @@ pub struct TaskEvent {
     pub id: i64,
     pub task_id: String,
     pub event_type: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub occurred_at: String,
     /// `None` on events recorded before the full log existed.
     pub from_status: Option<String>,
@@ -277,12 +287,14 @@ pub struct TaskComment {
     pub task_id: String,
     pub author: String,
     pub body: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
     /// `comment`, or `message` for one agent session writing to another.
     pub kind: String,
     pub sender_session_id: Option<String>,
     pub to_session_id: Option<String>,
     pub reply_to: Option<i64>,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub delivered_at: Option<String>,
 }
 

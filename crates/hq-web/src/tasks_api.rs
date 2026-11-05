@@ -1663,7 +1663,14 @@ mod tests {
         )
         .await;
         let claimed = body_json(claimed).await;
-        assert_eq!(claimed["work_started_at"].as_str().map(str::len), Some(19));
+        // Sent as an instant, so a browser never reads HQ's UTC as its own time (web wave 2, M11).
+        let started = claimed["work_started_at"].as_str().unwrap();
+        assert!(
+            started.len() == 20 && started.ends_with('Z') && started.as_bytes()[10] == b'T',
+            "{started}"
+        );
+        let created = task["created_at"].as_str().unwrap();
+        assert!(created.ends_with('Z'), "{created}");
 
         let events =
             body_json(list_task_events_handler(State(state.clone()), AxumPath(id)).await).await;

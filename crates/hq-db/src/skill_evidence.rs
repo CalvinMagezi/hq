@@ -57,6 +57,7 @@ impl PatternKind {
 pub struct Example {
     /// The invocation id.
     pub id: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub loaded_at: String,
     /// The task the session was on, when known.
     pub task_id: Option<String>,

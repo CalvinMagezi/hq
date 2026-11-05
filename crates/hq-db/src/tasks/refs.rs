@@ -47,6 +47,7 @@ pub struct TaskLink {
     pub label: String,
     pub direction: String,
     pub created_by: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
     /// For a `task` link, the task it points at.
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -11,7 +11,9 @@ pub struct ChatThread {
     pub thread_type: String,
     pub initiated_by: String,
     pub status: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub updated_at: String,
     pub last_message_preview: Option<String>,
     pub unread_count: i64,
@@ -35,6 +37,7 @@ pub struct ChatMessage {
     pub thread_id: String,
     pub role: String,
     pub content: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 

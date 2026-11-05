@@ -166,6 +166,7 @@ pub struct OpenDecision {
     pub item_id: String,
     /// The alert's title ("Harness session '...' is waiting for you").
     pub title: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub asked_at: String,
     pub alert: DialogAlert,
 }

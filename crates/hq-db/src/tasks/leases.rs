@@ -42,8 +42,11 @@ pub struct WorkSession {
     pub branch: String,
     /// Set for a lease that follows a spawned session.
     pub harness_session_id: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub started_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub last_heartbeat_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub ended_at: Option<String>,
     pub end_reason: Option<String>,
     /// Seconds from start to the end, or to the last sign of life while live.

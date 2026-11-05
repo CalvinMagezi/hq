@@ -16,6 +16,7 @@ pub struct VetoHold {
     pub release_at: i64,
     /// What the verdict was about, to be compared again before completing.
     pub currency: Value,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
 }
 

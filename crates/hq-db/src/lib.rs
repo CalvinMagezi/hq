@@ -39,6 +39,7 @@ pub mod usage_ledger;
 pub mod value_items;
 pub mod vault_cache;
 pub mod web_auth;
+pub mod wire_time;
 
 pub use pool::Database;
 

@@ -269,6 +269,7 @@ pub struct Verdict {
     pub reasons: String,
     pub applied: bool,
     pub canary: bool,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
     /// The submission (see [`review_marker`]) this verdict is about.
     pub submission: Option<i64>,

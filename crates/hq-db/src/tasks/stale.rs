@@ -12,6 +12,7 @@ pub struct StaleTask {
     pub display_id: String,
     pub title: String,
     pub initiative_id: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub last_activity_at: String,
     pub idle_hours: i64,
 }

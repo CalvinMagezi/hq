@@ -63,9 +63,13 @@ pub struct Sweep {
     pub status: String,
     pub plan: Value,
     pub note: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub created_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc")]
     pub updated_at: String,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub applied_at: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub undone_at: Option<String>,
 }
 
@@ -87,6 +91,7 @@ pub struct SweepItem {
     pub tries: i64,
     pub retry_at: i64,
     pub applied_status: Option<String>,
+    #[serde(serialize_with = "crate::wire_time::utc_opt")]
     pub applied_updated_at: Option<String>,
     pub detail: String,
 }
