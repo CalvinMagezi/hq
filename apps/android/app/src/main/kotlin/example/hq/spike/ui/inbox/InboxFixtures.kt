@@ -39,7 +39,7 @@ fun inboxFixture(name: String?): InboxUi? {
         "i-long" -> InboxUi(loaded = true, needs = listOf(longApproval(::ago)), checkedAt = "14:32")
         "i-long-details" -> longApproval(::ago).let { InboxUi(loaded = true, needs = listOf(it), details = it, checkedAt = "14:32") }
         "i-offline" -> InboxUi(loaded = true, offline = true)
-        "i-answering" -> base.copy(answering = mapOf("1" to Answer.Sending, "2" to Answer.Failed("Couldn't send your answer. HQ didn't reply. It may be restarting.")))
+        "i-answering" -> base.copy(answering = mapOf("1" to Answer.Sending, "2" to Answer.Failed("Couldn't send your answer. HQ didn't answer in time. It may be restarting.")))
         else -> null
     }
 }

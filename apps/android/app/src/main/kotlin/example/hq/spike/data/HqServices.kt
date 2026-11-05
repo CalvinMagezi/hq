@@ -3,6 +3,7 @@ package example.hq.spike.data
 import android.content.Context
 import android.content.Intent
 import example.hq.spike.HubService
+import example.hq.spike.ServerHq
 import example.hq.spike.ui.startup.FirstLaunch
 import example.hq.spike.ui.startup.StartRules
 import kotlinx.coroutines.withContext
@@ -13,20 +14,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-
-/** What the status line under a screen's name says about the local hq. */
-sealed interface HqStatus {
-    data object Live : HqStatus
-    /** [step] is 1 to 4 (the four steps of a start); [usualSeconds] is what this phone usually takes, once it has two starts to go on. */
-    data class Starting(val seconds: Long, val step: Int = 1, val usualSeconds: Long? = null) : HqStatus
-    data class Restarting(val seconds: Long) : HqStatus
-
-    /** hq's process ended, or its start has not moved for max(60 s, twice the usual): a fact, not a timer. */
-    data class Stopped(val sinceMs: Long, val step: Int?) : HqStatus
-
-    /** hq is up but the chat socket dropped; what is on screen is what was last saved, [age] ago ("1m", "<1m"). */
-    data class Saved(val age: String) : HqStatus
-}
 
 /** The parts of the app that live as long as the process: the client, its socket and the health status. */
 class HqServices private constructor(private val app: Context) {
@@ -40,8 +27,19 @@ class HqServices private constructor(private val app: Context) {
     val background = HqClient(token = { HubService.token(app) }, onSignedOut = { HubService.recoverToken(app) }, callSeconds = BACKGROUND_CALL_SECONDS)
     val connection = ChatConnection(client, scope)
 
-    private val _status = MutableStateFlow<HqStatus>(HqStatus.Starting(0))
-    val status: StateFlow<HqStatus> = _status
+    private val _status = MutableStateFlow<Connection>(Connection.Starting(0, 0, null))
+
+    /** The one Connection state every place reads, decided once here by [ConnectionRules.decide]. */
+    val status: StateFlow<Connection> = _status
+
+    private val network = NetworkWatch(app)
+
+    @Volatile private var healthy = false
+    @Volatile private var aiFailure: AiStatus? = null
+    @Volatile private var lastProbe: ProbeFacts? = null
+
+    /** What the last look at a down HQ found, kept so the state can be decided again each second without another probe. */
+    private data class ProbeFacts(val alive: Boolean, val step: Int, val usualMs: Long?)
 
     /** Free bytes for the app's files while HQ is not answering, for the almost-full line. */
     private val _freeBytes = MutableStateFlow<Long?>(null)
@@ -59,24 +57,30 @@ class HqServices private constructor(private val app: Context) {
                     if (sawDown) StartRules.recordStart(app, System.currentTimeMillis() - downSince)
                     sawDown = false
                     stepFloor = 0
-                    _status.value = HqStatus.Live
+                    healthy = true
+                    lastProbe = null
                     _freeBytes.value = null
                     downSince = System.currentTimeMillis()
                     stepMovedAt = downSince
                     FirstLaunch.markDone(app)
                     if (downSince - StartRules.lastAnswer(app) >= ANSWER_MARK_MS) StartRules.markAnswer(app, downSince)
+                    recompute()
                     delay(LIVE_POLL_MS)
                 } else {
                     sawDown = true
-                    _status.value = withContext(Dispatchers.IO) { probe() }
+                    healthy = false
+                    withContext(Dispatchers.IO) { probe() }
+                    recompute()
                     delay(DOWN_POLL_MS)
                 }
             }
         }
+        // The 3 s offline wait and the 5 s chat-link wait have no event of their own, so the state is decided again every second.
+        scope.launch { while (true) { delay(DOWN_POLL_MS); recompute() } }
     }
 
     /** Reads the four steps once: the hub service, hq's process, its port. */
-    private fun probe(): HqStatus {
+    private fun probe() {
         val now = System.currentTimeMillis()
         val alive = HubService.hqAlive()
         val raw = StartRules.step(HubService.hubUp(), alive, alive && portOpen())
@@ -85,21 +89,36 @@ class HqServices private constructor(private val app: Context) {
         if (step != stepFloor) stepMovedAt = now
         stepFloor = step
         _freeBytes.value = freeSpace()
-        val usual = StartRules.usual(StartRules.starts(app))
-        val decided = ConnectionRules.decide(
+        lastProbe = ProbeFacts(alive || HubService.lastExit(app) == null, step, StartRules.usual(StartRules.starts(app))?.times(MS_PER_SECOND))
+    }
+
+    /** The AI state HQ reported on its signed-in route; a good answer clears it. Read when the sheet opens and after a failed turn. */
+    suspend fun refreshAi() {
+        aiFailure = client.aiStatus()?.takeIf { !it.answering }
+        recompute()
+    }
+
+    /** Decides the one state from everything the phone knows now. The first true row wins (rules section 1). */
+    fun recompute() {
+        val now = System.currentTimeMillis()
+        val probe = lastProbe
+        if (connection.connected.value || !healthy) socketDownSince = 0L else if (socketDownSince == 0L) socketDownSince = now
+        val socketDown = socketDownSince
+        _status.value = ConnectionRules.decide(
             ConnectionInputs(
-                nowMs = now, processAlive = alive || HubService.lastExit(app) == null, restarting = HubService.restarting(),
-                startStep = step - 1, startedAtMs = downSince, stepMovedAtMs = stepMovedAt, usualStartMs = usual?.times(MS_PER_SECOND),
-                serverSignedOut = false, serverUnreachableSinceMs = null, socketDownSinceMs = null, offlineSinceMs = null, aiFailingService = null, aiFailingAtMs = null,
+                nowMs = now, processAlive = if (healthy) true else probe?.alive ?: true, restarting = !healthy && HubService.restarting(),
+                startStep = if (healthy) null else (probe?.step ?: 1) - 1, startedAtMs = downSince, stepMovedAtMs = if (healthy) null else stepMovedAt,
+                usualStartMs = probe?.usualMs ?: StartRules.usual(StartRules.starts(app))?.times(MS_PER_SECOND),
+                serverSignedOut = ServerHq.signedOut(app) && ServerHq.address(app) != null,
+                serverUnreachableSinceMs = ServerHq.unreachableSince(app),
+                socketDownSinceMs = socketDown.takeIf { it > 0 && now - it >= SOCKET_GRACE_MS },
+                offlineSinceMs = network.offlineSince.value,
+                aiFailingService = aiFailure?.failingService, aiFailingAtMs = aiFailure?.failedAtMs,
             ),
         )
-        return when (decided) {
-            is Connection.Stopped -> HqStatus.Stopped(decided.sinceMs, decided.step?.plus(1))
-            is Connection.Restarting -> HqStatus.Restarting(decided.seconds)
-            is Connection.Starting -> HqStatus.Starting(decided.seconds, step, decided.usualSeconds)
-            else -> HqStatus.Starting((now - downSince) / MS_PER_SECOND, step, usual)
-        }
     }
+
+    @Volatile private var socketDownSince = 0L
 
     private fun portOpen(): Boolean = try {
         java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", example.hq.spike.BuildConfig.HQ_PORT), PORT_TIMEOUT_MS) }
@@ -117,7 +136,8 @@ class HqServices private constructor(private val app: Context) {
         downSince = System.currentTimeMillis()
         stepFloor = 0
         stepMovedAt = downSince
-        _status.value = HqStatus.Starting(0)
+        lastProbe = null
+        recompute()
     }
 
     companion object {
@@ -126,6 +146,7 @@ class HqServices private constructor(private val app: Context) {
         private const val DOWN_POLL_MS = 1_000L
         private const val ANSWER_MARK_MS = 60_000L
         private const val PORT_TIMEOUT_MS = 300
+        private const val SOCKET_GRACE_MS = 5_000L
         private const val MS_PER_SECOND = 1_000L
         @Volatile private var instance: HqServices? = null
 

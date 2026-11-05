@@ -22,7 +22,7 @@ class BackgroundWorkTest {
         val snap = SettingsSnapshot(health = health, chatApps = chat(telegramOn))
         assertEquals(FactRow("HQ", "Running", good = true), SettingsWords.rightNow(snap, true, false)[0])
         assertEquals(FactRow("HQ", "Restarting"), SettingsWords.rightNow(snap, true, true)[0])
-        assertEquals(FactRow("HQ", "Not answering"), SettingsWords.rightNow(SettingsSnapshot(), true, false)[0])
+        assertEquals(FactRow("HQ", "No answer yet"), SettingsWords.rightNow(SettingsSnapshot(), true, false)[0])
     }
 
     @Test fun aChatAppIsConnectedOnlyWhenSetUpActiveAndTheRelayIsCurrent() {

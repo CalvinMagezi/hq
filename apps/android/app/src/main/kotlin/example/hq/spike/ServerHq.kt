@@ -1,6 +1,7 @@
 package example.hq.spike
 
 import android.content.Context
+import example.hq.spike.data.SavedCopy
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
@@ -45,6 +46,12 @@ object ServerHq {
     /** The address kept for the settings page, also while signed out. */
     fun address(c: Context): String? = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(ADDRESS, null)
 
+    /** When a signed-in call to the server first failed to connect, or 0 while it answers; the Connection state reads it. */
+    @Volatile private var unreachableSince = 0L
+
+    /** The server HQ's own state for the status line: when it stopped answering, or null when it answers or there is none. */
+    fun unreachableSince(c: Context): Long? = unreachableSince.takeIf { it > 0 && current(c) != null }
+
     fun signedOut(c: Context): Boolean = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(SIGNED_OUT, false)
 
     /** The server answered 401: its token was signed out there. The phone stops asking until the owner signs in again. */
@@ -52,10 +59,13 @@ object ServerHq {
     fun markSignedOut(c: Context) {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(SIGNED_OUT, true).apply()
         SecretStore.forgetServerToken(c)
+        SavedCopy.of(c).clearServer()
     }
 
     fun disconnect(c: Context) {
         SecretStore.forgetServerToken(c)
+        SavedCopy.of(c).clearServer()
+        unreachableSince = 0L
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
         Alerts.resetServer(c, false)
     }
@@ -137,7 +147,8 @@ object ServerHq {
                 h.setRequestProperty("Content-Type", "application/json")
                 h.outputStream.use { it.write(body.toByteArray()) }
             }
-            val status = h.responseCode
+            val status = try { h.responseCode } catch (e: IOException) { if (token != null && unreachableSince == 0L) unreachableSince = System.currentTimeMillis(); throw e }
+            if (token != null) unreachableSince = 0L
             val stream = if (status in 200..299) h.inputStream else h.errorStream
             return Reply(status, stream?.let(::readCapped).orEmpty(), h.getHeaderField("ETag"))
         } finally {

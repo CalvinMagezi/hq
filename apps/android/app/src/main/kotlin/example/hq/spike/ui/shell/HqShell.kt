@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,7 +63,9 @@ import androidx.compose.ui.unit.dp
 import example.hq.spike.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.testTag
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
+import example.hq.spike.data.ConnectionTone
+import example.hq.spike.data.ConnectionWords
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
@@ -87,6 +90,9 @@ private val RaisedLift = 10.dp
  * place goes to Chat, and Back from Chat leaves the app. The bottom bar steps aside while the keyboard is up.
  */
 /** Lets a screen or an overlay send the shell to another place, such as a note card going to Notes. */
+/** Opens the one search where a pill, a magnifier or a missing note asks to start. */
+val LocalOpenSearch = staticCompositionLocalOf<(example.hq.spike.ui.search.SearchStart) -> Unit> { {} }
+
 val LocalGoTo = staticCompositionLocalOf<(Place) -> Unit> { {} }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -94,8 +100,11 @@ val LocalGoTo = staticCompositionLocalOf<(Place) -> Unit> { {} }
 fun HqShell(
     startAt: Place = Place.Chat,
     inboxBadge: Int = 0,
-    status: HqStatus = HqStatus.Live,
+    status: Connection = Connection.Connected,
+    /** The line under the bar while HQ is not Connected (the offline strip); null when there is none. */
+    strip: @Composable (Place) -> Unit = {},
     onSearch: () -> Unit = {},
+    onOpenSearch: (example.hq.spike.ui.search.SearchStart) -> Unit = {},
     onSettings: () -> Unit = {},
     /** The status line is one button that opens the Connection sheet. */
     onStatus: () -> Unit = {},
@@ -114,20 +123,17 @@ fun HqShell(
     var current by rememberSaveable { mutableStateOf(startAt) }
     LaunchedEffect(request) { if (request != null) { current = request; onRequestHandled() } }
     BackHandler(enabled = current != Place.Chat) { current = Place.Chat }
-    val statusText = when (status) {
-        HqStatus.Live -> stringResource(R.string.state_connected)
-        is HqStatus.Starting -> stringResource(R.string.state_starting, status.seconds.toString())
-        is HqStatus.Restarting -> stringResource(R.string.conn_status_restarting, status.seconds.toString())
-        is HqStatus.Stopped -> stringResource(R.string.state_hub_stopped)
-        is HqStatus.Saved -> "Saved \u00b7 ${status.age}"
-    }
-    val statusColor = if (status == HqStatus.Live) Mts.BrandGreen else Mts.Amber
-    CompositionLocalProvider(LocalGoTo provides { current = it }) {
+    val words = ConnectionWords.of(status)
+    val statusText = stringResource(words.res, *words.args.toTypedArray())
+    val statusColor = when (words.tone) { ConnectionTone.Quiet -> Mts.InkMuted; ConnectionTone.Working -> Mts.BrandBlue; ConnectionTone.Warn -> Mts.Amber }
+    val bus = remember { ReselectBus() }
+    CompositionLocalProvider(LocalGoTo provides { current = it }, LocalReselect provides bus.taps, LocalOpenSearch provides onOpenSearch) {
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance, updateDot = updateDot, actions = { topActions(current) }, stopped = status is HqStatus.Stopped, onStatus = onStatus)
+                TopBar(title = current.label, status = subline(current)?.let { "$it \u00b7 $statusText" } ?: statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance.takeIf { status is Connection.Connected }, onBalance = onBalance, updateDot = updateDot, actions = { topActions(current) }, stopped = status is Connection.Stopped, onStatus = onStatus)
+                strip(current)
                 Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
-                if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
+                if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { if (it == current) bus.tap(it) else current = it }
             }
             overlay()
         }

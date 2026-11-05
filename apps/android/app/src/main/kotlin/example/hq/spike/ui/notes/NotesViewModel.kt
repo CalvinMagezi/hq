@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
+import example.hq.spike.data.NoteChanged
 import example.hq.spike.data.NoteNotFound
 import example.hq.spike.ui.chat.NoteExporter
 import example.hq.spike.ui.chat.Notice
@@ -27,9 +28,6 @@ class NotesActions(
     val onRefresh: () -> Unit = {},
     val onOpenFolder: (String) -> Unit = {},
     val onOpenNote: (String) -> Unit = {},
-    val onOpenSearch: () -> Unit = {},
-    val onQuery: (String) -> Unit = {},
-    val onFilter: (String?) -> Unit = {},
     val onBack: () -> Unit = {},
     val onNew: (String) -> Unit = {},
     val onEdit: () -> Unit = {},
@@ -48,6 +46,8 @@ class NotesActions(
     val onChooseFolder: (Boolean) -> Unit = {},
     val onPickFolder: (String) -> Unit = {},
     val onSave: () -> Unit = {},
+    val onSeeTheirs: () -> Unit = {},
+    val onKeepBoth: () -> Unit = {},
     val onLeave: () -> Unit = {},
     val onKeepEditing: () -> Unit = {},
     val onDiscard: () -> Unit = {},
@@ -63,15 +63,12 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(NotesUi())
     val state: StateFlow<NotesUi> = _state
     private val exporter = NoteExporter(app, client, viewModelScope)
-    private var searchJob: Job? = null
     private var frozen = false
 
     private val scrolls = ScrollMemory()
 
     val actions = NotesActions(
         onRefresh = ::refresh, onOpenFolder = ::openFolder, onOpenNote = ::openNote,
-        onOpenSearch = { push(NotesRoute.Search); _state.update { it.copy(search = SearchState()) } },
-        onQuery = ::query, onFilter = { f -> _state.update { it.copy(search = it.search.copy(filter = f)) } },
         onBack = ::back, onNew = ::newNote, onEdit = ::edit, onMenu = { open -> _state.update { it.copy(menu = open) } },
         onTogglePin = ::togglePin, onMakeTask = ::makeTask,
         onExport = { (_state.value.reader as? ReaderPhase.Ready)?.note?.let { n -> _state.update { it.copy(menu = false) }; exporter.choose(n.path, n.title, n.body) } },
@@ -82,7 +79,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onPreview = { edit { it.copy(preview = !it.preview) } },
         onChooseFolder = { open -> edit { it.copy(chooser = open) } },
         onPickFolder = { f -> edit { it.copy(folder = f, chooser = false) } },
-        onSave = ::save, onLeave = ::leave, onKeepEditing = { edit { it.copy(leaving = false) } }, onDiscard = ::discard,
+        onSave = ::save, onSeeTheirs = ::seeTheirs, onKeepBoth = ::keepBoth, onLeave = ::leave, onKeepEditing = { edit { it.copy(leaving = false) } }, onDiscard = ::discard,
         onScrolled = scrolls::save, scrollOf = scrolls::restore,
     )
 
@@ -165,7 +162,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             val phase = try {
                 val body = client.note(path)
                 val pins = try { client.pinned() } catch (e: HqUnavailable) { emptySet() }
-                val sheet = NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, body.path in pins)
+                val sheet = NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, body.path in pins, body.hash)
                 val edited = (_state.value.recent + _state.value.pinned).firstOrNull { it.path == body.path }?.let { NoteTime.edited(it.mtime) }.orEmpty()
                 ReaderPhase.Ready(sheet, edited)
             } catch (e: NoteNotFound) {
@@ -177,16 +174,6 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun query(q: String) {
-        _state.update { it.copy(search = it.search.copy(query = q, loading = q.isNotBlank(), filter = null, hits = if (q.isBlank()) emptyList() else it.search.hits)) }
-        searchJob?.cancel()
-        if (q.isBlank()) return
-        searchJob = viewModelScope.launch {
-            delay(SEARCH_WAIT_MS)
-            val hits = try { client.searchNoteHits(q).map { SearchHit(it.path, it.title.ifBlank { NoteRefs.title(it.path) }, it.notebook, it.snippet) } } catch (e: HqUnavailable) { emptyList() }
-            _state.update { s -> if (s.search.query == q) s.copy(search = s.search.copy(hits = hits, loading = false)) else s }
-        }
-    }
 
     private fun togglePin() {
         val ready = _state.value.reader as? ReaderPhase.Ready ?: return
@@ -197,7 +184,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
                 client.setPinned(ready.note.path, pin)
                 _state.update { s -> s.copy(reader = ready.copy(note = ready.note.copy(pinned = pin)), notice = Notice(if (pin) "Pinned to the top of Notes" else "Unpinned")) }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(notice = Notice("Could not change the pin. HQ is not answering.")) }
+                _state.update { it.copy(notice = Notice("Couldn\'t change the pin. HQ didn\'t answer in time. Try again.")) }
             }
         }
     }
@@ -209,7 +196,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             val said = try {
                 if (client.createTaskOnce(noteTaskBody(note.path, note.title))) "This note already has a task" else "Task added to your Inbox"
             } catch (e: HqUnavailable) {
-                if (e.status == 0) "Could not add the task. HQ is not answering." else "Could not add the task."
+                if (e.status == 0) "Couldn\'t add the task. HQ didn\'t answer in time. Try again." else "Could not add the task."
             }
             _state.update { it.copy(notice = Notice(said)) }
         }
@@ -232,7 +219,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         val draft = drafts.getString(draftKey(ready.note.path, ""), null)
         val text = draft ?: body
         _state.update {
-            it.copy(write = WriteState(ready.note.path, NoteRefs.folderTrail(ready.note.path), ready.note.title, TextFieldValue(text, TextRange(text.length)), original = body, status = if (text != body) SaveStatus.Unsaved else SaveStatus.Saved))
+            it.copy(write = WriteState(ready.note.path, NoteRefs.folderTrail(ready.note.path), ready.note.title, TextFieldValue(text, TextRange(text.length)), original = body, status = if (text != body) SaveStatus.Unsaved else SaveStatus.Saved, base = ready.note.hash))
         }
         push(NotesRoute.Write(ready.note.path))
     }
@@ -254,12 +241,45 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val path = w.path ?: client.createNote(w.folder, w.title.ifBlank { firstLine(w.text.text) }, w.text.text)
-                if (w.path != null) client.saveNote(path, w.text.text)
+                if (w.path != null) client.saveNote(path, w.text.text, w.base)
                 drafts.edit().remove(draftKey(w.path, w.folder)).apply()
                 _state.update { it.copy(write = null, stack = it.stack.dropLast(1)) }
                 if (w.path == null) openNote(path) else reloadReader(path)
+            } catch (e: NoteChanged) {
+                edit { it.copy(status = SaveStatus.Unsaved, conflict = Conflict(e.by)) }
             } catch (e: HqUnavailable) {
                 edit { it.copy(status = SaveStatus.Failed) }
+            }
+        }
+    }
+
+    /** Shows what the note says now, beside the owner's own text, without losing either. */
+    private fun seeTheirs() {
+        val w = _state.value.write ?: return
+        val path = w.path ?: return
+        val c = w.conflict ?: return
+        edit { it.copy(conflict = c.copy(busy = true)) }
+        viewModelScope.launch {
+            val theirs = try { NoteText.withoutFirstBlock(client.note(path).content) } catch (e: java.io.IOException) { null }
+            edit { it.copy(conflict = it.conflict?.copy(theirs = theirs ?: "", busy = false)) }
+        }
+    }
+
+    /** Saves the owner's text as a new note beside the original, then shows the note as it is now. */
+    private fun keepBoth() {
+        val w = _state.value.write ?: return
+        val path = w.path ?: return
+        val c = w.conflict ?: return
+        edit { it.copy(conflict = c.copy(busy = true)) }
+        viewModelScope.launch {
+            try {
+                val title = getApplication<Application>().getString(example.hq.spike.R.string.notes_your_version, w.title)
+                client.createNote(path.substringBeforeLast('/'), title, w.text.text)
+                drafts.edit().remove(draftKey(w.path, w.folder)).apply()
+                _state.update { it.copy(write = null, stack = it.stack.dropLast(1)) }
+                reloadReader(path)
+            } catch (e: HqUnavailable) {
+                edit { it.copy(status = SaveStatus.Failed, conflict = it.conflict?.copy(busy = false)) }
             }
         }
     }
@@ -270,7 +290,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val phase = try {
                 val body = client.note(path)
-                ReaderPhase.Ready(NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, pinned), "edited just now")
+                ReaderPhase.Ready(NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, pinned, body.hash), "edited just now")
             } catch (e: NoteNotFound) { ReaderPhase.Gone } catch (e: HqUnavailable) { ReaderPhase.Failed }
             _state.update { if (it.top == NotesRoute.Reader(path)) it.copy(reader = phase) else it }
         }

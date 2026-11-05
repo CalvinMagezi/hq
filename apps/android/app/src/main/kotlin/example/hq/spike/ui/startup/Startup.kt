@@ -2,7 +2,7 @@ package example.hq.spike.ui.startup
 
 import android.content.Context
 import example.hq.spike.R
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import java.time.ZoneId
 import example.hq.spike.ui.shell.Words
 
@@ -29,8 +29,8 @@ object StartRules {
     private const val DAY_MS = 24 * 60 * 60 * 1000L
 
     /** The cover only on the first launch (or when the signed switch brings the old cover back); later starts keep the app usable. */
-    fun decide(status: HqStatus, firstLaunchDone: Boolean, coverRemoval: Boolean = true): Startup = when {
-        status !is HqStatus.Starting -> Startup.None
+    fun decide(status: Connection, firstLaunchDone: Boolean, coverRemoval: Boolean = true): Startup = when {
+        status !is Connection.Starting -> Startup.None
         !firstLaunchDone || !coverRemoval -> Startup.Starting
         else -> Startup.None
     }

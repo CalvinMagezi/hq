@@ -32,7 +32,7 @@ class SettingsWordsTest {
     @Test fun theKeysLineNamesTheFirstAndCountsThem() {
         assertEquals("OpenRouter · 1 key", SettingsWords.keysStatus(testWords(), settings))
         assertEquals("No key yet", SettingsWords.keysStatus(testWords(), JSONObject("""{"provider_keys":[{"name":"OpenRouter","configured":false}]}""")))
-        assertEquals("Not answering", SettingsWords.keysStatus(testWords(), null))
+        assertEquals("No answer yet", SettingsWords.keysStatus(testWords(), null))
     }
 
     /** /api/settings for a config whose first choice runs on GitHub Copilot while an OpenRouter and a DeepSeek key are also stored. */
@@ -110,7 +110,7 @@ class SettingsWordsTest {
     @Test fun messagingNeedsBothTheTokenAndTheSwitch() {
         val chat = JSONObject("""{"telegram":{"token_set":true,"enabled":true},"discord":{"token_set":true,"enabled":false}}""")
         assertEquals("Telegram on · Discord off", SettingsWords.messagingStatus(chat))
-        assertEquals("Not answering", SettingsWords.messagingStatus(null))
+        assertEquals("No answer yet", SettingsWords.messagingStatus(null))
     }
 
     @Test fun devicesAreCounted() {
@@ -294,7 +294,7 @@ class SettingsWordsTest {
         val groups = SettingsWords.home(testWords(), SettingsSnapshot(), now, listOf(HomeRow(null, "background", "Background work", "On")), loaded = false)
         assertEquals("On", groups[0].rows.single().status)
         assertTrue(groups.drop(1).flatMap { it.rows }.filter { it.page != SettingsPage.About }.all { it.status == "Not read yet" })
-        assertTrue(SettingsWords.home(testWords(), SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "Not answering" })
+        assertTrue(SettingsWords.home(testWords(), SettingsSnapshot(), now, emptyList(), loaded = true).drop(1).flatMap { it.rows }.any { it.status == "No answer yet" })
     }
 
     @Test fun anOffsetInIsoTextIsReadWithoutInstantParse() {

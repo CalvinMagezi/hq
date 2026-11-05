@@ -2179,11 +2179,69 @@
     <string name="settings_server_hq_row">Server HQ</string>
     <string name="settings_server_hq_row_body">Your server HQ, %1$s</string>
     <string name="chat_approval_can_finish">HQ can finish now</string>
+<<<<<<< HEAD
+=======
+    <string name="away_card_title">While you were away</string>
+    <string name="away_card_hours">last 24 hours</string>
+    <plurals name="away_finished">
+        <item quantity="one">HQ checked and finished %1$s task.</item>
+        <item quantity="other">HQ checked and finished %1$s tasks.</item>
+    </plurals>
+    <string name="away_back_you">%1$s went back to you to finish.</string>
+    <string name="away_back_helper">%1$s went back to %2$s to finish.</string>
+    <plurals name="away_finishes">
+        <item quantity="one">%1$s finishes at %2$s.</item>
+        <item quantity="other">%1$s finish at %2$s.</item>
+    </plurals>
+    <string name="away_server_heading">On your server HQ</string>
+    <string name="away_phone_heading">On this phone</string>
+    <string name="away_page_line">Last 24 hours · checked at %1$s</string>
+    <string name="away_sec_soon">Finishing soon</string>
+    <string name="away_sec_done">Checked and finished</string>
+    <string name="away_sec_back">Went back to you to finish</string>
+    <string name="away_sec_waiting">Waiting on you</string>
+    <string name="away_finishes_row">Finishes at %1$s</string>
+    <string name="away_finishes_tomorrow_row">Finishes tomorrow at %1$s</string>
+    <string name="away_finishes_on_row">Finishes %1$s at %2$s</string>
+    <plurals name="away_initiative_row">
+        <item quantity="one">%1$s · %2$s task</item>
+        <item quantity="other">%1$s · %2$s tasks</item>
+    </plurals>
+    <string name="away_back_row_you">Failed a check. Reopened for you to finish.</string>
+    <string name="away_back_row_helper">Failed a check. Reopened for %1$s to finish.</string>
+    <plurals name="away_waiting_line">
+        <item quantity="one">%1$s task waits on you. It is on Today.</item>
+        <item quantity="other">%1$s tasks wait on you. They are on Today.</item>
+    </plurals>
+    <string name="away_go_today">Go to Today</string>
+    <string name="away_footer">From HQ\'s checks of finished work. Spot checks and holds are on the web app.</string>
+    <string name="away_stale">Your server HQ can\'t be reached. It will try again when HQ is back.</string>
+    <string name="away_saved_at">Saved on this phone at %1$s.</string>
+    <string name="away_open_label">Open While you were away</string>
+    <string name="fail_load_away_starting">Couldn\'t load While you were away. HQ is still starting. It will try again by itself.</string>
+    <string name="fail_load_away_stopped">Couldn\'t load While you were away. HQ has stopped. Start HQ to try again.</string>
+    <string name="fail_load_away_no_reply">Couldn\'t load While you were away. HQ didn\'t answer in time. Try again.</string>
+    <string name="tasks_see_as">Show all tasks as</string>
+    <string name="web_board">Board</string>
+    <string name="web_timeline">Timeline</string>
+    <string name="web_line_board">Web page · all tasks</string>
+    <string name="web_line_timeline">Web page · all tasks by date</string>
+    <string name="web_line_usage">Web page · spend and forecast</string>
+    <string name="web_opens_when_up">%1$s opens when HQ is up</string>
+    <string name="web_wait_starting">HQ is still starting. It will try again by itself.</string>
+    <string name="web_wait_stopped">HQ has stopped. Start HQ to try again.</string>
+    <string name="web_start_hq">Start HQ</string>
+    <string name="web_render_gone">The page stopped working. Try again.</string>
+    <string name="web_load_no_reply">Couldn\'t load %1$s. HQ didn\'t answer in time. Try again.</string>
+    <string name="web_try_again">Try again</string>
+    <string name="web_reload">Reload</string>
+>>>>>>> ux/w4-phone
     <string name="search_field_all">Search notes, tasks, chats and helpers</string>
     <string name="search_field_notes">Search notes</string>
     <string name="search_field_tasks">Search tasks</string>
     <string name="search_field_chats">Search chats</string>
     <string name="search_field_helpers">Search helpers</string>
+<<<<<<< HEAD
     <string name="search_field_notes_in">Search notes in %1$s</string>
     <string name="search_field_lite">Search notes and tasks</string>
     <string name="search_chip_all">All</string>
@@ -2212,11 +2270,37 @@
     <string name="search_ask_first">Ask HQ about the first %1$s notes</string>
     <string name="search_none_any">Nothing matches that.</string>
     <string name="search_none_try">Try fewer words, or another spelling.</string>
+=======
+    <string name="search_scope_all">All</string>
+    <string name="search_scope_notes">Notes</string>
+    <string name="search_scope_tasks">Tasks</string>
+    <string name="search_scope_chats">Chats</string>
+    <string name="search_scope_helpers">Helpers</string>
+    <string name="search_chip_count">%1$s %2$s</string>
+    <string name="search_chip_more">%1$s %2$s+</string>
+    <string name="search_folder_all">All folders %1$s</string>
+    <string name="search_folder_chip">%1$s %2$s</string>
+    <string name="search_folder_from">In %1$s</string>
+    <string name="search_folder_from_label">Only in %1$s. Clear to search all notes</string>
+    <string name="search_folder_caption">Searching only in %1$s and the folders inside it.</string>
+    <string name="search_helper_row">%1$s · %2$s · %3$s</string>
+    <string name="search_ask_one">Ask HQ about this note</string>
+    <string name="search_ask_many">Ask HQ about these %1$s notes</string>
+    <string name="search_ask_first">Ask HQ about the first %1$s notes</string>
+    <string name="search_recent">Recent searches</string>
+    <string name="search_recent_clear">Clear recent searches</string>
+    <string name="search_recent_cleared">Recent searches cleared</string>
+    <string name="search_undo">Undo</string>
+    <string name="search_hint_all">Type to search notes, tasks, chats and helpers.</string>
+    <string name="search_hint_notes">Type to search your notes.</string>
+    <string name="search_none_all">Nothing matches that.</string>
+>>>>>>> ux/w4-phone
     <string name="search_none_notes">No notes match that.</string>
     <string name="search_none_tasks">No tasks match that.</string>
     <string name="search_none_chats">No chats match that.</string>
     <string name="search_none_helpers">No helpers match that.</string>
     <string name="search_everything">Search everything</string>
+<<<<<<< HEAD
     <string name="search_loading">Searching your notes</string>
     <string name="search_saved_note">Tasks and helpers below are from the copy saved in this browser at %1$s.</string>
     <string name="search_back_note">When HQ is up, notes and chats appear here without a tap.</string>
@@ -2257,4 +2341,44 @@
     </plurals>
     <string name="tasks_done_one_keep">Not now</string>
     <string name="tasks_move_to">Move %1$s to</string>
+=======
+    <string name="fail_search_notes_chats_starting">Couldn\'t search your notes and chats. HQ is still starting. It will try again by itself.</string>
+    <string name="fail_search_notes_chats_restarting">Couldn\'t search your notes and chats. HQ is restarting. It will try again by itself.</string>
+    <string name="fail_search_notes_chats_stopped">Couldn\'t search your notes and chats. HQ has stopped. It will try again when HQ is back.</string>
+    <string name="fail_search_notes_chats_timeout">Couldn\'t search your notes and chats. HQ didn\'t answer in time. Try again.</string>
+    <string name="search_saved_tasks">Tasks below are from the copy saved on this phone at %1$s.</string>
+    <string name="search_back_label">Back to search results</string>
+    <string name="search_clear">Clear</string>
+    <string name="search_back">Back</string>
+    <string name="notes_changed_elsewhere">This note changed somewhere else.</string>
+    <string name="notes_changed_by">It was changed by %1$s.</string>
+    <string name="notes_see_theirs">See their version</string>
+    <string name="notes_keep_both">Keep both</string>
+    <string name="notes_their_version_empty">Their version is empty.</string>
+    <string name="notes_your_version">%1$s, your version</string>
+    <string name="search_helper_server">on your server HQ</string>
+    <string name="search_helper_saved">saved at %1$s</string>
+    <string name="search_notes_wait">When HQ is up, notes and chats appear here without a tap.</string>
+    <string name="search_ask_hint">Asks HQ with these notes attached.</string>
+    <string name="strip_lead_starting">HQ is starting.</string>
+    <string name="strip_lead_restarting">HQ is restarting.</string>
+    <string name="strip_lead_stopped">HQ has stopped.</string>
+    <string name="strip_lead_server">Your server HQ can\'t be reached.</string>
+    <string name="strip_lead_signed_out">This phone is signed out of your server HQ.</string>
+    <string name="strip_lead_offline">You\'re offline.</string>
+    <string name="strip_saved_at">Saved on this phone at %1$s.</string>
+    <string name="strip_saved_on">Saved on this phone on %1$s.</string>
+    <string name="strip_line">%1$s %2$s</string>
+    <string name="strip_line_bare">%1$s</string>
+    <string name="strip_a11y">%1$s Open connection details</string>
+    <string name="chat_bar_starting">HQ is starting. Your draft is kept. Send turns on when HQ is up.</string>
+    <string name="chat_bar_restarting">HQ is restarting. Your draft is kept. Send turns on when HQ is up.</string>
+    <string name="chat_bar_stopped">HQ has stopped. Your draft is kept.</string>
+    <string name="chat_bar_reconnecting">Reconnecting. Your draft is kept. It can be sent once HQ is back.</string>
+    <string name="chat_bar_offline">You\'re offline. Messages wait here and send when you\'re back online.</string>
+    <string name="chat_bar_ai_down">The AI service isn\'t answering. HQ is fine. Try again soon.</string>
+    <string name="chat_bar_server">Your server HQ can\'t be reached. Your draft is kept.</string>
+    <string name="chat_bar_signed_out">This phone is signed out of your server HQ. Your draft is kept.</string>
+    <string name="chat_bar_ai_action">AI service and keys</string>
+>>>>>>> ux/w4-phone
 </resources>

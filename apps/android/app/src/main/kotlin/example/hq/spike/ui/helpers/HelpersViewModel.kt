@@ -291,7 +291,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: HqUnavailable) {
                 if (e.message?.contains("HTTP 409") == true) { closeIfOpen(id); say(if (decision != null) "Already answered." else "That helper is no longer running."); refresh() }
-                else tell(id, "Couldn't send your answer. HQ didn't reply. It may be restarting.")
+                else tell(id, "Couldn't send your answer. HQ didn't answer in time. It may be restarting.")
             } finally {
                 answering.remove(id)
             }
@@ -331,7 +331,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 say("Sent.")
             } catch (e: HqUnavailable) {
                 val conflict = e.message?.contains("HTTP 409") == true
-                val why = if (conflict) "HQ would not pass that on: the helper is waiting at a question, or is no longer running." else "Couldn't send that. HQ didn't reply."
+                val why = if (conflict) "HQ would not pass that on: the helper is waiting at a question, or is no longer running." else "Couldn't send that. HQ didn't answer in time. Try again."
                 editFor(id) { it.copy(sending = false, error = why) }
             }
         }
@@ -347,7 +347,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 generation++
                 answered.remove(id)
             } catch (e: HqUnavailable) {
-                editFor(id) { it.copy(error = "Couldn't send that key. HQ didn't reply.") }
+                editFor(id) { it.copy(error = "Couldn't send that key. HQ didn't answer in time. Try again.") }
             } finally {
                 answering.remove(id)
             }
@@ -402,7 +402,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 val why = when {
                     e.message?.contains("HTTP 400") == true -> "HQ did not accept that name. Use plain words."
                     e.message?.contains("HTTP 404") == true -> "That helper is not there any more."
-                    else -> "Couldn't rename it. HQ didn't reply."
+                    else -> "Couldn't rename it. HQ didn't answer in time. Try again."
                 }
                 editFor(id) { it.copy(rename = null, error = why) }
             }
@@ -448,7 +448,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         e.message?.contains("HTTP 404") == true -> "Couldn't start it. HQ does not know that computer, or this edition cannot start helpers."
         e.message?.contains("HTTP 400") == true -> "Couldn't start it. HQ did not accept that text. Try shorter, plain words."
         e.message?.startsWith("HTTP ") == true -> "Couldn't start it. HQ answered with an error."
-        else -> "HQ did not answer in time. The helper may still be starting. Check the list before you try again."
+        else -> "HQ didn't answer in time. The helper may still be starting. Check the list before you try again."
     }
 
     private companion object {

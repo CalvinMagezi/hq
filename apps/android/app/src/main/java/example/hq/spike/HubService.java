@@ -311,7 +311,7 @@ public class HubService extends Service {
     }
 
     private Notification notification(boolean active) {
-        example.hq.spike.data.HqStatus status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
+        example.hq.spike.data.Connection status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
         example.hq.spike.ui.startup.RunningNotice.Text t = example.hq.spike.ui.startup.RunningNotice.INSTANCE.of(
                 example.hq.spike.ui.shell.Words.Companion.of(this), status, active, false);
         Intent open = new Intent(this, example.hq.spike.ShellActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -327,7 +327,7 @@ public class HubService extends Service {
         while (gen == generation.get()) {
             try {
                 boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
-                example.hq.spike.data.HqStatus status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
+                example.hq.spike.data.Connection status = example.hq.spike.data.HqServices.Companion.get(this).getStatus().getValue();
                 String key = example.hq.spike.ui.startup.RunningNotice.INSTANCE.key(example.hq.spike.ui.shell.Words.Companion.of(this), status, active);
                 if (!key.equals(shown)) {
                     shown = key;

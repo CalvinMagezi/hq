@@ -2,7 +2,7 @@ package example.hq.spike.ui.startup
 
 import example.hq.spike.testing.testWords
 
-import example.hq.spike.data.HqStatus
+import example.hq.spike.data.Connection
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -16,21 +16,21 @@ class StartupTest {
     @org.junit.Before fun english() = java.util.Locale.setDefault(java.util.Locale.ENGLISH)
 
     @Test fun theFirstStartGetsItsOwnScreenAndLaterOnesKeepTheApp() {
-        assertEquals(Startup.Starting, StartRules.decide(HqStatus.Starting(12), firstLaunchDone = false))
-        assertEquals(Startup.None, StartRules.decide(HqStatus.Starting(12), firstLaunchDone = true))
-        assertEquals(Startup.None, StartRules.decide(HqStatus.Live, firstLaunchDone = false))
-        assertEquals(Startup.None, StartRules.decide(HqStatus.Saved("1m"), firstLaunchDone = false))
+        assertEquals(Startup.Starting, StartRules.decide(Connection.Starting(0, 12, null), firstLaunchDone = false))
+        assertEquals(Startup.None, StartRules.decide(Connection.Starting(0, 12, null), firstLaunchDone = true))
+        assertEquals(Startup.None, StartRules.decide(Connection.Connected, firstLaunchDone = false))
+        assertEquals(Startup.None, StartRules.decide(Connection.Offline(0), firstLaunchDone = false))
     }
 
     @Test fun aSlowOrLongStartNeverBecomesACover() {
-        assertEquals(Startup.None, StartRules.decide(HqStatus.Starting(95), firstLaunchDone = true))
-        assertEquals(Startup.None, StartRules.decide(HqStatus.Stopped(0, 3), firstLaunchDone = true))
-        assertEquals(Startup.Starting, StartRules.decide(HqStatus.Starting(59), firstLaunchDone = false))
+        assertEquals(Startup.None, StartRules.decide(Connection.Starting(0, 95, null), firstLaunchDone = true))
+        assertEquals(Startup.None, StartRules.decide(Connection.Stopped(0, 2), firstLaunchDone = true))
+        assertEquals(Startup.Starting, StartRules.decide(Connection.Starting(0, 59, null), firstLaunchDone = false))
     }
 
     @Test fun theSignedSwitchBringsTheOldCoverBack() {
-        assertEquals(Startup.Starting, StartRules.decide(HqStatus.Starting(12), firstLaunchDone = true, coverRemoval = false))
-        assertEquals(Startup.None, StartRules.decide(HqStatus.Starting(12), firstLaunchDone = true, coverRemoval = true))
+        assertEquals(Startup.Starting, StartRules.decide(Connection.Starting(0, 12, null), firstLaunchDone = true, coverRemoval = false))
+        assertEquals(Startup.None, StartRules.decide(Connection.Starting(0, 12, null), firstLaunchDone = true, coverRemoval = true))
     }
 
     @Test fun theStepComesFromWhatThePhoneCanSee() {

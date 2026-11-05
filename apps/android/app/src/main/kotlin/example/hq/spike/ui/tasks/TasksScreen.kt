@@ -117,9 +117,12 @@ private fun Tabs(tab: TaskTab, onTab: (TaskTab) -> Unit) {
 private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
     val groups = ui.groups
     val onAll = ui.tab == TaskTab.All
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-        if (ui.offline) item { Text(stringResource(R.string.tasks_hq_is_not_running), style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Tasks, list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 96.dp)) {
         if (onAll) item(key = "chips") { AllChips(ui, actions.onChip) }
+        if (onAll) item(key = "seeas") { SeeAsRow() }
+        if (ui.tab == TaskTab.Today && ui.loaded) item(key = "away") { AwayCard(ui.away, ui.tasks) { actions.onAway(true) } }
         if (onAll && ui.scope != TaskScope.Everything) item(key = "scope") { ScopeChip(TaskFilters.label(ui.tree, ui.scope) ?: "Filtered") { actions.onScope(TaskScope.Everything) } }
         if (onAll && ui.sessions.isNotEmpty() && ui.chip == AllChip.Active) item(key = "strip") { WorkingStrip(ui.sessions, ui.tasks, onHelpers) }
         if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(if (onAll && ui.chip == AllChip.Archived && !ui.archivedLoaded) "Asking HQ\u2026" else if (onAll) TasksLogic.emptyAll(ui.chip) else emptyWords(ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
@@ -132,7 +135,6 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
             }
             if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
         }
-        if (onAll && ui.loaded) item(key = "web") { WebViews() }
     }
 }
 
@@ -149,15 +151,15 @@ private fun ScopeChip(name: String, onClear: () -> Unit) {
     }
 }
 
-/** The end of the All tab: the web app's Board and Timeline, shown in the app's own screen. */
+/** Right under the All chips: the web app's Board and Timeline, shown in the app's own screen. */
 @Composable
-private fun WebViews() {
+private fun SeeAsRow() {
     val open = LocalOpenWeb.current
-    Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
-        listOf(WebPage.Board to "Board", WebPage.Timeline to "Timeline").forEach { (page, label) ->
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { open(page) }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(label, style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
-                Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.tasks_see_as), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.weight(1f, fill = false))
+        listOf(WebPage.Board, WebPage.Timeline).forEach { page ->
+            Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).clickable(role = Role.Button) { open(page) }.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                Text(stringResource(page.title), style = HqType.BodySmBold, color = Mts.BrandBlue)
             }
         }
     }

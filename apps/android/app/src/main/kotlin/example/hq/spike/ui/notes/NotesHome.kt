@@ -64,9 +64,10 @@ fun NotesHome(ui: NotesUi, actions: NotesActions, onAskHq: () -> Unit) {
 @Composable
 private fun NotesList(ui: NotesUi, actions: NotesActions) {
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-            if (ui.offline) item { OfflineBanner() }
-            item { SearchPill(actions.onOpenSearch) }
+        val list = androidx.compose.foundation.lazy.rememberLazyListState()
+        example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Notes, list)
+        LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 96.dp)) {
+            item { val open = example.hq.spike.ui.shell.LocalOpenSearch.current; SearchPill { open(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes)) } }
             if (ui.topFolders.isNotEmpty()) item { FolderChips(ui.topFolders) { actions.onOpenFolder("Notebooks/$it") } }
             if (ui.pinned.isNotEmpty()) {
                 item { SectionLabel("Pinned") }
@@ -84,22 +85,11 @@ private fun NotesList(ui: NotesUi, actions: NotesActions) {
 }
 
 @Composable
-internal fun OfflineBanner() {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(HqIcons.WifiOff, null, Modifier.size(20.dp), tint = Mts.Amber)
-        Text(stringResource(R.string.notes_hq_is_not_running), style = HqType.BodySm, color = Mts.Ink)
-    }
-}
-
-@Composable
 private fun SearchPill(onClick: () -> Unit) {
     val shape = RoundedCornerShape(26.dp)
     Row(
         Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp).fillMaxWidth().heightIn(min = 52.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
-            .clickable(role = Role.Button, onClickLabel = "Search notes", onClick = onClick).padding(horizontal = 18.dp),
+            .clickable(role = Role.Button, onClickLabel = stringResource(R.string.search_field_notes), onClick = onClick).padding(horizontal = 18.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(HqIcons.Search, null, Modifier.size(22.dp), tint = Mts.InkMuted)

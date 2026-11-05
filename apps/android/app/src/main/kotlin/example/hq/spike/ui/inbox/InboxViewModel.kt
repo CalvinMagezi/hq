@@ -173,7 +173,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
                     _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine("Already answered.")) }
                     refresh()
                 } else {
-                    _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed("Couldn't send your answer. HQ didn't reply. It may be restarting."))) }
+                    _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed("Couldn't send your answer. HQ didn't answer in time. It may be restarting."))) }
                 }
             }
         }

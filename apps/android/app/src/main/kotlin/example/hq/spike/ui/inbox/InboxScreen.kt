@@ -129,9 +129,11 @@ private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard
         CaughtUp(ui, actions)
         return
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    example.hq.spike.ui.shell.ReselectEffect(example.hq.spike.ui.shell.Place.Inbox, list)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         ui.banner?.let { b -> item(key = "notif-banner") { NotifBanner(b, actions) } }
-        if (ui.offline) item { Text(if (cards.isEmpty()) "HQ is not answering yet, so what is waiting on you cannot be shown." else "HQ is not running. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
+        if (ui.offline) item { Text(if (cards.isEmpty()) "HQ hasn't answered yet, so what is waiting on you cannot be shown." else "HQ has stopped. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
         items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
     }
 }

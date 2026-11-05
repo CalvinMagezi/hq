@@ -28,6 +28,13 @@ class Words(private val resources: Resources, private val is24Hour: Boolean? = n
     /** A plural: [n] picks the form, [args] fill the placeholders in the order the sentence first names them. */
     fun n(@PluralsRes id: Int, n: Int, vararg args: Any): String = resources.getQuantityString(id, n, *args)
 
+    /** The time of day for something from today, and "Tue 3 Nov" for anything older. */
+    fun clockOrDay(at: Instant, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+        if (at.atZone(zone).toLocalDate() == now.atZone(zone).toLocalDate()) return clock(at, zone)
+        val locale = Locale.getDefault()
+        return at.atZone(zone).format(DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, "EEEdMMM"), locale))
+    }
+
     /** A time of day in the phone's own 12 or 24-hour setting: 2:32 PM or 14:32. */
     fun clock(at: Instant, zone: ZoneId = ZoneId.systemDefault()): String {
         val locale = Locale.getDefault()

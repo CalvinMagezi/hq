@@ -391,7 +391,7 @@ object HelperWords {
     /** Why "Follow in chat" did not open a chat: [status] is the HTTP status HQ answered with, 0 when it did not answer, null when it answered with no chat. */
     fun followFailed(status: Int?): String = when (status) {
         404 -> "That helper is gone."
-        0, 503 -> "HQ is not answering."
+        0, 503 -> "HQ didn't answer in time."
         else -> "Could not open the chat."
     }
 }
