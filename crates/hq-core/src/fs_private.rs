@@ -120,6 +120,8 @@ pub fn bind_private_socket(path: &Path, create_dir: bool) -> io::Result<tokio::n
     }
     match std::fs::symlink_metadata(path) {
         // A socket someone still answers on belongs to a running process: leave it to that one.
+        // ponytail: blocking connect; a live owner with a full backlog would stall this, use a
+        // nonblocking connect with a timeout if that is ever seen.
         Ok(existing) if existing.file_type().is_socket() => {
             if std::os::unix::net::UnixStream::connect(path).is_ok() {
                 return Err(io::Error::new(

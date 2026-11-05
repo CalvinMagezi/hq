@@ -52,7 +52,8 @@ pub struct Forwards {
 }
 
 impl Forwards {
-    /// Stops listening on every forward this process opened and frees their ports.
+    /// Stops listening on every forward this process opened and frees their ports. A socket file
+    /// stays behind; the next start replaces it as stale.
     pub fn abort(&self) {
         for task in &self.tasks {
             task.abort();

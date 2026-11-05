@@ -818,7 +818,6 @@ fn report_install() -> usize {
     fails
 }
 
-/// The `host:port` a plain TCP probe should dial for an endpoint URL.
 type Dial = std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>;
 
 /// What the probe dials for `entry`, as shown, and the dial.
@@ -835,6 +834,7 @@ fn probe_dial(entry: &hq_core::config::BackendEntry) -> Option<(String, Dial)> {
     Some((target, Box::pin(dial)))
 }
 
+/// The `host:port` a plain TCP probe should dial for an endpoint URL.
 fn probe_target(endpoint: &str) -> Option<String> {
     let url = reqwest::Url::parse(endpoint).ok()?;
     let port = url.port_or_known_default()?;
