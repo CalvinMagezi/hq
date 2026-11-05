@@ -249,19 +249,22 @@ class FirstRunViewModel(app: Application, initial: Step?) : AndroidViewModel(app
             s.useKeyFile -> s.keyFile?.let { BackupSecret.KeyFile(it) }
             else -> BackupSecret.Passphrase(s.passphrase)
         }
+        // A notes copy saved by safe mode is a plain .zip and needs no secret (N6).
+        val isCopy = backup != null && RestoreLogic.isZipUri(getApplication(), backup)
         val problem = when {
             backup == null -> FirstRunWords.RESTORE_NEEDS_FILE
+            isCopy -> null
             s.useKeyFile && s.keyFile == null -> FirstRunWords.RESTORE_NEEDS_KEY
             !s.useKeyFile -> RestoreLogic.passphraseProblem(s.passphrase)
             else -> null
         }
-        if (problem != null || backup == null || secret == null) {
+        if (problem != null || backup == null || (secret == null && !isCopy)) {
             mutableUi.update { it.copy(error = problem ?: FirstRunWords.RESTORE_NEEDS_FILE) }
             return
         }
         mutableUi.update { it.copy(restoring = true, error = null) }
         viewModelScope.launch {
-            val outcome = Restore.run(getApplication(), backup, secret)
+            val outcome = Restore.run(getApplication(), backup, secret ?: BackupSecret.Passphrase(""))
             mutableUi.update {
                 when (outcome) {
                     RestoreOutcome.Done -> it.copy(restoring = false, restored = true, passphrase = "", keyFile = null, keyFileName = null)

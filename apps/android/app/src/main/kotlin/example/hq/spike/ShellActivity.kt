@@ -9,6 +9,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
@@ -249,6 +250,13 @@ class ShellActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Two launches in a row that never drew a frame: this one goes to the screen that saves the notes.
+        if (intent.getStringExtra("fixture") == null && example.hq.spike.safe.CrashMarker.begin(filesDir)) {
+            example.hq.spike.safe.SafeModeActivity.open(this)
+            finish()
+            return
+        }
+        window.decorView.post { example.hq.spike.safe.CrashMarker.drawn(filesDir) }
         // A rotation keeps the web page open; it loads again from its start.
         web = WebPage.fromSlug(savedInstanceState?.getString(STATE_WEB))
         if (intent.getStringExtra("fixture") == null) firstRunStep = decideFirstRun()
@@ -307,7 +315,13 @@ class ShellActivity : ComponentActivity() {
             HqTheme { CompositionLocalProvider(LocalOpenWeb provides { page -> web = page }) {
                 if (firstRunUi.step != null) FirstRunHost(firstRunUi, firstRun.actions)
                 else if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
-                else if (startup == Startup.DidNotStart) DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
+                else if (startup == Startup.DidNotStart) androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                    DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
+                    androidx.compose.material3.TextButton(
+                        { example.hq.spike.safe.SafeModeActivity.open(this@ShellActivity) },
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).size(width = 280.dp, height = 48.dp),
+                    ) { androidx.compose.material3.Text(androidx.compose.ui.res.stringResource(R.string.safe_sheet_button), color = Mts.BrandBlue) }
+                }
                 else HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen,

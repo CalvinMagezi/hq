@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.update
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import example.hq.spike.HubService
+import example.hq.spike.voice.VoiceEngines
 
 /**
  * Updates without the Play Store. The channel manifest is trusted only after `libhq.so update verify-file` accepts its minisign signature
@@ -36,6 +38,11 @@ object Updater {
     private const val WATCH_POLL_MS = 60L * 60 * 1000
     private const val BUFFER_BYTES = 64 * 1024
     private const val REQUEST_CODE = 7001
+    private const val KEY_SEQ = "highest_seq"
+    private const val KEY_BUCKET = "bucket"
+    private const val KEY_OFFERED = "offered_code"
+    private const val BUCKETS = 100
+    private const val BUSY_PORT = 5678
     const val ACTION_RESULT = "example.hq.spike.update.RESULT"
 
     private val flow = MutableStateFlow<UpdateState>(UpdateState.Idle)
@@ -68,14 +75,25 @@ object Updater {
     /** Fetches and verifies the channel manifest and settles [state]. Blocking; call it off the main thread. */
     fun check(context: Context) {
         if (flow.value == UpdateState.Checking || flow.value == UpdateState.Downloading) return
+        val before = flow.value
         flow.value = UpdateState.Checking
         flow.value = try {
             val verdict = fetchVerdict(context)
             prefs(context).edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
             when (verdict) {
+                null -> if (before is UpdateState.Checking) UpdateState.Idle else before
                 UpdateVerdict.UpToDate -> UpdateState.UpToDate
-                is UpdateVerdict.Available -> UpdateState.Available(verdict.manifest)
+                is UpdateVerdict.Available -> {
+                    prefs(context).edit().putLong(KEY_OFFERED, verdict.manifest.versionCode).apply()
+                    UpdateState.Available(verdict.manifest)
+                }
                 is UpdateVerdict.NeedsNewerAndroid -> UpdateState.NeedsNewerAndroid(verdict.minSdk)
+                is UpdateVerdict.InstalledWithdrawn -> UpdateState.InstalledWithdrawn(installedName(context), verdict.fix)
+                is UpdateVerdict.Pulled -> {
+                    File(File(context.cacheDir, DIR), APK_NAME).delete()
+                    prefs(context).edit().remove(KEY_OFFERED).apply()
+                    UpdateState.Pulled(verdict.version)
+                }
             }
         } catch (e: UpdateException) {
             UpdateState.Failed(e.message ?: "The update check failed.")
@@ -86,8 +104,15 @@ object Updater {
     }
 
     /** Downloads the APK named by the signed manifest, checks its hash, and hands it to Android's installer. Blocking. */
-    fun install(context: Context, manifest: ChannelManifest) {
+    fun install(context: Context, manifest: ChannelManifest, stopAndInstall: Boolean = false) {
         if (flow.value == UpdateState.Downloading) return
+        if (!stopAndInstall) {
+            val reason = busyNow(context)
+            if (reason != null) {
+                flow.value = UpdateState.Busy(manifest, reason)
+                return
+            }
+        }
         if (!canInstall(context)) {
             flow.value = UpdateState.Failed("Allow AgentHQ to install apps, then try again.")
             context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -106,6 +131,50 @@ object Updater {
         }
     }
 
+    /**
+     * The owner chose "Wait until it's done": polls until HQ is free, then installs; [cancelWait] ends it ("Not now").
+     * Blocking, so call it off the main thread.
+     */
+    fun waitThenInstall(context: Context, manifest: ChannelManifest) {
+        waiting = true
+        try {
+            while (waiting) {
+                val busy = busyStatus(context)
+                val reason = UpdateLogic.busyReason(busy, outboxWaiting(context), VoiceEngines.downloading() != null)
+                if (reason == null) break
+                flow.value = UpdateState.Waiting(manifest, busy?.chatTurns ?: 0)
+                try { Thread.sleep(UpdateLogic.BUSY_POLL_MS) } catch (_: InterruptedException) { waiting = false }
+            }
+            if (waiting) install(context, manifest, stopAndInstall = true) else flow.value = UpdateState.Available(manifest)
+        } finally {
+            waiting = false
+        }
+    }
+
+    fun cancelWait() { waiting = false }
+
+    /** "Not now" on the busy dialog: the update stays offered. */
+    fun dismissBusy(manifest: ChannelManifest) {
+        if (flow.value is UpdateState.Busy) flow.value = UpdateState.Available(manifest)
+    }
+
+    @Volatile private var waiting = false
+
+    /** Why an install would stop work right now, or null. HQ not answering counts as free: there is nothing of its to stop. */
+    fun busyNow(context: Context): BusyReason? = UpdateLogic.busyReason(busyStatus(context), outboxWaiting(context), VoiceEngines.downloading() != null)
+
+    private fun outboxWaiting(context: Context): Boolean = example.hq.spike.safe.NotesCopy.waitingCount(context.filesDir) > 0
+
+    private fun busyStatus(context: Context): BusyStatus? = try {
+        val token = HubService.token(context)
+        val request = Request.Builder().url("http://127.0.0.1:$BUSY_PORT${UpdateLogic.BUSY_PATH}").header("Authorization", "Bearer $token").build()
+        http.newBuilder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).build().newCall(request).execute().use { r ->
+            if (r.isSuccessful) UpdateLogic.parseBusy(r.body.string()) else null
+        }
+    } catch (_: IOException) {
+        null
+    }
+
     /** What Android's installer answered, from [InstallResultReceiver]. Success needs no state: the app is replaced. */
     internal fun finished(status: Int, message: String?) {
         flow.value = UpdateLogic.installOutcome(status, message)
@@ -113,7 +182,18 @@ object Updater {
 
     private fun canInstall(context: Context): Boolean = context.packageManager.canRequestPackageInstalls()
 
-    private fun fetchVerdict(context: Context): UpdateVerdict {
+    private fun installedName(context: Context): String =
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty().ifBlank { installedCode(context).toString() }
+
+    /** The percent bucket this phone is in for staged rollouts: drawn once, kept. */
+    private fun bucket(context: Context): Int {
+        val p = prefs(context)
+        if (!p.contains(KEY_BUCKET)) p.edit().putInt(KEY_BUCKET, java.util.concurrent.ThreadLocalRandom.current().nextInt(BUCKETS)).apply()
+        return p.getInt(KEY_BUCKET, 0)
+    }
+
+    /** Null when the manifest is older than one already seen: the state stays as it was. */
+    private fun fetchVerdict(context: Context): UpdateVerdict? {
         val url = UpdateLogic.manifestUrl(channel(context))
         val dir = File(context.cacheDir, DIR).apply { mkdirs() }
         // The signature names the file it signed, so the manifest is saved under its release name.
@@ -123,7 +203,11 @@ object Updater {
         sigFile.writeBytes(getCapped("$url.minisig"))
         if (!signatureHolds(context, manifestFile, sigFile)) throw UpdateException("The update information is not signed by the AgentHQ release key. Nothing was installed.")
         val manifest = UpdateLogic.parse(manifestFile.readText()) ?: throw UpdateException("The update information is not in a form this version understands.")
-        return UpdateLogic.verdict(manifest, installedCode(context), Build.VERSION.SDK_INT)
+        val p = prefs(context)
+        if (!UpdateLogic.seqOk(manifest, p.getLong(KEY_SEQ, 0))) return null
+        p.edit().putLong(KEY_SEQ, manifest.seq).apply()
+        val offered = p.getLong(KEY_OFFERED, 0) == manifest.versionCode
+        return UpdateLogic.verdict(manifest, installedCode(context), Build.VERSION.SDK_INT, bucket(context), channel(context) == UpdateChannel.Main, offered)
     }
 
     private fun installedCode(context: Context): Long {

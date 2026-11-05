@@ -147,6 +147,10 @@ class SettingsActions(
     val onRefresh: suspend () -> Unit = {},
     val onCheckUpdate: () -> Unit = {},
     val onInstallUpdate: (ChannelManifest) -> Unit = {},
+    /** The busy dialog: wait until HQ is free, stop what runs and install, or leave it offered. */
+    val onWaitThenInstall: (ChannelManifest) -> Unit = {},
+    val onStopAndInstall: (ChannelManifest) -> Unit = {},
+    val onBusyDismiss: (ChannelManifest) -> Unit = {},
     val onUpdateMain: (Boolean) -> Unit = {},
 )
 
@@ -197,6 +201,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onRefresh = ::refreshNow,
         onCheckUpdate = { viewModelScope.launch(Dispatchers.IO) { Updater.check(ctx()) } },
         onInstallUpdate = { m -> viewModelScope.launch(Dispatchers.IO) { Updater.install(ctx(), m) } },
+        onWaitThenInstall = { m -> viewModelScope.launch(Dispatchers.IO) { Updater.waitThenInstall(ctx(), m) } },
+        onStopAndInstall = { m -> viewModelScope.launch(Dispatchers.IO) { Updater.install(ctx(), m, stopAndInstall = true) } },
+        onBusyDismiss = { m -> Updater.dismissBusy(m) },
         onUpdateMain = { main ->
             Updater.setChannel(ctx(), if (main) UpdateChannel.Main else UpdateChannel.Stable)
             _state.update { it.copy(updateMain = main) }

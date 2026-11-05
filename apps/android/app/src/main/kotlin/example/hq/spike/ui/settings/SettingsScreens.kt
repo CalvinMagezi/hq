@@ -1084,9 +1084,17 @@ private fun UpdateGroup(ui: SettingsUi, actions: SettingsActions) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = !working, role = Role.Button) { if (state is UpdateState.Available) actions.onInstallUpdate(state.manifest) else actions.onCheckUpdate() }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                 Text(if (state is UpdateState.Available) "Install update" else "Check for updates", style = HqType.BodyBold, color = Mts.Ink)
-                Text(UpdateLogic.words(state), style = HqType.BodySm, color = if (state is UpdateState.Failed) Mts.Amber else Mts.InkMuted)
+                Text(UpdateLogic.wordsFor(androidx.compose.ui.platform.LocalContext.current, state), style = HqType.BodySm, color = if (state is UpdateState.Failed) Mts.Amber else Mts.InkMuted)
             }
             if (working) Spinner(20) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+        }
+        if (state is UpdateState.Busy) {
+            example.hq.spike.update.InstallBusyDialog(
+                state.reason,
+                onWait = { actions.onWaitThenInstall(state.manifest) },
+                onStop = { actions.onStopAndInstall(state.manifest) },
+                onDismiss = { actions.onBusyDismiss(state.manifest) },
+            )
         }
         Divider()
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.Switch) { actions.onUpdateMain(!ui.updateMain) }.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

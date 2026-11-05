@@ -23,6 +23,7 @@
       </intent-filter>
       <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
     </activity>
+    <activity android:name=".safe.SafeModeActivity" android:exported="false" android:process=":safe" android:theme="@style/Theme.AgentHQ.Shell" android:excludeFromRecents="true" android:taskAffinity="" android:configChanges="orientation|screenSize|keyboardHidden|fontScale|smallestScreenSize|screenLayout|uiMode"/>
     <activity android:name=".LinkActivity" android:exported="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity="">
       <intent-filter>
         <action android:name="android.intent.action.VIEW"/>

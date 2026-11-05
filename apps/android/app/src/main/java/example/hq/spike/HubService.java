@@ -8,7 +8,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.IBinder;
+import android.os.ResultReceiver;
 import android.os.SystemClock;
 import android.util.Log;
 import example.hq.spike.bridge.BridgeSupervisor;
@@ -162,6 +164,55 @@ public class HubService extends Service {
         held = false;
     }
 
+    /** Asked by the safe-mode screen, which runs in its own process, to stop hq while the database files are copied. */
+    public static final String ACTION_COPY_HOLD = "example.hq.spike.COPY_HOLD";
+    public static final String ACTION_COPY_RELEASE = "example.hq.spike.COPY_RELEASE";
+    public static final String EXTRA_REPLY = "reply";
+    /** The answers sent back to the screen: hq is held, hq was not running so nothing needed holding, hq would not stop. */
+    public static final int COPY_HELD = 0;
+    public static final int COPY_NOT_RUNNING = 1;
+    public static final int COPY_FAILED = 2;
+    /** A copy never keeps hq stopped longer than this, whatever happens to the screen. */
+    private static final long COPY_HOLD_MAX_MS = 25_000;
+    private static Thread copyTimer;
+
+    private void copyHold(Intent intent, int startId) {
+        ResultReceiver reply = Build.VERSION.SDK_INT >= 33
+                ? intent.getParcelableExtra(EXTRA_REPLY, ResultReceiver.class) : intent.getParcelableExtra(EXTRA_REPLY);
+        if (!started.get()) {
+            if (reply != null) reply.send(COPY_NOT_RUNNING, Bundle.EMPTY);
+            stopSelf(startId);
+            return;
+        }
+        new Thread(() -> {
+            boolean ok = holdHq();
+            if (ok) {
+                Thread timer = new Thread(() -> {
+                    try {
+                        Thread.sleep(COPY_HOLD_MAX_MS);
+                    } catch (InterruptedException e) {
+                        // The copy finished first.
+                    }
+                    releaseHq();
+                }, "hq-copy-release");
+                synchronized (LOCK) {
+                    if (copyTimer != null) copyTimer.interrupt();
+                    copyTimer = timer;
+                }
+                timer.start();
+            }
+            if (reply != null) reply.send(ok ? COPY_HELD : COPY_FAILED, Bundle.EMPTY);
+        }, "hq-copy-hold").start();
+    }
+
+    private static void copyRelease() {
+        synchronized (LOCK) {
+            if (copyTimer != null) copyTimer.interrupt();
+            copyTimer = null;
+        }
+        releaseHq();
+    }
+
     /** True when the running hq child was started in Active mode. */
     public static boolean childActive() {
         return childActive;
@@ -169,6 +220,14 @@ public class HubService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_COPY_HOLD.equals(intent.getAction())) {
+            copyHold(intent, startId);
+            return START_STICKY;
+        }
+        if (intent != null && ACTION_COPY_RELEASE.equals(intent.getAction())) {
+            copyRelease();
+            return START_STICKY;
+        }
         NotificationManager nm = getSystemService(NotificationManager.class);
         for (NotificationChannel ch : AlertPoster.channels(this)) nm.createNotificationChannel(ch);
         Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
