@@ -70,11 +70,6 @@ impl LlmError {
         matches!(self.runtime_error_kind(), Transient | AuthN)
     }
 
-    /// Whether this is a context overflow that should trigger compaction.
-    pub fn is_context_overflow(&self) -> bool {
-        matches!(self, LlmError::ContextOverflow { .. })
-    }
-
     /// Construct from an HTTP status code and response body. The shared
     /// classifier; each wire's own classifier handles only its extra cases
     /// and defers here for the rest.

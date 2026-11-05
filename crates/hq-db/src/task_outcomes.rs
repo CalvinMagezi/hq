@@ -133,73 +133,6 @@ fn execute_insert(conn: &Connection, outcome: &TaskOutcome) -> Result<usize> {
     )?)
 }
 
-/// Summary for `hq models leaderboard`: one row per (model, task_hint) with
-/// trend deltas between the last 24h and 7d windows.
-#[derive(Debug, Clone, Serialize)]
-pub struct LeaderboardRow {
-    pub model: String,
-    pub provider: String,
-    pub task_hint: String,
-    pub samples_24h: i64,
-    pub success_rate_24h: f64,
-    pub avg_cost_per_success_24h: f64,
-    pub success_rate_7d: f64,
-}
-
-pub fn leaderboard(
-    conn: &Connection,
-    task_hint_filter: Option<&str>,
-) -> Result<Vec<LeaderboardRow>> {
-    let now = current_epoch();
-    let day_ago = now - 86_400;
-    let week_ago = now - 7 * 86_400;
-
-    let (filter_clause, filter_param): (&str, Option<&str>) = match task_hint_filter {
-        Some(th) => ("AND o.task_hint = ?3", Some(th)),
-        None => ("", None),
-    };
-
-    let sql = format!(
-        "SELECT
-            o.model,
-            o.provider,
-            o.task_hint,
-            COUNT(CASE WHEN o.recorded_at >= ?1 THEN 1 END) AS samples_24h,
-            AVG(CASE WHEN o.recorded_at >= ?1 THEN o.success ELSE NULL END) AS success_rate_24h,
-            AVG(CASE WHEN o.recorded_at >= ?1 AND o.success = 1 THEN o.cost_usd ELSE NULL END) AS avg_cost_per_success_24h,
-            AVG(CASE WHEN o.recorded_at >= ?2 THEN o.success ELSE NULL END) AS success_rate_7d
-         FROM task_outcomes o
-         WHERE o.recorded_at >= ?2 {}
-         GROUP BY o.model, o.provider, o.task_hint
-         ORDER BY samples_24h DESC, success_rate_24h DESC",
-        filter_clause
-    );
-
-    let mut stmt = conn.prepare(&sql)?;
-
-    let rows: Vec<LeaderboardRow> = if let Some(th) = filter_param {
-        stmt.query_map(params![day_ago, week_ago, th], row_to_leaderboard)?
-            .collect::<std::result::Result<_, _>>()?
-    } else {
-        stmt.query_map(params![day_ago, week_ago], row_to_leaderboard)?
-            .collect::<std::result::Result<_, _>>()?
-    };
-
-    Ok(rows)
-}
-
-fn row_to_leaderboard(row: &rusqlite::Row<'_>) -> rusqlite::Result<LeaderboardRow> {
-    Ok(LeaderboardRow {
-        model: row.get(0)?,
-        provider: row.get(1)?,
-        task_hint: row.get(2)?,
-        samples_24h: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-        success_rate_24h: row.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
-        avg_cost_per_success_24h: row.get::<_, Option<f64>>(5)?.unwrap_or(0.0),
-        success_rate_7d: row.get::<_, Option<f64>>(6)?.unwrap_or(0.0),
-    })
-}
-
 /// Compact seed record for router health warm-up at startup.
 #[derive(Debug, Clone)]
 pub struct OutcomeSeedRow {
@@ -244,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_and_aggregate() {
+    fn insert_and_read_back() {
         let conn = setup();
 
         let outcome = TaskOutcome {
@@ -275,10 +208,14 @@ mod tests {
         let id = insert(&conn, &outcome).unwrap();
         assert!(id > 0);
 
-        let board = leaderboard(&conn, Some("coding")).unwrap();
-        assert_eq!(board.len(), 1);
-        assert_eq!(board[0].samples_24h, 1);
-        assert!((board[0].success_rate_24h - 1.0).abs() < 0.001);
+        let (model, success): (String, bool) = conn
+            .query_row(
+                "SELECT model, success FROM task_outcomes WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((model.as_str(), success), ("ollama/gemma4:e4b", true));
     }
 
     #[test]
@@ -303,18 +240,5 @@ mod tests {
         // Rows without an id never collide with each other.
         let plain = TaskOutcome::now("s", 1, "m", "p", "chat");
         assert!(insert_if_new(&conn, &plain).unwrap() && insert_if_new(&conn, &plain).unwrap());
-    }
-
-    #[test]
-    fn leaderboard_without_filter() {
-        let conn = setup();
-        for (task, model) in [("coding", "a"), ("planning", "b"), ("coding", "c")] {
-            let mut o = TaskOutcome::now("s", 0, model, "prov", task);
-            o.latency_ms = 100;
-            o.cost_usd = 0.01;
-            insert(&conn, &o).unwrap();
-        }
-        let rows = leaderboard(&conn, None).unwrap();
-        assert_eq!(rows.len(), 3);
     }
 }

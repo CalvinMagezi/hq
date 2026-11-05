@@ -84,7 +84,7 @@ impl TaskHint {
     }
 
     /// All task hints, in enum-discriminant order. Useful for iteration in
-    /// aggregation and leaderboard queries.
+    /// aggregate queries.
     pub fn all() -> &'static [TaskHint] {
         &[
             TaskHint::Simple,

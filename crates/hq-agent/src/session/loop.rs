@@ -61,21 +61,6 @@ impl AgentSession {
         self.run_prompt(text, false, Vec::new()).await
     }
 
-    /// Same as [`prompt`](Self::prompt), but attaches images to the user
-    /// turn (FR-017) for vision-capable models. Callers that already staged
-    /// the current turn's images into session history (e.g. via
-    /// `push_message`) should NOT also call this with the same images —
-    /// that would duplicate the turn. See `native_hq.rs`/relay dispatch code
-    /// for the pattern of popping a pre-staged current-turn message and
-    /// passing its `image_parts` here instead.
-    pub async fn prompt_with_images(
-        &mut self,
-        text: &str,
-        image_parts: Vec<hq_core::types::ImageAttachment>,
-    ) -> Result<SessionResult> {
-        self.run_prompt(text, false, image_parts).await
-    }
-
     /// Run the prompt loop, asking streaming-capable API backends for token
     /// deltas. Emits [`SessionEvent::TextDelta`] chunks as they arrive. Tool
     /// execution, compaction, budget, limits, and continuation are identical to
@@ -84,7 +69,13 @@ impl AgentSession {
         self.run_prompt(text, true, Vec::new()).await
     }
 
-    /// Streaming counterpart to [`prompt_with_images`](Self::prompt_with_images).
+    /// Same as [`prompt_stream`](Self::prompt_stream), but attaches images to
+    /// the user turn (FR-017) for vision-capable models. Callers that already
+    /// staged the current turn's images into session history (e.g. via
+    /// `push_message`) should NOT also call this with the same images: that
+    /// would duplicate the turn. See `native_hq.rs`/relay dispatch code for
+    /// the pattern of popping a pre-staged current-turn message and passing
+    /// its `image_parts` here instead.
     pub async fn prompt_stream_with_images(
         &mut self,
         text: &str,

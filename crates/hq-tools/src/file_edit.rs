@@ -111,33 +111,6 @@ pub fn find_actual_string<'a>(file_content: &'a str, search_string: &str) -> Opt
     Some(&file_content[byte_start..byte_end])
 }
 
-/// Strip trailing whitespace from each line while preserving line endings (LF / CRLF / CR).
-///
-/// Distilled from claude-code's `stripTrailingWhitespace()`. Skip for Markdown files
-/// because two trailing spaces are a hard line-break.
-pub fn strip_trailing_whitespace(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-
-    for c in s.chars() {
-        if c == '\r' {
-            // Trim trailing spaces before emitting the line ending.
-            let trimmed_end = result.trim_end_matches([' ', '\t']).len();
-            result.truncate(trimmed_end);
-            result.push('\r');
-        } else if c == '\n' {
-            let trimmed_end = result.trim_end_matches([' ', '\t']).len();
-            result.truncate(trimmed_end);
-            result.push('\n');
-        } else {
-            result.push(c);
-        }
-    }
-    // Trim trailing whitespace on the last line (no newline at EOF)
-    let trimmed_end = result.trim_end_matches([' ', '\t']).len();
-    result.truncate(trimmed_end);
-    result
-}
-
 // ── Core edit logic ───────────────────────────────────────────────────────────
 
 /// Apply a single string replacement to `content`.
@@ -591,21 +564,6 @@ mod tests {
     #[test]
     fn test_find_actual_string_not_found() {
         assert_eq!(find_actual_string("hello world", "goodbye"), None);
-    }
-
-    // ── strip_trailing_whitespace ────────────────────────────────────────────
-
-    #[test]
-    fn test_strip_trailing_whitespace_lf() {
-        let input = "hello   \nworld  \n";
-        let out = strip_trailing_whitespace(input);
-        assert_eq!(out, "hello\nworld\n");
-    }
-
-    #[test]
-    fn test_strip_trailing_whitespace_no_newline() {
-        let input = "hello   ";
-        assert_eq!(strip_trailing_whitespace(input), "hello");
     }
 
     // ── apply_edit ───────────────────────────────────────────────────────────

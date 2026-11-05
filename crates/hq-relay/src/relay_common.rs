@@ -301,8 +301,8 @@ pub(crate) fn queue_steer(inbox: &std::sync::Mutex<Option<String>>, text: String
 /// to `/reset`, transcripts, etc.) BEFORE calling the harness — so by the
 /// time `history` is read back here, its last entry IS the current turn.
 /// The harness call also passes that same turn's text separately (as
-/// `prompt`/`text`/`content`) to `AgentSession::prompt_with_images`/
-/// `prompt_stream_with_images`, which pushes its own fresh user message.
+/// `prompt`/`text`/`content`) to
+/// `AgentSession::prompt_stream_with_images`, which pushes its own fresh user message.
 /// Leaving the current turn in `history` too would push it TWICE — two
 /// consecutive User messages with no assistant reply between them — and
 /// only the `history` copy would carry the image, since the second

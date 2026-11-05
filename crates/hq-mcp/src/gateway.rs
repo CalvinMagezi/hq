@@ -1405,10 +1405,16 @@ mod tests {
         let result = handle_call(&registry, Some(&map), &db, Some(&allowed)).await;
 
         assert!(result.is_ok());
-        let by_agent = db
-            .with_conn(|conn| hq_db::tool_usage::by_agent(conn, "vault_search"))
+        let agent: String = db
+            .with_conn(|conn| {
+                Ok(conn.query_row(
+                    "SELECT agent_name FROM tool_usage WHERE tool_name = 'vault_search'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
             .unwrap();
-        assert_eq!(by_agent, vec![("mcp-external".to_string(), 1)]);
+        assert_eq!(agent, "mcp-external");
     }
 
     /// hq-web's /mcp serializes these types directly, so their JSON is the HTTP wire format.

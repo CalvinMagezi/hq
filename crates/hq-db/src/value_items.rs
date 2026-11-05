@@ -603,35 +603,6 @@ pub fn count_from_sources_since(
     })
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct TaskEngagement {
-    pub source_task: String,
-    pub delivered: i64,
-    pub engaged: i64,
-}
-
-/// Per-task engagement ledger: how many items reached the user vs were acted on.
-pub fn task_engagement_stats(db: &Database) -> Result<Vec<TaskEngagement>> {
-    db.with_conn(|c| {
-        let mut stmt = c.prepare(
-            "SELECT source_task, \
-                SUM(CASE WHEN state IN ('delivered','engaged','dismissed') THEN 1 ELSE 0 END) AS delivered, \
-                SUM(CASE WHEN state = 'engaged' THEN 1 ELSE 0 END) AS engaged \
-             FROM value_items GROUP BY source_task ORDER BY delivered DESC",
-        )?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok(TaskEngagement {
-                    source_task: r.get(0)?,
-                    delivered: r.get(1)?,
-                    engaged: r.get(2)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -888,10 +859,9 @@ mod tests {
         set_delivered(&db, &id).unwrap();
         let token: String = id.chars().take(8).collect();
         assert!(record_engagement_by_token(&db, &token, "approved").unwrap());
-        let stats = task_engagement_stats(&db).unwrap();
-        assert_eq!(stats.len(), 1);
-        assert_eq!(stats[0].delivered, 1);
-        assert_eq!(stats[0].engaged, 1);
+        let engaged = list_by_state(&db, ValueState::Engaged).unwrap();
+        assert_eq!(engaged.len(), 1);
+        assert_eq!(engaged[0].id, id);
     }
 
     #[test]

@@ -845,12 +845,8 @@ impl HqConfig {
         all
     }
 
-    /// The `remote_mcp` entry `web_search_peer` names, if both exist.
-    pub fn web_search_peer_server(&self) -> Option<&RemoteMcpServer> {
-        self.web_search_peer_in(&self.remote_mcp)
-    }
-
-    /// [`Self::web_search_peer_server`] among already resolved `remotes`.
+    /// The entry among already resolved `remotes` that `web_search_peer` names,
+    /// if both exist.
     pub fn web_search_peer_in<'a>(
         &self,
         remotes: &'a [RemoteMcpServer],

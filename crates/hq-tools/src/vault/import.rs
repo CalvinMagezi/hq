@@ -446,12 +446,6 @@ impl Importer {
         }
     }
 
-    /// Converts one vault file and, unless it is a dry run, writes its note.
-    pub async fn import_one(&self, rel: &str, s: &ImportSettings, caller: &Caller<'_>) -> Value {
-        self.import_with(rel, s, caller, &mut self.imported_index())
-            .await
-    }
-
     async fn import_with(
         &self,
         rel: &str,
