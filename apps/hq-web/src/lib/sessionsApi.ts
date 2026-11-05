@@ -1,5 +1,6 @@
 import { hqJson } from './hqAuth'
 import type { TaskStatus } from './tasksApi'
+import type { SessionEvent } from './autoAnswers'
 
 export type SessionStatus = 'running' | 'exited' | 'stopped' | 'orphaned'
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done'
@@ -30,6 +31,8 @@ export interface WatchedSession {
   pending_wake: string | null
   last_driven_at: string | null
   created_at: string
+  /** The session's recorded events, when the server sends them; the answers HQ gave are read from these. */
+  events?: SessionEvent[]
   task: { id: string; display_id: string; title: string; status: TaskStatus } | null
 }
 

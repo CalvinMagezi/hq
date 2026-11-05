@@ -1,4 +1,5 @@
 import { Eye, PanelLeft, X } from 'lucide-react'
+import { t } from '~/strings'
 import { needsAttention, watchingLabel, type WatchedSession } from '~/lib/sessionsApi'
 
 interface Props {
@@ -16,7 +17,7 @@ interface Props {
 export function ChatHeader({ title, onToggleSidebar, onClose, watching = [], sessionsOpen = false, onToggleSessions }: Props) {
   return (
     <div className="flex items-center gap-1 border-b border-white/10 px-1 md:px-3 shrink-0">
-      <button type="button" onClick={onToggleSidebar} className="p-2.5 text-neutral-400 hover:text-white" title="Toggle chat list">
+      <button type="button" onClick={onToggleSidebar} className="p-2.5 text-neutral-400 hover:text-white" title={t('chat_toggle_list')} aria-label={t('chat_toggle_list')}>
         <PanelLeft className="w-4 h-4" />
       </button>
       <span className="flex-1 text-sm text-neutral-300 truncate py-2.5">{title}</span>
@@ -30,7 +31,7 @@ export function ChatHeader({ title, onToggleSidebar, onClose, watching = [], ses
             type="button"
             onClick={onClose}
             className="p-2.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
-            title="Close chat"
+            title={t('chat_close')} aria-label={t('chat_close')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -48,12 +49,12 @@ function WatchingButton({ sessions, open, onToggle }: { sessions: WatchedSession
       type="button"
       onClick={onToggle}
       className={`flex items-center gap-1.5 h-11 min-w-11 sm:h-8 sm:min-w-0 px-2 rounded-lg text-xs hover:bg-white/10 transition-colors shrink-0 ${open ? 'text-white bg-white/5' : 'text-neutral-400 hover:text-white'}`}
-      title="Coding-agent sessions this chat is watching"
+      title={t('chat_watching_title')}
       aria-label={watchingLabel(sessions)}
       aria-expanded={open}
     >
       <Eye className="w-4 h-4" />
-      <span className="hidden sm:inline">Watching</span> {sessions.length}
+      <span className="hidden sm:inline">{t('chat_watching')}</span> {sessions.length}
       {waiting > 0 && (
         <span className="flex items-center gap-1" style={{ color: 'var(--accent-amber)' }} aria-hidden="true">
           <span className="w-1.5 h-1.5 rounded-full bg-current" />

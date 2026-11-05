@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react'
-import { Plus, MessageSquare, Archive, Search, X, Loader2 } from 'lucide-react'
+import { Plus, MessageSquare, Archive, Search, X, Loader2, Mic } from 'lucide-react'
 import { useThreadStore } from '~/store/threadStore'
 import { relTime } from '~/lib/time'
 import { t } from '~/strings'
-import { groupChats } from '~/lib/chatGroups'
+import { groupChats, isSpokenThread } from '~/lib/chatGroups'
 
 interface Props {
   /** Drawer state on mobile; the sidebar is always shown from md up. */
@@ -21,6 +21,7 @@ interface Props {
 export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen, onArchive }: Props) {
   const threads = useThreadStore((s) => s.threads)
   const running = useThreadStore((s) => s.live)
+  const saved = useThreadStore((s) => s.threadMessages)
   const activeThreadId = useThreadStore((s) => s.activeThreadId)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -108,6 +109,11 @@ export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen
                           )}
                         </div>
                         <div className="text-xs text-neutral-500 truncate">
+                          {isSpokenThread(saved[th.threadId]) && (
+                            <span className="inline-flex items-center gap-0.5 mr-1">
+                              <Mic className="w-3 h-3" aria-hidden="true" /> {t('chat_spoken')} ·
+                            </span>
+                          )}
                           {relTime(th.updatedAt)}
                           {th.lastMessagePreview ? ` · ${th.lastMessagePreview}` : ''}
                         </div>

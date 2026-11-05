@@ -24,6 +24,8 @@ export interface ApprovalQuote {
   loses: boolean
   /** The word for the Allow button when it loses something ("delete"); null for a plain request. */
   verb: string | null
+  /** The web chat that asked; null for another chat app or a chat not saved yet. */
+  thread_id?: string | null
 }
 
 /** A blocked agent's dialog as the server read it (`metadata.dialog`). */

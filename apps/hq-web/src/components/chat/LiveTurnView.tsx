@@ -1,3 +1,4 @@
+import { t } from '~/strings'
 import { useLiveTurn } from '~/store/threadStore'
 import { ChatBubble } from './ChatBubble'
 import { StreamErrorBoundary } from './StreamErrorBoundary'
@@ -27,7 +28,7 @@ export function LiveTurnView({ threadId }: { threadId: string | null | undefined
       </StreamErrorBoundary>
       {turn.gap && (
         <p role="status" className="-mt-2 mb-3 px-3 text-xs text-amber-400">
-          Some of this reply was skipped on a slow connection. The complete reply replaces it when HQ finishes.
+          {t('chat_reply_skipped')}
         </p>
       )}
     </>
