@@ -17,6 +17,9 @@ object VoiceWords {
             VoicePhase.LookingUp -> R.string.voice_looking_up
             VoicePhase.Answering -> R.string.voice_answering
             VoicePhase.Idle -> R.string.voice_tap_to_ask
+            VoicePhase.MicNeeded -> R.string.voice_mic_needed_label
+            VoicePhase.MicBlocked -> R.string.voice_mic_off_label
+            VoicePhase.Stopped -> R.string.voice_stopped
         },
     )
 
@@ -26,6 +29,17 @@ object VoiceWords {
             VoicePhase.Listening -> R.string.voice_act_done
             VoicePhase.Thinking, VoicePhase.LookingUp, VoicePhase.Answering -> R.string.voice_act_stop
             VoicePhase.Idle, VoicePhase.ModelReady -> R.string.voice_act_ask
+            VoicePhase.MicNeeded -> R.string.voice_mic_allow_cd
+            VoicePhase.MicBlocked -> R.string.voice_ask_again
+            VoicePhase.Stopped -> R.string.voice_act_ask
+        },
+    )
+
+    fun silence(w: Words, line: SilenceLine): String = w.s(
+        when (line) {
+            SilenceLine.Short -> R.string.voice_nothing_heard
+            SilenceLine.SwitchHint -> R.string.voice_silence_switch
+            SilenceLine.SpeakCloser -> R.string.voice_silence_closer
         },
     )
 
@@ -34,6 +48,8 @@ object VoiceWords {
         VoicePhase.NeedsModel -> w.s(R.string.speech_needed_body)
         VoicePhase.Downloading -> w.s(if (dl == DlState.WaitingWifi) R.string.speech_waiting_body else R.string.speech_downloading_body)
         VoicePhase.ModelReady -> w.s(R.string.speech_ready_body)
+        VoicePhase.MicNeeded -> w.s(R.string.voice_mic_needed_body)
+        VoicePhase.MicBlocked -> w.s(R.string.voice_mic_blocked_body)
         else -> null
     }
 }

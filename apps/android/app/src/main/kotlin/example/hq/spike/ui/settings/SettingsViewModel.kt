@@ -413,10 +413,20 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
             HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(Words.of(ctx()), keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(Words.of(ctx()), it, Instant.now()).checked.any { r -> !r.ok } }),
             HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else homeNotifLine(listOf(R.string.notify_home_needs_on to on(AlertPoster.NEEDS), R.string.notify_home_updates_on to on(AlertPoster.UPDATES), R.string.notify_home_app_updates_on to on(AlertPoster.APP_UPDATES))), warn = !allowed || !on(AlertPoster.NEEDS) || !on(AlertPoster.UPDATES) || !on(AlertPoster.APP_UPDATES)),
+            assistantRow(c),
+            speech.takeIf { it >= 0 }?.let { HomeRow(SettingsPage.Speech, "speech", c.getString(R.string.speech_title), c.getString(R.string.speech_home_status, example.hq.spike.download.DownloadRules.sizeMb(it))) },
             HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", PhoneWords.captureSummary(captureFacts())),
             HomeRow(SettingsPage.StoredKeys, "key", FirstRunWords.KEYS_TITLE, "Add, replace or remove"),
-            speech.takeIf { it >= 0 }?.let { HomeRow(SettingsPage.Speech, "speech", c.getString(R.string.speech_title), c.getString(R.string.speech_home_status, example.hq.spike.download.DownloadRules.sizeMb(it))) },
         )
+    }
+
+    private fun assistantRow(c: Context): HomeRow {
+        val role = example.hq.spike.voice.AssistantRole
+        val available = role.available(c)
+        val held = role.held(c)
+        val mic = role.micState(c)
+        val status = AssistantWords.status(Words.of(c), available, held, mic, example.hq.spike.voice.VoiceModels(c).ready())
+        return HomeRow(SettingsPage.Assistant, "assistant", c.getString(R.string.assist_row_title), status, warn = AssistantWords.warn(available, held, mic))
     }
 
     /** "Needs you on · Updates on · App updates on": a part that is off reads with the word off in place of on. */

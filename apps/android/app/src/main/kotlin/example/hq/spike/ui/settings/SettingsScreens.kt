@@ -109,6 +109,7 @@ private fun icon(key: String): ImageVector = when (key) {
     "notifications" -> HqIcons.Inbox
     "capture" -> HqIcons.Plus
     "key" -> HqIcons.Key
+    "assistant" -> HqIcons.Mic
     "chat" -> HqIcons.Chat
     "phone" -> HqIcons.Phone
     "shield" -> HqIcons.Shield
@@ -144,6 +145,7 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Noticed -> "What HQ noticed"
     SettingsPage.Update -> "Update AgentHQ"
     SettingsPage.Speech -> "Speech model"
+    SettingsPage.Assistant -> "Phone assistant"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -162,7 +164,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-                Text(if (ui.page == SettingsPage.Update) stringResource(R.string.upd_page_title) else if (ui.page == SettingsPage.Speech) stringResource(R.string.speech_title) else pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
+                Text(if (ui.page == SettingsPage.Update) stringResource(R.string.upd_page_title) else if (ui.page == SettingsPage.Speech) stringResource(R.string.speech_title) else if (ui.page == SettingsPage.Assistant) stringResource(R.string.assist_row_title) else pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))
             }
             when (ui.page) {
                 SettingsPage.Home -> Home(ui, actions)
@@ -182,6 +184,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Technical -> Technical(ui, actions)
                 SettingsPage.Update -> UpdatePage(ui, actions)
                 SettingsPage.Speech -> SpeechPage(ui, actions)
+                SettingsPage.Assistant -> AssistantPage(ui, actions)
                 SettingsPage.Noticed -> NoticedPage(Counters.get(androidx.compose.ui.platform.LocalContext.current))
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }

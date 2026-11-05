@@ -39,7 +39,7 @@ class VoiceTurnTest {
             listOf(ChatEvent.TurnStart("t3", id, null), ChatEvent.Text("t3", "Half an"))
         }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
         dropping.join()
-        assertEquals(TurnOutput.Failed(VoiceTurn.CONNECTION_LOST), out.last())
+        assertEquals(TurnOutput.Failed(VoiceTurn.RESTARTING), out.last())
     }
 
     @Test
@@ -83,13 +83,13 @@ class VoiceTurnTest {
         val events = bus()
         val out = turn(events, mutableListOf()) { id -> listOf(ChatEvent.TurnStart("t4", id, null), ChatEvent.Lagged(3)) }
             .ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
-        assertEquals(listOf(TurnOutput.Thread("t4"), TurnOutput.Failed(VoiceTurn.MISSED)), out)
+        assertEquals(listOf(TurnOutput.Thread("t4"), TurnOutput.Failed(VoiceTurn.LOST_PART)), out)
     }
 
     @Test
     fun aQuestionHqNeverPicksUpTimesOut() = runBlocking {
         val out = turn(bus(), mutableListOf(), startWaitMs = 50) { emptyList() }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
-        assertEquals(listOf(TurnOutput.Failed(VoiceTurn.NOT_STARTED)), out)
+        assertEquals(listOf(TurnOutput.Failed(VoiceTurn.NO_REPLY)), out)
     }
 
     @Test
@@ -139,7 +139,7 @@ class VoiceTurnTest {
     @Test
     fun noSocketFailsAtOnce() = runBlocking {
         val out = turn(bus(), mutableListOf(), accept = false) { emptyList() }.ask("hi", null).let { withTimeout(TIMEOUT_MS) { it.toList() } }
-        assertEquals(listOf(TurnOutput.Failed(VoiceTurn.NOT_CONNECTED)), out)
+        assertEquals(listOf(TurnOutput.Failed(VoiceTurn.HQ_STOPPED)), out)
     }
 
     @Test

@@ -71,6 +71,8 @@ class Ears(app: Context) {
         return try {
             if (mic.state != AudioRecord.STATE_INITIALIZED) throw IOException("microphone did not open")
             mic.startRecording()
+            // Another app (a call, a recorder) holds the microphone: Android starts the stream but never records.
+            if (mic.recordingState != AudioRecord.RECORDSTATE_RECORDING) throw Busy()
             val chunk = ShortArray(CHUNK)
             var n = mic.read(chunk, 0, chunk.size)
             if (n < 0) throw IOException("microphone did not start")

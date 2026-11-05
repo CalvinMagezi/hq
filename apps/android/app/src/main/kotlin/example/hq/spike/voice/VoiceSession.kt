@@ -21,13 +21,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class VoicePhase { NeedsModel, Downloading, ModelReady, Preparing, Listening, Thinking, LookingUp, Answering, Idle }
+enum class VoicePhase { NeedsModel, Downloading, ModelReady, Preparing, Listening, Thinking, LookingUp, Answering, Idle, MicNeeded, MicBlocked, Stopped }
 
 data class VoiceState(
     val phase: VoicePhase = VoicePhase.Idle,
     val heard: String = "",
     val reply: String = "",
     val problem: String? = null,
+    /** The silent tries in a row, so a second one can say more than the first. */
+    val silent: Int = 0,
+    /** The chat this question landed in, so the sheet can open it. */
+    val threadId: String? = null,
 )
 
 /**
@@ -38,11 +42,13 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
     private val models = VoiceModels(app)
     private val words = Words.of(app)
     private val ears = VoiceEngines.ears(app)
-    private val turn = VoiceTurn(connection.events, connection.connected, { content, thread, clientId -> connection.sendChat(content, thread, clientId) })
+    private val turn = VoiceTurn(connection.events, connection.connected, { content, thread, clientId -> connection.sendChat(content, thread, clientId, source = "voice") })
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state
 
     private var threadId: String? = null
+    private var sentAt = 0L
+    private var worked = false
     private var job: Job? = null
     /** This sheet's own stop switch for the request it is hearing; dictation for other apps has its own. */
     @Volatile private var hearing = AtomicBoolean(true)
@@ -80,10 +86,18 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     fun micPressed() = when (_state.value.phase) {
         VoicePhase.NeedsModel, VoicePhase.Downloading, VoicePhase.Preparing -> Unit
+        VoicePhase.MicNeeded, VoicePhase.MicBlocked -> listen()
         VoicePhase.Listening -> hearing.set(true)
         VoicePhase.ModelReady -> listen()
-        VoicePhase.Thinking, VoicePhase.LookingUp, VoicePhase.Answering -> { interrupt(); listen() }
+        VoicePhase.Thinking, VoicePhase.LookingUp, VoicePhase.Answering -> stop()
+        VoicePhase.Stopped -> listen()
         VoicePhase.Idle -> listen()
+    }
+
+    /** Stop only stops: HQ is told, nothing listens, and the next tap asks again. */
+    private fun stop() {
+        interrupt()
+        _state.update { it.copy(phase = VoicePhase.Stopped) }
     }
 
     fun listen() = run { hearThenAsk() }
@@ -96,6 +110,8 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
                 work()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: Ears.Busy) {
+                refuse(words.s(R.string.voice_mic_busy))
             } catch (e: Exception) {
                 Log.w(TAG, "voice turn failed", e)
                 refuse(words.s(R.string.voice_engine_failed))
@@ -103,11 +119,20 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
         }
     }
 
+    /** Android's dialog answered "Don't allow" once: the button becomes Allow and Type instead is offered. */
+    fun micNeeded() = _state.update { it.copy(phase = VoicePhase.MicNeeded, problem = null) }
+
+    /** Android will not ask again: the sheet says so and points at App info. [still] adds the line for a return with the microphone still off. */
+    fun micBlocked(still: Boolean = false) = _state.update { it.copy(phase = VoicePhase.MicBlocked, problem = if (still) words.s(R.string.voice_mic_still_off) else null) }
+
     fun refuse(problem: String) = _state.update { it.copy(phase = VoicePhase.Idle, problem = problem) }
 
     /** The sheet left the screen: stop hearing, and stop HQ's answer if one is running. */
     fun quiet() {
-        if (_state.value.phase != VoicePhase.Idle) interrupt()
+        val phase = _state.value.phase
+        // Closing keeps HQ working unless the question just went out and no tool has started: then it was a slip.
+        val slip = !worked && SystemClock.elapsedRealtime() - sentAt < SLIP_MS
+        if (phase != VoicePhase.Idle) { if (slip) interrupt() else { job?.cancel(); hearing.set(true) } }
         _state.update { it.copy(phase = VoicePhase.Idle) }
     }
 
@@ -122,7 +147,8 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
             _state.update { VoiceState(waitingPhase(engine().state.value)) }
             return
         }
-        _state.update { VoiceState(VoicePhase.Preparing, reply = it.reply) }
+        if (MicAsk.onCall(app.getSystemService(android.media.AudioManager::class.java)?.mode ?: 0)) return refuse(words.s(R.string.voice_on_call))
+        _state.update { VoiceState(VoicePhase.Preparing, silent = it.silent, threadId = it.threadId) }
         ears.prepare()
         _state.update { it.copy(heard = "", problem = null) }
         val stop = AtomicBoolean(false).also { hearing = it }
@@ -131,19 +157,26 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
             onRecording = { _state.update { it.copy(phase = VoicePhase.Listening) } },
             onPartial = { partial -> _state.update { it.copy(heard = partial) } },
         ).trim()
-        if (said.isEmpty()) return refuse(words.s(R.string.voice_nothing_heard))
+        if (said.isEmpty()) {
+            val silent = _state.value.silent + 1
+            _state.update { it.copy(silent = silent) }
+            return refuse(MicAsk.silenceLine(silent, android.os.Build.VERSION.SDK_INT).let { VoiceWords.silence(words, it) })
+        }
+        _state.update { it.copy(silent = 0) }
         val question = Invocation.strip(said)
         _state.update { it.copy(phase = VoicePhase.Thinking, heard = question, reply = "") }
+        sentAt = SystemClock.elapsedRealtime()
+        worked = false
         turn.ask(question, threadId).collect(::onOutput)
-        _state.update { it.copy(phase = VoicePhase.Idle) }
+        _state.update { if (it.phase == VoicePhase.Stopped) it else it.copy(phase = VoicePhase.Idle) }
     }
 
     private fun onOutput(out: TurnOutput) {
         when (out) {
-            is TurnOutput.Thread -> threadId = out.id
+            is TurnOutput.Thread -> { threadId = out.id; _state.update { it.copy(threadId = out.id) } }
             is TurnOutput.Text -> _state.update { it.copy(phase = VoicePhase.Answering, reply = it.reply + out.chunk) }
             is TurnOutput.Failed -> _state.update { it.copy(problem = out.reason) }
-            TurnOutput.Working -> _state.update { it.copy(phase = VoicePhase.LookingUp) }
+            TurnOutput.Working -> { worked = true; _state.update { it.copy(phase = VoicePhase.LookingUp) } }
             TurnOutput.Done -> Unit
         }
     }
@@ -157,5 +190,6 @@ class VoiceSession(private val app: Context, private val scope: CoroutineScope, 
 
     private companion object {
         const val TAG = "HqVoice"
+        const val SLIP_MS = 3_000L
     }
 }

@@ -60,6 +60,8 @@ data class ChatUiState(
     /** When the socket dropped (epoch milliseconds), so the status line can say how old what is shown is. */
     val offlineSince: Long? = null,
     val draft: String = "",
+    /** Goes up each time a link asks for the composer (hq://chat?compose=1); the field takes focus and the keyboard on every change. */
+    val focusDraft: Int = 0,
     /** The empty chat's chips from HQ (`GET /api/capabilities`); null until it answers. */
     val suggestions: List<Suggestion>? = null,
     val notice: Notice? = null,

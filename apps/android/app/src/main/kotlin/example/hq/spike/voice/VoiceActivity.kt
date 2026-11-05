@@ -4,7 +4,11 @@ import android.Manifest
 import android.app.KeyguardManager
 import example.hq.spike.measure.Counter
 import example.hq.spike.measure.Counters
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.net.Uri
+import android.os.SystemClock
+import example.hq.spike.ui.shell.Links
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -73,8 +77,19 @@ class VoiceActivity : ComponentActivity() {
     /** A press (the first open or a new intent) waits for onResume to start. */
     private var askOnResume = false
 
+    /** App info is open over the sheet; leaving for it must not close the sheet, and coming back re-reads the microphone. */
+    private var awayToSettings = false
+    private var rationaleBefore = false
+    private var askedAt = 0L
+
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) session.listen() else session.refuse(getString(R.string.voice_mic_refused))
+        val after = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+        when (MicAsk.outcome(granted, rationaleBefore, after, SystemClock.elapsedRealtime() - askedAt)) {
+            MicOutcome.Granted -> session.listen()
+            MicOutcome.Needed -> session.micNeeded()
+            MicOutcome.Blocked -> session.micBlocked()
+            MicOutcome.Dismissed -> Unit
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,8 +102,15 @@ class VoiceActivity : ComponentActivity() {
             HqTheme {
                 val state by session.state.collectAsState()
                 val downloads by Downloads.states.collectAsState()
+                androidx.compose.runtime.LaunchedEffect(state.phase == VoicePhase.Thinking || state.phase == VoicePhase.LookingUp) {
+                    if (state.phase == VoicePhase.Thinking || state.phase == VoicePhase.LookingUp) {
+                        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        kotlinx.coroutines.delay(SCREEN_ON_MS)
+                    }
+                    window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
                 val item = remember { VoiceModels(applicationContext).item() }
-                if (unlocked.value) VoiceSheet(state, downloads[item.id] ?: DlState.Ready, item, onOp = { op -> session.engine().perform(op) }, engine = { Downloads.get(item.id) }, onMic = ::micPressed, onClose = ::finish)
+                if (unlocked.value) VoiceSheet(state, downloads[item.id] ?: DlState.Ready, item, onOp = { op -> session.engine().perform(op) }, engine = { Downloads.get(item.id) }, onMic = ::micPressed, onClose = ::finish, onSettings = ::openAppInfo, onOpenChat = ::openChat, onType = ::typeInstead)
             }
         }
         askOnResume = true
@@ -102,6 +124,11 @@ class VoiceActivity : ComponentActivity() {
     /** The unlock prompt can only be asked for by an activity that is showing, so a press is handled here. */
     override fun onResume() {
         super.onResume()
+        if (awayToSettings) {
+            awayToSettings = false
+            if (AssistantRole.micAllowed(this)) session.listen() else session.micBlocked(still = true)
+            return
+        }
         if (!askOnResume || dismissing) return
         askOnResume = false
         unlockThen { micPressed() }
@@ -111,7 +138,7 @@ class VoiceActivity : ComponentActivity() {
         super.onStop()
         // Nothing listens once the sheet is gone: the microphone is only ever open in front of the owner.
         session.quiet()
-        if (!isChangingConfigurations && !dismissing) finish()
+        if (!isChangingConfigurations && !dismissing && !awayToSettings) finish()
     }
 
     override fun onDestroy() {
@@ -121,7 +148,34 @@ class VoiceActivity : ComponentActivity() {
 
     private fun micPressed() {
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-        if (granted) session.micPressed() else askMic.launch(Manifest.permission.RECORD_AUDIO)
+        if (granted) return session.micPressed()
+        if (session.state.value.phase == VoicePhase.MicBlocked) return session.micBlocked()
+        rationaleBefore = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+        askedAt = SystemClock.elapsedRealtime()
+        AssistantRole.markMicAsked(this)
+        askMic.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    /** The chat this question is in, in the main app. Closing the sheet does not stop the answer. */
+    private fun openChat(id: String) {
+        val link = "hq://chat/$id"
+        startActivity(Intent(this, example.hq.spike.ShellActivity::class.java).setData(Uri.parse(link)).putExtra(Links.EXTRA, link).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
+    }
+
+    private fun openAppInfo() {
+        awayToSettings = true
+        try {
+            startActivity(AssistantRole.appInfo(this))
+        } catch (e: ActivityNotFoundException) {
+            awayToSettings = false
+        }
+    }
+
+    /** Type instead: the sheet closes and Chat opens with the keyboard up. The microphone is never opened for it. */
+    private fun typeInstead() {
+        startActivity(Intent(this, example.hq.spike.ShellActivity::class.java).setData(Uri.parse("hq://chat?compose=1")).putExtra(Links.EXTRA, "hq://chat?compose=1").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finish()
     }
 
     /** HQ's notes and tasks are never shown or heard over the lock screen: the owner unlocks first. */
@@ -162,7 +216,7 @@ class VoiceActivity : ComponentActivity() {
 
 /** The sheet. While there is no model on the phone the shared download row and its asks sit where the round button does. */
 @Composable
-internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -> Unit, engine: () -> LargeDownload?, onMic: () -> Unit, onClose: () -> Unit) {
+internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -> Unit, engine: () -> LargeDownload?, onMic: () -> Unit, onClose: () -> Unit, onSettings: () -> Unit = {}, onOpenChat: (String) -> Unit = {}, onType: () -> Unit = {}) {
     val w = rememberWords()
     val needsModel = state.phase == VoicePhase.NeedsModel || state.phase == VoicePhase.Downloading
     Box(Modifier.fillMaxSize().background(Mts.Surface000.copy(alpha = SCRIM_ALPHA)).clickable(onClick = onClose), contentAlignment = Alignment.BottomCenter) {
@@ -177,16 +231,43 @@ internal fun VoiceSheet(state: VoiceState, dl: DlState, item: Item, onOp: (Op) -
             if (state.reply.isNotBlank()) {
                 Text(state.reply, style = HqType.Body, color = Mts.Ink, modifier = Modifier.heightIn(max = REPLY_MAX_HEIGHT.dp).verticalScroll(rememberScrollState()))
             }
-            state.problem?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText) }
+            val waiting = state.phase == VoicePhase.Thinking || state.phase == VoicePhase.LookingUp
+            val late = androidx.compose.runtime.remember(waiting) { androidx.compose.runtime.mutableStateOf(false) }
+            if (waiting) androidx.compose.runtime.LaunchedEffect(Unit) { kotlinx.coroutines.delay(CLOSE_HINT_MS); late.value = true }
+            if (waiting && late.value) Text(w.s(R.string.voice_close_note), style = HqType.BodySm, color = Mts.InkMuted)
+            state.problem?.let { Problem(it) }
+            if (state.phase == VoicePhase.MicBlocked) Text(w.s(R.string.assist_mic_taps), style = HqType.BodySm, color = Mts.InkMuted)
             if (needsModel) {
                 DownloadRow(item, dl, onOp)
                 DownloadDialogs(item, dl, engine)
                 if (state.phase == VoicePhase.NeedsModel) TextButton(onClose, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.confirm_not_now), style = HqType.BodyBold, color = Mts.InkMuted) }
             } else {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { MicButton(w, state.phase, onMic) }
+                if (state.phase == VoicePhase.MicBlocked) {
+                    SheetButton(w.s(R.string.assist_open_android), onSettings)
+                    SheetButton(w.s(R.string.voice_ask_again), onMic)
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { MicButton(w, state.phase, onMic) }
+                }
+                state.threadId?.takeIf { state.phase != VoicePhase.Idle || state.reply.isNotBlank() }?.let { SheetButton(w.s(R.string.voice_open_chat)) { onOpenChat(it) } }
+                val offerType = state.phase == VoicePhase.MicNeeded || state.phase == VoicePhase.MicBlocked || state.silent >= 2
+                if (offerType) SheetButton(w.s(R.string.voice_type_instead), onType)
             }
         }
     }
+}
+
+/** A problem line: amber with an icon, so it is not told by colour alone. */
+@Composable
+private fun Problem(text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+        androidx.compose.material3.Icon(example.hq.spike.ui.shell.HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
+        Text(text, style = HqType.BodySm, color = Mts.Ink)
+    }
+}
+
+@Composable
+private fun SheetButton(label: String, onClick: () -> Unit) {
+    TextButton(onClick, Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(label, style = HqType.BodyBold, color = Mts.Ink) }
 }
 
 @Composable
@@ -202,6 +283,8 @@ private fun MicButton(w: Words, phase: VoicePhase, onMic: () -> Unit) {
     }
 }
 
+private const val CLOSE_HINT_MS = 3_000L
+private const val SCREEN_ON_MS = 30_000L
 private const val SCRIM_ALPHA = 0.5f
 private const val SHEET_RADIUS = 20
 private const val SHEET_PADDING = 20

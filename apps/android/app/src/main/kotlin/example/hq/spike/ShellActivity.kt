@@ -229,7 +229,7 @@ class ShellActivity : ComponentActivity() {
     /** Shows what a link names, over the place it belongs to. Waiting for what is not loaded yet is the view model's job. */
     private fun applyLink(t: LinkTarget) {
         when (t.place) {
-            Place.Chat -> t.id?.let(chat::openLinked)
+            Place.Chat -> { t.id?.let(chat::openLinked); if (t.compose) chat.focusComposer() }
             Place.Inbox -> t.id?.let(inbox::openItem)
             Place.Tasks -> t.id?.let { tasks.openById(it) { } }
             Place.Notes -> { t.path?.let(notes::openNote); if (t.search) notes.actions.onOpenSearch() }

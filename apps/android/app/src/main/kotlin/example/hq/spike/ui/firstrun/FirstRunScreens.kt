@@ -29,7 +29,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -165,10 +168,12 @@ private fun StartStep(ui: FirstRunUi, actions: FirstRunActions) {
         Text(FirstRunWords.START_TITLE, style = Title, color = Mts.Ink)
         OldPhoneWarning()
     } else {
-        Heading(FirstRunWords.START_TITLE, FirstRunWords.START_BODY)
+        Text(FirstRunWords.START_TITLE, style = Title, color = Mts.Ink)
     }
     ui.error?.let { Message(it) }
     StartNotifCard()
+    AssistantCard()
+    if (!ui.moved) Text(stringResource(R.string.assist_one_machine), style = HqType.BodySm, color = Mts.InkMuted)
     GreenPill(if (ui.busy) FirstRunWords.STARTING else FirstRunWords.START, busy = ui.busy, onClick = actions.onStart)
     TextAction(FirstRunWords.BACK, enabled = !ui.busy, onClick = actions.onBack)
 }
@@ -289,3 +294,36 @@ private fun openLink(context: Context, url: String) {
 private fun displayName(context: Context, uri: Uri): String? = runCatching {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
 }.getOrNull()
+
+/** The optional "make HQ your phone's assistant" card. Shown only where the phone has the setting; it never blocks Start HQ. */
+@Composable
+private fun AssistantCard() {
+    val context = LocalContext.current
+    val facts = example.hq.spike.ui.settings.rememberAssistantFacts()
+    var steps by remember { mutableStateOf(false) }
+    var skipped by remember { mutableStateOf(false) }
+    if (!facts.available) return
+    if (facts.held) androidx.compose.runtime.LaunchedEffect(Unit) { example.hq.spike.measure.Counters.get(context).bump(example.hq.spike.measure.Counter.AssistantChosen) }
+    val shape = RoundedCornerShape(16.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (facts.held) Mts.Ink else Mts.Line, shape).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Icon(if (facts.held) example.hq.spike.ui.shell.HqIcons.Check else example.hq.spike.ui.shell.HqIcons.Mic, null, Modifier.size(24.dp), tint = Mts.Ink)
+            Text(stringResource(if (facts.held) R.string.assist_card_chosen_title else R.string.assist_card_title), style = HqType.BodyBold, color = Mts.Ink)
+        }
+        if (facts.held) {
+            val size = example.hq.spike.download.DownloadRules.sizeMb(example.hq.spike.voice.VoiceModels.SIZE_BYTES)
+            Text(stringResource(R.string.assist_card_chosen_body, stringResource(R.string.dl_mb, size)), style = HqType.BodySm, color = Mts.InkMuted)
+        } else {
+            Text(stringResource(R.string.assist_optional), style = HqType.Caption, color = Mts.InkMuted)
+            Text(stringResource(R.string.assist_card_body), style = HqType.BodySm, color = Mts.InkMuted)
+            if (skipped) Text(stringResource(R.string.assist_card_not_set), style = HqType.BodySm, color = Mts.InkMuted)
+            OutlinePill(stringResource(if (skipped) R.string.assist_try_again else R.string.assist_card_set_up)) { steps = true }
+        }
+    }
+    if (steps) androidx.compose.ui.window.Dialog(onDismissRequest = { steps = false; skipped = true }) {
+        Column(Modifier.clip(shape).background(Mts.Surface100)) { example.hq.spike.ui.settings.AssistantTapSteps { steps = false; skipped = true } }
+    }
+}

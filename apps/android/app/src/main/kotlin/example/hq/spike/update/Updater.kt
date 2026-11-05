@@ -51,6 +51,8 @@ object Updater {
     private const val KEY_OFFERED = "offered_code"
     private const val KEY_SAVE_COPY = "switch_save_copy"
     private const val KEY_START_COVER = "switch_start_cover_removal"
+    private const val KEY_LOCK_ASSIST = "switch_lock_screen_assistant"
+    private const val KEY_LOCK_OFF_MODELS = "switch_lock_screen_assist_off_models"
     private const val KEY_PENDING = "pending_code"
     private const val KEY_INSTALLING = "installing_code"
     private const val KEY_INSTALLING_NAME = "installing_name"
@@ -474,7 +476,8 @@ object Updater {
             val manifest = UpdateLogic.parse(manifestFile.readText()) ?: throw UpdateException("The update information is not in a form this version understands.")
             val p = prefs(context)
             if (!UpdateLogic.seqOk(manifest, p.getLong(KEY_SEQ, 0))) return null
-            p.edit().putLong(KEY_SEQ, manifest.seq).putBoolean(KEY_SAVE_COPY, manifest.switches.saveCopy).putBoolean(KEY_START_COVER, manifest.switches.startCoverRemoval).apply()
+            p.edit().putLong(KEY_SEQ, manifest.seq).putBoolean(KEY_SAVE_COPY, manifest.switches.saveCopy).putBoolean(KEY_START_COVER, manifest.switches.startCoverRemoval)
+                .putBoolean(KEY_LOCK_ASSIST, manifest.switches.lockScreenAssistant).putStringSet(KEY_LOCK_OFF_MODELS, manifest.switches.lockScreenAssistOffModels.toSet()).apply()
             val offered = p.getLong(KEY_OFFERED, 0) == manifest.versionCode
             val verdict = UpdateLogic.verdict(manifest, installedCode(context), Build.VERSION.SDK_INT, bucket(context), channel(context) == UpdateChannel.Main, offered)
             if (verdict is UpdateVerdict.Available || verdict is UpdateVerdict.NeedsNewerAndroid || verdict is UpdateVerdict.InstalledWithdrawn) {
@@ -546,6 +549,10 @@ object Updater {
 
     /** False brings the old start cover back on every start; the signed switch is the way back if the status line alone proves too quiet. */
     fun startCoverRemoval(context: Context): Boolean = prefs(context).getBoolean(KEY_START_COVER, true)
+
+    /** The signed lock-screen assistant switch for this phone model: off until a verified manifest turns it on, and off again for a model it lists. */
+    fun lockScreenAssistAllowed(context: Context, model: String = Build.MODEL): Boolean =
+        Switches(lockScreenAssistant = prefs(context).getBoolean(KEY_LOCK_ASSIST, false), lockScreenAssistOffModels = prefs(context).getStringSet(KEY_LOCK_OFF_MODELS, null).orEmpty().toList()).lockScreenAssistAllowed(model)
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

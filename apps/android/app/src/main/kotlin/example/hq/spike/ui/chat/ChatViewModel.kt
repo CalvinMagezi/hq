@@ -318,6 +318,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Opens a chat a link names, but only one that is in the list: an unknown id would blank the open chat and send the next message to nothing. */
+    fun focusComposer() = _state.update { it.copy(focusDraft = it.focusDraft + 1) }
+
     fun openLinked(id: String) {
         if (_state.value.chats.any { it.id == id }) { openThread(id); return }
         viewModelScope.launch {

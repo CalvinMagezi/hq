@@ -100,9 +100,11 @@ higher or lower than the board.
 
 ## Hey HQ: the phone's assistant
 
-AgentHQ can take Google's place as the phone's assistant: Settings, Apps, Choose default apps, Digital
-assistant app, AgentHQ. Holding Home (or the assist gesture) then opens a voice sheet over whatever is on
-screen. It does not open over the lock screen (unlock first). It listens, shows what it heard, sends those
+AgentHQ can take Google's place as the phone's assistant. The app offers it on the last first-run step and in
+Settings, Phone assistant, which open Android's own page (Digital assistant app, AgentHQ) and read the answer
+back; it is optional and checked live, never stored. Holding Home (or the assist gesture) then opens a voice sheet over whatever is on
+screen. It does not open over the lock screen (unlock first): the signed `lockScreenAssistant` switch is off, and Settings
+says so. Stop only stops; closing the sheet keeps a running answer in the chat (Open in chat). It listens, shows what it heard, sends those
 words to HQ's chat with a note asking for a short plain-text answer, and shows the reply as it streams
 ("Looking it up" while HQ runs a tool first). Answers are text only: the on-device voice was tried and
 retired. Tap the button to stop listening early, to interrupt the reply, or to ask a follow-up in the same

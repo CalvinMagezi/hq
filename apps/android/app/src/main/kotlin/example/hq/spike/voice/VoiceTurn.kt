@@ -72,7 +72,7 @@ class VoiceTurn(
         listening.await()
         if (!post(VOICE_CONTEXT + transcript, threadId, clientId)) {
             reading.cancel()
-            send(TurnOutput.Failed(NOT_CONNECTED))
+            send(TurnOutput.Failed(HQ_STOPPED))
             return@channelFlow
         }
         suspend fun endWith(reason: String) {
@@ -85,12 +85,12 @@ class VoiceTurn(
                 // A frame can be queued before the socket finishes opening; only a drop after it opened counts.
                 connected.first { it }
                 connected.first { !it }
-                endWith(CONNECTION_LOST)
+                endWith(RESTARTING)
             }
             while (reading.isActive) {
                 delay(WATCH_TICK_MS)
                 val limit = if (started.get()) quietWaitMs else startWaitMs
-                if (System.currentTimeMillis() - lastHeard.get() > limit) endWith(if (started.get()) TOO_QUIET else NOT_STARTED)
+                if (System.currentTimeMillis() - lastHeard.get() > limit) endWith(if (started.get()) STILL_WORKING else NO_REPLY)
             }
         }
         reading.join()
@@ -105,7 +105,7 @@ class VoiceTurn(
             return if (event.clientId == clientId) Step(listOf(TurnOutput.Failed(rejected(event))), ends = true) else Step()
         }
         // Events were dropped for a slow reader; this turn's end may be among them.
-        if (event is ChatEvent.Lagged) return Step(listOf(TurnOutput.Failed(MISSED)), ends = true)
+        if (event is ChatEvent.Lagged) return Step(listOf(TurnOutput.Failed(LOST_PART)), ends = true)
         if (thread == null || threadOf(event) != thread) return Step()
         return when (event) {
             is ChatEvent.Text -> Step(listOf(TurnOutput.Text(event.text)), ours = true)
@@ -145,11 +145,11 @@ class VoiceTurn(
         /** Tools can run for a while, but each step reports; this long with nothing at all is a stuck turn. */
         const val QUIET_WAIT_MS = 180_000L
         private const val WATCH_TICK_MS = 500L
-        const val NOT_CONNECTED = "HQ is not answering yet. Try again in a moment."
-        const val CONNECTION_LOST = "The connection to HQ dropped before the answer finished."
-        const val NOT_STARTED = "HQ did not pick up the question. Try again in a moment."
-        const val TOO_QUIET = "HQ went quiet in the middle of the answer. It may still finish in the chat."
-        const val MISSED = "Part of the answer was missed on the way. The full answer is in the chat."
+        const val HQ_STOPPED = "Couldn't send your question. HQ has stopped. Start HQ to try again."
+        const val RESTARTING = "Couldn't get the whole answer. HQ is restarting. Try again in a moment."
+        const val NO_REPLY = "Couldn't send your question. HQ didn't answer in time. Try again."
+        const val STILL_WORKING = "HQ is still working on it. The answer will be in the chat."
+        const val LOST_PART = "Couldn't show the whole answer here. Open in chat to read it."
         const val BUSY = "HQ is still answering the last question."
         const val NOT_ACCEPTED = "HQ did not accept the question."
     }
