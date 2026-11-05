@@ -63,12 +63,17 @@ pub fn owner_has_used(conn: &Connection, tools: &[&str]) -> Result<Vec<String>> 
     Ok(used)
 }
 
-/// A message the person typed, with its time in unix seconds.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A message in the person's chats, with its time in unix seconds.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UserMessage {
     pub at: i64,
     pub text: String,
+    /// An outside MCP client asked it through `hq_ask`; the person did not type it.
+    pub from_client: bool,
 }
+
+/// How `hq_ask` marks the question it saves (`meta.source.kind`).
+const CLIENT_SOURCE_SQL: &str = "COALESCE(json_extract(meta, '$.source.kind'), '') = 'mcp'";
 
 fn parse_time(raw: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(raw)
@@ -86,7 +91,9 @@ fn rfc3339(ts: i64) -> String {
 pub fn first_user_message_at(conn: &Connection) -> Result<Option<i64>> {
     let raw: Option<String> = conn
         .query_row(
-            "SELECT MIN(created_at) FROM chat_messages WHERE role = 'user'",
+            &format!(
+                "SELECT MIN(created_at) FROM chat_messages WHERE role = 'user' AND NOT {CLIENT_SOURCE_SQL}"
+            ),
             [],
             |r| r.get(0),
         )
@@ -95,25 +102,40 @@ pub fn first_user_message_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(raw.as_deref().and_then(parse_time))
 }
 
-/// The person's messages at or after `since`, oldest first, at most [`MAX_MESSAGES`].
+/// User-role messages at or after `since`, oldest first, at most [`MAX_MESSAGES`]. Questions an
+/// MCP client asked are included and marked, so a caller decides; [`persons_own`] drops them.
 pub fn user_messages_since(conn: &Connection, since: i64) -> Result<Vec<UserMessage>> {
-    let mut stmt = conn.prepare(
-        "SELECT created_at, content FROM chat_messages
+    let mut stmt = conn.prepare(&format!(
+        "SELECT created_at, content, {CLIENT_SOURCE_SQL} FROM chat_messages
           WHERE role = 'user' AND created_at >= ?1
-          ORDER BY created_at ASC LIMIT ?2",
-    )?;
+          ORDER BY created_at ASC LIMIT ?2"
+    ))?;
     let rows = stmt.query_map(params![rfc3339(since), MAX_MESSAGES], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, bool>(2)?,
+        ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (at, text) = row?;
+        let (at, text, from_client) = row?;
         // Rows written with another offset compare differently as text; the parsed time decides.
         if let Some(at) = parse_time(&at).filter(|t| *t >= since) {
-            out.push(UserMessage { at, text });
+            out.push(UserMessage {
+                at,
+                text,
+                from_client,
+            });
         }
     }
     Ok(out)
+}
+
+/// The messages the person typed themselves.
+pub fn persons_own(mut messages: Vec<UserMessage>) -> Vec<UserMessage> {
+    messages.retain(|m| !m.from_client);
+    messages
 }
 
 /// Phrases that mean the last answer missed: too long, wrong, or not what was asked. English
@@ -230,7 +252,23 @@ mod tests {
                 "reply before the first?",
             );
             say(c, "user", NOW - 60, "Make it shorter please");
-            assert_eq!(first_user_message_at(c)?, Some(NOW - 3 * DAY_SECS));
+            c.execute(
+                "INSERT INTO chat_messages (message_id, thread_id, role, content, created_at, meta)
+                 VALUES ('mcp', 't', 'user', 'asked by a client', ?1, ?2)",
+                params![
+                    rfc3339(NOW - 4 * DAY_SECS),
+                    r#"{"source":{"kind":"mcp","caller":"c"}}"#
+                ],
+            )?;
+            assert_eq!(
+                first_user_message_at(c)?,
+                Some(NOW - 3 * DAY_SECS),
+                "a client's question is not the person writing"
+            );
+            let all = user_messages_since(c, NOW - 5 * DAY_SECS)?;
+            assert_eq!(all.len(), 3);
+            assert!(all[0].from_client);
+            assert_eq!(persons_own(all).len(), 2);
             let recent = user_messages_since(c, NOW - DAY_SECS)?;
             assert_eq!(recent.len(), 1);
             assert_eq!(recent[0].at, NOW - 60);
@@ -253,7 +291,7 @@ mod tests {
     fn active_days_count_distinct_days_in_the_window() {
         let at = |t| UserMessage {
             at: t,
-            text: String::new(),
+            ..Default::default()
         };
         let day = NOW.div_euclid(DAY_SECS) * DAY_SECS;
         let msgs = vec![

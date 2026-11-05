@@ -250,8 +250,15 @@ Where the build of phases 0 and 1 differs from the text above:
   third time in two weeks) so `hq offers replay` can run them over past chats. It prints, per
   detector, how often it fired, how often HQ used that capability within ten minutes anyway, and
   how often it would have been the one offer under that reply. Nothing shows an offer yet. On a
-  phone, `scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` run them in the
-  app's sandbox so only the counts leave it.
+  phone, `scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` read them from the
+  phone's HQ so only the counts leave it.
+- Phase 2, first step (measurement on a release phone): a release build is not debuggable, so the
+  reports moved behind `GET /api/adoption` and `GET /api/offers/replay` (web or device token), and
+  `phone-hq.sh` signs a computer in as a device and reads them over the bridge. The replay prints
+  phase 1's rules beside the tuned ones (the person's own messages only, ready capabilities only,
+  offers spaced by `SAME_OFFER_GAP_SECS` and `ANY_OFFER_GAP_SECS`, cues as whole words, tighter
+  lists, dated to-dos and file requests), so one run on the phone gives the before and the after.
+  The offers themselves, the reminders and the decline memory follow in the next pull request.
 
 **Phase 2: offers.** The post-turn detectors (written, tuned with `hq offers replay`), the one-line
 offer under a reply, Yes/Not now, and the 30-day memory of declines. The date detector and the reminder ship here. Offers are chosen by HQ

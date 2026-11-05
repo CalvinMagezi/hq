@@ -28,8 +28,9 @@ log in `.vault/_data/vault.db`), with no model.
 | Ordering the empty chat's chips, untried capabilities first (`GET /api/capabilities`) | the owner's web app and phone app | no |
 | The weekly digest in the inbox | the owner's web inbox and phone app | no |
 | `hq adoption` and `hq offers replay`, the same numbers on the command line | the terminal of the machine HQ runs on | no |
+| `GET /api/adoption` and `GET /api/offers/replay`, the same numbers for `scripts/phone-hq.sh` | a computer the owner signed in as a device | counts only, to that computer |
 
-`/api/capabilities` sits behind the web token or a signed-in device token
+These routes sit behind the web token or a signed-in device token
 (`docs/security/WEB_AUTH.md`); MCP keys and claude.ai connector tokens cannot reach it.
 
 ## Where it may not go
@@ -52,9 +53,10 @@ log in `.vault/_data/vault.db`), with no model.
 
 ## Reading the numbers from a phone
 
-`scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` run the two commands on a
-phone over `adb`, inside the app's sandbox and with the phone's own binary. Only their output
-crosses the cable, and that output is counts and the catalog's own wording, never a message.
+`scripts/phone-hq.sh adoption` and `scripts/phone-hq.sh offers replay` ask the phone's HQ for the
+two reports over the bridge (`GET /api/adoption`, `GET /api/offers/replay`, with a device token the
+owner hands out from Settings, Devices and can sign out there). The phone computes them; only the
+answer crosses, and that answer is counts and the catalog's own wording, never a message.
 Do not copy `vault.db` or chat history off the phone to compute these elsewhere: a laptop session,
 and above all an AI coding session, would then hold the person's chats, and a coding agent sends
 what it reads to its model provider.
