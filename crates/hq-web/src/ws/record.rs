@@ -63,6 +63,11 @@ pub(super) struct ReplyToSave {
 }
 
 impl TurnRecord {
+    /// The reply's text so far, for a page that lost its socket mid-reply.
+    pub(super) fn content_so_far(&self) -> &str {
+        &self.content
+    }
+
     pub(super) fn with_driver(driver: Value) -> Self {
         Self {
             driver: Some(driver),

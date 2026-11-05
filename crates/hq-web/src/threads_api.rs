@@ -103,6 +103,16 @@ pub(crate) const UNDO_WINDOW_SECS: i64 = 10 * 60;
 /// What an Undo past the window, or after a change elsewhere, answers.
 pub(crate) const UNDO_TOO_LATE: &str = "changed";
 
+/// `POST /api/threads/{id}/stop`: Stop over HTTP as well as the socket, so a page whose socket dropped
+/// can still end a reply. Ends it for every tab, keeping what it wrote.
+pub(crate) async fn stop_thread_handler(
+    State(state): State<Arc<WsState>>,
+    Path(thread_id): Path<String>,
+) -> Response {
+    crate::ws::stop_chat_turn(&state, &thread_id).await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
 /// `POST /api/threads/{id}/unarchive`: the Undo of an archive, within the window.
 pub(crate) async fn unarchive_thread_handler(
     State(state): State<Arc<WsState>>,

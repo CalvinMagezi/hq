@@ -395,6 +395,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             axum::routing::post(threads_api::unarchive_thread_handler),
         )
         .route(
+            "/api/threads/{thread_id}/stop",
+            axum::routing::post(threads_api::stop_thread_handler),
+        )
+        .route(
             "/api/notifications",
             get(notifications_api::list_notifications_handler),
         )
