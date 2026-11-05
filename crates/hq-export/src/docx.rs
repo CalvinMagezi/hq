@@ -83,7 +83,11 @@ pub fn to_docx(
     asset_root: Option<&Path>,
 ) -> Result<Vec<u8>, ExportError> {
     let accent = theme.accent.trim_start_matches('#').to_owned();
-    let accent = if matches!(accent.len(), 6 | 8) {
+    // A colour that is not hex digits falls back to the default rather than being sliced.
+    let hex = accent.bytes().all(|b| b.is_ascii_hexdigit());
+    let accent = if !hex {
+        "1F4E79".to_owned()
+    } else if matches!(accent.len(), 6 | 8) {
         accent[..6].to_owned()
     } else if accent.len() == 3 {
         accent.chars().flat_map(|c| [c, c]).collect()
@@ -613,6 +617,17 @@ mod tests {
             None,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn an_accent_that_is_not_hex_falls_back_instead_of_panicking() {
+        // Eight bytes whose sixth falls inside a character: slicing it at 6 used to panic.
+        let theme = Theme {
+            accent: "#ab€€".into(),
+            ..Theme::default()
+        };
+        assert!(!"ab€€".is_char_boundary(6));
+        to_docx(&Document::from_markdown("Title", "Body"), &theme, None).unwrap();
     }
 
     fn part(bytes: &[u8], name: &str) -> String {

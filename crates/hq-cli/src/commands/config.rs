@@ -113,7 +113,7 @@ fn print_backends(config: &HqConfig) {
 
 fn mask_key(key: &Option<String>) -> String {
     match key {
-        Some(k) if k.len() > 8 => format!("{}...", &k[..8]),
+        Some(k) if k.chars().count() > 8 => format!("{}...", hq_core::text::truncate_chars(k, 8)),
         Some(k) if !k.is_empty() => format!("{}...", k),
         _ => "(not set)".to_string(),
     }
@@ -170,4 +170,19 @@ fn set_config(key: &str, value: &str) -> Result<()> {
     hq_core::fs_private::write_private(&config_path, content)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_is_masked_by_characters_not_bytes() {
+        assert_eq!(mask_key(&Some("sk-or-v1-abcdef".into())), "sk-or-v1...");
+        // Byte 8 falls inside the third 3-byte character, where a byte cut used to panic.
+        let odd = "€€€abcdefgh".to_string();
+        assert!(!odd.is_char_boundary(8));
+        assert_eq!(mask_key(&Some(odd)), "€€€abcde...");
+        assert_eq!(mask_key(&None), "(not set)");
+    }
 }

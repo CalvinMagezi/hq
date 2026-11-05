@@ -709,11 +709,7 @@ pub fn write_daemon_status(vault_path: &Path, tasks: &[DaemonTask], started_at: 
     );
     for t in tasks {
         let err_str = t.last_error.as_deref().unwrap_or("-");
-        let err_display = if err_str.len() > 60 {
-            &err_str[..60]
-        } else {
-            err_str
-        };
+        let err_display = hq_core::text::truncate_chars(err_str, 60);
         md.push_str(&format!(
             "| `{}` | {} | {} | {} | {} | {} | {} | {} |\n",
             t.name,
@@ -1046,6 +1042,29 @@ mod lite_tests {
             ..full.clone()
         };
         assert!(accept_reload(&full, tweaked, &no_env).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    /// The status table quotes each task's last error, cut to 60 characters. Errors here carry
+    /// em dashes, and a byte cut inside one used to panic the status writer.
+    #[test]
+    fn a_last_error_with_a_multibyte_character_at_the_cut_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut task = DaemonTask::new("t", Duration::from_secs(60), Duration::from_secs(5));
+        // 59 ASCII bytes, then a 3-byte em dash that straddles byte 60.
+        task.last_error = Some(format!("{} — and more after the cut", "e".repeat(58)));
+        assert!(!task.last_error.as_deref().unwrap().is_char_boundary(60));
+
+        write_daemon_status(dir.path(), &[task], "now");
+
+        let md = std::fs::read_to_string(dir.path().join("DAEMON-STATUS.md")).unwrap();
+        let row = md.lines().find(|l| l.starts_with("| `t`")).unwrap();
+        assert!(row.contains(&format!("{} —", "e".repeat(58))), "{row}");
+        assert!(!row.contains("and more"), "{row}");
     }
 }
 
