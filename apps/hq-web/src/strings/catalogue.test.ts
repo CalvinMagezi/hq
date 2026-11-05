@@ -1,16 +1,25 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { ANDROID_OUT, androidFile, load, placeholders, WEB_OUT, webFile } from '../../../../scripts/strings/build'
+import { ANDROID_OUT, androidFile, load, placeholders, WEB_OUT, webFile, webKeys } from '../../../../scripts/strings/build'
 import { t, tn } from '.'
 import { inlineCounts, inlineStrings } from '../../../../scripts/strings/inline'
 import baseline from './inline-baseline.json'
+
+/** Reading every web source to pick the web's keys takes a few seconds on a busy machine. */
+const SOURCE_SCAN_MS = 30_000
 
 describe('the catalogue', () => {
   const cat = load()
 
   test('the generated web and phone files are current', () => {
-    expect(readFileSync(WEB_OUT, 'utf8')).toBe(webFile(cat))
+    expect(readFileSync(WEB_OUT, 'utf8')).toBe(webFile(webKeys(cat)))
     expect(readFileSync(ANDROID_OUT, 'utf8')).toBe(androidFile(cat))
+  }, SOURCE_SCAN_MS)
+
+  test("the web file leaves the phone's own sentences out, and keeps keys the code builds", () => {
+    const code = "t('settings_title') + t(`note_export_${kind}`)"
+    const kept = Object.keys(webKeys({ settings_title: 'Settings', note_export_pdf: 'PDF', voice_mic_needed: 'x' }, code))
+    expect(kept).toEqual(['settings_title', 'note_export_pdf'])
   })
 
   test('every plural form uses the same names', () => {

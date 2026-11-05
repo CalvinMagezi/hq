@@ -12,14 +12,18 @@ function fill(text: string, params: Params): string {
 
 /** One whole sentence by key, with its names, numbers and times filled in. */
 export function t(key: StringKey, params: Params = {}): string {
-  return fill(en[key] as string, params)
+  const text = en[key] as string | undefined
+  // A key built at run time that the web's share of the catalogue left out: never a blank page.
+  if (text === undefined) return key
+  return fill(text, params)
 }
 
 const rules = new Intl.PluralRules('en')
 
 /** A plural sentence: the form is chosen by `count`, which also fills `{n}`. */
 export function tn(key: PluralKey, count: number, params: Params = {}): string {
-  const forms = en[key] as Record<string, string>
+  const forms = en[key] as Record<string, string> | undefined
+  if (forms === undefined) return key
   const form = rules.select(count)
   return fill(forms[form] ?? forms.other, { n: count, ...params })
 }
