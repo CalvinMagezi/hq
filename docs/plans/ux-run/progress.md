@@ -24,6 +24,7 @@ Ask for them in one batch before the wave that needs each. Record the answer and
 | L1 | Yes: the losing tools and commands as listed below | 2026-11-05 |
 | L2 | Yes: a session's command policy keeps saying yes to a losing command its own rules allow | 2026-11-05 |
 | L3 | Yes: a command dialog cut too short to read counts as losing for automatic answers | 2026-11-05 |
+| Locked hold log | Skipped for now: the A32's lock screen has no Home button to hold. Wave 3 ships on N21's path: the unlocked assistant, the lock-screen switch off (signed channel `lockScreenAssistant` false), card B in Settings. A later Pass can turn the switch on without a build | 2026-11-05 |
 | B11 (resolutions.md) | Approved as recommended: "This window", saved copy and outbox keyed by HQ id, "Saved in HQ Hub at 14:32", no web push, HQ Hub system notices | 2026-11-05 |
 
 ## Web wave 0 (live bugs and shared parts)
@@ -107,7 +108,7 @@ the safer side.
 
 ### Phone wave 3
 
-- [ ] Waits for the owner's locked Home hold log on the A32 (HQ as the assistant, a PIN set), `mobile/device-checks.md`.
+- [ ] Proceeding without the locked hold log (owner, 2026-11-05): N21's path, the lock-screen switch off.
 
 ### Server parts for wave 4 (built ahead)
 
