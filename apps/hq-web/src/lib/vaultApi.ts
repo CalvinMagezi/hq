@@ -87,11 +87,15 @@ export async function getVaultRoot(): Promise<{ path: string }> {
   return { path: res.vault_path }
 }
 
-export async function searchNotes(query: string): Promise<{ results: SearchHit[] }> {
+/** The address of a notes search; HQ applies `folder` before the limit. */
+export function searchPath(query: string, folder?: string | null): string {
+  const scope = folder ? `&folder=${encodeURIComponent(folder)}` : ''
+  return `/api/search?q=${encodeURIComponent(query)}&limit=${SEARCH_LIMIT}${scope}`
+}
+
+export async function searchNotes(query: string, folder?: string | null): Promise<{ results: SearchHit[] }> {
   if (!query.trim()) return { results: [] }
-  const res = await hqJson<{ results: Array<Record<string, any>> }>(
-    `/api/search?q=${encodeURIComponent(query)}&limit=${SEARCH_LIMIT}`,
-  )
+  const res = await hqJson<{ results: Array<Record<string, any>> }>(searchPath(query, folder))
   return {
     results: (res.results ?? []).map((r) => ({
       notePath: r.note_path,

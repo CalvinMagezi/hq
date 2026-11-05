@@ -1,0 +1,59 @@
+// What an Inbox card is and says (docs/plans/ux-run/web/wave-4/05-inbox.md): its kind, whether the
+// request ran out, why an answer failed, and the notifications card's 7 day "Not now".
+
+import { t } from '~/strings'
+import type { NotificationItem } from './notificationsApi'
+
+export type CardKind = 'sign_in' | 'question' | 'approval' | 'task_check' | 'stuck' | 'update'
+
+/** A request waits 24 hours for its answer, then lapses (resolutions.md C-7). */
+export const REQUEST_LIFETIME_MS = 24 * 60 * 60 * 1000
+export const NOTIFY_HIDE_MS = 7 * 24 * 60 * 60 * 1000
+export const NOTIFY_HIDDEN_KEY = 'hq-notify-card-until'
+
+const HTTP_CONFLICT = 409
+
+export function cardKind(n: NotificationItem): CardKind {
+  if (n.metadata.sign_in) return 'sign_in'
+  if (n.metadata.dialog) return 'question'
+  if (n.metadata.approval) return 'approval'
+  const source = n.metadata.extra?.source_task
+  if (source === 'task_ready_for_review') return 'task_check'
+  if (source === 'helper_stuck') return 'stuck'
+  return n.kind === 'action_needed' ? 'approval' : 'update'
+}
+
+/** An approval or a helper's question nobody answered in 24 hours: no buttons, just the line. */
+export function lapsed(n: NotificationItem, now: number = Date.now()): boolean {
+  if (n.state !== 'pending') return false
+  const kind = cardKind(n)
+  if (kind !== 'approval' && kind !== 'question') return false
+  const made = new Date(n.created_at).getTime()
+  return Number.isFinite(made) && now - made > REQUEST_LIFETIME_MS
+}
+
+/** The words for a failed answer: refused (the question changed) is not failed (HQ did not answer). */
+export function answerErrorLine(err: unknown): string {
+  const status = (err as { status?: number } | null)?.status
+  if (status === HTTP_CONFLICT) return t('fail_send_answer_changed')
+  if (err instanceof TypeError) return t('fail_send_answer_unreachable')
+  if (typeof status === 'number') return t('fail_send_answer_no_reply')
+  return t('fail_answer_refused')
+}
+
+export function notifyCardHidden(now: number = Date.now(), store: Pick<Storage, 'getItem'> = localStorage): boolean {
+  try {
+    return now < Number(store.getItem(NOTIFY_HIDDEN_KEY) ?? 0)
+  } catch {
+    return false
+  }
+}
+
+/** Not now hides the card for 7 days. */
+export function hideNotifyCard(now: number = Date.now(), store: Pick<Storage, 'setItem'> = localStorage) {
+  try {
+    store.setItem(NOTIFY_HIDDEN_KEY, String(now + NOTIFY_HIDE_MS))
+  } catch {
+    // Blocked storage: the card returns next visit.
+  }
+}

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { NotificationItem, NotificationDialog } from '~/lib/notificationsApi'
 import { ApprovalCard } from '~/components/ui/ApprovalCard'
 import { t } from '~/strings'
+import { answerErrorLine } from '~/lib/inboxCard'
 import { answerDecision } from '~/lib/taskDecisionsApi'
 
 /** The dialog an agent waits at, when this notice is about one nobody has answered yet. */
@@ -33,7 +34,7 @@ export function DialogAnswer({
       await answerDecision(notification.id, choice)
       onAnswered(notification.id, choice)
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('fail_answer_refused'))
+      setError(answerErrorLine(e))
     } finally {
       setBusy(false)
     }

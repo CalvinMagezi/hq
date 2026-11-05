@@ -3,16 +3,23 @@ import type { KeyboardEvent } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { searchNotes, type SearchHit } from '~/lib/vaultApi'
 import { searchDebounceMs } from '~/lib/dataUsage'
-
-const SEARCH_DEBOUNCE_MS = 200
+import { SEARCH_DEBOUNCE_MS } from '~/lib/search'
 
 /** Debounced vault search with arrow, Enter and Escape handling for the search input. */
-export function useVaultSearch(onClose: () => void) {
+export function useVaultSearch(onClose: () => void, folder?: string | null) {
     const [query, setQuery] = useState('')
     const [results, setResults] = useState<SearchHit[]>([])
     const [isLoading, setIsLoading] = useState(false)
+    const [failed, setFailed] = useState(false)
     const [selectedIndex, setSelectedIndex] = useState(0)
     const navigate = useNavigate()
+    const [retry, setRetry] = useState(0)
+    // The device coming back online runs the same search again by itself; the overlay calls `again` when HQ is back.
+    const again = useCallback(() => setRetry((n) => n + 1), [])
+    useEffect(() => {
+        window.addEventListener('online', again)
+        return () => window.removeEventListener('online', again)
+    }, [again])
 
     const reset = useCallback(() => {
         setQuery('')
@@ -54,10 +61,13 @@ export function useVaultSearch(onClose: () => void) {
         setSelectedIndex(0)
         const timer = setTimeout(async () => {
             try {
-                const data = await searchNotes(q)
-                if (!controller.signal.aborted) setResults(data.results)
+                const data = await searchNotes(q, folder)
+                if (!controller.signal.aborted) {
+                    setResults(data.results)
+                    setFailed(false)
+                }
             } catch {
-                // Keep the previous results on a failed search.
+                if (!controller.signal.aborted) setFailed(true)
             } finally {
                 if (!controller.signal.aborted) setIsLoading(false)
             }
@@ -66,7 +76,7 @@ export function useVaultSearch(onClose: () => void) {
             clearTimeout(timer)
             controller.abort()
         }
-    }, [query])
+    }, [query, folder, retry])
 
-    return { query, setQuery, results, isLoading, selectedIndex, openResult, onKeyDown, reset }
+    return { query, setQuery, results, isLoading, failed, again, selectedIndex, openResult, onKeyDown, reset }
 }

@@ -1,6 +1,8 @@
 import { ApprovalCard } from '~/components/ui/ApprovalCard'
 import { t } from '~/strings'
-import React from 'react'
+import React, { useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import { answerErrorLine, cardKind, lapsed } from '~/lib/inboxCard'
 import {
   CheckCircle2,
   XCircle,
@@ -30,12 +32,23 @@ interface Props {
 
 export function NotificationCard({
   notification,
-  onSelect,
   onAction,
   onAnswered,
   loadingAction,
 }: Props) {
   const isPending = notification.state === 'pending'
+  const [failure, setFailure] = useState<string | null>(null)
+  const kind = cardKind(notification)
+  const ranOut = lapsed(notification)
+  const stuckOpen = kind === 'stuck' && isPending && !ranOut
+  const act = async (id: string, action: string) => {
+    setFailure(null)
+    try {
+      await onAction(id, action)
+    } catch (e) {
+      setFailure(answerErrorLine(e))
+    }
+  }
   const dialog = openDialog(notification)
   const signInId = notification.metadata.sign_in?.device_id
   const devices = useQuery({ queryKey: ['auth-devices'], queryFn: listDevices, enabled: !!signInId && isPending })
@@ -68,7 +81,7 @@ export function NotificationCard({
       <SignInActions
         device={device}
         busy={loadingAction !== null}
-        onItWasMe={() => void onAction(notification.id, 'approve')}
+        onItWasMe={() => void act(notification.id, 'approve')}
         onSignOut={async () => {
           await signOutDevice(signInId)
           toastAlert(t('sign_out_device_done', { device: device ?? t('new_signin_unknown') }))
@@ -123,9 +136,9 @@ export function NotificationCard({
       {/* Title & Description */}
       <div className="mb-3.5">
         <h3 className="text-sm font-semibold text-white break-words group-hover:text-emerald-300 transition-colors">
-          <button type="button" onClick={() => onSelect(notification)} className="text-left" aria-label={t('inbox_open_title', { title: notification.title })}>
+          <Link to="/inbox/$id" params={{ id: notification.id }} className="text-left" aria-label={t('inbox_open_title', { title: notification.title })}>
             {notification.title}
-          </button>
+          </Link>
         </h3>
         {signInId ? (
           <SignInBody device={device} createdAt={notification.created_at} />
@@ -139,7 +152,17 @@ export function NotificationCard({
       {/* Action Footer */}
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
 
-        {dialog ? (
+        {ranOut && <p className="a-muted text-xs">{t('inbox_request_ran_out')}</p>}
+        {stuckOpen && (
+          <Link
+            to="/helpers/$id"
+            params={{ id: notification.metadata.extra?.session_id ?? notification.id }}
+            className="a-btn secondary ml-auto"
+          >
+            {t('inbox_open_it_to_see')}
+          </Link>
+        )}
+        {ranOut || stuckOpen ? null : dialog ? (
           <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
         ) : signInActions ? (
           signInActions
@@ -154,13 +177,14 @@ export function NotificationCard({
                 loses={notification.metadata.approval?.loses}
                 verb={notification.metadata.approval?.verb}
                 busy={loadingAction !== null}
-                onDecline={() => onAction(notification.id, 'reject')}
-                onAllow={() => onAction(notification.id, 'approve')}
+                error={failure}
+                onDecline={() => void act(notification.id, 'reject')}
+                onAllow={() => void act(notification.id, 'approve')}
               />
             ) : (
               <button
                 type="button"
-                onClick={() => onAction(notification.id, 'dismiss')}
+                onClick={() => void act(notification.id, 'dismiss')}
                 disabled={loadingAction !== null}
                 className="px-3 py-1.5 rounded-xl text-xs font-semibold text-neutral-300 hover:text-white hover:bg-white/10 border border-white/10 transition-all flex items-center gap-1.5 disabled:opacity-50"
               >

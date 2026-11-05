@@ -1,3 +1,5 @@
+import { NotifyCard } from '~/components/notifications/NotifyCard'
+import { answerErrorLine } from '~/lib/inboxCard'
 import { createFileRoute, useParams } from '@tanstack/react-router'
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
@@ -114,7 +116,7 @@ function NotificationsPage() {
       }
     } catch (e) {
       // A refused action (an agent's question approved as a notice, say) must not look like it worked.
-      useHQStore.getState().setSystemNotice(e instanceof Error ? e.message : `Could not ${action} that.`)
+      throw e
     } finally {
       setLoadingAction(null)
     }
@@ -313,6 +315,7 @@ function NotificationsPage() {
 
       {/* Feed List */}
       <div className="space-y-3 pb-6">
+        {activeTab === 'pending' && <NotifyCard />}
         {filteredNotifications.length > 0 ? (
           filteredNotifications.map((notif) => (
             <NotificationCard
@@ -343,7 +346,7 @@ function NotificationsPage() {
       <NotificationDetailDrawer
         notification={selectedNotification}
         onClose={() => setSelectedNotification(null)}
-        onAction={handleAction}
+        onAction={(id, action) => handleAction(id, action).catch((e) => useHQStore.getState().setSystemNotice(answerErrorLine(e)))}
               onAnswered={handleAnswered}
         loadingAction={loadingAction}
       />

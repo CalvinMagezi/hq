@@ -277,7 +277,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'h')) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'h') {
         if (lite) return
         e.preventDefault()
         setGlobalChatOpen(true)
@@ -391,8 +391,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
           type="button"
           onClick={() => window.dispatchEvent(new Event('hq:open-search'))}
           className="hq-header-search p-1.5 rounded-lg text-neutral-400 hover:bg-white/5 transition-all"
-          title="Search vault (Cmd+/)"
-          aria-label="Search vault"
+          title={lite ? t('search_field_lite') : t('search_field_all')}
+          aria-label={lite ? t('search_field_lite') : t('search_field_all')}
         >
           <Search className="w-4 h-4" />
         </button>
