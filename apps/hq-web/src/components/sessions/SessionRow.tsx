@@ -1,10 +1,12 @@
 import { Link } from '@tanstack/react-router'
-import { Archive, ArchiveRestore, Hand, Loader2, Terminal, WifiOff } from 'lucide-react'
+import { ArchiveRestore, Hand, Loader2, Terminal, WifiOff } from 'lucide-react'
 import { STATUS_LABELS, parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
 import type { AgentStatus, HarnessSession } from '~/lib/sessionsApi'
 import { t } from '~/strings'
 import { computerName, folderName, sessionTitle } from '~/lib/workbench'
+import { cardFacts } from '~/lib/helperView'
+import { InlineAnswer } from './HelperAnswer'
 import { STATUS_BADGE_CLASS } from '../tasks/TaskCard'
 
 const ago = (when: string | null) => (when ? relTime(parseSqliteUtc(when)) : '')
@@ -101,42 +103,45 @@ export function SessionTaskLink({ session: s }: { session: HarnessSession }) {
 interface Props {
   session: HarnessSession
   selected: boolean
-  onSelect: () => void
-  /** Offered only for a past agent; archived ones offer Restore instead. */
-  onArchive?: (archived: boolean) => void
+  /** Called after an in-place answer, so the list reloads. */
+  onAnswered: () => unknown
+  /** Offered on an archived card, beside its link. */
+  onRestore?: () => void
   busy?: boolean
 }
 
-/** One agent in the list. The task link and archive button sit beside the select button, not inside it. */
-export function SessionRow({ session: s, selected, onSelect, onArchive, busy }: Props) {
+/** One helper in the list: a title link to its page, one line of facts, and for a plain question the answer in place. */
+export function SessionRow({ session: s, selected, onAnswered, onRestore, busy }: Props) {
   const folder = folderName(s.cwd)
+  const state = helperState(s)
   return (
     <li className={`hq-row mb-1.5 ${selected ? 'is-selected' : ''} ${s.status === 'running' ? '' : 'opacity-70'}`}>
       <div className="flex items-stretch">
-        <button
-          type="button"
-          onClick={onSelect}
+        <Link
+          to="/helpers/$id"
+          params={{ id: s.id }}
+          search={(prev: Record<string, unknown>) => ({ ...prev, id: undefined })}
           aria-current={selected ? 'true' : undefined}
-          className="flex-1 min-w-0 text-left px-3.5 py-3 space-y-1 rounded-xl min-h-11"
+          className="flex-1 min-w-0 text-left px-3.5 py-3 space-y-1 rounded-xl min-h-11 block"
         >
-          <div className="flex items-center gap-2 min-w-0 text-sm font-semibold">
-            <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+          <span className="flex items-center gap-2 min-w-0 text-sm font-semibold">
+            <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" aria-hidden="true" />
             <span className="text-neutral-100 truncate min-w-0">{sessionTitle(s)}</span>
-          </div>
-          {folder && <p className="text-xs text-neutral-400 truncate">{folder}</p>}
-          <SessionBadges session={s} />
-          {s.goal && <p className="text-xs text-neutral-400 line-clamp-2">{s.goal}</p>}
-        </button>
-        {onArchive && (
-          <button
-            type="button"
-            onClick={() => onArchive(!s.archived)}
-            disabled={busy}
-            aria-label={s.archived ? `Restore ${sessionTitle(s)}` : `Archive ${sessionTitle(s)}`}
-            title={s.archived ? 'Restore' : 'Archive'}
-            className="flex items-center justify-center w-11 shrink-0 text-neutral-500 hover:text-white hover:bg-white/10 disabled:opacity-40"
-          >
-            {s.archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}
+          </span>
+          {folder && <span className="block text-xs text-neutral-400 truncate">{folder}</span>}
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-400">
+            <HelperPill session={s} />
+            {cardFacts(s).map((fact, i) => (
+              <span key={i} className="min-w-0 break-words">
+                {fact}
+              </span>
+            ))}
+          </span>
+        </Link>
+        {onRestore && (
+          <button type="button" onClick={onRestore} disabled={busy} aria-label={t('helpers_restore_aria', { helper: sessionTitle(s) })} className="a-btn secondary self-center mr-2 shrink-0">
+            <ArchiveRestore className="w-4 h-4" aria-hidden="true" />
+            {t('helpers_restore')}
           </button>
         )}
       </div>
@@ -145,6 +150,7 @@ export function SessionRow({ session: s, selected, onSelect, onArchive, busy }: 
           <SessionTaskLink session={s} />
         </div>
       )}
+      {state === 'needs' && !s.archived && <InlineAnswer session={s} onDone={onAnswered} />}
     </li>
   )
 }

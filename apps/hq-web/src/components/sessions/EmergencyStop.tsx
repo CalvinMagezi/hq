@@ -2,13 +2,20 @@ import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { CheckCircle2, Loader2, OctagonX, X } from 'lucide-react'
-import { workbenchApi, type LockdownResult, type WorkbenchHost } from '~/lib/sessionsApi'
+import { globalSessionsApi, workbenchApi, type HarnessSession, type LockdownResult, type WorkbenchHost } from '~/lib/sessionsApi'
 import { computerName } from '~/lib/workbench'
 import { lockFact, unreachableHosts } from '~/lib/lockdown'
 import { ErrorText } from './ErrorText'
 import { useModal } from './useModal'
 
 const ALL_COMPUTERS = ''
+
+/** How many helpers run on each computer, for the numbers in the dialog. */
+export function runningByHost(list: HarnessSession[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const s of list) if (s.status === 'running') out[s.host] = (out[s.host] ?? 0) + 1
+  return out
+}
 const MAX_REASON_CHARS = 300
 
 interface ButtonProps {
@@ -40,6 +47,7 @@ export function StopAllButton({ compact = false, onStopped }: ButtonProps) {
 
 function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped: () => void }) {
   const [hosts, setHosts] = useState<WorkbenchHost[]>([])
+  const [counts, setCounts] = useState<Record<string, number>>({})
   const [target, setTarget] = useState(ALL_COMPUTERS)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -56,7 +64,12 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
       .hosts()
       .then((res) => setHosts(res.hosts))
       .catch(() => setHosts([]))
+    globalSessionsApi
+      .list({})
+      .then((list) => setCounts(runningByHost(list)))
+      .catch(() => setCounts({}))
   }, [])
+  const total = Object.entries(counts).reduce((n, [host, c]) => n + (hosts.find((h) => h.host === host)?.reachable === false ? 0 : c), 0)
 
   const stop = async () => {
     setBusy(true)
@@ -69,7 +82,7 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
       setResult(done)
       onStopped()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not stop the agents.')
+      setError(e instanceof Error ? e.message : t('helpers_stop_all_failed'))
     } finally {
       setBusy(false)
     }
@@ -91,7 +104,7 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
           <h2 id="stop-all-title" className="text-sm font-bold text-white">
             {t('stop_all_title')}
           </h2>
-          <button type="button" onClick={close} disabled={busy} aria-label="Close" className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
+          <button type="button" onClick={close} disabled={busy} aria-label={t('helpers_new_cancel')} className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -103,34 +116,39 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
               <p id="stop-all-what" className="text-xs text-neutral-300 leading-relaxed">
                 {t('stop_all_body')}
               </p>
-              <div>
-                <label htmlFor="stop-all-computer" className="block mb-1 text-[11px] text-neutral-400">
-                  Computer
+              <fieldset className="space-y-2">
+                <legend className="mb-1 text-[11px] text-neutral-400">{t('helpers_stop_all_pick')}</legend>
+                <label className="flex items-start gap-2 min-h-11 text-xs text-neutral-200">
+                  <input type="radio" name="stop-all-computer" checked={target === ALL_COMPUTERS} onChange={() => setTarget(ALL_COMPUTERS)} className="mt-1" />
+                  <span>{t('helpers_stop_all_every', { n: total })}</span>
                 </label>
-                <select
-                  id="stop-all-computer"
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                  className="w-full min-w-0 h-11 px-3 rounded-lg text-xs text-neutral-200 hq-field"
-                >
-                  <option value={ALL_COMPUTERS}>Every computer</option>
-                  {hosts.map((h) => (
-                    <option key={h.host} value={h.host}>
-                      {computerName(h.host)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {hosts.map((h) => (
+                  <label key={h.host} className="flex items-start gap-2 min-h-11 text-xs text-neutral-200">
+                    <input
+                      type="radio"
+                      name="stop-all-computer"
+                      checked={target === h.host}
+                      disabled={!h.reachable}
+                      onChange={() => setTarget(h.host)}
+                      className="mt-1"
+                    />
+                    <span>
+                      {t('helpers_stop_all_one', { computer: computerName(h.host), n: counts[h.host] ?? 0 })}
+                      {!h.reachable && <span className="block text-neutral-400">{t('helpers_stop_all_cant')}</span>}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
               <div>
                 <label htmlFor="stop-all-reason" className="block mb-1 text-[11px] text-neutral-400">
-                  Why (optional)
+                  {t('helpers_stop_all_why')}
                 </label>
                 <input
                   id="stop-all-reason"
                   value={reason}
                   maxLength={MAX_REASON_CHARS}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Agents I did not start"
+                  placeholder={t('helpers_stop_all_why_hint')}
                   className="w-full min-w-0 h-11 px-3 rounded-lg text-xs text-neutral-200 hq-field"
                 />
               </div>
@@ -141,7 +159,7 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
         <div className="px-4 py-3 border-t border-white/10 pb-[calc(0.75rem+var(--safe-bottom))]">
           {result ? (
             <button type="button" onClick={close} className="hq-btn-primary w-full">
-              Done
+              {t('helpers_stop_all_done')}
             </button>
           ) : (
             <div className="flex flex-col gap-2">

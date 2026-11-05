@@ -2,8 +2,9 @@ import { t } from '~/strings'
 import { parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
 import type { HarnessSession } from '~/lib/sessionsApi'
-import { agentName, computerName, statusInfo } from '~/lib/workbench'
-import { HelperPill, SessionTaskLink } from './SessionRow'
+import { agentName, computerName } from '~/lib/workbench'
+import { SessionTaskLink } from './SessionRow'
+import { ActionError, FollowInChat, RenameTitle, StopButton, useAction } from './SessionActions'
 
 const ago = (when: string | null) => (when ? relTime(parseSqliteUtc(when)) : '')
 
@@ -16,42 +17,37 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-/** Facts about the open agent, shown beside it on large screens where there is room to keep them in view. */
-export function SessionInspector({ session: s }: { session: HarnessSession }) {
-  const status = statusInfo(s)
+/** Facts about the open helper, with Rename, Follow in Chat and Stop, shown beside it where there is room. */
+export function SessionInspector({ session: s, onChanged }: { session: HarnessSession; onChanged?: () => void | Promise<void> }) {
+  const action = useAction(onChanged ?? (() => undefined))
   const started = ago(s.created_at)
   const seen = ago(s.last_seen_at)
+  const running = s.status === 'running'
   return (
-    <aside aria-label={t('helpers_details_aria')} className="flex flex-col gap-4 w-[340px] shrink-0 overflow-y-auto p-5 border-l border-white/10">
+    <aside aria-label={t('helpers_details_aria')} className="flex flex-col gap-4 w-[320px] shrink-0 overflow-y-auto p-5 border-l border-white/10">
       <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">{t('inbox_details')}</h2>
-      {status.agent === 'blocked' && (
-        <div className="hq-card hq-card-needs rounded-xl p-4">
-          <p className="text-sm font-semibold text-neutral-50">{t('helpers_waiting_for_you')}</p>
-          <p className="mt-1 text-xs text-neutral-400">{t('helpers_answer_in_terminal')}</p>
-        </div>
-      )}
       <dl className="hq-card rounded-xl p-4 flex flex-col gap-3">
-        <Row label="Status"><HelperPill session={s} /></Row>
-        <Row label="Runtime">{agentName(s.harness)}</Row>
-        <Row label="Folder">{s.cwd || 'Unknown'}</Row>
-        <Row label="Computer">{computerName(s.host)}</Row>
+        <Row label={t('helpers_ins_helper')}>{agentName(s.harness)}</Row>
+        <Row label={t('helpers_ins_computer')}>{computerName(s.host)}</Row>
+        <Row label={t('helpers_ins_folder')}>{s.cwd || '-'}</Row>
         {started && <div className="text-sm text-neutral-100">{t('helper_started', { when: started })}</div>}
         {seen && <div className="text-sm text-neutral-100">{t('helper_last_seen', { when: seen })}</div>}
-        <Row label="HQ">{s.mode === 'drive' && s.drive ? 'Driving' : 'Watching'}</Row>
+        <Row label={t('helpers_ins_task')}>{s.task ? <SessionTaskLink session={s} /> : '-'}</Row>
+        <Row label={t('helpers_ins_chat')}>{s.owner_thread ? t('helpers_follow_open') : t('helpers_ins_chat_none')}</Row>
       </dl>
       {s.goal && (
         <section className="hq-card rounded-xl p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">Goal</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">{t('helpers_ins_goal')}</h3>
           <p className="text-sm text-neutral-100 leading-relaxed">{s.goal}</p>
-          {s.done_criteria && <p className="mt-2 text-xs text-neutral-400 leading-relaxed">Done when: {s.done_criteria}</p>}
+          {s.done_criteria && <p className="mt-2 text-xs text-neutral-400 leading-relaxed">{t('helpers_ins_done_when', { criteria: s.done_criteria })}</p>}
         </section>
       )}
-      {s.task && (
-        <section className="hq-card rounded-xl p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-2">Linked task</h3>
-          <SessionTaskLink session={s} />
-        </section>
-      )}
+      <div className="flex flex-col items-stretch gap-2">
+        <RenameTitle session={s} action={action} />
+        <FollowInChat session={s} action={action} />
+        {running && <StopButton session={s} action={action} />}
+        <ActionError error={action.error} />
+      </div>
     </aside>
   )
 }

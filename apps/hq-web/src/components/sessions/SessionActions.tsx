@@ -65,8 +65,8 @@ export function RenameTitle({ session: s, action }: ActionProps) {
             setEditing(true)
           }}
           disabled={action.busy}
-          aria-label="Rename"
-          title="Rename"
+          aria-label={t('helpers_rename')}
+          title={t('helpers_rename')}
           className="flex items-center justify-center h-11 w-11 sm:h-9 sm:w-9 shrink-0 rounded text-neutral-500 hover:text-white hover:bg-white/10 disabled:opacity-50"
         >
           <Pencil className="w-3.5 h-3.5" />
@@ -75,7 +75,7 @@ export function RenameTitle({ session: s, action }: ActionProps) {
     )
   }
   const save = async () => {
-    if (await action.run(() => globalSessionsApi.rename(s.id, value.trim()), 'Could not rename this agent.')) setEditing(false)
+    if (await action.run(() => globalSessionsApi.rename(s.id, value.trim()), t('helpers_rename_failed', { helper: title }))) setEditing(false)
   }
   return (
     <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -88,14 +88,14 @@ export function RenameTitle({ session: s, action }: ActionProps) {
           if (e.key === 'Enter') void save()
           if (e.key === 'Escape') setEditing(false)
         }}
-        aria-label="Agent name"
+        aria-label={t('helpers_rename_label')}
         maxLength={80}
         className="flex-1 min-w-0 h-11 sm:h-9 px-3 rounded-lg text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
       />
-      <button type="button" onClick={() => void save()} disabled={action.busy} aria-label="Save name" className={ACTION_BUTTON_CLASS}>
+      <button type="button" onClick={() => void save()} disabled={action.busy} aria-label={t('helpers_rename_save')} className={ACTION_BUTTON_CLASS}>
         {action.busy ? Spinner : <Check className="w-3.5 h-3.5" />}
       </button>
-      <button type="button" onClick={() => setEditing(false)} disabled={action.busy} aria-label="Cancel rename" className={ACTION_BUTTON_CLASS}>
+      <button type="button" onClick={() => setEditing(false)} disabled={action.busy} aria-label={t('helpers_rename_cancel')} className={ACTION_BUTTON_CLASS}>
         <X className="w-3.5 h-3.5" />
       </button>
     </div>
@@ -110,7 +110,7 @@ export function StopButton({ session: s, action }: ActionProps) {
     <>
       <button type="button" disabled={action.busy} onClick={() => setConfirming(true)} className={ACTION_BUTTON_CLASS}>
         <Square className="w-3.5 h-3.5" />
-        Stop
+        {t('helpers_stop')}
       </button>
       {confirming && (
         <Dialog
@@ -131,16 +131,16 @@ export function StopButton({ session: s, action }: ActionProps) {
   )
 }
 
-export function ResumeButton({ session: s, action }: ActionProps) {
+export function ResumeButton({ session: s, action, prompt }: ActionProps & { prompt?: string }) {
   return (
     <button
       type="button"
       disabled={action.busy}
-      onClick={() => void action.run(() => globalSessionsApi.resume(s.id), 'Could not resume this agent.')}
+      onClick={() => void action.run(() => globalSessionsApi.resume(s.id, prompt?.trim() || undefined), t('helpers_resume_failed', { helper: s.label || s.id }))}
       className={`${ACTION_BUTTON_CLASS} sm:h-11 px-5 text-xs bg-white/10`}
     >
       {action.busy ? Spinner : <Play className="w-3.5 h-3.5" />}
-      Resume
+      {t('helpers_resume_act')}
     </button>
   )
 }
@@ -151,11 +151,11 @@ export function ArchiveButton({ session: s, action }: ActionProps) {
     <button
       type="button"
       disabled={action.busy}
-      onClick={() => void action.run(() => globalSessionsApi.archive(s.id, !s.archived), 'Could not update this agent.')}
+      onClick={() => void action.run(() => globalSessionsApi.archive(s.id, !s.archived), t('helpers_archive_one_failed', { helper: s.label || s.id }))}
       className={ACTION_BUTTON_CLASS}
     >
       {action.busy ? Spinner : <Icon className="w-3.5 h-3.5" />}
-      {s.archived ? 'Restore' : 'Archive'}
+      {s.archived ? t('helpers_restore') : t('helpers_archive_act')}
     </button>
   )
 }
@@ -169,7 +169,7 @@ export function FollowInChat({ session: s, action }: ActionProps) {
       setThreadId(result.thread_id)
       await refreshThreads()
       useThreadStore.getState().setActiveThread(result.thread_id)
-    }, 'Could not start the chat.')
+    }, t('helpers_follow_failed'))
 
   if (threadId) {
     return (
@@ -177,10 +177,10 @@ export function FollowInChat({ session: s, action }: ActionProps) {
         to="/chat"
         onClick={() => useThreadStore.getState().setActiveThread(threadId)}
         className={ACTION_BUTTON_CLASS}
-        title="A chat is following this agent. Open it."
+        title={t('helpers_follow_open')}
       >
         <Eye className="w-3.5 h-3.5" />
-        Open chat
+        {t('helpers_follow_open')}
       </Link>
     )
   }
@@ -190,10 +190,10 @@ export function FollowInChat({ session: s, action }: ActionProps) {
       onClick={() => void follow()}
       disabled={action.busy}
       className={ACTION_BUTTON_CLASS}
-      title="Start a chat that follows this agent. HQ only watches and will not answer for it."
+      title={t('helpers_follow')}
     >
       {action.busy ? Spinner : <Eye className="w-3.5 h-3.5" />}
-      Follow in chat
+      {t('helpers_follow')}
     </button>
   )
 }

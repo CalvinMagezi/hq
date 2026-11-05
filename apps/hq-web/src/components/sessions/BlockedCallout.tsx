@@ -1,8 +1,10 @@
 import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { globalSessionsApi, type AnswerPayload, type DialogKind, type HarnessSession, type PendingDialog } from '~/lib/sessionsApi'
-import { ANSWER_HOLD_MS, answerHeld, classifyBlocked, readDialog, tailLines, tappableOptions } from '~/lib/workbench'
+import { globalSessionsApi, type DialogKind, type HarnessSession, type PendingDialog } from '~/lib/sessionsApi'
+import { ANSWER_HOLD_MS, answerHeld, classifyBlocked, readDialog, sessionTitle, tailLines, tappableOptions } from '~/lib/workbench'
+import { canAllowOnce, computerInLine } from '~/lib/helperView'
+import { useDialogAnswer } from './HelperAnswer'
 import { MoreKeys, SendError, useSend } from './SessionSendBox'
 
 const CALLOUT_LINES = 12
@@ -11,19 +13,22 @@ const BIG_BUTTON_CLASS =
 const OPTION_CLASS =
   'w-full flex flex-col items-start gap-0.5 min-h-12 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-left text-sm font-semibold hover:bg-white/10 disabled:opacity-50 disabled:hover:bg-white/5'
 
-const EXPLAIN = {
-  approval: 'It stopped to ask before going on. Here is what it says.',
-  trust: 'This agent is asking whether it may use this folder. Pick an option below.',
-  other: 'It needs an answer before it can go on. Check what it says, then pick an option below.',
-} as const
+const HEADS: Record<DialogKind, string> = {
+  command: 'helpers_wants_run',
+  edit: 'helpers_wants_edit',
+  path: 'helpers_wants_path',
+  question: 'helpers_wants_question',
+  trust: 'helpers_wants_trust',
+  other: 'helpers_wants_other',
+}
 
-const ASKS: Record<DialogKind, string> = {
-  command: 'It wants to run a command.',
-  edit: 'It wants to change a file.',
-  path: 'It wants to reach a path outside what it may use.',
-  question: 'It is asking you something.',
-  trust: 'It is asking whether to trust this folder.',
-  other: 'It needs an answer before it can go on.',
+const IN_WORDS: Record<DialogKind, string> = {
+  command: 'helpers_in_words_run',
+  edit: 'helpers_in_words_edit',
+  path: 'helpers_in_words_path',
+  question: 'helpers_in_words_other',
+  trust: 'helpers_in_words_other',
+  other: 'helpers_in_words_other',
 }
 
 interface Props {
@@ -72,17 +77,19 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
   return (
     <section
       aria-label={t('helpers_waiting_for_you')}
-      className="shrink-0 hq-composer border-t px-3 py-3 space-y-2"
+      className="hq-composer border-t px-3 py-3 space-y-2"
       style={{ borderColor: 'var(--warn)' }}
     >
-      <h3 className="text-sm font-semibold" style={{ color: 'var(--warn)' }}>
-        {t('helpers_waiting_for_you')}
-      </h3>
+      {!read && (
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--warn)' }}>
+          {t('helpers_waiting_for_you')}
+        </h3>
+      )}
       {read ? (
-        <DialogAnswer sessionId={session.id} dialog={read.dialog} seq={read.seq} onSent={onSent} />
+        <DialogAnswer session={session} dialog={read.dialog} seq={read.seq} onSent={onSent} />
       ) : (
         <>
-          <p className="text-xs text-neutral-400">{EXPLAIN[kind]}</p>
+          <p className="text-xs text-neutral-400">{t('helpers_unreadable')}</p>
           {tail && (
             <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-xs leading-snug text-neutral-200 whitespace-pre-wrap break-words">
               {tail}
@@ -107,67 +114,90 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
   )
 }
 
-/** Answers by option through the host, which presses Enter only once the agent's cursor is on it. */
-function useAnswer(sessionId: string, onSent: () => void | Promise<void>) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const answer = async (payload: AnswerPayload) => {
-    setBusy(true)
-    setError(null)
-    try {
-      const report = await globalSessionsApi.answer(sessionId, payload)
-      if (!report.registered) setError(report.note ?? 'The agent did not take that answer. Check its screen.')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not answer that.')
-    } finally {
-      // Stay busy until the refresh lands, so a second tap cannot answer the next dialog by mistake.
-      await onSent()
-      setBusy(false)
-    }
-  }
-  return { answer, busy, error }
-}
-
-function DialogAnswer({ sessionId, dialog, seq, onSent }: { sessionId: string; dialog: PendingDialog; seq: number; onSent: () => void | Promise<void> }) {
-  const { answer, busy, error } = useAnswer(sessionId, onSent)
+/** The answer card: what it would run, in HQ's words, what each answer does, and Decline before Allow once. */
+function DialogAnswer({ session, dialog, seq, onSent }: { session: HarnessSession; dialog: PendingDialog; seq: number; onSent: () => void | Promise<void> }) {
+  const { answer, busy, error } = useDialogAnswer(session, onSent)
+  const [telling, setTelling] = useState(false)
+  const [message, setMessage] = useState('')
+  const helper = sessionTitle(session)
+  const allow = canAllowOnce(dialog)
+  const picked = dialog.options.find((o) => o.selected)
+  const others = tappableOptions(dialog).filter((o) => !(allow && o.id === picked?.id))
+  const typed = dialog.options.some((o) => o.typed)
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-neutral-400">{ASKS[dialog.kind]}</p>
+    <div className="space-y-3">
+      <h3 className="text-base font-semibold text-neutral-50">{t(HEADS[dialog.kind] as 'helpers_wants_run', { helper })}</h3>
       {dialog.question && <p className="text-sm text-neutral-100 break-words">{dialog.question}</p>}
       {dialog.command && (
-        <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-xs leading-snug text-neutral-200 whitespace-pre-wrap break-words">
-          {dialog.command}
-        </pre>
+        <div>
+          <p className="text-xs text-neutral-400">{t(dialog.kind === 'edit' ? 'helpers_quote_head_edit' : 'helpers_quote_head', { helper })}</p>
+          <pre className="a-quote mt-1 max-h-48 overflow-auto overscroll-contain whitespace-pre-wrap break-words">{dialog.command}</pre>
+        </div>
       )}
-      {dialog.truncated && <p className="text-xs text-neutral-500">Shortened here. The whole text is on the agent's screen.</p>}
-      <div className="flex flex-col gap-2">
-        {tappableOptions(dialog).map((o) => (
-          <button
-            key={o.id}
-            type="button"
-            disabled={busy}
-            onClick={() => void answer({ seq, option: o.id })}
-            className={OPTION_CLASS}
-            style={o.remember ? { color: 'var(--warn)' } : undefined}
-          >
-            <span className="flex items-center gap-2">
-              {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-              {o.label}
-            </span>
-            {o.remember && <span className="text-xs font-normal text-neutral-400">It will not ask about this again</span>}
-          </button>
-        ))}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void answer({ seq, decline: true })}
-          className={OPTION_CLASS}
-          
-        >
-          Decline
+      {dialog.truncated && <p className="text-xs text-neutral-500">{t('helpers_shortened')}</p>}
+      <p className="text-xs text-neutral-300">
+        <span className="font-semibold">{t('approval_in_words')}: </span>
+        {t(IN_WORDS[dialog.kind] as 'helpers_in_words_run', { computer: computerInLine(session.host) })}
+      </p>
+      {allow && (
+        <>
+          <p className="text-xs text-neutral-400">{t('helpers_if_allow', { helper })}</p>
+          <p className="text-xs text-neutral-400">{t('helpers_if_decline', { helper })}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => void answer(seq, { decline: true })} className="a-btn secondary flex-1 min-w-[8rem]">
+              {t('notice_action_decline')}
+            </button>
+            <button type="button" disabled={busy} onClick={() => picked && void answer(seq, { option: picked.id })} className="a-btn flex-1 min-w-[8rem]">
+              {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+              {t('notice_action_allow_once')}
+            </button>
+          </div>
+          <p className="text-xs text-neutral-500">{t('helpers_allow_note')}</p>
+        </>
+      )}
+      {!allow && (
+        <button type="button" disabled={busy} onClick={() => void answer(seq, { decline: true })} className={OPTION_CLASS}>
+          {t('notice_action_decline')}
         </button>
-      </div>
-      <SendError error={error} />
+      )}
+      {others.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-neutral-300">{t('approval_other_answers')}</p>
+          {others.map((o) => (
+            <button key={o.id} type="button" disabled={busy} onClick={() => void answer(seq, { option: o.id })} className={OPTION_CLASS} style={o.remember ? { color: 'var(--warn)' } : undefined}>
+              <span>{o.label}</span>
+              {o.remember && <span className="text-xs font-normal text-neutral-400">{t('helpers_other_answers_hint')}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {typed && !telling && (
+        <button type="button" disabled={busy} onClick={() => setTelling(true)} className={OPTION_CLASS}>
+          {t('helpers_tell_instead', { helper })}
+        </button>
+      )}
+      {telling && (
+        <form
+          className="space-y-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (message.trim()) void answer(seq, { decline: true, message: message.trim() })
+          }}
+        >
+          <label className="block text-xs text-neutral-300" htmlFor="tell-instead">
+            {t('helpers_tell_label', { helper })}
+          </label>
+          <input id="tell-instead" value={message} onChange={(e) => setMessage(e.target.value)} className="w-full h-11 px-3 rounded-lg text-sm hq-field" />
+          <button type="submit" disabled={busy || !message.trim()} className="a-btn">
+            {t('helpers_tell_send')}
+          </button>
+        </form>
+      )}
+      {error && (
+        <p role="alert" className="text-xs" style={{ color: 'var(--warn)' }}>
+          {error}
+        </p>
+      )}
     </div>
   )
 }
