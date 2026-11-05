@@ -609,7 +609,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     companion object {
-        const val LOCAL_HQ = "http://127.0.0.1:5678"
+        val LOCAL_HQ = "http://127.0.0.1:${example.hq.spike.BuildConfig.HQ_PORT}"
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_UNAUTHORIZED = 401

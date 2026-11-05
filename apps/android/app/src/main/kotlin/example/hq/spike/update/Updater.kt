@@ -44,7 +44,7 @@ object Updater {
     private const val KEY_BUCKET = "bucket"
     private const val KEY_OFFERED = "offered_code"
     private const val BUCKETS = 100
-    private const val BUSY_PORT = 5678
+    private val BUSY_PORT = example.hq.spike.BuildConfig.HQ_PORT
     const val ACTION_RESULT = "example.hq.spike.update.RESULT"
 
     private val flow = MutableStateFlow<UpdateState>(UpdateState.Idle)

@@ -85,6 +85,8 @@ android {
         // CI passes a number that only grows (the workflow run number); a phone refuses a lower one.
         versionCode = versionCodeProperty.map(String::toInt).getOrElse(1)
         versionName = versionNameProperty.getOrElse("dev")
+        // -Phq.port= gives a test copy its own loopback port, so its hq never fights the installed app's for 5678.
+        buildConfigField("int", "HQ_PORT", providers.gradleProperty("hq.port").getOrElse("5678"))
         // shortcuts.xml cannot use a manifest placeholder, so its target package is a resource.
         resValue("string", "hq_application_id", applicationId!!)
         ndk { abiFilters += "arm64-v8a" }
@@ -134,7 +136,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     // Keep every file of the web build; the default pattern drops names that start with "." or "_".
     androidResources { ignoreAssetsPattern = "!.svn:!.git" }
