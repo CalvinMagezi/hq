@@ -4,7 +4,7 @@
 
 use crate::{Bridge, DoorTarget, ForwardListener, ForwardOptions, Services, run_forward};
 use anyhow::{Context, Result, anyhow, bail};
-use hq_core::config::{BridgeServicesConfig, DoorTarget as ConfigTarget};
+use hq_core::config::{BridgeServicesConfig, DoorTarget as ConfigTarget, SHARED_MODEL_SERVICE};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind;
 use tokio::task::JoinHandle;
@@ -17,7 +17,8 @@ pub fn services_from_config(
     ws_port: u16,
 ) -> Result<Option<Services>> {
     let checked = config.services().map_err(|e| anyhow!(e))?;
-    if checked.is_empty() {
+    let shared = config.shared_model().map_err(|e| anyhow!(e))?;
+    if checked.is_empty() && shared.is_none() {
         return Ok(None);
     }
     let mut out = BTreeMap::new();
@@ -31,19 +32,42 @@ pub fn services_from_config(
                 .with_context(|| format!("bridge.services.{name}.peers"))?;
             peers.insert(name.clone(), ids);
         }
-        let target = match service.target {
-            ConfigTarget::Unix(path) => DoorTarget::Unix(path),
-            ConfigTarget::Tcp(addr) if addr.port() == ws_port => bail!(
-                "bridge.services.{name} leads to the web server's own port ({ws_port}); point it at bridge.web_listen"
-            ),
-            ConfigTarget::Tcp(addr) => DoorTarget::Tcp(addr),
-        };
+        let target = door_target(service.target, &format!("bridge.services.{name}"), ws_port)?;
         out.insert(name, target);
+    }
+    let mut hubs_only = BTreeMap::new();
+    if let Some(target) = shared {
+        let target = door_target(target, "bridge.share_model", ws_port)?;
+        out.insert(SHARED_MODEL_SERVICE.to_string(), target);
+        let mut also = BTreeSet::new();
+        for id in config.configured_hubs() {
+            match id.to_ascii_lowercase().parse::<iroh::EndpointId>() {
+                Ok(id) => {
+                    also.insert(id);
+                }
+                Err(_) => tracing::warn!(
+                    peer = %id,
+                    "bridge.share_model: a web forward's peer is not a machine id; it is not counted as a hub"
+                ),
+            }
+        }
+        hubs_only.insert(SHARED_MODEL_SERVICE.to_string(), also);
     }
     Ok(Some(Services {
         peers,
+        hubs_only,
         ..Services::new(out)
     }))
+}
+
+fn door_target(target: ConfigTarget, what: &str, ws_port: u16) -> Result<DoorTarget> {
+    Ok(match target {
+        ConfigTarget::Unix(path) => DoorTarget::Unix(path),
+        ConfigTarget::Tcp(addr) if addr.port() == ws_port => bail!(
+            "{what} leads to the web server's own port ({ws_port}); point it at bridge.web_listen"
+        ),
+        ConfigTarget::Tcp(addr) => DoorTarget::Tcp(addr),
+    })
 }
 
 /// One configured forward and whether this process listens for it.
@@ -164,5 +188,39 @@ mod tests {
         assert_eq!(services.peers.len(), 1, "web stays open to every peer");
         assert_eq!(services.peers["llm"], BTreeSet::from([id]));
         services.validate().unwrap();
+    }
+
+    #[test]
+    fn a_shared_model_is_offered_to_hubs_only() {
+        let hub = iroh::SecretKey::generate().public();
+        let config = BridgeServicesConfig {
+            share_model: Some(hq_core::config::ShareModel::default()),
+            forwards: vec![hq_core::config::BridgeForward {
+                peer: hub.to_string(),
+                service: "web".into(),
+                listen: "127.0.0.1:47480".into(),
+                fail_fast_secs: None,
+                when: Default::default(),
+            }],
+            ..BridgeServicesConfig::default()
+        };
+        let services = services_from_config(&config, 5678).unwrap().unwrap();
+        assert_eq!(
+            services.targets[SHARED_MODEL_SERVICE],
+            DoorTarget::Tcp(hq_core::config::DEFAULT_MODEL_SERVER.parse().unwrap())
+        );
+        assert_eq!(
+            services.hubs_only[SHARED_MODEL_SERVICE],
+            BTreeSet::from([hub])
+        );
+        services.validate().unwrap();
+        let on_web_port = BridgeServicesConfig {
+            share_model: Some(hq_core::config::ShareModel {
+                to: "127.0.0.1:5678".into(),
+                model: None,
+            }),
+            ..BridgeServicesConfig::default()
+        };
+        assert!(services_from_config(&on_web_port, 5678).is_err());
     }
 }

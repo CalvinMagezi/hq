@@ -3,7 +3,8 @@
 //! "service" is a plain TCP echo server standing in for the web server's or the gate's port.
 
 use hq_bridge::{
-    Bridge, BridgeConfig, DoorTarget, ForwardOptions, Services, open_service, run_forward,
+    Bridge, BridgeConfig, DoorTarget, ForwardOptions, ServiceSwitch, Services, open_service,
+    run_forward,
 };
 use hq_db::{Database, bridge as peers};
 use iroh::RelayMode;
@@ -300,6 +301,105 @@ async fn a_service_with_a_peers_list_admits_only_those_peers() {
     );
     let port = forward(&tablet, &laptop.id(), "llm").await;
     assert_eq!(with_timeout(round_trip(port, b"hello")).await, None);
+}
+
+/// Records `hub` on `machine` as pairing's setup would: `machine`'s hub.
+fn set_up_as_hub(machine: &Machine, hub: &Machine) {
+    let setup = hq_db::bridge_setup::Setup {
+        peer_id: hub.id(),
+        peer_role: hq_db::bridge_setup::ROLE_HUB.into(),
+        peer_name: "phone".into(),
+        local_port: 47_401,
+        peer_offers: true,
+        peer_port: None,
+        mcp_key: None,
+        offered: true,
+    };
+    assert!(hq_db::bridge_setup::record(&machine.db, &setup, None).unwrap());
+}
+
+async fn opens(from: &Machine, to: &Machine, service: &str) -> bool {
+    let conn = with_timeout(from.bridge.connect_service(&to.id()))
+        .await
+        .unwrap();
+    with_timeout(open_service(&conn, service)).await.is_ok()
+}
+
+#[tokio::test]
+async fn a_hubs_only_service_admits_this_machines_hubs_and_nobody_else() {
+    let (web, llm) = (echo_server().await, echo_server().await);
+    let phone = Machine::new("phone", None).await;
+    let tablet = Machine::new("tablet", None).await;
+    let configured = Machine::new("configured hub", None).await;
+    let mut offered = offering("web", web);
+    offered.targets.insert("llm".into(), DoorTarget::Tcp(llm));
+    offered
+        .hubs_only
+        .insert("llm".into(), [configured.bridge.id()].into());
+    let laptop = Machine::new("laptop", Some(offered)).await;
+    for device in [&phone, &tablet, &configured] {
+        laptop.knows(device);
+        device.knows(&laptop);
+    }
+
+    assert!(
+        !opens(&phone, &laptop, "llm").await,
+        "paired, but not set up as a hub yet"
+    );
+    set_up_as_hub(&laptop, &phone);
+    assert!(
+        opens(&phone, &laptop, "llm").await,
+        "a hub pairing set up, read at the stream"
+    );
+    assert!(
+        opens(&configured, &laptop, "llm").await,
+        "a hub configured by hand"
+    );
+    assert!(
+        !opens(&tablet, &laptop, "llm").await,
+        "another paired device"
+    );
+    assert!(
+        opens(&tablet, &laptop, "web").await,
+        "which keeps the open services"
+    );
+}
+
+#[tokio::test]
+async fn a_switched_off_service_is_refused_and_its_open_streams_end() {
+    let llm = echo_server().await;
+    let switch = ServiceSwitch::new(true);
+    let mut offered = offering("llm", llm);
+    offered.switches.insert("llm".into(), switch.clone());
+    let laptop = Machine::new("laptop", Some(offered)).await;
+    let phone = Machine::new("phone", None).await;
+    laptop.knows(&phone);
+    phone.knows(&laptop);
+    let port = forward(&phone, &laptop.id(), "llm").await;
+
+    let mut open = TcpStream::connect(port).await.unwrap();
+    open.write_all(b"ping").await.unwrap();
+    let mut got = [0u8; 4];
+    with_timeout(open.read_exact(&mut got)).await.unwrap();
+    assert_eq!(&got, b"ping");
+
+    switch.set(false);
+    let started = tokio::time::Instant::now();
+    let mut rest = Vec::new();
+    let _ = with_timeout(open.read_to_end(&mut rest)).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "the open stream ends at once, took {:?}",
+        started.elapsed()
+    );
+    assert!(!opens(&phone, &laptop, "llm").await, "refused while off");
+    assert_eq!(with_timeout(round_trip(port, b"x")).await, None);
+
+    switch.set(true);
+    assert_eq!(
+        with_timeout(round_trip(port, b"back")).await.as_deref(),
+        Some(&b"back"[..])
+    );
 }
 
 #[tokio::test]

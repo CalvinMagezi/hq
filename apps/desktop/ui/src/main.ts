@@ -17,6 +17,22 @@ interface Settings {
   relay: string
   device_name: string
   hq_path: string | null
+  share_model: boolean
+  shared_model: string | null
+}
+
+interface ShareModel {
+  name: string
+  tools: boolean
+}
+interface Share {
+  on: boolean
+  model: string | null
+  server: string
+  reachable: boolean
+  models: ShareModel[]
+  context_length: number | null
+  warning: string | null
 }
 
 interface Qr {
@@ -146,6 +162,8 @@ function showTab(name: (typeof TABS)[number]) {
   }
   // Reading Claude runs its program, so it happens on opening the tab and after a change.
   if (name === 'claude') void guarded('claude-error', refreshClaude)
+  // Asking Ollama about every model is slow, so it happens on opening the tab and on request.
+  if (name === 'devices') void guarded('share-warning', refreshShare)
   void refresh()
 }
 document.querySelectorAll<HTMLButtonElement>('nav [data-tab]').forEach((b) =>
@@ -398,6 +416,53 @@ $('cancel-ticket').addEventListener('click', () =>
   }),
 )
 $('copy-link').addEventListener('click', () => void copy($('ticket-link').textContent ?? ''))
+
+// Sharing the model
+function renderShare(share: Share) {
+  $<HTMLInputElement>('share-on').checked = share.on
+  const select = $<HTMLSelectElement>('share-model')
+  select.replaceChildren()
+  const chosen = share.model ?? share.models[0]?.name ?? null
+  for (const m of share.models) {
+    const option = el('option', m.tools ? m.name : `${m.name} (no tool calls)`)
+    option.value = m.name
+    option.selected = m.name === chosen
+    select.append(option)
+  }
+  select.hidden = share.models.length === 0
+  const context = share.context_length ? `, ${share.context_length} tokens of context` : ''
+  $('share-state').textContent = !share.reachable
+    ? ''
+    : share.on
+      ? `Sharing ${chosen ?? 'the first model'} from ${share.server}${context}.`
+      : `Not shared. Ollama answers at ${share.server}.`
+  $('share-warning').textContent = share.warning ?? ''
+}
+
+// A probe can take seconds; only the newest one may draw, so an older answer never undoes a toggle.
+let shareAsked = 0
+let shareShown: Share | null = null
+async function refreshShare() {
+  const asked = ++shareAsked
+  const share = await invoke<Share>('share_status')
+  if (asked !== shareAsked) return
+  shareShown = share
+  renderShare(share)
+}
+
+async function saveShare() {
+  const on = $<HTMLInputElement>('share-on').checked
+  // With Ollama away the list is empty: keep the model chosen before rather than clearing it.
+  const model = $<HTMLSelectElement>('share-model').value || shareShown?.model || null
+  shareAsked++
+  await invoke('share_set', { on, model })
+  toast(on ? 'Sharing this computer\'s model.' : 'Stopped sharing.')
+  await refreshShare()
+}
+
+$('share-on').addEventListener('change', () => guarded('share-warning', saveShare))
+$('share-model').addEventListener('change', () => guarded('share-warning', saveShare))
+$('share-check').addEventListener('click', () => guarded('share-warning', refreshShare))
 
 // Claude
 function renderClaude(hubs: ClaudeHub[]) {

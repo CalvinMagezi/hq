@@ -37,8 +37,9 @@ pub use agent_host::{
 pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
 pub use backup::BackupConfig;
 pub use bridge::{
-    BridgeForward, BridgeServicesConfig, CheckedForward, CheckedService, ForwardWhen,
-    LimitedService, MAX_SERVICE_NAME, ServiceEntry, valid_service_name,
+    BridgeForward, BridgeServicesConfig, CheckedForward, CheckedService, DEFAULT_MODEL_SERVER,
+    ForwardWhen, LimitedService, MAX_SERVICE_NAME, SHARED_MODEL_SERVICE, ServiceEntry, ShareModel,
+    valid_service_name,
 };
 pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
 pub use collaboration::*;

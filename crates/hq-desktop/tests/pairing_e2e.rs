@@ -29,6 +29,7 @@ async fn within<T>(what: &str, f: impl Future<Output = T>) -> T {
 
 struct App {
     host: Arc<PairingController>,
+    db: Database,
     _dir: tempfile::TempDir,
 }
 
@@ -39,6 +40,7 @@ fn app_with(tuning: Tuning) -> App {
 fn app_with_services(tuning: Tuning, hub: Option<HubServices>) -> App {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
+    let opened = db.clone();
     let host = PairingController::new(
         PairingConfig {
             key: dir.path().join("bridge.key"),
@@ -48,7 +50,7 @@ fn app_with_services(tuning: Tuning, hub: Option<HubServices>) -> App {
             with_addrs: true,
             tuning,
         },
-        move || Ok(db.clone()),
+        move || Ok(opened.clone()),
         None,
     );
     let host = match hub {
@@ -57,6 +59,7 @@ fn app_with_services(tuning: Tuning, hub: Option<HubServices>) -> App {
     };
     App {
         host: Arc::new(host),
+        db,
         _dir: dir,
     }
 }
@@ -465,4 +468,83 @@ async fn the_app_offers_its_gate_and_opens_forwards_and_reports_a_port_taken_els
         TcpListener::bind(free_addr).await.is_ok(),
         "stopping left the forward's port bound"
     );
+}
+
+#[tokio::test]
+async fn the_app_shares_its_model_only_while_switched_on_and_only_with_its_hub() {
+    let model = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model_addr = model.local_addr().unwrap();
+    tokio::spawn(echo_server(model));
+    let app = app_with_services(
+        Tuning {
+            ttl: Duration::from_secs(120),
+            ..Tuning::default()
+        },
+        Some(HubServices {
+            config: BridgeServicesConfig {
+                share_model: Some(hq_core::config::ShareModel {
+                    to: model_addr.to_string(),
+                    model: None,
+                }),
+                ..Default::default()
+            },
+            ws_port: 1,
+        }),
+    );
+    let joiner = Arc::new(Joiner::new().await);
+    let ticket = app.host.begin().await.unwrap();
+    let (digits, outcome) = joiner.join(&ticket.link, tuning());
+    let request = first_request(&app.host).await;
+    let shown = within("the joiner's digits", digits).await.unwrap();
+    assert_eq!(
+        app.host.submit_digits(request.id, &shown),
+        Submitted::Accepted
+    );
+    within("the join to finish", outcome)
+        .await
+        .unwrap()
+        .unwrap();
+    let host_id = app.host.snapshot().await.host.unwrap().id;
+    let opens = || async {
+        let conn = within(
+            "the service connection",
+            joiner.bridge.dialer().connect_service(&host_id),
+        )
+        .await
+        .unwrap();
+        within("the model service", open_service(&conn, "llm"))
+            .await
+            .is_ok()
+    };
+
+    assert!(!opens().await, "off until switched on");
+    assert!(app.host.snapshot().await.services.is_empty());
+    app.host.set_sharing(true, Some("qwen3:8b".into()));
+    assert!(
+        !opens().await,
+        "on, but the joiner is not this machine's hub"
+    );
+
+    let hub = hq_db::bridge_setup::Setup {
+        peer_id: joiner.bridge.id().to_string(),
+        peer_role: hq_db::bridge_setup::ROLE_HUB.into(),
+        peer_name: "phone".into(),
+        local_port: 47_402,
+        peer_offers: true,
+        peer_port: None,
+        mcp_key: None,
+        offered: true,
+    };
+    assert!(hq_db::bridge_setup::record(&app.db, &hub, None).unwrap());
+    assert!(
+        opens().await,
+        "its hub reaches the model while sharing is on"
+    );
+    assert_eq!(app.host.snapshot().await.services, ["llm"]);
+    assert_eq!(app.host.sharing(), (true, Some("qwen3:8b".to_string())));
+
+    app.host.set_sharing(false, None);
+    assert!(!opens().await, "switched off without restarting the bridge");
+    assert!(app.host.snapshot().await.services.is_empty());
+    app.host.stop().await;
 }
