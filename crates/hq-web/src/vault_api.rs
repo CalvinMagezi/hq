@@ -651,6 +651,81 @@ pub(crate) fn update_preserving_frontmatter(
 }
 
 /// `PUT /api/note {path, content}`: body-only edit that keeps the note's frontmatter.
+/// `GET /api/note/versions?path=`: who wrote each version of a note, when, and where its review stands,
+/// for About this note (web wave 4, notes R2). The same read as the `note_provenance` tool.
+pub(crate) async fn note_versions_handler(
+    State(state): State<Arc<WsState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let path = params.get("path").cloned().unwrap_or_default();
+    if !state.path_allowed(&path) {
+        return ApiError::not_found().into_response();
+    }
+    let Ok(vault) = hq_vault::VaultClient::new(state.vault_path.clone()) else {
+        return ApiError::internal("the notes folder cannot be opened").into_response();
+    };
+    use hq_tools::registry::HqTool;
+    let tool =
+        hq_tools::vault::NoteProvenanceTool::new(Arc::new(vault), Arc::new(state.db.clone()));
+    match tool.execute(json!({ "path": path })).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => ApiError::bad_request(e.to_string()).into_response(),
+    }
+}
+
+/// `POST /api/note/review {path, verdict, reason}`: the owner's Looks right (`accepted`) or
+/// Something's wrong (`disputed`, with a reason) on the version on disk. It goes through
+/// `review_note`, the one place review decisions are applied, as the owner.
+pub(crate) async fn note_review_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let path = body
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let verdict = match body.get("verdict").and_then(Value::as_str) {
+        Some("accepted") => hq_db::provenance::ReviewState::Accepted,
+        Some("disputed") => hq_db::provenance::ReviewState::Disputed,
+        _ => return ApiError::bad_request("verdict must be accepted or disputed").into_response(),
+    };
+    let reason = body
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if !state.path_allowed(&path) {
+        return ApiError::not_found().into_response();
+    }
+    let Ok(vault) = hq_vault::VaultClient::new(state.vault_path.clone()) else {
+        return ApiError::internal("the notes folder cannot be opened").into_response();
+    };
+    let db = state.db.clone();
+    let reviewed = tokio::task::spawn_blocking(move || {
+        hq_tools::vault::review_note(
+            &db,
+            &vault,
+            &path,
+            None,
+            verdict,
+            reason.as_deref(),
+            &hq_tools::vault::Reviewer::owner(),
+        )
+    })
+    .await;
+    match reviewed {
+        Ok(Ok(r)) => Json(json!({
+            "path": r.record.path,
+            "review_state": r.record.review_state.as_str(),
+            "previous_state": r.previous.as_str(),
+        }))
+        .into_response(),
+        Ok(Err(e)) => ApiError::bad_request(e.to_string()).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
 /// A save that started from an older version: nothing is written, and the editor learns who wrote the
 /// newer one and when, so the owner can compare (never a silent overwrite).
 // ponytail: the base check and the write are not one atomic step; two saves in the same instant can
@@ -1037,6 +1112,38 @@ mod tests {
         };
         assert_eq!(hits("quokka")[0].note_path, "Notebooks/Inbox/Plan.md");
         assert!(hits("zebra").is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_owner_reads_a_notes_versions_and_reviews_the_current_one() {
+        let v = vault();
+        let state = Arc::new(WsState::new(v.path().to_path_buf(), None));
+        let body = json!({"folder": "Notebooks/Inbox", "title": "Plan", "content": "zebra"});
+        note_create_handler(State(state.clone()), Json(body)).await;
+        let path = "Notebooks/Inbox/Plan.md";
+        let q = std::collections::HashMap::from([("path".to_string(), path.to_string())]);
+        let res = note_versions_handler(State(state.clone()), axum::extract::Query(q)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let listed: Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(listed.to_string().contains("content_hash"), "{listed}");
+
+        let no_reason = json!({"path": path, "verdict": "disputed"});
+        let res = note_review_handler(State(state.clone()), Json(no_reason)).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let odd = json!({"path": path, "verdict": "superseded", "reason": "x"});
+        let res = note_review_handler(State(state.clone()), Json(odd)).await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let wrong = json!({"path": path, "verdict": "disputed", "reason": "the date is wrong"});
+        let res = note_review_handler(State(state.clone()), Json(wrong)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let reviewed: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(reviewed["review_state"], "disputed");
     }
 
     #[tokio::test]

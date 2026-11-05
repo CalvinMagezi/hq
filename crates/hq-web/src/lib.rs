@@ -323,6 +323,8 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(api::note_read_handler).put(vault_api::note_update_handler),
         )
         .route("/api/note/create", post(vault_api::note_create_handler))
+        .route("/api/note/versions", get(vault_api::note_versions_handler))
+        .route("/api/note/review", post(vault_api::note_review_handler))
         .route("/api/note/pdf", get(vault_api::note_pdf_handler))
         .route("/api/note/export", get(vault_api::note_export_handler))
         .route("/api/vault/folders", get(vault_api::folders_handler))
