@@ -8,7 +8,7 @@ status:
   for these in one batch when you reach the wave that needs them.
 - **Revised**: changed after the adversarial reviews; the new text is the one to build.
 
-Where a spec and this log disagree, this log wins, then `rules-shared.md` and `rules-web.md`.
+`resolutions.md` settles the last cross-platform conflicts and wins over this log; then this log; then `rules-shared.md` and `rules-web.md`; then the specs.
 
 ## Phone: original decisions (D)
 
@@ -154,4 +154,4 @@ Where a spec and this log disagree, this log wins, then `rules-shared.md` and `r
 
 ## Owner to confirm, in one list
 
-N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22.
+N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22, and resolutions.md B11 (what the HQ window keeps and what it is called).

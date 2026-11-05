@@ -5,7 +5,7 @@ the wave's "Try this now" note, and record what the owner found. One line per it
 
 ## Owner decisions to collect
 
-From `decisions.md` "Owner to confirm": N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22.
+From `decisions.md` "Owner to confirm": N4, N6, N19, N22, N25, W34, W44, W50, WR18, WR22, B11 (resolutions.md).
 Ask for them in one batch before the wave that needs each. Record the answer and the date here.
 
 | Id | Answer | Date |
