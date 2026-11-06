@@ -1,39 +1,39 @@
 [
   {
-    "id": "dashboard",
+    "id": "web-chat",
     "kind": "image",
-    "src": "/media/dashboard.jpg",
-    "alt": "The HQ home screen: a vault search box, recent project notes as cards with tags, and a list of in-progress tasks.",
-    "caption": "The home screen: search, recent notes and in-progress tasks in one place. Demo data.",
+    "src": "/media/web-chat.jpg",
+    "alt": "The HQ web app's Chat: the list of chats on the left, a new chat asking What would you like to do? with three suggestions, and the message box.",
+    "caption": "Chat: what HQ can do on this install, as suggestions, and one box to ask. Demo data.",
     "width": 1485,
     "height": 812
   },
   {
-    "id": "vault-browser",
+    "id": "web-notes",
     "kind": "image",
-    "src": "/media/vault-browser.jpg",
-    "alt": "The vault explorer listing notebook folders beside a markdown note about webhook retries with a text code block.",
-    "caption": "The vault browser: plain markdown notes on your own disk, searchable. Demo data.",
+    "src": "/media/web-notes.jpg",
+    "alt": "The HQ web app's Notes: a folder of notes beside an open markdown note about a garden planner project, with Edit, Ask HQ, Make a task, Pin and Export, and who wrote it at the side.",
+    "caption": "Notes: plain markdown from your vault, with who wrote each version. Demo data.",
     "width": 1485,
     "height": 812
   },
   {
-    "id": "tasks-board",
+    "id": "web-tasks",
     "kind": "image",
-    "src": "/media/tasks-board.jpg",
-    "alt": "The tasks board with cards in To do, In progress, Blocked, Ready for review and Complete columns.",
-    "caption": "The tasks board: spaces, initiatives and tasks as a list, board or timeline. Demo data.",
+    "src": "/media/web-tasks.jpg",
+    "alt": "The HQ web app's Tasks board with columns To do, In progress, Stuck, Ready to check and Done, each holding task cards.",
+    "caption": "Tasks: list, board or timeline, with the ones ready to check marked. Demo data.",
     "width": 1485,
     "height": 812
   },
   {
-    "id": "sessions-list",
+    "id": "web-inbox",
     "kind": "image",
-    "src": "/media/sessions-list.jpg",
-    "alt": "The HQ Sessions page: a list of three supervised sessions (opencode, and two claude-code) with host and status, and the selected session's terminal output below its header.",
-    "caption": "The Sessions page: each supervised session with its host and state, and the selected one's terminal. The agents here are scripted stand-ins on a demo instance.",
-    "width": 1512,
-    "height": 771
+    "src": "/media/web-inbox.jpg",
+    "alt": "The HQ web app's Inbox: under Needs you, a task HQ says is finished, with a Check it button.",
+    "caption": "Inbox: what needs you, from a finished task to check to an agent's question. Demo data.",
+    "width": 1485,
+    "height": 812
   },
   {
     "id": "session-watch",
