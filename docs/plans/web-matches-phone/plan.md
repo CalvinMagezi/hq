@@ -337,17 +337,12 @@ Builds on wave A item 1. Desktop UI only (`apps/desktop/ui`), no Rust.
 - **Wave C** can run beside wave B.
 - **Wave D** comes last.
 
-## Owner questions
+## Owner decisions (6 Nov 2026)
 
-1. **Get started steps.** The Shell board lists "Turn on notifications" and "Connect an AI service".
-   The Chat board's review note says "Connect an AI service" was never a step, and the code has
-   "Open HQ on your phone" and "Messaging apps (optional)". Recommendation: keep the code's steps;
-   the Shell board is older.
-2. **Search placeholder.** "Search notes, tasks and chats" (Chat boards) or "Search notes, tasks,
-   chats and helpers" (Shell and Search boards, and the code today). Recommendation: keep the code.
-3. **Helpers list resize and collapse.** The web lets you drag the list's width and collapse it; no
-   board draws either. Recommendation: drop the drag, keep collapse as the boards' `.a-side-toggle`.
-4. **Share this computer's model** in HQ Hub's Devices tab (added after the boards) has no board.
-   Recommendation: an `.a-li` with an `.a-sw` under "Shared with paired devices".
-5. **Light theme.** The boards define light values but draw only dark, waiting on you.
-   Recommendation: dark only for this run.
+1. Get started keeps the code's steps ("Open HQ on your phone", "Messaging apps (optional)"); the
+   Shell board's list is older.
+2. The search placeholder stays "Search notes, tasks, chats and helpers".
+3. The Helpers list keeps collapse (as `.a-side-toggle`); the drag to resize goes.
+4. Share this computer's model: an `.a-li` with an `.a-sw` under "Shared with paired devices" (the
+   recommendation; not objected to).
+5. Dark only for this run; the light values stay defined and unused.
