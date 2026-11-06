@@ -55,19 +55,14 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
   const canRegenerate = !liveTurn && last?.role === 'assistant' && isSaved(last) && !last.driver && !lastLocked
 
   return (
-    <div className="flex-1 min-h-0 relative">
-      <div ref={scrollRef} className="absolute inset-0 overflow-y-auto overscroll-contain p-3 sm:p-6">
-        <div ref={contentRef} className="max-w-4xl mx-auto space-y-3">
+    <div className="hq-thread-box">
+      <div ref={scrollRef} className="hq-thread-scroll">
+        <div ref={contentRef} className="a-wrap a-thread hq-thread">
           <div ref={sentinelRef} />
           {olderAvailable && (
-            <div className="flex justify-center py-1">
-              <button
-                type="button"
-                onClick={() => void olderPage.load()}
-                disabled={olderPage.loading}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-full border border-white/10 text-xs text-neutral-400 hover:text-white hover:bg-white/5 disabled:opacity-60"
-              >
-                {olderPage.loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            <div className="hq-thread-older">
+              <button type="button" className="a-btn quiet compact" onClick={() => void olderPage.load()} disabled={olderPage.loading}>
+                {olderPage.loading && <Loader2 className="a-ic sm animate-spin" aria-hidden="true" />}
                 {olderPage.loading ? t('chat_loading_earlier') : t('chat_load_earlier')}
               </button>
             </div>
@@ -102,15 +97,12 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
           ))}
 
           {unanswered && (
-            <div role="alert" className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] text-xs text-neutral-200">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-              <span className="flex-1 min-w-0">{t(unansweredKey)}</span>
-              <button
-                type="button"
-                onClick={onRegenerate}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-full border border-white/15 hover:bg-white/10"
-              >
-                <RotateCw className="w-3.5 h-3.5" /> {t('chat_retry')}
+            <div role="alert" className="a-stale">
+              <AlertTriangle className="a-ic sm" aria-hidden="true" />
+              <span>{t(unansweredKey)}</span>
+              <button type="button" className="a-btn secondary compact" onClick={onRegenerate}>
+                <RotateCw className="a-ic sm" aria-hidden="true" />
+                {t('chat_retry')}
               </button>
             </div>
           )}
@@ -120,14 +112,10 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
       </div>
 
       {!atBottom && (
-        <button
-          type="button"
-          onClick={() => scrollToBottom(true)}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 h-10 px-4 rounded-full border border-white/15 bg-neutral-900/90 backdrop-blur text-xs text-neutral-200 shadow-lg hover:bg-neutral-800"
-                  >
-          <ArrowDown className="w-3.5 h-3.5" />
+        <button type="button" className="a-btn secondary compact hq-thread-latest" onClick={() => scrollToBottom(true)}>
+          <ArrowDown className="a-ic sm" aria-hidden="true" />
           {hasUnseen ? t('chat_new_messages') : t('chat_latest')}
-          {hasUnseen && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+          {hasUnseen && <span className="a-unread" aria-hidden="true" />}
         </button>
       )}
     </div>

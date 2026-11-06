@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { t } from '~/strings'
-import { Paperclip, Send, Square, WifiOff } from 'lucide-react'
+import { Plus, Send, Square, WifiOff } from 'lucide-react'
 import { SlashCommandPalette, SLASH_COMMANDS, matchingSlashCommands, isSlashInput } from './SlashCommandPalette'
 import { enterSendsMessage, readEnterSends, writeEnterSends } from '~/lib/enterRule'
 import { tooBig } from '~/lib/chatUploads'
@@ -94,28 +94,28 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   const sendTitle = !connected ? t('chat_banner_reconnecting') : uploading ? t('chat_send_waiting_files') : t('chat_send')
 
   return (
-    <div className="px-3 pt-2 pb-3 sm:px-4 sm:pb-4 hq-composer shrink-0 relative">
+    <div className="hq-comp">
       {isSlashInput(value) && <SlashCommandPalette input={value} onSelect={pickCommand} />}
 
       {!connected && !canQueue && (
-        <div className="flex items-center justify-center gap-1.5 pb-2 text-[11px] " style={{ color: 'var(--accent-amber)' }}>
-          <WifiOff className="w-3 h-3" /> {t('outbox_shared_send')}
-        </div>
+        <p role="status" className="a-cap a-warn-t hq-comp-note">
+          <WifiOff className="a-ic xs" aria-hidden="true" /> {t('outbox_shared_send')}
+        </p>
       )}
-
       {hasBigFile && (
-        <p role="status" className="pb-2 text-[11px] text-center" style={{ color: 'var(--accent-amber)' }}>
+        <p role="status" className="a-cap a-warn-t hq-comp-note">
           {t('chat_remove_big')}
         </p>
       )}
       <ComposerAttachments items={attachments} onRemove={onRemoveAttachment} onRetry={onRetryAttachment} />
 
-      <div className="flex items-end gap-2 sm:gap-3 max-w-4xl mx-auto">
+      <div className="a-comp">
+      <div className="a-comp-in">
         <input
           ref={fileInputRef}
           type="file"
           multiple
-          className="hidden"
+          hidden
           onChange={(e) => {
             const files = Array.from(e.target.files ?? [])
             // Clearing lets the same file be picked again after it was removed.
@@ -123,53 +123,37 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
             if (files.length > 0) onAddFiles(files)
           }}
         />
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="w-10 h-10 rounded-full flex items-center justify-center text-neutral-400 hover:text-white hover:bg-white/10 shrink-0"
-          title={t('chat_attach')}
-          aria-label={t('chat_attach')}
-        >
-          <Paperclip className="w-4 h-4" />
+        <button type="button" className="a-ib" onClick={() => fileInputRef.current?.click()} aria-label={t('chat_attach')}>
+          <Plus className="a-ic" aria-hidden="true" />
         </button>
-
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          placeholder={t('chat_message_hq')}
-          rows={1}
-          enterKeyHint="enter"
-          className="flex-1 min-w-0 rounded-3xl px-5 py-3 text-base sm:text-sm leading-6 outline-none resize-none hq-field text-white caret-emerald-400 overflow-y-auto"
-          style={{ maxHeight: MAX_INPUT_HEIGHT_PX }}
-        />
-
+        <div className="a-comp-field">
+          <label className="a-sr" htmlFor="hq-composer">
+            {t('chat_message_hq')}
+          </label>
+          <textarea
+            id="hq-composer"
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            placeholder={t('chat_message_hq')}
+            rows={1}
+            enterKeyHint="enter"
+          />
+        </div>
         {running ? (
-          <button
-            type="button"
-            onClick={onStop}
-            className="w-10 h-10 rounded-full flex items-center justify-center bg-amber-500 text-black hover:brightness-110 shrink-0"
-            title={t('chat_stop')}
-            aria-label={t('chat_stop')}
-          >
-            <Square className="w-4 h-4 fill-current" />
+          <button type="button" className="a-send stop" onClick={onStop} aria-label={t('chat_stop')}>
+            <Square className="a-ic sm" aria-hidden="true" />
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={() => onSend()}
-            disabled={!canSend}
-            className="w-11 h-11 rounded-full flex items-center justify-center bg-emerald-400 text-black font-bold disabled:opacity-30 hover:brightness-110 shrink-0 shadow-[0_6px_20px_rgba(34,255,55,0.2)]"
-            title={sendTitle}
-            aria-label={t('chat_send')}
-          >
-            <Send className="w-4 h-4" />
+          <button type="button" className="a-send" onClick={() => onSend()} disabled={!canSend} title={sendTitle} aria-label={t('chat_send')}>
+            <Send className="a-ic sm" aria-hidden="true" />
           </button>
         )}
       </div>
-      <label className="hidden sm:flex items-center justify-center gap-1.5 pt-1.5 text-[11px]" style={{ color: 'var(--ink-muted)' }} title={t('chat_enter_sends_hint')}>
+      </div>
+      <label className="a-cap a-muted hq-comp-enter" title={t('chat_enter_sends_hint')}>
         <input
           type="checkbox"
           checked={enterSends ?? true}
