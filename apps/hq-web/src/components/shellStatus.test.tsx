@@ -35,8 +35,8 @@ describe('header in the seven states', () => {
 describe('badge and strip', () => {
   test('rail and bar badge is amber and Workbench has none', () => {
     expect(inboxNeedsYou(2, 3)).toBe(5)
-    for (const f of ['src/components/AppRail.tsx', 'src/components/BottomNav.tsx']) expect(read(f)).not.toMatch(/workbenchBadge|workbench[A-Za-z]*Count/i)
-    expect(read('app.css')).toMatch(/\.hq-rail-badge\s*\{[^}]*var\(--warn\)/)
+    for (const f of ['src/components/AppRail.tsx', 'src/components/BottomNav.tsx', 'src/components/Places.tsx']) expect(read(f)).not.toMatch(/workbenchBadge|workbench[A-Za-z]*Count/i)
+    expect(read('src/styles/aligned-ui.css')).toMatch(/\.a-badge\{background:var\(--warn\)/)
   })
   test('strip shows in every state but connected and signed_out', () => {
     expect(STATES.filter(stripShown)).toEqual(['offline', 'unreachable', 'starting', 'reconnecting', 'ai_down'])
@@ -64,11 +64,12 @@ describe('badge and strip', () => {
 describe('colours and sizes', () => {
   test('dim text and no font under 12px in app.css', () => {
     const css = read('app.css')
-    expect(css).toMatch(/--text-dim:\s*#D0D2D3/i)
+    expect(css).toMatch(/--text-dim:\s*var\(--ink-muted\)/)
+    expect(read('src/styles/aligned-ui.css')).toMatch(/--ink-muted:#D0D2D3/i)
     expect(css).not.toMatch(/font-size:\s*(?:[0-9]|10|11)px/)
   })
   test('narrow phone: Search moves to the menu, status wraps', () => {
-    expect(read('app.css')).toContain('.hq-more')
+    expect(read('src/styles/aligned-ui.css')).toMatch(/@container app \(max-width:359px\)\{\.a-top-more\{display:inline-flex\}/)
     expect(read('src/styles/aligned-ui.css')).toMatch(/\.a-status\{white-space:normal\}/)
   })
   test('no rose or emerald status colour in the shell-owned files', () => {

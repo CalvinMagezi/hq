@@ -27,8 +27,7 @@ describe('notes (spec 03)', () => {
     expect(src('../routes/notes/index.tsx')).toContain('onKeepPin')
   })
   test('Notes stays lit on every address under it (acceptance 5)', () => {
-    expect(src('../components/AppRail.tsx')).toContain('exact: false')
-    expect(src('../components/BottomNav.tsx')).toContain('exact: false')
+    expect(src('../components/Places.tsx')).toContain('exact: false')
   })
   test('a save carries the base hash and a create carries a client id', () => {
     const api = src('./vaultApi.ts')

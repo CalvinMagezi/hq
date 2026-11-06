@@ -17,7 +17,6 @@ import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
 import { SearchOverlay } from '~/components/SearchOverlay'
 import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
-import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { InstallPrompt } from '~/components/InstallPrompt'
 import { openSignIn, SignedOutView, SignInPrompt } from '~/components/SignInPrompt'
@@ -104,12 +103,11 @@ function RootComponent() {
       <WebSocketProvider>
         <SetupRedirect />
         <VaultShell embedded={embedded} />
-        {/* The app has its own search, quick note and chat screens. */}
+        {/* The app has its own search and quick note screens. */}
         {!embedded && (
           <>
             <SearchOverlay />
             <QuickNoteOverlay />
-            <GlobalChatOverlay />
           </>
         )}
         {/* One drawer for every note link, whatever page or overlay it was clicked in. It stays in the app's host, where a note link in a task would otherwise do nothing. */}
@@ -171,20 +169,21 @@ function useChip() {
 }
 
 function CopilotChip({ state, chip }: { state: ConnectionState; chip: ReturnType<typeof useChip> }) {
+  if (state !== 'connected' || !chip.label) return null
   return (
-    <Link to={chip.to} className="hq-chip-link">
-      <BalanceChip state={state} label={chip.label} title={chip.title} limit={chip.limit} />
+    <Link to={chip.to} className={`a-bal ${chip.limit ? 'warn' : ''}`} title={chip.title} aria-label={t('balance_aria', { balance: chip.label })}>
+      <BalanceChip state={state} label={chip.label} title={chip.title} limit={chip.limit} bare />
     </Link>
   )
 }
 
-/** Search, the balance and Settings in one menu on the narrowest phones. */
+/** Search, the balance and Settings in one menu below 360 px (the design's `.a-top-more`). */
 function MoreMenu({ state, chip, lite }: { state: ConnectionState; chip: ReturnType<typeof useChip>; lite: boolean }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="hq-more">
+    <div className="a-top-more">
       <button type="button" className="a-ib" aria-label={t('more_menu')} aria-expanded={open} onClick={() => setOpen(!open)}>
-        <MoreHorizontal className="w-4 h-4" />
+        <MoreHorizontal className="a-ic" aria-hidden="true" />
       </button>
       {open && (
         <div className="a-menu hq-more-menu" role="menu">
@@ -205,6 +204,18 @@ function MoreMenu({ state, chip, lite }: { state: ConnectionState; chip: ReturnT
   )
 }
 
+/** The search field from 1024 px, the search icon below it (the design's `.a-find`). */
+function FindButton({ lite }: { lite: boolean }) {
+  const words = lite ? t('search_field_lite') : t('search_field_all')
+  return (
+    <button type="button" className="a-find" aria-label={words} onClick={() => window.dispatchEvent(new Event('hq:open-search'))}>
+      <Search className="a-ic" aria-hidden="true" />
+      <span>{words}</span>
+      <kbd className="a-kbd">{t('search_kbd')}</kbd>
+    </button>
+  )
+}
+
 const BUDGET_QUERY_KEYS = ['usage-budgets', 'usage-forecast', 'usage-providers', 'copilot-usage', 'openrouter-usage']
 const refetchBudgetQueries = () => {
   for (const queryKey of BUDGET_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [queryKey] })
@@ -214,7 +225,6 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   useEffect(() => startDataCounter(), [])
   useRefreshOn(['budget:change', 'settings:change'], refetchBudgetQueries)
   const wsConnected = useHQStore((s) => s.wsConnected)
-  const setGlobalChatOpen = useHQStore((s) => s.setGlobalChatOpen)
   useNeedsYouCount()
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const pathname = useRouterState({ select: (r) => r.location.pathname })
@@ -225,6 +235,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   const lite = edition === 'lite'
   const navigate = useNavigate()
   const activeTasks = useHQStore((s) => s.tasks.filter((x) => x.status === 'in_progress').length)
+  const workingHelpers = useHQStore((s) => s.workingHelpersCount)
   const statusLineRef = useRef<HTMLButtonElement>(null)
   const cover = isCover(pathname)
   const signInPage = needsSignInPage({ signInNeeded, hadSignIn: hasWebToken() || wasSignedOut() })
@@ -275,17 +286,13 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   // A shared computer signs out after 30 minutes with no input, wiping what this tab held.
   useEffect(() => (isSharedComputer() && !signInNeeded ? watchIdle(refuseSignIn) : undefined), [signInNeeded])
 
+  // "Send to Chat" from anywhere: the text is already the draft, Chat opens with it.
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'h') {
-        if (lite) return
-        e.preventDefault()
-        setGlobalChatOpen(true)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setGlobalChatOpen, lite])
+    if (lite) return
+    const open = () => void navigate({ to: '/chat' })
+    window.addEventListener('hq:open-chat', open)
+    return () => window.removeEventListener('hq:open-chat', open)
+  }, [navigate, lite])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
@@ -332,100 +339,72 @@ function VaultShell({ embedded }: { embedded: boolean }) {
 
   if (cover && !embedded) {
     return (
-      <div className="fixed inset-0 overflow-hidden" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)', paddingTop: 'var(--safe-top)' }}>
+      <div className="a-app hq-root">
         <ToastHost />
         <SignInPrompt />
-        <main className="h-full overflow-hidden">
-          {signInNeeded && !ownsSignedOut(pathname) ? <SignedOutView pathname={pathname} embedded={false} /> : <Outlet />}
+        <main className="a-main">
+          <div className="hq-place">
+            {signInNeeded && !ownsSignedOut(pathname) ? <SignedOutView pathname={pathname} embedded={false} /> : <Outlet />}
+          </div>
         </main>
       </div>
     )
   }
 
+  const signedOut = connection.state === 'signed_out'
   return (
-    <div
-      className="flex flex-row fixed inset-0 overflow-hidden"
-      style={{
-        background: 'var(--bg-base)',
-        color: 'var(--text-primary)',
-        paddingTop: 'var(--safe-top)',
-      }}
-    >
-      <div className="hq-ambient-bg" />
-      {!embedded && <AppRail />}
-      <div className="flex flex-col flex-1 min-w-0 min-h-0 relative z-10">
+    <div className="a-app hq-root">
+      {!embedded && (
+        <a className="a-skip" href="#hq-main">
+          {t('skip_to_content')}
+        </a>
+      )}
       {!embedded && (
         <>
           <InstallPrompt />
           <SignInPrompt />
           <ConnectionSheet connection={connection} open={sheetOpen} onClose={() => setSheetOpen(false)} triggerRef={statusLineRef} />
+          <ToastHost />
         </>
       )}
-
-      {!embedded && <ToastHost />}
-
-      {!embedded && <header
-        className="flex-shrink-0 flex items-center gap-2 px-3 sticky top-0 z-30 hq-header"
-        style={{ minHeight: '48px' }}
-      >
-        <Link
-          to="/"
-          className="flex md:hidden items-center gap-2 flex-shrink-0 transition-opacity active:opacity-60"
-        >
-          <img src="/icons/hq-mark-96.png" alt="Agent HQ" width="28" height="28" className="flex-shrink-0 object-contain" />
-          {/* Gives way on the narrowest phones so the clock always fits. */}
-          <span className="hidden min-[380px]:inline text-xs font-mono font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>
-            HQ Vault
-          </span>
-        </Link>
-
-        <HeaderTitle
-          title={placeTitle(pathname)}
-          connection={connection}
-          fact={placeFact(pathname, { activeTasks, workingHelpers: 0 })}
-          onClick={() => setSheetOpen(true)}
-          buttonRef={statusLineRef}
-        />
-
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new Event('hq:open-search'))}
-          className="hq-header-search p-1.5 rounded-lg text-neutral-400 hover:bg-white/5 transition-all"
-          title={lite ? t('search_field_lite') : t('search_field_all')}
-          aria-label={lite ? t('search_field_lite') : t('search_field_all')}
-        >
-          <Search className="w-4 h-4" />
-        </button>
-
-        {!lite && <CopilotChip state={connection.state} chip={chip} />}
-
-        <Link
-          to="/settings"
-          className="hq-header-gear md:hidden p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-all"
-          title="Settings"
-          aria-label="Settings"
-          activeProps={{ className: 'text-neutral-100 bg-white/5' }}
-        >
-          <Settings className="w-4 h-4" />
-        </Link>
-
-        {connection.state === 'signed_out' && (
-          <button type="button" className="a-btn compact" onClick={openSignIn}>
-            {t('signed_out_button')}
-          </button>
+      <div className="a-shell">
+        {/* Signed out, only Sign in shows: no places, no gear (FirstRun 2). */}
+        {!embedded && !signedOut && <AppRail />}
+        {!embedded && (
+          <header className="a-top">
+            <HeaderTitle
+              title={placeTitle(pathname)}
+              connection={connection}
+              fact={placeFact(pathname, { activeTasks, workingHelpers })}
+              onClick={() => setSheetOpen(true)}
+              buttonRef={statusLineRef}
+            />
+            <div className="a-top-actions">
+              {signedOut ? (
+                <button type="button" className="a-btn compact" onClick={openSignIn}>
+                  {t('signed_out_button')}
+                </button>
+              ) : (
+                <>
+                  <FindButton lite={lite} />
+                  {!lite && <CopilotChip state={connection.state} chip={chip} />}
+                  <Link to="/settings" className="a-ib a-top-gear" aria-label={t('place_settings')}>
+                    <Settings className="a-ic" aria-hidden="true" />
+                  </Link>
+                  <MoreMenu state={connection.state} chip={chip} lite={lite} />
+                </>
+              )}
+            </div>
+          </header>
         )}
-
-        <MoreMenu state={connection.state} chip={chip} lite={lite} />
-      </header>}
-
-      {!embedded && <SavedStrip state={connection.state} pathname={pathname} />}
-
-      <main className="flex-1 min-h-0 overflow-hidden relative main-content md:mx-3 md:mb-3 md:rounded-2xl hq-glass-pane">
-        {signInNeeded ? <SignedOutView pathname={pathname} embedded={embedded} /> : <Outlet />}
-      </main>
-
+        <main className="a-main" id="hq-main">
+          {!embedded && <SavedStrip state={connection.state} pathname={pathname} />}
+          <div className="hq-place">
+            {signInNeeded ? <SignedOutView pathname={pathname} embedded={embedded} /> : <Outlet />}
+          </div>
+        </main>
+        {!embedded && !signedOut && <BottomNav />}
       </div>
-      {!embedded && <BottomNav />}
     </div>
   )
 }

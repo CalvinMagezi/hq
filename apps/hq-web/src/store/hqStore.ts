@@ -25,7 +25,9 @@ interface HQState {
   setNotificationCounts: (unread: number, pending: number) => void
   /** Coding agents waiting on the person; drives the Workbench nav badge. Not persisted. */
   needsYouCount: number
-  setNeedsYouCount: (count: number) => void
+  /** Helpers working right now, for the status line's "Connected · 2 working". Not persisted. */
+  workingHelpersCount: number
+  setNeedsYouCount: (count: number, working?: number) => void
   /** True while the Workbench list (unfiltered) is open and feeds the count itself, so the nav need not poll. */
   workbenchFeedsCount: boolean
   setWorkbenchFeedsCount: (feeds: boolean) => void
@@ -70,7 +72,8 @@ export const useHQStore = create<HQState>()(
       setNotificationCounts: (unreadNotificationsCount, pendingApprovalsCount) =>
         set({ unreadNotificationsCount, pendingApprovalsCount }),
       needsYouCount: 0,
-      setNeedsYouCount: (needsYouCount) => set({ needsYouCount }),
+      workingHelpersCount: 0,
+      setNeedsYouCount: (needsYouCount, workingHelpersCount = 0) => set({ needsYouCount, workingHelpersCount }),
       workbenchFeedsCount: false,
       setWorkbenchFeedsCount: (workbenchFeedsCount) => set({ workbenchFeedsCount }),
       updateNotificationState: (id, state) =>

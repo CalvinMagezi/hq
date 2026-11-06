@@ -1472,8 +1472,10 @@ mod security_header_tests {
         for attr in ["src=\"", "href=\""] {
             for part in html.split(attr).skip(1) {
                 let url = part.split('"').next().unwrap();
+                // A link to a place on this page (the skip link) loads nothing.
+                let in_page = attr == "href=\"" && url.starts_with('#');
                 assert!(
-                    url.starts_with('/') && !url.starts_with("//"),
+                    in_page || (url.starts_with('/') && !url.starts_with("//")),
                     "cross-origin or inline load: {url}"
                 );
             }

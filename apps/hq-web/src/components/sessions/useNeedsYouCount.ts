@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useHQStore } from '~/store/hqStore'
 import { globalSessionsApi } from '~/lib/sessionsApi'
-import { needsYouCount } from '~/lib/workbench'
+import { needsYouCount, workingCount } from '~/lib/workbench'
 import { usePolled } from './usePolled'
 
 const COUNT_POLL_MS = 30_000
@@ -16,6 +16,6 @@ export function useNeedsYouCount() {
   useEffect(() => {
     if (fed) return
     if (failed) setCount(0)
-    else if (count !== null) setCount(count)
+    else if (count !== null && list.data) setCount(count, workingCount(list.data))
   }, [fed, failed, count, setCount])
 }

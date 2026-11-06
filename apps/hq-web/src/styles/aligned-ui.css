@@ -9,6 +9,8 @@
 @font-face{font-family:"Clear Sans";src:url("/fonts/ClearSans-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
 @font-face{font-family:"Clear Sans";src:url("/fonts/ClearSans-Bold.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
 @font-face{font-family:"Clear Sans";src:url("/fonts/ClearSans-Italic.woff2") format("woff2");font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:"Clear Sans";src:url("/fonts/ClearSans-BoldItalic.woff2") format("woff2");font-weight:700;font-style:italic;font-display:swap}
+.a-mark{display:block;width:100%;height:100%;border-radius:50%;background:var(--mark-ground) url("/icons/hq-icon-192.png") center/cover no-repeat}
 
 /* ---------- tokens: MTS dark, as HqTheme.kt (Mts object) ---------- */
 :root{
@@ -477,3 +479,17 @@ textarea.a-input{min-height:96px;resize:vertical}
 .a-card.danger{border-color:var(--warn)}
 .a-rcard[aria-checked="true"]{border-color:var(--ink)}
 .a-rcard[aria-checked="true"] .a-radio{border-color:var(--ink);background:radial-gradient(circle,var(--ink) 42%,transparent 48%)}
+
+/* Synced from the canvas, 6 Nov 2026: states that changed after the first copy. */
+.a-field.is-error .a-input{border-color:var(--warn)}
+.a-top{height:auto;min-height:var(--top-h)}
+.a-tt{height:auto;min-height:48px;padding:4px 0}
+.a-top-more{display:none}
+@container app (max-width:359px){.a-top-more{display:inline-flex}.a-find,.a-bal,.a-top-gear{display:none}}
+.a-tab.is-on em,.a-tab[aria-selected="true"] em{background:var(--ink);color:var(--surface-000)}
+.a-tab em.hub-need,.a-tab em.need{background:var(--warn);color:#000}
+.a-panes.no-list .a-pane-detail{display:flex}
+.a-chip.is-on,.a-chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--surface-000)}
+.a-banner.work>.a-ic{color:var(--brand-blue)}
+.a-sw[aria-checked="true"]{background:var(--ink);border-color:var(--ink)}
+.a-chk[aria-checked="true"] u{background:var(--ink);border-color:var(--ink)}

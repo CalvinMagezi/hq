@@ -11,7 +11,7 @@ import { SessionRow } from '~/components/sessions/SessionRow'
 import { usePolled } from '~/components/sessions/usePolled'
 import { globalSessionsApi, workbenchApi, type HarnessSession } from '~/lib/sessionsApi'
 import { useHQStore } from '~/store/hqStore'
-import { needsYouCount, sessionTitle, statusInfo } from '~/lib/workbench'
+import { needsYouCount, sessionTitle, statusInfo, workingCount } from '~/lib/workbench'
 import { GROUP_WORDS, HELPER_CHIPS, chipCounts, chipWords, finishedToArchive, groupHelpers, taskBanner, type HelperChip } from '~/lib/helperView'
 import { edgeWorkerApi, ownCardId, ownTitle, ownWords, type EdgeRun } from '~/lib/edgeWorker'
 import { toastUndo } from '~/lib/toast'
@@ -78,7 +78,7 @@ function WorkbenchPage() {
   useEffect(() => {
     if (!feeds) return
     if (list.error !== null) setCount(0)
-    else if (list.data) setCount(needsYouCount(list.data))
+    else if (list.data) setCount(needsYouCount(list.data), workingCount(list.data))
   }, [feeds, list.data, list.error, setCount])
 
   const select = (id: string | undefined) =>
