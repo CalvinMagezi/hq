@@ -310,6 +310,7 @@ mod tests {
             "/api/vault-asset?path=_system/IDENTITY.md",
             "/api/vault-asset?path=_data/vault.db",
             "/api/note?path=_system/IDENTITY.md",
+            "/api/note?path=_system",
             "/api/tree?path=_system",
         ] {
             assert_eq!(
@@ -329,6 +330,15 @@ mod tests {
         );
         assert_eq!(
             status(&lite, "GET", "/api/note?path=Notebooks/plan.md").await,
+            StatusCode::OK
+        );
+        // A folder answers with its listing, under the same rules as a note.
+        assert_eq!(
+            status(&lite, "GET", "/api/note?path=Notebooks").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(&full, "GET", "/api/note?path=_system").await,
             StatusCode::OK
         );
         assert_eq!(

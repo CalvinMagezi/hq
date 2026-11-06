@@ -273,9 +273,10 @@ pub(crate) async fn note_read_handler(
     if !state.path_allowed(&path_param) {
         return ApiError::not_found().into_response();
     }
-    let Some((abs, effective_path)) =
-        crate::vault_api::resolve_note_path(&state.vault_path, &path_param)
-    else {
+    // A folder opened from Notes answers with its listing, under the same checks as a note.
+    let resolved = crate::vault_api::resolve_note_path(&state.vault_path, &path_param)
+        .or_else(|| crate::vault_api::resolve_folder(&state.vault_path, &path_param));
+    let Some((abs, effective_path)) = resolved else {
         return ApiError::not_found().into_response();
     };
     if !state.path_allowed(&effective_path) || !state.resolved_allowed(&abs) {
