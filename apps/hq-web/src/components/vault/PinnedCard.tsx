@@ -1,118 +1,45 @@
 import { Link } from '@tanstack/react-router'
+import { Pin } from 'lucide-react'
 import type { PinnedNote } from '~/lib/vaultApi'
 import { relTime } from '~/lib/time'
 import { t } from '~/strings'
+import { folderTrail } from './noteRows'
+import './notes.css'
 
-export function PinnedCard({ note, isSelected, onClick, onUnpin, onKeepPin, onNotNow }: { note: PinnedNote; isSelected: boolean; onClick?: () => void; onUnpin?: (path: string) => void; onKeepPin?: (path: string) => void; onNotNow?: (path: string) => void }) {
-    const folder = note.path.includes('/') ? note.path.split('/').slice(0, -1).join('/') : null
+interface PinnedCardProps {
+  note: PinnedNote
+  onKeepPin?: (path: string) => void
+  onNotNow?: (path: string) => void
+}
 
-    return (
-        <div className="relative group w-full">
-            <Link
-                to="/notes/$"
-                params={{ _splat: note.path }}
-                onClick={onClick}
-                className="flex flex-col gap-1.5 px-3 py-2.5 rounded-xl transition-all w-full glass-card"
-                style={{
-                    borderColor: isSelected ? 'rgba(0, 173, 238, 0.35)' : undefined,
-                    boxShadow: isSelected ? '0 0 20px rgba(0, 173, 238, 0.12), inset 0 1px 0 var(--glass-shine)' : undefined,
-                }}
-            >
-                {/* Title row */}
-                <div className="flex items-start justify-between gap-2">
-                    <span
-                        className="text-[12px] font-bold leading-snug flex-1"
-                        style={{
-                            color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                        }}
-                    >
-                        {note.title}
-                    </span>
-                    <span className="text-[9px] shrink-0 mt-0.5" style={{ color: 'var(--text-dim)' }}>
-                        {relTime(note.updatedAt)}
-                    </span>
-                </div>
-
-                {/* Preview text */}
-                {note.preview && (
-                    <p
-                        className="text-[11px] leading-relaxed"
-                        style={{
-                            color: 'var(--text-dim)',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                        }}
-                    >
-                        {note.preview}
-                    </p>
-                )}
-
-                {/* Footer: folder path + tags */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                    {folder && (
-                        <span
-                            className="text-[9px] px-1.5 py-0.5 rounded-md"
-                            style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-dim)' }}
-                        >
-                            {folder}
-                        </span>
-                    )}
-                    {note.tags?.slice(0, 3).map(tag => (
-                        <span
-                            key={tag}
-                            className="text-[9px] px-1.5 py-0.5 rounded-md glass-tag"
-                            style={{ color: 'var(--accent-blue)' }}
-                        >
-                            #{tag}
-                        </span>
-                    ))}
-                </div>
-            </Link>
-            {note.suggestedBy && (
-                <div className="flex items-center gap-1.5 px-3 pb-2 -mt-1 text-[9px]" style={{ color: 'var(--text-dim)' }}>
-                    <span>{t('pin_suggested_by', { name: note.suggestedBy })}</span>
-                    {onKeepPin && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onKeepPin(note.path) }}
-                            className="underline hover:opacity-80"
-                            style={{ color: 'var(--accent-blue)' }}
-                        >
-                            {t('pin_keep')}
-                        </button>
-                    )}
-                    {onNotNow && (
-                        <button
-                            onClick={(e) => { e.stopPropagation(); onNotNow(note.path) }}
-                            className="underline hover:opacity-80"
-                            style={{ color: 'var(--text-dim)' }}
-                        >
-                            {t('pin_not_now')}
-                        </button>
-                    )}
-                </div>
-            )}
-            {onUnpin && (
-                <button
-                    onClick={(e) => { e.stopPropagation(); onUnpin(note.path) }}
-                    title={t('pin_unpin')}
-                    className="absolute top-2 right-2 md:opacity-0 md:group-hover:opacity-100 transition-all w-5 h-5 flex items-center justify-center rounded-full text-[9px] font-bold hover:scale-110"
-                    style={{
-                        background: 'rgba(0,0,0,0.6)',
-                        backdropFilter: 'blur(8px)',
-                        WebkitBackdropFilter: 'blur(8px)',
-                        color: 'var(--text-dim)',
-                        border: '1px solid rgba(255,255,255,0.12)',
-                    }}
-                >
-                    ✕
-                </button>
-            )}
+/** A pinned note as a card: title, a line of what is in it, where it lives. A suggested pin says who and asks. */
+export function PinnedCard({ note, onKeepPin, onNotNow }: PinnedCardProps) {
+  const trail = folderTrail(note.path)
+  const suggested = Boolean(note.suggestedBy)
+  return (
+    <div className={`a-card an-pin${suggested ? ' an-sug' : ''}`}>
+      <Link to="/notes/$" params={{ _splat: note.path }} className="an-pin-link">
+        <b>{note.title}</b>
+        {note.preview && <span className="a-body-sm a-muted">{note.preview}</span>}
+        <span className="a-body-sm a-muted">
+          {!suggested && <Pin className="a-ic" aria-hidden="true" />} {[trail, relTime(note.updatedAt)].filter(Boolean).join(' · ')}
+        </span>
+      </Link>
+      {suggested && (
+        <div className="a-chips">
+          <span className="a-body-sm a-muted">{t('pin_suggested_by', { name: note.suggestedBy ?? '' })}</span>
+          {onKeepPin && (
+            <button type="button" className="a-btn compact" onClick={() => onKeepPin(note.path)}>
+              {t('pin_keep')}
+            </button>
+          )}
+          {onNotNow && (
+            <button type="button" className="a-btn compact" onClick={() => onNotNow(note.path)}>
+              {t('pin_not_now')}
+            </button>
+          )}
         </div>
-    )
+      )}
+    </div>
+  )
 }

@@ -1,9 +1,10 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
-import { lazy, Suspense, useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { lazy, Suspense, useState, useCallback, useMemo, useRef } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchNoteExport, togglePinNote } from '~/lib/vaultApi'
+import { FileQuestion } from 'lucide-react'
+import { fetchNoteExport, togglePinNote, type DirEntry, type NoteTreeNode } from '~/lib/vaultApi'
 import { exportFileName, exportGate, exportKeys, exportOptionsFor, type NoteExportFormat } from '~/lib/noteExport'
 import { t } from '~/strings'
 import { Dialog, workingLabel } from '~/components/ui/Dialog'
@@ -13,9 +14,7 @@ import { useInHub } from '~/lib/hubWindow'
 import { useSharedConnection } from '~/lib/connection'
 import { AboutNote } from '~/components/notes/AboutNote'
 import { HqHttpError } from '~/lib/hqAuth'
-import { noteQuery, vaultKeys } from '~/lib/queries'
-import type { DirEntry } from '~/lib/vaultApi'
-import { fileIcon } from '~/components/vault/fileIcon'
+import { noteQuery, noteTreeQuery, vaultKeys } from '~/lib/queries'
 import { MarkdownViewer } from '~/components/MarkdownViewer'
 import { ImageViewer } from '~/components/ImageViewer'
 import { NoteEditor } from '~/components/NoteEditor'
@@ -24,11 +23,14 @@ import { CopyPathMenu, type CopyMenuState } from '~/components/CopyPathMenu'
 import { ExportMenu, type ExportMenuState } from '~/components/ExportMenu'
 import { usePersistedState } from '~/lib/usePersistedState'
 import { NoteTasks } from '~/components/tasks/NoteTasks'
+import { NEW_CHAT_KEY, restoreDraft } from '~/components/chat/draftStore'
+import { FolderView, NoteBar, NoteLayout, NoteMeta, SiblingList, BackLink } from '~/components/vault/NoteViews'
+import { countNotes, parentPath } from '~/components/vault/noteRows'
+import '~/components/vault/notes.css'
 
 const MD_ZOOM_MIN = 0.7
 const MD_ZOOM_MAX = 1.6
 const MD_ZOOM_STEP = 0.1
-
 
 // Lazy-load heavy viewer components to reduce initial bundle
 const PdfViewer = lazy(() => import('~/components/PdfViewer').then(m => ({ default: m.PdfViewer })))
@@ -50,72 +52,73 @@ function VaultFileRoute() {
     const note = useQuery(noteQuery(filePath))
     if (!note.data) {
         return (
-            <div className="h-full flex items-center justify-center text-xs " style={{ color: 'var(--text-dim)' }}>
-                {note.isError ? 'Could not load this note, and no saved copy is on this device.' : 'Loading...'}
+            <div className="an-home">
+                {note.isError ? (
+                    <div role="alert" className="a-empty">
+                        <span className="a-empty-ic"><FileQuestion className="a-ic" aria-hidden="true" /></span>
+                        <p>{t('notes_load_failed')}</p>
+                        <BackLink path={filePath} />
+                    </div>
+                ) : (
+                    <div role="status" aria-label={t('notes_viewer_loading')}>
+                        <span className="a-skel t" />
+                        <span className="a-skel t" />
+                        <span className="a-skel t" />
+                    </div>
+                )}
             </div>
         )
     }
+    if (note.data.isDir) return <FolderRoute dirPath={filePath} entries={note.data.dirEntries ?? []} />
     return (
         <VaultFileView
             key={filePath}
             filePath={filePath}
             content={note.data.content}
             hash={note.data.hash}
-            isDir={note.data.isDir}
-            dirEntries={note.data.dirEntries ?? []}
         />
     )
 }
 
-function DirView({ dirPath, entries }: { dirPath: string; entries: DirEntry[] }) {
-    const name = dirPath.split('/').pop() ?? dirPath
+function subfolderCounts(tree: NoteTreeNode | undefined): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const child of tree?.children ?? []) if (child.type === 'dir') counts[child.path] = countNotes(child)
+    return counts
+}
+
+function FolderRoute({ dirPath, entries }: { dirPath: string; entries: DirEntry[] }) {
+    const tree = useQuery(noteTreeQuery(dirPath))
     return (
-        <div className="p-6">
-            <div className="flex items-center gap-2 mb-5">
-                <span className="text-lg">📁</span>
-                <h1 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{name}</h1>
-                <span className="text-[11px] " style={{ color: 'var(--text-dim)', opacity: 0.4 }}>{entries.length} items</span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {entries.map(e => (
-                    <Link
-                        key={e.path}
-                        to="/notes/$"
-                        params={{ _splat: e.path }}
-                        className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all"
-                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
-                        onMouseEnter={ev => { ev.currentTarget.style.background = 'rgba(0,173,238,0.06)'; ev.currentTarget.style.borderColor = 'rgba(0,173,238,0.15)' }}
-                        onMouseLeave={ev => { ev.currentTarget.style.background = 'rgba(255,255,255,0.03)'; ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' }}
-                    >
-                        <span className="text-[14px] flex-shrink-0">{e.isDir ? '📁' : fileIcon(e.name)}</span>
-                        <span className="text-[11px] truncate" style={{ color: e.isDir ? 'var(--text-primary)' : 'var(--text-dim)' }}>
-                            {e.name.replace(/\.md$/, '')}
-                        </span>
-                    </Link>
-                ))}
-            </div>
-        </div>
+        <FolderView
+            dirPath={dirPath}
+            entries={entries}
+            counts={subfolderCounts(tree.data?.tree)}
+            onNewHere={() => window.dispatchEvent(new CustomEvent('hq:open-quick-note', { detail: { folder: dirPath } }))}
+        />
     )
 }
 
-function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
+function VaultFileView({ filePath, content, hash }: {
     filePath: string
     content: string
     hash?: string
-    isDir: boolean
-    dirEntries: DirEntry[]
 }) {
     const { setGlobalChatOpen, setChatDraft } = useHQStore()
     const queryClient = useQueryClient()
+    const navigate = useNavigate()
 
     const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
     const isMd = ext === 'md'
+    const parent = parentPath(filePath)
+    const siblings = useQuery({ ...noteTreeQuery(parent ?? ''), enabled: parent !== null })
+    const siblingEntries: DirEntry[] = (siblings.data?.tree?.children ?? []).map((c) => ({ name: c.name, path: c.path, isDir: c.type === 'dir' }))
 
     // All hooks must be called unconditionally before any early returns
     const initialPinned = isMd && /^---[\s\S]*?^pinned:\s*true/m.test(content)
     const [isPinned, setIsPinned] = useState(initialPinned)
     const [pinning, setPinning] = useState(false)
     const [editing, setEditing] = useState(false)
+    const [sideOpen, setSideOpen] = useState(false)
     const [exporting, setExporting] = useState<NoteExportFormat | null>(null)
     const inHub = useInHub()
     const connection = useSharedConnection()
@@ -140,14 +143,6 @@ function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
         [setMdZoom],
     )
 
-    if (isDir) {
-        return (
-            <div className="h-full overflow-y-auto">
-                <DirView dirPath={filePath} entries={dirEntries} />
-            </div>
-        )
-    }
-
     const handleTogglePin = async () => {
         setPinning(true)
         try {
@@ -157,6 +152,11 @@ function VaultFileView({ filePath, content, hash, isDir, dirEntries }: {
         } finally {
             setPinning(false)
         }
+    }
+
+    const handleAskHq = () => {
+        restoreDraft(NEW_CHAT_KEY, `\`${filePath}\``)
+        void navigate({ to: '/chat', search: { compose: '1' } })
     }
 
     const handleConvertToTask = () => {
@@ -340,147 +340,67 @@ ${safeHtml}
         viewer = <CodeViewer content={content} path={filePath} />
     }
 
-    const filename = filePath.split('/').pop()
+    const toggleEditing = () => (editing && leaveRef.current ? leaveRef.current(() => setEditing(false)) : setEditing(!editing))
+
+    const body = (
+        <Suspense fallback={<span role="status" className="a-skel t" aria-label={t('notes_viewer_loading')} />}>
+            <div className="an-md">
+                {isMd && <NoteMeta path={filePath} />}
+                {viewer}
+                {exportNote && <p role="status" className="a-body-sm a-muted">{exportNote}</p>}
+                {isMd && !editing && <NoteTasks path={filePath} />}
+            </div>
+        </Suspense>
+    )
 
     return (
-        <div className="h-full flex flex-col relative">
-            {/* Action bar — sticky, compact, action-focused (path shown in bottom breadcrumb) */}
-            <div
-                className="flex items-center justify-between px-3 py-1.5 flex-shrink-0 sticky top-0 z-10 glass-heavy"
-                style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', minHeight: '36px' }}
-            >
-                <span className="text-[11px] font-bold truncate flex-1 mr-2" style={{ color: 'var(--text-primary)' }}>
-                    {filename?.replace(/\.md$/, '')}
-                </span>
-
-                <div className="flex items-center gap-1 flex-shrink-0">
-                    {isMd && (
-                        <button
-                            onClick={() => (editing && leaveRef.current ? leaveRef.current(() => setEditing(false)) : setEditing(!editing))}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-all"
-                            style={{
-                                color: editing ? 'var(--accent-violet)' : 'var(--text-dim)',
-                                background: editing ? 'rgba(167,139,250,0.1)' : 'rgba(255,255,255,0.04)',
-                                border: editing ? '1px solid rgba(167,139,250,0.2)' : '1px solid rgba(255,255,255,0.06)',
-                            }}
-                        >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                {editing
-                                    ? <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
-                                    : <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>
-                                }
-                            </svg>
-                            {editing ? t('note_editor_view') : t('note_editor_edit')}
-                        </button>
-                    )}
-                    {isMd && (
-                        <button
-                            onClick={handleTogglePin}
-                            disabled={pinning}
-                            className="flex items-center justify-center w-7 h-7 rounded-lg transition-all"
-                            style={{
-                                color: isPinned ? 'var(--accent-amber)' : 'var(--text-dim)',
-                                background: isPinned ? 'rgba(255,179,0,0.08)' : 'rgba(255,255,255,0.04)',
-                                border: isPinned ? '1px solid rgba(255,179,0,0.15)' : '1px solid rgba(255,255,255,0.06)',
-                            }}
-                            title={isPinned ? 'Unpin' : 'Pin'}
-                        >
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill={isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-                            </svg>
-                        </button>
-                    )}
-                    {isMd && !editing && (
-                        <div className="flex gap-1 items-center bg-black/20 rounded-lg p-0.5 border border-white/5 mr-1">
-                            <button
-                                onClick={() => setMdZoomPersisted(mdZoom - MD_ZOOM_STEP)}
-                                disabled={mdZoom <= MD_ZOOM_MIN}
-                                className="px-1.5 py-0.5 text-[11px] rounded hover:bg-white/10 disabled:opacity-30 transition-all"
-                                style={{ color: 'var(--text-dim)' }}
-                                title="Decrease text size (Cmd/Ctrl + -)"
-                            >A-</button>
-                            <span className="text-[9px] w-7 text-center" style={{ color: 'var(--text-dim)' }}>
-                                {Math.round(mdZoom * 100)}%
-                            </span>
-                            <button
-                                onClick={() => setMdZoomPersisted(mdZoom + MD_ZOOM_STEP)}
-                                disabled={mdZoom >= MD_ZOOM_MAX}
-                                className="px-1.5 py-0.5 text-[11px] rounded hover:bg-white/10 disabled:opacity-30 transition-all"
-                                style={{ color: 'var(--text-dim)' }}
-                                title="Increase text size (Cmd/Ctrl + +)"
-                            >A+</button>
-                            {mdZoom !== 1 && (
-                                <button
-                                    onClick={() => setMdZoomPersisted(1)}
-                                    className="px-1 text-[9px] rounded hover:bg-white/10 text-amber-400/70 hover:text-amber-400 transition-all"
-                                    title="Reset zoom (Cmd/Ctrl + 0)"
-                                >↺</button>
-                            )}
-                        </div>
-                    )}
-                    {isMd && (
-                        <button
-                            onClick={(e) => {
+        <>
+            <NoteLayout
+                filePath={filePath}
+                list={parent !== null && siblings.data ? <SiblingList parent={parent} entries={siblingEntries} current={filePath} /> : undefined}
+                side={isMd ? <AboutNote path={filePath} /> : undefined}
+                sideOpen={sideOpen}
+                onToggleSide={() => setSideOpen(!sideOpen)}
+                onMore={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    setCopyMenu({ relPath: filePath, x: rect.right - 300, y: rect.bottom + 6 })
+                }}
+                bar={
+                    isMd ? (
+                        <NoteBar
+                            editing={editing}
+                            pinned={isPinned}
+                            pinning={pinning}
+                            exporting={exporting !== null}
+                            exportOpen={exportMenu !== null}
+                            onEdit={toggleEditing}
+                            onAsk={handleAskHq}
+                            onTask={handleConvertToTask}
+                            onPin={handleTogglePin}
+                            onExport={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect()
-                                setExportMenu({ x: rect.right - 240, y: rect.bottom + 6 })
+                                setExportMenu({ x: rect.left, y: rect.bottom + 6 })
                             }}
-                            disabled={exporting !== null}
-                            className="flex items-center justify-center gap-1 h-7 px-2 rounded-lg transition-all disabled:opacity-40"
-                            style={{ color: 'var(--text-dim)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                            title={t('note_export_menu_label')}
-                            aria-haspopup="menu"
-                            aria-expanded={exportMenu !== null}
-                        >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
-                            <span className="hidden sm:inline text-[11px] ">{t('note_action_export')}</span>
-                        </button>
-                    )}
-                    {isMd && (
-                        <button
-                            onClick={handleConvertToTask}
-                            className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg transition-all"
-                            style={{ color: 'var(--text-dim)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                            title="Convert to task"
-                        >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-                            </svg>
-                        </button>
-                    )}
-                    <button
-                        onClick={(e) => {
-                            const rect = e.currentTarget.getBoundingClientRect()
-                            setCopyMenu({ relPath: filePath, x: rect.right - 220, y: rect.bottom + 6 })
-                        }}
-                        className="flex items-center justify-center w-7 h-7 rounded-lg transition-all"
-                        style={{ color: 'var(--text-dim)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                        title="Copy path"
-                    >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-
-            {/* Content Area */}
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden w-full">
-                <Suspense fallback={
-                    <div className="flex items-center justify-center py-12">
-                        <span className="text-sm animate-pulse" style={{ color: 'var(--text-dim)' }}>Loading viewer...</span>
-                    </div>
-                }>
-                    <div className="max-w-[860px] mx-auto p-4 sm:p-6 overflow-x-hidden" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom))' }}>
-                        {viewer}
-                        {exportNote && <p role="status" className="a-body-sm a-muted">{exportNote}</p>}
-                        {isMd && !editing && <NoteTasks path={filePath} />}
-                        {isMd && !editing && <AboutNote path={filePath} />}
-                    </div>
-                </Suspense>
-            </div>
-            <CopyPathMenu menu={copyMenu} onClose={closeCopyMenu} onLinked={(p) => queryClient.invalidateQueries({ queryKey: vaultKeys.note(p) })} />
+                        />
+                    ) : undefined
+                }
+            >
+                {body}
+            </NoteLayout>
+            <CopyPathMenu
+                menu={copyMenu}
+                onClose={closeCopyMenu}
+                onLinked={(p) => queryClient.invalidateQueries({ queryKey: vaultKeys.note(p) })}
+                zoom={isMd && !editing ? {
+                    pct: Math.round(mdZoom * 100),
+                    canSmaller: mdZoom > MD_ZOOM_MIN,
+                    canLarger: mdZoom < MD_ZOOM_MAX,
+                    modified: mdZoom !== 1,
+                    onSmaller: () => setMdZoomPersisted(mdZoom - MD_ZOOM_STEP),
+                    onLarger: () => setMdZoomPersisted(mdZoom + MD_ZOOM_STEP),
+                    onReset: () => setMdZoomPersisted(1),
+                } : undefined}
+            />
             <ExportMenu menu={exportMenu} options={exportOptions} busy={exporting} title={t('note_export_title')} onPick={startExport} onClose={closeExportMenu} />
             {askShared && (
                 <Dialog
@@ -498,6 +418,6 @@ ${safeHtml}
                     }}
                 />
             )}
-        </div>
+        </>
     )
 }

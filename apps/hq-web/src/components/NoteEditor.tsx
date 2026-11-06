@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type MutableRefObject } from 'react'
+import { Bold, Heading2, Link2, List, ListChecks } from 'lucide-react'
 import { Link, useBlocker } from '@tanstack/react-router'
 import { MarkdownViewer } from './MarkdownViewer'
 import { Dialog, workingLabel } from '~/components/ui/Dialog'
@@ -7,6 +8,7 @@ import { displayZone } from '~/lib/time'
 import { conflictWhere, stripFrontmatter } from '~/lib/noteConflict'
 import { keepBoth as keepBothNote, liveNoteApi, saveNote, seeTheirVersion, type NoteApi, type SaveStep, type TheirVersion } from '~/lib/noteSave'
 import type { NoteConflict } from '~/lib/vaultApi'
+import '~/components/vault/notes.css'
 import { keepUnsaved, onBeforeReload, takeUnsaved } from '~/lib/version'
 
 interface NoteEditorProps {
@@ -36,6 +38,27 @@ function whereWords(by: string | undefined, kind: 'cap' | 'low'): string | null 
     return t(kind === 'cap' ? 'note_where_hq' : 'note_from_hq')
 }
 
+/** What a formatting button does to the text: wrap the selection, or start the line with a marker. */
+export type Format = 'heading' | 'bold' | 'italic' | 'bullets' | 'checklist' | 'link'
+
+/** The new text and selection after one formatting button, so the textarea stays plain markdown. */
+export function applyFormat(text: string, start: number, end: number, format: Format): { text: string; start: number; end: number } {
+    const wrap = (open: string, close: string) => {
+        const next = text.slice(0, start) + open + text.slice(start, end) + close + text.slice(end)
+        return { text: next, start: start + open.length, end: end + open.length }
+    }
+    const lead = (marker: string) => {
+        const at = text.lastIndexOf('\n', start - 1) + 1
+        return { text: text.slice(0, at) + marker + text.slice(at), start: start + marker.length, end: end + marker.length }
+    }
+    if (format === 'bold') return wrap('**', '**')
+    if (format === 'italic') return wrap('*', '*')
+    if (format === 'link') return wrap('[[', ']]')
+    if (format === 'heading') return lead('## ')
+    if (format === 'bullets') return lead('- ')
+    return lead('- [ ] ')
+}
+
 export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = liveNoteApi }: NoteEditorProps) {
     const [mode, setMode] = useState<'edit' | 'preview'>('edit')
     const [saving, setSaving] = useState(false)
@@ -50,7 +73,7 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
 
     useEffect(() => setBase(base), [base])
 
-    // Strip frontmatter for editing — server handles preservation on save
+    // Strip frontmatter for editing; the server handles preservation on save
     const bodyOnly = stripFrontmatter(content)
     const [editContent, setEditContent] = useState(bodyOnly)
 
@@ -67,6 +90,19 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
         if (!dirty) return
         return onBeforeReload(() => keepUnsaved(`note:${filePath}`, editContent))
     }, [dirty, filePath, editContent])
+
+    const areaRef = useRef<HTMLTextAreaElement | null>(null)
+    const format = (kind: Format) => {
+        const area = areaRef.current
+        if (!area) return
+        const next = applyFormat(editContent, area.selectionStart, area.selectionEnd, kind)
+        setEditContent(next.text)
+        setDirty(true)
+        requestAnimationFrame(() => {
+            area.focus()
+            area.setSelectionRange(next.start, next.end)
+        })
+    }
 
     const handleChange = (value: string) => {
         setEditContent(value)
@@ -119,11 +155,14 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
             if ((e.metaKey || e.ctrlKey) && e.key === 's') {
                 e.preventDefault()
                 void handleSave()
+            } else if ((e.metaKey || e.ctrlKey) && (e.key === 'b' || e.key === 'i') && document.activeElement === areaRef.current) {
+                e.preventDefault()
+                format(e.key === 'b' ? 'bold' : 'italic')
             }
         }
         window.addEventListener('keydown', onKeyDown)
         return () => window.removeEventListener('keydown', onKeyDown)
-    }, [handleSave])
+    }, [handleSave, format])
 
     // Closing the tab asks the browser's own question; its words cannot be set.
     useEffect(() => {
@@ -199,7 +238,7 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
 
                 <div className="flex items-center gap-2">
                     <span className="a-muted a-body-sm hidden sm:inline">{t('note_editor_counts', { words, lines })}</span>
-                    <span className="a-body-sm" role="status" style={{ color: dirty || failed || conflict ? 'var(--warn)' : 'var(--ink-muted)' }}>
+                    <span className="an-save" role="status" style={{ color: dirty || failed || conflict ? 'var(--warn)' : undefined }}>
                         {status}
                     </span>
                     <button type="button" className="a-btn" onClick={() => void handleSave()} disabled={!dirty || saving || !!conflict}>
@@ -209,7 +248,7 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
             </div>
 
             {conflict && !theirs && (
-                <div role="alert" className="a-card" style={{ marginBottom: 8 }}>
+                <div role="alert" className="an-conf">
                     <h2 className="a-h3">{t('note_conflict_title')}</h2>
                     <p className="a-body-sm a-muted">
                         {from ? t('note_conflict_line', { where: from, time }) : t('note_conflict_line_unknown', { time })}
@@ -221,7 +260,7 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
                 </div>
             )}
             {conflict && theirs && (
-                <section aria-label={t('note_conflict_theirs_head')} className="a-card" style={{ marginBottom: 8 }}>
+                <section aria-label={t('note_conflict_theirs_head')} className="an-conf">
                     <h2 className="a-h3">{t('note_conflict_theirs_head')}</h2>
                     <p className="a-body-sm a-muted">
                         {fromLow ? t('note_conflict_theirs_from', { where: fromLow, time }) : t('note_conflict_theirs_from_unknown', { time })}
@@ -247,13 +286,26 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
                 </div>
             )}
 
+            {mode === 'edit' && (
+                <div className="an-fmt" role="toolbar" aria-label={t('notes_fmt_label')}>
+                    <button type="button" className="a-ib" aria-label={t('notes_fmt_heading')} onClick={() => format('heading')}><Heading2 className="a-ic" aria-hidden="true" /></button>
+                    <button type="button" className="a-ib" aria-label={t('notes_fmt_bold')} onClick={() => format('bold')}><Bold className="a-ic" aria-hidden="true" /></button>
+                    <button type="button" className="a-ib" aria-label={t('notes_fmt_italic')} onClick={() => format('italic')}><i aria-hidden="true">I</i></button>
+                    <span className="an-fmt-sep" aria-hidden="true" />
+                    <button type="button" className="a-ib" aria-label={t('notes_fmt_bullets')} onClick={() => format('bullets')}><List className="a-ic" aria-hidden="true" /></button>
+                    <button type="button" className="a-ib" aria-label={t('notes_fmt_checklist')} onClick={() => format('checklist')}><ListChecks className="a-ic" aria-hidden="true" /></button>
+                    <button type="button" className="a-ib" aria-label={t('notes_fmt_link')} onClick={() => format('link')}><Link2 className="a-ic" aria-hidden="true" /></button>
+                </div>
+            )}
+
             <div className="flex-1 min-h-0 overflow-y-auto">
                 {mode === 'edit' ? (
                     <textarea
+                        ref={areaRef}
+                        aria-label={t('notes_note_text')}
                         value={editContent}
                         onChange={(e) => handleChange(e.target.value)}
-                        className="a-input w-full h-full min-h-[400px] resize-none"
-                        style={{ fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.7 }}
+                        className="an-ed"
                         spellCheck={false}
                     />
                 ) : (

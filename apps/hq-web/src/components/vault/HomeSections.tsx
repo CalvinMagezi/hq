@@ -1,83 +1,72 @@
 import { Link } from '@tanstack/react-router'
+import { FileText } from 'lucide-react'
 import type { PinnedNote, RecentFile } from '~/lib/vaultApi'
-import { STATUS_LABELS, type TaskItem } from '~/lib/tasksApi'
 import type { SectionState } from '~/lib/homeSections'
-import { relTime } from '~/lib/time'
-import { SignalCard } from '~/components/SignalCard'
+import { shortAge } from '~/lib/time'
+import { t } from '~/strings'
 import { PinnedCard } from './PinnedCard'
 import { HomeSection } from './HomeSection'
+import { folderTrail, noteName } from './noteRows'
+import './notes.css'
 
 interface HomeSectionsProps {
   pinned: SectionState<PinnedNote>
   recent: SectionState<RecentFile>
-  tasks: SectionState<TaskItem>
   onRetryPinned: () => void
   onKeepPin?: (path: string) => void
   onNotNow?: (path: string) => void
   onRetryRecent: () => void
-  onRetryTasks: () => void
 }
 
-function TaskRow({ task }: { task: TaskItem }) {
+/** One recent note as a row: its name, the folder it is in, and how long ago it changed. */
+export function RecentRow({ note }: { note: RecentFile }) {
+  const trail = folderTrail(note.path)
   return (
-    <Link
-      to="/tasks"
-      search={{ task: task.id }}
-      className="glass-card rounded-xl px-3.5 py-3 flex items-center gap-3 min-w-0"
-    >
-      <span className="text-[11px] font-bold shrink-0" style={{ color: 'var(--accent-green)' }}>
-        {task.display_id}
+    <Link to="/notes/$" params={{ _splat: note.path }} className="a-row">
+      <span className="a-av" aria-hidden="true">
+        <FileText className="a-ic" />
       </span>
-      <span className="text-[12px] truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>
-        {task.title}
+      <span className="a-row-main">
+        <b>{note.title || noteName(note.path)}</b>
+        <span className="a-body-sm a-muted">
+          {trail && <span className="an-trail">{trail}</span>}
+          {note.primaryAgent ? ` · ${t('notes_by_hq')}` : ''}
+        </span>
       </span>
-      <span className="text-[9px] shrink-0" style={{ color: 'var(--text-dim)' }}>
-        {STATUS_LABELS[task.status]} · {relTime(task.updated_at)}
-      </span>
+      <span className="a-body-sm a-muted">{shortAge(note.mtime)}</span>
     </Link>
   )
 }
 
-/** Pinned notes, then recent project notes, then in-progress tasks. */
+/** Pinned notes as cards, then the notes that changed lately as rows. */
 export function HomeSections(p: HomeSectionsProps) {
   return (
     <>
       <HomeSection
-        title="Pinned"
-        accent="var(--accent-blue)"
+        title={t('notes_pinned_hd')}
         state={p.pinned}
-        emptyText="No pinned notes yet. Pin a note from the vault to keep it here."
+        emptyText={t('notes_no_pins')}
+        failedKey="fail_load_pinned_no_reply"
         onRetry={p.onRetryPinned}
         render={(notes) => (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {notes.map((note, i) => (
-              <div key={note.path} className="stagger-item" style={{ animationDelay: `${i * 60}ms` }}>
-                <PinnedCard note={note} isSelected={false} onKeepPin={p.onKeepPin} onNotNow={p.onNotNow} />
-              </div>
+          <div className="an-pins">
+            {notes.map((note) => (
+              <PinnedCard key={note.path} note={note} onKeepPin={p.onKeepPin} onNotNow={p.onNotNow} />
             ))}
           </div>
         )}
       />
       <HomeSection
-        title="Recent Project Notes"
+        title={t('notes_recent')}
         state={p.recent}
-        emptyText="No project notes found."
+        emptyText={t('notes_no_notes_yet')}
+        failedKey="fail_load_recent_no_reply"
         onRetry={p.onRetryRecent}
         render={(notes) => (
-          <div className="grid grid-cols-1 min-[400px]:grid-cols-2 lg:grid-cols-3 gap-3">
-            {notes.map((note) => <SignalCard key={note.path} note={note} lane="note" />)}
-          </div>
-        )}
-      />
-      <HomeSection
-        title="In Progress Tasks"
-        accent="var(--accent-green)"
-        state={p.tasks}
-        emptyText="No tasks in progress."
-        onRetry={p.onRetryTasks}
-        render={(tasks) => (
-          <div className="flex flex-col gap-2">
-            {tasks.map((t) => <TaskRow key={t.id} task={t} />)}
+          <div className="an-rows">
+            {notes.map((note) => (
+              <RecentRow key={note.path} note={note} />
+            ))}
           </div>
         )}
       />
