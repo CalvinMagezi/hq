@@ -12,6 +12,7 @@ pub mod code;
 pub mod dns;
 pub mod door;
 pub mod from_config;
+pub mod holder;
 pub mod host;
 pub mod join;
 pub mod key;

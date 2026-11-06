@@ -687,10 +687,31 @@ async fn serve(net: &NetArgs, db: Database) -> Result<()> {
     let role = net.role_or(Role::Machine);
     let bridge = start(net, db, true, Some(role)).await?;
     start_set_up(&bridge, role).await?;
+    keep_holder_record();
     println!("Serving paired peers as {}; ctrl-c to stop.", bridge.id());
     tokio::signal::ctrl_c().await?;
+    hq_bridge::holder::remove_own(&HqConfig::hq_dir());
     bridge.shutdown().await;
     Ok(())
+}
+
+/// Names the loopback ports this process now holds for `bridge.forwards`, so HQ Hub can tell
+/// HQ's own bridge from another program on them. `start_forwards` has already failed the start
+/// if any of them was taken.
+fn keep_holder_record() {
+    let listens = HqConfig::load()
+        .ok()
+        .and_then(|c| c.bridge.forwards().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|f| match f.listen {
+            hq_core::config::DoorTarget::Tcp(addr) => Some(addr),
+            _ => None,
+        })
+        .collect();
+    if let Err(e) = hq_bridge::holder::write(&HqConfig::hq_dir(), listens) {
+        eprintln!("Could not note the forwards for HQ Hub: {e:#}");
+    }
 }
 
 /// The forwards, configured and set up, and on a machine setup with every paired peer that has

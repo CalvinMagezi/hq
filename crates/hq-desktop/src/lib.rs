@@ -7,6 +7,7 @@
 //! `docs/security/DESKTOP.md`.
 
 pub mod agents;
+pub mod bridge_holder;
 pub mod chooser;
 pub mod claude;
 pub mod desktop;
