@@ -249,6 +249,8 @@ export interface SpawnInput {
   purpose?: Purpose
   /** Work on this branch in a git worktree of its own instead of in the folder itself. */
   branch?: string
+  /** The HQ task it works on; the task then records what it does (WR17). */
+  task_id?: string
 }
 
 /** Coding agents edit code; general-purpose agents (Hermes, OpenClaw) never take code work. */

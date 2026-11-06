@@ -116,7 +116,7 @@ the safer side.
 - [x] 01-chat.md: start screen, Get started, Stop over HTTP, resume, banners by state, the Enter rule, grouped sidebar links, the spoken mark, approval cards in the chat, Let HQ say yes with its explainer and the list of what HQ said yes to (server: `GET /api/harness-sessions/{id}/answers`, approvals name their chat).
 - [x] 02-first-run-sign-in.md and 03-notes.md: covers, `/signin`, notes that never overwrite silently (409, See their version, Keep both), Quick note, Export, About this note and Looks right (server: `GET /api/note/versions`, `POST /api/note/review`), the leave dialog. Copy link stays Copy path (no note ids).
 - [x] 04-search.md and 05-inbox.md: one Search (Ctrl K, folder filter from HQ, Back reopens it), the Inbox redesign, Done by day.
-- [x] 06-tasks.md and 07-helpers.md: Today and Upcoming, checking in plain words, Board and Timeline, HQ's own work, Start a helper (no task field, WR17 later), typing to a helper (WR18), the helper page.
+- [x] 06-tasks.md and 07-helpers.md: Today and Upcoming, checking in plain words, Board and Timeline, HQ's own work, Start a helper (WR17 done 2026-11-06: "Start a helper on this task" from a task page, `task_id` on the start route), typing to a helper (WR18), the helper page.
 - [x] 08-settings.md and 09-spending.md: Settings in plain words, the key sheet, Support and Updates, Spending limits by card with origins HQ records (chat, harness, background, verification).
 
 ### Phone wave 4
@@ -132,7 +132,7 @@ the safer side.
 
 ### Server parts for wave 4 (built ahead)
 
-- `/api/search?folder=` filtered before the limit; notes save with `base` and 409; `source: voice` and `client_id` in a message's meta, `turn_end.waiting_for_owner`, "You said" on a voice turn's approvals; `POST /api/threads/{id}/stop` and `resume`. The task field on the start route stays "later" (WR17).
+- `/api/search?folder=` filtered before the limit; notes save with `base` and 409; `source: voice` and `client_id` in a message's meta, `turn_end.waiting_for_owner`, "You said" on a voice turn's approvals; `POST /api/threads/{id}/stop` and `resume`. The task field on the start route (WR17) landed after the cutover.
 
 Workspace gates after these: clippy clean; `cargo test --workspace` 5512 passed, 0 failed, 44 ignored (94 binaries).
 
@@ -211,6 +211,13 @@ Build the web app and restart HQ after it (the page's script hashes are read whe
 Checked in a browser against a test HQ (`target/debug/hq` from this branch, a throwaway vault and token): items 1, 2 (card and words), 6 and 7, and the sign-in sheet's words. That check found and fixed: the red dialog drawn off screen, updates listed under Needs you, a notice offered as an approval, the Notifications row saying on while push was off, "used not used yet". Not checked in a browser: 3 (needs a real helper), 4 past ten minutes, 8.
 
 Gates: web 521 tests, typecheck and build pass; hq-core 296, hq-db, hq-tools and hq-web suites pass; clippy clean on the touched crates. The review of the approval and sign-in seams found the losing check failing open on shell keywords, wrapper options, `xargs`, `find -delete` and hidden code; fixed and tested (commit d24ca547).
+
+## After the cutover (2026-11-06)
+
+- [x] WR17: `POST /api/harness-sessions` takes `task_id` (refused before a folder is made when the task is missing, archived or complete); the task page has "Start a helper on this task", and the dialog says "For this task: {title}".
+- [x] Note ids (W22, C-10): Copy link mints `note_id:` as the note's first frontmatter line (`POST /api/note/link`, not recorded as the owner's version, answers the new `hash`), `GET /api/note/by-id/{id}` finds it after a move, the web's `/notes/n/:id` opens it or shows the gone page, and the phone opens `hq://notes/n/{id}` the same way. Lite answers the same 404 for a note it keeps out.
+
+Try this now: open a note, Copy link, move the note to another folder in Finder, paste the link: the note opens from its new folder. On a task page, Start a helper on this task: the helper's task records its start.
 
 ## Found by the owner
 

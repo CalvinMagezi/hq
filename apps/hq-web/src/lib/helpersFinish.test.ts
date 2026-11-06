@@ -157,7 +157,8 @@ test('Start a helper asks in the spec order and says the footer promise', () => 
   expect(order).toEqual([...order].sort((a, b) => a - b))
   expect(order.every((i) => i > -1)).toBe(true)
   expect(t('helpers_new_asks')).toBe('It asks before it runs commands or changes files. You answer each step here and in your Inbox.')
-  expect(source).not.toContain('task_id')
+  // WR17: a task is sent only when the dialog was opened from a task page.
+  expect(source).toContain('...(task ? { task_id: task.id } : {})')
 })
 
 test('the list takes the whole page below 1024 and the detail shows Back to Helpers', () => {

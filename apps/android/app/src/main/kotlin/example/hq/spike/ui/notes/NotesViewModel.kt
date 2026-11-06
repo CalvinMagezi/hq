@@ -156,7 +156,28 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         loadReader(path)
     }
 
+    /** Opens the note a `hq://notes/n/{id}` link names, wherever it lives now; an unknown id shows the gone page. */
+    fun openNoteById(id: String) {
+        viewModelScope.launch {
+            val phase = try {
+                openNote(client.notePathById(id))
+                return@launch
+            } catch (e: NoteNotFound) {
+                ReaderPhase.Gone
+            } catch (e: HqUnavailable) {
+                ReaderPhase.Failed
+            }
+            push(NotesRoute.Reader(UNKNOWN_NOTE))
+            _state.update { if (it.top == NotesRoute.Reader(UNKNOWN_NOTE)) it.copy(reader = phase) else it }
+        }
+    }
+
     private fun loadReader(path: String) {
+        // A link by id that named no note has no path to ask HQ for.
+        if (path == UNKNOWN_NOTE) {
+            _state.update { if (it.top == NotesRoute.Reader(path)) it.copy(reader = ReaderPhase.Gone) else it }
+            return
+        }
         _state.update { it.copy(reader = ReaderPhase.Loading) }
         viewModelScope.launch {
             val phase = try {

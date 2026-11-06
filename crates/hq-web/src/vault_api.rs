@@ -390,7 +390,7 @@ fn create_unique(dir: &Path, title: &str, content: &str) -> std::io::Result<Path
 
 /// Web writes go straight into FTS so search sees them before the periodic
 /// sync does. Tags stay empty here; that sync fills them on its next pass.
-fn index_web_note(state: &WsState, abs: &Path, raw: &str) {
+pub(crate) fn index_web_note(state: &WsState, abs: &Path, raw: &str) {
     let rel = rel_to_vault(&state.vault_path, abs);
     let title = abs
         .file_stem()

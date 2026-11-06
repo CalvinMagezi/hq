@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { t } from '~/strings'
 import { getNote, getVaultRoot } from '~/lib/vaultApi'
+import { copyNoteLink, mintNoteLink } from '~/lib/noteLink'
 
 export interface CopyMenuState {
     relPath: string
@@ -30,13 +32,20 @@ async function copyText(text: string): Promise<boolean> {
  * Floating "copy" menu (relative path, absolute path, note content). Rendered when `menu` is set; anchors near the
  * long-press point, clamped to the viewport so it stays usable on phones.
  */
-export function CopyPathMenu({ menu, onClose }: { menu: CopyMenuState | null; onClose: () => void }) {
-    const [copied, setCopied] = useState<'rel' | 'abs' | 'content' | null>(null)
+export function CopyPathMenu({ menu, onClose, onLinked }: {
+    menu: CopyMenuState | null
+    onClose: () => void
+    /** Called once the note carries its id, so an open editor saves from the new version. */
+    onLinked?: (path: string) => void
+}) {
+    const [copied, setCopied] = useState<'link' | 'rel' | 'abs' | 'content' | null>(null)
+    const [linkFailed, setLinkFailed] = useState(false)
     const ref = useRef<HTMLDivElement | null>(null)
 
     useEffect(() => {
         if (!menu) return
         setCopied(null)
+        setLinkFailed(false)
         const dismiss = (e: Event) => {
             if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return
             onClose()
@@ -59,9 +68,22 @@ export function CopyPathMenu({ menu, onClose }: { menu: CopyMenuState | null; on
     if (!menu) return null
 
     const MENU_W = 220
-    const MENU_H = 144
+    const isNote = menu.relPath.endsWith('.md')
+    const MENU_H = isNote ? 200 : 144
     const left = Math.max(8, Math.min(menu.x, window.innerWidth - MENU_W - 8))
     const top = Math.max(8, Math.min(menu.y, window.innerHeight - MENU_H - 8))
+
+    const doCopyLink = async () => {
+        try {
+            const { copied: ok } = await copyNoteLink(menu.relPath, { mint: mintNoteLink, copy: copyText, origin: window.location.origin })
+            onLinked?.(menu.relPath)
+            if (!ok) return
+            setCopied('link')
+            setTimeout(onClose, 650)
+        } catch {
+            setLinkFailed(true)
+        }
+    }
 
     const doCopy = async (kind: 'rel' | 'abs' | 'content') => {
         let text = menu.relPath
@@ -105,7 +127,15 @@ export function CopyPathMenu({ menu, onClose }: { menu: CopyMenuState | null; on
                 backdropFilter: 'blur(8px)', overflow: 'hidden',
             }}
         >
-            <button role="menuitem" style={itemStyle} onClick={() => doCopy('rel')}>
+            {isNote && (
+                <button role="menuitem" style={{ ...itemStyle, fontFamily: 'inherit', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }} onClick={doCopyLink}>
+                    <span>{copied === 'link' ? t('notes_link_copied') : t('notes_copy_link')}</span>
+                    <span style={{ fontSize: 11, color: linkFailed ? 'var(--danger)' : 'var(--text-dim)' }}>
+                        {linkFailed ? t('notes_link_copy_failed') : t('notes_copy_link_hint')}
+                    </span>
+                </button>
+            )}
+            <button role="menuitem" style={isNote ? { ...itemStyle, borderTop: '1px solid rgba(255,255,255,0.06)' } : itemStyle} onClick={() => doCopy('rel')}>
                 <span style={{ color: 'var(--accent-blue)' }}>{copied === 'rel' ? '✓' : '⧉'}</span>
                 {copied === 'rel' ? 'Copied!' : 'Copy relative path'}
             </button>

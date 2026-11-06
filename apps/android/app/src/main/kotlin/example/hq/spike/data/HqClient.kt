@@ -114,6 +114,23 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** Where the note with this id lives now, for a `hq://notes/n/{id}` link. A 404 is [NoteNotFound]. */
+    suspend fun notePathById(id: String): String = withContext(Dispatchers.IO) {
+        val request = authed("/api/note/by-id/${java.net.URLEncoder.encode(id, "UTF-8")}").build()
+        try {
+            http.newCall(request).execute().use { r ->
+                if (r.code == HTTP_UNAUTHORIZED) refused()
+                if (r.code == HTTP_NOT_FOUND) throw NoteNotFound(id)
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note/by-id", status = r.code)
+                JSONObject(r.body.string()).optString("path", "").ifBlank { throw NoteNotFound(id) }
+            }
+        } catch (e: IOException) {
+            throw if (e is HqUnavailable || e is NoteNotFound) e else HqUnavailable("hq is not reachable", e)
+        } catch (e: org.json.JSONException) {
+            throw HqUnavailable("hq sent something unreadable", e)
+        }
+    }
+
     /** Saves a vault file (an upload, say) to [dest]. */
     suspend fun download(path: String, dest: java.io.File) = withContext(Dispatchers.IO) {
         val request = authed("/api/vault-asset?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()

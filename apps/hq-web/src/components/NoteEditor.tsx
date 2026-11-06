@@ -54,12 +54,13 @@ export function NoteEditor({ content, filePath, base, onSaved, leaveRef, api = l
     const bodyOnly = stripFrontmatter(content)
     const [editContent, setEditContent] = useState(bodyOnly)
 
+    // Keyed on the body, so a frontmatter-only change (Copy link adding the note's id, a pin) keeps
+    // what is being typed; the new base still arrives through `base`.
     useEffect(() => {
-        const newBody = stripFrontmatter(content)
         const keptText = takeUnsaved(`note:${filePath}`)
-        setEditContent(keptText ?? newBody)
-        setDirty(keptText !== null && keptText !== newBody)
-    }, [content, filePath])
+        setEditContent(keptText ?? bodyOnly)
+        setDirty(keptText !== null && keptText !== bodyOnly)
+    }, [bodyOnly, filePath])
 
     // A reload for a newer HQ must not lose what has not been saved.
     useEffect(() => {

@@ -1,16 +1,21 @@
-import { Link } from '@tanstack/react-router'
+import { t } from '~/strings'
+import { useState } from 'react'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { Loader2, Terminal } from 'lucide-react'
 import { globalSessionsApi } from '~/lib/sessionsApi'
 import { sessionTitle } from '~/lib/workbench'
 import { SessionBadges } from '../sessions/SessionRow'
 import { usePolled } from '../sessions/usePolled'
 import { useRefreshOn } from '~/lib/useRefreshOn'
+import { NewAgentDialog } from '../sessions/NewAgentDialog'
 import { SectionLabel } from './taskFields'
 
 const TASK_SESSIONS_POLL_MS = 120_000
 
 /** The coding-agent sessions launched for or linked to this task, each linking to the Workbench. */
-export function TaskSessions({ taskId }: { taskId: string }) {
+export function TaskSessions({ taskId, taskTitle, done }: { taskId: string; taskTitle: string; done: boolean }) {
+  const [starting, setStarting] = useState(false)
+  const navigate = useNavigate()
   const sessions = usePolled(taskId, () => globalSessionsApi.list({ task_id: taskId }), TASK_SESSIONS_POLL_MS, true, true, ['task:sync', 'sessions:sync'])
   useRefreshOn(['session:changed', 'task:sync'], sessions.refresh)
   return (
@@ -47,6 +52,21 @@ export function TaskSessions({ taskId }: { taskId: string }) {
             </li>
           ))}
         </ul>
+      )}
+      {!done && (
+        <button type="button" onClick={() => setStarting(true)} className="mt-2 min-h-11 px-3 rounded-lg text-xs font-bold text-neutral-200 bg-white/[0.04] border border-white/10 hover:bg-white/10">
+          {t('helpers_start_on_task')}
+        </button>
+      )}
+      {starting && (
+        <NewAgentDialog
+          task={{ id: taskId, title: taskTitle }}
+          onClose={() => setStarting(false)}
+          onStarted={(id) => {
+            setStarting(false)
+            void navigate({ to: '/helpers/$id', params: { id } })
+          }}
+        />
       )}
     </section>
   )

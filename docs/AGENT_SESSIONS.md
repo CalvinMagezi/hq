@@ -764,7 +764,9 @@ also carry `X-HQ-Client` (the web app sends it; scripts must add it, or get a 40
 `unwatch` predate the header and stay open to cached PWAs that do not send it yet. Errors the
 endpoints do not recognise are logged and answered generically, never with ssh or the host stderr.
 
-- `POST /api/harness-sessions` starts an agent: `{harness, host?, folder?, new_folder?, prompt?, label?}`.
+- `POST /api/harness-sessions` starts an agent: `{harness, host?, folder?, new_folder?, prompt?, label?,
+  purpose?, branch?, task_id?}`. `task_id` (an id or display id) makes that task the record of the work,
+  as `harness_session_spawn` does; a missing, archived or complete task is refused before any folder is made.
   The folder is resolved on the computer that runs the agent and must be inside its HQ folder
   (`~/Documents/HQ`; `GET /api/workbench/hosts` reports it, `GET` and `POST
   /api/workbench/hosts/{host}/dirs` browse and create folders there). The agent always starts in

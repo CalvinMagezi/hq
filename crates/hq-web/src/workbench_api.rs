@@ -175,6 +175,8 @@ pub(crate) struct SpawnBody {
     /// A branch to work on in a git worktree of its own, so it never shares a working tree
     /// with another agent in the folder. Blank works in the folder itself.
     branch: Option<String>,
+    /// The HQ task (id or display id) it works on (WR17); the task then records its work.
+    task_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -320,6 +322,16 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
     let worktree =
         trimmed(body.branch).map(|name| agent_host::WorktreeBase::Branch { name, from: None });
     let (folder, new_folder) = (trimmed(body.folder), trimmed(body.new_folder));
+    // Before a folder is chosen or made, so a missing or finished task leaves nothing behind.
+    let task = match trimmed(body.task_id) {
+        Some(asked) => Some(
+            state
+                .db
+                .with_conn(|c| harness::mission::resolve_task(c, &asked))
+                .map_err(|e| ApiError::bad_request(e.to_string()))?,
+        ),
+        None => None,
+    };
 
     let own = own_folder_name(&label, &harness_name);
     let lookup = host_name.clone();
@@ -343,7 +355,7 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
             prompt: prompt.as_deref(),
             cwd: &cwd,
             label: &label,
-            mission_id: None,
+            mission_id: task.as_deref(),
             watch: None,
             parent: None,
             goal: GoalText {
@@ -585,6 +597,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_helper_started_for_a_missing_task_is_refused_before_anything_is_made() {
+        let state = test_state();
+        let res = spawn_handler(
+            State(state),
+            Json(SpawnBody {
+                harness: "claude-code".into(),
+                host: None,
+                folder: None,
+                new_folder: Some("made-for-it".into()),
+                prompt: None,
+                label: None,
+                purpose: None,
+                branch: None,
+                task_id: Some("NOPE-999".into()),
+            }),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("NOPE-999"));
+    }
+
+    #[tokio::test]
     async fn spawn_asks_which_agent_and_bounds_the_free_text() {
         let state = test_state();
         let body = |harness: &str, prompt: Option<String>, label: Option<String>| SpawnBody {
@@ -596,6 +633,7 @@ mod tests {
             label,
             purpose: None,
             branch: None,
+            task_id: None,
         };
         for bad in [
             body("  ", None, None),
