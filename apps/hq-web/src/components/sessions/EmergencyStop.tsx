@@ -1,12 +1,11 @@
 import { t } from '~/strings'
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { CheckCircle2, Loader2, OctagonX, X } from 'lucide-react'
+import { CheckCircle2, OctagonX } from 'lucide-react'
 import { globalSessionsApi, workbenchApi, type HarnessSession, type LockdownResult, type WorkbenchHost } from '~/lib/sessionsApi'
 import { computerName } from '~/lib/workbench'
 import { lockFact, unreachableHosts } from '~/lib/lockdown'
 import { ErrorText } from './ErrorText'
-import { useModal } from './useModal'
+import { Sheet } from '../ui/Sheet'
 
 const ALL_COMPUTERS = ''
 
@@ -36,11 +35,11 @@ export function StopAllButton({ compact = false, onStopped, off = null }: Button
         type="button"
         onClick={() => setOpen(true)}
         disabled={off !== null}
-        className={compact ? 'hq-btn-stop !h-11 !w-11 !p-0' : 'hq-btn-stop'}
+        className={compact ? 'a-ib' : 'a-menu-item'}
         aria-label={t('stop_all_act')}
         title={off ?? t('stop_all_act')}
       >
-        <OctagonX className="w-4 h-4" />
+        <OctagonX className="a-ic" aria-hidden="true" />
         {!compact && t('stop_all_act')}
       </button>
       {open && <StopAllDialog onClose={() => setOpen(false)} onStopped={onStopped} />}
@@ -48,7 +47,8 @@ export function StopAllButton({ compact = false, onStopped, off = null }: Button
   )
 }
 
-function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped: () => void }) {
+/** The Stop every helper sheet: pick a computer, say why, confirm. */
+export function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped: () => void }) {
   const [hosts, setHosts] = useState<WorkbenchHost[]>([])
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [target, setTarget] = useState(ALL_COMPUTERS)
@@ -59,7 +59,6 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
   const close = () => {
     if (!busy) onClose()
   }
-  const { dialogRef, portal, trapTab } = useModal(close)
 
   // The stop never waits for this list: every computer is the default.
   useEffect(() => {
@@ -91,93 +90,55 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
     }
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center hq-scrim sm:p-4">
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        onKeyDown={trapTab}
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="stop-all-title"
-        aria-describedby="stop-all-what"
-        className="w-full max-w-md max-h-[92dvh] outline-none flex flex-col rounded-t-2xl sm:rounded-2xl hq-modal overflow-hidden"
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-          <h2 id="stop-all-title" className="text-sm font-bold text-white">
-            {t('stop_all_title')}
-          </h2>
-          <button type="button" onClick={close} disabled={busy} aria-label={t('helpers_new_cancel')} className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
-          {result ? (
-            <StopReport result={result} onRetry={() => void stop()} />
-          ) : (
-            <>
-              <p id="stop-all-what" className="text-xs text-neutral-300 leading-relaxed">
-                {t('stop_all_body')}
-              </p>
-              <fieldset className="space-y-2">
-                <legend className="mb-1 text-[11px] text-neutral-400">{t('helpers_stop_all_pick')}</legend>
-                <label className="flex items-start gap-2 min-h-11 text-xs text-neutral-200">
-                  <input type="radio" name="stop-all-computer" checked={target === ALL_COMPUTERS} onChange={() => setTarget(ALL_COMPUTERS)} className="mt-1" />
-                  <span>{t('helpers_stop_all_every', { n: total })}</span>
-                </label>
-                {hosts.map((h) => (
-                  <label key={h.host} className="flex items-start gap-2 min-h-11 text-xs text-neutral-200">
-                    <input
-                      type="radio"
-                      name="stop-all-computer"
-                      checked={target === h.host}
-                      disabled={!h.reachable}
-                      onChange={() => setTarget(h.host)}
-                      className="mt-1"
-                    />
-                    <span>
-                      {t('helpers_stop_all_one', { computer: computerName(h.host), n: counts[h.host] ?? 0 })}
-                      {!h.reachable && <span className="block text-neutral-400">{t('helpers_stop_all_cant')}</span>}
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
+  const footer = result ? (
+    <button type="button" onClick={close} className="a-btn">
+      {t('helpers_stop_all_done')}
+    </button>
+  ) : (
+    <>
+      <button type="button" onClick={close} disabled={busy} className="a-btn secondary">
+        {t('stop_all_keep')}
+      </button>
+      <button type="button" onClick={() => void stop()} disabled={busy} aria-busy={busy || undefined} className="a-btn danger">
+        {busy ? t('confirm_busy_stopping') : t('stop_all_act')}
+      </button>
+    </>
+  )
+
+  return (
+    <Sheet title={t('stop_all_title')} onClose={close} busy={busy} footer={footer}>
+      {result ? (
+        <StopReport result={result} onRetry={() => void stop()} />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <p className="a-body-sm">{t('stop_all_body')}</p>
+          <div role="radiogroup" aria-label={t('helpers_stop_all_pick')} className="flex flex-col gap-2">
+            <button type="button" role="radio" aria-checked={target === ALL_COMPUTERS} className="a-rcard" onClick={() => setTarget(ALL_COMPUTERS)}>
+              <i className="a-radio" aria-hidden="true" />
               <div>
-                <label htmlFor="stop-all-reason" className="block mb-1 text-[11px] text-neutral-400">
-                  {t('helpers_stop_all_why')}
-                </label>
-                <input
-                  id="stop-all-reason"
-                  value={reason}
-                  maxLength={MAX_REASON_CHARS}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder={t('helpers_stop_all_why_hint')}
-                  className="w-full min-w-0 h-11 px-3 rounded-lg text-xs text-neutral-200 hq-field"
-                />
+                <b>{t('helpers_stop_all_every', { n: total })}</b>
               </div>
-              {error && <ErrorText>{error}</ErrorText>}
-            </>
-          )}
-        </div>
-        <div className="px-4 py-3 border-t border-white/10 pb-[calc(0.75rem+var(--safe-bottom))]">
-          {result ? (
-            <button type="button" onClick={close} className="hq-btn-primary w-full">
-              {t('helpers_stop_all_done')}
             </button>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <button type="button" onClick={close} disabled={busy} className="a-btn secondary block">
-                {t('stop_all_keep')}
+            {hosts.map((h) => (
+              <button key={h.host} type="button" role="radio" aria-checked={target === h.host} disabled={!h.reachable} className="a-rcard" onClick={() => setTarget(h.host)}>
+                <i className="a-radio" aria-hidden="true" />
+                <div>
+                  <b>{t('helpers_stop_all_one', { computer: computerName(h.host), n: counts[h.host] ?? 0 })}</b>
+                  {!h.reachable && <span>{t('helpers_stop_all_cant')}</span>}
+                </div>
               </button>
-              <button type="button" onClick={() => void stop()} disabled={busy} aria-busy={busy || undefined} className="a-btn danger block">
-                {busy ? t('confirm_busy_stopping') : t('stop_all_act')}
-              </button>
-            </div>
-          )}
+            ))}
+          </div>
+          <div className="a-field">
+            <label htmlFor="stop-all-reason" className="a-field-label">
+              {t('helpers_stop_all_why')}
+            </label>
+            <input id="stop-all-reason" value={reason} maxLength={MAX_REASON_CHARS} onChange={(e) => setReason(e.target.value)} placeholder={t('helpers_stop_all_why_hint')} className="a-input" />
+          </div>
+          {error && <ErrorText>{error}</ErrorText>}
         </div>
-      </div>
-    </div>,
-    portal
+      )}
+    </Sheet>
   )
 }
 
@@ -189,17 +150,17 @@ function StopReport({ result, onRetry }: { result: LockdownResult; onRetry: () =
         {result.hosts
           .filter((h) => h.locked)
           .map((h) => (
-            <li key={h.host} className="flex items-start gap-2 text-xs">
-              <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--ink)' }} />
-              <span className="min-w-0 break-words text-neutral-200">{t('stop_all_locked_host', { computer: computerName(h.host) })}</span>
+            <li key={h.host} className="flex items-start gap-2 a-body-sm">
+              <CheckCircle2 className="a-ic shrink-0" aria-hidden="true" />
+              <span className="min-w-0 break-words">{t('stop_all_locked_host', { computer: computerName(h.host) })}</span>
             </li>
           ))}
       </ul>
       {failed.length > 0 && (
-        <div className="flex items-start gap-2 text-xs">
-          <OctagonX className="w-4 h-4 shrink-0" style={{ color: 'var(--warn)' }} />
+        <div className="flex items-start gap-2 a-body-sm a-warn-t">
+          <OctagonX className="a-ic shrink-0" aria-hidden="true" />
           <div className="min-w-0 space-y-2">
-            <p className="break-words text-neutral-200">{t('stop_all_unreachable')}</p>
+            <p className="break-words">{t('stop_all_unreachable')}</p>
             <button type="button" onClick={onRetry} className="a-btn secondary">
               {t('stop_all_try_again')}
             </button>
@@ -215,18 +176,16 @@ export function LockdownBanner({ hosts }: { hosts: WorkbenchHost[] }) {
   const locked = hosts.filter((h) => h.lockdown)
   if (locked.length === 0) return null
   return (
-    <div role="status" className="mx-4 mb-3 px-3 py-2 rounded-xl text-xs text-neutral-200 border" style={{ borderColor: 'var(--warn)' }}>
-      <p className="font-semibold" style={{ color: 'var(--warn)' }}>
-        {t('helpers_locked_banner')}
-      </p>
+    <div role="status" className="a-card warn mx-4 mb-3">
+      <b className="a-body-b a-warn-t">{t('helpers_locked_banner')}</b>
       {locked.map((h) => (
-        <p key={h.host} className="break-words">
+        <p key={h.host} className="a-body-sm break-words">
           {h.lockdown && lockFact(h.host, h.lockdown)}
         </p>
       ))}
       <details>
-        <summary className="flex items-center min-h-11 cursor-pointer text-neutral-400 select-none">{t('helpers_technical_details')}</summary>
-        <p className="break-words text-neutral-400">{t('helpers_locked_technical')}</p>
+        <summary className="flex items-center min-h-11 cursor-pointer a-body-sm a-muted select-none">{t('helpers_technical_details')}</summary>
+        <p className="a-cap a-muted break-words">{t('helpers_locked_technical')}</p>
       </details>
     </div>
   )

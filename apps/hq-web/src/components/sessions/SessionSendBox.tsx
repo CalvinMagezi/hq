@@ -4,10 +4,6 @@ import { Loader2, Send } from 'lucide-react'
 import { ErrorText } from './ErrorText'
 import { INTERRUPT_KEY, QUICK_KEYS, globalSessionsApi, type HarnessSession } from '~/lib/sessionsApi'
 
-const KEY_BUTTON_CLASS =
-  'h-11 sm:h-9 min-w-11 sm:min-w-9 px-2.5 rounded border border-white/10 text-[11px] text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
-const INTERRUPT_BUTTON_CLASS =
-  'h-11 sm:h-9 px-2.5 rounded border border-white/10 text-[11px] hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
 /** How long the interrupt button stays armed before it falls back to unarmed. */
 const INTERRUPT_CONFIRM_MS = 4_000
 
@@ -58,17 +54,16 @@ export function MoreKeys({ send, disabled, defaultOpen }: KeysProps) {
   }, [armed])
   return (
     <details open={defaultOpen}>
-      <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-400 hover:text-white select-none">More keys</summary>
-      <div className="flex flex-wrap items-center gap-1.5 pb-1" role="group" aria-label="Press a key">
+      <summary className="a-body-sm a-muted flex items-center min-h-11 cursor-pointer select-none">{t('helpers_more_keys')}</summary>
+      <div className="a-keys pb-2" role="group" aria-label={t('helpers_keys_aria')}>
         {QUICK_KEYS.map((key) => (
-          <button key={key} type="button" onClick={() => void send({ keys: [key] })} disabled={disabled} className={KEY_BUTTON_CLASS}>
+          <button key={key} type="button" onClick={() => void send({ keys: [key] })} disabled={disabled} className="a-key">
             {key}
           </button>
         ))}
-        <span className="flex-1" />
         <button
           type="button"
-          aria-label={armed ? 'Confirm stop what it is doing (Ctrl+C)' : 'Stop what it is doing (Ctrl+C)'}
+          aria-label={armed ? t('helpers_interrupt_confirm_aria') : t('helpers_interrupt_aria')}
           disabled={disabled}
           onClick={() => {
             if (!armed) return setArmed(true)
@@ -76,10 +71,9 @@ export function MoreKeys({ send, disabled, defaultOpen }: KeysProps) {
             void send({ keys: [INTERRUPT_KEY] })
           }}
           onBlur={() => setArmed(false)}
-          className={INTERRUPT_BUTTON_CLASS}
-          style={{ color: 'var(--accent-red)' }}
+          className={`a-key ${armed ? 'a-warn-t' : ''}`}
         >
-          {armed ? 'tap again to interrupt' : INTERRUPT_KEY}
+          {armed ? t('helpers_interrupt_press_again') : INTERRUPT_KEY}
         </button>
       </div>
     </details>
@@ -101,35 +95,37 @@ export function SessionSendBox({ session, onSent }: Props) {
   }
 
   return (
-    <section aria-label="Message the agent" className="border-t border-white/10 px-3 py-2 space-y-1">
-      <div className="flex items-end gap-2">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
-              void submitText()
-            }
-          }}
-          disabled={busy}
-          rows={2}
-          placeholder="Tell the agent what to do next"
-          aria-label="Message for the agent"
-          className="flex-1 min-w-0 px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:opacity-50 resize-y"
-        />
-        <button
-          type="button"
-          onClick={() => void submitText()}
-          disabled={busy || !text.trim()}
-          className="flex items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-xl border border-white/10 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent shrink-0"
-        >
-          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-          Send
-        </button>
+    <section aria-label={t('helpers_tell_this_helper_something')} className="flex flex-col">
+      <div className="a-comp">
+        <div className="a-comp-in">
+          <div className="a-comp-field">
+            <label className="a-sr" htmlFor="helper-message">
+              {t('helpers_message_aria')}
+            </label>
+            <textarea
+              id="helper-message"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault()
+                  void submitText()
+                }
+              }}
+              disabled={busy}
+              rows={1}
+              placeholder={t('helpers_tell_this_helper_something')}
+            />
+          </div>
+          <button type="button" onClick={() => void submitText()} disabled={busy || !text.trim()} className="a-send" aria-label={t('helpers_tell_send')}>
+            {busy ? <Loader2 className="a-ic animate-spin" aria-hidden="true" /> : <Send className="a-ic" aria-hidden="true" />}
+          </button>
+        </div>
       </div>
-      <MoreKeys send={send} disabled={busy} />
-      <SendError error={error} />
+      <div className="a-wrap">
+        <MoreKeys send={send} disabled={busy} />
+        <SendError error={error} />
+      </div>
     </section>
   )
 }
