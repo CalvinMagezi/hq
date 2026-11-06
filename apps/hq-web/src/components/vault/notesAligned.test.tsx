@@ -72,6 +72,18 @@ describe('Notes on the aligned boards', () => {
     expect(read('routes/notes/index.tsx')).not.toContain('GetStartedCard')
   })
 
+  test('HQ Lite has no Ask HQ and no Export on a note (NotesNote2)', () => {
+    const bar = (lite: boolean) =>
+      renderToStaticMarkup(
+        createElement(NoteBar, { editing: false, pinned: false, pinning: false, exporting: false, exportOpen: false, onEdit: noop, onAsk: noop, onTask: noop, onPin: noop, onExport: noop, lite }),
+      )
+    expect(bar(false)).toContain('Ask HQ')
+    expect(bar(false)).toContain('Export')
+    expect(bar(true)).not.toContain('Ask HQ')
+    expect(bar(true)).not.toContain('Export')
+    expect(bar(true)).toContain('Make a task')
+  })
+
   test('a folder lists its notes as rows, not emoji tiles', async () => {
     const html = await inRouter(
       createElement(FolderView, {

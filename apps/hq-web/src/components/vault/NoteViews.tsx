@@ -140,20 +140,24 @@ interface NoteBarProps {
     onTask: () => void
     onPin: () => void
     onExport: (e: MouseEvent<HTMLButtonElement>) => void
+    /** HQ Lite runs no chats and serves no export, so Ask HQ and Export are not there. */
+    lite?: boolean
 }
 
 /** The note's actions in one row of chips: Edit first, then Ask HQ, Make a task, Pin and Export. */
-export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdit, onAsk, onTask, onPin, onExport }: NoteBarProps) {
+export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdit, onAsk, onTask, onPin, onExport, lite }: NoteBarProps) {
     return (
         <div className="a-chips an-bar" role="group" aria-label={t('notes_actions')}>
             <button type="button" className="a-btn compact" onClick={onEdit}>
                 {editing ? <Eye className="a-ic" aria-hidden="true" /> : <Pencil className="a-ic" aria-hidden="true" />}
                 {editing ? t('note_editor_view') : t('note_editor_edit')}
             </button>
-            <button type="button" className="a-chip" onClick={onAsk}>
-                <MessageSquare className="a-ic xs" aria-hidden="true" />
-                {t('notes_ask_hq')}
-            </button>
+            {!lite && (
+                <button type="button" className="a-chip" onClick={onAsk}>
+                    <MessageSquare className="a-ic xs" aria-hidden="true" />
+                    {t('notes_ask_hq')}
+                </button>
+            )}
             <button type="button" className="a-chip" onClick={onTask}>
                 <ListChecks className="a-ic xs" aria-hidden="true" />
                 {t('notes_make_task')}
@@ -162,10 +166,12 @@ export function NoteBar({ editing, pinned, pinning, exporting, exportOpen, onEdi
                 {pinned ? <PinOff className="a-ic xs" aria-hidden="true" /> : <Pin className="a-ic xs" aria-hidden="true" />}
                 {pinned ? t('pin_unpin') : t('notes_pin')}
             </button>
-            <button type="button" className="a-chip" aria-haspopup="menu" aria-expanded={exportOpen} disabled={exporting} onClick={onExport}>
-                <Download className="a-ic xs" aria-hidden="true" />
-                {t('note_action_export')}
-            </button>
+            {!lite && (
+                <button type="button" className="a-chip" aria-haspopup="menu" aria-expanded={exportOpen} disabled={exporting} onClick={onExport}>
+                    <Download className="a-ic xs" aria-hidden="true" />
+                    {t('note_action_export')}
+                </button>
+            )}
         </div>
     )
 }

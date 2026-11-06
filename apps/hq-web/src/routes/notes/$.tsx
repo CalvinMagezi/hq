@@ -11,6 +11,7 @@ import { Dialog, workingLabel } from '~/components/ui/Dialog'
 import { toastNotice, useToasts } from '~/lib/toast'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { useInHub } from '~/lib/hubWindow'
+import { useEdition } from '~/lib/edition'
 import { useSharedConnection } from '~/lib/connection'
 import { AboutNote } from '~/components/notes/AboutNote'
 import { HqHttpError } from '~/lib/hqAuth'
@@ -121,6 +122,7 @@ function VaultFileView({ filePath, content, hash }: {
     const [sideOpen, setSideOpen] = useState(false)
     const [exporting, setExporting] = useState<NoteExportFormat | null>(null)
     const inHub = useInHub()
+    const lite = useEdition() === 'lite'
     const connection = useSharedConnection()
     const [askShared, setAskShared] = useState<NoteExportFormat | null>(null)
     const [exportNote, setExportNote] = useState<string | null>(null)
@@ -375,6 +377,7 @@ ${safeHtml}
                             exportOpen={exportMenu !== null}
                             onEdit={toggleEditing}
                             onAsk={handleAskHq}
+                            lite={lite}
                             onTask={handleConvertToTask}
                             onPin={handleTogglePin}
                             onExport={(e) => {

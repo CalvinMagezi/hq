@@ -34,6 +34,7 @@ import appCss from '../../app.css?url'
 import { t } from '~/strings'
 import { startDataCounter } from '~/lib/dataUsage'
 import { useRefreshOn } from '~/lib/useRefreshOn'
+import { usePrintInLight } from '~/lib/printTheme'
 import { visibleTimer } from '~/lib/visibleTimer'
 import { openrouterChipLabel, openrouterChipTitle, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, type BudgetsResponse } from '~/lib/usageApi'
@@ -219,6 +220,7 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   useRefreshOn(['budget:change', 'settings:change'], refetchBudgetQueries)
   const wsConnected = useHQStore((s) => s.wsConnected)
   useNeedsYouCount()
+  usePrintInLight()
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const pathname = useRouterState({ select: (r) => r.location.pathname })
   const [sheetOpen, setSheetOpen] = useState(false)
