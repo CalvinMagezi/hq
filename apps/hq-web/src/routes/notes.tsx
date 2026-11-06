@@ -270,7 +270,7 @@ function VaultLayout() {
                     <Outlet />
                 </main>
             </div>
-            <CopyPathMenu menu={copyMenu} onClose={closeCopyMenu} />
+            <CopyPathMenu menu={copyMenu} onClose={closeCopyMenu} onLinked={(p) => queryClient.invalidateQueries({ queryKey: vaultKeys.note(p) })} />
         </div>
     )
 }

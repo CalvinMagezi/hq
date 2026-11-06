@@ -245,7 +245,7 @@ class ShellActivity : ComponentActivity() {
             Place.Chat -> { t.id?.let(chat::openLinked); if (t.compose) chat.focusComposer() }
             Place.Inbox -> t.id?.let(inbox::openItem)
             Place.Tasks -> if (t.away) tasks.actions.onAway(true) else t.id?.let { tasks.openById(it) { } }
-            Place.Notes -> { t.path?.let(notes::openNote); t.search?.let { openSearch(example.hq.spike.ui.search.SearchStart(it)) } }
+            Place.Notes -> { t.path?.let(notes::openNote); t.noteId?.let(notes::openNoteById); t.search?.let { openSearch(example.hq.spike.ui.search.SearchStart(it)) } }
             Place.Helpers -> t.id?.let(helpers::openSession)
         }
         t.web?.let { WebPage.fromSlug(it) }?.let { web = it }

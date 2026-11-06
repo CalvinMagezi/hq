@@ -236,8 +236,9 @@ private fun GonePage(ui: NotesUi, actions: NotesActions) {
         Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.size(72.dp).background(Mts.Surface200, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) { Icon(HqIcons.Warning, null, Modifier.size(34.dp), tint = Mts.Amber) }
             Text(stringResource(R.string.notes_this_note_is_not), style = HqType.H2, color = Mts.Ink)
-            Text(stringResource(R.string.notes_may_be_moved, path.removePrefix("Notebooks/")), style = HqType.BodySm, color = Mts.InkMuted)
-            Box(Modifier.padding(top = 8.dp)) {
+            val known = path != UNKNOWN_NOTE
+            Text(if (known) stringResource(R.string.notes_may_be_moved, path.removePrefix("Notebooks/")) else stringResource(R.string.notes_gone_moved_or_deleted), style = HqType.BodySm, color = Mts.InkMuted)
+            if (known) Box(Modifier.padding(top = 8.dp)) {
                 Row(
                     Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onBack(); openSearch(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes, null, example.hq.spike.ui.chat.blocks.NoteRefs.title(path))) }.padding(horizontal = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,

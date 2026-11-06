@@ -480,7 +480,7 @@ ${safeHtml}
                     </div>
                 </Suspense>
             </div>
-            <CopyPathMenu menu={copyMenu} onClose={closeCopyMenu} />
+            <CopyPathMenu menu={copyMenu} onClose={closeCopyMenu} onLinked={(p) => queryClient.invalidateQueries({ queryKey: vaultKeys.note(p) })} />
             <ExportMenu menu={exportMenu} options={exportOptions} busy={exporting} title={t('note_export_title')} onPick={startExport} onClose={closeExportMenu} />
             {askShared && (
                 <Dialog

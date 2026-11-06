@@ -336,6 +336,31 @@ pub fn for_session(conn: &Connection, session_id: &str, limit: usize) -> Result<
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+/// The same note, re-written by HQ in a way that changes no word of it (a note id added to its
+/// frontmatter): the new version keeps the old one's record, writer and review alike, so the change
+/// neither makes an agent's version look like nobody's nor drops the owner's review. Returns whether
+/// a record was carried; an unrecorded version stays unrecorded.
+pub fn carry_version(
+    conn: &Connection,
+    path: &str,
+    from_hash: &str,
+    to_hash: &str,
+) -> Result<bool> {
+    if from_hash == to_hash {
+        return Ok(false);
+    }
+    let carried = conn.execute(
+        "INSERT OR IGNORE INTO note_provenance
+           (path, content_hash, actor_id, source_kind, session_id, task_id, written_at,
+            review_state, reviewed_by, reviewed_at, review_reason, recorded_late, redacted, deleted_at)
+         SELECT path, ?3, actor_id, source_kind, session_id, task_id, written_at,
+                review_state, reviewed_by, reviewed_at, review_reason, recorded_late, redacted, deleted_at
+           FROM note_provenance WHERE path = ?1 AND content_hash = ?2",
+        params![path, from_hash, to_hash],
+    )?;
+    Ok(carried > 0)
+}
+
 /// A note moved: its records follow it. A version already recorded at the destination keeps that
 /// record, and the duplicate from the old path is dropped.
 pub fn move_path(conn: &Connection, from: &str, to: &str) -> Result<usize> {
@@ -470,6 +495,31 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         crate::migrations::run(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn a_version_carried_over_keeps_its_writer_and_review() {
+        let conn = db();
+        let (old, new) = (
+            "---\npinned: true\n---\nx",
+            "---\nnote_id: 0123456789abcdef\npinned: true\n---\nx",
+        );
+        let (old_hash, new_hash) = (
+            crate::search::content_hash(old),
+            crate::search::content_hash(new),
+        );
+        assert!(
+            !carry_version(&conn, "n.md", &old_hash, &new_hash).unwrap(),
+            "nothing recorded, nothing carried"
+        );
+        record(&conn, "n.md", &old_hash, &agent("hs-1", "hs-1", None)).unwrap();
+        assert!(carry_version(&conn, "n.md", &old_hash, &new_hash).unwrap());
+        assert_eq!(
+            pin_suggested_by(&conn, "n.md", new).unwrap().as_deref(),
+            Some("hs-1")
+        );
+        let carried = current(&conn, "n.md", &new_hash).unwrap().unwrap();
+        assert_eq!(carried.review_state, ReviewState::Unreviewed);
     }
 
     #[test]

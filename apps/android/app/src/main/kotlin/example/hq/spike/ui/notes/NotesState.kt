@@ -7,6 +7,9 @@ import example.hq.spike.ui.chat.Notice
 import example.hq.spike.ui.chat.NoteSheet
 import example.hq.spike.ui.chat.blocks.NoteRefs
 
+/** The reader's path for a note link by id that names no note: its name is not known. */
+const val UNKNOWN_NOTE = ""
+
 /** A page pushed over the Notes home. Back pops one. */
 sealed interface NotesRoute {
     data class Folder(val path: String) : NotesRoute

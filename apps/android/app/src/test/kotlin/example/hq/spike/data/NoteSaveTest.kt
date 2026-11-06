@@ -54,6 +54,18 @@ class NoteSaveTest {
 
     private fun client() = HqClient({ "t" }, "http://127.0.0.1:${server.localPort}", {})
 
+    @Test fun aNoteLinkByIdFindsWhereTheNoteLivesNow() = runBlocking {
+        answer = 200 to """{"path":"Notebooks/Archive/Plan.md"}"""
+        assertEquals("Notebooks/Archive/Plan.md", client().notePathById("0123456789abcdef"))
+        answer = 404 to """{"error":"not found"}"""
+        try {
+            client().notePathById("ffffffffffffffff")
+            fail("an unknown id is a missing note")
+        } catch (e: NoteNotFound) {
+            // The Notes gone page, not an outage.
+        }
+    }
+
     @Test fun aCreateCarriesItsClientIdOnEveryTry() = runBlocking {
         answer = 200 to """{"path":"Notebooks/Inbox/A.md"}"""
         client().createNote("Notebooks/Inbox", "A", "text", clientId = "id-1")
