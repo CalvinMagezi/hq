@@ -1190,3 +1190,16 @@ html[data-embed="1"] .vault-sidebar {
 .hq-tone-grey{color:var(--ink-muted);border-color:var(--line)}
 .hq-chip-on{background:transparent;color:var(--ink);border-color:var(--ink)}
 .hq-card-needs{border-color:var(--warn)}
+
+/* The shared sheet is a modal <dialog>: undo the browser's own dialog box so `.a-sheet` places it. */
+dialog.hq-sheet{margin:0;border:0;color:var(--ink);max-width:none;width:auto;height:auto;inset:auto;left:0;right:0;bottom:0;position:fixed}
+dialog.hq-sheet::backdrop{background:var(--scrim)}
+@container app (min-width:768px){
+  dialog.hq-sheet.side{left:auto;right:0;top:0;bottom:0}
+  dialog.hq-sheet.center{left:50%;top:50%;right:auto;bottom:auto}
+}
+/* The details pane docks from 1400 px; below that, opening it lays it over the detail as a side sheet. */
+.hq-panes{position:relative}
+@container app (max-width:1399px){
+  .hq-panes.side-open .a-pane-side{display:flex;position:absolute;top:0;right:0;bottom:0;z-index:20;width:min(var(--side-w),100%);background:var(--surface-100);border-left:1px solid var(--hairline)}
+}
