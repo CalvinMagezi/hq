@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CalendarDays } from 'lucide-react'
-import type { Initiative, TaskItem, UpdateTaskInput, WorkSession } from '~/lib/tasksApi'
-import { BLOCKED_CHIP_CLASS, STATUS_BADGE_CLASS } from './TaskCard'
+import { CalendarDays, TriangleAlert } from 'lucide-react'
+import { STATUS_LABELS, type Initiative, type TaskItem, type UpdateTaskInput, type WorkSession } from '~/lib/tasksApi'
+import './tasks.css'
 import { groupByInitiative, nestRows, type TaskRow } from './hierarchy'
 import { t } from '~/strings'
 import { usePersistedState } from '~/lib/usePersistedState'
@@ -18,7 +18,7 @@ import {
   spanOf,
   spanToPatch,
   monthRange,
-  visibleRange,
+  weekRange,
   type DragMode,
   type Span,
   type Zoom,
@@ -50,7 +50,7 @@ interface DragState extends DragPayload {
 const MONDAY = 1
 const ARROW_HEAD_SIZE = 6
 const TIMELINE_ATTR = 'data-gantt-timeline'
-const EDGE_HANDLE_CLASS = 'absolute top-0 bottom-0 w-2 cursor-ew-resize'
+const EDGE_HANDLE_CLASS = 'tl-edge'
 
 export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onReschedule, sessions = [] }: Props) {
   const [zoom, setZoom] = usePersistedState<Zoom>(ZOOM_KEY, 'week', isZoom)
@@ -73,10 +73,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
 
   const actual = useMemo(() => actualSpans(sessions), [sessions])
   const unscheduled = useMemo(() => tasks.filter((t) => spanOf(t) === null), [tasks])
-  const range = useMemo(
-    () => (zoom === 'month' ? monthRange(today) : visibleRange(tasks.map(spanOf).filter((s): s is Span => s !== null), today)),
-    [tasks, today, zoom]
-  )
+  const range = useMemo(() => (zoom === 'month' ? monthRange(today) : weekRange(today)), [today, zoom])
   const dayCount = range.end - range.start + 1
   const width = dayCount * dayPx
 
@@ -126,20 +123,20 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
   })
 
   return (
-    <div className="pb-6 space-y-3">
+    <div className="tl-wrap">
       <GanttToolbar zoom={zoom} onZoom={setZoom} onToday={scrollToToday} />
 
-      <div ref={scrollRef} className="relative overflow-auto rounded-2xl border border-white/10 bg-black/20 max-h-[70vh]">
-        <div className="flex min-w-max">
-          <div className="sticky left-0 z-20 w-36 sm:w-56 shrink-0 border-r border-white/10 bg-neutral-950">
-            <div className="sticky top-0 z-10 h-11 border-b border-white/10 bg-neutral-950" />
+      <div ref={scrollRef} className="tl">
+        <div className="tl-grid">
+          <div className="tl-names">
+            <div className="tl-head" />
             {lines.map((line) => (
               <GanttLabel key={line.kind === 'group' ? `g-${line.name}` : line.row.task.id} line={line} onSelect={onSelect} />
             ))}
           </div>
 
-          <div className="relative overflow-hidden" style={{ width }}>
-            <GanttHeader rangeStart={range.start} dayCount={dayCount} dayPx={dayPx} zoom={zoom} />
+          <div className="tl-area" style={{ width }}>
+            <GanttHeader rangeStart={range.start} dayCount={dayCount} dayPx={dayPx} zoom={zoom} today={today} />
             <div
               ref={timelineRef}
               {...{ [TIMELINE_ATTR]: true }}
@@ -197,9 +194,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
           </div>
         </div>
         {lines.length === 0 && (
-          <p className="px-4 py-10 text-center text-xs text-neutral-500">
-            No scheduled tasks. Drag one from the tray below onto the timeline.
-          </p>
+          <p className="a-grp">{t('timeline_none_scheduled')}</p>
         )}
       </div>
 
@@ -207,7 +202,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
 
       {drag?.mode === 'place' && (
         <div
-          className="fixed z-50 pointer-events-none px-2.5 py-1 rounded-lg text-[11px] border shadow-2xl bg-neutral-950 text-neutral-200 border-emerald-500/40"
+          className="tl-chip bd-ghost"
           style={{ left: drag.point.x + BAR_INSET, top: drag.point.y + BAR_INSET }}
         >
           {drag.task.display_id} {drag.task.title}
@@ -219,27 +214,16 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
 
 function GanttToolbar({ zoom, onZoom, onToday }: { zoom: Zoom; onZoom: (z: Zoom) => void; onToday: () => void }) {
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1 p-1 rounded-xl hq-field">
+    <div className="tk-bar">
+      <div className="a-seg">
         {(['week', 'month'] as Zoom[]).map((z) => (
-          <button
-            key={z}
-            type="button"
-            onClick={() => onZoom(z)}
-            className={`px-3 py-1 rounded-lg text-xs font-semibold capitalize transition-all ${
-              zoom === z ? 'bg-white/10 text-emerald-400' : 'text-neutral-400 hover:text-neutral-200'
-            }`}
-          >
+          <button key={z} type="button" aria-pressed={zoom === z} onClick={() => onZoom(z)} className="a-seg-item">
             {t(z === 'week' ? 'timeline_week' : 'timeline_month')}
           </button>
         ))}
       </div>
-      <button
-        type="button"
-        onClick={onToday}
-        className="px-3 py-1.5 rounded-xl border border-white/10 text-xs text-neutral-300 hover:text-white hover:bg-white/5 flex items-center gap-1.5"
-      >
-        <CalendarDays className="w-3.5 h-3.5" />
+      <button type="button" onClick={onToday} className="a-btn compact secondary">
+        <CalendarDays className="a-ic sm" aria-hidden="true" />
         {t('timeline_this_week')}
       </button>
     </div>
@@ -254,10 +238,7 @@ function isOverdue(task: TaskItem, today: number): boolean {
 function GanttLabel({ line, onSelect }: { line: Line; onSelect: (task: TaskItem) => void }) {
   if (line.kind === 'group') {
     return (
-      <div
-        className="px-3 flex items-end pb-1 text-[11px] font-bold uppercase tracking-wider text-neutral-500 truncate"
-        style={{ height: ROW_HEIGHT }}
-      >
+      <div className="tl-name is-group" style={{ height: ROW_HEIGHT }}>
         {line.name}
       </div>
     )
@@ -267,35 +248,33 @@ function GanttLabel({ line, onSelect }: { line: Line; onSelect: (task: TaskItem)
     <button
       type="button"
       onClick={() => onSelect(task)}
-      className={`w-full text-left px-3 flex items-center gap-1.5 hover:bg-white/5 ${depth === 1 ? 'pl-7' : ''}`}
-      style={{ height: ROW_HEIGHT }}
+      className="tl-name"
+      style={{ height: ROW_HEIGHT, paddingLeft: depth === 1 ? 32 : undefined }}
     >
-      <span className="hidden sm:inline text-[11px] text-neutral-500 shrink-0">{task.display_id}</span>
-      <span className={`text-xs truncate ${task.status === 'complete' ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>
-        {task.title}
-      </span>
+      <span>{task.display_id}</span>
+      <b>{task.title}</b>
     </button>
   )
 }
 
-function GanttHeader({ rangeStart, dayCount, dayPx, zoom }: { rangeStart: number; dayCount: number; dayPx: number; zoom: Zoom }) {
+function GanttHeader({ rangeStart, dayCount, dayPx, zoom, today }: { rangeStart: number; dayCount: number; dayPx: number; zoom: Zoom; today: number }) {
   const days = Array.from({ length: dayCount }, (_, i) => rangeStart + i)
   return (
-    <div className="sticky top-0 z-10 h-11 border-b border-white/10 bg-neutral-950">
+    <div className="tl-days">
       {days.map((day, i) => {
         const monthStart = dayOfMonth(day) === 1 || i === 0
         const showDay = zoom === 'week' || dayOfWeek(day) === MONDAY
         return (
           <div key={day}>
             {monthStart && (
-              <span className="absolute top-1 text-[11px] font-semibold text-neutral-400 pl-1 whitespace-nowrap" style={{ left: i * dayPx }}>
+              <span className="tl-day" style={{ left: i * dayPx, border: 0, padding: '2px 4px', width: 'auto' }}>
                 {monthLabel(day)}
               </span>
             )}
             {showDay && (
               <span
-                className="absolute bottom-1 text-[11px] text-neutral-500 text-center"
-                style={{ left: i * dayPx, width: zoom === 'week' ? dayPx : undefined }}
+                className={`tl-day${day === today ? ' today' : ''}${isWeekend(day) ? ' we' : ''}`}
+                style={{ left: i * dayPx, width: zoom === 'week' ? dayPx : undefined, top: 'auto', height: 28 }}
               >
                 {zoom === 'week' ? dayOfMonth(day) : t('timeline_monday', { day: dayOfMonth(day) })}
               </span>
@@ -311,11 +290,11 @@ function GanttBackground({ rangeStart, dayCount, dayPx, today, zoom }: { rangeSt
   // At Month a day is a few pixels wide, so shading weekends only adds noise.
   const weekends = zoom === 'month' ? [] : Array.from({ length: dayCount }, (_, i) => rangeStart + i).filter(isWeekend)
   return (
-    <div className="absolute inset-0 pointer-events-none">
+    <div className="tl-bg">
       {weekends.map((day) => (
-        <div key={day} className="absolute top-0 bottom-0 bg-white/[0.025]" style={{ left: (day - rangeStart) * dayPx, width: dayPx }} />
+        <div key={day} className="tl-shade" style={{ left: (day - rangeStart) * dayPx, width: dayPx }} />
       ))}
-      <div className="absolute top-0 bottom-0 w-px bg-emerald-400/60" style={{ left: (today - rangeStart) * dayPx + dayPx / 2 }} />
+      <div className="tl-now" style={{ left: (today - rangeStart) * dayPx + dayPx / 2 }} />
     </div>
   )
 }
@@ -331,20 +310,37 @@ interface BarProps {
   onPointerDown: (e: React.PointerEvent, mode: DragMode) => void
 }
 
+function barState(task: TaskItem, overdue: boolean): { cls: string; label: string } {
+  if (overdue) return { cls: 'late', label: t('tasks_bar_late') }
+  switch (task.status) {
+    case 'in_progress':
+      return { cls: 'work', label: t('tasks_bar_working') }
+    case 'ready_for_review':
+      return { cls: 'needs', label: STATUS_LABELS.ready_for_review }
+    case 'blocked':
+      return { cls: 'needs', label: STATUS_LABELS.blocked }
+    case 'complete':
+      return { cls: 'done', label: STATUS_LABELS.complete }
+    default:
+      return { cls: '', label: STATUS_LABELS.to_do }
+  }
+}
+
 function GanttBar({ task, span, top, left, dayPx, overdue, dragging, onPointerDown }: BarProps) {
-  const colors = overdue ? BLOCKED_CHIP_CLASS : STATUS_BADGE_CLASS[task.status]
+  const state = barState(task, overdue)
   const title = `${task.display_id} ${task.title}`
   if (span.milestone) {
     return (
       <div
         onPointerDown={(e) => onPointerDown(e, 'move')}
-        title={title}
-        className={`absolute rotate-45 border cursor-grab select-none [-webkit-touch-callout:none] ${colors} ${dragging ? 'ring-1 ring-emerald-400' : ''}`}
+        title={`${title}, ${state.label}`}
+        className={`tl-bar milestone ${state.cls}${dragging ? ' is-dragging' : ''}`}
         style={{
           top: top + (ROW_HEIGHT - MILESTONE_SIZE) / 2,
           left: left + (dayPx - MILESTONE_SIZE) / 2,
           width: MILESTONE_SIZE,
           height: MILESTONE_SIZE,
+          minHeight: 0,
         }}
       />
     )
@@ -353,12 +349,14 @@ function GanttBar({ task, span, top, left, dayPx, overdue, dragging, onPointerDo
     <div
       onPointerDown={(e) => onPointerDown(e, 'move')}
       title={title}
-      className={`absolute rounded-md border cursor-grab select-none [-webkit-touch-callout:none] overflow-hidden ${colors} ${dragging ? 'ring-1 ring-emerald-400' : ''}`}
+      className={`tl-bar ${state.cls}${dragging ? ' is-dragging' : ''}`}
       style={{ top: top + BAR_INSET, left, width: (span.end - span.start + 1) * dayPx, height: ROW_HEIGHT - BAR_INSET * 2 }}
     >
-      <span className="absolute inset-0 px-2 flex items-center text-[11px] whitespace-nowrap">{task.title}</span>
-      <div onPointerDown={(e) => onPointerDown(e, 'start')} className={`${EDGE_HANDLE_CLASS} left-0`} />
-      <div onPointerDown={(e) => onPointerDown(e, 'end')} className={`${EDGE_HANDLE_CLASS} right-0`} />
+      {overdue && <TriangleAlert className="a-ic xs" aria-hidden="true" />}
+      <span>{task.title}</span>
+      <em>{state.label}</em>
+      <div onPointerDown={(e) => onPointerDown(e, 'start')} className={`${EDGE_HANDLE_CLASS}`} style={{ left: 0 }} />
+      <div onPointerDown={(e) => onPointerDown(e, 'end')} className={`${EDGE_HANDLE_CLASS}`} style={{ right: 0 }} />
     </div>
   )
 }
@@ -371,8 +369,8 @@ function ActualBar({ span, top, left, dayPx }: { span: ActualSpan; top: number; 
   return (
     <div
       aria-hidden
-      title={span.live ? 'A session is working on this now' : 'Worked on'}
-      className={`absolute rounded-full pointer-events-none bg-neutral-300 ${span.live ? 'opacity-90' : 'opacity-45'}`}
+      title={span.live ? t('timeline_working_now') : t('timeline_worked_on')}
+      className={`tl-actual${span.live ? ' live' : ''}`}
       style={{
         top: top + ROW_HEIGHT - ACTUAL_BAR_HEIGHT - ACTUAL_BAR_OFFSET,
         left,
@@ -414,11 +412,11 @@ function DependencyArrows({ lines, rowIndex, allById, previewSpan, toX, width }:
   }
   if (arrows.length === 0) return null
   return (
-    <svg className="absolute inset-0 pointer-events-none overflow-visible" width={width} height={lines.length * ROW_HEIGHT}>
+    <svg className="tl-arrows" width={width} height={lines.length * ROW_HEIGHT}>
       <defs>
         {(['ok', 'conflict'] as const).map((kind) => (
           <marker key={kind} id={`gantt-arrow-${kind}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth={ARROW_HEAD_SIZE} markerHeight={ARROW_HEAD_SIZE} orient="auto">
-            <path d="M0,0 L8,4 L0,8 z" className={kind === 'ok' ? 'fill-neutral-500' : 'fill-rose-400'} />
+            <path d="M0,0 L8,4 L0,8 z" fill={kind === 'ok' ? 'var(--ink-muted)' : 'var(--warn)'} />
           </marker>
         ))}
       </defs>
@@ -428,7 +426,7 @@ function DependencyArrows({ lines, rowIndex, allById, previewSpan, toX, width }:
           d={a.d}
           fill="none"
           strokeWidth={1.5}
-          className={a.conflict ? 'stroke-rose-400' : 'stroke-neutral-500'}
+          stroke={a.conflict ? 'var(--warn)' : 'var(--ink-muted)'}
           markerEnd={`url(#gantt-arrow-${a.conflict ? 'conflict' : 'ok'})`}
         />
       ))}
@@ -445,20 +443,16 @@ interface TrayProps {
 function UnscheduledTray({ tasks, draggingId, onPointerDown }: TrayProps) {
   if (tasks.length === 0) return null
   return (
-    <div className="rounded-2xl border border-dashed border-white/10 p-3">
-      <h3 className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">
-        Unscheduled ({tasks.length}), drag onto the timeline to schedule
-      </h3>
-      <div className="flex flex-wrap gap-2">
+    <div className="tl-tray">
+      <h3 className="a-grp">{t('timeline_unscheduled', { n: tasks.length })}</h3>
+      <div className="tk-meta">
         {tasks.map((task) => (
           <div
             key={task.id}
             onPointerDown={(e) => onPointerDown(e, task)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] border cursor-grab select-none [-webkit-touch-callout:none] bg-white/5 text-neutral-300 border-white/10 hover:border-emerald-500/30 ${
-              draggingId === task.id ? 'opacity-30' : ''
-            }`}
+            className={`tl-chip${draggingId === task.id ? ' is-dragging' : ''}`}
           >
-            <span className="text-neutral-500 mr-1.5">{task.display_id}</span>
+            <span>{task.display_id}</span>
             {task.title}
           </div>
         ))}

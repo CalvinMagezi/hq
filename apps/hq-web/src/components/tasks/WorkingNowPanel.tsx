@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { agentName } from '~/lib/names'
 import { parseSqliteUtc, type TaskItem, type WorkSession } from '~/lib/tasksApi'
 import { t } from '~/strings'
+import './leaf.css'
 
 const TICK_MS = 1000
 const SECONDS_PER_MINUTE = 60
@@ -43,11 +44,11 @@ export function WorkingNowPanel({ sessions, taskById, onSelect }: Props) {
   const now = useNow(sessions.length > 0)
   if (sessions.length === 0) return null
   return (
-    <section aria-label={t('task_working_now')} className="mb-4 rounded-2xl hq-card p-2">
-      <h2 className="px-2 pt-1 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+    <section aria-label={t('task_working_now')} className="a-card mb-4">
+      <h2 className="a-label">
         {t('task_working_now_count', { n: sessions.length })}
       </h2>
-      <ul className="space-y-1">
+      <ul className="l-stack">
         {sessions.map((s) => {
           const task = taskById.get(s.task_id)
           return (
@@ -55,18 +56,18 @@ export function WorkingNowPanel({ sessions, taskById, onSelect }: Props) {
               <button
                 type="button"
                 onClick={() => onSelect(s.task_id)}
-                className="w-full min-w-0 flex items-center gap-2 rounded-xl px-2 py-2 text-left hover:bg-white/5"
+                className="a-drow l-tall l-link w-full"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-current text-neutral-200 animate-pulse shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs text-neutral-100">{task?.title ?? s.task_id}</span>
-                  <span className="block truncate text-[11px] text-neutral-500">
+                <span className="l-work animate-pulse" aria-hidden="true" />
+                <span className="l-grow">
+                  <span className="block l-clip a-body-sm">{task?.title ?? s.task_id}</span>
+                  <span className="block l-clip a-cap a-muted">
                     {s.actor}
                     {s.harness ? ` · ${agentName(s.harness)}` : ''}
                     {s.branch ? `, ${s.branch}` : ''}
                   </span>
                 </span>
-                <span className="shrink-0 text-xs tabular-nums text-neutral-200">{formatClock(elapsedSeconds(s, now))}</span>
+                <span className="shrink-0 a-body-sm l-num">{formatClock(elapsedSeconds(s, now))}</span>
               </button>
             </li>
           )

@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { fetchTasksLinkedToClient, STATUS_LABELS } from '~/lib/tasksApi'
 import { usePolled } from '../sessions/usePolled'
 import { useRefreshOn } from '~/lib/useRefreshOn'
+import './leaf.css'
 
 const NOTE_TASKS_POLL_MS = 300_000
 
@@ -11,21 +12,21 @@ export function NoteTasks({ path }: { path: string }) {
   useRefreshOn(['task:sync'], found.refresh)
   if (!found.data || found.data.length === 0) return null
   return (
-    <section aria-label="Tasks from this note" className="mt-8 pt-4 border-t border-white/10">
-      <h3 className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-dim)' }}>
+    <section aria-label="Tasks from this note" className="l-stack mt-8">
+      <h3 className="a-label">
         Tasks from this note
       </h3>
-      <ul className="space-y-1.5">
+      <ul className="a-card l-lines">
         {found.data.map((task) => (
           <li key={task.id}>
             <Link
               to="/tasks"
               search={{ task: task.id }}
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 text-xs min-w-0"
+              className="a-drow l-tall l-link a-body-sm"
             >
-              <span className="text-[11px] text-neutral-500 shrink-0">{task.display_id}</span>
-              <span className="truncate flex-1 text-neutral-200">{task.title}</span>
-              <span className="text-[11px] text-neutral-500 shrink-0">{STATUS_LABELS[task.status]}</span>
+              <span className="a-cap a-muted shrink-0">{task.display_id}</span>
+              <span className="l-clip l-grow">{task.title}</span>
+              <span className="a-cap a-muted shrink-0">{STATUS_LABELS[task.status]}</span>
             </Link>
           </li>
         ))}

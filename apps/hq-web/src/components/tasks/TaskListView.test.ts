@@ -60,7 +60,7 @@ const academyTask = (n: number) => makeTask(n, { initiative_id: 'init-2' })
 // React writes "1<!-- --> sub-task", so match on the button's text rather than the count.
 const SUBTASK_TOGGLE = ' sub-task</button>'
 
-const checkboxes = (html: string) => html.match(/<input[^>]*type="checkbox"[^>]*>/g) ?? []
+const checkboxes = (html: string) => html.match(/<(?:input[^>]*type="checkbox"|button[^>]*role="checkbox"[^>]*aria-label="Select[^>]*)[^>]*>/g) ?? []
 
 test('a plain list has no checkboxes', () => {
   expect(checkboxes(render([makeTask(1), makeTask(2)]))).toHaveLength(0)
@@ -70,7 +70,7 @@ test('picking shows a box on every card and one for the group, ticked where chos
   const html = render([makeTask(1), makeTask(2)], { ticked: new Set(['tk-1']), onToggle: noop, onToggleMany: noop })
   const boxes = checkboxes(html)
   expect(boxes).toHaveLength(3)
-  expect(boxes.filter((b) => b.includes('checked'))).toHaveLength(1)
+  expect(boxes.filter((b) => b.includes('checked') && !b.includes('aria-checked="false"'))).toHaveLength(1)
   expect(html).toContain('aria-label="Select HQ-1"')
   expect(html).toContain('aria-label="Select all in Launch"')
 })

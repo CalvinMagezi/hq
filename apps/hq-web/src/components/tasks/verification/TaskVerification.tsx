@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { t, tn } from '~/strings'
 import { Check, ChevronDown, Hourglass, MinusCircle, TriangleAlert, Undo2 } from 'lucide-react'
+import '../leaf.css'
 import {
   fetchTaskVerification,
   requestSecondOpinion,
@@ -24,57 +25,57 @@ const VERDICT_WORD: Record<TaskVerdict['verdict'], string> = {
 }
 
 const VERDICT_STYLE: Record<TaskVerdict['verdict'], string> = {
-  pass: 'border hq-tone-ink',
-  fail: 'border hq-tone-warn',
-  inconclusive: 'border hq-tone-grey',
+  pass: 'a-kind sm',
+  fail: 'a-state needs',
+  inconclusive: 'a-kind sm',
 }
 
 function VerdictBlock({ v, open }: { v: TaskVerdict; open: boolean }) {
   return (
-    <details open={open} className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2">
-      <summary className="flex items-center gap-2 cursor-pointer list-none min-h-8">
-        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-md ${VERDICT_STYLE[v.verdict]}`}>{VERDICT_WORD[v.verdict]}</span>
-        <span className="text-xs text-neutral-300 min-w-0 flex-1 truncate">
+    <details open={open} className="l-details">
+      <summary className="l-row">
+        <span className={VERDICT_STYLE[v.verdict]}>{VERDICT_WORD[v.verdict]}</span>
+        <span className="a-body-sm l-grow l-clip">
           {kindLabel(v.tier)}, {levelLabel(v.level)}
           {v.applied ? '' : `, ${t('check_not_applied')}`}
         </span>
-        <span className="text-xs text-neutral-500 shrink-0">{v.created_at.slice(0, 16)}</span>
-        <ChevronDown className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+        <span className="a-cap a-muted shrink-0">{v.created_at.slice(0, 16)}</span>
+        <ChevronDown className="a-ic xs a-muted" aria-hidden="true" />
       </summary>
-      <div className="mt-2 space-y-2.5">
-        <p className="text-xs text-neutral-400 break-words">
+      <div className="l-stack mt-2">
+        <p className="a-cap a-muted l-break">
           {t('check_who_made', { verifier: v.verifier, how: v.independence.replaceAll('_', ' ') })}
         </p>
-        {v.reasons && <p className="text-xs text-neutral-300 whitespace-pre-wrap break-words">{v.reasons}</p>}
+        {v.reasons && <p className="a-body-sm l-pre">{v.reasons}</p>}
         <div>
-          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{criteriaSummary(v.criteria)}</p>
-          <ul className="space-y-1">
+          <p className="a-label mb-1">{criteriaSummary(v.criteria)}</p>
+          <ul className="l-stack">
             {v.criteria.map((c) => (
-              <li key={c.text} className="flex items-start gap-1.5 text-xs text-neutral-200">
+              <li key={c.text} className="l-row a-body-sm">
                 {c.result === 'pass' ? (
-                  <Check className="w-3.5 h-3.5 text-white shrink-0 mt-0.5" aria-label={t('verify_met')} />
+                  <Check className="a-ic xs" aria-label={t('verify_met')} />
                 ) : c.result === 'fail' ? (
-                  <TriangleAlert className="w-3.5 h-3.5 text-[var(--warn)] shrink-0 mt-0.5" aria-label={t('verify_not_met')} />
+                  <TriangleAlert className="a-ic xs a-warn-t" aria-label={t('verify_not_met')} />
                 ) : (
-                  <MinusCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" aria-label={t('verify_not_decided')} />
+                  <MinusCircle className="a-ic xs a-muted" aria-label={t('verify_not_decided')} />
                 )}
-                <span className="break-words">{c.text}</span>
+                <span className="l-break">{c.text}</span>
               </li>
             ))}
           </ul>
         </div>
-        <ul className="space-y-1">
+        <ul className="l-stack">
           {v.observations.map((o) => (
-            <li key={o.id} className="flex items-start gap-1.5 text-xs text-neutral-400">
+            <li key={o.id} className="l-row a-cap a-muted">
               {o.ok === true ? (
-                <Check className="w-3.5 h-3.5 text-white shrink-0 mt-0.5" />
+                <Check className="a-ic xs" aria-hidden="true" />
               ) : o.ok === false ? (
-                <TriangleAlert className="w-3.5 h-3.5 text-[var(--warn)] shrink-0 mt-0.5" />
+                <TriangleAlert className="a-ic xs a-warn-t" aria-hidden="true" />
               ) : (
-                <MinusCircle className="w-3.5 h-3.5 text-neutral-600 shrink-0 mt-0.5" />
+                <MinusCircle className="a-ic xs a-muted" aria-hidden="true" />
               )}
-              <span className="break-words">
-                <span className="text-neutral-600">{o.id}</span> {o.fact}
+              <span className="l-break">
+                <span className="a-mono">{o.id}</span> {o.fact}
               </span>
             </li>
           ))}
@@ -103,31 +104,31 @@ export function TaskVerificationView({ data, taskStatus, nowMs, busy, confirming
   const opinion = data.second_opinion
   const pending = opinion?.state === 'pending'
   return (
-    <div className="space-y-3">
+    <div className="a-card" data-check-card>
       {data.waiting_for && (
-        <p className={`text-xs ${data.waiting_for.who === 'owner' ? 'text-[var(--warn)]' : 'text-neutral-400'}`}>
+        <p className={`a-body-sm ${data.waiting_for.who === 'owner' ? 'a-warn-t' : 'a-muted'}`}>
           <span className="font-semibold">{WAITING_LABEL[data.waiting_for.who]}.</span> {data.waiting_for.reason}
         </p>
       )}
 
       {data.hold && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/20 bg-white/5">
-          <Hourglass className="w-4 h-4 text-[var(--warn)] shrink-0" />
-          <span className="text-xs text-neutral-100 flex-1">{t('check_holds', { time: countdown(data.hold.release_at, nowMs) })}</span>
-          <button type="button" disabled={busy} onClick={onVeto} className="hq-btn-ghost !h-9 !px-3 !text-xs disabled:opacity-40">
-            <Undo2 className="w-3.5 h-3.5" />
+        <div className="l-row">
+          <Hourglass className="a-ic sm a-warn-t" aria-hidden="true" />
+          <span className="a-body-sm l-grow">{t('check_holds', { time: countdown(data.hold.release_at, nowMs) })}</span>
+          <button type="button" disabled={busy} onClick={onVeto} className="a-btn secondary compact">
+            <Undo2 className="a-ic xs" aria-hidden="true" />
             {t('check_keep_open')}
           </button>
         </div>
       )}
 
       {latest ? (
-        <div className="space-y-2">
+        <div className="l-stack">
           <VerdictBlock v={latest} open={taskStatus !== 'complete'} />
           {older.length > 0 && (
-            <details>
-              <summary className="text-xs text-neutral-500 cursor-pointer">{tn('check_earlier', older.length)}</summary>
-              <div className="mt-2 space-y-2">
+            <details className="l-details">
+              <summary>{tn('check_earlier', older.length)}</summary>
+              <div className="l-stack mt-2">
                 {older.slice(0, OLDER_SHOWN).map((v) => (
                   <VerdictBlock key={v.id} v={v} open={false} />
                 ))}
@@ -136,11 +137,11 @@ export function TaskVerificationView({ data, taskStatus, nowMs, busy, confirming
           )}
         </div>
       ) : (
-        <p className="text-xs text-neutral-500">{t('check_not_checked')}</p>
+        <p className="a-body-sm a-muted">{t('check_not_checked')}</p>
       )}
 
       {opinion && (
-        <p className="text-xs text-neutral-400">
+        <p className="a-body-sm a-muted">
           {opinion.state === 'pending'
             ? t('check_second_look_pending')
             : opinion.state === 'agreed'
@@ -151,25 +152,20 @@ export function TaskVerificationView({ data, taskStatus, nowMs, busy, confirming
         </p>
       )}
 
-      <div className="flex flex-wrap gap-2">
+            <div className="l-bar">
+        {taskStatus !== 'to_do' && (
+          <button type="button" disabled={busy} onClick={onReturnToDo} className="a-btn secondary compact">
+            {t('tasks_send_back')}
+          </button>
+        )}
         {latest && (
-          <button type="button" disabled={busy || pending} onClick={onSecondOpinion} className="hq-btn-ghost !h-10 !px-3.5 !text-xs disabled:opacity-40">
+          <button type="button" disabled={busy || pending} onClick={onSecondOpinion} className="a-btn quiet compact">
             {pending ? t('check_second_look_asked') : t('check_second_look')}
           </button>
         )}
         {taskStatus !== 'complete' && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onCompleteAnyway}
-            className={`!h-10 !px-3.5 !text-xs disabled:opacity-40 ${confirmingComplete ? 'hq-btn-primary' : 'hq-btn-ghost'}`}
-          >
+          <button type="button" disabled={busy} onClick={onCompleteAnyway} className="a-btn compact l-end">
             {confirmingComplete ? t('check_mark_done_again') : t('tasks_mark_done')}
-          </button>
-        )}
-        {taskStatus !== 'to_do' && (
-          <button type="button" disabled={busy} onClick={onReturnToDo} className="hq-btn-ghost !h-10 !px-3.5 !text-xs disabled:opacity-40">
-            {t('tasks_send_back')}
           </button>
         )}
       </div>

@@ -9,6 +9,7 @@ import { usePolled } from '../sessions/usePolled'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { NewAgentDialog } from '../sessions/NewAgentDialog'
 import { SectionLabel } from './taskFields'
+import './leaf.css'
 
 const TASK_SESSIONS_POLL_MS = 120_000
 
@@ -22,28 +23,28 @@ export function TaskSessions({ taskId, taskTitle, done }: { taskId: string; task
     <section aria-label="Linked agents">
       <SectionLabel>Agents</SectionLabel>
       {sessions.loading ? (
-        <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <div role="status" className="a-loading">
+          <Loader2 className="a-ic xs animate-spin" aria-hidden="true" />
           Loading agents
         </div>
       ) : !sessions.data ? (
-        <p role="alert" className="text-xs text-rose-400">
+        <p role="alert" className="a-body-sm a-danger-t">
           {sessions.error ?? 'Could not load agents.'}
         </p>
       ) : sessions.data.length === 0 ? (
-        <p className="text-xs text-neutral-500">No agents on this task yet.</p>
+        <p className="a-body-sm a-muted">No agents on this task yet.</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="a-card l-lines">
           {sessions.data.map((s) => (
             <li key={s.id}>
               <Link
                 to="/helpers/$id"
                 params={{ id: s.id }}
-                className="block px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 space-y-0.5"
+                className="a-drow l-tall l-col l-link"
               >
-                <span className="flex items-center gap-2 min-w-0 text-xs text-neutral-200">
-                  <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
-                  <span className="truncate">
+                <span className="l-row a-body-sm">
+                  <Terminal className="a-ic xs a-muted" aria-hidden="true" />
+                  <span className="l-clip">
                     {sessionTitle(s)}
                   </span>
                 </span>
@@ -54,7 +55,7 @@ export function TaskSessions({ taskId, taskTitle, done }: { taskId: string; task
         </ul>
       )}
       {!done && (
-        <button type="button" onClick={() => setStarting(true)} className="mt-2 min-h-11 px-3 rounded-lg text-xs font-bold text-neutral-200 bg-white/[0.04] border border-white/10 hover:bg-white/10">
+        <button type="button" onClick={() => setStarting(true)} className="a-btn secondary compact mt-2">
           {t('helpers_start_on_task')}
         </button>
       )}

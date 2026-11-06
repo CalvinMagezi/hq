@@ -49,7 +49,8 @@ describe('tasks finish', () => {
 
   test('check 3: delete for good is offered only for an archived task', () => {
     const drawer = readFileSync('src/components/tasks/TaskDetailDrawer.tsx', 'utf8')
-    expect(drawer).toContain('{!archived && <button')
+    expect(drawer).toContain('{!archived && (')
+    expect(drawer).toContain('onDelete(task.id, true, true)')
     expect(drawer).toContain('onDelete(task.id, task.subtask_count > 0)')
   })
 
@@ -68,7 +69,7 @@ describe('tasks finish', () => {
 
   test('check 5: board cards are links, Move is a button, M and the arrows are keys', () => {
     const board = readFileSync('src/components/tasks/TaskBoardView.tsx', 'utf8')
-    expect(board).toContain('asLink')
+    expect(board).toContain('a-card')
     expect(board).toContain('data-board-move')
     expect(boardKey('m')).toBe('move')
     expect(boardKey('M')).toBe('move')

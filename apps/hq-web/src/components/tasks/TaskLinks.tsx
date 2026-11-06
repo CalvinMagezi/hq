@@ -7,20 +7,21 @@ import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
 import { linkTarget, linkText } from './linkTarget'
 import { useRefreshOn } from '~/lib/useRefreshOn'
+import './leaf.css'
 
 const LINKS_POLL_MS = 300_000
-const ICON_CLASS = 'w-3.5 h-3.5 text-neutral-500 shrink-0'
+const ICON_CLASS = 'a-ic xs a-muted'
 const ROW_CLASS =
-  'flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 text-xs text-neutral-200 min-w-0'
+  'a-drow l-tall l-link a-body-sm'
 
 const ICONS: Record<LinkKind, ReactNode> = {
-  vault_note: <FileText className={ICON_CLASS} />,
-  chat_thread: <MessageSquare className={ICON_CLASS} />,
-  session: <Terminal className={ICON_CLASS} />,
-  commit: <GitCommit className={ICON_CLASS} />,
-  pr: <GitPullRequest className={ICON_CLASS} />,
-  url: <ExternalLink className={ICON_CLASS} />,
-  task: <CheckSquare className={ICON_CLASS} />,
+  vault_note: <FileText className={ICON_CLASS} aria-hidden="true" />,
+  chat_thread: <MessageSquare className={ICON_CLASS} aria-hidden="true" />,
+  session: <Terminal className={ICON_CLASS} aria-hidden="true" />,
+  commit: <GitCommit className={ICON_CLASS} aria-hidden="true" />,
+  pr: <GitPullRequest className={ICON_CLASS} aria-hidden="true" />,
+  url: <ExternalLink className={ICON_CLASS} aria-hidden="true" />,
+  task: <CheckSquare className={ICON_CLASS} aria-hidden="true" />,
 }
 
 const DIRECTION_NOTE: Record<TaskLinkItem['direction'], string> = {
@@ -34,8 +35,8 @@ function LinkRow({ link }: { link: TaskLinkItem }) {
   const body = (
     <>
       <span className="mt-0.5">{ICONS[link.kind]}</span>
-      <span className="min-w-0 break-words">
-        {DIRECTION_NOTE[link.direction] && <span className="text-neutral-500">{DIRECTION_NOTE[link.direction]} </span>}
+      <span className="l-grow l-break">
+        {DIRECTION_NOTE[link.direction] && <span className="a-muted">{DIRECTION_NOTE[link.direction]} </span>}
         {linkText(link)}
       </span>
     </>
@@ -68,8 +69,8 @@ export function TaskLinks({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Links">
         <SectionLabel>Links</SectionLabel>
-        <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <div role="status" className="a-loading">
+          <Loader2 className="a-ic xs animate-spin" aria-hidden="true" />
           Loading links
         </div>
       </section>
@@ -79,7 +80,7 @@ export function TaskLinks({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Links">
         <SectionLabel>Links</SectionLabel>
-        <p role="alert" className="text-xs text-rose-400">{links.error ?? 'Could not load links.'}</p>
+        <p role="alert" className="a-body-sm a-danger-t">{links.error ?? 'Could not load links.'}</p>
       </section>
     )
   }
@@ -87,7 +88,7 @@ export function TaskLinks({ task }: { task: TaskItem }) {
   return (
     <section aria-label="Links">
       <SectionLabel>Links</SectionLabel>
-      <ul className="space-y-1.5">
+      <ul className="a-card l-lines">
         {links.data.map((link) => (
           <li key={link.id}>
             <LinkRow link={link} />
