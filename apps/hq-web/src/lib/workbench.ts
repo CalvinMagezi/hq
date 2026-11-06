@@ -108,6 +108,9 @@ export function groupSessions(sessions: HarnessSession[], showArchived: boolean)
 
 export const needsYouCount = (sessions: HarnessSession[]) => sessions.filter((s) => isRunning(s) && needsYou(s)).length
 
+/** Helpers running that do not need the owner: the status line's "· 2 working". */
+export const workingCount = (sessions: HarnessSession[]) => sessions.filter((s) => isRunning(s) && !needsYou(s) && s.agent_status === 'working').length
+
 /** Past sessions that "Archive all" would hide: not running and not archived already. */
 export const archivable = (sessions: HarnessSession[]) => sessions.filter((s) => !isRunning(s) && !s.archived)
 

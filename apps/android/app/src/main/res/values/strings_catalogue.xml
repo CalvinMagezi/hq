@@ -711,6 +711,12 @@
     <string name="place_inbox">Inbox</string>
     <string name="place_settings">Settings</string>
     <string name="place_other">Agent HQ</string>
+    <string name="nav_places">Places</string>
+    <string name="nav_inbox_needs_one">Inbox, 1 needs you</string>
+    <string name="nav_inbox_needs_many">Inbox, %1$s need you</string>
+    <string name="skip_to_content">Skip to content</string>
+    <string name="search_kbd">Ctrl K</string>
+    <string name="balance_aria">%1$s. Open Spending</string>
     <string name="fact_active">%1$s active</string>
     <string name="fact_working">%1$s working</string>
     <string name="more_menu">Search, Spending and Settings</string>

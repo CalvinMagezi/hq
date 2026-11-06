@@ -1,45 +1,36 @@
 @import "tailwindcss";
 
-/* ─── Fonts (self-hosted, latin subset) ─────────────────────────────────────── */
-@import "@fontsource/inter/latin-400.css";
-@import "@fontsource/inter/latin-500.css";
-@import "@fontsource/inter/latin-600.css";
-@import "@fontsource/inter/latin-700.css";
-@import "@fontsource/nunito/latin-700.css";
-@import "@fontsource/nunito/latin-800.css";
-@import "@fontsource/nunito/latin-900.css";
 
 :root {
-  /* Brand: Agent HQ — black + #22FF37 green + #00ADEE blue */
-  --bg-base: #000000;
+  /* Older names, kept for screens not yet rebuilt: each points at the phone's MTS token (aligned-ui.css). */
+  --bg-base: var(--surface-000);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --bg-surface: rgba(6, 6, 6, 0.72);
-  --bg-elevated: rgba(10, 10, 10, 0.65);
-  --bg-solid-surface: #080808;
-  --bg-solid-elevated: #0e0e0e;
-  --border: rgba(255, 255, 255, 0.07);
+  --bg-surface: var(--surface-100);
+  --bg-elevated: var(--surface-200);
+  --bg-solid-surface: var(--surface-100);
+  --bg-solid-elevated: var(--surface-200);
+  --border: var(--hairline);
   --border-glow: rgba(0, 173, 238, 0.15);
   --accent-green: #22ff37;
   --accent-amber: #ffb300;
-  --accent-red: #ff4444;
+  --accent-red: var(--warn);
   --accent-blue: #00adee;
   --accent-violet: #00adee;   /* brand blue — replaces violet everywhere */
-  --text-primary: #e8e8f0;
-  --text-dim: #D0D2D3;
+  --text-primary: var(--ink);
+  --text-dim: var(--ink-muted);
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-  --font-body: 'Inter', 'Clear Sans', sans-serif;
-  --font-heading: 'Nunito', 'Aller', 'Inter', sans-serif;
+  --font-body: var(--font-sans);
+  --font-heading: var(--font-sans);
 
-  /* Glass tokens */
-  --glass-bg: rgba(6, 6, 6, 0.55);
-  --glass-bg-heavy: rgba(14, 16, 20, 0.58);
-  --glass-bg-light: rgba(12, 12, 12, 0.40);
-  --glass-blur: 20px;
-  --glass-blur-heavy: 32px;
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-shine: rgba(255, 255, 255, 0.04);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --glass-bg: var(--surface-100);
+  --glass-bg-heavy: var(--surface-100);
+  --glass-bg-light: var(--surface-100);
+  --glass-blur: 0px;
+  --glass-blur-heavy: 0px;
+  --glass-border: var(--hairline);
+  --glass-shine: transparent;
+  --glass-shadow: none;
 }
 
 * {
@@ -80,18 +71,7 @@ body {
   overflow: hidden;
 }
 
-/* ─── Ambient Background ───────────────────────────────────────────────────── */
 
-.hq-ambient-bg {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(1100px 700px at 6% -8%, rgba(0, 173, 238, 0.16) 0%, transparent 62%),
-    radial-gradient(900px 700px at 104% 108%, rgba(34, 255, 55, 0.09) 0%, transparent 62%),
-    radial-gradient(700px 500px at 60% 40%, rgba(46, 49, 145, 0.18) 0%, transparent 70%);
-}
 
 /* Dot grid */
 .dot-grid {
@@ -102,29 +82,21 @@ body {
 /* ─── Glass utilities ──────────────────────────────────────────────────────── */
 
 .glass {
-  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
 }
 
 .glass-heavy {
-  backdrop-filter: blur(var(--glass-blur-heavy)) saturate(200%);
-  -webkit-backdrop-filter: blur(var(--glass-blur-heavy)) saturate(200%);
   background: var(--glass-bg-heavy);
   border: 1px solid var(--glass-border);
 }
 
 .glass-light {
-  backdrop-filter: blur(12px) saturate(160%);
-  -webkit-backdrop-filter: blur(12px) saturate(160%);
   background: var(--glass-bg-light);
   border: 1px solid var(--glass-border);
 }
 
 .glass-card {
-  backdrop-filter: blur(16px) saturate(170%);
-  -webkit-backdrop-filter: blur(16px) saturate(170%);
   background: rgba(8, 8, 8, 0.50);
   border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--glass-shine);
@@ -152,8 +124,6 @@ body {
 /* ─── Panel ────────────────────────────────────────────────────────────────── */
 
 .hq-panel {
-  backdrop-filter: blur(16px) saturate(170%);
-  -webkit-backdrop-filter: blur(16px) saturate(170%);
   background: rgba(8, 8, 8, 0.50);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
@@ -251,8 +221,6 @@ body {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .badge-running {
@@ -376,8 +344,6 @@ body {
   max-width: 100%;
   margin-top: 0.5em;
   margin-bottom: 1em;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .markdown-viewer p,
@@ -443,8 +409,6 @@ body {
   margin: 1em 0;
   border-radius: 10px;
   border: 1px solid var(--border);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .md-table {
@@ -540,8 +504,6 @@ body {
   opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   z-index: 2;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .code-copy-btn:hover {
@@ -627,8 +589,6 @@ body {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -643,8 +603,6 @@ body {
   background: rgba(0, 173, 238, 0.06);
   border: 1px solid rgba(0, 173, 238, 0.14);
   border-radius: 6px;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
 }
 
 /* Glass skeleton shimmer */
@@ -822,8 +780,6 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(16px) saturate(170%);
-  -webkit-backdrop-filter: blur(16px) saturate(170%);
   background: rgba(8, 8, 8, 0.50);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -857,8 +813,6 @@ textarea:focus {
   padding: 0 10px;
   cursor: grab;
   user-select: none;
-  backdrop-filter: blur(32px) saturate(200%);
-  -webkit-backdrop-filter: blur(32px) saturate(200%);
   background: rgba(4, 4, 4, 0.90);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -917,8 +871,6 @@ textarea:focus {
   padding: 0 8px;
   position: relative;
   z-index: 200;
-  backdrop-filter: blur(32px) saturate(200%);
-  -webkit-backdrop-filter: blur(32px) saturate(200%);
   background: rgba(4, 4, 4, 0.90);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -989,26 +941,12 @@ textarea:focus {
   }
 }
 
-/* PWA standalone */
-.main-content {
-  padding-bottom: 0;
-}
-
-@media (max-width: 767px) {
-  .main-content {
-    padding-bottom: calc(84px + var(--safe-bottom));
-  }
-}
-
-/* Inside the phone app's screen or any `?embed=1` page (see lib/embedHost.ts): no header or bottom bar, so no room kept for them.
-   The head script sets data-embed before first paint, so the chrome never shows even for a frame. */
-html[data-embed="1"] .hq-header,
-html[data-embed="1"] .hq-bottom-nav,
-html[data-embed="1"] .hq-rail {
+/* Inside the phone app's screen or any `?embed=1` page (see lib/embedHost.ts): no bars, so no room kept for them.
+   The head script sets data-embed before first paint, so the bars never show even for a frame. */
+html[data-embed="1"] .a-top,
+html[data-embed="1"] .a-nav,
+html[data-embed="1"] .a-rail {
   display: none !important;
-}
-html[data-embed="1"] .main-content {
-  padding-bottom: var(--safe-bottom);
 }
 html[data-embed="1"] .vault-sidebar {
   bottom: var(--safe-bottom);
@@ -1035,97 +973,24 @@ html[data-embed="1"] .vault-sidebar {
 }
 
 
-/* ─── App shell: glass rail, floating panes, floating phone nav ───────────── */
+/* ─── Shared controls not yet on the design system ───────────────────────── */
 
 :root {
-  --glass-fill: rgba(255, 255, 255, 0.055);
-  --glass-line: rgba(255, 255, 255, 0.10);
-  --glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --glass-fill: var(--surface-100);
+  --glass-line: var(--hairline);
+  --glass-hi: none;
 }
 
-.hq-rail {
-  width: 72px;
-  flex-shrink: 0;
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 14px 0;
-  background: rgba(14, 16, 20, 0.58);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  border-right: 1px solid var(--glass-line);
-  box-shadow: var(--glass-hi);
-}
-@media (min-width: 768px) {
-  .hq-rail { display: flex; }
-}
 
-.hq-rail-item {
-  position: relative;
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 14px;
-  color: #d0d2d3;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.hq-rail-item:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
-.hq-rail-item[aria-current='page'],
-.hq-rail-item.is-active {
-  background: rgba(34, 255, 55, 0.10);
-  color: var(--accent-green);
-  box-shadow: inset 0 0 0 1px rgba(34, 255, 55, 0.28);
-}
-.hq-rail-item[aria-current='page']::before,
-.hq-rail-item.is-active::before {
-  content: '';
-  position: absolute;
-  left: -12px;
-  top: 12px;
-  bottom: 12px;
-  width: 4px;
-  border-radius: 4px;
-  background: var(--ink);
-}
-.hq-rail-badge {
-  position: absolute;
-  top: 3px;
-  right: 1px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
-  background: var(--warn);
-  color: #000;
-}
 
-:is(.hq-rail-item, .hq-icon-btn, .hq-btn-primary, .hq-resize-handle, .hq-avatar):focus-visible {
+:is(.hq-icon-btn, .hq-btn-primary, .hq-resize-handle, .hq-avatar):focus-visible {
   outline: 3px solid var(--accent-blue);
   outline-offset: 3px;
-}
-
-.hq-glass-pane {
-  background: rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  box-shadow: var(--glass-hi), 0 24px 60px rgba(0, 0, 0, 0.35);
-}
-@media (min-width: 768px) {
-  .hq-glass-pane { border: 1px solid var(--glass-line); }
 }
 
 .hq-glass-card {
   background: var(--glass-fill);
   border: 1px solid var(--glass-line);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
   box-shadow: var(--glass-hi), 0 8px 24px rgba(0, 0, 0, 0.22);
 }
 
@@ -1243,46 +1108,17 @@ html[data-embed="1"] .vault-sidebar {
   border: 2px solid #0a0c0f;
 }
 
-/* Phone bottom bar: a floating glass pill. */
-.hq-bottom-nav {
-  position: fixed;
-  left: 12px;
-  right: 12px;
-  bottom: calc(12px + var(--safe-bottom));
-  z-index: 40;
-  display: flex;
-  align-items: stretch;
-  height: 64px;
-  border-radius: 24px;
-  background: rgba(14, 16, 20, 0.62);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  border: 1px solid var(--glass-line);
-  box-shadow: var(--glass-hi), 0 12px 32px rgba(0, 0, 0, 0.4);
-}
-@media (min-width: 768px) {
-  .hq-bottom-nav { display: none; }
-}
 
 @media (prefers-reduced-motion: reduce) {
-  .hq-rail-item, .hq-row, .hq-resize-handle::after, aside { transition: none !important; }
+  .hq-row, .hq-resize-handle::after, aside { transition: none !important; }
 }
 
-.hq-header {
-  background: transparent;
-  border-bottom: 1px solid var(--glass-line);
-}
-@media (min-width: 768px) {
-  .hq-header { border-bottom-color: transparent; }
-}
 
 /* ─── Inner controls shared by Tasks, Chat and Inbox ──────────────────────── */
 
 .hq-field {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--glass-line);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 .hq-field:focus,
 .hq-field:focus-within { border-color: rgba(0, 173, 238, 0.55); }
@@ -1297,8 +1133,6 @@ html[data-embed="1"] .vault-sidebar {
 .hq-card {
   background: var(--glass-fill);
   border: 1px solid var(--glass-line);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
   box-shadow: var(--glass-hi), 0 8px 24px rgba(0, 0, 0, 0.22);
 }
 .hq-card-live:hover {
@@ -1325,39 +1159,31 @@ html[data-embed="1"] .vault-sidebar {
 .hq-composer {
   border-top: 1px solid var(--glass-line);
   background: rgba(14, 16, 20, 0.5);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
 }
 
 /* Dialogs, drawers and overlays */
 .hq-scrim {
   background: rgba(4, 6, 9, 0.55);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
 }
 .hq-modal {
   background: rgba(20, 22, 27, 0.78);
   border: 1px solid var(--glass-line);
-  backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
   box-shadow: var(--glass-hi), 0 30px 80px rgba(0, 0, 0, 0.55);
 }
 
-/* Shell status (web wave 1): the header, toast, state pills and tone classes. */
-.hq-header .a-tt{height:auto;min-height:48px;padding:4px 0}
-.hq-header .a-status{padding:2px 0}
-.hq-chip-link{display:none}
-@media (min-width: 400px) { .hq-chip-link{display:inline-flex} }
-.hq-more{display:none;position:relative}
+/* The shell (web-matches-phone wave A): the design's .a-app fills the window; places fill .a-main. */
+.hq-root{position:fixed;inset:0;padding-top:var(--safe-top);display:flex;flex-direction:column}
+/* A banner above the shell (install, sign-in) takes its own room; the shell gets the rest. */
+.hq-root>.a-shell{flex:1 1 auto;height:auto;min-height:0}
+.hq-root .a-nav{padding-bottom:calc(16px + var(--safe-bottom))}
+.hq-place{position:relative;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden;display:flex;flex-direction:column}
+.hq-place>*{flex:1 1 auto;min-height:0}
+.a-top-more{position:relative}
 .hq-more-menu{position:absolute;right:0;top:100%;z-index:40}
-@media (max-width: 359px) {
-  .hq-more{display:block}
-  .hq-header-search,.hq-header-gear,.hq-chip-link{display:none !important}
-}
 .hq-toast{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:12px;max-width:min(560px,calc(100vw - 24px));padding:10px 16px;border-radius:var(--radius-md);background:var(--surface-200);border:1px solid var(--line);color:var(--ink);font:400 14px/20px var(--font-sans)}
 @media (min-width: 768px) { .hq-toast{bottom:24px} }
 .hq-toast-action{min-height:44px;padding:0 8px;font-weight:700;color:var(--ink)}
-@media print { .hq-header,.hq-rail,.hq-bottom-nav,.a-top,.a-rail,.a-nav{display:none !important} }
+@media print { .a-top,.a-rail,.a-nav,.a-skip{display:none !important} }
 .hq-tone-warn{color:var(--warn);border-color:var(--warn)}
 .hq-tone-work{color:var(--brand-blue);border-color:var(--brand-blue)}
 .hq-tone-ink{color:var(--ink);border-color:var(--ink)}

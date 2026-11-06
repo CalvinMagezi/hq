@@ -65,18 +65,19 @@ export interface HeaderTitleProps extends StatusLineProps {
 export function HeaderTitle({ title, ...line }: HeaderTitleProps) {
   return (
     <div className="a-tt">
-      <span className="a-title">{title}</span>
+      <h1 className="a-title">{title}</h1>
       <StatusLine {...line} />
     </div>
   )
 }
 
-/** A balance or limit chip shows only while Connected; a limit's words are amber, never red. */
-export function BalanceChip({ state, label, title, limit }: { state: ConnectionState; label: string | null; title?: string; limit?: boolean }) {
+/** A balance or limit chip shows only while Connected; a limit's words are amber, never red. `bare` is its inner pill, for a link that carries `.a-bal` itself. */
+export function BalanceChip({ state, label, title, limit, bare }: { state: ConnectionState; label: string | null; title?: string; limit?: boolean; bare?: boolean }) {
   if (state !== 'connected' || !label) return null
+  const outer = bare ? undefined : `a-bal ${limit ? 'warn' : ''}`
   return (
-    <span className={`a-bal ${limit ? 'warn' : ''}`} title={title}>
-      <span>{label}</span>
+    <span className={outer} title={bare ? undefined : title}>
+      {bare ? label : <span>{label}</span>}
     </span>
   )
 }

@@ -120,11 +120,12 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
     const [frontmatter, setFrontmatter] = useState<Record<string, any>>({})
     const [metaOpen, setMetaOpen] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
-    const { setGlobalChatOpen, setChatDraft } = useHQStore()
+    const setChatDraft = useHQStore((s) => s.setChatDraft)
 
+    // The shell opens Chat with the text as its draft (it owns the router).
     const handleSendSelection = (text: string) => {
         setChatDraft(text)
-        setGlobalChatOpen(true)
+        window.dispatchEvent(new Event('hq:open-chat'))
     }
 
     useEffect(() => {
