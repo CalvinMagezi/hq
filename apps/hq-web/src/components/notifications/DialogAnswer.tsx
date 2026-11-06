@@ -40,28 +40,22 @@ export function DialogAnswer({
     }
   }
   return (
-    <div className="w-full">
-      <ApprovalCard
-        quoteTitle={t('approval_quote_inbox')}
-        command={dialog.command}
-        inWords={dialog.question}
-        loses={dialog.loses}
-        verb={dialog.verb}
-        canAllow={!!dialog.approve}
-        busy={busy}
-        error={error}
-        onDecline={() => void answer('decline')}
-        onAllow={() => void answer('approve')}
-        more={
-          <Link
-            to="/helpers/$id"
-            params={{ id: dialog.session_id }}
-            className="a-btn secondary"
-          >
-            {dialog.approve ? t('approval_other_answers') : t('approval_answer_on_page')}
-          </Link>
-        }
-      />
-    </div>
+    <ApprovalCard
+      quoteTitle={t('approval_quote_inbox')}
+      command={dialog.command}
+      inWords={dialog.question}
+      loses={dialog.loses}
+      verb={dialog.verb}
+      canAllow={!!dialog.approve}
+      busy={busy}
+      error={error}
+      onDecline={() => void answer('decline')}
+      onAllow={() => void answer('approve')}
+      more={
+        <Link to="/helpers/$id" params={{ id: dialog.session_id }} className="a-btn secondary">
+          {dialog.approve ? t('approval_other_answers') : t('approval_answer_on_page')}
+        </Link>
+      }
+    />
   )
 }

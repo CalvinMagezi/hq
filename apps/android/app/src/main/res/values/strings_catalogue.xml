@@ -3434,4 +3434,14 @@
     <string name="helpers_tell_failed">Couldn\'t send that. Look at its screen.</string>
     <string name="chat_offer_yes">Yes</string>
     <string name="chat_offer_not_now">Not now</string>
+    <string name="inbox_chip_hq">HQ</string>
+    <string name="inbox_back">Back to Inbox</string>
+    <string name="inbox_caught_up_body">Nothing is waiting on you. Checked at %1$s.</string>
+    <string name="inbox_decided_today">You decided today</string>
+    <string name="inbox_clear_one">Clear %1$s</string>
+    <string name="inbox_d_asked_by">Asked by</string>
+    <string name="inbox_d_when">When</string>
+    <string name="inbox_d_waits_until">Waits until</string>
+    <string name="inbox_d_helper">A helper</string>
+    <string name="inbox_d_pick">Choose an item to see its details.</string>
 </resources>

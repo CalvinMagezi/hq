@@ -1203,3 +1203,21 @@ dialog.hq-sheet::backdrop{background:var(--scrim)}
 @container app (max-width:1399px){
   .hq-panes.side-open .a-pane-side{display:flex;position:absolute;top:0;right:0;bottom:0;z-index:20;width:min(var(--side-w),100%);background:var(--surface-100);border-left:1px solid var(--hairline)}
 }
+
+/* Inbox (web-matches-phone B5): the list, the open item at 720 and its footer with 320 px buttons. */
+.hq-inbox-scroll{flex:1 1 auto;min-height:0;overflow:auto}
+.hq-inbox-tools{display:flex;align-items:center;gap:8px;padding:8px 16px}
+.hq-inbox-tools .a-search{flex:1 1 0;min-width:0}
+.hq-inbox-list{display:flex;flex-direction:column;gap:12px;padding:12px 16px 16px}
+.hq-inbox-clear{display:flex;justify-content:flex-end;padding:0 8px}
+.hq-who{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
+.hq-who b a{color:var(--ink);text-decoration:none}
+.hq-who b a:hover{text-decoration:underline}
+.a-card.needs>.a-card{border:0;padding:0;background:none}
+.a-msg:has(>.a-msg-main[aria-current="true"]){background:var(--surface-200)}
+.hq-inbox-body{flex:1 1 auto;min-height:0;overflow:auto;padding:24px 0}
+.hq-inbox-wrap{display:flex;flex-direction:column;gap:16px;max-width:720px}
+.hq-inbox-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.hq-inbox-foot{flex:none;display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:12px 16px calc(12px + var(--safe-bottom));border-top:1px solid var(--hairline);background:var(--surface-000)}
+.hq-inbox-foot>p{width:100%;text-align:center}
+.hq-inbox-foot>.a-btn{flex:1 1 140px;max-width:320px}
