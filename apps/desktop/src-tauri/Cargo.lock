@@ -1977,6 +1977,7 @@ dependencies = [
  "hq-db",
  "hq-gate",
  "iroh",
+ "libc",
  "qrcodegen",
  "rand 0.8.8",
  "serde",
