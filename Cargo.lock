@@ -3638,7 +3638,7 @@ dependencies = [
  "typst-render",
  "typst-svg",
  "typst-utils",
- "zip 8.6.0",
+ "zip 9.0.5",
 ]
 
 [[package]]
