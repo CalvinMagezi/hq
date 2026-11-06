@@ -59,11 +59,11 @@ const hosts = [
 
 const phoneShots = [
   { id: 'chat-working', label: 'Chat', alt: 'Phone screen: a chat where HQ answers a question, then lists the steps it is taking: checked your tasks, read a note, writing the steps.' },
-  { id: 'tasks-today', label: 'Tasks', alt: 'Phone screen: the Today tab of Tasks, with tasks waiting on you, one ready to check, and work in progress.' },
-  { id: 'inbox-needs-you', label: 'Inbox', alt: 'Phone screen: the Inbox, where a coding agent asks to edit one file and HQ offers Allow once or Not now.' },
+  { id: 'tasks-today', label: 'Tasks', alt: 'Phone screen: the Today tab of Tasks, with a stuck task and one ready to check under Waiting on you, two in progress and one due today.' },
+  { id: 'inbox-needs-you', label: 'Inbox', alt: 'Phone screen: the Inbox, where a task HQ says is finished waits with Check it and Not now.' },
   { id: 'helper-working', label: 'Helpers', alt: 'Phone screen: a coding agent on a Mac mini building an app, with what it has done so far and a field to tell it something.' },
-  { id: 'note-reading', label: 'Notes', alt: 'Phone screen: a note from the vault open for reading, with Ask HQ, Make a task and Pin actions.' },
-  { id: 'keep-running', label: 'Keep running', alt: 'Phone screen: Keep running, which checks the Android battery and permission settings that let HQ stay on.' },
+  { id: 'note-reading', label: 'Notes', alt: 'Phone screen: a garden planner note open for reading, with Edit, Ask HQ, Make a task, Pin and Share.' },
+  { id: 'keep-running', label: 'Keep running', alt: 'Phone screen: Keep running, listing three Android settings to fix so HQ stays on: battery use, unused-app permissions and notifications.' },
 ];
 ---
 
@@ -220,7 +220,7 @@ const phoneShots = [
           ))
         }
       </ul>
-      <p class="small phone-note">Screens from the app's design. The app's own screens follow it, and so do the web app and the desktop app.</p>
+      <p class="small phone-note">Tasks, Inbox, Notes and Keep running are the app itself on a fresh install with demo data. Chat and Helpers are from the app's design, which the app, the web app and the desktop app follow.</p>
       <div class="phone-facts">
         <div class="gcard">
           <h3>Works today</h3>
@@ -302,6 +302,10 @@ const phoneShots = [
           and when your phone is the hub it shows the phone's HQ and says so: "HQ on your phone".
         </p>
       </div>
+      <figure class="hub-shot reveal">
+        <img src="/media/hub-computer.jpg" alt="The HQ Hub window on This computer: Helpers here, for HQ on your phone, with Open HQ and Stop helpers here, one helper at work that needs your OK, and the start and program settings." width="1140" height="930" loading="lazy" decoding="async" />
+        <figcaption class="small">HQ Hub with the phone as the hub: this Mac runs the helpers, and Open HQ shows the phone's HQ. Demo data.</figcaption>
+      </figure>
       <div class="phone-facts">
         <div class="gcard">
           <h3>What it does</h3>
@@ -2153,6 +2157,21 @@ const phoneShots = [
 }
 .phone-note {
   margin: 0;
+  color: var(--ink-muted);
+}
+.hub-shot {
+  margin: 0;
+  max-width: 760px;
+}
+.hub-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+}
+.hub-shot figcaption {
+  margin-top: 8px;
   color: var(--ink-muted);
 }
 .phone-facts {
