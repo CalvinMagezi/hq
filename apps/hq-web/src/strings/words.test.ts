@@ -109,8 +109,8 @@ describe('the words a person reads', () => {
 
   test('the Helpers panel and Details pane show a span once and no internal names', () => {
     const inspector = textOf(renderToStaticMarkup(createElement(SessionInspector, { session: harness() })))
-    expect(inspector).toContain('Started · 14 min ago')
-    expect(inspector).toContain('Last seen · 1 min ago')
+    expect(inspector).toMatch(/Started\s+14 min ago/)
+    expect(inspector).toMatch(/Last seen\s+1 min ago/)
     expect(inspector).not.toContain('ago ago')
     expect(inspector.match(/14 min ago/g)?.length).toBe(1)
   })

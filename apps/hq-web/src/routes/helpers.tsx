@@ -1,24 +1,24 @@
 import { t } from '~/strings'
 import { createFileRoute, useParams } from '@tanstack/react-router'
-import { Archive, Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Terminal } from 'lucide-react'
+import { MoreHorizontal, PanelLeftClose, Plus, Terminal, TriangleAlert } from 'lucide-react'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { NewAgentDialog } from '~/components/sessions/NewAgentDialog'
-import { LockdownBanner, StopAllButton } from '~/components/sessions/EmergencyStop'
+import { LockdownBanner, StopAllDialog } from '~/components/sessions/EmergencyStop'
 import { SessionDetail } from '~/components/sessions/SessionDetail'
 import { SessionInspector } from '~/components/sessions/SessionInspector'
 import { SessionRow } from '~/components/sessions/SessionRow'
 import { usePolled } from '~/components/sessions/usePolled'
-import { globalSessionsApi, workbenchApi, type HarnessSession } from '~/lib/sessionsApi'
+import { Panes } from '~/components/ui/Panes'
+import { globalSessionsApi, workbenchApi, type HarnessSession, type WorkbenchHost } from '~/lib/sessionsApi'
 import { useHQStore } from '~/store/hqStore'
-import { needsYouCount, sessionTitle, statusInfo, workingCount } from '~/lib/workbench'
+import { needsYouCount, workingCount } from '~/lib/workbench'
 import { GROUP_WORDS, HELPER_CHIPS, chipCounts, chipWords, finishedToArchive, groupHelpers, taskBanner, type HelperChip } from '~/lib/helperView'
 import { edgeWorkerApi, ownCardId, ownTitle, ownWords, type EdgeRun } from '~/lib/edgeWorker'
 import { toastUndo } from '~/lib/toast'
 import { useThreadStore } from '~/store/threadStore'
 import { tn } from '~/strings'
 import { useSidebarLayout } from '~/components/sessions/useSidebarLayout'
-import { SIDEBAR_MAX, SIDEBAR_MIN } from '~/lib/sidebarLayout'
 import { ErrorText } from '~/components/sessions/ErrorText'
 import { useSharedConnection } from '~/lib/connection'
 import { helpersAway, readSavedHelpers, saveHelpers, type HelpersAway } from '~/lib/helpersSaved'
@@ -48,14 +48,14 @@ export const Route = createFileRoute('/helpers')({
   component: WorkbenchPage,
 })
 
-const NEW_AGENT_BUTTON_CLASS = 'hq-btn-primary'
-
 function WorkbenchPage() {
   const { task } = Route.useSearch()
   const selectedId = useParams({ strict: false }).id
   const navigate = Route.useNavigate()
   const [showArchived, setShowArchived] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [sideOpen, setSideOpen] = useState(false)
   const sidebar = useSidebarLayout()
   // Archived agents are always fetched and hidden here, so the toggle is instant and never blanks the list.
   const filters = useMemo(() => ({ ...(task ? { task_id: task } : {}), include_archived: true }), [task])
@@ -89,86 +89,61 @@ function WorkbenchPage() {
   // The detail fetch is fresher than the list, and also covers an agent the list's filters hide.
   const selected: HarnessSession | null = detail.data ?? list.data?.find((s) => s.id === selectedId) ?? null
 
-  const collapsed = sidebar.collapsed
-  return (
-    <div className="flex h-full min-h-0 w-full max-w-full overflow-hidden">
-      <aside
-        aria-label={t('helpers_list_aria')}
-        style={{ '--wb-w': collapsed ? '72px' : `${sidebar.width}px` } as React.CSSProperties}
-        className={`${selectedId ? 'hidden min-[1024px]:flex' : 'flex'} flex-col w-full min-[1024px]:w-[var(--wb-w)] min-[1024px]:border-r md:border-white/10 min-h-0 shrink-0 ${sidebar.dragging ? '' : 'md:transition-[width] md:duration-200'}`}
-      >
-        {collapsed ? (
-          <CollapsedRail list={list.data ?? []} selectedId={selectedId} onSelect={select} onNew={() => setCreating(true)} onExpand={sidebar.toggle} onStopped={afterStop} />
-        ) : (
-          <>
-            <div className="flex items-center gap-2 px-4 pt-4 pb-3">
-              <h1 className="text-xl font-semibold tracking-tight text-neutral-50 mr-auto" style={{ fontFamily: 'var(--font-heading)' }}>{t('place_helpers')}</h1>
-              <button
-                type="button"
-                onClick={() => void list.refresh()}
-                className="hq-icon-btn"
-                aria-label={t('helpers_refresh')}
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
-              <span className="hidden md:contents">
-                <button type="button" onClick={sidebar.toggle} className="hq-icon-btn" aria-label={t('helpers_collapse')}>
-                  <PanelLeftClose className="w-4 h-4" />
-                </button>
-              </span>
-            </div>
-            <div className="flex gap-2 px-4 pb-3">
-              <button type="button" disabled={away !== null} title={offWhy ?? undefined} onClick={() => setCreating(true)} className="hq-btn-primary flex-1 min-w-0">
-                <Plus className="w-4 h-4" />
-                {t('helpers_start_a_helper')}
-              </button>
-              <StopAllButton onStopped={afterStop} off={offWhy} />
-            </div>
-            <LockdownBanner hosts={hosts.data?.hosts ?? []} />
-            <AgentList away={away} offWhy={offWhy} list={list} selectedId={selectedId} showArchived={showArchived} onShowArchived={setShowArchived} onNew={() => setCreating(true)} task={task} onShowAll={() => void navigate({ search: (prev) => ({ ...prev, task: undefined }), replace: true })} />
-          </>
-        )}
-      </aside>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t('helpers_resize')}
-        aria-valuemin={SIDEBAR_MIN}
-        aria-valuemax={SIDEBAR_MAX}
-        aria-valuenow={collapsed ? 72 : sidebar.width}
-        tabIndex={0}
-        onPointerDown={collapsed ? undefined : sidebar.startDrag}
-        onDoubleClick={sidebar.reset}
-        onKeyDown={sidebar.onKeyDown}
-        className={`hq-resize-handle hidden md:block ${sidebar.dragging ? 'is-dragging' : ''} ${collapsed ? 'is-disabled' : ''}`}
+  // Folding the list away only makes sense beside an open helper; below 1024 px a missing list would leave nothing to see.
+  const folded = sidebar.collapsed && Boolean(selectedId)
+  const listPane = folded ? undefined : (
+    <div className="relative flex flex-col flex-1 min-h-0">
+      <AgentList
+        away={away}
+        offWhy={offWhy}
+        list={list}
+        hosts={hosts.data?.hosts ?? []}
+        selectedId={selectedId}
+        showArchived={showArchived}
+        onShowArchived={setShowArchived}
+        onNew={() => setCreating(true)}
+        onStopAll={() => setStopping(true)}
+        onCollapse={selectedId ? sidebar.toggle : undefined}
+        task={task}
+        onShowAll={() => void navigate({ search: (prev) => ({ ...prev, task: undefined }), replace: true })}
       />
-      <main className={`${selectedId ? 'flex' : 'hidden min-[1024px]:flex'} flex-1 min-w-0 min-h-0 flex-col`}>
-        <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
-          <div className="mx-auto flex flex-1 min-h-0 min-w-0 w-full max-w-[1500px]">
-            <div className="flex flex-col flex-1 min-h-0 min-w-0 max-w-[760px] mx-auto">
-              {selectedId ? (
-                selected ? (
-                  <SessionDetail key={selected.id} session={selected} onBack={() => select(undefined)} onChanged={refreshAll} />
-                ) : (
-                  <DetailPlaceholder error={detail.error} loading={detail.loading} onBack={() => select(undefined)} />
-                )
-              ) : (
-                <div className="m-auto flex flex-col items-center gap-3 text-neutral-400 text-sm p-6 text-center">
-                  <span className="flex items-center justify-center w-12 h-12 rounded-2xl hq-glass-card">
-                    <Terminal className="w-5 h-5" />
-                  </span>
-                  {t('helpers_empty_pick')}
-                </div>
-              )}
+    </div>
+  )
+
+  return (
+    <>
+      <Panes
+        list={listPane}
+        showDetail={Boolean(selectedId)}
+        sideOpen={sideOpen}
+        listLabel={t('helpers_list_aria')}
+        detailLabel={t('place_helpers')}
+        sideLabel={t('helpers_details_aria')}
+        detail={
+          selectedId ? (
+            selected ? (
+              <SessionDetail
+                key={selected.id}
+                session={selected}
+                onBack={() => select(undefined)}
+                onChanged={refreshAll}
+                onToggleSide={() => setSideOpen((o) => !o)}
+                onExpandList={folded ? sidebar.toggle : undefined}
+              />
+            ) : (
+              <DetailPlaceholder error={detail.error} loading={detail.loading} onBack={() => select(undefined)} />
+            )
+          ) : (
+            <div className="a-empty">
+              <span className="a-empty-ic">
+                <Terminal className="a-ic" aria-hidden="true" />
+              </span>
+              <p className="a-body">{t('helpers_empty_pick')}</p>
             </div>
-            {selected && (
-              <div className="hidden min-[1400px]:flex">
-                <SessionInspector session={selected} onChanged={refreshAll} />
-              </div>
-            )}
-          </div>
-        </div>
-      </main>
+          )
+        }
+        side={selected ? <SessionInspector session={selected} onChanged={refreshAll} /> : undefined}
+      />
       {creating && (
         <NewAgentDialog
           onClose={() => setCreating(false)}
@@ -179,7 +154,8 @@ function WorkbenchPage() {
           }}
         />
       )}
-    </div>
+      {stopping && <StopAllDialog onClose={() => setStopping(false)} onStopped={afterStop} />}
+    </>
   )
 }
 
@@ -187,28 +163,32 @@ interface ListProps {
   away: HelpersAway
   offWhy: string | null
   list: ReturnType<typeof usePolled<HarnessSession[]>>
+  hosts: WorkbenchHost[]
   selectedId: string | undefined
   showArchived: boolean
   onShowArchived: (show: boolean) => void
   onNew: () => void
+  onStopAll: () => void
+  onCollapse?: () => void
   task: string | undefined
   onShowAll: () => void
 }
 
 function SectionTitle({ children, count }: { children: string; count: number }) {
   return (
-    <h2 className="flex items-center gap-2 px-2 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
+    <p className="a-grp">
       {children}
-      <span className="px-1.5 rounded-full bg-white/10 text-[10px] text-neutral-300">{count}</span>
-    </h2>
+      <span className="a-count">{count}</span>
+    </p>
   )
 }
 
-function AgentList({ away, offWhy, list, selectedId, showArchived, onShowArchived, onNew, task, onShowAll }: ListProps) {
+function AgentList({ away, offWhy, list, hosts, selectedId, showArchived, onShowArchived, onNew, onStopAll, onCollapse, task, onShowAll }: ListProps) {
   const inHub = useInHub()
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [chip, setChip] = useState<HelperChip>('all')
+  const [menuOpen, setMenuOpen] = useState(false)
   const own = usePolled('edge-worker', () => edgeWorkerApi.runs(), OWN_POLL_MS, true, true, HELPER_EVENTS)
   const saved = useMemo(() => (away ? readSavedHelpers() : null), [away])
   const live = away ? null : list.data
@@ -245,96 +225,140 @@ function AgentList({ away, offWhy, list, selectedId, showArchived, onShowArchive
 
   if (away && !saved) {
     return (
-      <p className="p-4 text-xs text-neutral-400" role="status">
-        {t('saved_nothing')} {offWhy}
-      </p>
+      <div className="a-stale" role="status">
+        <TriangleAlert className="a-ic" aria-hidden="true" />
+        <span>
+          {t('saved_nothing')} {offWhy}
+        </span>
+      </div>
     )
   }
   if (list.loading && !away) {
     return (
-      <div className="flex items-center gap-2 p-4 text-xs text-neutral-500" role="status">
-        <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+      <div className="a-loading" role="status">
+        <span className="a-spin lg" aria-hidden="true" />
         {t('helpers_loading')}
       </div>
     )
   }
   if (!list.data && !away) {
-    return <ErrorText className="p-4 text-xs">{list.error ?? t('helpers_load_failed')}</ErrorText>
+    return <ErrorText className="p-4">{list.error ?? t('helpers_load_failed')}</ErrorText>
   }
 
   const ownRuns = own.data ?? []
   const showOwn = ownRuns.length > 0 || (own.data !== undefined && sessions.length > 0)
-  const empty = sessions.filter((s) => !s.archived).length === 0 && ownRuns.length === 0
+  const shown = sessions.filter((s) => !s.archived).length
+  const empty = shown === 0 && ownRuns.length === 0
+  const menuItem = (label: string, run: () => void, disabled = false) => (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      className="a-menu-item"
+      onClick={() => {
+        setMenuOpen(false)
+        run()
+      }}
+    >
+      {label}
+    </button>
+  )
 
   return (
-    <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 pb-4 px-2">
-      {away && saved && (
-        <p className="px-3 py-2 text-xs text-neutral-400" role="status">
-          {savedLine(saved.at, Date.now(), undefined, inHub)} {offWhy}
-        </p>
-      )}
-      {banner && (
-        <div className="px-2 py-2 text-xs text-neutral-300 border-y border-white/5" role="status">
-          <p className="font-semibold">{banner.title}</p>
-          <p>{banner.line}</p>
-          <button type="button" onClick={onShowAll} className="a-btn secondary mt-1">
-            {t('helpers_show_all')}
+    <>
+      <div className="a-pane-head">
+        <h2 className="a-h3">{tn('helpers_count', shown)}</h2>
+        <button type="button" disabled={away !== null} title={offWhy ?? undefined} onClick={onNew} className="a-btn compact max-[767px]:hidden">
+          <Plus className="a-ic" aria-hidden="true" />
+          {t('helpers_start_a_helper')}
+        </button>
+        {onCollapse && (
+          <button type="button" onClick={onCollapse} className="a-ib sm max-[1023px]:hidden" aria-label={t('helpers_collapse')}>
+            <PanelLeftClose className="a-ic" aria-hidden="true" />
           </button>
-        </div>
-      )}
-      <div role="group" aria-label={t('helpers_filters_aria')} className="flex flex-wrap gap-1.5 px-1 py-2">
-        {HELPER_CHIPS.map((c) => (
-          <button key={c} type="button" aria-pressed={chip === c} onClick={() => setChip(c)} className={`a-chip ${chip === c ? 'is-on' : ''} min-h-11 px-3 rounded-full border border-white/10 text-xs`}>
-            {t(chipWords(c))} · {counts[c]}
+        )}
+        <div className="relative">
+          <button type="button" className="a-ib sm" aria-haspopup="menu" aria-expanded={menuOpen} aria-label={t('helpers_more')} onClick={() => setMenuOpen((o) => !o)}>
+            <MoreHorizontal className="a-ic" aria-hidden="true" />
           </button>
-        ))}
-      </div>
-      {list.error && <ErrorText className="px-3 py-1.5">{t('helpers_refresh_failed', { reason: list.error })}</ErrorText>}
-      {archiveError && <ErrorText className="px-3 py-1.5">{archiveError}</ErrorText>}
-      {empty && (
-        <div className="flex flex-col items-center gap-3 p-6 text-center">
-          <Terminal className="w-6 h-6 text-neutral-500" aria-hidden="true" />
-          <p className="text-sm text-neutral-200">{t('helpers_empty_title')}</p>
-          <p className="text-xs text-neutral-400">{t('helpers_empty_body')}</p>
-          <button type="button" onClick={onNew} className={NEW_AGENT_BUTTON_CLASS}>
-            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-            {t('helpers_start_a_helper')}
-          </button>
-        </div>
-      )}
-      {!empty && groups.length === 0 && chip !== 'all' && <p className="px-3 py-4 text-xs text-neutral-400">{t('helpers_empty_chip')}</p>}
-      {groups.map(({ group, items }) => (
-        <section key={group} aria-label={t(GROUP_WORDS[group])} data-group={group}>
-          <SectionTitle count={items.length}>{t(GROUP_WORDS[group])}</SectionTitle>
-          {group === 'past' && toArchive.length > 0 && (
-            <div className="px-2 pb-2">
-              <button type="button" disabled={busyId !== null} onClick={() => void archiveFinished()} className="a-btn secondary">
-                <Archive className="w-3.5 h-3.5" aria-hidden="true" />
-                {t('helpers_archive_finished')}
-              </button>
+          {menuOpen && (
+            <div role="menu" className="a-menu absolute right-0 top-full z-10">
+              {menuItem(showArchived ? t('helpers_hide_archived') : t('helpers_show_archived'), () => onShowArchived(!showArchived))}
+              {menuItem(t('helpers_archive_finished'), () => void archiveFinished(), busyId !== null || toArchive.length === 0)}
+              <div className="a-menu-sep" />
+              {menuItem(t('stop_all_act'), onStopAll, offWhy !== null)}
             </div>
           )}
-          <ul>
-            {items.map((s) => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                selected={s.id === selectedId}
-                onAnswered={() => list.refresh()}
-                onRestore={s.archived ? () => void archive([s.id], false) : undefined}
-                busy={busyId === s.id || busyId === 'all'}
-                answersOff={offWhy}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
-      {chip === 'all' && showOwn && <OwnWork runs={ownRuns} />}
-      <label className="flex items-center gap-2 px-3 min-h-11 text-xs text-neutral-400 cursor-pointer">
-        <input type="checkbox" checked={showArchived} onChange={(e) => onShowArchived(e.target.checked)} className="h-4 w-4" style={{ accentColor: 'var(--accent-green)' }} />
-        {t('helpers_show_archived')}
-      </label>
-    </div>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-24">
+        {away && saved && (
+          <div className="a-stale" role="status">
+            <TriangleAlert className="a-ic" aria-hidden="true" />
+            <span>
+              {savedLine(saved.at, Date.now(), undefined, inHub)} {offWhy}
+            </span>
+          </div>
+        )}
+        <LockdownBanner hosts={hosts} />
+        {banner && (
+          <div className="a-card mx-4 mb-3" role="status">
+            <b className="a-body-b">{banner.title}</b>
+            <p className="a-body-sm">{banner.line}</p>
+            <button type="button" onClick={onShowAll} className="a-btn secondary compact">
+              {t('helpers_show_all')}
+            </button>
+          </div>
+        )}
+        <div role="group" aria-label={t('helpers_filters_aria')} className="a-chips px-4 py-2">
+          {HELPER_CHIPS.map((c) => (
+            <button key={c} type="button" aria-pressed={chip === c} onClick={() => setChip(c)} className={`a-chip ${chip === c ? 'is-on' : ''}`}>
+              {t(chipWords(c))}
+              <em>{counts[c]}</em>
+            </button>
+          ))}
+        </div>
+        {list.error && <ErrorText className="px-4 py-1.5">{t('helpers_refresh_failed', { reason: list.error })}</ErrorText>}
+        {archiveError && <ErrorText className="px-4 py-1.5">{archiveError}</ErrorText>}
+        {empty && (
+          <div className="a-empty">
+            <span className="a-empty-ic">
+              <Terminal className="a-ic" aria-hidden="true" />
+            </span>
+            <p className="a-body-b">{t('helpers_empty_title')}</p>
+            <p className="a-body-sm a-muted">{t('helpers_empty_body')}</p>
+            <button type="button" onClick={onNew} className="a-btn">
+              <Plus className="a-ic" aria-hidden="true" />
+              {t('helpers_start_a_helper')}
+            </button>
+          </div>
+        )}
+        {!empty && groups.length === 0 && chip !== 'all' && <p className="a-body-sm a-muted px-4 py-4">{t('helpers_empty_chip')}</p>}
+        {groups.map(({ group, items }) => (
+          <section key={group} aria-label={t(GROUP_WORDS[group])} data-group={group}>
+            <SectionTitle count={items.length}>{t(GROUP_WORDS[group])}</SectionTitle>
+            <ul className="flex flex-col gap-3 px-4">
+              {items.map((s) => (
+                <SessionRow
+                  key={s.id}
+                  session={s}
+                  selected={s.id === selectedId}
+                  onAnswered={() => list.refresh()}
+                  onRestore={s.archived ? () => void archive([s.id], false) : undefined}
+                  busy={busyId === s.id || busyId === 'all'}
+                  answersOff={offWhy}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
+        {chip === 'all' && showOwn && <OwnWork runs={ownRuns} />}
+      </div>
+      <button type="button" disabled={away !== null} title={offWhy ?? undefined} onClick={onNew} className="a-fab">
+        <Plus className="a-ic" aria-hidden="true" />
+        {t('helpers_start_a_helper')}
+      </button>
+    </>
   )
 }
 
@@ -344,10 +368,10 @@ function OwnWork({ runs }: { runs: EdgeRun[] }) {
   return (
     <section aria-label={t('helpers_own_work')} data-group="own">
       <SectionTitle count={runs.length}>{t('helpers_own_work')}</SectionTitle>
-      {runs.length === 0 && <p className="px-3 py-2 text-xs text-neutral-400">{t('helpers_own_none')}</p>}
-      <ul>
+      {runs.length === 0 && <p className="a-body-sm a-muted px-4 py-2">{t('helpers_own_none')}</p>}
+      <ul className="flex flex-col gap-3 px-4">
         {runs.map((run) => (
-          <li key={ownCardId(run)} className="hq-row mb-1.5">
+          <li key={ownCardId(run)}>
             <button
               type="button"
               disabled={!run.thread_id}
@@ -357,10 +381,10 @@ function OwnWork({ runs }: { runs: EdgeRun[] }) {
                 void navigate({ to: '/chat' })
               }}
               aria-label={`${ownTitle(run)}, ${ownWords(run)}. ${t('helpers_own_open_chat')}`}
-              className="w-full text-left px-3.5 py-3 min-h-11 space-y-1 rounded-xl"
+              className="a-card w-full text-left"
             >
-              <span className="block text-sm font-semibold text-neutral-100 truncate">{ownTitle(run)}</span>
-              <span className="block text-xs text-neutral-400">{ownWords(run)}</span>
+              <b className="a-body-b truncate">{ownTitle(run)}</b>
+              <span className="a-body-sm a-muted">{ownWords(run)}</span>
             </button>
           </li>
         ))}
@@ -372,70 +396,18 @@ function OwnWork({ runs }: { runs: EdgeRun[] }) {
 function DetailPlaceholder({ error, loading, onBack }: { error: string | null; loading: boolean; onBack: () => void }) {
   if (loading) {
     return (
-      <div className="m-auto flex items-center gap-2 text-xs font-mono text-neutral-500" role="status">
-        <Loader2 className="w-4 h-4 animate-spin" />
+      <div className="a-loading" role="status">
+        <span className="a-spin lg" aria-hidden="true" />
         {t('helpers_open_loading')}
       </div>
     )
   }
   return (
-    <div className="m-auto flex flex-col items-center gap-2 p-6 text-center text-xs font-mono">
-      <ErrorText className="text-xs">{error ?? t('helpers_open_missing')}</ErrorText>
-      <button type="button" onClick={onBack} className="h-9 px-3 rounded border border-white/10 text-neutral-300 hover:bg-white/10">
+    <div className="a-empty">
+      <ErrorText>{error ?? t('helpers_open_missing')}</ErrorText>
+      <button type="button" onClick={onBack} className="a-btn secondary">
         {t('helpers_back')}
       </button>
-    </div>
-  )
-}
-
-interface RailProps {
-  list: HarnessSession[]
-  selectedId: string | undefined
-  onSelect: (id: string) => void
-  onNew: () => void
-  onExpand: () => void
-  onStopped: () => void
-}
-
-const initials = (title: string) =>
-  title
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('')
-
-/** The sidebar folded down to one avatar per agent, with a status dot, so nothing that needs you is hidden. */
-function CollapsedRail({ list, selectedId, onSelect, onNew, onExpand, onStopped }: RailProps) {
-  const visible = list.filter((s) => !s.archived).slice(0, 14)
-  return (
-    <div className="flex flex-col items-center gap-2.5 py-4 overflow-y-auto min-h-0">
-      <button type="button" onClick={onExpand} className="hq-icon-btn" aria-label={t('helpers_expand')}>
-        <PanelLeftOpen className="w-4 h-4" />
-      </button>
-      <button type="button" onClick={onNew} className="hq-btn-primary !h-11 !w-11 !p-0" aria-label={t('helpers_new_aria')}>
-        <Plus className="w-4 h-4" />
-      </button>
-      <StopAllButton compact onStopped={onStopped} />
-      {visible.map((s) => {
-        const status = statusInfo(s)
-        const title = sessionTitle(s)
-        const tone = s.agent_status === 'blocked' || status.warn ? 'var(--accent-blue)' : s.status === 'running' ? 'var(--accent-green)' : 'var(--text-dim)'
-        return (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => onSelect(s.id)}
-            aria-label={`${title}, ${status.word}`}
-            aria-current={s.id === selectedId ? 'true' : undefined}
-            title={`${title} · ${status.word}`}
-            className={`hq-avatar ${s.id === selectedId ? 'is-selected' : ''}`}
-          >
-            {initials(title)}
-            <span className="hq-avatar-dot" style={{ background: tone }} />
-          </button>
-        )
-      })}
     </div>
   )
 }

@@ -1,7 +1,6 @@
 import { t } from '~/strings'
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { Loader2, X } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { GENERAL_PURPOSES, workbenchApi, type LaunchReport, type Purpose, type WorkbenchHosts } from '~/lib/sessionsApi'
 import {
   DEFAULT_AGENT,
@@ -15,10 +14,9 @@ import {
 import { ErrorText } from './ErrorText'
 import { FolderPicker } from './FolderPicker'
 import { LockdownBanner } from './EmergencyStop'
-import { useModal } from './useModal'
+import { Sheet } from '../ui/Sheet'
 
-const FIELD_CLASS =
-  'w-full min-w-0 px-3 rounded-lg text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
+const FIELD_CLASS = 'a-input'
 const PURPOSE_WORDS: Record<Purpose, 'helpers_new_purpose_general' | 'helpers_new_purpose_research' | 'helpers_new_purpose_review' | 'helpers_new_purpose_monitor'> = {
   code: 'helpers_new_purpose_general',
   general: 'helpers_new_purpose_general',
@@ -26,7 +24,7 @@ const PURPOSE_WORDS: Record<Purpose, 'helpers_new_purpose_general' | 'helpers_ne
   review: 'helpers_new_purpose_review',
   monitor: 'helpers_new_purpose_monitor',
 }
-const LABEL_CLASS = 'block mb-1 text-[11px] text-neutral-400'
+const LABEL_CLASS = 'a-field-label'
 
 interface Props {
   onClose: () => void
@@ -85,7 +83,6 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
     if (report) onStarted(report.session_id)
     else onClose()
   }
-  const { dialogRef, portal, trapTab } = useModal(close)
   const selected = hosts?.hosts.find((h) => h.host === host)
   const noneReachable = Boolean(hosts && !hosts.hosts.some((h) => h.reachable))
   // A general-purpose agent is started for a stated purpose; a coding agent's purpose is code.
@@ -113,51 +110,54 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
     }
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center hq-scrim sm:p-4">
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        onKeyDown={trapTab}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-agent-title"
-        className="w-full max-w-lg max-h-[92dvh] outline-none flex flex-col rounded-t-2xl sm:rounded-2xl hq-modal overflow-hidden"
+  const footer = report ? (
+    <button type="button" onClick={() => onStarted(report.session_id)} className="a-btn">
+      {t('helpers_new_open')}
+    </button>
+  ) : (
+    <>
+      <button type="button" onClick={close} disabled={busy} className="a-btn secondary">
+        {t('helpers_new_cancel')}
+      </button>
+      <button
+        type="button"
+        onClick={() => void start()}
+        disabled={busy || !selected?.workspace || !harness || Boolean(selected && computerUnavailableReason(selected)) || Boolean(selected?.lockdown)}
+        className="a-btn"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-          <h2 id="new-agent-title" className="text-sm font-bold text-white">
-            {t('helpers_start_a_helper')}
-          </h2>
-          <button type="button" onClick={close} disabled={busy} aria-label={t('helpers_new_cancel')} className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        {busy && <Loader2 className="a-ic animate-spin" aria-hidden="true" />}
+        {busy ? t('helpers_new_starting') : t('helpers_new_start')}
+      </button>
+    </>
+  )
 
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
+  return (
+    <Sheet title={t('helpers_start_a_helper')} onClose={close} busy={busy} footer={footer}>
+      <div className="flex flex-col gap-4">
           {loadError && <ErrorText>{loadError}</ErrorText>}
           {report && <LaunchNotice report={report} />}
           {!hosts && !loadError && (
-            <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
-              <Loader2 className="w-4 h-4 animate-spin" />
+            <div role="status" className="flex items-center gap-2 a-body-sm a-muted">
+              <Loader2 className="a-ic animate-spin" aria-hidden="true" />
               {t('helpers_new_loading')}
             </div>
           )}
           {hosts && !report && (
             <>
               {hosts.hosts.some((h) => h.lockdown) && <LockdownBanner hosts={hosts.hosts} />}
-              {task && <p className="text-xs text-neutral-300">{t('helpers_new_for_task', { title: task.title })}</p>}
-              <div>
+              {task && <p className="a-body-sm">{t('helpers_new_for_task', { title: task.title })}</p>}
+              <div className="a-field">
                 <label htmlFor="agent-first" className={LABEL_CLASS}>
                   {t('helpers_new_first')}
                 </label>
-                <textarea id="agent-first" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} className={`${FIELD_CLASS} py-2 resize-y`} />
+                <textarea id="agent-first" value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} className={`${FIELD_CLASS} resize-y`} />
               </div>
 
-              <div>
+              <div className="a-field">
                 <label htmlFor="agent-kind" className={LABEL_CLASS}>
                   {t('helpers_new_which')}
                 </label>
-                <select id="agent-kind" value={harness} onChange={(e) => setHarness(e.target.value)} className={`${FIELD_CLASS} h-11 sm:h-9`}>
+                <select id="agent-kind" value={harness} onChange={(e) => setHarness(e.target.value)} className={FIELD_CLASS}>
                   {(['coding', 'general_purpose'] as const)
                     .map((category) => [category, harnessesIn(hosts, category)] as const)
                     .filter(([, names]) => names.length > 0)
@@ -174,31 +174,31 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
               </div>
 
               {generalPurpose && (
-                <div>
-                  <label htmlFor="agent-purpose" className={LABEL_CLASS}>
+                <div className="a-field">
+                  <span id="agent-purpose-label" className={LABEL_CLASS}>
                     {t('helpers_new_purpose')}
-                  </label>
-                  <select id="agent-purpose" value={purpose} onChange={(e) => setPurpose(e.target.value as Purpose)} className={`${FIELD_CLASS} h-11 sm:h-9`}>
+                  </span>
+                  <div id="agent-purpose" role="group" aria-labelledby="agent-purpose-label" className="a-chips">
                     {GENERAL_PURPOSES.map((p) => (
-                      <option key={p} value={p}>
+                      <button key={p} type="button" aria-pressed={purpose === p} onClick={() => setPurpose(p)} className={`a-chip ${purpose === p ? 'on' : ''}`}>
                         {t(PURPOSE_WORDS[p])}
-                      </option>
+                      </button>
                     ))}
-                  </select>
-                  <p className="mt-1 text-[11px] text-neutral-500">{t('helpers_new_purpose_hint')}</p>
+                  </div>
+                  <p className="a-cap a-muted">{t('helpers_new_purpose_hint')}</p>
                 </div>
               )}
 
               {!phone && (
-                <div>
+                <div className="a-field">
                   <label htmlFor="agent-name" className={LABEL_CLASS}>
                     {t('helpers_new_name')}
                   </label>
-                  <input id="agent-name" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={`${FIELD_CLASS} h-11 sm:h-9`} />
+                  <input id="agent-name" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80} className={FIELD_CLASS} />
                 </div>
               )}
 
-              <div>
+              <div className="a-field">
                 <label htmlFor="agent-computer" className={LABEL_CLASS}>
                   {t('helpers_new_where')}
                 </label>
@@ -209,7 +209,7 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
                     setHost(e.target.value)
                     setFolder('')
                   }}
-                  className={`${FIELD_CLASS} h-11 sm:h-9`}
+                  className={FIELD_CLASS}
                 >
                   {hosts.hosts.map((h) => (
                     <option key={h.host} value={h.host} disabled={computerUnavailableReason(h) !== null}>
@@ -218,20 +218,20 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
                   ))}
                 </select>
                 {noneReachable && (
-                  <p role="status" className="mt-1 text-[11px]" style={{ color: 'var(--warn)' }}>
+                  <p role="status" className="a-cap a-warn-t">
                     {t('helpers_new_none_reachable', { computer: computerName(hosts.hosts[0]?.host ?? '') })} {t('helpers_new_needs_computer')}
                   </p>
                 )}
               </div>
 
               {selected?.workspace && (
-                <div>
+                <div className="a-field">
                   <span className={LABEL_CLASS}>{t('helpers_new_folder')}</span>
                   {changingFolder ? (
                     <FolderPicker host={host} workspace={selected.workspace} value={folder} onChange={setFolder} />
                   ) : (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 break-all text-xs text-neutral-300">{plainPath(folder || selected.workspace.root)}</span>
+                      <span className="min-w-0 break-all a-body-sm">{plainPath(folder || selected.workspace.root)}</span>
                       <button type="button" onClick={() => setChangingFolder(true)} className="a-btn secondary shrink-0">
                         {t('helpers_new_change')}
                       </button>
@@ -242,8 +242,8 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
 
               {phone ? (
                 <details open={foldOpen || label !== '' || branch !== ''} onToggle={(e) => setFoldOpen(e.currentTarget.open)}>
-                  <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-400 select-none">{t('helpers_new_name_advanced')}</summary>
-                  <div className="space-y-4">
+                  <summary className="flex items-center min-h-11 cursor-pointer a-body-sm a-muted select-none">{t('helpers_new_name_advanced')}</summary>
+                  <div className="flex flex-col gap-4">
                     <NameField label={label} onChange={setLabel} />
                     {!generalPurpose && <BranchField branch={branch} onChange={setBranch} />}
                   </div>
@@ -251,60 +251,31 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
               ) : (
                 !generalPurpose && (
                   <details>
-                    <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-400 select-none">{t('helpers_new_advanced')}</summary>
+                    <summary className="flex items-center min-h-11 cursor-pointer a-body-sm a-muted select-none">{t('helpers_new_advanced')}</summary>
                     <BranchField branch={branch} onChange={setBranch} />
                   </details>
                 )
               )}
             </>
           )}
-        </div>
-
-        <div className="px-4 py-3 border-t border-white/10 space-y-2">
-          {error && <ErrorText>{error}</ErrorText>}
-          {selected?.lockdown && !report && <p role="status" className="text-[11px] text-neutral-400">{t('helpers_new_locked')}</p>}
-          {report ? (
-            <button type="button" onClick={() => onStarted(report.session_id)} className={`${PRIMARY_CLASS} disabled:opacity-40`}>
-              {t('helpers_new_open')}
-            </button>
-          ) : (
-          <div className="flex gap-2">
-          <button type="button" onClick={close} disabled={busy} className="a-btn secondary flex-1">
-            {t('helpers_new_cancel')}
-          </button>
-          <button
-            type="button"
-            onClick={() => void start()}
-            disabled={busy || !selected?.workspace || !harness || Boolean(selected && computerUnavailableReason(selected)) || Boolean(selected?.lockdown)}
-            className={`${PRIMARY_CLASS} flex-1 disabled:opacity-40 disabled:hover:bg-white/10`}
-          >
-            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            {busy ? t('helpers_new_starting') : t('helpers_new_start')}
-          </button>
-          </div>
-          )}
-          <p className="text-[11px] text-neutral-500">{t('helpers_new_asks')}</p>
-        </div>
+        {error && <ErrorText>{error}</ErrorText>}
+        {selected?.lockdown && !report && <p role="status" className="a-cap a-muted">{t('helpers_new_locked')}</p>}
+        <p className="a-cap a-muted">{t('helpers_new_asks')}</p>
       </div>
-    </div>,
-    portal
+    </Sheet>
   )
 }
-
-const PRIMARY_CLASS = 'w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-white/10 bg-white/10 text-sm font-semibold text-white hover:bg-white/15'
 
 /** What the agent said right after starting, shown before the dialog closes so a question is never missed. */
 function LaunchNotice({ report }: { report: LaunchReport }) {
   return (
-    <div className="space-y-2" role="status">
-      <p className="text-sm font-semibold text-white">{t('helpers_new_started', { helper: agentName(report.harness) })}</p>
-      {report.note && <p className="text-xs text-neutral-300 break-words">{report.note}</p>}
+    <div className="flex flex-col gap-2" role="status">
+      <p className="a-body-b">{t('helpers_new_started', { helper: agentName(report.harness) })}</p>
+      {report.note && <p className="a-body-sm break-words">{report.note}</p>}
       {report.blocked && (
         <>
-          <p className="text-xs " style={{ color: 'var(--accent-amber)' }}>
-            {t('helpers_new_blocked')}
-          </p>
-          <pre className="max-h-48 overflow-auto rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">{report.blocked.screen}</pre>
+          <p className="a-body-sm a-warn-t">{t('helpers_new_blocked')}</p>
+          <pre className="a-quote max-h-48 overflow-auto break-words">{report.blocked.screen}</pre>
         </>
       )}
     </div>
@@ -313,23 +284,23 @@ function LaunchNotice({ report }: { report: LaunchReport }) {
 
 function NameField({ label, onChange }: { label: string; onChange: (v: string) => void }) {
   return (
-    <div>
+    <div className="a-field">
       <label htmlFor="agent-name" className={LABEL_CLASS}>
         {t('helpers_new_name')}
       </label>
-      <input id="agent-name" value={label} onChange={(e) => onChange(e.target.value)} maxLength={80} className={`${FIELD_CLASS} h-11 sm:h-9`} />
+      <input id="agent-name" value={label} onChange={(e) => onChange(e.target.value)} maxLength={80} className={FIELD_CLASS} />
     </div>
   )
 }
 
 function BranchField({ branch, onChange }: { branch: string; onChange: (v: string) => void }) {
   return (
-    <div>
+    <div className="a-field">
       <label htmlFor="agent-branch" className={LABEL_CLASS}>
         {t('helpers_new_branch')}
       </label>
-      <input id="agent-branch" value={branch} onChange={(e) => onChange(e.target.value)} maxLength={120} className={`${FIELD_CLASS} h-11 sm:h-9`} />
-      <p className="mt-1 text-[11px] text-neutral-500">{t('helpers_new_branch_hint')}</p>
+      <input id="agent-branch" value={branch} onChange={(e) => onChange(e.target.value)} maxLength={120} className={FIELD_CLASS} />
+      <p className="a-cap a-muted">{t('helpers_new_branch_hint')}</p>
     </div>
   )
 }

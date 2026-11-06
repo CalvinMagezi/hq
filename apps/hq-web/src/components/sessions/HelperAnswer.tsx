@@ -6,6 +6,7 @@ import { toastNotice } from '~/lib/toast'
 import { canAllowOnce } from '~/lib/helperView'
 import { readDialog, sessionTitle } from '~/lib/workbench'
 import { t } from '~/strings'
+import { ErrorText } from './ErrorText'
 
 type Done = () => unknown
 
@@ -53,22 +54,18 @@ export function InlineAnswer({ session, onDone, off = null }: { session: Harness
   if (!read || !canAllowOnce(read.dialog)) return null
   const picked = read.dialog.options.find((o) => o.selected)
   return (
-    <div className="px-3.5 pb-3 space-y-2">
-      <div className="flex gap-2">
-        <button type="button" disabled={busy || off !== null} onClick={() => void answer(read.seq, { decline: true })} className="a-btn secondary flex-1">
+    <>
+      <div className="a-card-actions">
+        <button type="button" disabled={busy || off !== null} onClick={() => void answer(read.seq, { decline: true })} className="a-btn secondary">
           {t('notice_action_decline')}
         </button>
-        <button type="button" disabled={busy || off !== null} onClick={() => picked && void answer(read.seq, { option: picked.id })} className="a-btn flex-1">
-          {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+        <button type="button" disabled={busy || off !== null} onClick={() => picked && void answer(read.seq, { option: picked.id })} className="a-btn">
+          {busy && <Loader2 className="a-ic animate-spin" aria-hidden="true" />}
           {t('notice_action_allow_once')}
         </button>
       </div>
-      {off && <p className="text-xs text-neutral-400">{off}</p>}
-      {error && (
-        <p role="alert" className="text-xs" style={{ color: 'var(--warn)' }}>
-          {error}
-        </p>
-      )}
-    </div>
+      {off && <p className="a-cap a-muted">{off}</p>}
+      {error && <ErrorText>{error}</ErrorText>}
+    </>
   )
 }

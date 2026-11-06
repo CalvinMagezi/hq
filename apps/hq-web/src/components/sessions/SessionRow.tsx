@@ -1,13 +1,12 @@
 import { Link } from '@tanstack/react-router'
-import { ArchiveRestore, Hand, Loader2, Terminal, WifiOff } from 'lucide-react'
+import { ArchiveRestore, Hand, Loader2, WifiOff } from 'lucide-react'
 import { STATUS_LABELS, parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
 import type { AgentStatus, HarnessSession } from '~/lib/sessionsApi'
 import { t } from '~/strings'
-import { computerName, folderName, sessionTitle } from '~/lib/workbench'
+import { computerName, sessionTitle } from '~/lib/workbench'
 import { cardFacts } from '~/lib/helperView'
 import { InlineAnswer } from './HelperAnswer'
-import { STATUS_BADGE_CLASS } from '../tasks/TaskCard'
 
 const ago = (when: string | null) => (when ? relTime(parseSqliteUtc(when)) : '')
 
@@ -72,10 +71,10 @@ export function HelperPill({ session }: { session: StateInput }) {
 export function SessionBadges({ session: s }: { session: HarnessSession }) {
   const seen = ago(s.last_seen_at)
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-400">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 a-cap a-muted">
       <HelperPill session={s} />
       <span>{computerName(s.host)}</span>
-      {seen && <span>seen {seen}</span>}
+      {seen && <span>{t('helpers_seen', { when: seen })}</span>}
     </div>
   )
 }
@@ -85,17 +84,10 @@ export function SessionTaskLink({ session: s }: { session: HarnessSession }) {
   const task = s.task
   if (!task) return null
   return (
-    <Link
-      to="/tasks"
-      search={{ task: task.id }}
-      className="flex items-center gap-2 min-w-0 text-xs text-neutral-300 hover:text-white"
-      title={t('helpers_open_task')}
-    >
-      <span className="text-neutral-500 shrink-0">{task.display_id}</span>
+    <Link to="/tasks" search={{ task: task.id }} className="a-link inline-flex items-center gap-2 min-w-0" title={t('helpers_open_task')}>
+      <span className="shrink-0">{task.display_id}</span>
       <span className="min-w-0 truncate">{task.title}</span>
-      <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
-        {STATUS_LABELS[task.status]}
-      </span>
+      <span className="a-state">{STATUS_LABELS[task.status]}</span>
     </Link>
   )
 }
@@ -112,47 +104,41 @@ interface Props {
   answersOff?: string | null
 }
 
-/** One helper in the list: a title link to its page, one line of facts, and for a plain question the answer in place. */
+const EDGE_STATES: readonly HelperState[] = ['needs', 'offline', 'lost']
+
+/** One helper in the list: the title is the link to its page, the state pill beside it, the facts under it, and for a plain question the answer in place. */
 export function SessionRow({ session: s, selected, onAnswered, onRestore, busy, answersOff = null }: Props) {
-  const folder = folderName(s.cwd)
   const state = helperState(s)
+  const [kind, where, span, doing] = cardFacts(s)
   return (
-    <li className={`hq-row mb-1.5 ${selected ? 'is-selected' : ''} ${s.status === 'running' ? '' : 'opacity-70'}`}>
-      <div className="flex items-stretch">
-        <Link
-          to="/helpers/$id"
-          params={{ id: s.id }}
-          search={(prev: Record<string, unknown>) => ({ ...prev, id: undefined })}
-          aria-current={selected ? 'true' : undefined}
-          className="flex-1 min-w-0 text-left px-3.5 py-3 space-y-1 rounded-xl min-h-11 block"
-        >
-          <span className="flex items-center gap-2 min-w-0 text-sm font-semibold">
-            <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" aria-hidden="true" />
-            <span className="text-neutral-100 truncate min-w-0">{sessionTitle(s)}</span>
-          </span>
-          {folder && <span className="block text-xs text-neutral-400 truncate">{folder}</span>}
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-400">
-            <HelperPill session={s} />
-            {cardFacts(s).map((fact, i) => (
-              <span key={i} className="min-w-0 break-words">
-                {fact}
-              </span>
-            ))}
-          </span>
-        </Link>
-        {onRestore && (
-          <button type="button" onClick={onRestore} disabled={busy} aria-label={t('helpers_restore_aria', { helper: sessionTitle(s) })} className="a-btn secondary self-center mr-2 shrink-0">
-            <ArchiveRestore className="w-4 h-4" aria-hidden="true" />
-            {t('helpers_restore')}
-          </button>
-        )}
-      </div>
-      {s.task && (
-        <div className="px-3.5 pb-2.5">
-          <SessionTaskLink session={s} />
+    <li>
+      <div className={`a-card ${EDGE_STATES.includes(state) && !s.archived ? 'needs' : ''} ${selected ? 'is-sel' : ''}`}>
+        <div className="a-card-head">
+          <Link
+            to="/helpers/$id"
+            params={{ id: s.id }}
+            search={(prev: Record<string, unknown>) => ({ ...prev, id: undefined })}
+            aria-current={selected ? 'true' : undefined}
+            className="flex-1 min-w-0"
+          >
+            <b className="a-body-b break-words">{sessionTitle(s)}</b>
+          </Link>
+          <HelperPill session={s} />
         </div>
-      )}
-      {state === 'needs' && !s.archived && <InlineAnswer session={s} onDone={onAnswered} off={answersOff} />}
+        <span className="a-body-sm a-muted">{[kind, where, span].filter(Boolean).join(' · ')}</span>
+        <span className="a-body-sm">{doing}</span>
+        {state === 'working' && <span className="a-work" aria-hidden="true" />}
+        {s.task && <SessionTaskLink session={s} />}
+        {onRestore && (
+          <div className="a-card-actions">
+            <button type="button" onClick={onRestore} disabled={busy} aria-label={t('helpers_restore_aria', { helper: sessionTitle(s) })} className="a-btn secondary">
+              <ArchiveRestore className="a-ic" aria-hidden="true" />
+              {t('helpers_restore')}
+            </button>
+          </div>
+        )}
+        {state === 'needs' && !s.archived && <InlineAnswer session={s} onDone={onAnswered} off={answersOff} />}
+      </div>
     </li>
   )
 }

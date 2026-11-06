@@ -47,30 +47,30 @@ export function TechnicalDetails({ session: s, refreshKey, pollMs, onText, onSen
   }
 
   return (
-    <section aria-label={t('helpers_technical_details')} className="shrink-0 border-t border-white/10">
+    <section aria-label={t('helpers_technical_details')} className="a-wrap shrink-0">
       <button
         ref={toggle}
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 min-h-11 px-3 text-left text-xs text-neutral-300 hover:text-white"
+        className="flex w-full items-center gap-2 min-h-11 text-left a-body-sm"
       >
-        {open ? <ChevronDown className="w-4 h-4" aria-hidden="true" /> : <ChevronRight className="w-4 h-4" aria-hidden="true" />}
-        <span className="font-semibold">{t('helpers_technical_details')}</span>
-        {!open && <span className="text-neutral-500">{t('helpers_technical_hint')}</span>}
+        {open ? <ChevronDown className="a-ic" aria-hidden="true" /> : <ChevronRight className="a-ic" aria-hidden="true" />}
+        <span className="a-body-b">{t('helpers_technical_details')}</span>
+        {!open && <span className="a-muted">{t('helpers_technical_hint')}</span>}
       </button>
       {open && (
         <div onKeyDown={onKeyDown} className="flex flex-col">
-          <label className="flex items-start gap-3 px-3 py-2 text-xs text-neutral-300">
-            <input type="checkbox" role="switch" checked={typing} onChange={(e) => setTyping(e.target.checked)} className="mt-0.5 h-5 w-5" />
-            <span>
-              <span className="block font-semibold">{t('helpers_typing_label')}</span>
-              <span className="block text-neutral-500">{t('helpers_typing_hint', { helper })}</span>
+          <div className="flex items-start justify-between gap-3 py-2">
+            <span id="typing-label">
+              <span className="a-body-b block">{t('helpers_typing_label')}</span>
+              <span className="a-cap a-muted block">{t('helpers_typing_hint', { helper })}</span>
             </span>
-          </label>
-          <SessionTerminal sessionId={s.id} refreshKey={refreshKey} active pollMs={pollMs} onText={onText} />
+            <button type="button" role="switch" aria-checked={typing} aria-labelledby="typing-label" onClick={() => setTyping((v) => !v)} className="a-sw" />
+          </div>
+          <SessionTerminal sessionId={s.id} refreshKey={refreshKey} active pollMs={pollMs} onText={onText} helper={helper} />
           {typing && armed && (
-            <p role="status" className="px-3 py-2 text-xs" style={{ color: 'var(--warn)' }}>
+            <p role="status" className="a-cap a-warn-t py-2">
               <strong>{t('helpers_interrupt_press_again')}</strong> {t('helpers_interrupt_armed', { helper })}
             </p>
           )}

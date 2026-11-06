@@ -138,7 +138,7 @@ test('HQ own work follows the phone: pending is working, answered is finished, a
 test('Stop every helper counts running helpers per computer and shows a radio group', () => {
   expect(runningByHost([make({}), make({ id: 'x' }), make({ id: 'y', host: 'far' }), make({ id: 'z', status: 'exited' })])).toEqual({ native: 2, far: 1 })
   const source = src('components', 'sessions', 'EmergencyStop.tsx')
-  expect(source).toContain('type="radio"')
+  expect(source).toContain('role="radio"')
   expect(source).not.toContain('<select')
   expect(t('helpers_stop_all_cant')).toBe("Can't be reached right now. Its helpers can't be stopped from here.")
 })
@@ -162,6 +162,6 @@ test('Start a helper asks in the spec order and says the footer promise', () => 
 })
 
 test('the list takes the whole page below 1024 and the detail shows Back to Helpers', () => {
-  expect(src('routes', 'helpers.tsx')).toContain('min-[1024px]:flex')
+  expect(src('routes', 'helpers.tsx')).toContain('showDetail={Boolean(selectedId)}')
   expect(renderToStaticMarkup(createElement(SessionDetail, { session: make({}), onBack() {}, onChanged() {} }))).toContain('Back to Helpers')
 })

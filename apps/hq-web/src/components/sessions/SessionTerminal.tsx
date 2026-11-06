@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef } from 'react'
 import { ArrowDown, Loader2 } from 'lucide-react'
+import { t } from '~/strings'
 import { globalSessionsApi } from '~/lib/sessionsApi'
 import { parseAnsi, plainText, spanCss } from '~/lib/ansi'
 import { chooseScreenMode, screenStatusText } from '~/lib/screenStream'
@@ -19,23 +20,25 @@ interface Props {
   pollMs?: number
   /** Called with the newest text so the parent can quote it. */
   onText?: (text: string) => void
+  /** Named in the screen's labels. */
+  helper?: string
 }
 
 const SKELETON_WIDTHS = ['w-3/4', 'w-1/2', 'w-5/6', 'w-2/3', 'w-1/3']
 
 /** Placeholder lines shown until the first screen read answers, which can take seconds on a remote computer. */
-function TerminalSkeleton() {
+function TerminalSkeleton({ helper }: { helper: string }) {
   return (
-    <div role="status" aria-label="Loading what the agent is doing" data-testid="terminal-skeleton" className="flex flex-col gap-2 animate-pulse">
+    <div role="status" aria-label={t('helpers_screen_loading', { helper })} data-testid="terminal-skeleton" className="flex flex-col gap-2 animate-pulse">
       {SKELETON_WIDTHS.map((w) => (
-        <div key={w} className={`h-3 rounded bg-white/5 ${w}`} />
+        <div key={w} className={`h-3 rounded ${w}`} style={{ background: 'var(--surface-200)' }} />
       ))}
     </div>
   )
 }
 
 /** The agent's recent text, read-only, following the newest line unless scrolled up. */
-export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_POLL_MS, onText }: Props) {
+export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_POLL_MS, onText, helper = t('helpers_the_helper') }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLPreElement>(null)
   const streamUrl = globalSessionsApi.screenStreamPath(sessionId, SCREEN_LINES)
@@ -62,12 +65,12 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
 
 
   return (
-    <section aria-label="What the agent is doing" className="relative flex flex-col flex-1 min-h-40">
-      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-neutral-500 border-b border-white/5">
+    <section aria-label={t('helpers_screen_aria', { helper })} className="relative flex flex-col flex-1 min-h-40">
+      <div className="flex items-center gap-2 py-1.5 a-cap a-muted">
         <span>{screenStatusText(mode, stream.phase, data?.source)}</span>
-        {screen.loading && <Loader2 className="w-3 h-3 animate-spin" aria-label="Loading" />}
+        {screen.loading && <Loader2 className="a-ic animate-spin" aria-hidden="true" />}
         {screen.error && (
-          <span role="alert" className="truncate min-w-0" style={{ color: 'var(--accent-red)' }}>
+          <span role="alert" className="truncate min-w-0 a-warn-t">
             {screen.error}
           </span>
         )}
@@ -75,13 +78,13 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
       <div
         ref={scrollRef}
         role="log"
-        aria-label="Agent output"
+        aria-label={t('helpers_screen_aria', { helper })}
         aria-live="off"
-        className="flex-1 min-h-32 sm:min-h-48 overflow-auto overscroll-contain bg-black/40 px-3 py-2"
+        className="a-term flex-1 min-h-32 sm:min-h-48 overflow-auto overscroll-contain"
         tabIndex={0}
       >
-        {screen.loading && !text && <TerminalSkeleton />}
-        <pre ref={contentRef} className="text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">
+        {screen.loading && !text && <TerminalSkeleton helper={helper} />}
+        <pre ref={contentRef} className="whitespace-pre-wrap break-words">
           {rawText
             ? rows.map((spans, i) => (
                 <Fragment key={i}>
@@ -100,10 +103,10 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
         <button
           type="button"
           onClick={() => scrollToBottom(true)}
-          className="absolute right-3 bottom-3 flex items-center gap-1 h-11 sm:h-9 px-3 rounded-full hq-field text-[11px] text-neutral-200 hover:bg-white/10"
+          className="a-btn tonal compact absolute right-3 bottom-3"
         >
-          <ArrowDown className="w-3.5 h-3.5" />
-          Latest
+          <ArrowDown className="a-ic" aria-hidden="true" />
+          {t('helpers_screen_latest')}
         </button>
       )}
     </section>

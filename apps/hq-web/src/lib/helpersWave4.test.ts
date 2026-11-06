@@ -86,7 +86,9 @@ test('Technical details is closed by default, so no screen is read or streamed',
 
 test('the details panel docks at 1400, not 1536', () => {
   const source = readFileSync(join(import.meta.dir, '..', 'routes', 'helpers.tsx'), 'utf8')
-  expect(source).toContain('min-[1400px]:flex')
+  expect(source).toContain('<Panes')
+  expect(source).toContain('side={selected ?')
+  expect(source).not.toContain('min-[1400px]')
   expect(source).not.toContain('2xl:flex')
 })
 
