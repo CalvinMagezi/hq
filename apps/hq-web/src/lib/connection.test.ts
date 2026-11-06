@@ -137,6 +137,12 @@ describe('connectionState', () => {
     expect(view.actionsOff).toBe('You can answer once HQ has started.')
   })
 
+  test('the HQ window on a paired phone names whose HQ it is', () => {
+    const view = connectionState({ ...baseInputs, inHub: true, phone: true }, NOW)
+    expect(view.words).toBe('Connected · HQ on your phone')
+    expect(connectionState({ ...baseInputs, inHub: true }, NOW).words).toBe('Connected')
+  })
+
   test('Lite connected gives Connected · HQ Lite', () => {
     const view = connectionState(
       {

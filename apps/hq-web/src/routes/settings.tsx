@@ -16,7 +16,7 @@ import { spendResetLine, useHqZone, zonesDiffer } from '~/lib/time'
 import { readDataUsed } from '~/lib/dataUsed'
 import { startDataCounter } from '~/lib/dataUsage'
 import { fetchHello } from '~/lib/hello'
-import { useInHub } from '~/lib/hubWindow'
+import { useHubPhone, useInHub } from '~/lib/hubWindow'
 import { DEFAULT_PUSH_PREFS, getPushState, readPushPrefs } from '~/lib/webPush'
 import { LANDING_PATH, WIDE_MIN_PX, ageWords, trailNotifKey, backupNeedsLook, formatSize, hashRedirect, liteNotice, type BackupStatus } from '~/lib/settingsGroups'
 import { HqHttpError } from '~/lib/hqAuth'
@@ -216,7 +216,7 @@ function useWide(): boolean {
 }
 
 /** Words at the right of each home row, from what this browser already knows. */
-function useTrailing(hub: boolean, backup: BackupStatus | null): Record<string, string> {
+function useTrailing(hub: boolean, phone: boolean, backup: BackupStatus | null): Record<string, string> {
   const prefs = useStoredPrefs()
   const pushOn = usePushOn()
   const zone = useClockZone() || deviceTimeZone()
@@ -232,7 +232,7 @@ function useTrailing(hub: boolean, backup: BackupStatus | null): Record<string, 
     notifications: hub ? '' : t(notif),
     time: !hqZone ? zoneCity(zone) : zonesDiffer(hqZone, zone) ? t('tz_row_differ', { city: zoneCity(zone), hqCity: zoneCity(hqZone) }) : t('tz_row_same', { city: zoneCity(zone) }),
     version: hello ? t('trail_version', { version: hello.version }) : '',
-    data: hub ? t('data_used_row_window') : used === null ? '' : t('data_used_row', { size: formatSize(used) }),
+    data: phone ? t('data_used_row_window') : used === null ? '' : t('data_used_row', { size: formatSize(used) }),
     signout: t(hub ? 'trail_sign_out_window' : 'trail_sign_out_browser'),
     backup: backupRowWords(backup),
   }
@@ -261,6 +261,7 @@ function SettingsLayout() {
   const wide = useWide()
   const lite = useQuery({ queryKey: ['hello'], queryFn: ({ signal }) => fetchHello(signal) }).data?.edition === 'lite'
   const hub = useInHub()
+  const phone = useHubPhone()
   const backup = useBackupStatus()
   const notificationsOff = useNotificationsOff()
   const [signingOut, setSigningOut] = useState(false)
@@ -272,7 +273,7 @@ function SettingsLayout() {
     else if (home && wide) void navigate({ to: LANDING_PATH, replace: true })
   }, [hash, home, wide, navigate])
 
-  const trailing = useTrailing(hub, backup)
+  const trailing = useTrailing(hub, phone, backup)
   const needsLook = [
     ...(backupNeedsLook(backup) ? ['backup'] : []),
     ...(notificationsOff && !wide ? ['notifications'] : []),
@@ -283,7 +284,7 @@ function SettingsLayout() {
     <aside className={`min-w-0 lg:w-[360px] lg:shrink-0 lg:overflow-y-auto ${home ? 'block flex-1 lg:flex-none' : 'hidden lg:block'}`}>
       <h1 className="a-h1 px-4 py-3 lg:hidden">{t('settings_title')}</h1>
       <CardSlot notificationsOff={notificationsOff} />
-      <SettingsHome lite={lite} hub={hub} trailing={{ ...trailing, notifications: notificationsOff && !wide ? t('trail_notif_none') : trailing.notifications }} needsLook={needsLook} onSignOut={() => setSigningOut(true)} />
+      <SettingsHome lite={lite} hub={hub} phone={phone} trailing={{ ...trailing, notifications: notificationsOff && !wide ? t('trail_notif_none') : trailing.notifications }} needsLook={needsLook} onSignOut={() => setSigningOut(true)} />
     </aside>
   )
   return (

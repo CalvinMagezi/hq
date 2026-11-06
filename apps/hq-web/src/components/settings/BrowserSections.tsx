@@ -5,7 +5,7 @@ import { formatSize } from '~/lib/settingsGroups'
 import { readDataUsed } from '~/lib/dataUsed'
 import { lastHourBytes, overIdleTarget, readFirstLoad } from '~/lib/dataUsage'
 import { fetchHello } from '~/lib/hello'
-import { useInHub } from '~/lib/hubWindow'
+import { useHubPhone } from '~/lib/hubWindow'
 import { APP_VERSION, reloadForNewer, useNewerHq } from '~/lib/version'
 import { HqHttpError, refuseSignIn } from '~/lib/hqAuth'
 import { signOutCurrentDevice } from '~/lib/deviceSignIn'
@@ -88,14 +88,14 @@ function SupportCard({ lines }: { lines: string[] }) {
 
 /** Data used by HQ in this browser this month: the month, an idle hour and the Chat first load. */
 export function DataUsedPage() {
-  const hub = useInHub()
+  const phone = useHubPhone()
   const [numbers, setNumbers] = useState<{ month: number; idle: number | null; first: number | null } | null>(null)
   useEffect(() => setNumbers({ month: readDataUsed(), idle: lastHourBytes(), first: readFirstLoad() }), [])
   const idleOver = numbers?.idle != null && overIdleTarget(numbers.idle)
   return (
     <div className="flex flex-col gap-4">
       <div className="a-card">
-        <b>{hub ? t('data_phone') : t('data_month_title')}</b>
+        <b>{phone ? t('data_phone') : t('data_month_title')}</b>
         <span className="a-muted">{numbers ? formatSize(numbers.month) : ''}</span>
       </div>
       <div className={idleOver ? 'a-card warn' : 'a-card'}>

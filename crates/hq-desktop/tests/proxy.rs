@@ -43,6 +43,11 @@ async fn echo_request(State(seen): State<Seen>, headers: HeaderMap, body: String
         "default-src 'self'".parse().unwrap(),
     );
     h.insert("access-control-allow-origin", "*".parse().unwrap());
+    // An upstream claiming to be a phone: only the proxy may say whose HQ the window shows.
+    h.insert(
+        proxy::HUB_KIND_HEADER,
+        proxy::HUB_KIND_PHONE.parse().unwrap(),
+    );
     h.append(header::SET_COOKIE, "a=1; Path=/".parse().unwrap());
     h.append(
         header::SET_COOKIE,
@@ -202,6 +207,10 @@ async fn responses_gain_a_second_policy_and_lose_cross_origin_grants() {
     assert_eq!(res.headers()["x-content-type-options"], "nosniff");
     assert_eq!(res.headers()["referrer-policy"], "no-referrer");
     assert_eq!(res.headers()["x-hq-window"], "hub");
+    assert!(
+        res.headers().get(proxy::HUB_KIND_HEADER).is_none(),
+        "the upstream's own claim is dropped"
+    );
     // Both cookies survive, and the proxy does not rewrite them.
     let cookies: Vec<_> = res
         .headers()
@@ -371,6 +380,7 @@ async fn a_gone_hq_the_person_stopped_is_marked_stopped() {
         },
         None,
         Some(flag.clone()),
+        false,
     )
     .await
     .unwrap();
@@ -488,4 +498,30 @@ async fn a_shut_gate_forwards_nothing() {
     assert!(res.status().is_success());
     assert_eq!(seen.0.load(Ordering::SeqCst), 1);
     proxy.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_paired_phones_window_is_marked_phone() {
+    let app = Router::new().fallback(any(|| async { "ok" }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let proxy = proxy::start_marked(
+        ProxyConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            upstream,
+        },
+        None,
+        None,
+        true,
+    )
+    .await
+    .unwrap();
+    let url = format!("http://127.0.0.1:{}/api/hello", proxy.addr.port());
+    let res = client().get(&url).send().await.unwrap();
+    assert_eq!(res.headers()[proxy::HUB_KIND_HEADER], proxy::HUB_KIND_PHONE);
+    assert_eq!(
+        res.headers()[proxy::HUB_WINDOW_HEADER],
+        proxy::HUB_WINDOW_VALUE
+    );
 }

@@ -826,6 +826,7 @@ impl Desktop {
                     },
                     gate,
                     Some(self.host.you_stopped_flag()),
+                    hub.is_some(),
                 )
                 .await?,
             );

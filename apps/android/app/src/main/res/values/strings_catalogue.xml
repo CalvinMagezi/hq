@@ -8,6 +8,7 @@
     <string name="state_reconnecting">Reconnecting</string>
     <string name="state_ai_down">The AI service isn\'t answering</string>
     <string name="state_connected">Connected</string>
+    <string name="state_connected_phone">Connected · HQ on your phone</string>
     <string name="state_lite">Connected · HQ Lite</string>
     <string name="state_hub_stopped">HQ has stopped</string>
     <string name="state_hub_restarting">Restarting HQ</string>
@@ -867,6 +868,7 @@
     <string name="hub_notif_needs_body">HQ Hub shows a notice on this computer. Its only button is Open.</string>
     <string name="hub_notif_updates_title">Updates</string>
     <string name="hub_notif_updates_body">This window has no web push. Your phone shows its own notifications.</string>
+    <string name="hub_notif_updates_body_here">This window has no web push. HQ Hub shows the notices.</string>
     <string name="notif_in_browser">In this browser</string>
     <string name="notif_needs_desc">Questions and approvals from helpers and tasks.</string>
     <string name="notif_updates_desc">What HQ finished, like \"HQ answered\" after you leave a chat.</string>
