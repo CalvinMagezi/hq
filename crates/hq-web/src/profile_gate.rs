@@ -16,6 +16,8 @@ use crate::WsState;
 /// `/api` prefixes Lite serves. A prefix matches itself and anything below it, so
 /// `/api/tasks` allows `/api/tasks/{id}/comments` but not `/api/tasksX`.
 const LITE_API: &[&str] = &[
+    // Which HQ answers and its edition: the app reads it to say "Connected · HQ Lite".
+    "/api/hello",
     "/api/tasks",
     "/api/spaces",
     "/api/folders",
@@ -109,6 +111,7 @@ mod tests {
     #[test]
     fn lite_serves_tasks_notes_search_and_the_app_shell() {
         for (method, path) in [
+            (Method::GET, "/api/hello"),
             (Method::GET, "/api/tasks"),
             (Method::POST, "/api/tasks"),
             (Method::PATCH, "/api/tasks/abc"),
