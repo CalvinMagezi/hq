@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Archive, EyeOff, Loader2, Terminal } from 'lucide-react'
+import { Archive, EyeOff } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
+import './chat.css'
 import { STATUS_LABELS, parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
 import { agentName, computerName } from '~/lib/names'
@@ -9,7 +10,6 @@ import { t, tn } from '~/strings'
 import { autoAnswers, type AutoAnswer } from '~/lib/autoAnswers'
 import { Dialog } from '../ui/Dialog'
 import { globalSessionsApi, type WatchedSession } from '~/lib/sessionsApi'
-import { STATUS_BADGE_CLASS } from '../tasks/TaskCard'
 import { HelperPill } from '../sessions/SessionRow'
 
 // What the registry records as the answerer when HQ itself says yes toward the goal.
@@ -57,30 +57,35 @@ export function SessionsPanel({ sessions, busy, onDrive, onUnwatch, onArchive }:
   }
 
   return (
-    <div className="border-b border-white/10 bg-neutral-900/60 shrink-0 max-h-[50dvh] overflow-y-auto overscroll-contain">
-      <h2 className="max-w-4xl mx-auto px-3 sm:px-4 pt-2 text-xs font-semibold">
-        {t('chat_details')} · {t('chat_watching_count', { n: sessions.length })}
-      </h2>
-      <ul className="max-w-4xl mx-auto" aria-label={t('helpers_watched_aria')}>
-        {sessions.map((s) => (
-          <SessionRow
-            key={s.id}
-            session={s}
-            busy={busy.has(s.id)}
-            onDrive={(drive) => turn(s.id, drive)}
-            onUnwatch={() => onUnwatch(s.id)}
-          />
-        ))}
-      </ul>
-      <section className="max-w-4xl mx-auto px-3 sm:px-4 py-2.5 text-xs border-t border-white/5">
-        <h3 className="font-semibold">{t('chat_this_chat')}</h3>
-        <p className="mt-1 text-neutral-500">{t('chat_alerts_note')}</p>
-        {onArchive && (
-          <button type="button" onClick={onArchive} className="mt-1.5 flex items-center gap-1.5 h-8 px-2 rounded border border-white/10 text-neutral-300 hover:text-white hover:bg-white/5">
-            <Archive className="w-3.5 h-3.5" aria-hidden="true" /> {t('chat_row_archive')}
+    <div className="hq-chat-side">
+      {sessions.length > 0 && (
+        <>
+          <p className="a-grp">
+            {t('chat_watching')} <em className="a-count">{sessions.length}</em>
+          </p>
+          <ul className="hq-chat-side" style={{ padding: 0 }} aria-label={t('helpers_watched_aria')}>
+            {sessions.map((s) => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                busy={busy.has(s.id)}
+                onDrive={(drive) => turn(s.id, drive)}
+                onUnwatch={() => onUnwatch(s.id)}
+              />
+            ))}
+          </ul>
+        </>
+      )}
+      <p className="a-grp">{t('chat_this_chat')}</p>
+      <p className="a-body-sm a-muted">{t('chat_alerts_note')}</p>
+      {onArchive && (
+        <div className="a-btns">
+          <button type="button" onClick={onArchive} className="a-btn quiet compact">
+            <Archive className="a-ic sm" aria-hidden="true" />
+            {t('chat_row_archive')}
           </button>
-        )}
-      </section>
+        </div>
+      )}
       {explaining && (
         <Dialog
           kind="ask"
@@ -105,47 +110,43 @@ interface RowProps {
 
 function SessionRow({ session: s, busy, onDrive, onUnwatch }: RowProps) {
   const running = s.status === 'running'
+  const blocked = s.agent_status === 'blocked'
+  const name = `${agentName(s.harness)} · ${s.label}`
   return (
-    <li className={`px-3 sm:px-4 py-2.5 text-xs border-t border-white/5 first:border-t-0 ${running ? '' : 'opacity-50'}`}>
-      <div className="flex items-center gap-2 min-w-0">
-        <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
-        <span className="text-neutral-200 truncate min-w-0" title={s.cwd}>
-          {agentName(s.harness)} · {s.label}
-        </span>
-        <span className="hidden sm:inline text-neutral-500 truncate min-w-0">{computerName(s.host)}</span>
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={onUnwatch}
-          disabled={busy}
-          className="flex items-center justify-center gap-1 h-11 min-w-11 sm:h-8 sm:min-w-0 px-2 rounded text-neutral-400 hover:text-white hover:bg-white/10 disabled:opacity-50 shrink-0"
-          title={t('chat_stop_watching_hint')}
-          aria-label={t('helpers_unwatch_aria', { name: `${agentName(s.harness)} ${s.label}` })}
-        >
-          <EyeOff className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">{t('helpers_unwatch')}</span>
-        </button>
+    <li className={`a-card ${blocked ? 'needs' : ''} ${running ? '' : 'is-past'}`}>
+      <div className="a-card-head">
+        <b>
+          <a href={`/helpers/${encodeURIComponent(s.id)}`} title={s.cwd}>
+            {name}
+          </a>
+        </b>
       </div>
+      <StatusLine session={s} />
       {s.task && <TaskLine task={s.task} />}
       <GoalLines session={s} />
-      <StatusLine session={s} />
-      {s.agent_status === 'blocked' && (
-        <a href={`/helpers/${encodeURIComponent(s.id)}`} className="a-btn mt-1.5 inline-flex">
+      {blocked && (
+        <a href={`/helpers/${encodeURIComponent(s.id)}`} className="a-btn compact" style={{ alignSelf: 'flex-start' }}>
           {t('chat_answer_it')}
         </a>
       )}
-      <DriveSwitch drive={s.drive} busy={busy} onChange={onDrive} />
+      <DriveSwitch id={s.id} drive={s.drive} busy={busy} onChange={onDrive} />
       <AnswerLog sessionId={s.id} />
-      {!s.drive && s.drive_off_reason && (
-        <p className="mt-1 text-xs" style={{ color: 'var(--warn)' }}>
-          {t('helpers_drive_off_reason', { reason: s.drive_off_reason })}
-        </p>
-      )}
+      {!s.drive && s.drive_off_reason && <p className="a-body-sm a-warn-t">{t('helpers_drive_off_reason', { reason: s.drive_off_reason })}</p>}
       {!s.drive && s.drive_blocked_by.length > 0 && (
-        <p className="mt-1 text-xs" style={{ color: 'var(--warn)' }}>
-          {t('helpers_observes_until', { reasons: s.drive_blocked_by.join(', ') })}
-        </p>
+        <p className="a-body-sm a-warn-t">{t('helpers_observes_until', { reasons: s.drive_blocked_by.join(', ') })}</p>
       )}
+      <button
+        type="button"
+        onClick={onUnwatch}
+        disabled={busy}
+        className="a-btn quiet compact"
+        style={{ alignSelf: 'flex-start' }}
+        aria-label={t('helpers_unwatch_aria', { name })}
+      >
+        <EyeOff className="a-ic sm" aria-hidden="true" />
+        {t('chat_stop_watching')}
+      </button>
+      <p className="a-cap a-muted">{t('chat_stop_watching_hint')}</p>
     </li>
   )
 }
@@ -154,76 +155,67 @@ function TaskLine({ task }: { task: NonNullable<WatchedSession['task']> }) {
   const closeOverlay = useHQStore((st) => st.setGlobalChatOpen)
   const selectTask = useHQStore((st) => st.setSelectedTaskId)
   return (
-    <Link
-      to="/tasks"
-      onClick={() => {
-        selectTask(task.id)
-        closeOverlay(false)
-      }}
-      className="mt-1.5 flex items-center gap-2 min-w-0 text-neutral-300 hover:text-white"
-      title={t('helpers_open_task')}
-    >
-      <span className="text-neutral-500 shrink-0">{task.display_id}</span>
-      <span className="min-w-0 line-clamp-2 sm:line-clamp-1">{task.title}</span>
-      <span className={`shrink-0 text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
-        {STATUS_LABELS[task.status]}
+    <div className="a-drow">
+      <span>{t('helpers_ins_task')}</span>
+      <span>
+        <Link
+          to="/tasks"
+          className="a-link"
+          onClick={() => {
+            selectTask(task.id)
+            closeOverlay(false)
+          }}
+          title={t('helpers_open_task')}
+        >
+          {task.display_id} {task.title} · {STATUS_LABELS[task.status]}
+        </Link>
       </span>
-    </Link>
+    </div>
   )
 }
 
 function GoalLines({ session: s }: { session: WatchedSession }) {
-  if (!s.goal && !s.done_criteria) return null
   return (
-    <dl className="mt-1 text-neutral-400 space-y-0.5">
+    <>
       {s.goal && (
-        <div className="flex gap-2 min-w-0">
-          <dt className="text-neutral-500 shrink-0">{t('helpers_goal')}</dt>
-          <dd className="min-w-0 line-clamp-2">{s.goal}</dd>
-        </div>
+        <p className="a-body-sm">
+          <b>{t('helpers_goal')}</b>
+          <br />
+          {s.goal}
+        </p>
       )}
       {s.done_criteria && (
-        <div className="flex gap-2 min-w-0">
-          <dt className="text-neutral-500 shrink-0">{t('helpers_done_when')}</dt>
-          <dd className="min-w-0 line-clamp-2">{s.done_criteria}</dd>
-        </div>
+        <p className="a-body-sm">
+          <b>{t('helpers_done_when')}</b>
+          <br />
+          {s.done_criteria}
+        </p>
       )}
-    </dl>
+    </>
   )
 }
 
 function StatusLine({ session: s }: { session: WatchedSession }) {
   const seen = ago(s.last_seen_at)
   const driven = ago(s.last_driven_at)
+  const facts = [computerName(s.host), seen && t('helpers_seen', { when: seen }), s.pending_wake && t('helpers_wake_pending', { what: s.pending_wake }), driven && t('helpers_driven', { when: driven })]
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-neutral-500">
-      <span className="sm:hidden">{computerName(s.host)}</span>
+    <>
       <HelperPill session={s} />
-      {seen && <span>{t('helpers_seen', { when: seen })}</span>}
-      {s.pending_wake && <span>{t('helpers_wake_pending', { what: s.pending_wake })}</span>}
-      {driven && <span>{t('helpers_driven', { when: driven })}</span>}
-    </div>
+      <span className="a-body-sm a-muted">{facts.filter(Boolean).join(' · ')}</span>
+    </>
   )
 }
 
-function DriveSwitch({ drive, busy, onChange }: { drive: boolean; busy: boolean; onChange: (drive: boolean) => void }) {
+function DriveSwitch({ id, drive, busy, onChange }: { id: string; drive: boolean; busy: boolean; onChange: (drive: boolean) => void }) {
+  const labelId = `hq-drive-${id}`
   return (
-    <div className="mt-1.5 flex items-center gap-2 min-w-0">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={drive}
-        onClick={() => onChange(!drive)}
-        disabled={busy}
-        className={`flex items-center gap-1.5 h-11 sm:h-8 px-3 sm:px-2 rounded border shrink-0 disabled:opacity-50 ${
-          drive ? 'hq-chip-on' : 'border-white/10 text-neutral-400 hover:text-white hover:bg-white/5'
-        }`}
-        title={drive ? t('chat_say_yes_on') : t('chat_say_yes_off')}
-      >
-        {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span className={`w-2 h-2 rounded-full ${drive ? 'bg-white' : 'bg-neutral-500'}`} />}
-        {t('chat_say_yes')} · {drive ? t('helpers_drive_on') : t('helpers_drive_off')}
-      </button>
-      <span className="hidden sm:inline text-xs text-neutral-500">{drive ? t('chat_say_yes_on') : t('chat_say_yes_off')}</span>
+    <div className="hq-swrow">
+      <span>
+        <b id={labelId}>{t('chat_say_yes')}</b>
+        <i>{drive ? t('chat_say_yes_on') : t('chat_say_yes_off')}</i>
+      </span>
+      <button type="button" className="a-sw" role="switch" aria-checked={drive} aria-labelledby={labelId} aria-busy={busy || undefined} disabled={busy} onClick={() => onChange(!drive)} />
     </div>
   )
 }
@@ -232,10 +224,10 @@ function DriveSwitch({ drive, busy, onChange }: { drive: boolean; busy: boolean;
 function AnswerLog({ sessionId }: { sessionId: string }) {
   const answers = useAnswers(sessionId)
   return (
-    <div className="mt-1.5 text-neutral-400">
-      <p className="font-semibold text-neutral-300">{tn('chat_say_yes_log', answers.length)}</p>
+    <div className="a-body-sm">
+      <b>{tn('chat_say_yes_log', answers.length)}</b>
       {answers.length === 0 ? (
-        <p className="text-neutral-500">{t('chat_say_yes_none')}</p>
+        <p className="a-muted">{t('chat_say_yes_none')}</p>
       ) : (
         <ul>
           {answers.map((a, i) => (

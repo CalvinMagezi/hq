@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { newClientId } from '~/lib/outbox'
-import { Paperclip, PencilLine, X } from 'lucide-react'
+import { ChevronLeft, Info, Paperclip, PencilLine, X } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { useThreadStore, useLiveTurn, type ThreadMessage } from '~/store/threadStore'
 import { useWS } from '~/context/WebSocketContext'
@@ -17,9 +17,10 @@ import { rejectSend } from '~/lib/chatEvents'
 import { answerOffer } from '~/lib/offersApi'
 import { MAX_ATTACHMENTS, type ChatAttachment } from '~/lib/chatUploads'
 import { parseSlashCommand, isSlashInput } from './SlashCommandPalette'
-import { ThreadSidebar } from './ThreadSidebar'
+import { ChatList, NewChatButton } from './ChatList'
+import { Panes } from '../ui/Panes'
+import { Sheet } from '../ui/Sheet'
 import { ChatComposer } from './ChatComposer'
-import { ChatHeader } from './ChatHeader'
 import { MessageList, isSaved } from './MessageList'
 import { OutboxGroup } from './OutboxGroup'
 import { useChatOutbox } from './useChatOutbox'
@@ -30,18 +31,10 @@ import { SessionsPanel } from './SessionsPanel'
 import { ChatApprovals } from './ChatApprovals'
 
 const FOCUS_DELAY_MS = 50
-const SIDEBAR_COLLAPSED_KEY = 'hq.chat.sidebarCollapsed'
-const DESKTOP_QUERY = '(min-width: 768px)'
 // A reply alert links here with the chat to open.
 const THREAD_PARAM = 'thread'
-
-function readCollapsed() {
-  try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
-  } catch {
-    return false
-  }
-}
+// From here the details pane is docked and always shown.
+const DOCKED_QUERY = '(min-width: 1400px)'
 
 /** A saved user message being rewritten in the composer; sending replaces it and everything after. */
 interface Editing {
@@ -52,14 +45,12 @@ interface Editing {
 interface Props {
   /** Only the visible instance loads data, takes a pending draft and grabs focus. */
   active: boolean
-  /** Shown as a close button in the header when set (the overlay). */
-  onClose?: () => void
   /** The chat an address names (`/chat/:id`); it opens that chat. */
   threadId?: string
 }
 
-/** The whole chat UI: thread list, messages and composer. The /chat route and the global overlay both render it. */
-export function ChatView({ active, onClose, threadId }: Props) {
+/** The whole chat (AlignedChat): the chats list, the open chat and its details, on the shared panes. */
+export function ChatView({ active, threadId }: Props) {
   const chatDraft = useHQStore((s) => s.chatDraft)
   const setChatDraft = useHQStore((s) => s.setChatDraft)
   const clearChatUnread = useHQStore((s) => s.clearChatUnread)
@@ -77,8 +68,10 @@ export function ChatView({ active, onClose, threadId }: Props) {
   const waitingForOwner = useThreadStore((s) => (activeThreadId ? s.waiting[activeThreadId] === true : false))
 
   const [loadingThreads, setLoadingThreads] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(readCollapsed)
+  // Below 1024 px the chats list is a sheet; from 1024 it is the list pane.
+  const [listOpen, setListOpen] = useState(false)
+  // Below 1400 px the details lie over the chat while open; from 1400 they are docked.
+  const [sideOpen, setSideOpen] = useState(false)
   const [followSignal, setFollowSignal] = useState(0)
   const [editing, setEditing] = useState<Editing | null>(null)
   const [sessionsOpen, setSessionsOpen] = useState(false)
@@ -130,13 +123,12 @@ export function ChatView({ active, onClose, threadId }: Props) {
 
   useEffect(() => {
     setEditing(null)
-    setSessionsOpen(false)
   }, [activeThreadId])
 
-  // Unwatching the last session hides the button, so the panel goes with it.
+  // The watched helpers are asked for only while their details can be seen.
   useEffect(() => {
-    if (watched.sessions.length === 0) setSessionsOpen(false)
-  }, [watched.sessions.length])
+    setSessionsOpen(sideOpen || (typeof window !== 'undefined' && window.matchMedia(DOCKED_QUERY).matches))
+  }, [sideOpen])
 
   // A note action hands over text; append it so a half-written message survives.
   useEffect(() => {
@@ -147,7 +139,7 @@ export function ChatView({ active, onClose, threadId }: Props) {
 
   const openThread = (id: string) => {
     setActiveThread(id)
-    setSidebarOpen(false)
+    setListOpen(false)
     focusInput()
   }
 
@@ -291,126 +283,151 @@ export function ChatView({ active, onClose, threadId }: Props) {
     })
   }
 
-  // One button: a drawer on mobile, a persisted collapse on desktop.
-  const toggleSidebar = () => {
-    if (!window.matchMedia(DESKTOP_QUERY).matches) {
-      setSidebarOpen((v) => !v)
-      return
-    }
-    setSidebarCollapsed((v) => {
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, v ? '0' : '1')
-      } catch {
-        // Storage can be blocked; the toggle still works for this session.
-      }
-      return !v
-    })
-  }
-
   const activeThread = threads.find((t) => t.threadId === activeThreadId)
 
-  return (
-    <div className="flex h-full w-full text-white overflow-hidden relative">
-      <ThreadSidebar
-        open={sidebarOpen}
-        collapsed={sidebarCollapsed}
-        onClose={() => setSidebarOpen(false)}
-        loading={loadingThreads}
-        onNew={() => void startNewThread()}
-        onOpen={openThread}
-        onArchive={(id) => void archiveThread(id)}
+  const chatList = (head: boolean) => (
+    <ChatList
+      loading={loadingThreads}
+      onNew={() => {
+        setListOpen(false)
+        void startNewThread()
+      }}
+      onOpen={openThread}
+      onArchive={(id) => void archiveThread(id)}
+      withHead={head}
+    />
+  )
+
+  const title = activeThread?.title ?? t('chat_new_chat')
+  const detail = (
+    <div className="hq-chat-detail" {...drop.handlers}>
+      {drop.dragging && (
+        <div className="hq-chat-drop" aria-hidden="true">
+          <Paperclip className="a-ic" />
+          <b>{t('chat_drop_title')}</b>
+          <span className="a-body-sm a-muted">{t('chat_drop_line')}</span>
+        </div>
+      )}
+      <div className="a-pane-head">
+        <button type="button" className="a-ib a-back" aria-label={t('chat_chats')} onClick={() => setListOpen(true)}>
+          <ChevronLeft className="a-ic" aria-hidden="true" />
+        </button>
+        <h2 className="a-h3">{title}</h2>
+        <button type="button" className="a-ib sm a-side-toggle" aria-label={t('chat_details')} aria-expanded={sideOpen} onClick={() => setSideOpen((v) => !v)}>
+          <Info className="a-ic sm" aria-hidden="true" />
+        </button>
+      </div>
+
+      <MessageList
+        threadId={activeThreadId}
+        messages={messages}
+        followSignal={followSignal}
+        onEdit={startEdit}
+        onRegenerate={regenerate}
+        onPick={(text) => draft.setText(text)}
+        onOffer={answerOfferOn}
       />
 
-      <div className="flex-1 flex flex-col h-full min-w-0 relative" {...drop.handlers}>
-        {drop.dragging && (
-          <div className="absolute inset-2 z-30 rounded-2xl border-2 border-dashed border-emerald-400/60 bg-neutral-950/80 flex flex-col items-center justify-center gap-2 text-sm text-neutral-200 pointer-events-none">
-            <Paperclip className="w-6 h-6 text-emerald-400" />
-            <span className="font-medium">{t('chat_drop_title')}</span>
-            <span className="text-xs text-neutral-400">{t('chat_drop_line')}</span>
-          </div>
-        )}
-        <ChatHeader
-          title={activeThread?.title ?? t('chat_new_chat')}
-          onToggleSidebar={toggleSidebar}
-          onClose={onClose}
-          watching={watched.sessions}
-          sessionsOpen={sessionsOpen}
-          onToggleSessions={() => setSessionsOpen((v) => !v)}
-        />
-        {sessionsOpen && (
-          <SessionsPanel
-            sessions={watched.sessions}
-            busy={watched.busy}
-            onDrive={(id, drive) => void watched.setDrive(id, drive)}
-            onUnwatch={(id) => void watched.unwatch(id)}
-            onArchive={activeThreadId ? () => void archiveThread(activeThreadId) : undefined}
-          />
-        )}
+      <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} />
 
-        <MessageList
-          threadId={activeThreadId}
-          messages={messages}
-          followSignal={followSignal}
-          onEdit={startEdit}
-          onRegenerate={regenerate}
-          onPick={(text) => draft.setText(text)}
-          onOffer={answerOfferOn}
-        />
+      <OutboxGroup
+        entries={outboxChat.entries}
+        state={outboxChat.state}
+        inHub={inHub}
+        sending={outboxChat.sending}
+        textOf={(e) => (e.payload as { content: string }).content}
+        onRemove={(id) => void outboxChat.remove(id)}
+        onSendNow={(id) => void outboxChat.sendNow(id)}
+      />
 
-        <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} />
-
-        <OutboxGroup
-          entries={outboxChat.entries}
-          state={outboxChat.state}
-          inHub={inHub}
-          sending={outboxChat.sending}
-          textOf={(e) => (e.payload as { content: string }).content}
-          onRemove={(id) => void outboxChat.remove(id)}
-          onSendNow={(id) => void outboxChat.sendNow(id)}
-        />
-
-        {banner && (
-          <div role="status" className="px-4 py-1.5 border-t border-amber-500/30 text-[11px] text-amber-400 bg-neutral-900/60">
+      {banner && (
+        <div role="status" className="a-stale">
+          <span>
             {t(banner)}
-            {savedLine && <span className="block">{savedLine}</span>}
-          </div>
-        )}
+            {savedLine && <span className="hq-block">{savedLine}</span>}
+          </span>
+        </div>
+      )}
 
-        {editing && (
-          <div className="flex items-center gap-2 px-4 py-1.5 border-t border-white/10 text-[11px] text-neutral-400 bg-neutral-900/60">
-            <PencilLine className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            <span className="flex-1 min-w-0 truncate">
-              {t('chat_editing')}. {t('chat_editing_line')}
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(null)
-                draft.setText('')
-              }}
-              className="flex items-center gap-1 h-8 px-2 rounded hover:bg-white/10 hover:text-white"
-            >
-              <X className="w-3.5 h-3.5" /> {t('chat_stop_editing')}
-            </button>
-          </div>
-        )}
+      {editing && (
+        <div className="a-stale">
+          <PencilLine className="a-ic sm" aria-hidden="true" />
+          <span>
+            {t('chat_editing')}. {t('chat_editing_line')}
+          </span>
+          <button
+            type="button"
+            className="a-btn quiet compact"
+            onClick={() => {
+              setEditing(null)
+              draft.setText('')
+            }}
+          >
+            <X className="a-ic sm" aria-hidden="true" />
+            {t('chat_stop_editing')}
+          </button>
+        </div>
+      )}
 
-        <ChatComposer
-          ref={inputRef}
-          value={input}
-          onChange={draft.setText}
-          onSend={(content) => void handleSend(content)}
-          onStop={handleStop}
-          running={!!liveTurn}
-          canQueue={outboxChat.enabled && !!activeThreadId && !editing}
-          attachments={attachments}
-          onAddFiles={addFiles}
-          onRemoveAttachment={draft.removeAttachment}
-          onRetryAttachment={draft.retryAttachment}
-          connected={connected}
-          hasKeptFiles={(editing?.attachments.length ?? 0) > 0}
-        />
-      </div>
+      <ChatComposer
+        ref={inputRef}
+        value={input}
+        onChange={draft.setText}
+        onSend={(content) => void handleSend(content)}
+        onStop={handleStop}
+        running={!!liveTurn}
+        canQueue={outboxChat.enabled && !!activeThreadId && !editing}
+        attachments={attachments}
+        onAddFiles={addFiles}
+        onRemoveAttachment={draft.removeAttachment}
+        onRetryAttachment={draft.retryAttachment}
+        connected={connected}
+        hasKeptFiles={(editing?.attachments.length ?? 0) > 0}
+      />
     </div>
+  )
+
+  const side = (
+    <>
+      <div className="a-pane-head">
+        <h2 className="a-h3">{t('chat_details')}</h2>
+        <button type="button" className="a-ib sm a-side-toggle" aria-label={t('close')} onClick={() => setSideOpen(false)}>
+          <X className="a-ic sm" aria-hidden="true" />
+        </button>
+      </div>
+      <SessionsPanel
+        sessions={watched.sessions}
+        busy={watched.busy}
+        onDrive={(id, drive) => void watched.setDrive(id, drive)}
+        onUnwatch={(id) => void watched.unwatch(id)}
+        onArchive={activeThreadId ? () => void archiveThread(activeThreadId) : undefined}
+      />
+    </>
+  )
+
+  return (
+    <>
+      <Panes
+        list={chatList(true)}
+        listLabel={t('chat_chats')}
+        detail={detail}
+        detailLabel={title}
+        side={side}
+        sideLabel={t('chat_details')}
+        showDetail
+        sideOpen={sideOpen}
+      />
+      {listOpen && (
+        <Sheet
+          title={t('chat_chats')}
+          placement="bottom"
+          className="hq-chats-sheet"
+          onClose={() => setListOpen(false)}
+          headActions={<NewChatButton onNew={() => { setListOpen(false); void startNewThread() }} />}
+        >
+          {chatList(false)}
+        </Sheet>
+      )}
+    </>
   )
 }
