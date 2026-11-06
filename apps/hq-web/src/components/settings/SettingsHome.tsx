@@ -1,7 +1,22 @@
 import { Link } from '@tanstack/react-router'
-import { ChevronRight } from 'lucide-react'
+import { Archive, Bell, ChevronRight, Clock, Folder, Gauge, KeyRound, LogOut, MessageSquare, Monitor, ShieldCheck, Smartphone, BarChart3, type LucideIcon } from 'lucide-react'
 import { settingsGroups, type WhereHqRuns } from '~/lib/settingsGroups'
 import { t } from '~/strings'
+
+const ROW_ICONS: Record<string, LucideIcon> = {
+  notifications: Bell,
+  time: Clock,
+  version: Monitor,
+  data: BarChart3,
+  signout: LogOut,
+  keys: KeyRound,
+  messaging: MessageSquare,
+  devices: Smartphone,
+  spending: Gauge,
+  safety: ShieldCheck,
+  folders: Folder,
+  backup: Archive,
+}
 
 interface Props extends WhereHqRuns {
   /** The words at the right of a row, by row id. */
@@ -16,23 +31,29 @@ interface Props extends WhereHqRuns {
 /** The four groups as a list; at every width it is the index of Settings. */
 export function SettingsHome({ lite, hub, phone, trailing, needsLook = [], onSignOut }: Props) {
   return (
-    <div className="flex flex-col gap-5 pb-6">
+    <div className="st-home">
       {phone && (
-        <div className="flex flex-col gap-1 px-4">
+        <div className="st-note">
           <p className="a-body">{t('hub_note_phone')}</p>
           <p className="a-muted a-body-sm">{t('hub_note_phone_own')}</p>
         </div>
       )}
       {settingsGroups({ lite, hub }).map((group) => (
         <section key={group.id} aria-labelledby={`group-${group.id}`}>
-          <h2 id={`group-${group.id}`} className="a-label px-4">
+          <h2 id={`group-${group.id}`} className="a-grp">
             {t(group.label)}
           </h2>
-          {group.id === 'browser' && hub && <p className="a-muted a-body-sm px-4">{t('hub_shown_by')}</p>}
+          {group.id === 'browser' && hub && <p className="a-muted a-body-sm st-note">{t('hub_shown_by')}</p>}
           <div className="a-set">
             {group.rows.map((row) => {
+              const Icon = ROW_ICONS[row.id]
               const inner = (
                 <>
+                  {Icon && (
+                    <span className="a-muted st-ic">
+                      <Icon className="a-ic" aria-hidden="true" />
+                    </span>
+                  )}
                   <div className="a-li-main">
                     <b>{t(row.label)}</b>
                     {trailing[row.id] && <span className={needsLook.includes(row.id) ? 'a-warn-t' : undefined}>{trailing[row.id]}</span>}

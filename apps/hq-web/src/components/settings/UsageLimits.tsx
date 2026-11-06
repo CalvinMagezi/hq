@@ -8,7 +8,9 @@ import { spendResetLine } from '~/lib/time'
 import { copilotUsageQuery, formatCompact } from '~/lib/copilotUsageApi'
 import { t, tn } from '~/strings'
 import { LimitSheet } from './LimitSheet'
+import { SkeletonRows } from './SettingsSkeleton'
 import {
+  PERIOD_KEY,
   atLimitWords,
   driverLine,
   scopeWords,
@@ -33,65 +35,70 @@ import {
 const MAX_BAR_PCT = 100
 const SECONDS_TO_MS = 1000
 const MS_PER_HOUR = 3_600_000
+// The chart palette: blue, sky, white, grey, indigo. Never amber, red or green, which mean something else.
+const CHART_COLOURS = ['var(--brand-blue)', 'var(--brand-sky)', 'var(--ink)', 'var(--ink-muted)', 'var(--brand-indigo)']
 
 const hoursUntil = (resetsAt: number) => Math.max(0, (resetsAt * SECONDS_TO_MS - Date.now()) / MS_PER_HOUR)
 
 /** Within the limit is a grey bar; past the warning point and over it are amber. Never green or red. */
 function Bar({ value, calm }: { value: number; calm: boolean }) {
   return (
-    <div className="a-prog" role="img" aria-label={pct(value)}>
-      <u style={{ width: `${Math.min(MAX_BAR_PCT, Math.max(0, value))}%`, background: calm ? 'var(--ink-muted)' : 'var(--warn)' }} />
+    <div className={`a-prog st-meter ${calm ? 'sp-meter' : 'warn'}`} role="img" aria-label={pct(value)}>
+      <u style={{ width: `${Math.min(MAX_BAR_PCT, Math.max(0, value))}%` }} />
     </div>
   )
 }
 
 function Fact({ label, children }: { label: string; children: string }) {
   return (
-    <div className="flex flex-col sm:flex-row sm:justify-between sm:gap-4 a-body-sm">
+    <div className="st-fact-row a-body-sm">
       <span className="a-muted">{label}</span>
-      <span className="min-w-0 break-words sm:text-right">{children}</span>
+      <span>{children}</span>
     </div>
   )
 }
 
-function LimitRow({ b, def, away, onEdit, onDelete }: { b: BudgetStatus; def: BudgetDef | undefined; away: boolean; onEdit: () => void; onDelete: () => void }) {
+export function LimitRow({ b, def, away, onEdit, onDelete }: { b: BudgetStatus; def: BudgetDef | undefined; away: boolean; onEdit: () => void; onDelete: () => void }) {
   const [menu, setMenu] = useState(false)
   const calm = b.state === 'ok'
   return (
-    <li className="a-card" data-testid="budget-row" data-state={b.state}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <b className="a-body-b">{b.name}</b>
-          <p className="a-muted a-body-sm">{scopeWords(b.scope)}</p>
-        </div>
-        <div className="relative">
+    <li className="a-li st-limit" data-testid="budget-row" data-state={b.state}>
+      <div className="st-limit-head">
+        <b className="a-body-b">{b.name}</b>
+        <span className="a-kind sm">{t(PERIOD_KEY[b.period])}</span>
+        <div className="st-menu-anchor">
           <button
             type="button"
-            className="a-ib"
+            className="a-ib sm"
             aria-label={t('spend_limit_menu', { name: b.name })}
+            aria-haspopup="menu"
             aria-expanded={menu}
             disabled={away}
             onClick={() => setMenu(!menu)}
           >
-            <MoreHorizontal className="w-4 h-4" />
+            <MoreHorizontal className="a-ic" aria-hidden="true" />
           </button>
           {menu && (
-            <div className="a-menu absolute right-0 z-10" role="menu">
+            <div className="a-menu st-menu" role="menu">
               <button type="button" role="menuitem" className="a-menu-item" onClick={() => { setMenu(false); onEdit() }} disabled={!def}>
                 {t('spend_edit')}
               </button>
-              <button type="button" role="menuitem" className="a-menu-item" onClick={() => { setMenu(false); onDelete() }}>
+              <button type="button" role="menuitem" className="a-menu-item danger" onClick={() => { setMenu(false); onDelete() }}>
                 {t('spend_delete')}
               </button>
             </div>
           )}
         </div>
       </div>
-      <p className="a-body">
-        {t('spend_of', { spent: usd(b.spent_usd), limit: usd(b.limit_usd) })} · {pct(b.pct)}
+      <p className="a-body-sm a-muted">{scopeWords(b.scope)}</p>
+      <p className="st-limit-spent">
+        <span className="a-body-b">{usd(b.spent_usd)}</span>
+        <span className="a-body-sm a-muted">
+          {t('spend_of', { spent: usd(b.spent_usd), limit: usd(b.limit_usd) })} · {pct(b.pct)}
+        </span>
       </p>
       <Bar value={b.pct} calm={calm} />
-      <p className={`a-body-sm flex items-center gap-1.5 ${calm ? 'a-muted' : 'a-warn-t'}`}>
+      <p className={`a-body-sm st-inline ${calm ? 'a-muted' : 'a-warn-t'}`}>
         {!calm && <TriangleAlert className="a-ic" aria-hidden="true" />}
         {standingWords(b, spanWords(hoursUntil(b.resets_at)))}
       </p>
@@ -117,9 +124,12 @@ function StoppedBanner({ b, away, onRaise }: { b: BudgetStatus; away: boolean; o
 
 function Loading() {
   return (
-    <p className="a-loading a-muted" role="status">
-      {t('spend_loading')}
-    </p>
+    <>
+      <p className="a-loading a-muted" role="status">
+        {t('spend_loading')}
+      </p>
+      <SkeletonRows />
+    </>
   )
 }
 
@@ -181,8 +191,12 @@ function LimitsPanel({ onOpenSheet }: { onOpenSheet: (editing: BudgetDef | null)
         </div>
       ) : (
         <>
-          <h2 className="a-h2">{t('spend_limits_heading', { n: data.budgets.length })}</h2>
-          <ul className="flex flex-col gap-3">
+          <h3 className="a-grp">
+            {t('spend_limits_group')}
+            <span className="a-count">{data.budgets.length}</span>
+          </h3>
+          <p className="a-body-sm a-muted">{spendResetLine()}</p>
+          <ul className="a-set">
             {data.budgets.map((b) => (
               <LimitRow
                 key={b.name}
@@ -201,13 +215,22 @@ function LimitsPanel({ onOpenSheet }: { onOpenSheet: (editing: BudgetDef | null)
   )
 }
 
-function DriverList({ title, rows }: { title: string; rows: Driver[] }) {
+function DriverBars({ title, rows }: { title: string; rows: Driver[] }) {
   if (rows.length === 0) return null
+  const top = Math.max(...rows.map((d) => d.usd), Number.EPSILON)
   return (
-    <div className="flex flex-col gap-1">
-      <h3 className="a-h3">{title}</h3>
-      {rows.map((d) => (
-        <Fact key={d.name} label={d.name}>{driverLine(d.calls, usd(d.usd))}</Fact>
+    <div className="a-card">
+      <p className="a-label">{title}</p>
+      {rows.map((d, i) => (
+        <div key={d.name} className="sp-bar">
+          <span className="a-body-sm">
+            <b>{d.name}</b>
+          </span>
+          <span className="a-body-sm a-muted">{driverLine(d.calls, usd(d.usd))}</span>
+          <span className="a-prog">
+            <u style={{ width: `${Math.round((d.usd / top) * MAX_BAR_PCT)}%`, background: CHART_COLOURS[i % CHART_COLOURS.length] }} />
+          </span>
+        </div>
       ))}
     </div>
   )
@@ -219,34 +242,36 @@ function ForecastPanel() {
   if (!data || !m) return null
   const reaching = data.budgets.find((b) => b.forecast.exhausts_before_reset && b.forecast.projected_exhaustion_at)
   return (
-    <section className="a-card flex flex-col gap-2" aria-labelledby="spend-forecast">
-      <h2 className="a-h2" id="spend-forecast">{t('spend_forecast_heading')}</h2>
-      {m.rate_per_hour === null ? (
-        <p className="a-muted">{t('spend_forecast_none')}</p>
-      ) : (
-        <>
-          <Fact label={t('spend_forecast_spent')}>{usd(m.spent_this_period)}</Fact>
-          <Fact label={t('spend_forecast_rate')}>{t('spend_forecast_rate_value', { amount: usd(m.rate_per_hour) })}</Fact>
-          <Fact label={t('spend_forecast_total')}>{usd(m.projected_period_total)}</Fact>
-          <Fact label={t('spend_forecast_resets')}>{spanWords(m.hours_to_reset)}</Fact>
-          {reaching && (
-            <p className="a-warn-t a-body-sm flex items-center gap-1.5">
-              <TriangleAlert className="a-ic" aria-hidden="true" />
-              {t('spend_forecast_reach', {
-                name: reaching.budget,
-                date: new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(reaching.forecast.projected_exhaustion_at!)),
-              })}
-            </p>
-          )}
-          {m.confidence === 'low' && <p className="a-muted a-body-sm">{t('spend_forecast_rough')}</p>}
-        </>
-      )}
-      <div className="flex flex-col gap-3 pt-2">
-        <h2 className="a-h2">{t('spend_used_most')}</h2>
-        <DriverList title={t('spend_by_model')} rows={data.drivers.models} />
-        <DriverList title={t('spend_by_work')} rows={data.drivers.origins} />
+    <>
+      <section className="a-card flex flex-col gap-2" aria-labelledby="spend-forecast">
+        <h2 className="a-h2" id="spend-forecast">{t('spend_forecast_heading')}</h2>
+        {m.rate_per_hour === null ? (
+          <p className="a-muted">{t('spend_forecast_none')}</p>
+        ) : (
+          <>
+            <Fact label={t('spend_forecast_spent')}>{usd(m.spent_this_period)}</Fact>
+            <Fact label={t('spend_forecast_rate')}>{t('spend_forecast_rate_value', { amount: usd(m.rate_per_hour) })}</Fact>
+            <Fact label={t('spend_forecast_total')}>{usd(m.projected_period_total)}</Fact>
+            <Fact label={t('spend_forecast_resets')}>{spanWords(m.hours_to_reset)}</Fact>
+            {reaching && (
+              <p className="a-warn-t a-body-sm st-inline">
+                <TriangleAlert className="a-ic" aria-hidden="true" />
+                {t('spend_forecast_reach', {
+                  name: reaching.budget,
+                  date: new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(reaching.forecast.projected_exhaustion_at!)),
+                })}
+              </p>
+            )}
+            {m.confidence === 'low' && <p className="a-muted a-body-sm">{t('spend_forecast_rough')}</p>}
+          </>
+        )}
+      </section>
+      <h3 className="a-grp">{t('spend_used_most')}</h3>
+      <div className="sp-two">
+        <DriverBars title={t('spend_by_model')} rows={data.drivers.models} />
+        <DriverBars title={t('spend_by_work')} rows={data.drivers.origins} />
       </div>
-    </section>
+    </>
   )
 }
 
@@ -317,7 +342,7 @@ function ServicesPanel() {
       <h2 className="a-h2" id="spend-services">{t('spend_services')}</h2>
       {isLoading && <Loading />}
       {data?.backends.length === 0 && <p className="a-muted">{t('spend_no_services')}</p>}
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="sp-two">
         <CopilotCard />
         {data?.backends.map((p) => <ProviderCard key={p.backend} p={p} />)}
       </div>
@@ -345,19 +370,21 @@ export function UsagePage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
-        <button type="button" className="a-btn" disabled={away} onClick={() => setSheet({ editing: null })}>
-          {t('spend_add_limit')}
-        </button>
+        {/* The empty state carries its own Add a limit, so a second one here only repeats it. */}
+        {budgets?.definitions.length === 0 ? <span /> : (
+          <button type="button" className="a-btn" disabled={away} onClick={() => setSheet({ editing: null })}>
+            {t('spend_add_limit')}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('usage-') })}
           aria-label={t('spend_refresh')}
           className="a-ib"
         >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`a-ic ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
         </button>
       </div>
-      <p className="a-muted a-body-sm">{spendResetLine()}</p>
       <LimitsPanel onOpenSheet={(editing) => setSheet({ editing })} />
       <ForecastPanel />
       <ServicesPanel />

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { useSharedConnection } from '~/lib/connection'
 import { Dialog } from '~/components/ui/Dialog'
+import { SettingsSkeleton } from './SettingsSkeleton'
 import { t } from '~/strings'
 import { relTime } from '~/lib/time'
 import {
@@ -49,7 +50,7 @@ function useBusyAction(after?: () => Promise<unknown>) {
 
 function ExtLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} target="_blank" rel="noreferrer" className="underline text-neutral-100 hover:text-white">
+    <a href={href} target="_blank" rel="noreferrer" className="a-link">
       {children}
     </a>
   )
@@ -124,23 +125,25 @@ function RestartNotice({ restarter }: { restarter: Restarter }) {
   if (state.phase === 'idle') return null
   if (state.phase === 'restarting') {
     return (
-      <p role="status" className="flex items-center gap-2 text-sm text-neutral-300">
-        <Loader2 className="w-4 h-4 animate-spin" /> {t('settings_app_restarting')}
+      <p role="status" className="a-body-sm a-muted st-inline">
+        <Loader2 className="a-ic animate-spin" aria-hidden="true" /> {t('settings_app_restarting')}
       </p>
     )
   }
-  if (state.phase === 'done') return <p role="status" className="text-sm text-neutral-300">{t('settings_app_restarted')}</p>
-  return <p role="alert" className="text-sm text-neutral-100">{state.message}</p>
+  if (state.phase === 'done') return <p role="status" className="a-body-sm a-muted">{t('settings_app_restarted')}</p>
+  return <p role="alert" className="a-body-sm a-warn-t">{state.message}</p>
 }
 
 function RelayLine({ app }: { app: ChatAppStatus }) {
   const relay = app.relay
-  if (!app.enabled || !app.token_set) return <span>{t('settings_app_off')}</span>
-  if (app.needs_restart) return <span>{t('settings_app_needs_restart')}</span>
-  if (!relay || !relay.current) return <span>{t('settings_app_not_running')}</span>
-  if (relay.error) return <span>{relay.error}</span>
+  const dot = <i className={app.needs_restart ? 'a-dot warn' : 'a-dot off'} aria-hidden="true" />
+  if (!app.enabled || !app.token_set) return <span className="st-inline">{dot}{t('settings_app_off')}</span>
+  if (app.needs_restart) return <span className="st-inline">{dot}{t('settings_app_needs_restart')}</span>
+  if (!relay || !relay.current) return <span className="st-inline">{dot}{t('settings_app_not_running')}</span>
+  if (relay.error) return <span className="st-inline">{dot}{relay.error}</span>
   return (
-    <span>
+    <span className="st-inline">
+      {dot}
       {relay.status === 'connected' ? t('settings_app_running') : relay.status}, {t('settings_app_seen', { age: relTime(relay.last_seen) })}
     </span>
   )
@@ -167,13 +170,16 @@ function ConnectForm({ platform, onSave }: { platform: ChatPlatform; onSave: (to
       setChecked(res.username ?? null)
     })
   return (
-    <div className="flex flex-col gap-3 py-3.5">
-      <ol className="list-decimal pl-5 flex flex-col gap-1 text-sm text-neutral-300 leading-relaxed">
+    <div className="st-form">
+      <ol className="a-body-sm a-muted st-steps">
         {COPY[platform].steps.map((step, i) => <li key={i}>{step}</li>)}
       </ol>
-      <label className="flex flex-col gap-1 text-xs text-neutral-400">
-        {t('settings_app_bot')}
+      <div className="a-field">
+        <label className="a-field-label" htmlFor={`chat-token-${platform}`}>
+          {t('settings_app_bot')}
+        </label>
         <input
+          id={`chat-token-${platform}`}
           type="password"
           autoComplete="off"
           spellCheck={false}
@@ -182,17 +188,17 @@ function ConnectForm({ platform, onSave }: { platform: ChatPlatform; onSave: (to
             setToken(e.target.value)
             setChecked(null)
           }}
-          className="rounded-lg bg-neutral-900 border border-white/10 px-3 py-2 text-neutral-100 font-mono"
+          className="a-input a-mono"
         />
-      </label>
-      {checked && <p className="text-sm text-neutral-100">{t('settings_app_found_bot', { name: checked })}</p>}
-      {error && <p role="alert" className="text-sm text-neutral-100 break-words">{error}</p>}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="hq-btn-ghost disabled:opacity-40" disabled={busy || !token.trim()} onClick={check}>
+      </div>
+      {checked && <p className="a-body-sm">{t('settings_app_found_bot', { name: checked })}</p>}
+      {error && <p role="alert" className="a-body-sm a-warn-t st-wrap">{error}</p>}
+      <div className="a-btns">
+        <button type="button" className="a-btn secondary" disabled={busy || !token.trim()} onClick={check}>
           {t('settings_app_check_bot')}
         </button>
-        <button type="button" className="hq-btn-ghost disabled:opacity-40" disabled={busy || checked === null} onClick={() => run(() => onSave(token.trim()))}>
-          {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t('settings_app_save_restart')}
+        <button type="button" className="a-btn" disabled={busy || checked === null} onClick={() => run(() => onSave(token.trim()))}>
+          {busy && <Loader2 className="a-ic animate-spin" aria-hidden="true" />} {t('settings_app_save_restart')}
         </button>
       </div>
     </div>
@@ -203,25 +209,25 @@ function PairPanel({ platform, pair, onCancel }: { platform: ChatPlatform; pair:
   const left = secondsLeft(pair.expires_at, useNow(true))
   if (left === 0) {
     return (
-      <div className="flex flex-col gap-2 py-3.5 text-sm text-neutral-300">
-        {t('settings_app_pair_expired')}
-        <button type="button" className="hq-btn-ghost self-start" onClick={onCancel}>Close</button>
+      <div className="st-form">
+        <p className="a-body-sm a-muted">{t('settings_app_pair_expired')}</p>
+        <button type="button" className="a-btn secondary st-self" onClick={onCancel}>{t('close')}</button>
       </div>
     )
   }
   return (
-    <div className="flex flex-col gap-3 py-3.5 text-sm text-neutral-300">
+    <div className="st-form">
       {pair.deep_link && (
-        <a href={pair.deep_link} target="_blank" rel="noreferrer" className="hq-btn-ghost self-start px-4 py-2 text-sm">
-          <ExternalLink className="w-4 h-4" /> {t('settings_app_open_telegram')}
+        <a href={pair.deep_link} target="_blank" rel="noreferrer" className="a-btn secondary st-self">
+          <ExternalLink className="a-ic" aria-hidden="true" /> {t('settings_app_open_telegram')}
         </a>
       )}
-      <p className="leading-relaxed">{COPY[platform].pairHelp(pair)}</p>
-      <p className="font-mono text-2xl tracking-widest text-neutral-50 select-all">{pair.code}</p>
-      <p className="flex items-center gap-2">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t('settings_app_pair_waiting', { time: formatCountdown(left) })}
+      <p className="a-body-sm a-muted">{COPY[platform].pairHelp(pair)}</p>
+      <p className="a-mono st-code-text">{pair.code}</p>
+      <p className="a-body-sm a-muted st-inline">
+        <Loader2 className="a-ic animate-spin" aria-hidden="true" /> {t('settings_app_pair_waiting', { time: formatCountdown(left) })}
       </p>
-      <button type="button" className="hq-btn-ghost self-start" onClick={onCancel}>{t('spend_cancel')}</button>
+      <button type="button" className="a-btn quiet st-self" onClick={onCancel}>{t('spend_cancel')}</button>
     </div>
   )
 }
@@ -230,13 +236,13 @@ function DiscordInvite({ app }: { app: ChatAppStatus }) {
   const appId = app.bot?.application_id
   if (!appId) return null
   return (
-    <div className="flex flex-col gap-2 py-3.5 border-t border-white/10 text-sm text-neutral-300">
-      <span className="text-neutral-300">{t('settings_app_invite')}</span>
-      <a href={discordInviteUrl(appId)} target="_blank" rel="noreferrer" className="hq-btn-ghost self-start">
-        <ExternalLink className="w-3.5 h-3.5" /> {t('settings_app_invite_open')}
+    <div className="a-li st-stack">
+      <span className="a-body-sm">{t('settings_app_invite')}</span>
+      <a href={discordInviteUrl(appId)} target="_blank" rel="noreferrer" className="a-btn secondary st-self">
+        <ExternalLink className="a-ic" aria-hidden="true" /> {t('settings_app_invite_open')}
       </a>
       {app.bot?.message_content === false && (
-        <p role="alert" className="text-neutral-100">
+        <p role="alert" className="a-body-sm a-warn-t">
           {t('settings_app_intent_off')}
         </p>
       )}
@@ -246,9 +252,11 @@ function DiscordInvite({ app }: { app: ChatAppStatus }) {
 
 function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-3.5 text-sm border-t border-white/10 first:border-t-0">
-      <span className="text-neutral-300 shrink-0">{label}</span>
-      <span className="min-w-0 break-words text-right text-neutral-50">{children}</span>
+    <div className="a-li">
+      <div className="a-li-main">
+        <b>{label}</b>
+      </div>
+      <span className="a-li-trail st-trail">{children}</span>
     </div>
   )
 }
@@ -264,15 +272,15 @@ function OwnerLine({ platform, app, onPair, busy }: { platform: ChatPlatform; ap
   if (!app.owner.paired) {
     return (
       <Line label={t('settings_app_account')}>
-        <button type="button" className="hq-btn-ghost" disabled={busy} onClick={() => onPair(false)}>{COPY[platform].pairLabel}</button>
+        <button type="button" className="a-btn quiet" disabled={busy} onClick={() => onPair(false)}>{COPY[platform].pairLabel}</button>
       </Line>
     )
   }
   return (
     <Line label={t('settings_app_account')}>
-      <span className="inline-flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
+      <span className="st-inline">
         <span>{t('settings_app_linked')}</span>
-        <button type="button" className="hq-btn-ghost" disabled={busy} onClick={() => onPair(true)}>{t('settings_app_link_other')}</button>
+        <button type="button" className="a-btn quiet" disabled={busy} onClick={() => onPair(true)}>{t('settings_app_link_other')}</button>
       </span>
     </Line>
   )
@@ -295,9 +303,9 @@ function RestartLine({ data, restarter }: { data: ChatAppsStatus; restarter: Res
   return (
     <Line label={t('settings_app_needs_restart')}>
       {data.can_restart ? (
-        <button type="button" className="hq-btn-ghost" disabled={restarter.state.phase === 'restarting'} onClick={() => restarter.run()}>{t('settings_app_restart_now')}</button>
+        <button type="button" className="a-btn quiet" disabled={restarter.state.phase === 'restarting'} onClick={() => restarter.run()}>{t('settings_app_restart_now')}</button>
       ) : (
-        <span className="text-neutral-300">{data.restart_hint}</span>
+        <span className="a-body-sm a-muted">{data.restart_hint}</span>
       )}
     </Line>
   )
@@ -335,34 +343,41 @@ function ChatAppCard({ platform, data, restarter }: CardProps) {
   const save = (token: string) => run(async () => applyChange((await saveChatToken(platform, token)).can_restart))
 
   return (
-    <div className="hq-card rounded-2xl px-5">
-      <Line label={COPY[platform].title}><RelayLine app={app} /></Line>
-      {envLocked && <Line label={t('settings_app_bot')}>{t('settings_app_env_locked')}</Line>}
-      {!connected && editable && !settingUp && (
-        <Line label={t('settings_app_not_set_up')}>
-          <span className="block a-muted a-body-sm">{t('settings_app_pitch', { app: appName })}</span>
-          <button type="button" className="hq-btn-ghost" onClick={() => setSettingUp(true)}>{t('settings_app_set_up', { app: appName })}</button>
-        </Line>
-      )}
-      {!connected && editable && settingUp && <ConnectForm platform={platform} onSave={save} />}
-      {connected && (
-        <Line label={t('settings_app_bot')}>
-          {app.bot ? `@${app.bot.username}` : (
-            <button type="button" className="hq-btn-ghost" disabled={busy || !data.writable} onClick={recheck}>{t('settings_app_check_bot')}</button>
-          )}
-        </Line>
-      )}
-      {connected && platform === 'discord' && <DiscordInvite app={app} />}
-      {connected && data.writable && !pair && <OwnerLine platform={platform} app={app} busy={busy} onPair={(replace) => (replace ? setAsking('unlink') : startPairing(false))} />}
-      {pair && <PairPanel platform={platform} pair={pair} onCancel={() => setPair(null)} />}
-      {app.needs_restart && data.writable && <RestartLine data={data} restarter={restarter} />}
-      {connected && editable && (
-        <Line label={t('settings_app_disconnect')}>
-          <button type="button" className="hq-btn-ghost" disabled={busy || !reachable} onClick={() => setAsking('disconnect')}>{t('settings_app_disconnect')}</button>
-          {!reachable && <span className="block a-muted a-body-sm">{t('settings_needs_hq_unreachable')}</span>}
-        </Line>
-      )}
-      {error && <p role="alert" className="py-3 text-sm text-neutral-100 break-words border-t border-white/10">{error}</p>}
+    <section className="flex flex-col gap-2" aria-label={appName}>
+      <h3 className="a-grp">{appName}</h3>
+      <div className="a-set">
+        <Line label={t('settings_app_status')}><RelayLine app={app} /></Line>
+        {envLocked && <Line label={t('settings_app_bot')}>{t('settings_app_env_locked')}</Line>}
+        {!connected && editable && !settingUp && (
+          <Line label={t('settings_app_not_set_up')}>
+            <span className="a-muted a-body-sm">{t('settings_app_pitch', { app: appName })}</span>
+            <button type="button" className="a-btn quiet" onClick={() => setSettingUp(true)}>{t('settings_app_set_up', { app: appName })}</button>
+          </Line>
+        )}
+        {!connected && editable && settingUp && <ConnectForm platform={platform} onSave={save} />}
+        {connected && (
+          <Line label={t('settings_app_bot')}>
+            {app.bot ? `@${app.bot.username}` : (
+              <button type="button" className="a-btn quiet" disabled={busy || !data.writable} onClick={recheck}>{t('settings_app_check_bot')}</button>
+            )}
+          </Line>
+        )}
+        {connected && platform === 'discord' && <DiscordInvite app={app} />}
+        {connected && data.writable && !pair && <OwnerLine platform={platform} app={app} busy={busy} onPair={(replace) => (replace ? setAsking('unlink') : startPairing(false))} />}
+        {pair && <PairPanel platform={platform} pair={pair} onCancel={() => setPair(null)} />}
+        {app.needs_restart && data.writable && <RestartLine data={data} restarter={restarter} />}
+        {connected && editable && (
+          <Line label={t('settings_app_disconnect')}>
+            <button type="button" className="a-btn quiet" disabled={busy || !reachable} onClick={() => setAsking('disconnect')}>{t('settings_app_disconnect')}</button>
+            {!reachable && <span className="a-muted a-body-sm">{t('settings_needs_hq_unreachable')}</span>}
+          </Line>
+        )}
+        {error && (
+          <div className="a-li">
+            <p role="alert" className="a-body-sm a-warn-t st-wrap">{error}</p>
+          </div>
+        )}
+      </div>
       {asking === 'disconnect' && (
         <Dialog
           kind="red"
@@ -389,7 +404,7 @@ function ChatAppCard({ platform, data, restarter }: CardProps) {
           onAct={() => startPairing(true)}
         />
       )}
-    </div>
+    </section>
   )
 }
 
@@ -408,19 +423,15 @@ export function ChatAppsSection() {
         </button>
       </div>
     ) : (
-      <p className="a-muted" role="status">{t('settings_loading_messaging')}</p>
+      <SettingsSkeleton label={t('settings_loading_messaging')} />
     )
   }
   return (
-    <section id="chat-apps" aria-labelledby="chat-apps-title" className="scroll-mt-4 flex flex-col gap-3">
-      <h2 id="chat-apps-title" className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
+    <section id="chat-apps" aria-labelledby="chat-apps-title" className="flex flex-col gap-3">
+      <h2 id="chat-apps-title" className="a-sr">
         {t('row_messaging')}
       </h2>
-      {!data.writable && (
-        <p className="px-1 text-sm text-neutral-400">
-          {t('settings_app_needs_token')}
-        </p>
-      )}
+      {!data.writable && <p className="a-muted a-body-sm">{t('settings_app_needs_token')}</p>}
       <RestartNotice restarter={restarter} />
       <ChatAppCard platform="telegram" data={data} restarter={restarter} />
       <ChatAppCard platform="discord" data={data} restarter={restarter} />

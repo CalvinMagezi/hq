@@ -854,6 +854,7 @@
     <string name="leave_note_fallback">this note</string>
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back to Settings</string>
+    <string name="settings_loading">Asking HQ for your settings</string>
     <string name="group_browser">This browser</string>
     <string name="group_window">This window</string>
     <string name="group_accounts">Your accounts</string>
@@ -2586,7 +2587,7 @@
     <string name="helpers_new_name_advanced">Name and Advanced</string>
     <string name="spend_add_limit">Add a limit</string>
     <string name="spend_refresh">Refresh</string>
-    <string name="spend_limits_heading">Limits %1$s</string>
+    <string name="spend_limits_group">Limits</string>
     <string name="spend_loading">Asking HQ for your limits and spending</string>
     <string name="spend_empty_title">No spending limits</string>
     <string name="spend_empty_body">No limits are set, so nothing is limited. Add a limit to cap a day, a week or a month.</string>
@@ -3467,6 +3468,7 @@
     <string name="ver_updates_value">By itself</string>
     <string name="ver_support_body">Versions, with keys blanked.</string>
     <string name="settings_app_not_set_up">Not set up</string>
+    <string name="settings_app_status">Status</string>
     <string name="settings_app_pitch">Talk to HQ from %1$s. It needs a bot you make in %1$s, about five minutes.</string>
     <string name="settings_app_set_up">Set up %1$s</string>
     <string name="signed_out_inbox_line">Sign in to see what needs you. Nothing from this HQ stays in this browser.</string>

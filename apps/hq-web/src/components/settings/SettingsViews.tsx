@@ -17,12 +17,12 @@ const SECS_PER_MINUTE = 60
 
 function Line({ label, sub, children }: { label: string; sub?: string; children: ReactNode }) {
   return (
-    <div className="a-card">
-      <div className="flex items-baseline justify-between gap-4">
+    <div className="a-li st-fact">
+      <div className="a-li-main">
         <b>{label}</b>
-        <span className="text-right">{children}</span>
+        {sub && <span>{sub}</span>}
       </div>
-      {sub && <p className="a-muted a-body-sm">{sub}</p>}
+      <span className="a-li-trail st-trail">{children}</span>
     </div>
   )
 }
@@ -41,14 +41,14 @@ function SafetyTabBody({ s }: { s: HqSettings }) {
   const box = s.safety.bash_sandbox
   const boxWord = box === 'required' ? t('settings_safe_box_required') : box === 'best_effort' ? t('settings_safe_box_best_effort') : t('settings_safe_box_off')
   return (
-    <>
+    <div className="a-set">
       <Line label={t('settings_safe_box')} sub={t('settings_safe_box_sub')}>{boxWord}</Line>
       <Line label={t('settings_net_commands')} sub={t('settings_net_commands_sub')}>{yesNo(s.safety.bash_network)}</Line>
       <Line label={t('settings_skills_ask')} sub={t('settings_skills_ask_sub')}>{yesNo(s.safety.skills_write_approval)}</Line>
       <Line label={t('settings_origins')} sub={t('settings_origins_sub')}>
         {s.safety.web_allowed_origins.length ? s.safety.web_allowed_origins.join(', ') : t('settings_origins_none')}
       </Line>
-    </>
+    </div>
   )
 }
 
@@ -57,7 +57,7 @@ function HelpersTabBody({ h }: { h: HqSettings['agent_host'] }) {
   const box = safeBoxValue(h)
   const hidden = h.sandbox_hide_credentials !== false
   return (
-    <>
+    <div className="a-set">
       <Line label={t('settings_helpers_box')} sub={box.body}>{box.value}</Line>
       <Line label={t('settings_helpers_passwords')} sub={t('settings_helpers_passwords_sub')}>{yesNo(hidden)}</Line>
       <Line label={t('settings_helpers_default')}>{h.default_host}</Line>
@@ -76,33 +76,33 @@ function HelpersTabBody({ h }: { h: HqSettings['agent_host'] }) {
       <Line label={t('settings_helpers_extra_sites')} sub={t('settings_helpers_extra_sites_sub')}>
         {h.sandbox_profile !== 'open' && h.sandbox_extra_domains ? h.sandbox_extra_domains : t('settings_helpers_extra_never')}
       </Line>
-    </>
+    </div>
   )
 }
 
 function TimeTabBody({ s }: { s: HqSettings }) {
   const l = s.limits
   return (
-    <>
+    <div className="a-set">
       <Line label={t('settings_time_reply')} sub={t('settings_time_reply_sub')}>{`${Math.round(l.turn_ack_timeout_secs / SECS_PER_MINUTE)} min`}</Line>
       <Line label={t('settings_time_background')}>{tn('settings_time_background_value', l.background_turn_max_days)}</Line>
       <Line label={t('settings_time_checkin')}>
         {l.background_progress_secs === null ? t('settings_time_default') : `${Math.round(l.background_progress_secs / SECS_PER_MINUTE)} min`}
       </Line>
-    </>
+    </div>
   )
 }
 
 function ToolsTabBody({ s }: { s: HqSettings }) {
   const i = s.integrations
   return (
-    <>
+    <div className="a-set">
       <Line label={t('settings_tools_connected')}>
         {i.remote_mcp.length ? i.remote_mcp.map((m) => m.name).join(', ') : t('settings_tools_none')}
       </Line>
       <Line label={t('settings_tools_search')}>{i.searxng_host ?? t('settings_tools_search_builtin')}</Line>
       <Line label={t('settings_tools_disk')}>{onOff(i.disk_watchdog_enabled)}</Line>
-    </>
+    </div>
   )
 }
 
@@ -110,9 +110,9 @@ function ToolsTabBody({ s }: { s: HqSettings }) {
 export function SafetyView({ s, tab, onTab }: { s: HqSettings; tab: SafetyTab; onTab: (t: SafetyTab) => void }) {
   return (
     <div className="flex flex-col gap-3">
-      <div role="tablist" className="a-seg">
+      <div role="tablist" className="a-tabs">
         {SAFETY_TABS.map((k) => (
-          <button key={k} type="button" role="tab" aria-selected={k === tab} onClick={() => onTab(k)}>
+          <button key={k} type="button" role="tab" className="a-tab" aria-selected={k === tab} onClick={() => onTab(k)}>
             {t(TAB_KEY[k])}
           </button>
         ))}
@@ -132,22 +132,26 @@ export function FoldersView({ grants, canChange, busy, onRevoke, nowMs }: { gran
       <p className="a-muted a-body-sm">{t('settings_folders_intro')}</p>
       <p className="a-muted a-body-sm">{t('settings_folders_hq_note')}</p>
       {grants.length === 0 ? (
-        <div className="a-card">
+        <div className="a-empty">
           <b>{t('settings_folders_empty_title')}</b>
           <p className="a-muted">{t('settings_folders_empty_body')}</p>
         </div>
       ) : (
-        grants.map((g) => (
-          <div key={g.id} className="a-card">
-            <b className="font-mono">{g.path}</b>
-            <span className="a-muted">{g.host}</span>
-            <span className="a-muted">{formatApprovedText(g.approved_at, g.requested_by, nowMs)}</span>
-            <button type="button" className="a-btn secondary" disabled={busy || !canChange} onClick={() => onRevoke(g)}>
-              {t('settings_folders_revoke')}
-            </button>
-            {!canChange && <span className="a-muted a-body-sm">{t('settings_folders_revoke_needs')}</span>}
-          </div>
-        ))
+        <div className="a-set">
+          {grants.map((g) => (
+            <div key={g.id} className="a-li">
+              <div className="a-li-main">
+                <b className="a-mono">{g.path}</b>
+                <span>{g.host}</span>
+                <span>{formatApprovedText(g.approved_at, g.requested_by, nowMs)}</span>
+                {!canChange && <span>{t('settings_folders_revoke_needs')}</span>}
+              </div>
+              <button type="button" className="a-btn quiet danger" disabled={busy || !canChange} onClick={() => onRevoke(g)}>
+                {t('settings_folders_revoke')}
+              </button>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -166,10 +170,14 @@ export function BackupView({ status, canStart, version }: { status: BackupStatus
   else body = age ? t('settings_backup_on_body', { age }) : t('settings_backup_on')
   return (
     <div className="flex flex-col gap-3">
-      <div className="a-card">
-        <b>{known ? t('settings_backup_on') : t('settings_backup_unknown_title')}</b>
-        <span className={amber ? 'a-warn-t' : 'a-muted'}>{body}</span>
-        {version && <span className="a-muted">{t('ver_hq_line', { version })}</span>}
+      <div className="a-set">
+        <div className="a-li">
+          <div className="a-li-main">
+            <b>{known ? t('settings_backup_on') : t('settings_backup_unknown_title')}</b>
+            <span className={amber ? 'a-warn-t' : undefined}>{body}</span>
+            {version && <span>{t('ver_hq_line', { version })}</span>}
+          </div>
+        </div>
       </div>
     </div>
   )
