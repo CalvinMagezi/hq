@@ -1199,7 +1199,7 @@ dialog.hq-sheet::backdrop{background:var(--scrim)}
   dialog.hq-sheet.center{left:50%;top:50%;right:auto;bottom:auto}
 }
 /* The details pane docks from 1400 px; below that, opening it lays it over the detail as a side sheet. */
-.hq-panes{position:relative}
+.hq-panes{position:relative;height:100%}
 @container app (max-width:1399px){
   .hq-panes.side-open .a-pane-side{display:flex;position:absolute;top:0;right:0;bottom:0;z-index:20;width:min(var(--side-w),100%);background:var(--surface-100);border-left:1px solid var(--hairline)}
 }
