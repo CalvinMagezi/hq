@@ -137,11 +137,11 @@ describe('the new sign-in card (check 7)', () => {
   const html = (device: string | null) =>
     renderToStaticMarkup(createElement(SignInActions, { device, busy: false, onItWasMe: () => {}, onSignOut: async () => {} }))
 
-  test('has It was me, and Sign it out as an ink trigger that is never red', () => {
+  test('has It was me, and Sign it out as design buttons, the dialog trigger red', () => {
     const out = html('Chrome on Windows')
     expect(out).toContain('It was me')
     expect(out).toContain('Sign it out')
-    expect(out).not.toContain('danger')
+    expect(out).toContain('a-btn danger')
     expect(out).not.toContain('<dialog')
   })
 

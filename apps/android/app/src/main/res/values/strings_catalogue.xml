@@ -3455,4 +3455,14 @@
     <string name="helpers_message_aria">Message for the helper</string>
     <string name="helper_started_label">Started</string>
     <string name="helpers_hide_archived">Hide archived</string>
+    <string name="inbox_chip_hq">HQ</string>
+    <string name="inbox_back">Back to Inbox</string>
+    <string name="inbox_caught_up_body">Nothing is waiting on you. Checked at %1$s.</string>
+    <string name="inbox_decided_today">You decided today</string>
+    <string name="inbox_clear_one">Clear %1$s</string>
+    <string name="inbox_d_asked_by">Asked by</string>
+    <string name="inbox_d_when">When</string>
+    <string name="inbox_d_waits_until">Waits until</string>
+    <string name="inbox_d_helper">A helper</string>
+    <string name="inbox_d_pick">Choose an item to see its details.</string>
 </resources>
