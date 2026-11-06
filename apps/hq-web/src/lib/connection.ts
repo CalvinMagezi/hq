@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { useInHub } from '~/lib/hubWindow'
+import { useHubPhone, useInHub } from '~/lib/hubWindow'
 import { fetchHello, type Hello, helloUpstreamGone, helloYouStopped, startingSeconds } from '~/lib/hello'
 import { UNREACHABLE_GRACE_MS, useDeviceOnline } from '~/lib/reachability'
 import { hqJson, needsSignIn, onSignInChange } from '~/lib/hqAuth'
@@ -30,6 +30,8 @@ export interface ConnectionInputs {
   youStopped?: boolean
   lite: boolean
   inHub: boolean
+  /** The HQ window shows HQ on a paired phone, so Connected names whose HQ it is. */
+  phone?: boolean
 }
 
 export interface ConnectionView {
@@ -154,7 +156,7 @@ export function connectionState(
   return {
     ...base,
     state: 'connected',
-    words: inputs.lite ? t('state_lite') : t('state_connected'),
+    words: inputs.lite ? t('state_lite') : inputs.phone ? t('state_connected_phone') : t('state_connected'),
     dot: 'off',
     actionsOff: null,
   }
@@ -215,6 +217,7 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
   const proxyUpstreamGone = options?.proxyUpstreamGone ?? helloUpstreamGone()
   const hubWindow = useInHub()
   const inHub = options?.inHub ?? hubWindow
+  const phone = useHubPhone()
 
   const inputs: ConnectionInputs = {
     status401,
@@ -228,6 +231,7 @@ export function useConnection(options?: UseConnectionOptions): UseConnectionResu
     youStopped: helloYouStopped(),
     lite,
     inHub,
+    phone,
   }
 
   const view = connectionState(inputs, nowMs, nextTryMs)

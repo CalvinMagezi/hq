@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { readClock, deviceTimeZone, useClockZone } from '~/lib/clock'
-import { useInHub } from '~/lib/hubWindow'
+import { useHubPhone, useInHub } from '~/lib/hubWindow'
 import {
   DEFAULT_PUSH_PREFS,
   applyPushPrefs,
@@ -25,6 +25,8 @@ interface ViewProps {
   testLine: string | null
   onToggle: (key: keyof PushPrefs) => void
   onTest: () => void
+  /** The window shows HQ on a paired phone, which shows its own notifications. */
+  phone?: boolean
 }
 
 const BLOCKERS: Partial<Record<PushState, { title: StringKey; body: StringKey } | { line: StringKey }>> = {
@@ -47,7 +49,7 @@ function SwitchRow({ title, line, on, disabled, onToggle }: { title: string; lin
 }
 
 /** Notifications for this browser (N1 to N5, H9); the page's logic is in `NotificationsPage`. */
-export function NotificationsView({ mode, prefs, busy, host, testLine, onToggle, onTest }: ViewProps) {
+export function NotificationsView({ mode, prefs, busy, host, testLine, onToggle, onTest, phone }: ViewProps) {
   if (mode === null) return null
   if (mode === 'hub') {
     return (
@@ -61,7 +63,7 @@ export function NotificationsView({ mode, prefs, busy, host, testLine, onToggle,
         <div className="a-li">
           <div className="a-li-main">
             <b>{t('hub_notif_updates_title')}</b>
-            <span>{t('hub_notif_updates_body')}</span>
+            <span>{t(phone ? 'hub_notif_updates_body' : 'hub_notif_updates_body_here')}</span>
           </div>
         </div>
       </div>
@@ -136,6 +138,7 @@ export function NotificationsView({ mode, prefs, busy, host, testLine, onToggle,
 /** This browser's push subscription: the Needs you and Updates switches, details and a test. */
 export function NotificationsPage() {
   const hub = useInHub()
+  const phone = useHubPhone()
   const zone = useClockZone() || deviceTimeZone()
   const [state, setState] = useState<PushState | null>(null)
   const [prefs, setPrefs] = useState<PushPrefs>(DEFAULT_PUSH_PREFS)
@@ -180,7 +183,7 @@ export function NotificationsPage() {
   const mode: NotificationsMode = hub ? 'hub' : isSharedComputer() ? 'shared' : state
   return (
     <>
-      <NotificationsView mode={mode} prefs={prefs} busy={busy} host={typeof location === 'undefined' ? '' : location.host} testLine={testLine} onToggle={(k) => void toggle(k)} onTest={() => void test()} />
+      <NotificationsView mode={mode} phone={phone} prefs={prefs} busy={busy} host={typeof location === 'undefined' ? '' : location.host} testLine={testLine} onToggle={(k) => void toggle(k)} onTest={() => void test()} />
       {failed && <p className="a-muted a-body-sm" role="alert">{t('notif_failed')}</p>}
     </>
   )

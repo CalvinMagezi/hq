@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { t } from '~/strings'
-import { isHubResponse } from './hubWindow'
+import { isHubResponse, isPhoneHubResponse } from './hubWindow'
 import { monthKey } from './dataUsed'
 import { DEFAULT_PUSH_PREFS, subscribeBody } from './webPush'
 import {
@@ -57,6 +57,12 @@ describe('the four groups (check 1)', () => {
   test('the hub header is read as written', () => {
     expect(isHubResponse(new Headers({ 'x-hq-window': 'hub' }))).toBe(true)
     expect(isHubResponse(new Headers())).toBe(false)
+  })
+
+  test('only the HQ window can say it shows a phone', () => {
+    expect(isPhoneHubResponse(new Headers({ 'x-hq-window': 'hub', 'x-hq-hub': 'phone' }))).toBe(true)
+    expect(isPhoneHubResponse(new Headers({ 'x-hq-window': 'hub' }))).toBe(false)
+    expect(isPhoneHubResponse(new Headers({ 'x-hq-hub': 'phone' }))).toBe(false)
   })
 })
 

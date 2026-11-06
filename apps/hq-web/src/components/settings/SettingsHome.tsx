@@ -9,13 +9,15 @@ interface Props extends WhereHqRuns {
   /** Rows shown amber, by row id (H4). */
   needsLook?: string[]
   onSignOut: () => void
+  /** The window shows HQ on a paired phone: these are the phone's settings. */
+  phone?: boolean
 }
 
 /** The four groups as a list; at every width it is the index of Settings. */
-export function SettingsHome({ lite, hub, trailing, needsLook = [], onSignOut }: Props) {
+export function SettingsHome({ lite, hub, phone, trailing, needsLook = [], onSignOut }: Props) {
   return (
     <div className="flex flex-col gap-5 pb-6">
-      {hub && (
+      {phone && (
         <div className="flex flex-col gap-1 px-4">
           <p className="a-body">{t('hub_note_phone')}</p>
           <p className="a-muted a-body-sm">{t('hub_note_phone_own')}</p>

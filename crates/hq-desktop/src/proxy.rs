@@ -195,6 +195,7 @@ struct ProxyState {
     csp: HeaderValue,
     gate: Option<UpstreamGate>,
     you_stopped: Option<Arc<AtomicBool>>,
+    phone_hub: bool,
 }
 
 impl ProxyState {
@@ -246,15 +247,17 @@ pub async fn start(config: ProxyConfig) -> Result<ProxyHandle> {
 
 /// [`start`] with a gate asked before every request; while it is shut, nothing is forwarded.
 pub async fn start_gated(config: ProxyConfig, gate: Option<UpstreamGate>) -> Result<ProxyHandle> {
-    start_marked(config, gate, None).await
+    start_marked(config, gate, None, false).await
 }
 
 /// [`start_gated`] that also marks its 502 `x-hq-proxy: stopped` while `you_stopped` is set, so
-/// the window can say the person stopped HQ rather than that it went away.
+/// the window can say the person stopped HQ rather than that it went away. `phone_hub` marks
+/// every answer `x-hq-hub: phone`, for an upstream that is a paired phone's forward.
 pub async fn start_marked(
     config: ProxyConfig,
     gate: Option<UpstreamGate>,
     you_stopped: Option<Arc<AtomicBool>>,
+    phone_hub: bool,
 ) -> Result<ProxyHandle> {
     config.validate()?;
     let listener = tokio::net::TcpListener::bind(config.listen)
@@ -281,6 +284,7 @@ pub async fn start_marked(
         csp: HeaderValue::from_str(&extra_csp(addr.port()))?,
         gate,
         you_stopped,
+        phone_hub,
     });
     let app = Router::new().fallback(handle).with_state(state);
     let (stop, stopped) = oneshot::channel::<()>();
@@ -359,7 +363,8 @@ async fn forward(state: &ProxyState, req: Request) -> Response {
             let n = name.as_str();
             let hop = is_hop_by_hop(name);
             // The proxy is same-origin for its clients; HQ's CORS answers would only widen that.
-            if !hop && !n.starts_with("access-control-") {
+            // Whose HQ the window shows is the proxy's to say, never the upstream's.
+            if !hop && !n.starts_with("access-control-") && n != HUB_KIND_HEADER {
                 out.append(name.clone(), value.clone());
             }
         }
@@ -380,6 +385,12 @@ async fn forward(state: &ProxyState, req: Request) -> Response {
             HeaderName::from_static(HUB_WINDOW_HEADER),
             HeaderValue::from_static(HUB_WINDOW_VALUE),
         );
+        if state.phone_hub {
+            out.insert(
+                HeaderName::from_static(HUB_KIND_HEADER),
+                HeaderValue::from_static(HUB_KIND_PHONE),
+            );
+        }
     }
     response
         .body(Body::from_stream(upstream.bytes_stream()))
@@ -389,6 +400,9 @@ async fn forward(state: &ProxyState, req: Request) -> Response {
 /// Tells the web app it is HQ's window inside HQ Hub, so its Settings group reads "This window".
 pub const HUB_WINDOW_HEADER: &str = "x-hq-window";
 pub const HUB_WINDOW_VALUE: &str = "hub";
+/// Set when the HQ behind the window is a paired phone's, so its status line says "HQ on your phone".
+pub const HUB_KIND_HEADER: &str = "x-hq-hub";
+pub const HUB_KIND_PHONE: &str = "phone";
 
 /// Marks the proxy's own 502, so the window can tell "HQ can't be reached" from an error HQ sent.
 pub const UPSTREAM_GONE_HEADER: &str = "x-hq-proxy";
