@@ -11,15 +11,18 @@ html, body { margin: 0; height: 100%; background: var(--surface-000); }
 .hub-why:empty, .hub-error:empty { display: none; }
 .hub-error { margin: 0; color: var(--danger); font-weight: 700; }
 .hub-compact { padding: 12px 16px; }
-.hub-need { background: var(--warn); color: var(--on-green); }
+.hub-need { background: var(--warn); color: var(--surface-000); }
 .hub-paste { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.hub-paste .a-field { flex: 1 1 240px; }
+.hub-paste-field { flex: 1 1 240px; }
+.hub-top { gap: 12px; }
+.hub-mark { display: block; width: 32px; height: 32px; flex: none; }
+.hub-hit { cursor: pointer; }
+.hub-row-open { display: flex; flex: 1 1 0; min-width: 0; text-align: left; }
+.hub-select { width: auto; min-width: 160px; }
 .hub-log { margin: 0; max-height: 50vh; overflow: auto; font: 12px/16px var(--font-mono); white-space: pre-wrap; word-break: break-all; color: var(--ink); }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .muted { color: var(--ink-muted); }
 .link { word-break: break-all; max-width: 100%; }
-.list { padding: 0; list-style: none; margin: 0; }
-.list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--hairline); }
 .a-card { margin: 0; }
 canvas { image-rendering: pixelated; background: var(--qr-light); border: 8px solid var(--qr-light); }
 code { font-family: var(--font-mono); font-size: 12px; }

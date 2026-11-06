@@ -20,3 +20,6 @@ await cp('ui/style.css', 'ui/dist/style.css')
 // The shared dark styles and the font files they name, from the web app, so both windows look alike.
 await cp('../hq-web/src/styles/aligned-ui.css', 'ui/dist/aligned-ui.css')
 await cp('../hq-web/public/fonts', 'ui/dist/fonts', { recursive: true })
+// The HQ mark the stylesheet's `.a-mark` names.
+await mkdir('ui/dist/icons', { recursive: true })
+await cp('../hq-web/public/icons/hq-icon-192.png', 'ui/dist/icons/hq-icon-192.png')
