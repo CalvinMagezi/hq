@@ -176,6 +176,17 @@ pub(crate) fn is_rejected_note_ref(rel: &str) -> bool {
 /// 3. Bare note names/wikilinks (e.g. `Plan`) searched in root and `Notebooks/`
 ///
 /// Rejects path traversal (`..`), absolute paths, and external paths.
+/// A folder inside the vault, which `GET /api/note` answers with its listing. The vault root is
+/// not one: its listing is `/api/tree`'s.
+pub(crate) fn resolve_folder(vault: &Path, rel: &str) -> Option<(PathBuf, String)> {
+    let rel = rel.trim().trim_end_matches('/');
+    if rel.is_empty() || is_rejected_note_ref(rel) {
+        return None;
+    }
+    let abs = resolve_in_vault(vault, rel)?;
+    abs.is_dir().then(|| (abs, rel.to_string()))
+}
+
 pub(crate) fn resolve_note_path(vault: &Path, rel: &str) -> Option<(PathBuf, String)> {
     let rel = rel.trim();
     if is_rejected_note_ref(rel) {
@@ -1263,6 +1274,22 @@ mod tests {
 
         // 6. Missing note returns None
         assert!(resolve_note_path(v.path(), "Nonexistent").is_none());
+    }
+
+    #[test]
+    fn a_folder_resolves_for_its_listing_but_never_the_root_or_outside() {
+        let v = vault();
+        std::fs::write(v.path().join("Notebooks/Inbox/Plan.md"), "Plan").unwrap();
+        let (abs, rel) = resolve_folder(v.path(), "Notebooks/Inbox/").expect("a folder");
+        assert_eq!(rel, "Notebooks/Inbox");
+        assert_eq!(abs, v.path().join("Notebooks/Inbox"));
+        assert!(
+            resolve_folder(v.path(), "Notebooks/Inbox/Plan.md").is_none(),
+            "a file"
+        );
+        assert!(resolve_folder(v.path(), "").is_none(), "the root");
+        assert!(resolve_folder(v.path(), "Notebooks/../..").is_none());
+        assert!(resolve_folder(v.path(), "Notebooks/Missing").is_none());
     }
 
     /// FR-057: a symlink planted inside `Notebooks/` that points outside the
