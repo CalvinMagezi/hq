@@ -7,7 +7,7 @@ test('signed-out Inbox names the state and keeps nothing', () => {
   const html = renderToStaticMarkup(<SignedOutView pathname="/inbox" embedded={false} />)
   expect(html).toContain('Signed out of this HQ')
   expect(html).toContain('Nothing from this HQ stays in this browser.')
-  expect(html).toContain('min-h-11')
+  expect(html).toContain('class="a-btn"')
 })
 
 test('Settings words for the new pages exist', () => {
