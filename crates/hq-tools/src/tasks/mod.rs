@@ -35,7 +35,7 @@ pub use json::{
     apply_dependency_changes, notify_audit_digest, notify_autonomy_withdrawn, notify_briefing,
     notify_owner_exception, notify_queue_alert, notify_ready_for_review, notify_recipients,
     notify_tags, notify_unblocked, notify_veto_window, task_json, task_json_with_warnings,
-    unblocked_by_transition,
+    task_review_link, unblocked_by_transition,
 };
 pub use placement::{
     Placement, create_task_in, derive_id_prefix, find_or_create_folder, find_or_create_initiative,

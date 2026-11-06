@@ -296,6 +296,15 @@ async fn update_to_ready_for_review_emits_a_value_item_once() {
         1,
         "transition into ready_for_review should emit one value item"
     );
+    let item = hq_db::value_items::list_by_state(&value_db, hq_core::types::ValueState::Pending)
+        .unwrap()
+        .remove(0);
+    let task_id = created["id"].as_str().unwrap();
+    assert_eq!(
+        item.link.as_deref(),
+        Some(super::task_review_link(task_id).as_str()),
+        "Check it opens the task"
+    );
 
     // Already ready_for_review: touching an unrelated field must not re-fire.
     update

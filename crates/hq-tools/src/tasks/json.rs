@@ -212,7 +212,9 @@ pub async fn notify_ready_for_review(vault_path: PathBuf, task: t::Task) {
         summary,
         task.description.clone(),
     )
-    .with_dedup_key(format!("task-review-{}", task.id));
+    .with_dedup_key(format!("task-review-{}", task.id))
+    // Check it opens the task itself; the inbox card has no other way to find it.
+    .with_link(task_review_link(&task.id));
 
     let db_path = vault_path.join("_data").join("vault.db");
     let emitted = hq_db::Database::open(&db_path).and_then(|db| {
@@ -232,6 +234,11 @@ pub async fn notify_ready_for_review(vault_path: PathBuf, task: t::Task) {
 
 /// The value source of a review request.
 pub const TASK_REVIEW_SOURCE: &str = "task_ready_for_review";
+
+/// The web app's page for one task, which a ready-to-check item opens.
+pub fn task_review_link(task_id: &str) -> String {
+    format!("/tasks?task={task_id}")
+}
 /// The value source of a task verification could not settle and only the owner can.
 pub const TASK_EXCEPTION_SOURCE: &str = "task_needs_owner";
 /// The value source of a tier whose auto-completion was held back by what the audits and canaries

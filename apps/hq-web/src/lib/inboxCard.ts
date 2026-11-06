@@ -7,6 +7,13 @@ import type { NotificationItem } from './notificationsApi'
 
 export type CardKind = 'sign_in' | 'question' | 'approval' | 'task_check' | 'stuck' | 'update'
 
+/** The task a ready-to-check item is about, from the link the server gives it (`/tasks?task=<id>`). */
+export function taskCheckId(n: NotificationItem): string | null {
+  const link = n.metadata.link
+  if (!link?.startsWith('/tasks?')) return null
+  return new URLSearchParams(link.slice('/tasks?'.length)).get('task')
+}
+
 /** A request waits 24 hours for its answer, then lapses (resolutions.md C-7). */
 export const REQUEST_LIFETIME_MS = 24 * 60 * 60 * 1000
 export const NOTIFY_HIDE_MS = 7 * 24 * 60 * 60 * 1000

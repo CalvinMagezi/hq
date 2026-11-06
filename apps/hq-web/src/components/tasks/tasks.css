@@ -95,7 +95,6 @@
 .a-pad{padding:16px}
 .tk-page{display:flex;flex:1 1 auto;height:100%;min-height:0;width:100%;position:relative}
 .tk-page>.a-panes{flex:1 1 auto}
-.tk-sub{padding:0 16px 8px}
 .tk-view{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
 .tk-details-btn{display:inline-flex}
 @container app (min-width:1400px){.tk-details-btn{display:none}}
