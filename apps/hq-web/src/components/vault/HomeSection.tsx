@@ -3,12 +3,6 @@ import type { SectionState } from '~/lib/homeSections'
 import { useSharedConnection } from '~/lib/connection'
 import { t, type StringKey } from '~/strings'
 
-const FAILED_LOAD: Record<string, StringKey> = {
-  Pinned: 'fail_load_pinned_no_reply',
-  'Recent Project Notes': 'fail_load_recent_no_reply',
-  'In Progress Tasks': 'fail_load_tasks_no_reply',
-}
-
 /** A section's own failure shows only while Connected; every other state is said by the status line and the strip. */
 export const showsSectionError = (connected: boolean, kind: SectionState<unknown>['kind']) => connected && kind === 'error'
 
@@ -16,44 +10,34 @@ interface HomeSectionProps<T> {
   title: string
   state: SectionState<T>
   emptyText: string
+  failedKey: StringKey
   onRetry: () => void
   render: (items: T[]) => ReactNode
-  accent?: string
 }
 
 const SKELETON_ROWS = 2
 
-export function HomeSection<T>({ title, state, emptyText, onRetry, render, accent }: HomeSectionProps<T>) {
+/** One titled group of Notes home: its count, then skeleton shapes, an empty line, its own failure or the items. */
+export function HomeSection<T>({ title, state, emptyText, failedKey, onRetry, render }: HomeSectionProps<T>) {
   const connected = useSharedConnection() === 'connected'
   return (
-    <section className="mb-10" aria-label={title} data-home-section={title}>
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-xs tracking-widest uppercase font-bold" style={{ color: accent ?? 'var(--text-dim)' }}>
-          {title}
-        </span>
-        <div className="flex-1 h-px bg-white/5" />
-        {state.kind === 'ready' && (
-          <span className="text-xs px-1.5 py-0.5 rounded-md bg-white/5 font-bold" style={{ color: 'var(--text-dim)' }}>
-            {state.items.length}
-          </span>
-        )}
-      </div>
+    <section aria-label={title} data-home-section={title}>
+      <p className="a-grp">
+        {title}
+        {state.kind === 'ready' && <em className="a-count">{state.items.length}</em>}
+      </p>
       {state.kind === 'loading' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" role="status" aria-label={`Loading ${title}`}>
+        <div role="status" aria-label={t('notes_loading')}>
           {Array.from({ length: SKELETON_ROWS }, (_, i) => (
-            <div key={i} className="glass-card rounded-xl h-16 animate-pulse" />
+            <span key={i} className="a-skel t" />
           ))}
         </div>
       )}
-      {state.kind === 'empty' && (
-        <div className="glass-card rounded-xl px-4 py-5 text-xs " style={{ color: 'var(--text-dim)' }}>
-          {emptyText}
-        </div>
-      )}
+      {state.kind === 'empty' && <p className="a-body-sm a-muted">{emptyText}</p>}
       {showsSectionError(connected, state.kind) && (
-        <div role="alert" className="glass-card rounded-xl px-4 py-4 flex items-center justify-between gap-3 text-xs " style={{ color: 'var(--text-dim)' }}>
-          <span className="min-w-0 break-words">{t(FAILED_LOAD[title] ?? 'fail_load_recent_no_reply')}</span>
-          <button type="button" onClick={onRetry} className="shrink-0 px-3 py-1.5 rounded-lg bg-white/5 font-bold" style={{ color: 'var(--text-primary)' }}>
+        <div role="alert" className="a-banner">
+          <span>{t(failedKey)}</span>
+          <button type="button" className="a-link" onClick={onRetry}>
             {t('chat_retry')}
           </button>
         </div>
