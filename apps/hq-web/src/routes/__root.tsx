@@ -103,13 +103,8 @@ function RootComponent() {
       <WebSocketProvider>
         <SetupRedirect />
         <VaultShell embedded={embedded} />
-        {/* The app has its own search and quick note screens. */}
-        {!embedded && (
-          <>
-            <SearchOverlay />
-            <QuickNoteOverlay />
-          </>
-        )}
+        {/* The app has its own quick note screen. */}
+        {!embedded && <QuickNoteOverlay />}
       </WebSocketProvider>
     </RootDocument>
   )
@@ -363,6 +358,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
           <SignInPrompt />
           <ConnectionSheet connection={connection} open={sheetOpen} onClose={() => setSheetOpen(false)} triggerRef={statusLineRef} />
           <ToastHost />
+          {/* The one Search, inside .a-app so it takes the design's widths. */}
+          <SearchOverlay />
         </>
       )}
       {/* One sheet for every note link, whatever page it was clicked in; inside .a-app so it takes the design's widths. */}

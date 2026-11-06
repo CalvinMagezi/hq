@@ -27,7 +27,7 @@ export function AwayLinkRow() {
   const line = b && verificationActive(b.mode) ? awayLinkLine(b) : null
   if (!line) return null
   return (
-    <Link to="/tasks/away" className="block mt-4 px-3 py-3 min-h-11 rounded-xl hq-glass-card text-xs text-neutral-200">
+    <Link to="/tasks/away" className="a-rcard a-pad">
       {line}
     </Link>
   )

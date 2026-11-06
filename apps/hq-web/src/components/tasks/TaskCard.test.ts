@@ -37,23 +37,11 @@ const makeTask = (overrides: Partial<TaskItem> = {}): TaskItem => ({
   ...overrides,
 })
 
-test('TaskCard renders with defensive width and overflow classes for mobile safety', () => {
+test('TaskCard is one design row, with the long meta kept in one line of text', () => {
   const html = renderToString(createElement(TaskCard, { task: makeTask() }))
-
-  // Outer container must constrain width and prevent horizontal overflow
-  expect(html).toContain('w-full')
-  expect(html).toContain('max-w-full')
-  expect(html).toContain('min-w-0')
-  expect(html).toContain('overflow-hidden')
-
-  // Header must wrap on small screens
-  expect(html).toContain('flex-wrap')
-
-  // Title and description must break words
-  expect(html).toContain('break-words')
-
-  // Blocked chips and tags must truncate inside max-w-full container
-  expect(html).toContain('truncate')
+  expect(html).toContain('class="a-trow"')
+  expect(html).toContain('a-trow-main')
+  expect(html).not.toContain('hq-card')
   expect(html).toContain('SHADOW-002, SHADOW-003, SHADOW-004')
 })
 

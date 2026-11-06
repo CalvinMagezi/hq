@@ -1,0 +1,22 @@
+/* Search's own classes from the Aligned Search boards (`sr-*` there). */
+.sr-panel{position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;background:var(--surface-000);overflow:hidden;padding-top:var(--safe-top)}
+@container app (min-width:768px){.sr-panel{inset:auto;left:50%;top:56px;transform:translateX(-50%);width:min(760px,calc(100% - 48px));max-height:calc(100% - 112px);background:var(--surface-100);border:1px solid var(--line);border-radius:28px;padding-top:0}}
+.sr-scrim{z-index:39}
+.sr-top{display:flex;align-items:center;gap:4px;padding:12px 12px 4px 8px;flex:none}
+.sr-top .a-search{flex:1 1 0;min-width:0;margin-left:8px}
+.sr-body{flex:1 1 auto;overflow:auto;padding-bottom:8px}
+.sr-grp{display:flex;align-items:center;gap:8px;padding:16px 24px 6px;margin:0;font:700 14px/20px var(--font-sans);color:var(--ink)}
+.sr-grp .a-count{margin-right:auto}
+.sr-body .a-row{min-height:56px;cursor:pointer}
+.sr-body .a-row[aria-selected="true"]{background:var(--surface-200);outline:2px solid var(--focus-ring);outline-offset:-2px}
+.sr-trail{color:var(--text-blue) !important}
+.sr-hit mark{background:var(--surface-200);color:var(--ink);font-weight:700;border-radius:3px;padding:0 2px}
+.sr-foot{display:none;flex-wrap:wrap;gap:16px;align-items:center;padding:10px 24px;border-top:1px solid var(--hairline);font:400 12px/16px var(--font-sans);color:var(--ink-muted);flex:none}
+@container app (min-width:768px){.sr-foot{display:flex}}
+.sr-ask{display:flex;padding:8px 16px 4px}
+.sr-down{display:flex;flex-direction:column;gap:2px;margin:4px 16px;padding:12px;border-radius:12px;background:var(--surface-200);font:400 14px/20px var(--font-sans);color:var(--ink)}
+.sr-note{margin:8px 16px 0;font:400 13px/18px var(--font-sans);color:var(--ink-muted)}
+.sr-pad{padding:8px 24px}
+.sr-recent{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 24px 6px}
+.sr-chips{padding:4px 16px 8px}
+.sr-top .a-search input:focus-visible{outline:none}

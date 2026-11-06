@@ -2,6 +2,8 @@ import { ApprovalCard } from '../ui/ApprovalCard'
 import { t, type StringKey } from '~/strings'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
+import { AlertCircle } from 'lucide-react'
+import './leaf.css'
 import { answerDecision, fetchTaskDecisions, type TaskDecision } from '~/lib/taskDecisionsApi'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { usePolled } from '../sessions/usePolled'
@@ -26,7 +28,7 @@ export function TaskDecisions({ taskId }: { taskId: string }) {
   return (
     <section aria-label={t('task_dec_aria')}>
       <SectionLabel>{t('task_dec_title')}</SectionLabel>
-      <ul className="space-y-2">
+      <ul className="a-card needs l-lines">
         {open.map((d) => (
           <DecisionRow key={d.item_id} decision={d} onAnswered={decisions.refresh} />
         ))}
@@ -51,9 +53,10 @@ function DecisionRow({ decision: d, onAnswered }: { decision: TaskDecision; onAn
     }
   }
   return (
-    <li className="px-2.5 py-2 rounded-lg border border-amber-500/20 bg-amber-500/5 space-y-1.5">
-      <p className="text-xs text-neutral-300">
-        <Link to="/helpers/$id" params={{ id: d.session_id }} className="underline decoration-dotted">
+    <li className="a-drow l-tall l-col">
+      <p className="a-body-sm">
+        <AlertCircle className="a-ic xs a-warn-t" aria-hidden="true" />{' '}
+        <Link to="/helpers/$id" params={{ id: d.session_id }} className="a-link">
           {d.session_id}
         </Link>{' '}
         {t(ASKS[d.kind] ?? 'task_dec_needs')}

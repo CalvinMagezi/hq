@@ -5,15 +5,16 @@ import { SectionLabel } from './taskFields'
 import { formatLocalTime } from './timeFormat'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { t } from '~/strings'
+import './leaf.css'
 
 const CHECKPOINT_POLL_MS = 300_000
 
 function Part({ label, text }: { label: string; text: string }) {
   if (!text) return null
   return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wider text-neutral-500">{label}</div>
-      <p className="text-xs text-neutral-200 whitespace-pre-wrap break-words">{text}</p>
+    <div className="a-drow l-tall l-col">
+      <div className="a-label">{label}</div>
+      <p className="a-body-sm l-pre">{text}</p>
     </div>
   )
 }
@@ -32,21 +33,21 @@ export function TaskCheckpoint({ task }: { task: TaskItem }) {
   return (
     <section aria-label={t('task_cp_aria')}>
       <SectionLabel>{t('task_cp_title')}</SectionLabel>
-      <div className="space-y-2 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+      <div className="a-card l-lines">
         <Part label={t('task_cp_so_far')} text={checkpoint.summary} />
         <Part label={t('task_cp_next')} text={checkpoint.next_step} />
         <Part label={t('task_cp_questions')} text={checkpoint.open_questions} />
         {checkpoint.files.length > 0 && (
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('task_cp_files')}</div>
-            <ul className="text-[11px] text-neutral-300 break-all">
+          <div className="a-drow l-tall l-col">
+            <div className="a-label">{t('task_cp_files')}</div>
+            <ul className="a-cap l-break">
               {checkpoint.files.map((file) => (
                 <li key={file}>{file}</li>
               ))}
             </ul>
           </div>
         )}
-        <p className="text-[11px] text-neutral-500">
+        <p className="a-cap a-muted l-pad">
           {t('task_cp_left_by', { who: checkpoint.actor, when: formatLocalTime(checkpoint.created_at) })}
         </p>
       </div>

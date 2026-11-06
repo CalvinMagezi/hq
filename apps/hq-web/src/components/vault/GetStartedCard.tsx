@@ -20,7 +20,6 @@ import {
 
 // A service worker that never becomes ready would otherwise keep the card from ever settling.
 const PUSH_CHECK_TIMEOUT_MS = 5000
-const TAP_TARGET_PX = 36
 
 type PushCheck = { settled: false } | { settled: true; state: PushState | null }
 
@@ -47,29 +46,27 @@ function usePushCheck(enabled: boolean): PushCheck {
 function ItemRow({ item, onMarkDone, phoneHidden }: { item: GetStartedItem; onMarkDone?: () => void; phoneHidden?: boolean }) {
   const Icon = item.done ? Check : Circle
   return (
-    <li className={`${phoneHidden ? 'hidden sm:flex' : 'flex'} items-start gap-3 py-3 border-t border-white/5 first:border-t-0`}>
+    <li className={`${phoneHidden ? 'hidden sm:flex' : 'flex'} items-start gap-3 py-3 border-t first:border-t-0`} style={{ borderColor: 'var(--hairline)' }}>
       <Icon
-        className="w-4 h-4 mt-0.5 shrink-0"
-        style={{ color: item.done ? 'var(--accent-green)' : 'var(--text-dim)' }}
+        className="a-ic sm"
         aria-hidden="true"
       />
       <div className="flex flex-col gap-1 min-w-0 flex-1">
-        <span className="text-sm font-bold" style={{ color: item.done ? 'var(--text-dim)' : 'var(--text-primary)' }}>
+        <b className={item.done ? 'a-muted' : undefined}>
           {item.title}
-          {item.done && <span className="ml-2 text-xs font-normal">{t('gs_done')}</span>}
-        </span>
+          {item.done && <span className="a-body-sm a-muted"> {t('gs_done')}</span>}
+        </b>
         {item.done && item.doneDetail && (
-          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-dim)' }}>{item.doneDetail}</p>
+          <p className="a-body-sm a-muted">{item.doneDetail}</p>
         )}
         {!item.done && (
           <>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-dim)' }}>{item.detail}</p>
+            <p className="a-body-sm a-muted">{item.detail}</p>
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Link
                 to={item.to}
                 hash={item.hash}
-                className="inline-flex items-center px-3 rounded-lg bg-white/5 text-xs font-bold"
-                style={{ color: 'var(--text-primary)', minHeight: TAP_TARGET_PX }}
+                className="a-btn secondary compact"
               >
                 {item.linkLabel}
               </Link>
@@ -77,8 +74,7 @@ function ItemRow({ item, onMarkDone, phoneHidden }: { item: GetStartedItem; onMa
                 <button
                   type="button"
                   onClick={onMarkDone}
-                  className="px-3 rounded-lg text-xs"
-                  style={{ color: 'var(--text-dim)', minHeight: TAP_TARGET_PX }}
+                  className="a-btn quiet compact"
                 >
                   {t('gs_mark_done')}
                 </button>
@@ -118,21 +114,20 @@ export function GetStartedCard({ compact = false }: { compact?: boolean } = {}) 
   return (
     <section className="mb-10" aria-labelledby="get-started-title">
       <div className="flex items-center gap-2 mb-4">
-        <h2 id="get-started-title" className="text-[11px] tracking-widest uppercase font-bold" style={{ color: 'var(--text-dim)' }}>
+        <h2 id="get-started-title" className="a-grp">
           {t('gs_title')}
         </h2>
-        <span className="text-[11px]" style={{ color: 'var(--text-dim)' }}>{progressLine(items)}</span>
-        <div className="flex-1 h-px bg-white/5" />
+        <span className="a-body-sm a-muted">{progressLine(items)}</span>
+        <div className="flex-1" />
         <button
           type="button"
           onClick={() => setPrefs((p) => ({ ...p, hidden: true }))}
-          className="px-3 rounded-lg bg-white/5 text-[11px] font-bold"
-          style={{ color: 'var(--text-primary)', minHeight: TAP_TARGET_PX }}
+          className="a-btn quiet compact"
         >
           {t('gs_hide')}
         </button>
       </div>
-      <ul className="glass-card rounded-xl px-4">
+      <ul className="a-card">
         {items.map((item) => (
           <ItemRow
             key={item.id}

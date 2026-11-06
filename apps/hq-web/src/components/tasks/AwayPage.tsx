@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { t } from '~/strings'
+import './leaf.css'
 import { awaySections } from '~/lib/tasksAway'
 import { fetchBriefing, type Briefing } from '~/lib/verificationApi'
 import { useRefreshOn } from '~/lib/useRefreshOn'
@@ -20,36 +21,36 @@ interface ViewProps {
 export function AwayPageView({ briefing, nowMs, owner, onOpenTask, onAudit }: ViewProps) {
   const sections = awaySections(briefing, nowMs, owner)
   return (
-    <section aria-label={t('tasks_away_title')} className="space-y-5 pb-8">
+    <section aria-label={t('tasks_away_title')} className="l-stack pb-8">
       <div>
-        <h2 className="text-lg font-semibold text-white">{t('tasks_away_title')}</h2>
-        <p className="text-xs text-neutral-500">{t('tasks_away_window', { hours: AWAY_HOURS })}</p>
+        <h2 className="a-h3">{t('tasks_away_title')}</h2>
+        <p className="a-cap a-muted">{t('tasks_away_window', { hours: AWAY_HOURS })}</p>
       </div>
-      {sections.length === 0 && <p className="text-xs text-neutral-400">{t('tasks_away_nothing')}</p>}
+      {sections.length === 0 && <p className="a-body-sm a-muted">{t('tasks_away_nothing')}</p>}
       {sections.map((s) => (
         <div key={s.id} data-away-section={s.id}>
-          <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">
+          <h3 className="a-label mb-2">
             {s.title} {s.count}
           </h3>
           {s.id === 'spot' ? (
-            <button type="button" onClick={onAudit} className="hq-btn-ghost !h-10 !px-3 !text-xs">
+            <button type="button" onClick={onAudit} className="a-btn secondary compact">
               {t('tasks_away_spot_ask')}
             </button>
           ) : (
-            <ul className="space-y-1.5">
+            <ul className="a-card l-lines">
               {s.rows.map((r) => (
                 <li key={r.key}>
                   {r.taskId ? (
                     <button
                       type="button"
                       onClick={() => onOpenTask(r.taskId!)}
-                      className="w-full text-left min-h-11 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 hover:bg-white/[0.06]"
+                      className="a-drow l-tall l-col l-link w-full"
                     >
-                      <span className="block text-xs text-neutral-100 truncate">{r.title}</span>
-                      {r.detail && <span className="block text-xs text-neutral-400 truncate">{r.detail}</span>}
+                      <span className="block a-body-sm l-clip">{r.title}</span>
+                      {r.detail && <span className="block a-cap a-muted l-clip">{r.detail}</span>}
                     </button>
                   ) : (
-                    <span className="block text-xs text-neutral-300 px-1">{r.title}</span>
+                    <span className="block a-body-sm l-pad">{r.title}</span>
                   )}
                 </li>
               ))}
@@ -57,7 +58,7 @@ export function AwayPageView({ briefing, nowMs, owner, onOpenTask, onAudit }: Vi
           )}
         </div>
       ))}
-      <Link to="/tasks" className="inline-block text-xs text-emerald-400 hover:text-emerald-300">
+      <Link to="/tasks" className="a-link">
         {t('tasks_away_open_tasks')}
       </Link>
     </section>
@@ -76,7 +77,7 @@ export function AwayPage({ owner, onOpenTask, onAudit }: Props) {
   useRefreshOn(['task:sync'], found.refresh)
   const b = found.data
   if (!b || !verificationActive(b.mode)) {
-    return <p className="text-xs text-neutral-400">{t('tasks_away_nothing')}</p>
+    return <p className="a-body-sm a-muted">{t('tasks_away_nothing')}</p>
   }
   return <AwayPageView briefing={b} nowMs={Date.now()} owner={owner} onOpenTask={onOpenTask} onAudit={onAudit} />
 }

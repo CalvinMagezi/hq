@@ -1,7 +1,20 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Check, Copy, Link2, Minus, Plus } from 'lucide-react'
 import { t } from '~/strings'
 import { getNote, getVaultRoot } from '~/lib/vaultApi'
+import '~/components/vault/notes.css'
 import { copyNoteLink, mintNoteLink } from '~/lib/noteLink'
+
+/** The note's text size, shown in the menu on a note and changed from there. */
+export interface ZoomControl {
+    pct: number
+    canSmaller: boolean
+    canLarger: boolean
+    modified: boolean
+    onSmaller: () => void
+    onLarger: () => void
+    onReset: () => void
+}
 
 export interface CopyMenuState {
     relPath: string
@@ -29,14 +42,15 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 /**
- * Floating "copy" menu (relative path, absolute path, note content). Rendered when `menu` is set; anchors near the
- * long-press point, clamped to the viewport so it stays usable on phones.
+ * The More menu of a note: its link, its text, its path and the text size. Rendered when `menu` is set,
+ * anchored under the button and clamped to the viewport.
  */
-export function CopyPathMenu({ menu, onClose, onLinked }: {
+export function CopyPathMenu({ menu, onClose, onLinked, zoom }: {
     menu: CopyMenuState | null
     onClose: () => void
     /** Called once the note carries its id, so an open editor saves from the new version. */
     onLinked?: (path: string) => void
+    zoom?: ZoomControl
 }) {
     const [copied, setCopied] = useState<'link' | 'rel' | 'abs' | 'content' | null>(null)
     const [linkFailed, setLinkFailed] = useState(false)
@@ -51,14 +65,15 @@ export function CopyPathMenu({ menu, onClose, onLinked }: {
             onClose()
         }
         const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-        // Delay attach so the long-press touchend/click doesn't instantly close it
-        const t = setTimeout(() => {
+        // Delay attach so the tap that opened the menu doesn't instantly close it.
+        const timer = setTimeout(() => {
             window.addEventListener('pointerdown', dismiss)
             window.addEventListener('scroll', dismiss, true)
             window.addEventListener('keydown', onKey)
         }, 50)
+        ref.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
         return () => {
-            clearTimeout(t)
+            clearTimeout(timer)
             window.removeEventListener('pointerdown', dismiss)
             window.removeEventListener('scroll', dismiss, true)
             window.removeEventListener('keydown', onKey)
@@ -67,9 +82,9 @@ export function CopyPathMenu({ menu, onClose, onLinked }: {
 
     if (!menu) return null
 
-    const MENU_W = 220
+    const MENU_W = 300
     const isNote = menu.relPath.endsWith('.md')
-    const MENU_H = isNote ? 200 : 144
+    const MENU_H = 56 * (isNote ? 5 : 3) + (zoom ? 56 : 0)
     const left = Math.max(8, Math.min(menu.x, window.innerWidth - MENU_W - 8))
     const top = Math.max(8, Math.min(menu.y, window.innerHeight - MENU_H - 8))
 
@@ -109,44 +124,47 @@ export function CopyPathMenu({ menu, onClose, onLinked }: {
         }
     }
 
-    const itemStyle: React.CSSProperties = {
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-        padding: '10px 14px', background: 'none', border: 'none', textAlign: 'left',
-        fontFamily: 'monospace', fontSize: 12, color: 'var(--text-primary)', cursor: 'pointer',
-        minHeight: 40,
-    }
+    const row = (kind: 'rel' | 'abs' | 'content', label: string) => (
+        <button type="button" role="menuitem" className="an-mi2" onClick={() => doCopy(kind)}>
+            {copied === kind ? <Check className="a-ic" aria-hidden="true" /> : <Copy className="a-ic" aria-hidden="true" />}
+            <span><b>{copied === kind ? t('notes_copied') : label}</b></span>
+        </button>
+    )
 
     return (
-        <div
-            ref={ref}
-            role="menu"
-            style={{
-                position: 'fixed', left, top, width: MENU_W, zIndex: 1000,
-                background: 'rgba(20,20,28,0.97)', borderRadius: 12,
-                boxShadow: '0 8px 30px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(167,139,250,0.2)',
-                backdropFilter: 'blur(8px)', overflow: 'hidden',
-            }}
-        >
+        <div ref={ref} role="menu" aria-label={t('notes_more_for_note')} className="a-menu" style={{ position: 'fixed', left, top, width: MENU_W, zIndex: 1000 }}>
             {isNote && (
-                <button role="menuitem" style={{ ...itemStyle, fontFamily: 'inherit', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }} onClick={doCopyLink}>
-                    <span>{copied === 'link' ? t('notes_link_copied') : t('notes_copy_link')}</span>
-                    <span style={{ fontSize: 11, color: linkFailed ? 'var(--danger)' : 'var(--text-dim)' }}>
-                        {linkFailed ? t('notes_link_copy_failed') : t('notes_copy_link_hint')}
+                <button type="button" role="menuitem" className="an-mi2" onClick={doCopyLink}>
+                    {copied === 'link' ? <Check className="a-ic" aria-hidden="true" /> : <Link2 className="a-ic" aria-hidden="true" />}
+                    <span>
+                        <b>{copied === 'link' ? t('notes_link_copied') : t('notes_copy_link')}</b>
+                        <i style={linkFailed ? { color: 'var(--warn)' } : undefined}>
+                            {linkFailed ? t('notes_link_copy_failed') : t('notes_copy_link_hint')}
+                        </i>
                     </span>
                 </button>
             )}
-            <button role="menuitem" style={isNote ? { ...itemStyle, borderTop: '1px solid rgba(255,255,255,0.06)' } : itemStyle} onClick={() => doCopy('rel')}>
-                <span style={{ color: 'var(--accent-blue)' }}>{copied === 'rel' ? '✓' : '⧉'}</span>
-                {copied === 'rel' ? 'Copied!' : 'Copy relative path'}
-            </button>
-            <button role="menuitem" style={{ ...itemStyle, borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={() => doCopy('abs')}>
-                <span style={{ color: 'var(--accent-blue)' }}>{copied === 'abs' ? '✓' : '⧉'}</span>
-                {copied === 'abs' ? 'Copied!' : 'Copy absolute path'}
-            </button>
-            <button role="menuitem" style={{ ...itemStyle, borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={() => doCopy('content')}>
-                <span style={{ color: 'var(--accent-blue)' }}>{copied === 'content' ? '✓' : '⧉'}</span>
-                {copied === 'content' ? 'Copied!' : 'Copy note content'}
-            </button>
+            {row('content', t('notes_copy_text'))}
+            {row('rel', t('note_drawer_copy_path'))}
+            {row('abs', t('notes_copy_full_path'))}
+            {zoom && (
+                <>
+                    <div className="a-menu-sep" />
+                    <div className="an-zoom" role="group" aria-label={t('notes_text_size')}>
+                        <span>{t('notes_text_size')}</span>
+                        <button type="button" className="a-ib" aria-label={t('notes_text_smaller')} disabled={!zoom.canSmaller} onClick={zoom.onSmaller}>
+                            <Minus className="a-ic" aria-hidden="true" />
+                        </button>
+                        <output>{zoom.pct}%</output>
+                        <button type="button" className="a-ib" aria-label={t('notes_text_larger')} disabled={!zoom.canLarger} onClick={zoom.onLarger}>
+                            <Plus className="a-ic" aria-hidden="true" />
+                        </button>
+                        {zoom.modified && (
+                            <button type="button" className="a-link" onClick={zoom.onReset}>{t('notes_text_reset')}</button>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     )
 }

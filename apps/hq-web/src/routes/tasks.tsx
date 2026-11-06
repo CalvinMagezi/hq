@@ -1,7 +1,7 @@
 import { HqHttpError } from '~/lib/hqAuth'
 import { createFileRoute, useParams, useRouterState } from '@tanstack/react-router'
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { CheckSquare, ClipboardList, ListChecks, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
+import { ClipboardList, Filter, ListChecks, Plus, Search, List, Columns3, GanttChart, X, AlertTriangle, Info, ChevronDown, Eye } from 'lucide-react'
 import {
   createTaskClient,
   updateTaskClient,
@@ -39,7 +39,12 @@ import { CHIPS, TABS, chipStatus, matchesTab, type TaskChip, type TaskTab } from
 import { formatDay, todayDay } from '~/components/tasks/dates'
 import { TaskBoardView } from '~/components/tasks/TaskBoardView'
 import { TaskGanttView } from '~/components/tasks/TaskGanttView'
-import { TaskDetailDrawer } from '~/components/tasks/TaskDetailDrawer'
+import { TaskDetailMain, TaskDetailSide } from '~/components/tasks/TaskDetailDrawer'
+import { Panes, PaneHead } from '~/components/ui/Panes'
+import { useEdition } from '~/lib/edition'
+import { useSharedConnection } from '~/lib/connection'
+import { parseSqliteUtc } from '~/lib/tasksApi'
+import '~/components/tasks/tasks.css'
 import { useBackClosesLayer } from '~/lib/backLayer'
 import { TaskFormModal } from '~/components/tasks/TaskFormModal'
 import { ALL_SELECTION, TasksSidebar, type TaskSelection } from '~/components/tasks/TasksSidebar'
@@ -51,7 +56,7 @@ import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { InitiativeBriefing } from '~/components/tasks/InitiativeBriefing'
 import { VerificationBar } from '~/components/tasks/verification/VerificationBar'
 import { AwayPage } from '~/components/tasks/AwayPage'
-import { AwayLinkRow, TasksBody } from '~/components/tasks/TasksBody'
+import { AwayLinkRow } from '~/components/tasks/TasksBody'
 import { SweepSheet } from '~/components/tasks/verification/SweepSheet'
 import { AuditSheet } from '~/components/tasks/verification/AuditSheet'
 
@@ -130,15 +135,25 @@ function filterTasks(tasks: TaskItem[], f: TaskFilters, initiativeById: Map<stri
     if (f.statusFilter !== 'all') {
       if (t.status !== f.statusFilter) return false
     } else if (f.view !== 'board') {
+      if (f.tab === 'today' && f.statusTab === 'active' && isDoneToday(t)) return matchesFilters(t, f, initiativeById)
       // The board shows every status as a column, so the coarse tab is ignored there.
       if (f.statusTab === 'active' && t.status === 'complete') return false
       if (f.statusTab === 'complete' && t.status !== 'complete') return false
       if (!matchesTab(t, f.tab, formatDay(todayDay()))) return false
     }
-    if (f.tagFilter !== 'all' && !t.tags.includes(f.tagFilter)) return false
-    if (!matchesSelection(t, f.selection, initiativeById)) return false
-    return !f.searchQuery.trim() || matchesSearch(t, f.searchQuery)
+    return matchesFilters(t, f, initiativeById)
   })
+}
+
+function matchesFilters(t: TaskItem, f: TaskFilters, initiativeById: Map<string, Initiative>): boolean {
+  if (f.tagFilter !== 'all' && !t.tags.includes(f.tagFilter)) return false
+  if (!matchesSelection(t, f.selection, initiativeById)) return false
+  return !f.searchQuery.trim() || matchesSearch(t, f.searchQuery)
+}
+
+/** The Today tab keeps what was finished today, in its own folded group. */
+function isDoneToday(t: TaskItem): boolean {
+  return t.status === 'complete' && t.completed_at !== null && parseSqliteUtc(t.completed_at).toDateString() === new Date().toDateString()
 }
 
 function TasksPage() {
@@ -153,7 +168,10 @@ function TasksPage() {
   const statusFilter: TaskStatus | 'all' = (onAll && chipStatus(chip)) || 'all'
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [selection, setSelection] = useState<TaskSelection>(ALL_SELECTION)
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [checkingOpen, setCheckingOpen] = useState(false)
+  const [listsOpen, setListsOpen] = useState(false)
+  const [viewMenu, setViewMenu] = useState(false)
+  const [sideOpen, setSideOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   // The initiative whose briefing is open; picking another initiative closes it.
   const [briefingFor, setBriefingFor] = useState<string | null>(null)
@@ -220,6 +238,9 @@ function TasksPage() {
   const archivedTasks = archived.data ?? []
 
   const { task: linkedSearchId } = Route.useSearch()
+  const edition = useEdition()
+  const lite = edition === 'lite'
+  const connection = useSharedConnection()
   const away = useRouterState({ select: (s) => s.location.pathname }) === '/tasks/away'
   const linkedParam = useParams({ strict: false }).id
   const linkedTaskId = linkedParam ?? linkedSearchId
@@ -368,12 +389,16 @@ function TasksPage() {
     }
   }
 
-  const handleStatusMove = (task: TaskItem, status: TaskStatus) =>
-    applyOptimistic(
-      task,
-      { status, expected_status: task.status },
-      t('tasks_moved_by_other', { id: task.display_id })
+  const handleStatusMove = async (task: TaskItem, status: TaskStatus) => {
+    // Done asks first when others wait on the task or a check is pending, and offers its own Undo.
+    if (status === 'complete') return handleUpdate(task.id, { status, expected_status: task.status })
+    await applyOptimistic(task, { status, expected_status: task.status }, t('tasks_moved_by_other', { id: task.display_id }))
+    toastUndo(
+      t('tasks_moved_to', { status: STATUS_LABELS[status] }),
+      async () => upsertTask(await updateTaskClient(task.id, { status: task.status, expected_status: status })),
+      t('restored_task'),
     )
+  }
 
   const handleReschedule = (task: TaskItem, patch: UpdateTaskInput) =>
     applyOptimistic(task, patch, t('tasks_timeline_changed', { id: task.display_id }))
@@ -504,418 +529,438 @@ function TasksPage() {
     fn(...args)
   }
 
-  const listNode =
-    isRefreshing && tasks.length === 0 ? (
-          <div className="py-16 flex items-center justify-center text-neutral-500">
-            <Loader2 className="w-5 h-5 animate-spin" />
-          </div>
-        ) : filtered.length === 0 && view === 'list' ? (
-          <div className="py-16 flex flex-col items-center justify-center text-center p-8 rounded-2xl border border-dashed border-white/10 bg-white/[0.01]">
-            <div className="p-4 rounded-2xl bg-white/5 text-neutral-500 mb-3">
-              <CheckSquare className="w-8 h-8" />
-            </div>
-            <h3 className="text-sm font-bold text-neutral-300">{tasks.length === 0 ? t('tasks_none_yet_title') : t('tasks_none_found')}</h3>
-            <p className="text-xs text-neutral-500 max-w-sm mt-1">
-              {tasks.length === 0 ? t('tasks_none_yet_body') : statusTab === 'active' ? t('tasks_none_active') : t('tasks_none_match')}
-            </p>
-            {tasks.length === 0 && (
-              <button type="button" onClick={() => setFormOpen(true)} className="hq-btn-primary mt-3">
-                {t('tasks_new_task')}
-              </button>
-            )}
-          </div>
-        ) : view === 'board' ? (
-          <TaskBoardView tasks={filtered} allById={taskById} onSelect={(t) => setSelectedTaskId(t.id)} onMove={handleStatusMove} />
-        ) : view === 'timeline' ? (
-          <TaskGanttView
-            tasks={filtered}
-            allById={taskById}
-            initiativeById={initiativeById}
-            onSelect={(t) => setSelectedTaskId(t.id)}
-            onReschedule={handleReschedule}
-            sessions={recentWork.data ?? undefined}
-          />
-        ) : (
-          <TaskListView
-            tasks={filtered}
-            allById={taskById}
-            initiativeById={initiativeById}
-            onSelect={(t) => setSelectedTaskId(t.id)}
-            sections={sections}
-            selection={
-              picking.active
-                ? {
-                    ticked: picking.selectedIds,
-                    onToggle: afterPick(picking.toggle),
-                    onToggleMany: afterPick(picking.setMany),
-                  }
-                : undefined
-            }
-          />
-        
-    )
-
   const activeCount = tasks.filter((t) => t.status !== 'complete').length
+  const todayStr = formatDay(todayDay())
+  const tabCounts: Record<TaskTab, number> = {
+    today: tasks.filter((x) => x.status !== 'complete' && matchesTab(x, 'today', todayStr)).length,
+    upcoming: tasks.filter((x) => x.status !== 'complete' && matchesTab(x, 'upcoming', todayStr)).length,
+    all: activeCount,
+  }
+  const readyCount = tasks.filter((x) => x.status === 'ready_for_review').length
+  const unreachable = connection === 'unreachable' || connection === 'offline'
+  const canSelect = view === 'list' && statusTab !== 'archived'
+  const detailOpen = selectedTask != null || away
+  const closeDetail = () => {
+    setSideOpen(false)
+    if (away) void navigate({ to: '/tasks' })
+    else setSelectedTaskId(null)
+  }
+  const openTask = (id: string | null) => setSelectedTaskId(id)
+  // Board and Timeline are the detail pane themselves; a task opened from them replaces them until closed.
+  const wideView = view !== 'list'
+  // Check it opens the task, where its check is on top. Lite has no checking.
+  const checkIt = lite ? undefined : (task: TaskItem) => openTask(task.id)
+  const markDone = (task: TaskItem) =>
+    void handleUpdate(task.id, { status: task.status === 'complete' ? 'to_do' : 'complete', expected_status: task.status })
 
-  return (
-    <WorkingNowContext.Provider value={workingMap}>
-    <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
-    <div className="flex h-full min-h-0 w-full max-w-full overflow-x-hidden">
-      <TasksSidebar
-        spaces={spaces}
-        folders={folders}
-        initiatives={initiatives}
-        tasks={tasks}
-        selection={selection}
-        onSelect={setSelection}
-        onTaxonomyChanged={loadTaxonomy}
-        mobileOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
-      />
+  const showAs = (
+    <div className="tk-menu-at">
+      <button type="button" className="a-ib tk-viewmenu" aria-haspopup="menu" aria-expanded={viewMenu} aria-label={t('tasks_show_as')} onClick={() => setViewMenu((v) => !v)}>
+        <Eye className="a-ic" aria-hidden="true" />
+      </button>
+      {viewMenu && (
+        <div role="menu" className="a-menu tk-pop">
+          {VIEWS.map(({ id, label, icon: Icon }) => (
+            <button key={id} type="button" role="menuitemradio" aria-checked={view === id} className="a-menu-item" onClick={() => { setViewMenu(false); setView(id) }}>
+              <Icon className="a-ic sm" aria-hidden="true" />
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 
-      <div className="flex-1 flex flex-col h-full overflow-y-auto overflow-x-hidden px-4 py-6 sm:px-8 w-full max-w-full min-w-0 box-border">
-        <TasksHeader
-          activeCount={activeCount}
-          isRefreshing={isRefreshing}
-          onRefresh={loadTasks}
-          onNew={() => setFormOpen(true)}
-          onOpenSidebar={() => setMobileSidebarOpen(true)}
-        />
-
-        <TasksFilterBar
-          view={view}
-          setView={setView}
-          tab={tab}
-          setTab={setTab}
-          chip={chip}
-          setChip={setChip}
-          tagFilter={tagFilter}
-          setTagFilter={setTagFilter}
-          allTags={allTags}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          canSelect={view === 'list' && statusTab !== 'archived'}
-          selecting={picking.active}
-          onToggleSelecting={() => {
+  const headButtons = (
+    <>
+      <div className="a-seg tk-viewsw" role="group" aria-label={t('tasks_see_as')}>
+        {VIEWS.map(({ id, label, icon: Icon }) => (
+          <button key={id} type="button" className="a-seg-item" aria-pressed={view === id} onClick={() => setView(id)}>
+            <Icon className="a-ic xs" aria-hidden="true" />
+            {label}
+          </button>
+        ))}
+      </div>
+      {showAs}
+      {canSelect && (
+        <button
+          type="button"
+          className="a-ib"
+          aria-pressed={picking.active}
+          aria-label={t('tasks_pick_several')}
+          title={t('tasks_pick_several_title')}
+          onClick={() => {
             setBulkResult(null)
             if (picking.active) picking.stop()
             else picking.start()
           }}
-        />
+        >
+          <ListChecks className="a-ic" aria-hidden="true" />
+        </button>
+      )}
+      <button type="button" className="a-ib" aria-label={t('tasks_filter_by_list')} onClick={() => setListsOpen(true)}>
+        <Filter className="a-ic" aria-hidden="true" />
+      </button>
+      <button type="button" className="a-btn compact tk-new" onClick={() => setFormOpen(true)}>
+        <Plus className="a-ic sm" aria-hidden="true" />
+        {t('tasks_new_task')}
+      </button>
+    </>
+  )
 
-        {selection.initiativeId && (
-          <div className="mb-4">
-            {briefingFor === selection.initiativeId ? (
-              <InitiativeBriefing
-                initiativeId={selection.initiativeId}
-                name={initiativeById.get(selection.initiativeId)?.name ?? t('tasks_initiative')}
-                onClose={() => setBriefingFor(null)}
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setBriefingFor(selection.initiativeId ?? null)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 hq-field text-neutral-300 hover:text-neutral-100"
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                {t('tasks_briefing')}
-              </button>
-            )}
-          </div>
-        )}
-
-        <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={setSelectedTaskId} />
-
-        {notice && (
-          <div className="mb-4 flex items-start justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs text-amber-300">
-            <span>{notice}</span>
-            <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-amber-300/70 hover:text-amber-200">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-
-        {away ? (
-          <AwayPage owner onOpenTask={setSelectedTaskId} onAudit={() => setAuditOpen(true)} />
-        ) : (
-          <TasksBody
-            list={listNode}
-            checking={
-              <>
-                <AwayLinkRow />
-                <VerificationBar onVerifyNow={() => setSweepOpen(true)} onAudit={() => setAuditOpen(true)} />
-              </>
-            }
-          />
-        )}
-        {doneAsk && taskById.get(doneAsk.id) && (
-          <Dialog
-            kind="ask"
-            title={t('tasks_done_one_title')}
-            body={
-              doneAsk.why === 'check'
-                ? t('tasks_done_check_body')
-                : tn('tasks_done_one_body', dependentsOf({ id: doneAsk.id }, taskById.values()).length, { title: taskById.get(doneAsk.id)?.title ?? '' })
-            }
-            keepLabel={doneAsk.why === 'check' ? t('tasks_done_check_keep') : t('tasks_done_one_keep')}
-            actLabel={t('tasks_mark_done')}
-            onKeep={() => setDoneAsk(null)}
-            onAct={() => {
-              const ask = doneAsk
-              setDoneAsk(null)
-              void applyUpdate(ask.id, ask.patch)
-            }}
-          />
-        )}
-
-        {bulkDonePending && (
-          <Dialog
-            kind="ask"
-            title={t('bulk_done_title', { n: bulkDonePending.length })}
-            body={t('bulk_done_body_undo', { n: bulkDonePending.length })}
-            keepLabel={t('bulk_done_keep')}
-            actLabel={t('bulk_done_act', { n: bulkDonePending.length })}
-            onKeep={() => setBulkDonePending(null)}
-            onAct={() => void confirmBulkDone()}
-          />
-        )}
-
-        {picking.active && (
-          <BulkActionBar
-            total={onScreen.length}
-            ticked={picking.selected.length}
-            progress={bulkProgress}
-            message={bulkResult}
-            onSelectAll={afterPick(() => picking.setMany(onScreen, true))}
-            onClear={afterPick(picking.clear)}
-            onDone={afterPick(picking.stop)}
-            onStatus={handleBulkStatus}
-            onPriority={handleBulkPriority}
-          />
-        )}
-
-        <TaskDetailDrawer
-          task={selectedTask}
-          allTasks={tasks}
-          onClose={() => setSelectedTaskId(null)}
-          onUpdate={handleUpdate}
-          onDelete={handleDelete}
-          onRestore={handleRestore}
-          onSelectTask={setSelectedTaskId}
-          onCreateSubtask={handleCreateSubtask}
-          busy={busy}
-        />
-
-        <SweepSheet
-          key={sweepOpen ? 'open' : 'closed'}
-          open={sweepOpen}
-          onClose={() => setSweepOpen(false)}
-          inputs={{ initiativeId: selection.initiativeId ?? null, selectedIds: picking.selected.map((t) => t.id) }}
-          initiativeName={selection.initiativeId ? initiativeById.get(selection.initiativeId)?.name : undefined}
-        />
-        <AuditSheet open={auditOpen} onClose={() => setAuditOpen(false)} />
-
-        <OutboxGroup
-          entries={taskOutbox.entries}
-          state={taskOutbox.state}
-          inHub={false}
-          textOf={titleOf}
-          onRemove={(id) => void taskOutbox.remove(id)}
-          onSendNow={() => void taskOutbox.sendNow()}
-        />
-
-        <TaskFormModal
-          open={formOpen}
-          onClose={() => setFormOpen(false)}
-          spaces={spaces}
-          folders={folders}
-          initiatives={initiatives}
-          tasks={tasks}
-          onTaxonomyChanged={loadTaxonomy}
-          onCreate={handleCreate}
-        />
-      </div>
+  const controls = (
+    <div className="tk-bar">
+      <label className="a-search">
+        <Search className="a-ic sm" aria-hidden="true" />
+        <input type="search" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder={t('tasks_find')} aria-label={t('tasks_find')} />
+      </label>
+      <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} aria-label={t('tasks_filter_by_tag')} className="a-input">
+        <option value="all">{t('tasks_all_tags')}</option>
+        {allTags.map((tag) => (
+          <option key={tag} value={tag}>
+            {tag}
+          </option>
+        ))}
+      </select>
     </div>
-    </StaleIdsContext.Provider>
+  )
+
+  const tabs = picking.active ? (
+    <BulkActionBar
+      total={onScreen.length}
+      ticked={picking.selected.length}
+      progress={bulkProgress}
+      message={bulkResult}
+      onSelectAll={afterPick(() => picking.setMany(onScreen, true))}
+      onClear={afterPick(picking.clear)}
+      onDone={afterPick(picking.stop)}
+      onStatus={handleBulkStatus}
+      onPriority={handleBulkPriority}
+    />
+  ) : (
+    <div className="a-tabs fit" role="tablist" aria-label={t('place_tasks')}>
+      {TABS.map((id) => (
+        <button key={id} type="button" role="tab" aria-selected={tab === id} className="a-tab" onClick={() => setTab(id)}>
+          {t(`tasks_tab_${id}` as const)} <em>{tabCounts[id]}</em>
+        </button>
+      ))}
+    </div>
+  )
+
+  const chips =
+    tab === 'all' ? (
+      <div className="a-chips" role="group" aria-label={t('tasks_tab_all')}>
+        {CHIPS.map((id) => (
+          <button key={id} type="button" className="a-chip" aria-pressed={chip === id} onClick={() => setChip(id)}>
+            {chipLabel(id)}
+            {id === 'ready' && readyCount > 0 && <em>{readyCount}</em>}
+          </button>
+        ))}
+      </div>
+    ) : readyCount > 0 && !lite ? (
+      <div className="a-chips">
+        <button type="button" className="a-chip" onClick={() => { setTab('all'); setChip('ready') }}>
+          {t('tasks_ready_chip', { n: readyCount })}
+        </button>
+      </div>
+    ) : null
+
+  const emptyText =
+    tasks.length === 0
+      ? t('tasks_none_yet_body')
+      : tab === 'today' && chip === 'active'
+        ? t('tasks_empty_today')
+        : tab === 'upcoming'
+          ? t('tasks_empty_upcoming')
+          : searchQuery.trim() || tagFilter !== 'all' || selection !== ALL_SELECTION
+            ? t('tasks_none_match')
+            : t(`tasks_empty_${chip === 'ready' ? 'review' : chip}` as const)
+
+  const rows =
+    isRefreshing && tasks.length === 0 ? (
+      <div aria-busy="true" aria-label={t('tasks_getting')}>
+        {[0, 1].map((n) => (
+          <div key={n} className="a-trow">
+            <div className="a-trow-main">
+              <span className="a-skel t" />
+              <span className="a-skel s" />
+            </div>
+          </div>
+        ))}
+        <p className="a-grp">{t('tasks_getting')}</p>
+      </div>
+    ) : filtered.length === 0 ? (
+      <div className="a-pad">
+        <h3 className="a-body-b">{tasks.length === 0 ? t('tasks_none_yet_title') : t('tasks_none_found')}</h3>
+        <p className="a-body-sm a-muted">{emptyText}</p>
+        {tasks.length === 0 && (
+          <button type="button" onClick={() => setFormOpen(true)} className="a-btn compact">
+            {t('tasks_new_task')}
+          </button>
+        )}
+      </div>
+    ) : (
+      <TaskListView
+        tasks={filtered}
+        allById={taskById}
+        initiativeById={initiativeById}
+        onSelect={(task) => openTask(task.id)}
+        sections={sections}
+        grouping={tab === 'today' && statusTab === 'active' ? 'today' : 'list'}
+        onToggleDone={markDone}
+        onCheck={checkIt}
+        selectedId={selectedTaskId}
+        selection={
+          picking.active
+            ? { ticked: picking.selectedIds, onToggle: afterPick(picking.toggle), onToggleMany: afterPick(picking.setMany) }
+            : undefined
+        }
+      />
+    )
+
+  const noticeNode = notice && (
+    <div className="a-stale" role="status">
+      <AlertTriangle className="a-ic" aria-hidden="true" />
+      <span>{notice}</span>
+      <button type="button" onClick={() => setNotice(null)} className="a-ib" aria-label={t('close')}>
+        <X className="a-ic sm" aria-hidden="true" />
+      </button>
+    </div>
+  )
+
+  const briefing = selection.initiativeId && (
+    <div className="a-pad">
+      {briefingFor === selection.initiativeId ? (
+        <InitiativeBriefing
+          initiativeId={selection.initiativeId}
+          name={initiativeById.get(selection.initiativeId)?.name ?? t('tasks_initiative')}
+          onClose={() => setBriefingFor(null)}
+        />
+      ) : (
+        <button type="button" onClick={() => setBriefingFor(selection.initiativeId ?? null)} className="a-btn compact secondary">
+          <ClipboardList className="a-ic sm" aria-hidden="true" />
+          {t('tasks_briefing')}
+        </button>
+      )}
+    </div>
+  )
+
+  const staleNote = unreachable && (
+    <div className="a-stale" role="status">
+      <AlertTriangle className="a-ic" aria-hidden="true" />
+      <span>{t('tasks_unreachable')}</span>
+    </div>
+  )
+
+  const listPane = (
+    <>
+      <PaneHead title={t('place_tasks')}>{headButtons}</PaneHead>
+      <p className="a-cap a-muted tk-sub">{t('fact_active', { n: activeCount })}</p>
+      {tabs}
+      {chips}
+      {controls}
+      <div className="tk-scroll">
+        {staleNote}
+        {noticeNode}
+        {briefing}
+        {!lite && <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={openTask} />}
+        {rows}
+        <AwayLinkRow />
+      </div>
+    </>
+  )
+
+  const viewHead = (
+    <>
+      <PaneHead title={view === 'board' ? t('web_board') : t('web_timeline')}>{headButtons}</PaneHead>
+      {controls}
+      {staleNote}
+      {noticeNode}
+    </>
+  )
+
+  const emptyDetail = checkingOpen ? (
+    <>
+      <PaneHead title={t('tasks_how_checking')} back={<span />} />
+      <div className="tk-body">
+        <div className="a-pad tk-stack">
+          <VerificationBar onVerifyNow={() => setSweepOpen(true)} onAudit={() => setAuditOpen(true)} />
+        </div>
+      </div>
+    </>
+  ) : (
+    <div className="a-empty">
+      <p className="a-body-sm a-muted">{t('tasks_pick_one')}</p>
+      {!lite && (
+        <button type="button" className="a-btn compact secondary" onClick={() => setCheckingOpen(true)}>
+          {t('tasks_how_checking')}
+        </button>
+      )}
+    </div>
+  )
+
+  const viewBody =
+    view === 'board' ? (
+      <TaskBoardView tasks={filtered} allById={taskById} onSelect={(task) => openTask(task.id)} onMove={handleStatusMove} />
+    ) : (
+      <TaskGanttView
+        tasks={filtered}
+        allById={taskById}
+        initiativeById={initiativeById}
+        onSelect={(task) => openTask(task.id)}
+        onReschedule={handleReschedule}
+        sessions={recentWork.data ?? undefined}
+      />
+    )
+
+  let detail
+  if (away) {
+    detail = (
+      <>
+        <PaneHead
+          title={t('tasks_away_title')}
+          back={
+            <button type="button" className="a-ib a-back" onClick={closeDetail} aria-label={t('tasks_back')}>
+              <ChevronDown className="a-ic" aria-hidden="true" style={{ transform: 'rotate(90deg)' }} />
+            </button>
+          }
+        />
+        <div className="tk-body">
+          <div className="a-pad">
+            <AwayPage owner onOpenTask={openTask} onAudit={() => setAuditOpen(true)} />
+          </div>
+        </div>
+      </>
+    )
+  } else if (selectedTask) {
+    detail = (
+      <TaskDetailMain
+        task={selectedTask}
+        allTasks={tasks}
+        onClose={closeDetail}
+        onDetails={() => setSideOpen(true)}
+        onUpdate={handleUpdate}
+        onDelete={handleDelete}
+        onRestore={handleRestore}
+        onSelectTask={openTask}
+        onCreateSubtask={handleCreateSubtask}
+        busy={busy}
+      />
+    )
+  } else if (wideView) {
+    detail = (
+      <>
+        {viewHead}
+        <div className="tk-view">{isRefreshing && tasks.length === 0 ? rows : viewBody}</div>
+      </>
+    )
+  } else {
+    detail = emptyDetail
+  }
+
+  return (
+    <WorkingNowContext.Provider value={workingMap}>
+      <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
+        <div className="tk-page">
+          <Panes
+            list={wideView ? undefined : listPane}
+            detail={detail}
+            side={selectedTask && !away ? <TaskDetailSide task={selectedTask} onClose={() => setSideOpen(false)} /> : undefined}
+            showDetail={detailOpen || wideView}
+            sideOpen={sideOpen}
+            listLabel={t('place_tasks')}
+            detailLabel={selectedTask?.title ?? t('place_tasks')}
+            sideLabel={t('inbox_details')}
+          />
+
+          {!detailOpen && (
+            <button type="button" className="a-fab" onClick={() => setFormOpen(true)}>
+              <Plus className="a-ic" aria-hidden="true" />
+              {t('tasks_new_task')}
+            </button>
+          )}
+
+          {doneAsk && taskById.get(doneAsk.id) && (
+            <Dialog
+              kind="ask"
+              title={t('tasks_done_one_title')}
+              body={
+                doneAsk.why === 'check'
+                  ? t('tasks_done_check_body')
+                  : tn('tasks_done_one_body', dependentsOf({ id: doneAsk.id }, taskById.values()).length, { title: taskById.get(doneAsk.id)?.title ?? '' })
+              }
+              keepLabel={doneAsk.why === 'check' ? t('tasks_done_check_keep') : t('tasks_done_one_keep')}
+              actLabel={t('tasks_mark_done')}
+              onKeep={() => setDoneAsk(null)}
+              onAct={() => {
+                const ask = doneAsk
+                setDoneAsk(null)
+                void applyUpdate(ask.id, ask.patch)
+              }}
+            />
+          )}
+
+          {bulkDonePending && (
+            <Dialog
+              kind="ask"
+              title={t('bulk_done_title', { n: bulkDonePending.length })}
+              body={t('bulk_done_body_undo', { n: bulkDonePending.length })}
+              keepLabel={t('bulk_done_keep')}
+              actLabel={t('bulk_done_act', { n: bulkDonePending.length })}
+              onKeep={() => setBulkDonePending(null)}
+              onAct={() => void confirmBulkDone()}
+            />
+          )}
+
+          <SweepSheet
+            key={sweepOpen ? 'open' : 'closed'}
+            open={sweepOpen}
+            onClose={() => setSweepOpen(false)}
+            inputs={{ initiativeId: selection.initiativeId ?? null, selectedIds: picking.selected.map((t) => t.id) }}
+            initiativeName={selection.initiativeId ? initiativeById.get(selection.initiativeId)?.name : undefined}
+          />
+          <AuditSheet open={auditOpen} onClose={() => setAuditOpen(false)} />
+
+          <OutboxGroup
+            entries={taskOutbox.entries}
+            state={taskOutbox.state}
+            inHub={false}
+            textOf={titleOf}
+            onRemove={(id) => void taskOutbox.remove(id)}
+            onSendNow={() => void taskOutbox.sendNow()}
+          />
+
+          {listsOpen && (
+            <TasksSidebar
+              spaces={spaces}
+              folders={folders}
+              initiatives={initiatives}
+              tasks={tasks}
+              selection={selection}
+              onSelect={setSelection}
+              onTaxonomyChanged={loadTaxonomy}
+              onClose={() => setListsOpen(false)}
+            />
+          )}
+
+          <TaskFormModal
+            open={formOpen}
+            onClose={() => setFormOpen(false)}
+            spaces={spaces}
+            folders={folders}
+            initiatives={initiatives}
+            tasks={tasks}
+            onTaxonomyChanged={loadTaxonomy}
+            onCreate={handleCreate}
+          />
+        </div>
+      </StaleIdsContext.Provider>
     </WorkingNowContext.Provider>
   )
-}
-
-interface TasksHeaderProps {
-  activeCount: number
-  isRefreshing: boolean
-  onRefresh: () => void
-  onNew: () => void
-  onOpenSidebar: () => void
-}
-
-function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSidebar }: TasksHeaderProps) {
-  return (
-    <div className="flex flex-row items-center justify-between gap-3 mb-4 sm:mb-6">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <button
-          type="button"
-          onClick={onOpenSidebar}
-          className="md:hidden p-2 rounded-xl bg-white/5 text-neutral-300 hover:text-white"
-        >
-          <PanelLeftOpen className="w-4 h-4" />
-        </button>
-        <div className="hidden sm:block p-2.5 rounded-xl hq-glass-card text-emerald-400">
-          <CheckSquare className="w-5 h-5" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-semibold text-white tracking-tight" style={{ fontFamily: 'var(--font-heading)' }}>{t('place_tasks')}</h1>
-          <p className="text-xs text-neutral-400 mt-0.5">{t('fact_active', { n: activeCount })}</p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 shrink-0">
-        <button
-          type="button"
-          onClick={onRefresh}
-          aria-label={t('tasks_refresh')}
-          disabled={isRefreshing}
-          className="hq-btn-ghost disabled:opacity-50"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">{t('spend_refresh')}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onNew}
-          className="hq-btn-primary !h-9 !px-4"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="hidden min-[420px]:inline">{t('tasks_new_task')}</span>
-          <span className="min-[420px]:hidden sr-only">{t('tasks_new_task')}</span>
-        </button>
-      </div>
-    </div>
-  )
-}
-
-interface TasksFilterBarProps {
-  view: TasksView
-  setView: (v: TasksView) => void
-  tab: TaskTab
-  setTab: (t: TaskTab) => void
-  chip: TaskChip
-  setChip: (c: TaskChip) => void
-  tagFilter: string
-  setTagFilter: (t: string) => void
-  allTags: string[]
-  searchQuery: string
-  setSearchQuery: (q: string) => void
-  canSelect: boolean
-  selecting: boolean
-  onToggleSelecting: () => void
 }
 
 function chipLabel(id: TaskChip): string {
   const status = chipStatus(id)
   if (status) return STATUS_LABELS[status]
   return id === 'archived' ? t('tasks_chip_archived') : t('tasks_chip_active')
-}
-
-function TasksFilterBar(p: TasksFilterBarProps) {
-  const { view, setView, tab, setTab, chip, setChip } = p
-  const { tagFilter, setTagFilter, allTags, searchQuery, setSearchQuery } = p
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5 w-full max-w-full">
-      <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto min-w-0">
-        <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start shrink-0">
-          {VIEWS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setView(id)}
-              title={label}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
-                view === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden sm:inline">{label}</span>
-            </button>
-          ))}
-        </div>
-
-        {view !== 'board' && (
-          <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start max-w-full overflow-x-auto no-scrollbar shrink-0">
-            {TABS.map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                aria-pressed={tab === id}
-                className={`px-3 py-1.5 min-h-9 rounded-lg text-xs font-semibold transition-all shrink-0 ${
-                  tab === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
-                }`}
-              >
-                {t(`tasks_tab_${id}` as const)}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
-          <select
-            value={tagFilter}
-            onChange={(e) => setTagFilter(e.target.value)}
-            title={t('tasks_filter_by_tag')}
-            className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
-          >
-            <option value="all">{t('tasks_all_tags')}</option>
-            {allTags.map((tag) => (
-              <option key={tag} value={tag}>{tag}</option>
-            ))}
-          </select>
-
-          {p.canSelect && (
-            <button
-              type="button"
-              onClick={p.onToggleSelecting}
-              aria-pressed={p.selecting}
-              title={t('tasks_pick_several_title')}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-all ${
-                p.selecting ? 'hq-seg-on' : 'hq-field text-neutral-300 hover:text-white'
-              }`}
-            >
-              <ListChecks className="w-3.5 h-3.5 shrink-0" />
-              {t('tasks_pick_several')}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {view !== 'board' && tab === 'all' && (
-        <div role="group" aria-label={t('tasks_tab_all')} className="flex items-center gap-1.5 flex-wrap w-full order-last sm:basis-full">
-          {CHIPS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setChip(id)}
-              aria-pressed={chip === id}
-              className={`px-3 py-1.5 min-h-9 rounded-full text-xs font-semibold border border-white/10 ${
-                chip === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
-              {chipLabel(id)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="relative w-full sm:w-auto sm:max-w-xs sm:flex-1 min-w-0">
-        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder={t('tasks_find')}
-          className="w-full box-border pl-8 pr-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
-        />
-      </div>
-    </div>
-  )
 }

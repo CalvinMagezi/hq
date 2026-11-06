@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Loader2, MinusCircle, SkipForward, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
 import { t } from '~/strings'
+import '../leaf.css'
 import { answerAudit, fetchAudits, type AuditCard, type AuditStack } from '~/lib/verificationApi'
 import { usePolled } from '../../sessions/usePolled'
 import { SHEET_DANGER, SHEET_PRIMARY, SHEET_QUIET, Sheet } from './Sheet'
@@ -12,9 +13,9 @@ const MORE = 10
 const IDLE_POLL_MS = 60_000
 
 function ResultIcon({ result }: { result: 'pass' | 'fail' | 'unclear' | boolean | null }) {
-  if (result === 'pass' || result === true) return <Check className="w-3.5 h-3.5 text-white shrink-0 mt-0.5" aria-label={t('verify_met')} />
-  if (result === 'fail' || result === false) return <TriangleAlert className="w-3.5 h-3.5 text-[var(--warn)] shrink-0 mt-0.5" aria-label={t('verify_not_met')} />
-  return <MinusCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" aria-label={t('verify_not_decided')} />
+  if (result === 'pass' || result === true) return <Check className="a-ic xs" aria-label={t('verify_met')} />
+  if (result === 'fail' || result === false) return <TriangleAlert className="a-ic xs a-warn-t" aria-label={t('verify_not_met')} />
+  return <MinusCircle className="a-ic xs a-muted" aria-label={t('verify_not_decided')} />
 }
 
 interface CardProps {
@@ -34,19 +35,19 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
   const v = card.verdict
   const facts = card.observations.filter((o) => o.kind !== 'contract').slice(0, FACTS_SHOWN)
   return (
-    <article className="space-y-3" aria-label="Audit">
-      <div>
-        <p className="text-sm font-semibold text-white break-words">
+    <article className="a-card" aria-label="Audit">
+      <div className="l-stack">
+        <p className="a-body-sm-b l-break">
           {card.task ? (
             <>
-              {card.task.display_id} <span className="font-normal text-neutral-200">{card.task.title}</span>
+              {card.task.display_id} <span>{card.task.title}</span>
             </>
           ) : (
             'A task that no longer exists'
           )}
         </p>
         {v && (
-          <p className="text-xs text-neutral-400 mt-0.5">
+          <p className="a-cap a-muted">
             {t('check_audit_done_line', {
               level: levelLabel(v.level),
               kind: kindLabel(v.tier),
@@ -58,15 +59,15 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
       </div>
 
       {v && (
-        <div>
-          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{criteriaSummary(v.criteria)}</p>
-          <ul className="space-y-1">
+        <div className="l-stack">
+          <p className="a-label">{criteriaSummary(v.criteria)}</p>
+          <ul className="l-stack">
             {v.criteria.map((c) => (
-              <li key={c.text} className="flex items-start gap-1.5 text-xs text-neutral-200">
+              <li key={c.text} className="l-row a-body-sm">
                 <ResultIcon result={c.result} />
-                <span className="min-w-0 break-words">
+                <span className="l-grow l-break">
                   {c.text}
-                  {c.note ? <span className="text-neutral-500"> · {c.note}</span> : null}
+                  {c.note ? <span className="a-muted"> · {c.note}</span> : null}
                 </span>
               </li>
             ))}
@@ -75,13 +76,13 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
       )}
 
       {facts.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{t('verify_audit_saw')}</p>
-          <ul className="space-y-1">
+        <div className="l-stack">
+          <p className="a-label">{t('verify_audit_saw')}</p>
+          <ul className="l-stack">
             {facts.map((o) => (
-              <li key={o.id} className="flex items-start gap-1.5 text-xs text-neutral-400">
+              <li key={o.id} className="l-row a-cap a-muted">
                 <ResultIcon result={o.ok} />
-                <span className="min-w-0 break-words">{o.fact}</span>
+                <span className="l-grow l-break">{o.fact}</span>
               </li>
             ))}
           </ul>
@@ -89,44 +90,44 @@ export function AuditCardView({ card, busy, disagreeing, note, onNote, onAgree, 
       )}
 
       {card.links.length > 0 && (
-        <p className="text-xs text-neutral-500 break-all">
+        <p className="a-cap a-muted l-break">
           Linked: {card.links.map((l) => `${l.kind} ${l.ref}`).join(', ')}
         </p>
       )}
 
       {disagreeing ? (
-        <div className="space-y-2">
-          <label className="block text-xs text-neutral-300">
+        <div className="l-stack">
+          <label className="a-field-label block">
             {t('verify_audit_wrong')}
             <textarea
               value={note}
               onChange={(e) => onNote(e.target.value)}
               rows={3}
-              className="mt-1 w-full px-3 py-2 rounded-xl text-sm text-neutral-100 hq-field focus:outline-none focus:ring-1 focus:ring-white"
+              className="a-input mt-1"
             />
           </label>
-          <div className="flex gap-2">
+          <div className="l-bar">
             <button type="button" disabled={busy} onClick={onCancelDisagree} className={`${SHEET_QUIET} flex-1`}>
               {t('verify_audit_back')}
             </button>
             <button type="button" disabled={busy} onClick={onDisagree} className={`${SHEET_DANGER} flex-1`}>
-              <ThumbsDown className="w-4 h-4" />
+              <ThumbsDown className="a-ic sm" aria-hidden="true" />
               {t('verify_audit_reopen')}
             </button>
           </div>
         </div>
       ) : (
-        <div className="flex gap-2">
+        <div className="l-bar">
           <button type="button" disabled={busy} onClick={onAgree} className={`${SHEET_PRIMARY} flex-1`}>
-            <ThumbsUp className="w-4 h-4" />
+            <ThumbsUp className="a-ic sm" aria-hidden="true" />
             {t('verify_audit_agree')}
           </button>
           <button type="button" disabled={busy} onClick={onDisagree} className={`${SHEET_DANGER} flex-1`}>
-            <ThumbsDown className="w-4 h-4" />
+            <ThumbsDown className="a-ic sm" aria-hidden="true" />
             {t('verify_audit_disagree')}
           </button>
           <button type="button" disabled={busy} onClick={onSkip} className={`${SHEET_QUIET} px-3`} aria-label={t('verify_audit_skip')}>
-            <SkipForward className="w-4 h-4" />
+            <SkipForward className="a-ic sm" aria-hidden="true" />
           </button>
         </div>
       )}
@@ -153,13 +154,13 @@ interface StackProps {
 export function AuditStackView({ stack, index, busy, error, disagreeing, note, onNote, onAgree, onDisagree, onCancelDisagree, onSkip, onMore }: StackProps) {
   const card = stack.cards[index]
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-neutral-400">
+    <div className="l-stack">
+      <p className="a-body-sm a-muted">
         {t('verify_audit_intro')}
       </p>
       {card ? (
         <>
-          <p className="text-xs text-neutral-500">
+          <p className="a-cap a-muted">
             {index + 1} of {stack.cards.length}
           </p>
           <AuditCardView
@@ -175,11 +176,11 @@ export function AuditStackView({ stack, index, busy, error, disagreeing, note, o
           />
         </>
       ) : (
-        <p className="text-sm text-neutral-200">{t('verify_audit_none_left')}</p>
+        <p className="a-body-sm">{t('verify_audit_none_left')}</p>
       )}
-      {error && <p className="text-xs text-[var(--warn)]">{error}</p>}
-      <div className="pt-3 border-t border-white/10 space-y-2.5">
-        <p className="text-xs text-neutral-400" aria-live="polite">
+      {error && <p role="alert" className="a-why">{error}</p>}
+      <div className="l-stack">
+        <p className="a-body-sm a-muted" aria-live="polite">
           {auditEstimate(stack.calibration)}
         </p>
         <button type="button" disabled={busy} onClick={onMore} className={`${SHEET_QUIET} w-full`}>
@@ -273,8 +274,8 @@ export function AuditSheet({ open, onClose }: Props) {
           }
         />
       ) : (
-        <p className="text-sm text-neutral-400 flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin" />
+        <p className="a-loading">
+          <Loader2 className="a-ic sm animate-spin" aria-hidden="true" />
           {stack.error ?? 'Loading the audit'}
         </p>
       )}

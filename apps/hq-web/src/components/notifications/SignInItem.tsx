@@ -13,10 +13,10 @@ export function signInTime(createdAt: string, now: Date = new Date()): string {
 /** The two sentences of a new sign-in card, from the device's name and the item's time. */
 export function SignInBody({ device, createdAt }: { device: string | null; createdAt: string }) {
   return (
-    <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
-      <p>{t('new_signin_body', { device: device ?? t('new_signin_unknown'), time: signInTime(createdAt) })}</p>
-      <p>{t('new_signin_advice')}</p>
-    </div>
+    <>
+      <p className="a-body-sm">{t('new_signin_body', { device: device ?? t('new_signin_unknown'), time: signInTime(createdAt) })}</p>
+      <p className="a-body-sm a-muted">{t('new_signin_advice')}</p>
+    </>
   )
 }
 
@@ -28,7 +28,7 @@ interface ActionsProps {
   onSignOut(): Promise<void>
 }
 
-/** It was me (secondary) and Sign it out (an ink trigger: only the dialog's action is red). */
+/** It was me (secondary) and Sign it out (red, and it asks first in the shared dialog). */
 export function SignInActions({ device, busy, onItWasMe, onSignOut }: ActionsProps) {
   const [asking, setAsking] = useState(false)
   const [working, setWorking] = useState(false)
@@ -47,11 +47,11 @@ export function SignInActions({ device, busy, onItWasMe, onSignOut }: ActionsPro
     }
   }
   return (
-    <div className="a-card-actions flex flex-wrap items-center justify-between gap-2 w-full">
+    <div className="a-card-actions">
       <button type="button" className="a-btn secondary" disabled={busy} onClick={onItWasMe}>
         {t('it_was_me')}
       </button>
-      <button type="button" className="a-btn" style={{ background: 'var(--ink)', borderColor: 'var(--ink)', color: 'var(--on-green)' }} disabled={busy} onClick={() => setAsking(true)}>
+      <button type="button" className="a-btn danger" disabled={busy} onClick={() => setAsking(true)}>
         {t('sign_it_out')}
       </button>
       {asking && (

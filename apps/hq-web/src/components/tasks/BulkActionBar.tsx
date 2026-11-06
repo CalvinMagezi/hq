@@ -1,10 +1,9 @@
 import { useState } from 'react'
-import { ChevronUp, Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
+import './tasks.css'
 import { STATUS_LABELS, STATUS_ORDER, type TaskPriority, type TaskStatus } from '~/lib/tasksApi'
 import { t } from '~/strings'
 import { PRIORITIES } from './taskFields'
-
-const priorityLabel = (priority: TaskPriority) => priority.charAt(0).toUpperCase() + priority.slice(1)
 
 interface Props {
   /** Tasks on screen, and how many of them are ticked. */
@@ -23,13 +22,7 @@ interface Props {
 
 type Menu = 'status' | 'priority'
 
-const BUTTON = 'hq-btn-ghost disabled:opacity-40 disabled:pointer-events-none'
-
-// The bar and its menus float over cards, so they need a solid fill, not the frosted one. Inline,
-// because the unlayered `.hq-modal` background would beat a Tailwind utility.
-const SOLID = { background: 'var(--bg-solid-elevated)' }
-
-/** The strip at the foot of the list while tasks are being picked. */
+/** The bar that takes the place of the tabs while tasks are being picked. */
 export function BulkActionBar({ total, ticked, progress, message, onSelectAll, onClear, onDone, onStatus, onPriority }: Props) {
   const [menu, setMenu] = useState<Menu | null>(null)
   const running = progress !== null
@@ -42,59 +35,43 @@ export function BulkActionBar({ total, ticked, progress, message, onSelectAll, o
   }
 
   return (
-    <div className="sticky bottom-0 z-30 -mx-4 sm:-mx-8 mt-auto px-4 sm:px-8 pt-2 pb-3">
-      {menu && <button type="button" aria-label={t('tasks_bulk_close_menu')} className="fixed inset-0 z-30 cursor-default" onClick={() => setMenu(null)} />}
-      <div
-        role="toolbar"
-        aria-label={t('tasks_bulk_bar')}
-        style={SOLID}
-        className="relative z-40 hq-modal rounded-2xl px-3 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-2"
-      >
-        <div className="flex items-center gap-2 min-w-0 mr-auto">
-          <span className="text-xs font-semibold text-white whitespace-nowrap" aria-live="polite">
-            {running ? (
-              <span className="flex items-center gap-1.5">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                {t('tasks_bulk_progress', { settled: progress.settled, total: progress.total })}
-              </span>
-            ) : (
-              t('tasks_bulk_selected', { n: ticked })
-            )}
+    <div role="toolbar" aria-label={t('tasks_bulk_bar')} className="tk-bulk">
+      <b aria-live="polite">
+        {running ? (
+          <span className="tk-meta">
+            <Loader2 className="a-ic sm" aria-hidden="true" />
+            {t('tasks_bulk_progress', { settled: progress.settled, total: progress.total })}
           </span>
-          <button
-            type="button"
-            disabled={running || total === 0}
-            onClick={allTicked ? onClear : onSelectAll}
-            className="text-xs text-emerald-400 hover:text-emerald-300 disabled:opacity-40 whitespace-nowrap"
-          >
-            {allTicked ? t('inbox_clear') : t('tasks_bulk_select_all', { n: total })}
-          </button>
-          {message && !running && <span className="text-xs text-neutral-400 truncate min-w-0">{message}</span>}
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <MenuButton label={t('tasks_bulk_set_status')} open={menu === 'status'} disabled={running || none} onToggle={() => setMenu(menu === 'status' ? null : 'status')}>
-            {STATUS_ORDER.map((status) => (
-              <MenuItem key={status} onClick={() => pick(() => onStatus(status))}>
-                {STATUS_LABELS[status]}
-              </MenuItem>
-            ))}
-          </MenuButton>
-
-          <MenuButton label={t('tasks_bulk_set_priority')} open={menu === 'priority'} disabled={running || none} onToggle={() => setMenu(menu === 'priority' ? null : 'priority')}>
-            {PRIORITIES.map((p) => (
-              <MenuItem key={p} onClick={() => pick(() => onPriority(p))}>
-                {priorityLabel(p)}
-              </MenuItem>
-            ))}
-            <MenuItem onClick={() => pick(() => onPriority(null))}>{t('tasks_bulk_no_priority')}</MenuItem>
-          </MenuButton>
-
-          <button type="button" disabled={running} onClick={onDone} className={BUTTON}>
-            {t('safe_done_button')}
-          </button>
-        </div>
-      </div>
+        ) : (
+          t('tasks_bulk_selected', { n: ticked })
+        )}
+      </b>
+      <button type="button" disabled={running || total === 0} onClick={allTicked ? onClear : onSelectAll} className="a-btn compact quiet">
+        {allTicked ? t('inbox_clear') : t('tasks_bulk_select_all', { n: total })}
+      </button>
+      <MenuButton label={t('tasks_bulk_set_status')} open={menu === 'status'} disabled={running || none} onToggle={() => setMenu(menu === 'status' ? null : 'status')} onClose={() => setMenu(null)}>
+        {STATUS_ORDER.map((status) => (
+          <MenuItem key={status} onClick={() => pick(() => onStatus(status))}>
+            {STATUS_LABELS[status]}
+          </MenuItem>
+        ))}
+      </MenuButton>
+      <MenuButton label={t('tasks_bulk_set_priority')} open={menu === 'priority'} disabled={running || none} onToggle={() => setMenu(menu === 'priority' ? null : 'priority')} onClose={() => setMenu(null)}>
+        {PRIORITIES.map((p) => (
+          <MenuItem key={p} onClick={() => pick(() => onPriority(p))}>
+            {t(`tasks_priority_${p}`)}
+          </MenuItem>
+        ))}
+        <MenuItem onClick={() => pick(() => onPriority(null))}>{t('tasks_bulk_no_priority')}</MenuItem>
+      </MenuButton>
+      <button type="button" disabled={running} onClick={onDone} className="a-btn compact">
+        {t('safe_done_button')}
+      </button>
+      {message && !running && (
+        <p className="a-snack" role="status">
+          <span>{message}</span>
+        </p>
+      )}
     </div>
   )
 }
@@ -104,18 +81,19 @@ interface MenuButtonProps {
   open: boolean
   disabled: boolean
   onToggle: () => void
+  onClose: () => void
   children: React.ReactNode
 }
 
-function MenuButton({ label, open, disabled, onToggle, children }: MenuButtonProps) {
+function MenuButton({ label, open, disabled, onToggle, onClose, children }: MenuButtonProps) {
   return (
-    <div className="relative">
-      <button type="button" disabled={disabled} onClick={onToggle} aria-haspopup="menu" aria-expanded={open} className={BUTTON}>
+    <div className="tk-menu-at" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+      <button type="button" disabled={disabled} onClick={onToggle} aria-haspopup="menu" aria-expanded={open} className="a-btn compact secondary">
         {label}
-        <ChevronUp className={`w-3.5 h-3.5 transition-transform ${open ? '' : 'rotate-180'}`} />
+        <ChevronDown className="a-ic xs" aria-hidden="true" />
       </button>
       {open && (
-        <div role="menu" style={SOLID} className="absolute bottom-full right-0 mb-2 min-w-44 p-1.5 rounded-xl hq-modal flex flex-col">
+        <div role="menu" className="a-menu tk-pop">
           {children}
         </div>
       )}
@@ -125,12 +103,7 @@ function MenuButton({ label, open, disabled, onToggle, children }: MenuButtonPro
 
 function MenuItem({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      className="text-left px-3 py-2 rounded-lg text-xs font-semibold text-neutral-200 hover:bg-white/10"
-    >
+    <button type="button" role="menuitem" onClick={onClick} className="a-menu-item">
       {children}
     </button>
   )

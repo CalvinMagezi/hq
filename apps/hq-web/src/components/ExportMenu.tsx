@@ -1,4 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
+import { Sheet } from '~/components/ui/Sheet'
+import '~/components/vault/notes.css'
 import { t } from '~/strings'
 import { exportKeys, type NoteExportFormat, type NoteExportGroup, type NoteExportOption } from '~/lib/noteExport'
 
@@ -7,6 +9,7 @@ export interface ExportMenuState {
     y: number
 }
 
+const PHONE_QUERY = '(max-width: 767px)'
 const MENU_W = 300
 const ITEM_H = 56
 
@@ -14,6 +17,17 @@ const GROUP_KEYS: Record<NoteExportGroup, 'note_export_group_document' | 'note_e
     document: 'note_export_group_document',
     image: 'note_export_group_picture',
     data: 'note_export_group_tables',
+}
+
+function subscribeNarrow(cb: () => void) {
+    const mq = window.matchMedia(PHONE_QUERY)
+    mq.addEventListener('change', cb)
+    return () => mq.removeEventListener('change', cb)
+}
+
+/** True below 768 px, where the Export choices rise as a sheet instead of a menu. */
+function useNarrow(): boolean {
+    return useSyncExternalStore(subscribeNarrow, () => window.matchMedia(PHONE_QUERY).matches, () => false)
 }
 
 /**
@@ -37,9 +51,10 @@ export function ExportMenu({
     onClose: () => void
 }) {
     const ref = useRef<HTMLDivElement | null>(null)
+    const narrow = useNarrow()
 
     useEffect(() => {
-        if (!menu) return
+        if (!menu || narrow) return
         const dismiss = (e: Event) => {
             if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return
             onClose()
@@ -59,13 +74,55 @@ export function ExportMenu({
             window.removeEventListener('scroll', dismiss, true)
             window.removeEventListener('keydown', onKey)
         }
-    }, [menu, onClose])
+    }, [menu, narrow, onClose])
 
     if (!menu) return null
 
     const groups = (['document', 'image', 'data'] as const)
         .map((group) => ({ group, items: options.filter((o) => o.group === group) }))
         .filter((g) => g.items.length > 0)
+    const list = (
+        <>
+            {groups.map(({ group, items }, i) => (
+                <div key={group} role="group" aria-label={t(GROUP_KEYS[group])}>
+                    {i > 0 && <div className="a-menu-sep" />}
+                    <p className="a-muted a-body-sm" style={{ padding: '4px 16px' }}>{t(GROUP_KEYS[group])}</p>
+                    {items.map((o) => {
+                        const keys = exportKeys(o.format)
+                        return (
+                            <button
+                                key={o.format}
+                                type="button"
+                                role="menuitem"
+                                data-format={o.format}
+                                className="an-mi2"
+                                style={{ opacity: busy && busy !== o.format ? 0.4 : 1 }}
+                                disabled={busy !== null}
+                                onClick={() => onPick(o.format)}
+                            >
+                                <span>
+                                    {busy === o.format ? (
+                                        <>
+                                            <b>{t('note_export_making', { kind: t(keys.kind) })}</b>
+                                            <i>{t('note_export_making_body')}</i>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <b>{t(keys.name)}</b>
+                                            <i>{t(keys.hint)}</i>
+                                        </>
+                                    )}
+                                </span>
+                                <code>.{o.extension}</code>
+                            </button>
+                        )
+                    })}
+                </div>
+            ))}
+        </>
+    )
+    if (narrow) return <Sheet title={t('notes_export_as')} onClose={onClose}>{list}</Sheet>
+
     const height = 40 + groups.length * 32 + options.length * ITEM_H
     const left = Math.max(8, Math.min(menu.x, window.innerWidth - MENU_W - 8))
     const top = Math.max(8, Math.min(menu.y, window.innerHeight - height - 8))
@@ -79,42 +136,7 @@ export function ExportMenu({
             style={{ position: 'fixed', left, top, width: MENU_W, zIndex: 1000, maxHeight: 'calc(100vh - 16px)', overflowY: 'auto' }}
         >
             <p className="a-label" style={{ padding: '4px 16px' }}>{t('note_export_title', { title })}</p>
-            {groups.map(({ group, items }, i) => (
-                <div key={group} role="group" aria-label={t(GROUP_KEYS[group])}>
-                    {i > 0 && <div className="a-menu-sep" />}
-                    <p className="a-muted a-body-sm" style={{ padding: '4px 16px' }}>{t(GROUP_KEYS[group])}</p>
-                    {items.map((o) => {
-                        const keys = exportKeys(o.format)
-                        return (
-                            <button
-                                key={o.format}
-                                type="button"
-                                role="menuitem"
-                                data-format={o.format}
-                                className="a-menu-item"
-                                style={{ minHeight: ITEM_H, opacity: busy && busy !== o.format ? 0.4 : 1, justifyContent: 'space-between' }}
-                                disabled={busy !== null}
-                                onClick={() => onPick(o.format)}
-                            >
-                                <span style={{ display: 'flex', flexDirection: 'column' }}>
-                                    {busy === o.format ? (
-                                        <>
-                                            <span>{t('note_export_making', { kind: t(keys.kind) })}</span>
-                                            <span className="a-muted a-body-sm">{t('note_export_making_body')}</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span>{t(keys.name)}</span>
-                                            <span className="a-muted a-body-sm">{t(keys.hint)}</span>
-                                        </>
-                                    )}
-                                </span>
-                                <span className="a-muted a-body-sm">.{o.extension}</span>
-                            </button>
-                        )
-                    })}
-                </div>
-            ))}
+            {list}
         </div>
     )
 }

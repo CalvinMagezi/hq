@@ -10,6 +10,7 @@ import {
   reviewTag,
   whoWrote,
 } from '~/lib/noteReview'
+import '~/components/vault/notes.css'
 import { NoteHistory, whoText } from './NoteHistory'
 import { ReviewTag } from './ReviewTag'
 
@@ -70,21 +71,25 @@ export function AboutNote({ path }: { path: string }) {
     const line = LINES[kind]
     body = (
       <>
-        <dl className="a-body-sm" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 16px', margin: 0 }}>
-          <dt className="a-muted">{t('note_about_who')}</dt>
-          <dd style={{ margin: 0 }}>{whoText(who)}</dd>
-          <dt className="a-muted">{t('note_about_when')}</dt>
-          <dd style={{ margin: 0 }}>{now ? relTime(now.written_at) : t('note_review_unknown')}</dd>
-          <dt className="a-muted">{t('note_about_versions')}</dt>
-          <dd style={{ margin: 0 }}>
+        <div className="a-drow">
+          <span>{t('note_about_who')}</span>
+          <span>{whoText(who)}</span>
+        </div>
+        <div className="a-drow">
+          <span>{t('note_about_when')}</span>
+          <span>{now ? relTime(now.written_at) : t('note_review_unknown')}</span>
+        </div>
+        <div className="a-drow">
+          <span>{t('note_about_versions')}</span>
+          <span>
             {data.versions.length}
             {data.versions.length > 0 && (
               <button type="button" className="a-link" style={{ marginLeft: 8 }} aria-expanded={history} onClick={() => setHistory(!history)}>
                 {history ? t('note_about_hide_history') : t('note_about_show_history')}
               </button>
             )}
-          </dd>
-        </dl>
+          </span>
+        </div>
         <ReviewTag kind={kind} />
         {line && (
           <p className="a-body-sm a-muted">
@@ -124,8 +129,8 @@ export function AboutNote({ path }: { path: string }) {
   }
 
   return (
-    <section aria-label={t('note_about_title')} className="a-card">
-      <h2 className="a-h3">{t('note_about_title')}</h2>
+    <section aria-label={t('note_about_title')} className="an-side">
+      <p className="a-grp">{t('note_about_title')}</p>
       {body}
     </section>
   )

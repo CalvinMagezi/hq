@@ -1,17 +1,15 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { togglePinNote, type VaultSignals } from '~/lib/vaultApi'
-import { pinnedNotesQuery, vaultSignalsQuery } from '~/lib/queries'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { Plus, Search } from 'lucide-react'
+import { togglePinNote, type NoteTreeNode, type PinnedNote, type RecentFile, type VaultSignals } from '~/lib/vaultApi'
+import { noteTreeQuery, pinnedNotesQuery, vaultSignalsQuery } from '~/lib/queries'
+import { sectionState, type SectionState } from '~/lib/homeSections'
+import { Panes, PaneHead } from '~/components/ui/Panes'
 import { HomeSections } from '~/components/vault/HomeSections'
-import { GetStartedCard } from '~/components/vault/GetStartedCard'
 import { BriefingCard } from '~/components/tasks/verification/BriefingCard'
-import { fetchTasksClient } from '~/lib/tasksApi'
-import { inProgressTasks, sectionState } from '~/lib/homeSections'
-import { useWS } from '~/context/WebSocketContext'
-import { SignalCard } from '~/components/SignalCard'
+import { topFolders } from '~/components/vault/noteRows'
 import { t } from '~/strings'
-import { Plus } from 'lucide-react'
+import '~/components/vault/notes.css'
 
 export const Route = createFileRoute('/notes/')({
     component: VaultHome,
@@ -19,89 +17,90 @@ export const Route = createFileRoute('/notes/')({
     ssr: false,
 })
 
-const EMPTY_SIGNALS: VaultSignals = { recent: [], work: [], review: [], activity: [] }
+const NOTEBOOKS = 'Notebooks'
 
-function InlineSearch() {
+const openSearch = () => window.dispatchEvent(new CustomEvent('hq:open-search', { detail: { scope: 'notes' } }))
+const openNewNote = () => window.dispatchEvent(new Event('hq:open-quick-note'))
+
+interface NotesHomeViewProps {
+    pinned: SectionState<PinnedNote>
+    recent: SectionState<RecentFile>
+    folders: NoteTreeNode[]
+    onKeepPin?: (path: string) => void
+    onNotNow?: (path: string) => void
+    onRetryPinned: () => void
+    onRetryRecent: () => void
+    /** Extra cards above the sections (the first-run checklist, the briefing). */
+    intro?: React.ReactNode
+}
+
+/** Notes home: find, the folders to open, what is pinned, what changed lately. */
+export function NotesHomeView({ pinned, recent, folders, onKeepPin, onNotNow, onRetryPinned, onRetryRecent, intro }: NotesHomeViewProps) {
     return (
-        <button
-            type="button"
-            className="a-input w-full text-left"
-            onClick={() => window.dispatchEvent(new CustomEvent('hq:open-search', { detail: { scope: 'notes' } }))}
-        >
-            <span className="a-muted">{t('notes_search_your_notes')}</span>
-        </button>
+        <Panes
+            detailLabel={t('notes_your_notes')}
+            detail={
+                <>
+                    <PaneHead title={t('notes_your_notes')}>
+                        <button type="button" className="a-btn compact" onClick={openNewNote} title={t('notes_new_note_key')}>
+                            <Plus className="a-ic" aria-hidden="true" />
+                            {t('notes_new_note')}
+                            <kbd className="a-kbd an-kbd">{t('notes_new_note_key')}</kbd>
+                        </button>
+                    </PaneHead>
+                    <div className="an-home">
+                        <button type="button" className="a-input an-findpill" onClick={openSearch}>
+                            <Search className="a-ic" aria-hidden="true" />
+                            <span>{t('notes_search_your_notes')}</span>
+                            <kbd className="a-kbd">{t('search_kbd')}</kbd>
+                        </button>
+                        {folders.length > 0 && (
+                            <div className="a-chips" role="group" aria-label={t('notes_folders')}>
+                                {folders.map((f) => (
+                                    <Link key={f.path} to="/notes/$" params={{ _splat: f.path }} className="a-chip">
+                                        {f.name}
+                                    </Link>
+                                ))}
+                            </div>
+                        )}
+                        {intro}
+                        <HomeSections
+                            pinned={pinned}
+                            recent={recent}
+                            onKeepPin={onKeepPin}
+                            onNotNow={onNotNow}
+                            onRetryPinned={onRetryPinned}
+                            onRetryRecent={onRetryRecent}
+                        />
+                    </div>
+                </>
+            }
+        />
     )
 }
 
+const EMPTY_SIGNALS: VaultSignals = { recent: [], work: [], review: [], activity: [] }
+
 function VaultHome() {
     const signalsQuery = useQuery(vaultSignalsQuery)
-    const signals = signalsQuery.data ?? EMPTY_SIGNALS
     const pinnedQuery = useQuery({ ...pinnedNotesQuery, select: (d) => d.notes })
-    const tasksQuery = useQuery({
-        queryKey: ['tasks', 'in_progress'],
-        queryFn: () => fetchTasksClient({ status: 'in_progress' }),
-        select: (d) => inProgressTasks(d.tasks),
-    })
-    const queryClient = useQueryClient()
-    const { subscribe } = useWS()
-
-    useEffect(() => subscribe((msg) => {
-        if (msg.type === 'task:sync') queryClient.invalidateQueries({ queryKey: ['tasks', 'in_progress'] })
-    }), [subscribe, queryClient])
+    const tree = useQuery(noteTreeQuery(NOTEBOOKS))
+    const signals = signalsQuery.data ?? EMPTY_SIGNALS
 
     return (
-        <div className="h-full overflow-y-auto overflow-x-hidden">
-            <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12 w-full">
-                <div className="mb-10 flex items-stretch gap-2">
-                    <InlineSearch />
-                    <button
-                        type="button"
-                        onClick={() => window.dispatchEvent(new Event('hq:open-quick-note'))}
-                        className="flex items-center gap-2 px-4 rounded-2xl glass-card text-xs flex-shrink-0"
-                        style={{ color: 'var(--text-dim)' }}
-                        title="New note"
-                        aria-label="New note"
-                    >
-                        <Plus className="w-4 h-4" />
-                        <span className="hidden sm:inline">New note</span>
-                    </button>
-                </div>
-
-                <GetStartedCard />
-                <BriefingCard variant="home" />
-
-                <HomeSections
-                    pinned={sectionState(pinnedQuery)}
-                    recent={sectionState({ ...signalsQuery, data: signalsQuery.data?.recent })}
-                    tasks={sectionState(tasksQuery)}
-                    onKeepPin={(path) => void togglePinNote(path, true).then(() => pinnedQuery.refetch())}
-                    onNotNow={(path) => void togglePinNote(path, false).then(() => pinnedQuery.refetch())}
-                    onRetryPinned={() => pinnedQuery.refetch()}
-                    onRetryRecent={() => signalsQuery.refetch()}
-                    onRetryTasks={() => tasksQuery.refetch()}
-                />
-
-                <details className="mb-10 glass-card rounded-xl overflow-hidden">
-                    <summary className="cursor-pointer px-4 py-3 text-[11px] tracking-widest uppercase font-bold" style={{ color: 'var(--text-dim)' }}>
-                        System Activity
-                    </summary>
-                    <div className="px-4 pb-4 grid grid-cols-1 gap-3">
-                        {signals.activity.length > 0 ? signals.activity.map((note) => (
-                            <SignalCard key={note.path} note={note} lane="activity" />
-                        )) : (
-                            <div className="text-[11px] " style={{ color: 'var(--text-dim)' }}>
-                                No system activity found.
-                            </div>
-                        )}
-                    </div>
-                </details>
-
-                <div className="text-center pt-4 pb-8">
-                    <p className="text-[11px] " style={{ color: 'var(--text-dim)', opacity: 0.4 }}>
-                        Press <kbd className="px-1.5 py-0.5 rounded-md mx-0.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>⌘/</kbd> for global search anywhere
-                    </p>
-                </div>
-            </div>
-        </div>
+        <NotesHomeView
+            pinned={sectionState(pinnedQuery)}
+            recent={sectionState({ ...signalsQuery, data: signals.recent })}
+            folders={topFolders(tree.data?.tree)}
+            onKeepPin={(path) => void togglePinNote(path, true).then(() => pinnedQuery.refetch())}
+            onNotNow={(path) => void togglePinNote(path, false).then(() => pinnedQuery.refetch())}
+            onRetryPinned={() => pinnedQuery.refetch()}
+            onRetryRecent={() => signalsQuery.refetch()}
+            intro={
+                <>
+                    <BriefingCard variant="home" />
+                </>
+            }
+        />
     )
 }

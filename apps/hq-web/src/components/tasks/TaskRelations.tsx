@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Check, Plus, X } from 'lucide-react'
 import { STATUS_LABELS, type TaskItem } from '~/lib/tasksApi'
-import { STATUS_BADGE_CLASS } from './TaskCard'
 import { t } from '~/strings'
+import './leaf.css'
 
 interface Props {
   task: TaskItem
@@ -13,21 +13,21 @@ interface Props {
   onCreateSubtask: (parent: TaskItem, title: string) => Promise<void>
 }
 
-const SECTION_TITLE_CLASS = 'text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2'
+const SECTION_TITLE_CLASS = 'a-label mb-2'
 const INPUT_CLASS =
-  'flex-1 px-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
+  'a-input flex-1'
 
 function TaskLine({ task, onOpen, children }: { task: TaskItem; onOpen: () => void; children?: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5">
+    <div className="a-drow l-tall">
       {children}
-      <button type="button" onClick={onOpen} className="flex items-center gap-2 min-w-0 flex-1 text-left">
-        <span className="text-[11px] text-neutral-500 shrink-0">{task.display_id}</span>
-        <span className={`text-xs truncate ${task.status === 'complete' ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>
+      <button type="button" onClick={onOpen} className="l-row l-grow l-plain">
+        <span className="a-cap a-muted shrink-0">{task.display_id}</span>
+        <span className={`a-body-sm l-clip ${task.status === 'complete' ? 'l-line' : ''}`}>
           {task.title}
         </span>
       </button>
-      <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border shrink-0 ${STATUS_BADGE_CLASS[task.status]}`}>
+      <span className="a-kind sm">
         {STATUS_LABELS[task.status]}
       </span>
     </div>
@@ -69,7 +69,7 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
           <h3 className={SECTION_TITLE_CLASS}>
             {t('task_rel_subtasks', { done: task.subtask_done, total: task.subtask_count })}
           </h3>
-          <div className="space-y-1.5 mb-2">
+          <div className="a-card l-lines mb-2">
             {subtasks.map((sub) => {
               const done = sub.status === 'complete'
               return (
@@ -79,11 +79,11 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
                     disabled={busy}
                     title={done ? t('task_reopen') : t('task_mark_complete')}
                     onClick={() => onUpdate(sub.id, { status: done ? 'to_do' : 'complete', expected_status: sub.status })}
-                    className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                      done ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'border-white/20 text-transparent hover:border-white/40'
-                    }`}
+                    role="checkbox"
+                    aria-checked={done}
+                    className="a-chk"
                   >
-                    <Check className="w-3 h-3" />
+                    <u />
                   </button>
                 </TaskLine>
               )
@@ -97,8 +97,8 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
               placeholder={t('task_rel_add_sub')}
               className={INPUT_CLASS}
             />
-            <button type="button" onClick={addSubtask} disabled={busy || !subtaskTitle.trim()} className="p-1.5 rounded-lg text-emerald-400 hover:bg-white/10 disabled:opacity-40">
-              <Plus className="w-4 h-4" />
+            <button type="button" onClick={addSubtask} disabled={busy || !subtaskTitle.trim()} className="a-ib sm" aria-label={t('task_rel_add_sub')}>
+              <Plus className="a-ic sm" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -106,7 +106,7 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
 
       <div>
         <h3 className={SECTION_TITLE_CLASS}>{t('task_rel_waiting_on', { n: waitingOn.length })}</h3>
-        <div className="space-y-1.5 mb-2">
+        <div className="a-card l-lines mb-2">
           {waitingOn.map((dep) => (
             <TaskLine key={dep.id} task={dep} onOpen={() => onSelectTask(dep.id)}>
               <button
@@ -114,9 +114,10 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
                 disabled={busy}
                 title={t('task_rel_remove_dep')}
                 onClick={() => onUpdate(task.id, { remove_depends_on: [dep.id] })}
-                className="text-neutral-500 hover:text-rose-400 shrink-0"
+                aria-label={t('task_rel_remove_dep')}
+                className="a-ib sm"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="a-ic sm" aria-hidden="true" />
               </button>
             </TaskLine>
           ))}
@@ -135,8 +136,8 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
               <option key={t.id} value={`${t.display_id} ${t.title}`} />
             ))}
           </datalist>
-          <button type="button" onClick={addDependency} disabled={busy || !dependencyQuery.trim()} className="p-1.5 rounded-lg text-emerald-400 hover:bg-white/10 disabled:opacity-40">
-            <Plus className="w-4 h-4" />
+          <button type="button" onClick={addDependency} disabled={busy || !dependencyQuery.trim()} className="a-ib sm" aria-label={t('task_rel_id_hint')}>
+            <Plus className="a-ic sm" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -144,7 +145,7 @@ export function TaskRelations({ task, allTasks, busy, onUpdate, onSelectTask, on
       {blocking.length > 0 && (
         <div>
           <h3 className={SECTION_TITLE_CLASS}>Blocking ({blocking.length})</h3>
-          <div className="space-y-1.5">
+          <div className="a-card l-lines">
             {blocking.map((t) => (
               <TaskLine key={t.id} task={t} onOpen={() => onSelectTask(t.id)} />
             ))}
