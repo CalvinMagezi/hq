@@ -110,8 +110,6 @@ function RootComponent() {
             <QuickNoteOverlay />
           </>
         )}
-        {/* One drawer for every note link, whatever page or overlay it was clicked in. It stays in the app's host, where a note link in a task would otherwise do nothing. */}
-        <VaultNoteDrawer />
       </WebSocketProvider>
     </RootDocument>
   )
@@ -367,6 +365,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
           <ToastHost />
         </>
       )}
+      {/* One sheet for every note link, whatever page it was clicked in; inside .a-app so it takes the design's widths. */}
+      <VaultNoteDrawer />
       <div className="a-shell">
         {/* Signed out, only Sign in shows: no places, no gear (FirstRun 2). */}
         {!embedded && !signedOut && <AppRail />}

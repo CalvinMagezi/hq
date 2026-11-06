@@ -7,12 +7,16 @@ import { join, relative } from 'node:path'
 export const WEB_SRC = join(import.meta.dir, '..', '..', 'apps/hq-web/src')
 export const BASELINE = join(WEB_SRC, 'strings/inline-baseline.json')
 const SCANNED = ['components', 'routes']
+const WHOLLY_INTERPOLATED = /^\$\{.*\}$/
 
 /** JSX text and literal title, aria-label and placeholder props. */
 export function inlineStrings(source: string): string[] {
   const found: string[] = []
   for (const m of source.matchAll(/>\s*([^<>{}\n]*[A-Za-z]{2,}[^<>{}\n]*?)\s*</g)) found.push(m[1].trim())
-  for (const m of source.matchAll(/\b(?:title|aria-label|placeholder)="([^"]*[A-Za-z]{2,}[^"]*)"/g)) found.push(m[1])
+  for (const m of source.matchAll(/\b(?:title|aria-label|placeholder)="([^"]*[A-Za-z]{2,}[^"]*)"/g)) {
+    // Markup built as a string whose value is one interpolation (`${t('key')}`) takes its words from the catalogue.
+    if (!WHOLLY_INTERPOLATED.test(m[1])) found.push(m[1])
+  }
   return found
 }
 

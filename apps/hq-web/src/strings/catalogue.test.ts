@@ -45,6 +45,8 @@ describe('inline strings (N20 on the web)', () => {
   test('finds text a person reads', () => {
     expect(inlineStrings('<p>Hello there</p><input placeholder="Search notes" />')).toEqual(['Hello there', 'Search notes'])
     expect(inlineStrings('<p>{t("state_offline")}</p>')).toEqual([])
+    expect(inlineStrings('`<button aria-label="${escapeHtml(t(\'chat_table_copy\'))}">`')).toEqual([])
+    expect(inlineStrings('`<button aria-label="Copy ${name}">`')).toEqual(['Copy ${name}'])
   })
 
   test('no file has more inline strings than it had when the catalogue arrived', () => {
