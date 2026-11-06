@@ -74,6 +74,7 @@ export function SettingsHome({ lite, hub, phone, trailing, needsLook = [], onSig
           </div>
         </section>
       ))}
+      {lite && <p className="a-muted a-body-sm st-note">{t('lite_only')}</p>}
     </div>
   )
 }
