@@ -1135,6 +1135,41 @@ html[data-embed="1"] .a-rail {
 .hq-chip-on{background:transparent;color:var(--ink);border-color:var(--ink)}
 .hq-card-needs{border-color:var(--warn)}
 
+/* Settings and Spending (web-matches-phone B6): the detail pane's body and the small shapes the boards draw inline. */
+.st-body{padding:8px 0 32px}
+.st-body .a-wrap{display:flex;flex-direction:column;gap:12px}
+.st-body .a-set{margin:0}
+.st-body .a-grp,.st-body .a-wrap>section>.a-grp{padding:20px 0 8px}
+.st-body .a-grp:first-child{padding-top:8px}
+.st-body .a-li-main span{white-space:normal}
+.st-home{display:flex;flex-direction:column;padding-bottom:24px}
+.st-note{display:flex;flex-direction:column;gap:4px;padding:8px 16px 0}
+.st-ic{display:flex}
+.st-fact{align-items:flex-start}
+.st-trail{max-width:55%;text-align:right;overflow-wrap:anywhere}
+.st-inline{display:inline-flex;align-items:center;gap:8px}
+.st-stack{flex-direction:column;align-items:flex-start;gap:8px}
+.st-self{align-self:flex-start}
+.st-wrap{overflow-wrap:anywhere}
+.st-form{display:flex;flex-direction:column;gap:12px;padding:16px;border-top:1px solid var(--hairline)}
+.st-steps{padding-left:20px;display:flex;flex-direction:column;gap:4px;list-style:decimal}
+.st-code{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.st-code-text{font-size:28px;line-height:36px;letter-spacing:.2em;color:var(--ink);user-select:all}
+.st-qr{border-radius:var(--radius-md)}
+.st-menu-anchor{position:relative;flex:none}
+.st-menu{position:absolute;right:0;top:100%;z-index:10}
+.st-limit{flex-direction:column;align-items:stretch;gap:8px;padding:16px}
+.st-limit-head{display:flex;align-items:center;gap:8px}
+.st-limit-head .a-body-b{flex:1 1 0;min-width:0}
+.st-limit-spent{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.st-meter,.st-meter>u{height:8px;border-radius:4px}
+.st-fact-row{display:flex;flex-direction:column;gap:2px}
+@container app (min-width:480px){.st-fact-row{flex-direction:row;justify-content:space-between;gap:16px}.st-fact-row>span:last-child{text-align:right}}
+.sp-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.sp-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:8px 0}
+.sp-bar .a-prog{grid-column:1/3}
+.sp-meter>u{background:var(--ink-muted)}
+
 /* The shared sheet is a modal <dialog>: undo the browser's own dialog box so `.a-sheet` places it. */
 dialog.hq-sheet{margin:0;border:0;color:var(--ink);max-width:none;width:auto;height:auto;inset:auto;left:0;right:0;bottom:0;position:fixed}
 dialog.hq-sheet::backdrop{background:var(--scrim)}

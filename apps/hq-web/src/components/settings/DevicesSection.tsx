@@ -35,7 +35,7 @@ function errorText(e: unknown, fallback: string): string {
 function ErrorLine({ message }: { message: string | null }) {
   if (!message) return null
   return (
-    <p className="text-xs" role="alert" style={{ color: 'var(--warn)' }}>
+    <p className="a-body-sm a-warn-t" role="alert">
       {message}
     </p>
   )
@@ -56,8 +56,8 @@ function LoginQr({ link }: { link: string }) {
       live = false
     }
   }, [link])
-  if (failed) return <p className="text-xs text-neutral-400">{t('code_qr_failed')}</p>
-  return <canvas ref={canvas} width={QR_SIZE_PX} height={QR_SIZE_PX} aria-label={t('code_qr_label')} className="rounded-lg" />
+  if (failed) return <p className="a-muted a-body-sm">{t('code_qr_failed')}</p>
+  return <canvas ref={canvas} width={QR_SIZE_PX} height={QR_SIZE_PX} aria-label={t('code_qr_label')} className="st-qr" />
 }
 
 /** A one-time code and its QR code, for signing in a new device. */
@@ -99,33 +99,34 @@ export function SignInAnother() {
   const showing = issued !== null && left > 0
   return (
     <div className="flex flex-col gap-3">
-      <h3 className="text-sm font-semibold text-neutral-100">{t('code_title')}</h3>
-      <p className="a-card warn flex items-start gap-2 text-xs" style={{ borderColor: 'var(--warn)' }}>
-        <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--warn)' }} aria-hidden="true" />
+      <h3 className="a-grp">{t('code_title')}</h3>
+      <p className="a-banner" role="note">
+        <AlertTriangle className="a-ic a-warn-t" aria-hidden="true" />
         {t('code_warning')}
       </p>
       {showing && (
-        <div className="flex flex-col items-start gap-3">
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <span className="font-mono text-3xl tracking-[0.2em] text-neutral-50 select-all" aria-label={t('code_label')}>
+        <div className="st-code">
+          <LoginQr link={codeLink(window.location.origin, issued.code)} />
+          <div className="flex flex-col gap-2">
+            <span className="a-label">{t('code_label')}</span>
+            <span className="a-mono st-code-text" aria-label={t('code_label')}>
               {issued.code}
             </span>
-            <span className="text-xs text-neutral-400" aria-live="polite">
+            <span className="a-body-sm a-muted" aria-live="polite">
               {t('code_left', { time: formatCountdown(left) })}
             </span>
+            <p className="a-body-sm a-muted">{t('code_works_once', { time: formatCountdown(left) })}</p>
+            <p className="a-body-sm a-muted">{t('code_expiry')}</p>
           </div>
-          <LoginQr link={codeLink(window.location.origin, issued.code)} />
-          <p className="text-xs text-neutral-400">{t('code_works_once', { time: formatCountdown(left) })}</p>
-          <p className="text-xs text-neutral-400">{t('code_expiry')}</p>
         </div>
       )}
-      {issued !== null && !showing && <p className="text-xs text-neutral-400">{t('code_ran_out')}</p>}
-      <div className="flex flex-wrap gap-3">
-        <button type="button" onClick={start} disabled={busy} className="hq-btn-ghost disabled:opacity-40">
+      {issued !== null && !showing && <p className="a-body-sm a-muted">{t('code_ran_out')}</p>}
+      <div className="a-btns">
+        <button type="button" onClick={start} disabled={busy} className="a-btn secondary">
           {showing || issued !== null ? t('code_new') : t('code_title')}
         </button>
         {showing && (
-          <button type="button" onClick={() => void copyCode(issued.code)} className="hq-btn-ghost">
+          <button type="button" onClick={() => void copyCode(issued.code)} className="a-btn quiet">
             {copied ? t('code_copied') : t('code_copy')}
           </button>
         )}
@@ -162,16 +163,16 @@ export function deviceLine(d: SignedInDevice, nowMs: number): string {
 function RowMenu({ device, busy, onKeep }: { device: SignedInDevice; busy: boolean; onKeep: () => void }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="relative flex-shrink-0">
+    <div className="st-menu-anchor">
       <button type="button" className="a-ib" aria-haspopup="menu" aria-expanded={open} aria-label={t('device_menu', { device: device.label })} onClick={() => setOpen(!open)}>
-        <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
+        <MoreHorizontal className="a-ic" aria-hidden="true" />
       </button>
       {open && (
-        <div role="menu" className="a-card absolute right-0 z-10 mt-1">
+        <div role="menu" className="a-menu st-menu">
           <button
             type="button"
             role="menuitem"
-            className="a-btn quiet"
+            className="a-menu-item"
             disabled={busy}
             onClick={() => {
               setOpen(false)
@@ -221,33 +222,31 @@ function DeviceRows({ list, onChanged }: { list: DeviceList; onChanged: () => vo
   const others = list.devices.filter((d) => !d.current)
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="text-sm font-semibold text-neutral-100">{t('devices_title')}</h3>
-      {others.length === 0 && <p className="text-xs text-neutral-400">{t('devices_none')}</p>}
-      <ul className="flex flex-col divide-y divide-white/5">
-        {others.map((d) => (
-          <li key={d.id} className="flex items-center justify-between gap-3 py-2">
-            <div className="min-w-0">
-              <p className="text-neutral-100 truncate">
-                {deviceName(d)}
-                {d.new && (
-                  <span className="ml-2 inline-flex items-center gap-1 text-xs" style={{ color: 'var(--warn)' }}>
-                    <AlertTriangle className="w-3 h-3" aria-hidden="true" />
-                    {t('device_new_tag')}
-                  </span>
-                )}
-              </p>
-              <p className="text-xs text-neutral-400">{deviceLine(d, now)}</p>
-            </div>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <button type="button" onClick={() => setAsking(d)} disabled={busyId !== null} className="hq-btn-ghost disabled:opacity-40">
+      <h3 className="a-grp">{t('devices_title')}</h3>
+      {others.length === 0 && <p className="a-muted a-body-sm">{t('devices_none')}</p>}
+      {others.length > 0 && (
+        <ul className="a-set">
+          {others.map((d) => (
+            <li key={d.id} className="a-li">
+              <div className="a-li-main">
+                <b>{deviceName(d)}</b>
+                <span>{deviceLine(d, now)}</span>
+              </div>
+              {d.new && (
+                <span className="a-kind sm warn">
+                  <AlertTriangle className="a-ic xs" aria-hidden="true" />
+                  {t('device_new_tag')}
+                </span>
+              )}
+              <button type="button" onClick={() => setAsking(d)} disabled={busyId !== null} className="a-btn quiet danger">
                 {d.new ? t('sign_it_out') : t('device_sign_out')}
               </button>
               {!d.keep && <RowMenu device={d} busy={busyId !== null} onKeep={() => void keep(d)} />}
-            </div>
-          </li>
-        ))}
-      </ul>
-      <p className="text-xs text-neutral-400">{t('device_rule')}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="a-muted a-body-sm">{t('device_rule')}</p>
       {asking && (
         <Dialog
           kind="red"
@@ -262,7 +261,7 @@ function DeviceRows({ list, onChanged }: { list: DeviceList; onChanged: () => vo
           onAct={() => void signOut(asking)}
         />
       )}
-      {list.operator_link_active && <p className="text-xs text-neutral-400">{t('device_operator')}</p>}
+      {list.operator_link_active && <p className="a-muted a-body-sm">{t('device_operator')}</p>}
       <ErrorLine message={error} />
     </div>
   )
@@ -291,10 +290,10 @@ function SignOutEverywhere() {
 
   return (
     <div>
-      <button type="button" onClick={() => setConfirming(true)} className="hq-btn-ghost">
+      <button type="button" onClick={() => setConfirming(true)} className="a-btn secondary">
         {t('sign_out_all_act')}
       </button>
-      <p className="mt-2 text-xs text-neutral-400">{t('device_pair_note')}</p>
+      <p className="mt-2 a-muted a-body-sm">{t('device_pair_note')}</p>
       {confirming && (
         <Dialog
           kind="red"
@@ -333,22 +332,20 @@ export function DevicesSection() {
   }, [signedIn, load])
 
   return (
-    <section id="devices" aria-labelledby="devices-title" className="scroll-mt-4">
-      <h2 id="devices-title" className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
+    <section id="devices" aria-labelledby="devices-title" className="flex flex-col gap-4">
+      <h2 id="devices-title" className="a-sr">
         {t('devices_title')}
       </h2>
-      <div className="hq-card rounded-2xl px-5 py-4 flex flex-col gap-4 text-sm text-neutral-300">
-        {!signedIn ? (
-          <p>{t('devices_no_token')}</p>
-        ) : (
-          <>
-            <SignInAnother />
-            {list && <DeviceRows list={list} onChanged={load} />}
-            <ErrorLine message={loadError} />
-            <SignOutEverywhere />
-          </>
-        )}
-      </div>
+      {!signedIn ? (
+        <p className="a-body">{t('devices_no_token')}</p>
+      ) : (
+        <>
+          <SignInAnother />
+          {list && <DeviceRows list={list} onChanged={load} />}
+          <ErrorLine message={loadError} />
+          <SignOutEverywhere />
+        </>
+      )}
     </section>
   )
 }

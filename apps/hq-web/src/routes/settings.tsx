@@ -1,6 +1,6 @@
 import { Link, Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import { fetchSettings, type HqSettings } from '~/lib/settingsApi'
 import { t, type StringKey } from '~/strings'
@@ -10,6 +10,8 @@ import { CardSlot, useBackupStatus, useNotificationsOff } from '~/components/set
 import { NotificationsPage } from '~/components/settings/NotificationsPage'
 import { SettingsHome } from '~/components/settings/SettingsHome'
 import { Dialog } from '~/components/ui/Dialog'
+import { PaneHead, Panes } from '~/components/ui/Panes'
+import { SettingsSkeleton } from '~/components/settings/SettingsSkeleton'
 import { SignOutDialog } from '~/components/settings/BrowserSections'
 import { deviceTimeZone, useClockZone, zoneCity } from '~/lib/clock'
 import { spendResetLine, useHqZone, zonesDiffer } from '~/lib/time'
@@ -90,7 +92,9 @@ export function SessionFoldersSection() {
   const [asking, setAsking] = useState<FolderGrant | null>(null)
 
   if (isMissingRoute(error)) return null
-  if (!data) return error ? <LoadFailed onRetry={() => client.invalidateQueries({ queryKey: SESSION_FOLDERS_QUERY_KEY })} /> : null
+  if (!data) {
+    return error ? <LoadFailed onRetry={() => client.invalidateQueries({ queryKey: SESSION_FOLDERS_QUERY_KEY })} /> : <SettingsSkeleton label={t('settings_loading')} />
+  }
 
   return (
     <>
@@ -118,27 +122,36 @@ function WhichAi({ s }: { s: HqSettings }) {
   const { backends, model } = s
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="a-h3">{t('settings_which_ai')}</h2>
+      <h3 className="a-grp">{t('settings_which_ai')}</h3>
       <p className="a-muted a-body-sm">{t('settings_ai_cannot_change')}</p>
-      <div className="a-card">
-        <b>{t('settings_ai_model')}</b>
-        <span>{model.active}</span>
-        {model.local_only && <span className="a-muted">{t('settings_ai_local_only')}</span>}
+      <div className="a-set">
+        <div className="a-li">
+          <div className="a-li-main">
+            <b>{t('settings_ai_model')}</b>
+            <span>{model.active}</span>
+            {model.local_only && <span>{t('settings_ai_local_only')}</span>}
+          </div>
+        </div>
       </div>
       {backends.configured && (
         <>
-          <h3 className="a-h3">{t('settings_which_answers')}</h3>
-          {backends.entries.map((b) => (
-            <div key={b.name} className="a-card">
-              <b>{b.name}</b>
-              <span className="a-muted">
-                {[b.model, b.effort ? t('settings_chain_effort', { effort: b.effort }) : null, b.endpoint_host ? t('settings_chain_at', { host: b.endpoint_host }) : null]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </span>
-              <span className="a-muted a-body-sm">{b.primary ? t('settings_chain_first') : t('settings_chain_next')}</span>
-            </div>
-          ))}
+          <h3 className="a-grp">{t('settings_which_answers')}</h3>
+          <div className="a-set">
+            {backends.entries.map((b) => (
+              <div key={b.name} className="a-li">
+                <div className="a-li-main">
+                  <b>{b.name}</b>
+                  <span>
+                    {[b.model, b.effort ? t('settings_chain_effort', { effort: b.effort }) : null, b.endpoint_host ? t('settings_chain_at', { host: b.endpoint_host }) : null]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                  {!b.primary && <span>{t('settings_chain_next')}</span>}
+                </div>
+                {b.primary && <span className="a-kind sm">{t('settings_chain_first')}</span>}
+              </div>
+            ))}
+          </div>
         </>
       )}
     </section>
@@ -146,10 +159,10 @@ function WhichAi({ s }: { s: HqSettings }) {
 }
 
 export function KeysPage() {
-  const { data, refetch } = useSettingsData()
-  if (!data) return <LoadFailed words="settings_failed_safety" onRetry={() => void refetch()} />
+  const { data, isError, refetch } = useSettingsData()
+  if (!data) return isError ? <LoadFailed words="settings_failed_safety" onRetry={() => void refetch()} /> : <SettingsSkeleton label={t('settings_loading')} />
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <ProviderKeysSection rows={data.provider_keys} />
       <WhichAi s={data} />
     </div>
@@ -169,9 +182,9 @@ export function SpendingPage() {
 }
 
 export function SafetyPage() {
-  const { data: s, refetch } = useSettingsData()
+  const { data: s, isError, refetch } = useSettingsData()
   const [tab, setTab] = useState<SafetyTab>('safety')
-  if (!s) return <LoadFailed onRetry={() => void refetch()} />
+  if (!s) return isError ? <LoadFailed onRetry={() => void refetch()} /> : <SettingsSkeleton label={t('settings_loading')} />
   return <SafetyView s={s} tab={tab} onTab={setTab} />
 }
 
@@ -281,25 +294,25 @@ function SettingsLayout() {
   const notice = liteNotice(pathname, lite)
   const titleKey = notice ? 'row_notifications' : TITLES[pathname]
   const list = (
-    <aside className={`min-w-0 lg:w-[360px] lg:shrink-0 lg:overflow-y-auto ${home ? 'block flex-1 lg:flex-none' : 'hidden lg:block'}`}>
-      <h1 className="a-h1 px-4 py-3 lg:hidden">{t('settings_title')}</h1>
+    <>
       <CardSlot notificationsOff={notificationsOff} />
       <SettingsHome lite={lite} hub={hub} phone={phone} trailing={{ ...trailing, notifications: notificationsOff && !wide ? t('trail_notif_none') : trailing.notifications }} needsLook={needsLook} onSignOut={() => setSigningOut(true)} />
-    </aside>
+    </>
   )
-  return (
-    <div className="h-full min-h-0 flex overflow-hidden">
-      {list}
-      <main className={`min-w-0 flex-1 overflow-y-auto ${home ? 'hidden lg:block' : 'block'}`}>
-        <div className="mx-auto w-full max-w-[760px] px-4 py-5 flex flex-col gap-4">
-          {titleKey && (
-            <header className="flex items-center gap-2">
-              <Link to="/settings" className="a-ib lg:hidden" aria-label={t('settings_back')}>
-                <ChevronLeft className="w-4 h-4" />
-              </Link>
-              <h1 className="a-h1">{t(titleKey)}</h1>
-            </header>
-          )}
+  const detail = (
+    <>
+      {titleKey && (
+        <PaneHead
+          title={t(titleKey)}
+          back={
+            <Link to="/settings" className="a-ib a-back" aria-label={t('settings_back')}>
+              <ChevronLeft className="a-ic" aria-hidden="true" />
+            </Link>
+          }
+        />
+      )}
+      <div className="st-body">
+        <div className="a-wrap">
           {notice && (
             <p className="a-body" role="status">
               {t(notice)}
@@ -307,8 +320,13 @@ function SettingsLayout() {
           )}
           {notice ? <NotificationsPage /> : <Outlet />}
         </div>
-      </main>
+      </div>
+    </>
+  )
+  return (
+    <>
+      <Panes list={list} detail={detail} showDetail={!home} listLabel={t('settings_title')} detailLabel={titleKey ? t(titleKey) : t('settings_title')} />
       {signingOut && <SignOutDialog onClose={() => setSigningOut(false)} />}
-    </div>
+    </>
   )
 }

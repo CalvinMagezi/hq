@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { hasWebToken } from "~/lib/hqAuth";
 import { useSharedConnection } from "~/lib/connection";
@@ -9,6 +9,7 @@ import {
   replaceProviderKey,
   type SetupProviderId,
 } from "~/lib/setupApi";
+import { Sheet } from "~/components/ui/Sheet";
 import { t } from "~/strings";
 
 /** What a row offers: a button only for a key the web can change, a note for one set where HQ runs. */
@@ -57,70 +58,53 @@ function KeyForm({
     }
   };
 
+  const formId = useId();
   return (
-    <>
-    <div className="fixed inset-0 z-30 bg-[var(--scrim)]" onClick={onCancel} aria-hidden="true" />
-    <form
-      onSubmit={submit}
-      role="dialog"
-      aria-modal="true"
-      onKeyDown={(e) => e.key === 'Escape' && onCancel()}
-      className="fixed z-40 inset-x-0 bottom-0 max-h-[90vh] overflow-auto rounded-t-2xl bg-[var(--surface-100)] p-6 flex flex-col gap-2 md:inset-x-auto md:inset-y-0 md:right-0 md:w-[420px] md:max-h-none md:rounded-none"
+    <Sheet
+      title={t(replacing ? "settings_key_replace_title" : "settings_key_add_title", { service: name })}
+      placement="side"
+      busy={busy}
+      onClose={onCancel}
+      footer={
+        <>
+          <button type="button" onClick={onCancel} disabled={busy} className="a-btn secondary">
+            {t("spend_cancel")}
+          </button>
+          <button type="submit" form={formId} disabled={busy || key.trim() === ""} className="a-btn">
+            {busy ? t("settings_key_checking") : t("settings_key_check_save")}
+          </button>
+        </>
+      }
     >
-      <b>
-        {t(
-          replacing ? "settings_key_replace_title" : "settings_key_add_title",
-          { service: name },
+      <form id={formId} onSubmit={submit} className="flex flex-col gap-3">
+        <p className="a-muted a-body-sm">{t("settings_key_sheet_body", { service: name })}</p>
+        <div className="a-field">
+          <label className="a-field-label" htmlFor={inputId}>
+            {name}
+          </label>
+          <input
+            id={inputId}
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            className="a-input a-mono"
+          />
+        </div>
+        {keyUrl && (
+          <a href={keyUrl} target="_blank" rel="noreferrer" className="a-link a-body-sm self-start">
+            {name}
+          </a>
         )}
-      </b>
-      <p className="a-muted a-body-sm">
-        {t("settings_key_sheet_body", { service: name })}
-      </p>
-      <input
-        id={inputId}
-        aria-label={name}
-        type="password"
-        autoComplete="off"
-        spellCheck={false}
-        value={key}
-        onChange={(e) => setKey(e.target.value)}
-        className="a-field font-mono"
-      />
-      {keyUrl && (
-        <a
-          href={keyUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="a-muted a-body-sm underline self-start"
-        >
-          {name}
-        </a>
-      )}
-      <p className="a-muted a-body-sm">{t("settings_key_keeps")}</p>
-      <div className="flex flex-wrap gap-3">
-        <button
-          type="submit"
-          disabled={busy || key.trim() === ""}
-          className="a-btn"
-        >
-          {busy ? t("settings_key_checking") : t("settings_key_check_save")}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={busy}
-          className="a-btn secondary"
-        >
-          {t("spend_cancel")}
-        </button>
-      </div>
-      {error && (
-        <p role="alert" className="a-warn-t a-body-sm">
-          {error}
-        </p>
-      )}
-    </form>
-    </>
+        <p className="a-muted a-body-sm">{t("settings_key_keeps")}</p>
+        {error && (
+          <p role="alert" className="a-warn-t a-body-sm">
+            {error}
+          </p>
+        )}
+      </form>
+    </Sheet>
   );
 }
 
@@ -146,65 +130,43 @@ export function KeysView({
   onSaved,
   onCancel,
 }: ViewProps) {
+  const editingRow = rows.find((row) => row.id !== undefined && row.id === editing);
   return (
-    <section
-      id="keys"
-      aria-labelledby="keys-title"
-      className="flex flex-col gap-2"
-    >
-      <h2 id="keys-title" className="a-h3">
+    <section id="keys" aria-labelledby="keys-title" className="flex flex-col gap-2">
+      <h3 id="keys-title" className="a-grp">
         {t("settings_your_keys")}
-      </h2>
-      <p className="a-muted a-body-sm">
-        {canEdit ? t("settings_key_note") : t("settings_key_no_token")}
-      </p>
-      {!reachable && (
-        <p className="a-muted a-body-sm">{t("settings_needs_hq_key")}</p>
-      )}
-      {rows.map((row) => {
-        const action = keyRowAction(row, canEdit);
-        const id = row.id;
-        return (
-          <div key={row.name} className="a-card">
-            <div className="flex items-baseline justify-between gap-4">
-              <b>{row.name}</b>
-              <span className="a-muted">
-                {keyState(row) === "not_set"
-                  ? t("settings_key_not_set")
-                  : t("settings_key_saved")}
-              </span>
-              {(action === "add" || action === "replace") &&
-                editing !== id &&
-                id !== undefined && (
-                  <button
-                    type="button"
-                    disabled={!reachable}
-                    onClick={() => onEdit(id)}
-                    className="a-btn secondary"
-                  >
-                    {action === "replace"
-                      ? t("settings_key_replace")
-                      : t("settings_key_add")}
-                  </button>
-                )}
+      </h3>
+      <p className="a-muted a-body-sm">{canEdit ? t("settings_key_note") : t("settings_key_no_token")}</p>
+      {!reachable && <p className="a-muted a-body-sm">{t("settings_needs_hq_key")}</p>}
+      <div className="a-set">
+        {rows.map((row) => {
+          const action = keyRowAction(row, canEdit);
+          const id = row.id;
+          return (
+            <div key={row.name} className="a-li">
+              <div className="a-li-main">
+                <b>{row.name}</b>
+                {action === "env" && <span>{t("settings_key_where_runs")}</span>}
+              </div>
+              <span className="a-kind sm">{keyState(row) === "not_set" ? t("settings_key_not_set") : t("settings_key_saved")}</span>
+              {(action === "add" || action === "replace") && id !== undefined && (
+                <button type="button" disabled={!reachable} onClick={() => onEdit(id)} className="a-btn quiet">
+                  {action === "replace" ? t("settings_key_replace") : t("settings_key_add")}
+                </button>
+              )}
             </div>
-            {action === "env" && (
-              <p className="a-muted a-body-sm">
-                {t("settings_key_where_runs")}
-              </p>
-            )}
-            {id !== undefined && editing === id && (
-              <KeyForm
-                provider={id}
-                name={row.name}
-                replacing={action === "replace"}
-                onSaved={() => onSaved(row.name)}
-                onCancel={onCancel}
-              />
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {editingRow && editing && (
+        <KeyForm
+          provider={editing}
+          name={editingRow.name}
+          replacing={keyRowAction(editingRow, canEdit) === "replace"}
+          onSaved={() => onSaved(editingRow.name)}
+          onCancel={onCancel}
+        />
+      )}
       {saved && (
         <p role="status" className="a-body-sm">
           {saved}
