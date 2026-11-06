@@ -106,3 +106,11 @@ test('what HQ said yes to is read from the answers route, never from the session
   expect(urls).toEqual(['/api/harness-sessions/hs%201/answers'])
   expect(autoAnswers(list).map((a) => a.by)).toEqual(['a Drive turn'])
 })
+
+test('a task page starts a helper on that task, and the start sends it (WR17)', () => {
+  const src = (p: string) => readFileSync(join(import.meta.dir, p), 'utf8')
+  const sessions = src('../components/tasks/TaskSessions.tsx')
+  expect(sessions).toContain("t('helpers_start_on_task')")
+  expect(sessions).toContain('task={{ id: taskId, title: taskTitle }}')
+  expect(src('../components/sessions/NewAgentDialog.tsx')).toContain('task_id: task.id')
+})

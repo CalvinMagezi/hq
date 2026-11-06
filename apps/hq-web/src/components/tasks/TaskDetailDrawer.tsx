@@ -443,7 +443,7 @@ export function TaskDetailDrawer({
           <TaskActivity key={`activity-${task.id}`} task={task} />
           <TaskLinks key={`links-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
-          <TaskSessions key={`sessions-${task.id}`} taskId={task.id} />
+          <TaskSessions key={`sessions-${task.id}`} taskId={task.id} taskTitle={task.title} done={archived || task.status === 'complete'} />
 
           <TaskComments key={`comments-${task.id}`} taskId={task.id} />
         </div>

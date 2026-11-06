@@ -32,6 +32,8 @@ interface Props {
   onClose: () => void
   /** Called with the new agent's id once it has started. */
   onStarted: (sessionId: string) => void
+  /** Start it on this task (WR17): the task records its work. */
+  task?: { id: string; title: string }
 }
 
 const PHONE_QUERY = '(max-width: 639px)'
@@ -49,7 +51,7 @@ function useIsPhone(): boolean {
 }
 
 /** Pick a computer, a folder and an agent, say what to do first, and start. */
-export function NewAgentDialog({ onClose, onStarted }: Props) {
+export function NewAgentDialog({ onClose, onStarted, task }: Props) {
   const [hosts, setHosts] = useState<WorkbenchHosts | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [host, setHost] = useState('')
@@ -100,6 +102,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
         ...(label.trim() ? { label: label.trim() } : {}),
         ...(!generalPurpose && branch.trim() ? { branch: branch.trim() } : {}),
+        ...(task ? { task_id: task.id } : {}),
       })
       if (launched.blocked || launched.note) setReport(launched)
       else onStarted(launched.session_id)
@@ -142,6 +145,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
           {hosts && !report && (
             <>
               {hosts.hosts.some((h) => h.lockdown) && <LockdownBanner hosts={hosts.hosts} />}
+              {task && <p className="text-xs text-neutral-300">{t('helpers_new_for_task', { title: task.title })}</p>}
               <div>
                 <label htmlFor="agent-first" className={LABEL_CLASS}>
                   {t('helpers_new_first')}
