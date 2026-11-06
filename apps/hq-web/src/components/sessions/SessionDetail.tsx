@@ -1,18 +1,18 @@
 import { t, tn } from '~/strings'
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft, Loader2, PanelLeftOpen, PanelRight } from 'lucide-react'
 import { attachCommand, canSend, globalSessionsApi, isBlocked, type HarnessSession } from '~/lib/sessionsApi'
 import { autoAnswers, type AutoAnswer } from '~/lib/autoAnswers'
 import { parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
-import { computerName, folderName, screenPollMs, sessionTitle } from '~/lib/workbench'
+import { computerName, screenPollMs, sessionTitle } from '~/lib/workbench'
 import { helperState } from './SessionRow'
 import { TechnicalDetails } from './TechnicalDetails'
+import { PaneHead } from '../ui/Panes'
 import { SessionSendBox, useSend } from './SessionSendBox'
 import { HelperPill, SessionTaskLink } from './SessionRow'
 import { BlockedCallout } from './BlockedCallout'
-import { StopAllButton } from './EmergencyStop'
-import { ActionError, ArchiveButton, FollowInChat, RenameTitle, ResumeButton, StopButton, useAction } from './SessionActions'
+import { ActionError, ArchiveButton, ResumeButton, useAction } from './SessionActions'
 
 const DRIVE_ANSWERER = 'a Drive turn'
 const clock = (when: string | null) => (when ? parseSqliteUtc(when).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')
@@ -23,15 +23,17 @@ interface Props {
   session: HarnessSession
   onBack: () => void
   onChanged: Refresh
+  /** Opens the details pane below 1400 px. */
+  onToggleSide?: () => void
+  /** Brings back the list the owner collapsed. */
+  onExpandList?: () => void
 }
 
 /** One helper: what it needs from you first, what it is doing, then the way to tell it more. Its screen stays closed until asked for. */
-export function SessionDetail({ session: s, onBack, onChanged }: Props) {
+export function SessionDetail({ session: s, onBack, onChanged, onToggleSide, onExpandList }: Props) {
   const [sentCount, setSentCount] = useState(0)
   const [screenText, setScreenText] = useState('')
   const action = useAction(onChanged)
-  const running = s.status === 'running'
-  const folder = folderName(s.cwd)
   const afterSend = useCallback(async () => {
     setSentCount((n) => n + 1)
     await onChanged()
@@ -39,33 +41,28 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-y-auto overscroll-contain">
-      <header className="px-3 py-2 border-b border-white/10 space-y-1.5 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <button
-            type="button"
-            onClick={onBack}
-            className="min-[1024px]:hidden flex items-center gap-1 min-h-11 -ml-2 px-2 rounded text-xs text-neutral-300 hover:text-white"
-          >
-            <ArrowLeft className="w-4 h-4" aria-hidden="true" />
-            {t('helpers_back')}
+      <PaneHead title={sessionTitle(s)} back={
+          <button type="button" onClick={onBack} className="a-ib sm a-back" aria-label={t('helpers_back')}>
+            <ArrowLeft className="a-ic" aria-hidden="true" />
           </button>
-          <span className="min-[1024px]:hidden ml-auto">
-            <StopAllButton compact onStopped={() => void onChanged()} />
-          </span>
-        </div>
-        <RenameTitle session={s} action={action} />
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-400">
-          <HelperPill session={s} />
-          <span>{computerName(s.host)}</span>
-          {folder && <span className="truncate">{t('helpers_folder_line', { folder })}</span>}
-        </div>
+        }>
+        <HelperPill session={s} />
+        {onExpandList && (
+          <button type="button" onClick={onExpandList} className="a-ib sm" aria-label={t('helpers_expand')}>
+            <PanelLeftOpen className="a-ic" aria-hidden="true" />
+          </button>
+        )}
+        {onToggleSide && (
+          <button type="button" onClick={onToggleSide} className="a-ib sm a-side-toggle" aria-label={t('helpers_details_aria')}>
+            <PanelRight className="a-ic" aria-hidden="true" />
+          </button>
+        )}
+      </PaneHead>
+      <div className="a-wrap flex flex-col gap-2">
+        <span className="a-body-sm a-muted">{computerName(s.host)}</span>
         <SessionTaskLink session={s} />
-        <div className="flex flex-wrap items-start gap-1.5 min-[1400px]:hidden">
-          {running && <StopButton session={s} action={action} />}
-          <FollowInChat session={s} action={action} />
-        </div>
         <ActionError error={action.error} />
-      </header>
+      </div>
       <Body session={s} screenText={screenText} onSent={afterSend} onChanged={onChanged} />
       <TechnicalDetails session={s} refreshKey={sentCount} pollMs={screenPollMs(s)} onText={setScreenText} onSent={afterSend} />
       <Answers sessionId={s.id} />
@@ -106,10 +103,10 @@ function RightNow({ session: s, onSent }: { session: HarnessSession; onSent: Ref
   const helper = sessionTitle(s)
   const ready = helperState(s) === 'ready'
   return (
-    <section aria-label={t('helpers_right_now')} className="px-3 py-3 space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">{t('helpers_right_now')}</h3>
-      <p className="text-sm text-neutral-100">{t(ready ? 'helpers_right_now_ready' : 'helpers_right_now_working', { helper })}</p>
-      <div className="flex flex-wrap gap-2">
+    <section aria-label={t('helpers_right_now')} className="a-card">
+      <p className="a-label">{t('helpers_right_now')}</p>
+      <p className="a-body">{t(ready ? 'helpers_right_now_ready' : 'helpers_right_now_working', { helper })}</p>
+      <div className="a-btns">
         <button type="button" disabled={busy} onClick={() => void send({ text: t('helpers_quick_keep_going_text') })} className="a-btn secondary">
           {t('helpers_quick_keep_going')}
         </button>
@@ -123,7 +120,7 @@ function RightNow({ session: s, onSent }: { session: HarnessSession; onSent: Ref
 }
 
 const ErrorLine = ({ text }: { text: string }) => (
-  <p role="alert" className="text-xs" style={{ color: 'var(--warn)' }}>
+  <p role="alert" className="a-body-sm a-warn-t">
     {text}
   </p>
 )
@@ -136,14 +133,18 @@ function ResumePanel({ session: s, onChanged }: { session: HarnessSession; onCha
   const helper = sessionTitle(s)
   const when = s.last_seen_at ? relTime(parseSqliteUtc(s.last_seen_at)) : ''
   return (
-    <section aria-label={t('helpers_resume_act')} className="px-3 py-3 space-y-2">
-      <h3 className="text-sm font-semibold text-neutral-100">{t('helpers_resume_title', { helper, when })}</h3>
-      <p className="text-xs text-neutral-300">{t('helpers_resume_why')}</p>
-      <label htmlFor="resume-next" className="block text-xs text-neutral-400">
-        {t('helpers_resume_next')}
-      </label>
-      <textarea id="resume-next" rows={2} value={next} onChange={(e) => setNext(e.target.value)} className="w-full px-3 py-2 rounded-xl text-sm hq-field" />
-      <div className="flex flex-wrap gap-2">
+    <section aria-label={t('helpers_resume_act')} className="a-card">
+      <div className="a-card-head">
+        <b>{t('helpers_resume_title', { helper, when })}</b>
+      </div>
+      <p className="a-body-sm a-muted">{t('helpers_resume_why')}</p>
+      <div className="a-field">
+        <label htmlFor="resume-next" className="a-field-label">
+          {t('helpers_resume_next')}
+        </label>
+        <textarea id="resume-next" rows={2} value={next} onChange={(e) => setNext(e.target.value)} className="a-input" />
+      </div>
+      <div className="a-btns">
         <ResumeButton session={s} action={resume} prompt={next} />
         {!s.archived && <ArchiveButton session={s} action={archive} />}
       </div>
@@ -166,10 +167,10 @@ function Answers({ sessionId }: { sessionId: string }) {
       live = false
     }
   }, [sessionId])
-  if (answers === null) return <Loader2 className="w-4 h-4 animate-spin m-3 text-neutral-500" aria-hidden="true" />
+  if (answers === null) return <Loader2 className="a-ic sm animate-spin" aria-hidden="true" />
   return (
-    <section aria-label={t('helpers_answers_title')} className="px-3 py-3 text-xs text-neutral-400">
-      <h3 className="font-semibold text-neutral-300">{tn('chat_say_yes_log', answers.length)}</h3>
+    <section aria-label={t('helpers_answers_title')} className="a-body-sm a-muted">
+      <b>{tn('chat_say_yes_log', answers.length)}</b>
       {answers.length === 0 ? (
         <p>{t('helpers_answers_none')}</p>
       ) : (
@@ -193,9 +194,9 @@ function answerLine(a: AutoAnswer): string {
 function Advanced({ session: s }: { session: HarnessSession }) {
   return (
     <details>
-      <summary className="flex items-center min-h-11 px-3 cursor-pointer text-[11px] text-neutral-500 hover:text-neutral-300 select-none">{t('helpers_new_advanced')}</summary>
-      <div className="space-y-1 px-3 pb-1">
-        <code className="block px-1.5 py-1 rounded bg-black/40 text-[11px] text-neutral-300 break-all select-all">{attachCommand(s)}</code>
+      <summary className="a-btn quiet compact">{t('helpers_new_advanced')}</summary>
+      <div>
+        <pre className="a-quote">{attachCommand(s)}</pre>
       </div>
     </details>
   )

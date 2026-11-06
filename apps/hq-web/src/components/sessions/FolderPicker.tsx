@@ -5,7 +5,7 @@ import { crumbs, explorerLine, plainPath } from '~/lib/workbench'
 import { ErrorText } from './ErrorText'
 
 const INPUT_CLASS =
-  'min-w-0 h-11 sm:h-9 px-3 rounded-lg text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
+  'a-input min-w-0'
 
 interface Props {
   host: string
@@ -58,51 +58,51 @@ export function FolderPicker({ host, workspace, value, onChange }: Props) {
   }
 
   return (
-    <div className="space-y-2">
-      <nav aria-label="Folder path" className="flex flex-wrap items-center gap-x-0.5 text-[11px] text-neutral-400">
+    <div className="flex flex-col gap-2">
+      <nav aria-label="Folder path" className="flex flex-wrap items-center gap-x-0.5 a-cap a-muted">
         {trail.map((c, i) => (
           <span key={c.path || 'home'} className="flex items-center">
-            {i > 0 && <ChevronRight className="w-3 h-3 text-neutral-600" />}
-            <button type="button" onClick={() => onChange(c.path)} className="min-h-11 sm:min-h-8 px-1.5 hover:text-white">
+            {i > 0 && <ChevronRight className="a-ic" aria-hidden="true" />}
+            <button type="button" onClick={() => onChange(c.path)} className="min-h-11 px-1.5 a-link">
               {c.label}
             </button>
           </span>
         ))}
       </nav>
-      <p className="text-[11px] text-neutral-300 break-all">{plainPath(shown || workspace.root)}</p>
-      {explorer && <p className="text-[11px] text-neutral-500 break-all">{explorer}</p>}
-      <div className="rounded-lg border border-white/10 bg-black/20 max-h-44 overflow-y-auto overscroll-contain">
+      <p className="a-cap break-all">{plainPath(shown || workspace.root)}</p>
+      {explorer && <p className="a-cap a-muted break-all">{explorer}</p>}
+      <div className="a-term max-h-44 overflow-y-auto overscroll-contain p-0">
         {listing?.parent != null && (
           <button
             type="button"
             onClick={() => onChange(listing.parent ?? '')}
-            className="w-full flex items-center gap-2 min-h-11 px-3 text-left text-xs text-neutral-300 hover:bg-white/5 border-b border-white/5"
+            className="a-menu-item"
           >
-            <ArrowUp className="w-3.5 h-3.5 text-neutral-500" />
+            <ArrowUp className="a-ic" aria-hidden="true" />
             Up
           </button>
         )}
         {loading && (
-          <div role="status" className="flex items-center gap-2 px-3 py-3 text-xs text-neutral-500">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          <div role="status" className="flex items-center gap-2 px-3 py-3 a-body-sm a-muted">
+            <Loader2 className="a-ic animate-spin" aria-hidden="true" />
             Looking for folders
           </div>
         )}
-        {!loading && listing?.dirs.length === 0 && <p className="px-3 py-3 text-xs text-neutral-500">No folders inside this one yet.</p>}
+        {!loading && listing?.dirs.length === 0 && <p className="px-3 py-3 a-body-sm a-muted">No folders inside this one yet.</p>}
         {!loading &&
           listing?.dirs.map((d) => (
             <button
               key={d.path}
               type="button"
               onClick={() => onChange(d.path)}
-              className="w-full flex items-center gap-2 min-h-11 px-3 text-left text-xs text-neutral-200 hover:bg-white/5 border-b border-white/5 last:border-b-0"
+              className="a-menu-item"
             >
-              <Folder className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+              <Folder className="a-ic shrink-0" aria-hidden="true" />
               <span className="truncate">{d.name}</span>
             </button>
           ))}
       </div>
-      {listing?.truncated && <p className="text-[11px] text-neutral-500">Only the first folders are shown. Make a new folder or go deeper to find yours.</p>}
+      {listing?.truncated && <p className="a-cap a-muted">Only the first folders are shown. Make a new folder or go deeper to find yours.</p>}
       <div className="flex items-center gap-2">
         <input
           value={newName}
@@ -121,14 +121,14 @@ export function FolderPicker({ host, workspace, value, onChange }: Props) {
           type="button"
           onClick={() => void create()}
           disabled={creating || !newName.trim()}
-          className="flex items-center gap-1.5 h-11 sm:h-9 px-3 rounded-lg border border-white/10 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent shrink-0"
+          className="a-btn secondary shrink-0"
         >
-          {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderPlus className="w-3.5 h-3.5" />}
+          {creating ? <Loader2 className="a-ic animate-spin" aria-hidden="true" /> : <FolderPlus className="a-ic" aria-hidden="true" />}
           Make folder
         </button>
       </div>
       {error && <ErrorText>{error}</ErrorText>}
-      <p className="text-[11px] text-neutral-500">Agents started in the HQ folder itself get their own new folder, so projects stay separate.</p>
+      <p className="a-cap a-muted">Agents started in the HQ folder itself get their own new folder, so projects stay separate.</p>
     </div>
   )
 }

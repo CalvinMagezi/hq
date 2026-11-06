@@ -11,8 +11,7 @@ import { sharedConnectionNow } from '~/lib/connection'
 import { unreachableOr } from '~/lib/failureWords'
 import { ErrorText } from './ErrorText'
 
-export const ACTION_BUTTON_CLASS =
-  'flex items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded border border-white/10 text-[11px] text-neutral-200 hover:text-white hover:bg-white/10 disabled:opacity-50 disabled:hover:bg-transparent shrink-0'
+export const ACTION_BUTTON_CLASS = 'a-btn secondary'
 
 export interface ActionState {
   busy: boolean
@@ -48,7 +47,7 @@ interface ActionProps {
   action: ActionState
 }
 
-const Spinner = <Loader2 className="w-3.5 h-3.5 animate-spin" />
+const Spinner = <Loader2 className="a-ic animate-spin" aria-hidden="true" />
 
 /** The agent's name, editable in place. The field starts empty when no custom name is set. */
 export function RenameTitle({ session: s, action }: ActionProps) {
@@ -58,29 +57,25 @@ export function RenameTitle({ session: s, action }: ActionProps) {
 
   if (!editing) {
     return (
-      <div className="flex items-center gap-1 min-w-0">
-        <h2 className="text-sm text-neutral-100 truncate min-w-0">{title}</h2>
-        <button
-          type="button"
-          onClick={() => {
-            setValue(s.label ?? '')
-            setEditing(true)
-          }}
-          disabled={action.busy}
-          aria-label={t('helpers_rename')}
-          title={t('helpers_rename')}
-          className="flex items-center justify-center h-11 w-11 sm:h-9 sm:w-9 shrink-0 rounded text-neutral-500 hover:text-white hover:bg-white/10 disabled:opacity-50"
-        >
-          <Pencil className="w-3.5 h-3.5" />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => {
+          setValue(s.label ?? '')
+          setEditing(true)
+        }}
+        disabled={action.busy}
+        className={ACTION_BUTTON_CLASS}
+      >
+        <Pencil className="a-ic" aria-hidden="true" />
+        {t('helpers_rename')}
+      </button>
     )
   }
   const save = async () => {
     if (await action.run(() => globalSessionsApi.rename(s.id, value.trim()), t('helpers_rename_failed', { helper: title }))) setEditing(false)
   }
   return (
-    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+    <div className="a-field">
       <input
         autoFocus
         value={value}
@@ -92,14 +87,18 @@ export function RenameTitle({ session: s, action }: ActionProps) {
         }}
         aria-label={t('helpers_rename_label')}
         maxLength={80}
-        className="flex-1 min-w-0 h-11 sm:h-9 px-3 rounded-lg text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
+        className="a-input"
       />
-      <button type="button" onClick={() => void save()} disabled={action.busy} aria-label={t('helpers_rename_save')} className={ACTION_BUTTON_CLASS}>
-        {action.busy ? Spinner : <Check className="w-3.5 h-3.5" />}
-      </button>
-      <button type="button" onClick={() => setEditing(false)} disabled={action.busy} aria-label={t('helpers_rename_cancel')} className={ACTION_BUTTON_CLASS}>
-        <X className="w-3.5 h-3.5" />
-      </button>
+      <div className="a-btns">
+        <button type="button" onClick={() => setEditing(false)} disabled={action.busy} aria-label={t('helpers_rename_cancel')} className={ACTION_BUTTON_CLASS}>
+          <X className="a-ic" aria-hidden="true" />
+          {t('helpers_new_cancel')}
+        </button>
+        <button type="button" onClick={() => void save()} disabled={action.busy} aria-label={t('helpers_rename_save')} className="a-btn">
+          {action.busy ? Spinner : <Check className="a-ic" aria-hidden="true" />}
+          {t('helpers_rename_save')}
+        </button>
+      </div>
     </div>
   )
 }
@@ -110,9 +109,9 @@ export function StopButton({ session: s, action }: ActionProps) {
   const helper = s.label || s.id
   return (
     <>
-      <button type="button" disabled={action.busy} onClick={() => setConfirming(true)} aria-label={t('helpers_stop_named', { helper })} className={ACTION_BUTTON_CLASS}>
-        <Square className="w-3.5 h-3.5" />
-        {t('helpers_stop')}
+      <button type="button" disabled={action.busy} onClick={() => setConfirming(true)} className="a-btn quiet danger">
+        <Square className="a-ic" aria-hidden="true" />
+        {t('helpers_stop_named', { helper })}
       </button>
       {confirming && (
         <Dialog
@@ -139,9 +138,9 @@ export function ResumeButton({ session: s, action, prompt }: ActionProps & { pro
       type="button"
       disabled={action.busy}
       onClick={() => void action.run(() => globalSessionsApi.resume(s.id, prompt?.trim() || undefined), t('helpers_resume_failed', { helper: s.label || s.id }))}
-      className={`${ACTION_BUTTON_CLASS} sm:h-11 px-5 text-xs bg-white/10`}
+      className="a-btn"
     >
-      {action.busy ? Spinner : <Play className="w-3.5 h-3.5" />}
+      {action.busy ? Spinner : <Play className="a-ic" aria-hidden="true" />}
       {t('helpers_resume_act')}
     </button>
   )
@@ -156,7 +155,7 @@ export function ArchiveButton({ session: s, action }: ActionProps) {
       onClick={() => void action.run(() => globalSessionsApi.archive(s.id, !s.archived), t('helpers_archive_one_failed', { helper: s.label || s.id }))}
       className={ACTION_BUTTON_CLASS}
     >
-      {action.busy ? Spinner : <Icon className="w-3.5 h-3.5" />}
+      {action.busy ? Spinner : <Icon className="a-ic" aria-hidden="true" />}
       {s.archived ? t('helpers_restore') : t('helpers_archive_act')}
     </button>
   )
@@ -181,7 +180,7 @@ export function FollowInChat({ session: s, action }: ActionProps) {
         className={ACTION_BUTTON_CLASS}
         title={t('helpers_follow_open')}
       >
-        <Eye className="w-3.5 h-3.5" />
+        <Eye className="a-ic" aria-hidden="true" />
         {t('helpers_follow_open')}
       </Link>
     )
@@ -194,7 +193,7 @@ export function FollowInChat({ session: s, action }: ActionProps) {
       className={ACTION_BUTTON_CLASS}
       title={t('helpers_follow')}
     >
-      {action.busy ? Spinner : <Eye className="w-3.5 h-3.5" />}
+      {action.busy ? Spinner : <Eye className="a-ic" aria-hidden="true" />}
       {t('helpers_follow')}
     </button>
   )
