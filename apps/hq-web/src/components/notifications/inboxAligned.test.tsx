@@ -31,6 +31,7 @@ const approval = item({
   metadata: { approval: { tool: 'bash', args: { command: 'rm old.tar' }, loses: true, verb: 'delete' } },
 })
 const taskUpdate = item({ id: 'u1', kind: 'value_item', title: 'A task is ready to check', actions: ['dismiss'], metadata: { extra: { source_task: 'task_ready_for_review' } } })
+const taskCheck = item({ id: 't1', title: 'GARDEN-004: Write the README', description: 'A long task description.', metadata: { extra: { source_task: 'task_ready_for_review' }, link: '/tasks?task=abc123' } })
 const hqUpdate = item({ id: 'u2', kind: 'value_item', title: 'Backup finished', actions: ['dismiss'] })
 
 const base: InboxViewProps = {
@@ -104,6 +105,18 @@ describe('Needs you cards', () => {
     expect(html).toContain('a-card-head')
     expect(html).toContain('Look it over.')
     expect(html).toContain(`>${t('inbox_clear')}<`)
+  })
+
+  test('a task to check offers Check it, which opens the task, and never Allow or Decline (Inbox board)', async () => {
+    const html = await inRouter(() =>
+      createElement(NotificationCard, { notification: taskCheck, onAction: async () => undefined, onAnswered: () => undefined, loadingAction: null }),
+    )
+    expect(html).toContain(`>${t('tasks_check_it')}<`)
+    expect(html).toContain('href="/tasks?task=abc123"')
+    expect(html).toContain(t('tasks_finished_plain'))
+    expect(html).not.toContain(t('approval_quote_inbox'))
+    expect(html).not.toContain('Allow once')
+    expect(html).not.toContain('A long task description.')
   })
 
   test('a new sign-in offers It was me and a red Sign it out', async () => {

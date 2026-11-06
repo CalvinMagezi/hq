@@ -229,7 +229,8 @@ function VaultShell({ embedded }: { embedded: boolean }) {
   const edition = useEdition()
   const lite = edition === 'lite'
   const navigate = useNavigate()
-  const activeTasks = useHQStore((s) => s.tasks.filter((x) => x.status === 'in_progress').length)
+  // Active is every task not yet done, the same count as Tasks' Active chip.
+  const activeTasks = useHQStore((s) => s.tasks.filter((x) => x.status !== 'complete').length)
   const workingHelpers = useHQStore((s) => s.workingHelpersCount)
   const statusLineRef = useRef<HTMLButtonElement>(null)
   const cover = isCover(pathname)

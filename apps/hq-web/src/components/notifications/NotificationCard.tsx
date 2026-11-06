@@ -2,7 +2,7 @@ import { ApprovalCard } from '~/components/ui/ApprovalCard'
 import { t } from '~/strings'
 import { useState, type ComponentType } from 'react'
 import { Link } from '@tanstack/react-router'
-import { answerErrorLine, cardKind, lapsed, serverHqLine, type CardKind } from '~/lib/inboxCard'
+import { answerErrorLine, cardKind, lapsed, serverHqLine, taskCheckId, type CardKind } from '~/lib/inboxCard'
 import { ClipboardCheck, LifeBuoy, ShieldAlert, Sparkles, TriangleAlert } from 'lucide-react'
 import type { NotificationItem } from '~/lib/notificationsApi'
 import { relTime } from '~/lib/time'
@@ -57,7 +57,10 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
   const helperId = notification.metadata.extra?.session_id ?? notification.id
   const Icon = KIND_ICON[kind]
   const where = [serverHqLine(notification), relTime(notification.created_at)].filter(Boolean).join(' · ')
-  const approvable = notification.actions.includes('approve')
+  // A task to check is looked over on its own page, never approved from the card.
+  const taskCheck = kind === 'task_check'
+  const approvable = !taskCheck && notification.actions.includes('approve')
+  const checkTaskId = taskCheck ? taskCheckId(notification) : null
 
   const signInActions =
     isPending && signInId ? (
@@ -78,6 +81,12 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
     <DialogAnswer notification={notification} dialog={dialog} onAnswered={onAnswered} />
   ) : signInActions ? (
     signInActions
+  ) : taskCheck && isPending ? (
+    <div className="a-card-actions">
+      <Link to="/tasks" search={checkTaskId ? { task: checkTaskId } : {}} className="a-btn">
+        {t('tasks_check_it')}
+      </Link>
+    </div>
   ) : approvable ? (
     <ApprovalCard
       quoteTitle={t('approval_quote_inbox')}
@@ -115,7 +124,7 @@ export function NotificationCard({ notification, selected, onAction, onAnswered,
         </span>
       </div>
       {signInId && <SignInBody device={device} createdAt={notification.created_at} />}
-      {!signInId && !quoted && !dialog && <p className="a-body-sm">{notification.description}</p>}
+      {!signInId && !quoted && !dialog && <p className="a-body-sm">{taskCheck ? t('tasks_finished_plain') : notification.description}</p>}
       {failure && !approvable && (
         <p role="alert" className="a-stale">
           <TriangleAlert className="a-ic" aria-hidden="true" />

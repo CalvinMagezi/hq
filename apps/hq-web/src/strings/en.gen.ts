@@ -1719,6 +1719,7 @@ export const en = {
   tasks_remove_chip: "Remove {label}",
   tasks_add_details: "Add details",
   tasks_archived_notice: "Archived {when}. Restore it to work on it again, with its comments and sub-tasks.",
+  tasks_finished_plain: "HQ says this is finished. Look it over, then mark it done.",
   tasks_show: "Show",
   notes_ask_hq: "Ask HQ",
   notes_make_task: "Make a task",

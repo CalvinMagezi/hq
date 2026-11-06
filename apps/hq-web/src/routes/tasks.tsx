@@ -755,7 +755,6 @@ function TasksPage() {
   const listPane = (
     <>
       <PaneHead title={t('place_tasks')}>{headButtons}</PaneHead>
-      <p className="a-cap a-muted tk-sub">{t('fact_active', { n: activeCount })}</p>
       {tabs}
       {chips}
       {controls}
