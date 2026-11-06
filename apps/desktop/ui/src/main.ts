@@ -236,6 +236,9 @@ async function refreshHost() {
   const state = $('hub-state')
   state.textContent = v.state
   tone(state, v.tone)
+  // The header's status line says the same, as the phone's top bar does.
+  $('hub-status').textContent = v.state
+  $('hub-dot').className = `a-dot${v.tone === 'needs' ? ' warn' : v.tone === 'working' ? ' work' : ''}`
   $('hub-card').className = `a-card${v.tone === 'needs' ? ' needs' : ''}`
   $('hub-lines').replaceChildren(...v.lines.map((l) => el('p', l)))
   const answering = r.state === 'running' || r.state === 'external'
@@ -317,10 +320,17 @@ async function refreshAgents() {
   }
   const set = el('div', '', 'a-set hub-set')
   for (const a of view.agents) {
-    const row = el('div', '', 'a-row')
-    const main = el('div', '', 'a-row-main')
+    const row = el('div', '', 'a-li')
+    const main = el('div', '', 'a-li-main')
     main.append(el('b', a.name), el('span', `${a.agent ?? ''} ${a.title || shortPath(a.cwd)}`.trim()), el('span', t('hh_started', { name: a.agent ?? a.name, ago: agoText(a.age_secs) }), 'muted'))
     row.append(main, el('span', NEED_LABEL[a.need], a.need === 'blocked' ? 'a-state needs' : 'a-state'))
+    // The helper's own page is in the HQ window; a pane here has no session id, so it opens Helpers.
+    row.classList.add('hub-hit')
+    row.tabIndex = 0
+    row.setAttribute('role', 'link')
+    const go = () => void guarded('host-error', () => invoke('open_main_window', { path: '/helpers' }))
+    row.addEventListener('click', go)
+    row.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), go()))
     set.append(row)
   }
   box.append(groupHead(t('hh_group_work')), set)
@@ -573,12 +583,11 @@ function renderPeers(peers: Peer[]) {
   list.replaceChildren()
   $('peers-empty').hidden = peers.length > 0
   for (const peer of peers) {
-    const item = el('li')
-    const label = el('span')
+    const item = el('div', '', 'a-li')
+    const label = el('div', '', 'a-li-main')
     label.append(
-      el('strong', peer.name),
-      el('br'),
-      el('span', peer.last_seen_at === null ? t('dev_row_never', { id: peer.short_id }) : t('dev_row', { id: peer.short_id, seen: clock(peer.last_seen_at) }), 'muted'),
+      el('b', peer.name),
+      el('span', peer.last_seen_at === null ? t('dev_row_never', { id: peer.short_id }) : t('dev_row', { id: peer.short_id, seen: clock(peer.last_seen_at) })),
     )
     const remove = button(t('dev_remove'), () =>
       void guarded('devices-error', async () => {
@@ -601,16 +610,16 @@ function renderPeers(peers: Peer[]) {
         await refreshDevices()
       }),
     )
-    remove.className = 'a-btn compact secondary'
+    remove.className = 'a-btn compact quiet'
     item.append(label, remove)
     list.append(item)
   }
 }
 
 function sharedRow(title: string, note: string, tag: string, warn = false): HTMLElement {
-  const row = el('li')
-  const label = el('span')
-  label.append(el('strong', title), el('br'), el('span', note, 'muted'))
+  const row = el('div', '', 'a-li')
+  const label = el('div', '', 'a-li-main')
+  label.append(el('b', title), el('span', note))
   row.append(label, el('span', tag, warn ? 'a-state needs' : 'a-state'))
   return row
 }
@@ -628,7 +637,7 @@ function renderForwards(state: Pairing) {
     else list.append(sharedRow(t('dev_shared_web'), t('dev_shared_web_note'), t('dev_shared_tag')))
   }
   $('forwards-block').hidden = false
-  if (list.children.length === 0) list.append(el('li', t('dev_nothing_shared'), 'muted'))
+  if (list.children.length === 0) list.append(el('p', t('dev_nothing_shared'), 'hub-why'))
 }
 
 function labelDevices() {
@@ -729,10 +738,10 @@ function groupHead(title: string, note = ''): HTMLElement {
 }
 
 function helperRow(h: HelperView): HTMLElement {
-  const row = el('div', '', 'a-row')
-  const main = el('div', '', 'a-row-main')
+  const row = el('div', '', 'a-li')
+  const main = el('div', '', 'a-li-main')
   main.append(el('b', h.name), el('span', rowLine(h, h.new_here)))
-  const open = el('button', '', 'a-row-hit')
+  const open = el('button', '', 'hub-row-open')
   open.type = 'button'
   open.append(main)
   open.addEventListener('click', () => void openDetail(h.id))
@@ -1116,7 +1125,7 @@ void refresh()
 
 // Sharing the model
 function renderShare(share: Share) {
-  $<HTMLInputElement>('share-on').checked = share.on
+  $('share-on').setAttribute('aria-checked', String(share.on))
   const select = $<HTMLSelectElement>('share-model')
   select.replaceChildren()
   const chosen = share.model ?? share.models[0]?.name ?? null
@@ -1147,8 +1156,10 @@ async function refreshShare() {
   renderShare(share)
 }
 
-async function saveShare() {
-  const on = $<HTMLInputElement>('share-on').checked
+/** `flip` is the switch being pressed; a model picked from the list keeps it as it is. */
+async function saveShare(flip: boolean) {
+  const shown = $('share-on').getAttribute('aria-checked') === 'true'
+  const on = flip ? !shown : shown
   // With Ollama away the list is empty: keep the model chosen before rather than clearing it.
   const model = $<HTMLSelectElement>('share-model').value || shareShown?.model || null
   shareAsked++
@@ -1157,6 +1168,6 @@ async function saveShare() {
   await refreshShare()
 }
 
-$('share-on').addEventListener('change', () => guarded('share-warning', saveShare))
-$('share-model').addEventListener('change', () => guarded('share-warning', saveShare))
+$('share-on').addEventListener('click', () => guarded('share-warning', () => saveShare(true)))
+$('share-model').addEventListener('change', () => guarded('share-warning', () => saveShare(false)))
 $('share-check').addEventListener('click', () => guarded('share-warning', refreshShare))

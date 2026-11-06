@@ -9,6 +9,10 @@
 </head>
 <body>
   <div class="a-app hub-app" id="app">
+    <header class="a-top hub-top">
+      <span class="hub-mark" aria-hidden="true"><span class="a-mark"></span></span>
+      <div class="a-tt"><h1 class="a-title">HQ Hub</h1><span class="a-status"><span id="hub-dot" class="a-dot"></span><span id="hub-status"></span></span></div>
+    </header>
     <nav class="a-tabs" aria-label="Sections">
       <button type="button" class="a-tab" role="tab" data-tab="computer" aria-selected="true">This computer</button>
       <button type="button" class="a-tab" role="tab" data-tab="devices" aria-selected="false">Devices</button>
@@ -32,8 +36,10 @@
             <button type="button" id="copy-details" class="a-btn secondary" hidden>Copy details</button>
           </div>
           <div id="paste-row" class="hub-paste" hidden>
-            <label for="paste-path" id="paste-label"></label>
-            <input id="paste-path" class="a-field" type="text" autocomplete="off" spellcheck="false">
+            <div class="a-field hub-paste-field">
+              <label for="paste-path" id="paste-label" class="a-field-label"></label>
+              <input id="paste-path" class="a-input" type="text" autocomplete="off" spellcheck="false">
+            </div>
             <button type="button" id="paste-use" class="a-btn compact secondary">Use</button>
           </div>
           <p id="program-error" class="hub-why" role="alert"></p>
@@ -49,11 +55,11 @@
         </div>
 
         <div class="a-set hub-set">
-          <div class="a-row"><div class="a-row-main"><b id="launch-title"></b><span id="launch-note"></span></div>
+          <div class="a-li"><div class="a-li-main"><b id="launch-title"></b><span id="launch-note"></span></div>
             <button type="button" id="set-start-on-launch" class="a-sw" role="switch" aria-checked="false" aria-labelledby="launch-title"></button></div>
-          <div class="a-row"><div class="a-row-main"><b id="program-title"></b><span id="program-value"></span></div>
+          <div class="a-li"><div class="a-li-main"><b id="program-title"></b><span id="program-value"></span></div>
             <button type="button" id="change-program" class="a-btn compact quiet"></button></div>
-          <div class="a-row"><div class="a-row-main"><b id="log-title"></b><span id="log-value"></span></div>
+          <div class="a-li"><div class="a-li-main"><b id="log-title"></b><span id="log-value"></span></div>
             <button type="button" id="open-log" class="a-btn compact quiet"></button></div>
         </div>
         <p id="host-error" class="hub-error" role="alert"></p>
@@ -88,25 +94,26 @@
           <div id="pending"></div>
 
           <div id="forwards-block" hidden>
-            <h3 id="forwards-title"></h3>
-            <ul id="forwards" class="list"></ul>
+            <p id="forwards-title" class="a-grp"></p>
+            <div id="forwards" class="a-set hub-set"></div>
           </div>
 
-          <h3 id="peers-title"></h3>
-          <div id="share-block" class="a-card">
-            <div class="a-card-head"><b>Share this computer's model</b></div>
-            <p class="hub-why">Lends the model this Mac runs in Ollama to the phone it is paired with as its hub, and to no other device. The phone uses it while it can reach this Mac and its own model when it cannot. Turning this off ends what the phone has open at once.</p>
-            <p class="row">
-              <label><input type="checkbox" id="share-on"> Share this computer's model</label>
-              <select id="share-model" aria-label="Model to share"></select>
+          <p id="peers-title" class="a-grp"></p>
+          <div id="peers" class="a-set hub-set"></div>
+          <p id="peers-empty" class="hub-why"></p>
+          <div id="share-block" class="a-set hub-set">
+            <div class="a-li">
+              <div class="a-li-main"><b id="share-title">Share this computer's model</b><span>Lends the model this Mac runs in Ollama to the phone it is paired with as its hub, and to no other device. The phone uses it while it can reach this Mac and its own model when it cannot. Turning this off ends what the phone has open at once.</span></div>
+              <button type="button" id="share-on" class="a-sw" role="switch" aria-checked="false" aria-labelledby="share-title"></button>
+            </div>
+            <div class="a-li">
+              <div class="a-li-main"><b id="share-model-title">Model</b><span id="share-state"></span></div>
+              <select id="share-model" class="a-input hub-select" aria-labelledby="share-model-title"></select>
               <button type="button" class="a-btn compact quiet" id="share-check">Check again</button>
-            </p>
-            <p id="share-state" class="hub-why"></p>
-            <p id="share-warning" class="hub-error" role="alert"></p>
+            </div>
           </div>
-          <ul id="peers" class="list"></ul>
-          <p id="peers-empty" class="muted"></p>
-          <div class="a-set hub-set"><div class="a-row"><div class="a-row-main"><b id="relay-title"></b><span id="relay-note"></span></div><span id="relay-state" class="a-state"></span></div></div>
+          <p id="share-warning" class="hub-error" role="alert"></p>
+          <div class="a-set hub-set"><div class="a-li"><div class="a-li-main"><b id="relay-title"></b><span id="relay-note"></span></div><span id="relay-state" class="a-state"></span></div></div>
         </div>
         <p id="devices-error" class="hub-error" role="alert"></p>
       </section>
