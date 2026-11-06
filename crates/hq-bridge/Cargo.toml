@@ -29,6 +29,7 @@ url = { workspace = true }
 # The host gate's key files, for setup after pairing (`setup.rs`). Unix only, like the gate.
 [target.'cfg(unix)'.dependencies]
 hq-gate = { workspace = true }
+libc = "0.2"
 
 
 [dev-dependencies]

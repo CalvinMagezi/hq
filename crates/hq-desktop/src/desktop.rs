@@ -177,6 +177,8 @@ pub struct Desktop {
     /// Held across a whole try or stop, so two tries never leave a pane nobody can stop.
     try_gate: tokio::sync::Mutex<()>,
     latest: Mutex<std::collections::HashMap<&'static str, String>>,
+    /// Whether HQ's own bridge (not this app) holds a paired hub's web forward.
+    bridge_trust: crate::bridge_holder::BridgeTrust,
 }
 
 /// Everything the Helpers tab and a helper's page show.
@@ -199,7 +201,7 @@ pub struct ForwardNotOurs {
     pub held_elsewhere: bool,
 }
 
-pub const FORWARD_WAIT_LINE: &str = "Open HQ waits until HQ Hub holds the port itself.";
+pub const FORWARD_WAIT_LINE: &str = "HQ's bridge isn't running on this Mac, so HQ Hub can't reach your HQ yet. Start it with hq bridge serve.";
 
 /// Where the window's HQ is reachable from this machine: the paired hub's web app on its forward
 /// when the config has one, else this machine's own web server. The app talks to either only over
@@ -300,7 +302,9 @@ impl Desktop {
             ws_port: init.config.ws_port,
         });
         pairing.set_sharing(settings.share_model, settings.shared_model.clone());
+        let hq_dir = init.dir.parent().unwrap_or(&init.dir).to_path_buf();
         Ok(Self {
+            bridge_trust: crate::bridge_holder::BridgeTrust::for_this_machine(&hq_dir),
             dir: init.dir,
             settings: Mutex::new(settings),
             config: init.config,
@@ -793,6 +797,7 @@ impl Desktop {
         let held = hub.map(|listen| (listen, self.pairing.holds_forward(listen)));
         if let Some((listen, ours)) = held
             && ours != Some(true)
+            && !self.bridge_trust.holds(listen)
         {
             if let Some(running) = slot.take() {
                 running.shutdown().await;
@@ -806,7 +811,13 @@ impl Desktop {
         }
         if slot.is_none() {
             let port = self.settings().proxy_port;
-            let gate = hub.map(|listen| self.pairing.forward_gate(listen));
+            let gate = hub.map(|listen| {
+                let ours = self.pairing.forward_gate(listen);
+                let trust = self.bridge_trust.clone();
+                let gate: proxy::UpstreamGate =
+                    Arc::new(move || ours().filter(|_| !trust.holds(listen)));
+                gate
+            });
             *slot = Some(
                 proxy::start_marked(
                     ProxyConfig {
