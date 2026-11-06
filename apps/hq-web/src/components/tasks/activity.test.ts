@@ -39,8 +39,8 @@ test('accepted and unreviewed never look alike, and a version with no record is 
   expect(unreviewed.label).toBe('Unreviewed')
   expect(none.label).toBe('No record')
   expect(new Set([accepted.className, unreviewed.className, none.className]).size).toBe(3)
-  expect(unreviewed.className).toContain('border-dashed')
-  expect(accepted.className).not.toContain('border-dashed')
+  expect(unreviewed.className).toContain('l-dashed')
+  expect(accepted.className).not.toContain('l-dashed')
 })
 
 test('only a recorded author is named; every other case stays unknown', () => {

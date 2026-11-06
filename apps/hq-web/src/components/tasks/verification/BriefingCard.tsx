@@ -1,4 +1,5 @@
 import { t, tn } from '~/strings'
+import '../leaf.css'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { AlertTriangle, CheckCircle2, Hourglass, Undo2 } from 'lucide-react'
@@ -25,7 +26,7 @@ interface ViewProps {
 }
 
 function Heading({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">{children}</h3>
+  return <h3 className="a-label mb-2">{children}</h3>
 }
 
 /**
@@ -38,52 +39,52 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
   const nothing =
     b.needs_you_total === 0 && b.completed_total === 0 && b.reworked_total === 0 && b.veto_windows.length === 0 && b.open_audits === 0 && b.health.alerts.length === 0
   return (
-    <section aria-label="While you were away" className="mb-4 rounded-2xl hq-glass-card px-4 py-3.5 space-y-3.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-semibold text-white" style={{ fontFamily: 'var(--font-heading)' }}>
+    <section aria-label="While you were away" className="a-card mb-4">
+      <div className="l-row justify-between">
+        <h2 className="a-h3">
           {t('tasks_away_title')}
         </h2>
-        <span className="text-xs text-neutral-500">{t('tasks_away_window', { hours: BRIEFING_HOURS })}</span>
+        <span className="a-cap a-muted">{t('tasks_away_window', { hours: BRIEFING_HOURS })}</span>
       </div>
 
       {b.mode === 'shadow' && (
-        <p className="text-xs text-amber-300/90">{t('check_watching_only_line')}</p>
+        <p className="a-why"><AlertTriangle className="a-ic xs" aria-hidden="true" />{t('check_watching_only_line')}</p>
       )}
 
       {b.needs_you_total === 0 ? (
-        <p className="flex items-center gap-1.5 text-xs text-emerald-300">
-          <CheckCircle2 className="w-3.5 h-3.5" />
+        <p className="l-row a-body-sm a-muted">
+          <CheckCircle2 className="a-ic xs" aria-hidden="true" />
           {t('tasks_away_nothing')}
         </p>
       ) : b.bulk_offer ? (
-        <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3 py-2.5 space-y-2">
-          <p className="text-xs font-semibold text-amber-200">{t('check_needs_you_count', { n: b.needs_you_total })}</p>
-          <p className="text-xs text-amber-100/90">{b.bulk_offer.text}</p>
+        <div className="a-card needs">
+          <p className="a-body-sm-b a-warn-t">{t('check_needs_you_count', { n: b.needs_you_total })}</p>
+          <p className="a-body-sm">{b.bulk_offer.text}</p>
           {variant === 'tasks' && onPlanSweep ? (
-            <button type="button" onClick={onPlanSweep} className="hq-btn-primary !h-10 !px-3.5 !text-xs">
+            <button type="button" onClick={onPlanSweep} className="a-btn compact">
               {t('check_plan_sweep')}
             </button>
           ) : (
-            <p className="text-xs text-amber-200/80">
-              Open <Link to="/tasks" className="underline">Tasks</Link> to plan it, or run <code>{b.bulk_offer.command}</code>.
+            <p className="a-body-sm a-muted">
+              Open <Link to="/tasks" className="a-link">Tasks</Link> to plan it, or run <code>{b.bulk_offer.command}</code>.
             </p>
           )}
         </div>
       ) : (
-        <div>
+        <div className="l-sec">
           <Heading>{t('check_needs_you_head', { n: b.needs_you_total })}</Heading>
-          <ul className="space-y-1.5">
+          <ul className="a-card l-lines">
             {b.needs_you.map((i) => (
               <li key={i.task_id}>
                 <button
                   type="button"
                   onClick={() => onOpenTask?.(i.task_id)}
-                  className="w-full text-left min-h-11 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 hover:bg-white/[0.06]"
+                  className="a-drow l-tall l-col l-link w-full"
                 >
-                  <span className="block text-xs text-neutral-100 truncate">
-                    <span className="font-semibold">{i.display_id}</span> {i.title}
+                  <span className="block a-body-sm l-clip">
+                    <b>{i.display_id}</b> {i.title}
                   </span>
-                  <span className="block text-xs text-neutral-400 truncate">{i.reason}</span>
+                  <span className="block a-cap a-muted l-clip">{i.reason}</span>
                 </button>
               </li>
             ))}
@@ -92,26 +93,26 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
       )}
 
       {b.veto_windows.length > 0 && (
-        <div>
+        <div className="l-sec">
           <Heading>{t('tasks_away_finishing')}</Heading>
-          <ul className="space-y-1.5">
+          <ul className="a-card l-lines">
             {b.veto_windows.map((w) => (
-              <li key={w.task_id} className="flex items-center gap-2 min-h-11 px-3 py-1.5 rounded-xl bg-white/[0.03] border border-white/10">
-                <Hourglass className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xs text-neutral-200 truncate">
-                    <span className="font-semibold">{w.display_id}</span> {w.title}
+              <li key={w.task_id} className="a-drow l-tall">
+                <Hourglass className="a-ic xs a-warn-t" aria-hidden="true" />
+                <span className="l-grow">
+                  <span className="block a-body-sm l-clip">
+                    <b>{w.display_id}</b> {w.title}
                   </span>
-                  <span className="block text-xs text-amber-200/80">{t('tasks_away_finishes_at', { time: countdown(w.release_at, nowMs) })}</span>
+                  <span className="block a-cap a-warn-t">{t('tasks_away_finishes_at', { time: countdown(w.release_at, nowMs) })}</span>
                 </span>
                 {onVeto && (
                   <button
                     type="button"
                     disabled={busyVeto === w.task_id}
                     onClick={() => onVeto(w.task_id)}
-                    className="hq-btn-ghost !h-9 !px-3 !text-xs disabled:opacity-40"
+                    className="a-btn secondary compact"
                   >
-                    <Undo2 className="w-3.5 h-3.5" />
+                    <Undo2 className="a-ic xs" aria-hidden="true" />
                     {t('check_keep_open')}
                   </button>
                 )}
@@ -122,13 +123,13 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
       )}
 
       {b.completed_total > 0 && (
-        <div>
+        <div className="l-sec">
           <Heading>{t('tasks_away_finished')} {b.completed_total}</Heading>
-          <ul className="space-y-1">
+          <ul className="l-stack">
             {b.completed.map((g) => (
-              <li key={g.initiative_id} className="text-xs text-neutral-300">
-                <span className="font-semibold text-white">{g.count}</span> in {g.initiative || t('check_other_area')}
-                <span className="text-neutral-500">
+              <li key={g.initiative_id} className="a-body-sm">
+                <b>{g.count}</b> in {g.initiative || t('check_other_area')}
+                <span className="a-muted">
                   {' '}
                   ({Object.entries(g.by_level).map(([level, n]) => `${n} on ${levelLabel(level)}`).join(', ')}
                   {g.tier2 > 0 ? `, ${g.tier2} ${kindLabel(2).toLowerCase()}` : ''})
@@ -140,29 +141,29 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
       )}
 
       {b.reworked_total > 0 && (
-        <div>
+        <div className="l-sec">
           <Heading>{t('check_rework_head', { n: b.reworked_total })}</Heading>
-          <ul className="space-y-1">
+          <ul className="l-stack">
             {b.reworked.slice(0, REWORKED_SHOWN).map((r) => (
-              <li key={r.task_id} className="text-xs text-neutral-400 truncate">
-                <span className="text-neutral-200">{r.display_id}</span> {r.title}
-                {r.last_finding ? <span className="text-neutral-500"> · {r.last_finding}</span> : null}
+              <li key={r.task_id} className="a-body-sm a-muted l-clip">
+                <b>{r.display_id}</b> {r.title}
+                {r.last_finding ? <span className="a-muted"> · {r.last_finding}</span> : null}
               </li>
             ))}
-            {b.reworked_total > REWORKED_SHOWN && <li className="text-xs text-neutral-500">and {b.reworked_total - REWORKED_SHOWN} more</li>}
+            {b.reworked_total > REWORKED_SHOWN && <li className="a-cap a-muted">and {b.reworked_total - REWORKED_SHOWN} more</li>}
           </ul>
         </div>
       )}
 
       {(b.open_audits > 0 || b.audit_pool > 0) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <p className="text-xs text-neutral-400 mr-auto">
+        <div className="l-bar">
+          <p className="a-body-sm a-muted l-grow">
             {b.open_audits > 0
               ? tn('briefing_audits_waiting', b.open_audits)
               : `${b.audit_pool} completed tasks nobody has checked yet.`}
           </p>
           {variant === 'tasks' && onAudit && (
-            <button type="button" onClick={onAudit} className="hq-btn-ghost !h-9 !px-3 !text-xs">
+            <button type="button" onClick={onAudit} className="a-btn secondary compact">
               {t('check_audit')}
             </button>
           )}
@@ -170,19 +171,19 @@ export function BriefingCardView({ briefing: b, nowMs, variant, busyVeto, onOpen
       )}
 
       {b.health.alerts.length > 0 && (
-        <ul className="space-y-1">
+        <ul className="l-stack">
           {b.health.alerts.map((a) => (
-            <li key={a} className="flex items-start gap-1.5 text-xs text-amber-300">
-              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+            <li key={a} className="a-why">
+              <AlertTriangle className="a-ic xs" aria-hidden="true" />
               {a}
             </li>
           ))}
         </ul>
       )}
 
-      {nothing && <p className="text-xs text-neutral-500">{t('tasks_away_nothing')}</p>}
+      {nothing && <p className="a-body-sm a-muted">{t('tasks_away_nothing')}</p>}
       {variant === 'home' && (
-        <Link to="/tasks" className="inline-block text-xs text-emerald-400 hover:text-emerald-300">
+        <Link to="/tasks" className="a-link">
           {t('tasks_away_open_tasks')}
         </Link>
       )}

@@ -10,14 +10,12 @@ export function isZoom(v: unknown): v is Zoom {
   return v === 'week' || v === 'month'
 }
 
-export const DAY_PX: Record<Zoom, number> = { week: 36, month: 12 }
-export const ROW_HEIGHT = 36
-export const BAR_INSET = 7
-export const MILESTONE_SIZE = 12
+export const DAY_PX: Record<Zoom, number> = { week: 56, month: 12 }
+export const ROW_HEIGHT = 52
+export const BAR_INSET = 10
+export const MILESTONE_SIZE = 20
 /** Duration given to an unscheduled task dropped onto the grid. */
 const NEW_TASK_SPAN_DAYS = 3
-const RANGE_PAD_BEFORE_DAYS = 7
-const RANGE_PAD_AFTER_DAYS = 28
 const ARROW_CURVE_PX = 28
 
 /** Inclusive day range a task occupies. A due date alone is a milestone. */
@@ -53,24 +51,20 @@ export function placementPatch(day: number): UpdateTaskInput {
   return { start_date: formatDay(day), due_date: formatDay(day + NEW_TASK_SPAN_DAYS - 1) }
 }
 
-/** First and last visible day: every scheduled task plus today, padded. */
-export function visibleRange(spans: Span[], today: number): { start: number; end: number } {
-  let start = today
-  let end = today
-  for (const s of spans) {
-    start = Math.min(start, s.start)
-    end = Math.max(end, s.end)
-  }
-  return { start: start - RANGE_PAD_BEFORE_DAYS, end: end + RANGE_PAD_AFTER_DAYS }
-}
-
 const MONTH_WEEKS = 5
+const WEEK_ZOOM_WEEKS = 2
 const DAYS_PER_WEEK = 7
 
 /** Month is always five weeks from this week's Monday, however far the tasks reach. */
 export function monthRange(today: number): { start: number; end: number } {
   const start = today - ((dayOfWeek(today) + 6) % DAYS_PER_WEEK)
   return { start, end: start + MONTH_WEEKS * DAYS_PER_WEEK - 1 }
+}
+
+/** Week is two weeks from this week's Monday, the 14 days the design shows. */
+export function weekRange(today: number): { start: number; end: number } {
+  const start = today - ((dayOfWeek(today) + 6) % DAYS_PER_WEEK)
+  return { start, end: start + WEEK_ZOOM_WEEKS * DAYS_PER_WEEK - 1 }
 }
 
 /** Curved connector from the end of a blocker's bar to the start of the dependent's. */

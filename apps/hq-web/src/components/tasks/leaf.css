@@ -1,0 +1,33 @@
+/* Small helpers for the task panels built from a-* classes. Token colours only. */
+.l-stack{display:flex;flex-direction:column;gap:8px;min-width:0}
+.l-row{display:flex;align-items:center;gap:8px;min-width:0}
+.l-grow{flex:1 1 0;min-width:0}
+.l-wrap{display:flex;flex-wrap:wrap;gap:4px 16px}
+.l-clip{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.l-break{overflow-wrap:anywhere}
+.l-pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.l-line{text-decoration:line-through;color:var(--ink-muted)}
+.l-num{font-variant-numeric:tabular-nums}
+.l-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.l-sec{display:flex;flex-direction:column;gap:8px}
+.l-sec>.a-card,.l-sec>.a-set{margin:0}
+/* A line inside a card: a-drow without the fixed height, so long titles wrap. */
+.a-drow.l-tall{min-height:48px;padding-top:8px;padding-bottom:8px;gap:12px}
+.a-card .a-drow:last-child{border-bottom:0}
+.l-link{display:flex;align-items:center;gap:12px;min-width:0;min-height:44px;color:var(--ink);text-align:left}
+.l-link:hover{background:var(--surface-200)}
+.l-plain{background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left}
+.l-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.l-bar .l-end{margin-left:auto}
+.a-drow.l-col{flex-direction:column;align-items:stretch}
+.l-details>summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:8px;font:700 14px/20px var(--font-sans);color:var(--ink-muted)}
+.l-pad{padding:12px 16px}
+.l-input{min-height:44px;padding:8px 12px}
+.a-card.l-lines{padding:0;gap:0;overflow:hidden}
+.a-drow.l-link span:last-child{margin-left:0;text-align:left;color:inherit;font:inherit}
+.l-dashed{border-style:dashed}
+.l-dotted{border-style:dotted}
+.l-work{width:8px;height:8px;border-radius:50%;background:var(--brand-blue);flex:none}
+.l-choice{display:flex;align-items:center;gap:12px;min-height:48px;padding:0 16px;border:1px solid var(--line);border-radius:var(--radius-md);cursor:pointer}
+.l-choice.is-on{border-color:var(--ink)}
+.l-choice input{accent-color:var(--ink);width:20px;height:20px}

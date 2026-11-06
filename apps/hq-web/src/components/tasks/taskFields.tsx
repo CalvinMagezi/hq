@@ -1,21 +1,22 @@
 import type { ReactNode } from 'react'
 import type { TaskPriority } from '~/lib/tasksApi'
+import './leaf.css'
 
 export const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
 
 /** The small uppercase label above a field in the new-task form. */
 export function FieldLabel({ children }: { children: ReactNode }) {
   return (
-    <label className="block text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">
+    <label className="a-label block mb-1">
       {children}
     </label>
   )
 }
 
 /** A section heading in the task drawer. */
-export function SectionLabel({ children, className = 'mb-1.5' }: { children: ReactNode; className?: string }) {
+export function SectionLabel({ children, className = 'mb-2' }: { children: ReactNode; className?: string }) {
   return (
-    <h3 className={`text-xs font-semibold text-neutral-400 uppercase tracking-wider ${className}`}>
+    <h3 className={`a-label ${className}`}>
       {children}
     </h3>
   )
@@ -48,7 +49,7 @@ export function EstimateInput({
         className={inputClass}
       />
       {isInvalidEstimate(value) && (
-        <p role="alert" className="mt-1 text-[11px] text-rose-400">
+        <p role="alert" className="a-field-msg a-danger-t mt-1">
           Use a whole number of minutes, or leave it empty.
         </p>
       )}

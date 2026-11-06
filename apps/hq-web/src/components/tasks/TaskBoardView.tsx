@@ -1,7 +1,9 @@
+import { MoreHorizontal } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { STATUS_LABELS, STATUS_ORDER, type TaskItem, type TaskStatus } from '~/lib/tasksApi'
 import { t } from '~/strings'
-import { TaskCard } from './TaskCard'
+import { lateLabel } from './TaskCard'
+import './tasks.css'
 import { parentLabelFor } from './hierarchy'
 import { usePointerDrag, type DragPoint } from './usePointerDrag'
 import { boardKey, moveTargets, visibleDone } from './boardMoves'
@@ -72,30 +74,57 @@ export function TaskBoardView({ tasks, allById, onSelect, onMove }: Props) {
     onCancel: () => setDrag(null),
   })
 
+  const goTo = (status: TaskStatus) => {
+    const column: HTMLElement | null | undefined = boardRef.current?.querySelector(`[data-board-status="${status}"]`)
+    column?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+  }
+
+  const cardBody = (task: TaskItem) => {
+    const late = lateLabel(task)
+    const parent = parentLabelFor(task, allById)
+    return (
+      <>
+        <span className="a-trow-title">{task.title}</span>
+        <span className="a-trow-meta">
+          {[task.display_id, parent, task.due_date].filter(Boolean).join(' · ')}
+          {late?.late && (
+            <>
+              {' · '}
+              <b>{late.text}</b>
+            </>
+          )}
+        </span>
+      </>
+    )
+  }
+
   return (
-    <div ref={boardRef} className="flex gap-3 overflow-x-auto pb-6 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x">
-      {STATUS_ORDER.map((status) => {
-        const all = columns.get(status) ?? []
-        const items = status === 'complete' ? visibleDone(all, showAllDone) : all
-        const isTarget = drag !== null && drag.overStatus === status && drag.task.status !== status
-        return (
-          <div
-            key={status}
-            data-board-status={status}
-            className={`flex flex-col w-[260px] shrink-0 snap-start rounded-2xl border p-2.5 transition-colors ${
-              isTarget ? 'border-emerald-500/40 bg-emerald-500/5' : 'hq-glass-card'
-            }`}
-          >
-            <h2 className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 px-1.5 mb-2.5">
-              {STATUS_LABELS[status]}
-              <span className="text-neutral-700 ml-1.5">({all.length})</span>
-            </h2>
-            <div className="space-y-2 min-h-16">
+    <>
+      <div className="bd-jump">
+        {STATUS_ORDER.map((status) => (
+          <button key={status} type="button" className="a-chip" onClick={() => goTo(status)}>
+            {STATUS_LABELS[status]} <em>{(columns.get(status) ?? []).length}</em>
+          </button>
+        ))}
+      </div>
+      <div ref={boardRef} className="bd">
+        {STATUS_ORDER.map((status) => {
+          const all = columns.get(status) ?? []
+          const items = status === 'complete' ? visibleDone(all, showAllDone) : all
+          const isTarget = drag !== null && drag.overStatus === status && drag.task.status !== status
+          const needs = status === 'blocked' || status === 'ready_for_review'
+          return (
+            <div key={status} data-board-status={status} className={`bd-col${needs ? ' needs' : ''}${isTarget ? ' is-over' : ''}`}>
+              <div className="bd-head">
+                <h3>
+                  {STATUS_LABELS[status]} ({all.length})
+                </h3>
+              </div>
               {items.map((task) => (
                 <div
                   key={task.id}
                   onPointerDown={(e) => {
-                    if ((e.target as HTMLElement).closest('[data-board-move]')) return
+                    if ((e.target as HTMLElement).closest('[data-board-move], [role="menu"]')) return
                     startDrag(e, task)
                   }}
                   onClickCapture={(e) => {
@@ -113,11 +142,20 @@ export function TaskBoardView({ tasks, allById, onSelect, onMove }: Props) {
                     if (action === 'move') setMenuFor(task.id)
                     else moveFocus(card, action)
                   }}
-                  className={`relative select-none [-webkit-touch-callout:none] ${drag?.task.id === task.id ? 'opacity-30' : ''}`}
+                  className={`bd-card${drag?.task.id === task.id ? ' is-dragging' : ''}`}
                 >
-                  <span data-board-card className="contents">
-                    <TaskCard task={task} parentLabel={parentLabelFor(task, allById)} compact asLink onSelect={onSelect} />
-                  </span>
+                  <a
+                    data-board-card
+                    href={`/tasks/${encodeURIComponent(task.id)}`}
+                    className="a-card"
+                    onClick={(e) => {
+                      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                      e.preventDefault()
+                      onSelect(task)
+                    }}
+                  >
+                    {cardBody(task)}
+                  </a>
                   <button
                     type="button"
                     data-board-move
@@ -125,22 +163,23 @@ export function TaskBoardView({ tasks, allById, onSelect, onMove }: Props) {
                     aria-expanded={menuFor === task.id}
                     aria-label={t('board_move_card', { title: task.title })}
                     onClick={() => setMenuFor(menuFor === task.id ? null : task.id)}
-                    className="mt-1 w-full min-h-11 rounded-lg text-xs text-neutral-300 border border-white/10 px-2"
+                    className="a-ib"
                   >
-                    {t('board_move')}
+                    <MoreHorizontal className="a-ic" aria-hidden="true" />
                   </button>
                   {menuFor === task.id && (
-                    <div role="menu" className="mt-1 flex flex-col rounded-lg border border-white/10 p-1" style={{ background: 'var(--bg-solid-elevated)' }}>
+                    <div role="menu" className="a-menu">
+                      <div className="a-grp">{t('board_move')}</div>
                       {moveTargets(task).map((s) => (
                         <button
                           key={s}
                           type="button"
                           role="menuitem"
+                          className="a-menu-item"
                           onClick={() => {
                             setMenuFor(null)
                             onMove(task, s)
                           }}
-                          className="text-left min-h-11 px-3 rounded-md text-xs text-neutral-200 hover:bg-white/10"
                         >
                           {STATUS_LABELS[s]}
                         </button>
@@ -150,23 +189,20 @@ export function TaskBoardView({ tasks, allById, onSelect, onMove }: Props) {
                 </div>
               ))}
               {status === 'complete' && items.length < all.length && (
-                <button type="button" onClick={() => setShowAllDone(true)} className="w-full min-h-11 text-xs text-emerald-400">
+                <button type="button" onClick={() => setShowAllDone(true)} className="a-btn compact quiet">
                   {t('board_show_all', { n: all.length })}
                 </button>
               )}
             </div>
-          </div>
-        )
-      })}
+          )
+        })}
 
-      {drag && (
-        <div
-          className="fixed z-50 pointer-events-none w-[240px] rotate-2 shadow-2xl"
-          style={{ left: drag.point.x - GHOST_OFFSET_X, top: drag.point.y - GHOST_OFFSET_Y }}
-        >
-          <TaskCard task={drag.task} compact />
-        </div>
-      )}
-    </div>
+        {drag && (
+          <div className="bd-ghost bd-card" style={{ left: drag.point.x - GHOST_OFFSET_X, top: drag.point.y - GHOST_OFFSET_Y }}>
+            <div className="a-card">{cardBody(drag.task)}</div>
+          </div>
+        )}
+      </div>
+    </>
   )
 }

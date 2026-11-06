@@ -116,7 +116,7 @@ test('the queue panel puts alerts first and says why anything is deferred', () =
   )
   expect(html.indexOf('8 items wait on you, over 5')).toBeLessThan(html.indexOf('completed by HQ'))
   expect(html).toContain('the monthly reviewer ceiling is used up')
-  expect(html).toContain('3</span> tasks (waiting for budget)')
+  expect(html).toContain('3</b> tasks (waiting for budget)')
   expect(renderToString(<QueueHealthPanel health={health()} />)).toContain('Nothing is waiting on anyone.')
 })
 
@@ -199,7 +199,7 @@ test('a weekend of completions is a line per initiative and never a pass by pass
   )
   expect(html).toContain('Nothing happened that needs a decision.')
   expect(html).toContain('Checked and finished')
-  expect(html).toContain('150</span> in Website')
+  expect(html).toContain('150</b> in Website')
   expect(html).toContain('140 on machine checks and an independent review')
   expect(html).toContain('3 risky')
   expect(html).not.toContain('WRK-')
@@ -289,7 +289,7 @@ const body = (detail: SweepDetail, over: Partial<Parameters<typeof SweepBodyView
 test('a plan shows the groups with what apply does to each, the estimate, and only Run and Cancel', () => {
   const html = body(sweepDetail())
   expect(html).toContain('Plan ready')
-  expect(html).toContain('2</span> passed')
+  expect(html).toContain('2</b> passed')
   expect(html).toContain('Completed, with the evidence level recorded')
   expect(html).toContain('Sent back with what to link; never marked done')
   expect(html).toContain('2 reviewer runs, about $0.10 and 1 minute')

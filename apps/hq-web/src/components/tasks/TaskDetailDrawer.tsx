@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { X, Archive, Pencil, Check, X as XIcon, CornerLeftUp } from 'lucide-react'
+import { ArrowLeft, Info, MoreVertical, Pencil, Check, X as XIcon, CornerLeftUp } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '~/lib/tasksApi'
 import { STATUS_LABELS, STATUS_ORDER } from '~/lib/tasksApi'
 import { TaskRelations } from './TaskRelations'
@@ -16,13 +15,18 @@ import { useIsStale } from './staleContext'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
 import { formatLocalTime } from './timeFormat'
 import { Dialog } from '../ui/Dialog'
+import { PaneHead } from '../ui/Panes'
+import './tasks.css'
 import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
 interface Props {
   task: TaskItem | null
   allTasks: TaskItem[]
+  /** Closes the task (back below 1024 px, the X when the board or timeline is behind it). */
   onClose: () => void
+  /** Opens the details pane as a side sheet; shown only below 1400 px. */
+  onDetails?: () => void
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
   /** Brings an archived task back. */
   onRestore?: (id: string) => Promise<void>
@@ -33,13 +37,13 @@ interface Props {
   busy: boolean
 }
 
-const DATE_INPUT_CLASS =
-  'px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white'
+const DATE_INPUT_CLASS = 'a-input'
 
-export function TaskDetailDrawer({
+export function TaskDetailMain({
   task,
   allTasks,
   onClose,
+  onDetails,
   onUpdate,
   onRestore,
   onDelete,
@@ -59,6 +63,7 @@ export function TaskDetailDrawer({
   const [draftWaiting, setDraftWaiting] = useState('')
   const [draftLong, setDraftLong] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     if (!task) return
@@ -74,6 +79,7 @@ export function TaskDetailDrawer({
     setDraftWaiting(task.waiting_on ?? '')
     setDraftLong(task.long_horizon)
     setConfirmingDelete(false)
+    setMenuOpen(false)
   }, [task])
 
   const stale = useIsStale(task?.id ?? '')
@@ -112,197 +118,147 @@ export function TaskDetailDrawer({
     void onDelete(task.id, task.subtask_count > 0)
   }
 
-  const content = (
-    <div className="fixed inset-0 z-50 flex justify-end hq-scrim transition-all duration-300">
-      <div className="flex-1" onClick={onClose} />
+  const label = (text: string) => <SectionLabel>{text}</SectionLabel>
 
-      <div
-        className="w-full max-w-2xl h-full flex flex-col hq-modal border-l shadow-2xl overflow-hidden animate-in slide-in-from-right pad-safe-top pb-[var(--safe-bottom)]"
+  return (
+    <>
+      <PaneHead
+        title={task.title}
+        back={
+          <button type="button" className="a-ib a-back" onClick={onClose} aria-label={t('tasks_back')}>
+            <ArrowLeft className="a-ic" aria-hidden="true" />
+          </button>
+        }
       >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0"
-          style={{ borderColor: 'rgba(255,255,255,0.08)' }}
-        >
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-neutral-500">{task.display_id}</span>
-              {task.priority && (
-                <span className="text-xs font-semibold uppercase text-[var(--warn)]">
-                  {task.priority}
-                </span>
+        {editing ? (
+          <>
+            <button type="button" onClick={handleSaveEdit} disabled={busy || isInvalidEstimate(draftEstimate)} className="a-ib" aria-label={t('quick_note_save')}>
+              <Check className="a-ic" aria-hidden="true" />
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className="a-ib" aria-label={t('dl_btn_cancel')}>
+              <XIcon className="a-ic" aria-hidden="true" />
+            </button>
+          </>
+        ) : (
+          !archived && (
+            <button type="button" onClick={() => setEditing(true)} className="a-ib" aria-label={t('note_editor_edit')}>
+              <Pencil className="a-ic" aria-hidden="true" />
+            </button>
+          )
+        )}
+        <div className="tk-menu-at">
+          <button type="button" className="a-ib" aria-haspopup="menu" aria-expanded={menuOpen} aria-label={t('tasks_more_for_task')} onClick={() => setMenuOpen((v) => !v)}>
+            <MoreVertical className="a-ic" aria-hidden="true" />
+          </button>
+          {menuOpen && (
+            <div role="menu" className="a-menu tk-pop">
+              {!archived && (
+                <button type="button" role="menuitem" className="a-menu-item" disabled={busy} onClick={handleDeleteClick}>
+                  {t('chat_archive')}
+                </button>
               )}
-              {task.long_horizon && <span className="text-xs text-neutral-400">{t('task_long_running')}</span>}
-              {stale && <span className="text-xs text-neutral-400" title={t('task_stale_hint')}>{t('task_stale_label')}</span>}
+              {archived && (
+                <button type="button" role="menuitem" className="a-menu-item danger" disabled={busy} onClick={() => { setMenuOpen(false); setConfirmingDelete(true) }}>
+                  {t('delete_task_act')}
+                </button>
+              )}
+              <button type="button" role="menuitem" className="a-menu-item" onClick={() => { setMenuOpen(false); onClose() }}>
+                {t('close')}
+              </button>
             </div>
-            {editing ? (
-              <input
-                value={draftTitle}
-                onChange={(e) => setDraftTitle(e.target.value)}
-                className="text-base font-semibold text-white bg-transparent border-b border-white/20 focus:outline-none focus:border-white mt-1 w-full"
-              />
-            ) : (
-              <h2 className="text-base font-semibold text-white mt-1 break-words">{task.title}</h2>
-            )}
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {editing ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleSaveEdit}
-                  disabled={busy || isInvalidEstimate(draftEstimate)}
-                  className="p-1.5 rounded-lg text-white hover:bg-white/10 transition-colors disabled:opacity-50"
-                  title={t('quick_note_save')}
-                >
-                  <Check className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditing(false)}
-                  className="p-1.5 rounded-lg text-neutral-400 hover:bg-white/10 transition-colors"
-                  title={t('dl_btn_cancel')}
-                >
-                  <XIcon className="w-4 h-4" />
-                </button>
-              </>
-            ) : archived ? null : (
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
-                title={t('note_editor_edit')}
-              >
-                <Pencil className="w-4 h-4" />
-              </button>
-            )}
-            {!archived && <button
-              type="button"
-              onClick={handleDeleteClick}
-              disabled={busy}
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
-              title={t('chat_archive')}
-            >
-              <Archive className="w-4 h-4" />
-            </button>}
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          )}
         </div>
-
-        {confirmingDelete && (
-          <Dialog
-            kind="red"
-            title={t('delete_task_title')}
-            body={t('delete_task_body', { title: task.title })}
-            keepLabel={t('delete_task_keep')}
-            actLabel={t('delete_task_act')}
-            busyLabel={t('confirm_busy_deleting')}
-            busy={busy}
-            onKeep={() => setConfirmingDelete(false)}
-            onAct={() => void onDelete(task.id, true, true)}
-          />
-        )}
-
-        {archived && (
-          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-white/10 bg-white/[0.03]">
-            <span className="text-xs text-neutral-300">
-              Archived {formatLocalTime(task.archived_at ?? '')}. It keeps its comments, time and links.
-            </span>
-            {onRestore && (
-              <button
-                type="button"
-                onClick={() => onRestore(task.id)}
-                disabled={busy}
-                className="px-3 py-1 rounded-lg text-xs font-semibold text-neutral-200 border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
-              >
-                {t('tasks_restore')}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setConfirmingDelete(true)}
-              disabled={busy}
-              className="px-3 py-1 rounded-lg text-xs font-semibold border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
-              style={{ color: 'var(--accent-red)' }}
-            >
-              {t('delete_task_act')}
-            </button>
-          </div>
-        )}
-
-        {parent && (
-          <button
-            type="button"
-            onClick={() => onSelectTask(parent.id)}
-            className="flex items-center gap-1.5 px-6 py-2 border-b border-white/10 text-left text-xs text-neutral-400 hover:text-white"
-          >
-            <CornerLeftUp className="w-3 h-3 shrink-0" />
-            {t('task_drawer_sub_of')} <span className="text-neutral-500">{parent.display_id}</span>
-            <span className="truncate">{parent.title}</span>
+        {onDetails && !editing && (
+          <button type="button" className="a-ib tk-details-btn" onClick={onDetails} aria-label={t('inbox_details')}>
+            <Info className="a-ic" aria-hidden="true" />
           </button>
         )}
+      </PaneHead>
 
-        {/* Status pills */}
-        <div className="flex items-center gap-1.5 flex-wrap px-6 py-3 border-b" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-          {STATUS_ORDER.map((status: TaskStatus) => (
-            <button
-              key={status}
-              type="button"
-              disabled={busy || archived || status === task.status}
-              onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:cursor-default ${
-                status === task.status
-                  ? 'bg-transparent border hq-tone-ink'
-                  : 'bg-white/5 text-neutral-400 border border-white/10 hover:text-white hover:border-white/20'
-              }`}
-            >
-              {STATUS_LABELS[status]}
+      {confirmingDelete && (
+        <Dialog
+          kind="red"
+          title={t('delete_task_title')}
+          body={t('delete_task_body', { title: task.title })}
+          keepLabel={t('delete_task_keep')}
+          actLabel={t('delete_task_act')}
+          busyLabel={t('confirm_busy_deleting')}
+          busy={busy}
+          onKeep={() => setConfirmingDelete(false)}
+          onAct={() => void onDelete(task.id, true, true)}
+        />
+      )}
+
+      <div className="tk-body">
+        <div className="tk-stack a-pad">
+          {archived && (
+            <div className="a-stale" role="status">
+              <span>{t('tasks_archived_notice', { when: formatLocalTime(task.archived_at ?? '') })}</span>
+              {onRestore && (
+                <button type="button" onClick={() => onRestore(task.id)} disabled={busy} className="a-btn compact secondary">
+                  {t('tasks_restore')}
+                </button>
+              )}
+            </div>
+          )}
+
+          <TaskVerification key={`verification-${task.id}`} task={task} onUpdate={onUpdate} />
+
+          <div className="tk-meta">
+            <span className="a-kind sm">{task.display_id}</span>
+            {task.priority && <span className="a-kind sm warn">{task.priority}</span>}
+            {task.long_horizon && <span className="a-kind sm">{t('task_long_running')}</span>}
+            {stale && (
+              <span className="a-kind sm" title={t('task_stale_hint')}>
+                {t('task_stale_label')}
+              </span>
+            )}
+          </div>
+
+          {editing && (
+            <input value={draftTitle} onChange={(e) => setDraftTitle(e.target.value)} className="a-input" aria-label={t('task_title_label')} />
+          )}
+
+          {parent && (
+            <button type="button" onClick={() => onSelectTask(parent.id)} className="a-btn compact quiet">
+              <CornerLeftUp className="a-ic xs" aria-hidden="true" />
+              {t('task_drawer_sub_of')} {parent.display_id} {parent.title}
             </button>
-          ))}
-        </div>
+          )}
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          <div className="tk-pri" role="group" aria-label={t('tasks_status_label')}>
+            {STATUS_ORDER.map((status: TaskStatus) => (
+              <button
+                key={status}
+                type="button"
+                aria-pressed={status === task.status}
+                disabled={busy || archived || status === task.status}
+                onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
+                className="a-chip"
+              >
+                {STATUS_LABELS[status]}
+              </button>
+            ))}
+          </div>
+
           <div>
             <SectionLabel>{t('task_drawer_description')}</SectionLabel>
             {editing ? (
-              <textarea
-                value={draftDescription}
-                onChange={(e) => setDraftDescription(e.target.value)}
-                rows={5}
-                className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-200 border bg-black/30 focus:outline-none focus:ring-1 focus:ring-white resize-none"
-                style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-              />
+              <textarea value={draftDescription} onChange={(e) => setDraftDescription(e.target.value)} rows={5} className="a-input" />
             ) : task.description ? (
-              <div className="text-sm text-neutral-200 leading-relaxed">
+              <div className="a-body">
                 <MarkdownViewer content={task.description} bare />
               </div>
             ) : (
-              <p className="text-sm text-neutral-600 italic">{t('task_drawer_no_description')}</p>
+              <p className="a-body-sm a-muted">{t('task_drawer_no_description')}</p>
             )}
           </div>
 
           <div>
             <SectionLabel className="mb-2">{t('tasks_priority')}</SectionLabel>
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="tk-pri">
               {PRIORITIES.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => onUpdate(task.id, { priority: p === task.priority ? null : p })}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold uppercase transition-all ${
-                    p === task.priority
-                      ? 'bg-transparent border hq-tone-warn'
-                      : 'bg-white/5 text-neutral-500 border border-white/10 hover:text-neutral-300'
-                  }`}
-                >
+                <button key={p} type="button" aria-pressed={p === task.priority} disabled={busy} onClick={() => onUpdate(task.id, { priority: p === task.priority ? null : p })} className="a-chip">
                   {p}
                 </button>
               ))}
@@ -311,145 +267,103 @@ export function TaskDetailDrawer({
 
           {editing && (
             <>
-              <div className="flex items-end gap-3 flex-wrap">
-                <DateRangeInputs
-                  start={draftStartDate}
-                  due={draftDueDate}
-                  onStart={setDraftStartDate}
-                  onDue={setDraftDueDate}
-                  inputClass={DATE_INPUT_CLASS}
-                  label={(text) => <SectionLabel>{text}</SectionLabel>}
-                />
-                <EstimateInput
-                  value={draftEstimate}
-                  onChange={setDraftEstimate}
-                  inputClass={DATE_INPUT_CLASS}
-                  label={(text) => <SectionLabel>{text}</SectionLabel>}
-                />
+              <div className="tk-two">
+                <DateRangeInputs start={draftStartDate} due={draftDueDate} onStart={setDraftStartDate} onDue={setDraftDueDate} inputClass={DATE_INPUT_CLASS} label={label} />
+                <EstimateInput value={draftEstimate} onChange={setDraftEstimate} inputClass={DATE_INPUT_CLASS} label={label} />
               </div>
               {task.status === 'blocked' && (
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="tk-two">
                   <div>
                     <SectionLabel>{t('task_drawer_why_blocked')}</SectionLabel>
-                    <input
-                      value={draftReason}
-                      onChange={(e) => setDraftReason(e.target.value)}
-                      maxLength={500}
-                      placeholder={t('task_drawer_in_the_way')}
-                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
-                      style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                    />
+                    <input value={draftReason} onChange={(e) => setDraftReason(e.target.value)} maxLength={500} placeholder={t('task_drawer_in_the_way')} className="a-input" />
                   </div>
                   <div>
                     <SectionLabel>{t('task_drawer_waiting_on')}</SectionLabel>
-                    <input
-                      value={draftWaiting}
-                      onChange={(e) => setDraftWaiting(e.target.value)}
-                      maxLength={500}
-                      placeholder={t('task_drawer_waiting_hint')}
-                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
-                      style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                    />
+                    <input value={draftWaiting} onChange={(e) => setDraftWaiting(e.target.value)} maxLength={500} placeholder={t('task_drawer_waiting_hint')} className="a-input" />
                   </div>
                 </div>
               )}
-              <label className="flex items-center gap-2 text-xs text-neutral-300">
+              <label className="l-choice">
                 <input type="checkbox" checked={draftLong} onChange={(e) => setDraftLong(e.target.checked)} />
                 {t('task_drawer_long_running')}
               </label>
               <div>
                 <SectionLabel>{t('task_drawer_assigned_label')}</SectionLabel>
-                <input
-                  value={draftAssignees}
-                  onChange={(e) => setDraftAssignees(e.target.value)}
-                  placeholder={t('task_drawer_assigned_hint')}
-                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
-                  style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                />
+                <input value={draftAssignees} onChange={(e) => setDraftAssignees(e.target.value)} placeholder={t('task_drawer_assigned_hint')} className="a-input" />
               </div>
               <div>
                 <SectionLabel>{t('task_drawer_tags_label')}</SectionLabel>
-                <input
-                  value={draftTags}
-                  onChange={(e) => setDraftTags(e.target.value)}
-                  placeholder={t('task_drawer_tags_hint')}
-                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-white"
-                  style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                />
+                <input value={draftTags} onChange={(e) => setDraftTags(e.target.value)} placeholder={t('task_drawer_tags_hint')} className="a-input" />
               </div>
             </>
           )}
 
           {!editing && task.status === 'blocked' && (task.blocked_reason || task.waiting_on) && (
-            <div className="px-3 py-2 rounded-xl border hq-tone-warn bg-white/5 text-xs text-neutral-200 space-y-0.5">
-              {task.blocked_reason && <p className="break-words">Blocked: {task.blocked_reason}</p>}
-              {task.waiting_on && <p className="break-words text-neutral-400">{t('task_waiting_on', { ids: task.waiting_on })}</p>}
-              {task.blocked_since && <p className="text-xs text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
+            <div className="a-card">
+              {task.blocked_reason && <p className="a-body-sm-b">{t('task_blocked_line', { reason: task.blocked_reason })}</p>}
+              {task.waiting_on && <p className="a-body-sm a-muted">{t('task_waiting_on', { ids: task.waiting_on })}</p>}
+              {task.blocked_since && <p className="a-body-sm a-muted">{t('task_blocked_since', { when: formatLocalTime(task.blocked_since) })}</p>}
             </div>
           )}
 
-          {!editing && (task.tags.length > 0 || task.assignees.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at || task.completed_at) && (
-            <div className="flex items-center gap-2 flex-wrap text-xs ">
+          {!editing && (task.tags.length > 0 || task.assignees.length > 0) && (
+            <div className="tk-meta">
               {task.assignees.length > 0 && (
-                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-200 border border-white/10 break-all" title={t('task_assigned_to')}>
-                  for {task.assignees.join(', ')}
+                <span className="a-kind" title={t('task_assigned_to')}>
+                  {t('task_for', { who: task.assignees.join(', ') })}
                 </span>
               )}
               {task.tags.map((tag) => (
-                <span key={tag} className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-300 border border-white/10">
+                <span key={tag} className="a-kind">
                   {tag}
                 </span>
               ))}
-              {task.start_date && (
-                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  Start {task.start_date}
-                </span>
-              )}
-              {task.work_started_at && (
-                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  Work started {formatLocalTime(task.work_started_at)}
-                </span>
-              )}
-              {task.first_ready_for_review_at && (
-                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  First ready for review {formatLocalTime(task.first_ready_for_review_at)}
-                </span>
-              )}
-              {task.completed_at && (
-                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  Completed {formatLocalTime(task.completed_at)}
-                </span>
-              )}
-              {task.due_date && (
-                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  Due {task.due_date}
-                </span>
-              )}
             </div>
           )}
 
-          <TaskRelations
-            task={task}
-            allTasks={allTasks}
-            busy={busy}
-            onUpdate={onUpdate}
-            onSelectTask={onSelectTask}
-            onCreateSubtask={onCreateSubtask}
-          />
-
+          <TaskRelations task={task} allTasks={allTasks} busy={busy} onUpdate={onUpdate} onSelectTask={onSelectTask} onCreateSubtask={onCreateSubtask} />
           <TaskDecisions key={`decisions-${task.id}`} taskId={task.id} />
-          <TaskVerification key={`verification-${task.id}`} task={task} onUpdate={onUpdate} />
           <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
-          <TaskActivity key={`activity-${task.id}`} task={task} />
-          <TaskLinks key={`links-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
           <TaskSessions key={`sessions-${task.id}`} taskId={task.id} taskTitle={task.title} done={archived || task.status === 'complete'} />
-
           <TaskComments key={`comments-${task.id}`} taskId={task.id} />
         </div>
       </div>
-    </div>
+    </>
   )
+}
 
-  return typeof document !== 'undefined' ? createPortal(content, document.body) : content
+/** The details beside the open task: its dates, links and history. Read only; editing is in the task itself. */
+export function TaskDetailSide({ task, onClose }: { task: TaskItem; onClose?: () => void }) {
+  const row = (k: string, v: string | null) =>
+    v ? (
+      <div className="a-drow" key={k}>
+        <span>{k}</span>
+        <span>{v}</span>
+      </div>
+    ) : null
+  return (
+    <>
+      <PaneHead title={t('inbox_details')}>
+        {onClose && (
+          <button type="button" className="a-ib" onClick={onClose} aria-label={t('close')}>
+            <XIcon className="a-ic" aria-hidden="true" />
+          </button>
+        )}
+      </PaneHead>
+      <div className="tk-body">
+        <div className="tk-stack a-pad">
+          <div className="a-card l-lines">
+            {row(t('task_start'), task.start_date)}
+            {row(t('task_due'), task.due_date)}
+            {row(t('task_work_started'), task.work_started_at ? formatLocalTime(task.work_started_at) : null)}
+            {row(t('task_first_ready'), task.first_ready_for_review_at ? formatLocalTime(task.first_ready_for_review_at) : null)}
+            {row(t('task_completed'), task.completed_at ? formatLocalTime(task.completed_at) : null)}
+          </div>
+          <TaskLinks key={`links-${task.id}`} task={task} />
+          <TaskActivity key={`activity-${task.id}`} task={task} />
+        </div>
+      </div>
+    </>
+  )
 }

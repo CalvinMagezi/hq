@@ -25,45 +25,45 @@ export function ageLabel(text: string | null | undefined, nowMs: number = Date.n
 
 export interface Badge {
   label: string
-  /** Tailwind classes. Accepted is solid, unreviewed is hollow and dashed, so the two never look alike. */
+  /** a-* and leaf.css classes. Accepted is solid, unreviewed is hollow and dashed, so the two never look alike. */
   className: string
   /** What the badge means, for the title attribute. */
   title: string
 }
 
-const BASE = 'px-1.5 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wide border'
+const BASE = 'a-kind sm'
 
 const REVIEW_BADGES: Record<ReviewState, Badge> = {
   accepted: {
     label: 'Accepted',
-    className: `${BASE} bg-emerald-500/15 text-emerald-300 border-emerald-500/40`,
+    className: 'a-kind',
     title: 'Someone accepted this version',
   },
   reviewed: {
     label: 'Reviewed',
-    className: `${BASE} bg-sky-500/10 text-sky-300 border-sky-500/30`,
+    className: BASE,
     title: 'Someone looked at this version without accepting it',
   },
   disputed: {
     label: 'Disputed',
-    className: `${BASE} bg-rose-500/15 text-rose-300 border-rose-500/40`,
+    className: 'a-state needs',
     title: 'Someone disputed this version',
   },
   superseded: {
     label: 'Superseded',
-    className: `${BASE} bg-white/5 text-neutral-500 border-white/10 line-through`,
+    className: `${BASE} l-line`,
     title: 'A later note replaces this one',
   },
   unreviewed: {
     label: 'Unreviewed',
-    className: `${BASE} bg-transparent text-neutral-400 border-dashed border-neutral-600`,
+    className: `${BASE} l-dashed`,
     title: 'No one has reviewed this version',
   },
 }
 
 const NO_RECORD_BADGE: Badge = {
   label: 'No record',
-  className: `${BASE} bg-transparent text-neutral-500 border-dotted border-neutral-700`,
+  className: `${BASE} l-dotted`,
   title: 'This version of the file has no provenance record, so there is nothing to review',
 }
 

@@ -1,11 +1,12 @@
 import { useEffect, type ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { Loader2 } from 'lucide-react'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import { fetchTaskActivityClient, type ActivityGap, type ActivityNote, type TaskActivity as TaskActivityData } from '~/lib/taskActivityApi'
 import type { TaskItem } from '~/lib/tasksApi'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
+import './leaf.css'
 import {
   ageLabel,
   authorLabel,
@@ -25,10 +26,10 @@ const DECISION_STATES = ['accepted', 'reviewed', 'unreviewed', 'disputed', 'supe
 
 export type NoteRenderer = (path: string) => ReactNode
 
-const plainPath: NoteRenderer = (path) => <span className="break-all">{path}</span>
+const plainPath: NoteRenderer = (path) => <span className="l-break">{path}</span>
 
 const vaultLink: NoteRenderer = (path) => (
-  <Link to="/notes/$" params={{ _splat: path }} className="break-all text-neutral-200 hover:underline">
+  <Link to="/notes/$" params={{ _splat: path }} className="a-link l-break">
     {path}
   </Link>
 )
@@ -45,12 +46,12 @@ function ReviewBadge({ note }: { note: ActivityNote }) {
 function NoteRow({ note, renderPath, nowMs }: { note: ActivityNote; renderPath: NoteRenderer; nowMs?: number }) {
   const reviewed = note.reviewed_by ? `${note.reviewed_by}${note.review_reason ? `: ${note.review_reason}` : ''}` : null
   return (
-    <li className="px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 space-y-0.5">
-      <div className="flex items-start gap-2 text-xs">
-        <span className="min-w-0 flex-1">{renderPath(note.path)}</span>
+    <li className="a-drow l-tall l-col">
+      <div className="l-row a-body-sm">
+        <span className="l-grow">{renderPath(note.path)}</span>
         <ReviewBadge note={note} />
       </div>
-      <p className="text-[11px] text-neutral-500">
+      <p className="a-cap a-muted">
         By {authorLabel(note)}
         {note.session ? `, session ${note.session}` : ''}
         {note.written_at ? (
@@ -61,7 +62,7 @@ function NoteRow({ note, renderPath, nowMs }: { note: ActivityNote; renderPath: 
         ) : null}
         {note.recorded_late ? ' · linked to its author later' : ''}
       </p>
-      {reviewed && <p className="text-[11px] text-neutral-400 break-words">Decision by {reviewed}</p>}
+      {reviewed && <p className="a-cap a-muted l-break">Decision by {reviewed}</p>}
     </li>
   )
 }
@@ -71,19 +72,19 @@ function Gaps({ gaps, total }: { gaps: readonly ActivityGap[]; total: number }) 
   const shown = gaps.slice(0, GAPS_SHOWN)
   const rest = gaps.slice(GAPS_SHOWN)
   const row = (g: ActivityGap, i: number) => (
-    <li key={`${g.kind}-${g.subject ?? ''}-${i}`} className="text-[11px] text-amber-300/90 break-words">
-      <span className="font-semibold">{gapTitle(g)}</span>
-      {g.subject ? `: ${g.subject}` : ''}. {g.detail}.
+    <li key={`${g.kind}-${g.subject ?? ''}-${i}`} className="a-why l-break">
+      <AlertCircle className="a-ic xs" aria-hidden="true" /><span><b>{gapTitle(g)}</b>
+      {g.subject ? `: ${g.subject}` : ''}. {g.detail}.</span>
     </li>
   )
   return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">Gaps ({total})</div>
-      <ul className="space-y-1">{shown.map(row)}</ul>
+    <div className="l-pad">
+      <div className="a-label mb-1">Gaps ({total})</div>
+      <ul className="l-stack">{shown.map(row)}</ul>
       {rest.length > 0 && (
-        <details className="mt-1">
-          <summary className="text-[11px] text-neutral-500 cursor-pointer">{rest.length} more</summary>
-          <ul className="space-y-1 mt-1">{rest.map((g, i) => row(g, i + GAPS_SHOWN))}</ul>
+        <details className="l-details mt-1">
+          <summary className="a-cap a-muted">{rest.length} more</summary>
+          <ul className="l-stack mt-1">{rest.map((g, i) => row(g, i + GAPS_SHOWN))}</ul>
         </details>
       )}
     </div>
@@ -112,13 +113,13 @@ export function TaskActivityView({
   return (
     <section aria-label="Activity" data-kind={kind}>
       <SectionLabel>Activity</SectionLabel>
-      <div className="space-y-3 px-3 py-2.5 rounded-xl bg-white/[0.02] border border-white/5">
-        {KIND_NOTE[kind] && <p className="text-xs text-neutral-400">{KIND_NOTE[kind]}</p>}
+      <div className="a-card l-lines">
+        {KIND_NOTE[kind] && <p className="a-body-sm a-muted l-pad">{KIND_NOTE[kind]}</p>}
 
         {view.holders.length > 0 && (
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500">Held by</div>
-            <ul className="text-xs text-neutral-200">
+          <div className="l-pad">
+            <div className="a-label">Held by</div>
+            <ul className="a-body-sm">
               {view.holders.map((h) => (
                 <li key={h.lease_id}>
                   {h.actor}
@@ -130,17 +131,17 @@ export function TaskActivityView({
         )}
 
         {view.sessions.length > 0 && (
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500">Sessions</div>
-            <ul className="text-xs text-neutral-200 space-y-0.5">
+          <div className="l-pad">
+            <div className="a-label">Sessions</div>
+            <ul className="a-body-sm">
               {view.sessions.map((s) => (
                 <li key={s.id}>
                   {s.registered === false ? (
-                    <span className="text-amber-300/90">{s.id}: not in the session registry</span>
+                    <span className="a-warn-t">{s.id}: not in the session registry</span>
                   ) : (
                     <>
                       {s.agent || s.harness || s.id}{' '}
-                      <span className="text-neutral-500">
+                      <span className="a-muted">
                         {s.running ? 'running' : (s.status ?? 'unknown')}
                         {s.last_seen_at ? `, seen ${ageLabel(s.last_seen_at, nowMs)}` : ''}
                       </span>
@@ -153,13 +154,13 @@ export function TaskActivityView({
         )}
 
         {view.contributors.length > 0 && (
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500">Contributors</div>
-            <ul className="text-xs text-neutral-200">
+          <div className="l-pad">
+            <div className="a-label">Contributors</div>
+            <ul className="a-body-sm">
               {view.contributors.map((c) => (
                 <li key={c.actor}>
                   {c.actor}{' '}
-                  <span className="text-neutral-500">
+                  <span className="a-muted">
                     {c.notes} {c.notes === 1 ? 'note' : 'notes'}
                     {c.leases > 0 ? `, ${c.leases} ${c.leases === 1 ? 'lease' : 'leases'}` : ''}
                     {c.last_active ? `, last ${ageLabel(c.last_active, nowMs)}` : ''}
@@ -171,12 +172,12 @@ export function TaskActivityView({
         )}
 
         {view.notes.length > 0 && (
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">
+          <div className="l-pad">
+            <div className="a-label mb-1">
               Notes ({view.notes_total}) · {reviewSummary(view.review_counts)}
               {missingAuthors > 0 ? ` · ${missingAuthors} with no known author` : ''}
             </div>
-            <ul className="space-y-1.5">
+            <ul>
               {view.notes.map((n) => (
                 <NoteRow key={n.path} note={n} renderPath={renderPath} nowMs={nowMs} />
               ))}
@@ -185,15 +186,15 @@ export function TaskActivityView({
         )}
 
         {decisions.length > 0 && (
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">Decisions and findings</div>
+          <div className="l-pad">
+            <div className="a-label mb-1">Decisions and findings</div>
             {decisions.map((state) => (
-              <div key={state} className="mb-1.5">
-                <div className="text-[11px] font-semibold text-neutral-300 capitalize">{state}</div>
-                <ul className="text-xs text-neutral-300 space-y-0.5">
+              <div key={state}>
+                <div className="a-body-sm-b capitalize">{state}</div>
+                <ul className="a-body-sm">
                   {(view.decisions_and_findings[state] ?? []).map((n) => (
                     <li key={n.path}>
-                      {renderPath(n.path)} <span className="text-neutral-500">({n.type})</span>
+                      {renderPath(n.path)} <span className="a-muted">({n.type})</span>
                     </li>
                   ))}
                 </ul>
@@ -203,12 +204,12 @@ export function TaskActivityView({
         )}
 
         {view.open_questions.length > 0 && (
-          <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500">Open questions (as recorded)</div>
-            <ul className="text-xs text-neutral-200 space-y-0.5">
+          <div className="l-pad">
+            <div className="a-label">Open questions (as recorded)</div>
+            <ul className="a-body-sm">
               {view.open_questions.map((q) => (
-                <li key={`${q.source}-${q.at}`} className="whitespace-pre-wrap break-words">
-                  {q.text} <span className="text-neutral-500">({q.recorded_by}, {ageLabel(q.at, nowMs)})</span>
+                <li key={`${q.source}-${q.at}`} className="l-pre">
+                  {q.text} <span className="a-muted">({q.recorded_by}, {ageLabel(q.at, nowMs)})</span>
                 </li>
               ))}
             </ul>
@@ -217,7 +218,7 @@ export function TaskActivityView({
 
         <Gaps gaps={view.gaps} total={view.gaps_total} />
 
-        <p className="text-[11px] text-neutral-500">
+        <p className="a-cap a-muted l-pad">
           As of {freshnessLines(view.freshness, nowMs).join(' · ')}. Generated now from the task system, sessions and
           note records. A note being edited is not progress, and status comes only from the task.
         </p>
@@ -239,8 +240,8 @@ export function TaskActivity({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Activity">
         <SectionLabel>Activity</SectionLabel>
-        <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        <div role="status" className="a-loading">
+          <Loader2 className="a-ic xs animate-spin" aria-hidden="true" />
           Loading activity
         </div>
       </section>
@@ -250,7 +251,7 @@ export function TaskActivity({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Activity">
         <SectionLabel>Activity</SectionLabel>
-        <p role="alert" className="text-xs text-rose-400">
+        <p role="alert" className="a-body-sm a-danger-t">
           {found.error ?? 'Could not load activity.'}
         </p>
       </section>

@@ -3,6 +3,7 @@ import type { QueueHealth, Rollout } from '~/lib/verificationApi'
 import { RolloutPanel } from './RolloutPanel'
 import { WAITING_LABEL, queueLines, waitingChips } from './verification'
 import { t } from '~/strings'
+import '../leaf.css'
 
 /** Backlog by who it waits on, the sentences that matter, and why anything is deferred. */
 export function QueueHealthPanel({ health, rollout }: { health: QueueHealth; rollout?: Rollout }) {
@@ -10,34 +11,34 @@ export function QueueHealthPanel({ health, rollout }: { health: QueueHealth; rol
   const lines = queueLines(health)
   const alerts = health.alerts.length
   return (
-    <div className="mt-3 pt-3 border-t border-white/10 space-y-2.5 text-xs">
+    <div className="l-stack a-body-sm mt-3">
       {chips.length === 0 ? (
-        <p className="text-neutral-400">{t('verify_queue_empty')}</p>
+        <p className="a-muted">{t('verify_queue_empty')}</p>
       ) : (
-        <ul className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        <ul className="l-grid">
           {chips.map((c) => (
-            <li key={c.who} className={`px-3 py-2 rounded-xl border ${c.yours ? 'border-amber-400/30 bg-amber-400/10' : 'border-white/10 bg-white/[0.02]'}`}>
-              <span className="block text-lg font-semibold text-white leading-none">{c.count}</span>
-              <span className="text-neutral-400">{c.label}</span>
+            <li key={c.who} className={c.yours ? 'a-card needs' : 'a-card'}>
+              <span className="block a-h3">{c.count}</span>
+              <span className="a-cap a-muted">{c.label}</span>
             </li>
           ))}
         </ul>
       )}
-      <ul className="space-y-1">
+      <ul className="l-stack">
         {lines.map((line, i) => (
-          <li key={line} className={i < alerts ? 'flex items-start gap-1.5 text-amber-300' : 'text-neutral-400'}>
-            {i < alerts && <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />}
+          <li key={line} className={i < alerts ? 'a-why' : 'a-muted'}>
+            {i < alerts && <AlertTriangle className="a-ic xs" aria-hidden="true" />}
             <span>{line}</span>
           </li>
         ))}
       </ul>
       {health.deferrals.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1">{t('verify_queue_waiting')}</p>
-          <ul className="space-y-1">
+          <p className="a-label mb-1">{t('verify_queue_waiting')}</p>
+          <ul className="l-stack">
             {health.deferrals.map((d) => (
-              <li key={`${d.waiting_for}-${d.reason}`} className="text-neutral-400">
-                <span className="text-neutral-200">{d.tasks}</span> {d.tasks === 1 ? 'task' : 'tasks'} ({WAITING_LABEL[d.waiting_for].toLowerCase()}): {d.reason}
+              <li key={`${d.waiting_for}-${d.reason}`} className="a-muted">
+                <b>{d.tasks}</b> {d.tasks === 1 ? 'task' : 'tasks'} ({WAITING_LABEL[d.waiting_for].toLowerCase()}): {d.reason}
               </li>
             ))}
           </ul>

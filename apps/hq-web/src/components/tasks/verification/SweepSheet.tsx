@@ -1,6 +1,7 @@
 import { t } from '~/strings'
+import '../leaf.css'
 import { useState } from 'react'
-import { ChevronDown, Loader2, Pause, Play, RotateCcw, X } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Loader2, Pause, Play, RotateCcw, X } from 'lucide-react'
 import {
   createSweep,
   fetchSweep,
@@ -64,19 +65,19 @@ export function ScopePickerView({ inputs, initiativeName, choice, onChoice, onSi
           ? 'Give a date as YYYY-MM-DD.'
           : null
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-neutral-400">
+    <div className="l-stack">
+      <p className="a-body-sm a-muted">
         A sweep reads the evidence for each task waiting for review, with no model and no spend, and sorts them into groups. Nothing moves until you read the groups and apply.
       </p>
-      <fieldset className="space-y-2">
+      <fieldset className="l-stack">
         <legend className="sr-only">What to sweep</legend>
         {CHOICES.map((c) => (
           <label
             key={c.id}
-            className={`flex items-center gap-3 min-h-11 px-3.5 rounded-xl border cursor-pointer ${choice === c.id ? 'border-emerald-400/50 bg-emerald-400/10' : 'border-white/10 bg-white/[0.02]'}`}
+            className={`l-choice ${choice === c.id ? 'is-on' : ''}`}
           >
-            <input type="radio" name="sweep-scope" checked={choice === c.id} onChange={() => onChoice(c.id)} className="accent-emerald-400" />
-            <span className="text-sm text-neutral-100">
+            <input type="radio" name="sweep-scope" checked={choice === c.id} onChange={() => onChoice(c.id)} />
+            <span className="a-body-sm">
               {c.id === 'initiative' && initiativeName ? `${c.label}: ${initiativeName}` : c.id === 'selected' ? `${c.label} (${inputs.selectedIds.length})` : c.label}
             </span>
           </label>
@@ -88,24 +89,29 @@ export function ScopePickerView({ inputs, initiativeName, choice, onChoice, onSi
           value={inputs.since}
           onChange={(e) => onSince(e.target.value)}
           aria-label="Waiting since"
-          className="min-h-11 px-3 rounded-xl text-sm text-neutral-100 hq-field"
+          className="a-input"
         />
       )}
-      {missing && <p className="text-xs text-amber-300">{missing}</p>}
-      {error && <p className="text-xs text-rose-300">{error}</p>}
+      {missing && (
+        <p className="a-why">
+          <AlertTriangle className="a-ic xs" aria-hidden="true" />
+          {missing}
+        </p>
+      )}
+      {error && <p role="alert" className="a-body-sm a-danger-t">{error}</p>}
       <button type="button" disabled={busy || !scope} onClick={onStart} className={`${SHEET_PRIMARY} w-full`}>
-        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+        {busy ? <Loader2 className="a-ic sm animate-spin" aria-hidden="true" /> : null}
         Make the plan
       </button>
       {recent.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-1.5">Earlier sweeps</h3>
-          <ul className="space-y-1.5">
+          <h3 className="a-label mb-2">Earlier sweeps</h3>
+          <ul className="a-card l-lines">
             {recent.slice(0, 5).map((s) => (
               <li key={s.id}>
-                <button type="button" onClick={() => onOpen(s.id)} className="w-full text-left min-h-11 px-3 py-2 rounded-xl bg-white/[0.03] border border-white/10 hover:bg-white/[0.06]">
-                  <span className="block text-xs text-neutral-100">{scopeLabel(s.scope)}</span>
-                  <span className="block text-xs text-neutral-500">
+                <button type="button" onClick={() => onOpen(s.id)} className="a-drow l-tall l-col l-link w-full">
+                  <span className="block a-body-sm">{scopeLabel(s.scope)}</span>
+                  <span className="block a-cap a-muted">
                     {s.status} · {s.plan.total ?? 0} tasks · {s.created_at}
                   </span>
                 </button>
@@ -135,15 +141,15 @@ interface BodyProps {
 function ItemList({ items }: { items: SweepItem[] }) {
   const shown = items.slice(0, ITEMS_SHOWN)
   return (
-    <ul className="mt-2 space-y-1">
+    <ul className="l-stack mt-2">
       {shown.map((i) => (
-        <li key={i.task_id} className="text-xs text-neutral-400 break-words">
-          <span className="text-neutral-200">{i.display_id}</span> {i.title}
-          {i.finding ? <span className="text-neutral-500"> · {i.finding}</span> : null}
-          {i.state === 'stale' || i.state === 'kept' ? <span className="text-amber-300/80"> · {i.detail}</span> : null}
+        <li key={i.task_id} className="a-body-sm a-muted l-break">
+          <b>{i.display_id}</b> {i.title}
+          {i.finding ? <span className="a-muted"> · {i.finding}</span> : null}
+          {i.state === 'stale' || i.state === 'kept' ? <span className="a-warn-t"> · {i.detail}</span> : null}
         </li>
       ))}
-      {items.length > shown.length && <li className="text-xs text-neutral-500">and {items.length - shown.length} more</li>}
+      {items.length > shown.length && <li className="a-cap a-muted">and {items.length - shown.length} more</li>}
     </ul>
   )
 }
@@ -164,44 +170,44 @@ export function SweepBodyView({ detail, initiativeName, busy, error, confirmed, 
     const cls = apply || a === 'run' ? SHEET_PRIMARY : a === 'cancel' ? SHEET_DANGER : SHEET_QUIET
     return (
       <button key={a} type="button" disabled={busy || (apply && needsConfirm && !confirmed)} onClick={() => onAction(a)} className={`${cls} flex-1`}>
-        {Icon ? <Icon className="w-4 h-4" /> : null}
+        {Icon ? <Icon className="a-ic sm" aria-hidden="true" /> : null}
         {label}
       </button>
     )
   }
   return (
-    <div className="space-y-4">
+    <div className="l-stack">
       <div>
-        <p className="text-xs text-neutral-500">{scopeLabel(sweep.scope, initiativeName)}</p>
-        <p className="text-sm font-semibold text-white flex items-center gap-2">
-          {live && <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />}
+        <p className="a-cap a-muted">{scopeLabel(sweep.scope, initiativeName)}</p>
+        <p className="a-body-sm-b l-row">
+          {live && <Loader2 className="a-ic sm animate-spin" aria-hidden="true" />}
           {stage.label}
         </p>
-        <p className="text-xs text-neutral-400 mt-0.5">{stage.hint}</p>
+        <p className="a-body-sm a-muted">{stage.hint}</p>
       </div>
 
       {bar && (
         <div role="progressbar" aria-valuenow={bar.percent} aria-valuemin={0} aria-valuemax={100} aria-label={bar.label}>
-          <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-            <div className="h-full bg-emerald-400 transition-all" style={{ width: `${bar.percent}%` }} />
+          <div className="a-prog blue">
+            <u style={{ width: `${bar.percent}%` }} />
           </div>
-          <p className="text-xs text-neutral-500 mt-1">{bar.label}</p>
+          <p className="a-cap a-muted mt-1">{bar.label}</p>
         </div>
       )}
 
       {rows.length > 0 && (
-        <ul className="space-y-2">
+        <ul className="a-card l-lines">
           {rows.map((r) => {
             const mine = items.filter((i) => i.bucket === r.bucket)
             return (
-              <li key={r.bucket} className="rounded-xl border border-white/10 bg-white/[0.02] px-3.5 py-2.5">
-                <details>
-                  <summary className="flex items-baseline justify-between gap-3 cursor-pointer min-h-8 list-none">
-                    <span className="text-sm text-neutral-100">
-                      <span className="font-semibold text-white">{r.count}</span> {r.label.toLowerCase()}
+              <li key={r.bucket} className="a-drow l-tall l-col">
+                <details className="l-details">
+                  <summary className="l-row">
+                    <span className="a-body-sm">
+                      <b>{r.count}</b> {r.label.toLowerCase()}
                     </span>
-                    <span className="text-xs text-neutral-500 text-right">{BUCKET_INFO[r.bucket].does}</span>
-                    <ChevronDown className="w-3.5 h-3.5 text-neutral-500 shrink-0 self-center" aria-hidden="true" />
+                    <span className="a-cap a-muted">{BUCKET_INFO[r.bucket].does}</span>
+                    <ChevronDown className="a-ic xs a-muted" aria-hidden="true" />
                   </summary>
                   <ItemList items={mine} />
                 </details>
@@ -212,32 +218,32 @@ export function SweepBodyView({ detail, initiativeName, busy, error, confirmed, 
       )}
 
       {sweep.plan.would_wait_on_you !== undefined && sweep.plan.would_wait_on_you > 0 && (
-        <p className="text-xs text-neutral-400">{sweep.plan.would_wait_on_you} would wait on you, including risky ones, which wait a while before HQ marks them done.</p>
+        <p className="a-body-sm a-muted">{sweep.plan.would_wait_on_you} would wait on you, including risky ones, which wait a while before HQ marks them done.</p>
       )}
-      {estimate && <p className="text-xs text-neutral-400">{estimate}</p>}
+      {estimate && <p className="a-body-sm a-muted">{estimate}</p>}
 
       {needsConfirm && preview && (
-        <label className="flex items-start gap-3 px-3.5 py-3 rounded-xl border border-amber-400/30 bg-amber-400/10 cursor-pointer">
-          <input type="checkbox" checked={confirmed} onChange={(e) => onConfirm(e.target.checked)} className="mt-0.5 accent-amber-400 w-4 h-4" />
-          <span className="text-xs text-amber-100">
+        <label className="a-card needs l-row">
+          <input type="checkbox" checked={confirmed} onChange={(e) => onConfirm(e.target.checked)} />
+          <span className="a-body-sm">
             This moves {preview.will_move} tasks, more than the {preview.confirm_over} that HQ will apply without asking. I have read the groups and want it applied.
           </span>
         </label>
       )}
 
       {undone && (
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-3 text-xs space-y-1">
-          <p className="text-neutral-100">Restored {undone.restored} tasks to review.</p>
+        <div className="a-card a-body-sm">
+          <p>Restored {undone.restored} tasks to review.</p>
           {undone.left_alone.map((l) => (
-            <p key={l.task} className="text-neutral-400">
+            <p key={l.task} className="a-muted">
               Left alone: {l.task}, {l.why}
             </p>
           ))}
         </div>
       )}
 
-      {error && <p className="text-xs text-rose-300">{error}</p>}
-      {stage.actions.length > 0 && <div className="flex flex-wrap gap-2">{stage.actions.map(button)}</div>}
+      {error && <p role="alert" className="a-body-sm a-danger-t">{error}</p>}
+      {stage.actions.length > 0 && <div className="l-bar">{stage.actions.map(button)}</div>}
     </div>
   )
 }
@@ -339,8 +345,8 @@ export function SweepSheet({ open, onClose, inputs, initiativeName, initialSweep
           undone={undone}
         />
       ) : (
-        <p className="text-sm text-neutral-400 flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin" />
+        <p className="a-loading">
+          <Loader2 className="a-ic sm animate-spin" aria-hidden="true" />
           {detail.error ?? 'Loading the sweep'}
         </p>
       )}

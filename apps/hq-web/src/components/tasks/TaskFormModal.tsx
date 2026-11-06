@@ -1,6 +1,8 @@
 import { t } from '~/strings'
-import { useState } from 'react'
-import { X, Loader2, Plus } from 'lucide-react'
+import { useState, type KeyboardEvent } from 'react'
+import { Plus, X } from 'lucide-react'
+import { Sheet } from '../ui/Sheet'
+import './tasks.css'
 import type { Folder, Initiative, Space, TaskItem, TaskPriority } from '~/lib/tasksApi'
 import { createSpaceClient } from '~/lib/tasksApi'
 import { DateRangeInputs, EstimateInput, FieldLabel, PRIORITIES, isInvalidEstimate, parseEstimate } from './taskFields'
@@ -31,6 +33,35 @@ interface Props {
 }
 
 
+/** Names and tags: what is understood turns into a chip, and a tap on the chip takes it out. */
+function ChipField({ chips, onChange, placeholder, label }: { chips: string[]; onChange: (next: string[]) => void; placeholder: string; label: string }) {
+  const [draft, setDraft] = useState('')
+  const commit = () => {
+    const words = draft.split(',').map((w) => w.trim()).filter((w) => w && !chips.includes(w))
+    if (words.length) onChange([...chips, ...words])
+    setDraft('')
+  }
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault()
+      commit()
+    } else if (e.key === 'Backspace' && draft === '' && chips.length > 0) onChange(chips.slice(0, -1))
+  }
+  return (
+    <div className="tk-tagf">
+      {chips.map((c) => (
+        <span key={c} className="tk-tag">
+          {c}
+          <button type="button" className="a-ib" aria-label={t('tasks_remove_chip', { label: c })} onClick={() => onChange(chips.filter((x) => x !== c))}>
+            <X className="a-ic xs" aria-hidden="true" />
+          </button>
+        </span>
+      ))}
+      <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKey} onBlur={commit} placeholder={placeholder} aria-label={label} />
+    </div>
+  )
+}
+
 export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tasks, onTaxonomyChanged, onCreate }: Props) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -42,8 +73,9 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
   const [startDate, setStartDate] = useState('')
   const [estimate, setEstimate] = useState('')
   const [parentId, setParentId] = useState('')
-  const [tags, setTags] = useState('')
-  const [assignees, setAssignees] = useState('')
+  const [tags, setTags] = useState<string[]>([])
+  const [assignees, setAssignees] = useState<string[]>([])
+  const [details, setDetails] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [addingSpace, setAddingSpace] = useState(false)
   const [newSpaceName, setNewSpaceName] = useState('')
@@ -70,8 +102,9 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
     setStartDate('')
     setEstimate('')
     setParentId('')
-    setTags('')
-    setAssignees('')
+    setTags([])
+    setAssignees([])
+    setDetails(false)
   }
 
   const parentCandidates = tasks
@@ -93,14 +126,8 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
         start_date: startDate || undefined,
         estimate_minutes: parseEstimate(estimate) ?? undefined,
         parent_task_id: parentId || undefined,
-        tags: tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean),
-        assignees: assignees
-          .split(',')
-          .map((a) => a.trim())
-          .filter(Boolean),
+        tags,
+        assignees,
       })
       reset()
       onClose()
@@ -124,216 +151,135 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
     }
   }
 
+  const canSubmit = !submitting && title.trim() !== '' && !isInvalidEstimate(estimate)
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center hq-scrim p-4">
-      <div
-        className="w-full max-w-lg rounded-2xl hq-modal overflow-hidden"
-      >
-        <div
-          className="flex items-center justify-between px-5 py-4 border-b"
-          style={{ borderColor: 'rgba(255,255,255,0.08)' }}
-        >
-          <h2 className="text-sm font-bold text-white">New Task</h2>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors">
-            <X className="w-4 h-4" />
+    <Sheet
+      title={t('tasks_new_task')}
+      onClose={onClose}
+      busy={submitting}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="a-btn secondary">
+            {t('dl_btn_cancel')}
           </button>
-        </div>
+          <button type="button" onClick={handleSubmit} disabled={!canSubmit} className="a-btn">
+            {submitting ? t('tasks_adding') : t('tasks_add_task')}
+          </button>
+        </>
+      }
+    >
+      <div className="tk-stack">
+        <input
+          autoFocus
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && canSubmit && !details) void handleSubmit()
+          }}
+          placeholder={t('tasks_what_needs_doing')}
+          aria-label={t('tasks_form_title')}
+          className="a-input"
+        />
+        {!details && (
+          <button type="button" className="a-btn compact quiet" onClick={() => setDetails(true)}>
+            {t('tasks_add_details')}
+          </button>
+        )}
+        {details && (
+          <>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder={t('tasks_form_description')} rows={3} className="a-input" />
 
-        <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-          <input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Task title"
-            className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-100 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
-            style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-          />
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Description (optional)"
-            rows={3}
-            className="w-full px-3.5 py-2.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"
-            style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-          />
+            <div>
+              <FieldLabel>{t('tasks_form_parent')}</FieldLabel>
+              <select value={parentId} onChange={(e) => setParentId(e.target.value)} className="a-input">
+                <option value="">{t('tasks_form_parent_none')}</option>
+                {parentCandidates.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.display_id} {p.title}
+                  </option>
+                ))}
+              </select>
+              {parentId && <p className="a-body-sm a-muted">{t('tasks_filed_in_parent_list')}</p>}
+            </div>
 
-          <div>
-            <FieldLabel>Parent task (optional)</FieldLabel>
-            <select
-              value={parentId}
-              onChange={(e) => setParentId(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hq-field"
-            >
-              <option value="">None, a top-level task</option>
-              {parentCandidates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.display_id} {t.title}
-                </option>
-              ))}
-            </select>
-            {parentId && (
-              <p className="text-[11px] text-neutral-500 mt-1">{t('tasks_filed_in_parent_list')}</p>
-            )}
-          </div>
-
-          {!parentId && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <FieldLabel>{t('tasks_field_area')}</FieldLabel>
-                  {addingSpace ? (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        value={newSpaceName}
-                        onChange={(e) => setNewSpaceName(e.target.value)}
-                        placeholder={t('tasks_new_area_name')}
-                        className="flex-1 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border"
-                        style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                      />
-                      <button type="button" onClick={handleAddSpace} className="text-xs text-emerald-400 px-1">
-                        Add
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <select
-                        value={spaceId}
-                        onChange={(e) => setSpaceId(e.target.value)}
-                        className="flex-1 px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border"
-                        style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                      >
-                        {spaces.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => setAddingSpace(true)}
-                        title={t('tasks_new_area')}
-                        className="p-1.5 rounded-lg text-neutral-400 hover:text-emerald-400 hover:bg-white/10"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-              )}
+            {!parentId && (
+              <>
+                <div className="tk-two">
+                  <div>
+                    <FieldLabel>{t('tasks_field_area')}</FieldLabel>
+                    {addingSpace ? (
+                      <div className="tk-add">
+                        <input value={newSpaceName} onChange={(e) => setNewSpaceName(e.target.value)} placeholder={t('tasks_new_area_name')} className="a-input" />
+                        <button type="button" onClick={handleAddSpace} className="a-btn compact secondary">
+                          {t('tasks_form_add')}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="tk-add">
+                        <select value={spaceId} onChange={(e) => setSpaceId(e.target.value)} className="a-input">
+                          {spaces.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="button" onClick={() => setAddingSpace(true)} aria-label={t('tasks_new_area')} className="a-ib">
+                          <Plus className="a-ic" aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <FieldLabel>{t('tasks_form_folder')}</FieldLabel>
+                    <input list="folder-names" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder={t('tasks_none_in_area')} className="a-input" />
+                    <datalist id="folder-names">
+                      {foldersForSpace.map((f) => (
+                        <option key={f.id} value={f.name} />
+                      ))}
+                    </datalist>
+                  </div>
                 </div>
-
                 <div>
-                  <FieldLabel>Folder (optional)</FieldLabel>
-                  <input
-                    list="folder-names"
-                    value={folderName}
-                    onChange={(e) => setFolderName(e.target.value)}
-                    placeholder={t('tasks_none_in_area')}
-                    className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border"
-                    style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                  />
-                  <datalist id="folder-names">
-                    {foldersForSpace.map((f) => (
-                      <option key={f.id} value={f.name} />
+                  <FieldLabel>{t('tasks_field_list')}</FieldLabel>
+                  <input list="initiative-names" value={initiativeName} onChange={(e) => setInitiativeName(e.target.value)} placeholder={t('tasks_form_inbox')} className="a-input" />
+                  <datalist id="initiative-names">
+                    {initiativeNamesForSpace.map((name) => (
+                      <option key={name} value={name} />
                     ))}
                   </datalist>
                 </div>
-              </div>
+              </>
+            )}
 
-              <div>
-                <FieldLabel>{t('tasks_field_list')}</FieldLabel>
-                <input
-                  list="initiative-names"
-                  value={initiativeName}
-                  onChange={(e) => setInitiativeName(e.target.value)}
-                  placeholder="Inbox"
-                  className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border"
-                  style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-                />
-                <datalist id="initiative-names">
-                  {initiativeNamesForSpace.map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
-              </div>
-            </>
-          )}
-
-          <div className="grid grid-cols-3 gap-3">
             <div>
-              <FieldLabel>Priority</FieldLabel>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as TaskPriority | '')}
-                className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border"
-                style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-              >
-                <option value="">None</option>
+              <FieldLabel>{t('tasks_priority')}</FieldLabel>
+              <select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority | '')} className="a-input">
+                <option value="">{t('tasks_priority_none')}</option>
                 {PRIORITIES.map((p) => (
                   <option key={p} value={p}>
-                    {p}
+                    {t(`tasks_priority_${p}`)}
                   </option>
                 ))}
               </select>
             </div>
-            <DateRangeInputs
-              start={startDate}
-              due={dueDate}
-              onStart={setStartDate}
-              onDue={setDueDate}
-              inputClass="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hq-field"
-              label={(text) => <FieldLabel>{text}</FieldLabel>}
-            />
-            <EstimateInput
-              value={estimate}
-              onChange={setEstimate}
-              inputClass="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border border-white/10"
-              label={(text) => <FieldLabel>{text}</FieldLabel>}
-            />
-          </div>
+            <div className="tk-two">
+              <DateRangeInputs start={startDate} due={dueDate} onStart={setStartDate} onDue={setDueDate} inputClass="a-input" label={(text) => <FieldLabel>{text}</FieldLabel>} />
+            </div>
+            <EstimateInput value={estimate} onChange={setEstimate} inputClass="a-input" label={(text) => <FieldLabel>{text}</FieldLabel>} />
 
-          <div>
-            <FieldLabel>Assigned to (comma-separated; an agent named here is notified)</FieldLabel>
-            <input
-              value={assignees}
-              onChange={(e) => setAssignees(e.target.value)}
-              placeholder="hq, reviewer"
-              className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border border-white/10"
-            />
-          </div>
-
-          <div>
-            <FieldLabel>Tags (comma-separated; what the task is about)</FieldLabel>
-            <input
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="hq, backend"
-              className="w-full px-3 py-2 rounded-lg text-xs text-neutral-200 bg-black/30 border"
-              style={{ borderColor: 'rgba(255,255,255,0.1)' }}
-            />
-          </div>
-        </div>
-
-        <div
-          className="flex items-center justify-end gap-2 px-5 py-4 border-t"
-          style={{ borderColor: 'rgba(255,255,255,0.08)' }}
-        >
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-all"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting || !title.trim() || isInvalidEstimate(estimate)}
-            className="px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
-            style={{ background: 'var(--accent-green, #00ffa3)', color: '#000' }}
-          >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Task'}
-          </button>
-        </div>
+            <div>
+              <FieldLabel>{t('task_drawer_assigned_label')}</FieldLabel>
+              <ChipField chips={assignees} onChange={setAssignees} placeholder={t('task_drawer_assigned_hint')} label={t('task_drawer_assigned_label')} />
+            </div>
+            <div>
+              <FieldLabel>{t('task_drawer_tags_label')}</FieldLabel>
+              <ChipField chips={tags} onChange={setTags} placeholder={t('task_drawer_tags_hint')} label={t('task_drawer_tags_label')} />
+              <p className="a-body-sm a-muted">{t('tasks_words_hq_understood_are')}</p>
+            </div>
+          </>
+        )}
       </div>
-    </div>
+    </Sheet>
   )
 }

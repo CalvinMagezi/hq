@@ -6,7 +6,7 @@ import type { Initiative, TaskItem } from '~/lib/tasksApi'
 import { t, tn } from '~/strings'
 import { ToastView } from '../ui/Toast'
 import { TaskCard } from './TaskCard'
-import { TaskDetailDrawer } from './TaskDetailDrawer'
+import { TaskDetailMain } from './TaskDetailDrawer'
 import { TaskListView } from './TaskListView'
 import { dayOfWeek } from './dates'
 import { monthRange } from './gantt'
@@ -42,7 +42,7 @@ const asyncNoop = async () => {}
 
 const drawer = (t1: TaskItem) =>
   renderToString(
-    createElement(WebSocketProvider, null, createElement(TaskDetailDrawer, {
+    createElement(WebSocketProvider, null, createElement(TaskDetailMain, {
       task: t1,
       allTasks: [t1],
       onClose: noop,
@@ -82,9 +82,9 @@ describe('tasks, the leftovers of waves 0 to 4', () => {
     expect(html).toContain('<a href="/tasks/tk-2"')
   })
 
-  test('the check box of a card sits in a 48 px target', () => {
+  test('the check box of a card is the design a-chk, a hit target of its own', () => {
     const html = renderToString(createElement(TaskCard, { task: task(1), select: { ticked: false, onToggle: noop } }))
-    expect(html).toMatch(/class="[^"]*\bw-12\b[^"]*\bh-12\b[^"]*"[^>]*><input type="checkbox"/)
+    expect(html).toMatch(/class="a-chk[^"]*"[^>]*data-hit="select"|data-hit="select"[^>]*class="a-chk/)
   })
 
   test('check 3: Delete for good shows only on an archived task, and the stale label is plain', () => {
