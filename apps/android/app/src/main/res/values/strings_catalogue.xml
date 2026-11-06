@@ -1698,6 +1698,10 @@
     <string name="chat_row_unread">New reply</string>
     <string name="chat_row_archive">Archive chat</string>
     <string name="chat_row_archive_named">Archive %1$s</string>
+    <string name="chat_table_size">%1$s rows · %2$s columns</string>
+    <string name="chat_table_copy">Copy table</string>
+    <string name="chat_table_expand">Expand table</string>
+    <string name="chat_table_copied">Table copied</string>
     <string name="chat_row_running">%1$s running</string>
     <string name="chat_spoken">Spoken</string>
     <string name="chat_spoken_quote">You said: “%1$s”</string>

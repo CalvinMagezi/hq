@@ -3,6 +3,8 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { t } from '~/strings'
 import { SelectionToolbar } from './SelectionToolbar'
+import { Sheet } from './ui/Sheet'
+import { toastNotice } from '~/lib/toast'
 import { useHQStore } from '~/store/hqStore'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { blockRemoteImages } from '~/lib/remoteImages'
@@ -99,19 +101,30 @@ async function configureMarked() {
                 return `<a href="${token.href}" class="md-link" target="_blank" rel="noopener noreferrer">${this.parser.parseInline(token.tokens)}</a>`
             },
             table(this: any, token: any) {
-                const align = (cell: any) => cell.align ? ` align="${cell.align}"` : ''
-                const headerCells = token.header.map((cell: any) =>
-                    `<th class="md-th"${align(cell)}>${this.parser.parseInline(cell.tokens)}</th>`
-                ).join('')
-                const rows = token.rows.map((row: any, i: number) =>
-                    `<tr class="${i % 2 === 0 ? 'md-tr-even' : 'md-tr-odd'}">${
-                        row.map((cell: any) => `<td class="md-td"${align(cell)}>${this.parser.parseInline(cell.tokens)}</td>`).join('')
-                    }</tr>`
-                ).join('')
-                return `<div class="md-table-wrap"><table class="md-table"><thead><tr>${headerCells}</tr></thead><tbody>${rows}</tbody></table></div>`
+                return tableBlock(token, (tokens: any) => this.parser.parseInline(tokens))
             }
         }
     })
+}
+
+/** A table as the design's block (AlignedChatBlocks): its size and Copy and Expand, then the table in its own sideways scroll. */
+export function tableBlock(token: { header: any[]; rows: any[][] }, inline: (tokens: any) => string): string {
+    const align = (cell: any) => (cell.align ? ` align="${cell.align}"` : '')
+    const head = token.header.map((cell: any) => `<th scope="col"${align(cell)}>${inline(cell.tokens)}</th>`).join('')
+    const rows = token.rows.map((row: any[]) => `<tr>${row.map((cell: any) => `<td${align(cell)}>${inline(cell.tokens)}</td>`).join('')}</tr>`).join('')
+    const size = escapeHtml(t('chat_table_size', { rows: token.rows.length, cols: token.header.length }))
+    const bar =
+        `<div class="hq-blk-h"><span>${size}</span>` +
+        `<button type="button" class="a-ib sm" data-table-copy aria-label="${escapeHtml(t('chat_table_copy'))}"><span class="hq-ic hq-ic-copy" aria-hidden="true"></span></button>` +
+        `<button type="button" class="a-ib sm" data-table-expand aria-label="${escapeHtml(t('chat_table_expand'))}"><span class="hq-ic hq-ic-expand" aria-hidden="true"></span></button></div>`
+    return `<div class="hq-blk">${bar}<div class="a-scroll-x"><table class="a-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div></div>`
+}
+
+/** A table's cells as tab-separated lines, the way a spreadsheet pastes them. */
+export function tableText(table: HTMLTableElement): string {
+    return Array.from(table.rows)
+        .map((row) => Array.from(row.cells).map((cell) => (cell.textContent ?? '').trim()).join('\t'))
+        .join('\n')
 }
 
 /** `bare` drops the frontmatter panel and selection toolbar, for chat bubbles. */
@@ -119,6 +132,8 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
     const [html, setHtml] = useState<string>('')
     const [frontmatter, setFrontmatter] = useState<Record<string, any>>({})
     const [metaOpen, setMetaOpen] = useState(false)
+    // A table opened on its own, at the width the page allows.
+    const [expanded, setExpanded] = useState<string | null>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const setChatDraft = useHQStore((s) => s.setChatDraft)
 
@@ -160,11 +175,11 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
                 const parts = p1.split('|')
                 const target = parts[0].trim()
                 const label = (parts[1] || parts[0]).trim()
-                return `<button type="button" class="md-wikilink text-emerald-400 hover:text-emerald-300 underline font-medium cursor-pointer inline-block text-left" data-vault-note="${escapeHtml(target)}" aria-label="Open note ${escapeHtml(label)}">${escapeHtml(label)}</button>`
+                return `<button type="button" class="md-wikilink a-link" data-vault-note="${escapeHtml(target)}" aria-label="Open note ${escapeHtml(label)}">${escapeHtml(label)}</button>`
             })
 
             const raw = await marked.parse(md)
-            const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['data-copy-text', 'data-vault-note', 'data-chart-slot'] })
+            const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['data-copy-text', 'data-vault-note', 'data-chart-slot', 'data-table-copy', 'data-table-expand'] })
             const result = fillChartSlots(blockRemoteImages(sanitized))
             if (active) setHtml(result)
         }
@@ -188,6 +203,14 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
                     btn.textContent = 'Copied!'
                     setTimeout(() => { btn.textContent = 'Copy' }, 1500)
                 }).catch(() => {})
+                return
+            }
+
+            const tableBtn = (e.target as Element).closest<HTMLElement>('[data-table-copy],[data-table-expand]')
+            const table = tableBtn?.closest('.hq-blk')?.querySelector('table')
+            if (tableBtn && table) {
+                if (tableBtn.hasAttribute('data-table-expand')) setExpanded(table.outerHTML)
+                else void navigator.clipboard.writeText(tableText(table)).then(() => toastNotice(t('chat_table_copied'))).catch(() => undefined)
                 return
             }
 
@@ -259,6 +282,12 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
                 className="md-content"
                 dangerouslySetInnerHTML={{ __html: html }}
             />
+            {expanded && (
+                <Sheet title={t('chat_table_expand')} placement="center" onClose={() => setExpanded(null)}>
+                    {/* Already sanitized: it is a table taken from this viewer's own rendered HTML. */}
+                    <div className="a-scroll-x" dangerouslySetInnerHTML={{ __html: expanded }} />
+                </Sheet>
+            )}
         </div>
     )
 }
