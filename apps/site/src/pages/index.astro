@@ -9,12 +9,12 @@ const installCmd = 'curl -fsSL https://agent-hq.online/install.sh | bash';
 const agents = ['Claude Code', 'Codex', 'Cursor', 'OpenCode', 'Pi', 'Copilot CLI', 'Kimi', 'Qwen', 'Antigravity', 'Hermes Agent', 'OpenClaw'];
 const reach = ['Discord', 'Telegram', 'Web app', 'Terminal', 'MCP server', 'Markdown vault', 'Signed releases', 'Sub-agents'];
 
-const SCREEN_IDS = ['dashboard', 'sessions-list', 'tasks-board', 'vault-browser'];
+const SCREEN_IDS = ['web-chat', 'web-notes', 'web-tasks', 'web-inbox'];
 const SCREEN_LABELS: Record<string, string> = {
-  dashboard: 'Home',
-  'sessions-list': 'Sessions',
-  'tasks-board': 'Tasks',
-  'vault-browser': 'Vault',
+  'web-chat': 'Chat',
+  'web-notes': 'Notes',
+  'web-tasks': 'Tasks',
+  'web-inbox': 'Inbox',
 };
 const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
 
@@ -30,7 +30,7 @@ const hosts = [
   {
     name: 'Your laptop or desktop',
     where: 'macOS (Apple Silicon and Intel) or Linux',
-    body: 'Joins your phone with a QR code and runs your coding agents. One command installs a signed binary and the web app. On a Mac, hq service install keeps the daemon running and starts it at login.',
+    body: 'Joins your phone with a QR code and runs your coding agents. One command installs a signed binary and the web app. On a Mac, the AgentHQ desktop app starts HQ, shows the pairing code and opens HQ in its own window, and hq service install keeps the daemon running at login.',
     cmd: 'curl -fsSL https://agent-hq.online/install.sh | bash',
     tone: 'blue',
   },
@@ -59,11 +59,11 @@ const hosts = [
 
 const phoneShots = [
   { id: 'chat-working', label: 'Chat', alt: 'Phone screen: a chat where HQ answers a question, then lists the steps it is taking: checked your tasks, read a note, writing the steps.' },
-  { id: 'tasks-today', label: 'Tasks', alt: 'Phone screen: the Today tab of Tasks, with tasks waiting on you, one ready to check, and work in progress.' },
-  { id: 'inbox-needs-you', label: 'Inbox', alt: 'Phone screen: the Inbox, where a coding agent asks to edit one file and HQ offers Allow once or Not now.' },
+  { id: 'tasks-today', label: 'Tasks', alt: 'Phone screen: the Today tab of Tasks, with a stuck task and one ready to check under Waiting on you, two in progress and one due today.' },
+  { id: 'inbox-needs-you', label: 'Inbox', alt: 'Phone screen: the Inbox, where a task HQ says is finished waits with Check it and Not now.' },
   { id: 'helper-working', label: 'Helpers', alt: 'Phone screen: a coding agent on a Mac mini building an app, with what it has done so far and a field to tell it something.' },
-  { id: 'note-reading', label: 'Notes', alt: 'Phone screen: a note from the vault open for reading, with Ask HQ, Make a task and Pin actions.' },
-  { id: 'keep-running', label: 'Keep running', alt: 'Phone screen: Keep running, which checks the Android battery and permission settings that let HQ stay on.' },
+  { id: 'note-reading', label: 'Notes', alt: 'Phone screen: a garden planner note open for reading, with Edit, Ask HQ, Make a task, Pin and Share.' },
+  { id: 'keep-running', label: 'Keep running', alt: 'Phone screen: Keep running, listing three Android settings to fix so HQ stays on: battery use, unused-app permissions and notifications.' },
 ];
 ---
 
@@ -210,7 +210,7 @@ const phoneShots = [
           coding agents running on them report back to your phone.
         </p>
       </div>
-      <ul class="phones list-plain" tabindex="0" aria-label="Screens from the Android app design preview">
+      <ul class="phones list-plain" tabindex="0" aria-label="Screens from the Android app's design">
         {
           phoneShots.map((p, i) => (
             <li class={`phone-shot reveal reveal-${(i % 3) + 1}`}>
@@ -220,7 +220,7 @@ const phoneShots = [
           ))
         }
       </ul>
-      <p class="small phone-note">Screens from the design preview. The app already opens its native screens by default, with the web app a tap away; these show where the design is heading.</p>
+      <p class="small phone-note">Tasks, Inbox, Notes and Keep running are the app itself on a fresh install with demo data. Chat and Helpers are from the app's design, which the app, the web app and the desktop app follow.</p>
       <div class="phone-facts">
         <div class="gcard">
           <h3>Works today</h3>
@@ -230,6 +230,7 @@ const phoneShots = [
             <li>Pairing a laptop or server with a QR code and six digits, and revoking a device closes its connections at once</li>
             <li>Over the link, the phone reaches your laptop's coding agents and your laptop opens the phone's web app and HQ tools</li>
             <li>Claude Code, Claude Desktop and Claude Code Remote Control reach HQ through your laptop while it is on</li>
+            <li>The phone can borrow your laptop's model: switch on Share this computer's model in the desktop app, and HQ on the phone uses it while the laptop is reachable. Off by default</li>
           </ul>
         </div>
         <div class="gcard">
@@ -285,6 +286,48 @@ const phoneShots = [
         call back to HQ with their own narrow credential. Your laptop opens the phone's web app and tools.
         See <a href="/install/#pair-h">how to pair</a>.
       </p>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="hub-h">
+    <span class="orb orb-i o-tr slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-bl" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">macOS desktop app</p>
+        <h2 id="hub-h" class="reveal">One app on your laptop</h2>
+        <p class="lede reveal">
+          AgentHQ is a small Mac app. Its HQ Hub window starts HQ on the laptop, pairs your phone and other
+          computers, and lists the coding helpers that need you. Open HQ shows the web app in its own window,
+          and when your phone is the hub it shows the phone's HQ and says so: "HQ on your phone".
+        </p>
+      </div>
+      <figure class="hub-shot reveal">
+        <img src="/media/hub-computer.jpg" alt="The HQ Hub window on This computer: Helpers here, for HQ on your phone, with Open HQ and Stop helpers here, one helper at work that needs your OK, and the start and program settings." width="1140" height="930" loading="lazy" decoding="async" />
+        <figcaption class="small">HQ Hub with the phone as the hub: this Mac runs the helpers, and Open HQ shows the phone's HQ. Demo data.</figcaption>
+      </figure>
+      <div class="phone-facts">
+        <div class="gcard">
+          <h3>What it does</h3>
+          <ul class="facts list-plain">
+            <li>This computer: what HQ is doing here, with Start, Open HQ, Stop and Restart</li>
+            <li>Devices: show a pairing code, type the six digits the other device shows, revoke a device</li>
+            <li>Helpers: the coding agents on this Mac, the ones waiting for you first, with a macOS notice when one needs you</li>
+            <li>Share this computer's model: lend the Mac's local model to your phone, off until you switch it on</li>
+          </ul>
+        </div>
+        <div class="gcard">
+          <h3>Not there yet</h3>
+          <ul class="facts list-plain">
+            <li>No signed download yet: you build it from the repository, and it is unsigned</li>
+            <li>macOS only. Windows and Linux are not built yet</li>
+            <li>Nothing starts by itself: opening the app starts no host and opens no port until you press Start</li>
+          </ul>
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn" href={links.desktopApp}>Desktop app details</a>
+      </div>
     </div>
   </section>
 
@@ -429,7 +472,7 @@ const phoneShots = [
             <span class="mover"><i class="w80"></i><i class="w50"></i></span>
           </div>
           <h3>Tasks and sub-agents</h3>
-          <p class="body">Spaces, initiatives, tasks and comments are built in, with list, board and timeline views. Sub-agents run single, parallel, race or graph. Long turns detach and report back, and /watch schedules recurring ones.</p>
+          <p class="body">Spaces, initiatives, tasks and comments are built in, with list, board and timeline views. Start a coding helper on a task and its work stays tied to it. Sub-agents run single, parallel, race or graph. Long turns detach and report back, and /watch schedules recurring ones.</p>
         </article>
 
         <article class="gcard reveal reveal-3">
@@ -467,6 +510,27 @@ const phoneShots = [
           <h3>Safe by default</h3>
           <p class="body">Agent shell commands run in a sandbox with an environment allowlist. Untrusted content taints a session and cuts off secrets and outbound network. Servers update from signed releases and roll back on a failed health check.</p>
         </article>
+
+        <article class="gcard reveal">
+          <div class="stage" aria-hidden="true">
+            <div class="term-mini glass-light">
+              <span class="tline w62"></span>
+              <span class="tline w46"></span>
+              <span class="tline w70"></span>
+            </div>
+            <span class="chip">Allow once</span>
+          </div>
+          <h3>Asks before it acts</h3>
+          <p class="body">In a chat you drive, a call that changes things outside your notes and tasks waits for your OK in the Inbox, for exactly that tool with exactly those arguments. A finished task waits for you to check it.</p>
+        </article>
+
+        <article class="gcard span2 reveal reveal-2">
+          <div class="stage" aria-hidden="true">
+            <div class="lines"><i class="w76"></i><i class="w52 hit"></i><i class="w88"></i><i class="w64"></i></div>
+          </div>
+          <h3>Shows what it can do</h3>
+          <p class="body">An empty chat offers what HQ can do on your install, in plain words. After a reply it may offer one more thing it could do for you, and to-dos made in chat get a reminder when they are due. What you use HQ for stays on your device: it never goes to a model provider, a push service or anyone else.</p>
+        </article>
       </div>
     </div>
   </section>
@@ -477,7 +541,8 @@ const phoneShots = [
       <div class="see-head">
         <div class="head">
           <p class="eyebrow reveal">See it</p>
-          <h2 id="see-h" class="reveal">The web app, on your own server</h2>
+          <h2 id="see-h" class="reveal">The web app looks like the phone</h2>
+          <p class="lede reveal">The same places, words and colours as the Android app, from a phone-sized window up to a wide screen. It installs as an app, prints cleanly, and runs on your own server.</p>
         </div>
         <div class="seg glass-heavy" role="group" aria-label="Choose a screen" data-tablist hidden>
           <span class="seg-ind" aria-hidden="true"></span>
@@ -1383,13 +1448,13 @@ const phoneShots = [
     z-index: 0;
     background: radial-gradient(closest-side, rgba(0, 173, 238, 0.2), transparent);
   }
-  .sec:has([data-active='sessions-list']) .see-glow {
+  .sec:has([data-active='web-notes']) .see-glow {
     background: radial-gradient(closest-side, rgba(34, 255, 55, 0.13), transparent);
   }
-  .sec:has([data-active='tasks-board']) .see-glow {
+  .sec:has([data-active='web-tasks']) .see-glow {
     background: radial-gradient(closest-side, rgba(46, 49, 145, 0.45), transparent);
   }
-  .sec:has([data-active='vault-browser']) .see-glow {
+  .sec:has([data-active='web-inbox']) .see-glow {
     background: radial-gradient(closest-side, rgba(0, 198, 250, 0.18), transparent);
   }
   .see-head {
@@ -2092,6 +2157,21 @@ const phoneShots = [
 }
 .phone-note {
   margin: 0;
+  color: var(--ink-muted);
+}
+.hub-shot {
+  margin: 0;
+  max-width: 760px;
+}
+.hub-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 16px;
+}
+.hub-shot figcaption {
+  margin-top: 8px;
   color: var(--ink-muted);
 }
 .phone-facts {
