@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import './search.css'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Search, X } from 'lucide-react'
@@ -83,7 +84,7 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-dig
 function Found({ text, query }: { text: string; query: string }) {
   return (
     <>
-      {foundParts(text, query).map((p, i) => (p.found ? <strong key={i}>{p.text}</strong> : <span key={i}>{p.text}</span>))}
+      {foundParts(text, query).map((p, i) => (p.found ? <mark key={i}>{p.text}</mark> : <Fragment key={i}>{p.text}</Fragment>))}
     </>
   )
 }
@@ -295,15 +296,11 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
 
   return (
     <>
-      <div className="fixed inset-0 z-50 hq-scrim" onClick={close} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={t('search_open_label')}
-        className="fixed z-50 w-full shadow-2xl overflow-hidden flex flex-col inset-0 pad-safe-top rounded-none md:inset-auto md:top-[10vh] md:left-1/2 md:-translate-x-1/2 md:max-w-[760px] md:rounded-2xl md:max-h-[70vh] hq-modal"
-      >
-        <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--line)' }}>
-          <Search className="w-4 h-4 shrink-0" style={{ color: 'var(--ink-muted)' }} aria-hidden="true" />
+      <div className="a-scrim sr-scrim" onClick={close} />
+      <div role="dialog" aria-modal="true" aria-label={t('search_open_label')} className="sr-panel">
+        <div className="sr-top">
+          <label className="a-search">
+          <Search className="a-ic sm" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
@@ -319,16 +316,15 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
             }}
             onKeyDown={onKeyDown}
             placeholder={placeholder}
-            className="flex-1 min-w-0 bg-transparent outline-none"
-            style={{ color: 'var(--ink)', fontSize: 16 }}
             enterKeyHint="go"
           />
+          </label>
           <button type="button" onClick={close} aria-label={t('search_close')} className="a-ib">
-            <X className="w-4 h-4" />
+            <X className="a-ic" aria-hidden="true" />
           </button>
         </div>
 
-        <div role="tablist" aria-label={t('search_chips_label')} className="a-chips">
+        <div role="tablist" aria-label={t('search_chips_label')} className="a-chips sr-chips">
           {scopes.map((s) => (
             <button key={s} type="button" role="tab" aria-selected={scope === s} className={`a-chip${scope === s ? ' is-on' : ''}`} onClick={() => pickScope(s)}>
               {t(CHIP_KEYS[s])}
@@ -337,7 +333,7 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
           ))}
           {folder && (
             <button type="button" className="a-chip is-on" onClick={() => setFolder(null)} aria-label={t('search_chip_in_folder_clear', { folder: folderLabel(folder) })}>
-              {t('search_chip_in_folder', { folder: folderLabel(folder) })} <X className="w-3 h-3" aria-hidden="true" />
+              {t('search_chip_in_folder', { folder: folderLabel(folder) })} <X className="a-ic xs" aria-hidden="true" />
             </button>
           )}
           {folders.length > 0 && (
@@ -355,60 +351,52 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
         </div>
 
         {folder && (
-          <p className="px-4 pb-2 text-xs" style={{ color: 'var(--ink-muted)' }}>
+          <p className="sr-note">
             {t('search_folder_note', { folder: folderTrail(folder) })}
           </p>
         )}
 
-        <div ref={listRef} id={listId} role="listbox" aria-label={t('search_results_label')} className="flex-1 overflow-y-auto">
+        <div ref={listRef} id={listId} role="listbox" aria-label={t('search_results_label')} className="sr-body">
           {!typed && (
-            <div className="px-4 py-3">
+            <div>
               {recent.length > 0 && (
                 <div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
-                      {t('search_recent')}
-                    </p>
-                    <button type="button" className="a-btn secondary" onClick={clearRecent}>
+                  <div className="sr-recent">
+                    <p className="a-body-b">{t('search_recent')}</p>
+                    <button type="button" className="a-btn quiet compact" onClick={clearRecent}>
                       {t('search_recent_clear')}
                     </button>
                   </div>
-                  <ul className="mt-2">
+                  <ul>
                     {recent.map((r) => (
-                      <li key={r} className="flex items-center justify-between">
-                        <button type="button" className="text-left text-sm py-1.5 flex-1" onClick={() => setQuery(r)}>
-                          {r}
+                      <li key={r} className="a-row">
+                        <button type="button" className="a-row-main" onClick={() => setQuery(r)}>
+                          <b>{r}</b>
                         </button>
-                        <button type="button" className="a-ib" aria-label={t('search_recent_remove', { query: r })} onClick={() => setRecent(writeRecent(hqId, recent.filter((x) => x !== r)))}>
-                          <X className="w-3 h-3" />
+                        <button type="button" className="a-ib sm" aria-label={t('search_recent_remove', { query: r })} onClick={() => setRecent(writeRecent(hqId, recent.filter((x) => x !== r)))}>
+                          <X className="a-ic xs" aria-hidden="true" />
                         </button>
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
-              <p className="text-sm py-3" style={{ color: 'var(--ink-muted)' }}>
-                {scope === 'notes' ? t('search_hint_notes') : t('search_hint_empty')}
-              </p>
-              {lite && (
-                <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>
-                  {t('search_lite_note')}
-                </p>
-              )}
+              <p className="a-body-sm a-muted sr-pad">{scope === 'notes' ? t('search_hint_notes') : t('search_hint_empty')}</p>
+              {lite && <p className="a-cap a-muted sr-pad">{t('search_lite_note')}</p>}
             </div>
           )}
 
           {notesFailed && (
-            <div className="px-4 py-3 text-sm" role="status" style={{ color: 'var(--warn)' }}>
-              <p>{searchFailureLine(connection, lite)}</p>
-              {!lite && savedAt && <p style={{ color: 'var(--ink-muted)' }}>{t('search_saved_note', { time: savedAt })}</p>}
-              {!lite && <p style={{ color: 'var(--ink-muted)' }}>{t('search_back_note')}</p>}
+            <div className="sr-down" role="status">
+              <p className="a-warn-t">{searchFailureLine(connection, lite)}</p>
+              {!lite && savedAt && <p className="a-muted">{t('search_saved_note', { time: savedAt })}</p>}
+              {!lite && <p className="a-muted">{t('search_back_note')}</p>}
             </div>
           )}
 
           {typed && wantsNotes && notes.isLoading && !notes.failed && (
-            <p className="px-4 py-2 text-xs" style={{ color: 'var(--ink-muted)' }} role="status">
-              <span className="inline-block w-3 h-3 mr-2 rounded-full border-2 animate-spin align-middle" style={{ borderColor: 'var(--ink-muted)', borderTopColor: 'transparent' }} />
+            <p className="a-loading sr-pad" role="status">
+              <span className="a-spin" aria-hidden="true" />
               {t('search_loading')}
             </p>
           )}
@@ -420,8 +408,8 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
               const heading = t(CHIP_KEYS[g.kind])
               return (
                 <section key={g.kind} aria-label={t('search_group_label', { kind: heading, n: g.all.length })}>
-                  <h3 className="px-4 pt-3 pb-1 text-xs font-semibold" style={{ color: 'var(--ink-muted)' }}>
-                    {heading} <span>{g.all.length}</span>
+                  <h3 className="sr-grp">
+                    {heading} <span className="a-count">{g.all.length}</span>
                   </h3>
                   {g.rows.map((r, i) => {
                     const idx = offset + i
@@ -434,37 +422,27 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
                         aria-selected={on}
                         onClick={() => go(r)}
                         onMouseMove={() => setSelected(idx)}
-                        className="px-4 py-2.5 cursor-pointer"
-                        style={{ background: on ? 'var(--surface-200)' : 'transparent', outline: on ? '2px solid var(--brand-blue)' : 'none', outlineOffset: -2 }}
+                        className="a-row sr-hit"
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm truncate" style={{ color: 'var(--ink)' }}>
+                        <span className="a-row-main">
+                          <b>
                             <Found text={r.title} query={query} />
-                          </span>
-                          {r.pill && (
-                            <span className="text-xs font-semibold px-2 rounded-full shrink-0" style={{ border: '1px solid var(--warn)', color: 'var(--warn)' }}>
-                              {r.pill}
+                          </b>
+                          {r.trail && <span className="sr-trail">{r.trail}</span>}
+                          {r.sub && (
+                            <span>
+                              <Found text={r.sub} query={query} />
                             </span>
                           )}
-                        </div>
-                        {r.trail && (
-                          <div className="text-xs truncate" style={{ color: 'var(--brand-blue)' }}>
-                            {r.trail}
-                          </div>
-                        )}
-                        {r.sub && (
-                          <p className="text-xs line-clamp-2" style={{ color: 'var(--ink-muted)' }}>
-                            <Found text={r.sub} query={query} />
-                          </p>
-                        )}
+                        </span>
+                        {r.pill && <span className="a-state needs">{r.pill}</span>}
                       </div>
                     )
                   })}
                   {g.all.length > g.rows.length && (
                     <button
                       type="button"
-                      className="px-4 py-2 text-sm font-semibold"
-                      style={{ color: 'var(--brand-blue)' }}
+                      className="a-btn quiet compact sr-pad"
                       onClick={() => {
                         pickScope(g.kind)
                         setExpanded(g.kind)
@@ -474,29 +452,31 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
                     </button>
                   )}
                   {g.kind === 'notes' && !lite && askNotes.length > 0 && (
-                    <button type="button" className="a-btn secondary mx-4 my-2" onClick={ask}>
+                    <div className="sr-ask">
+                    <button type="button" className="a-btn secondary compact" onClick={ask}>
                       {noteHits.length === 1
                         ? t('search_ask_one')
                         : noteHits.length > ASK_MAX
                           ? t('search_ask_first', { n: ASK_MAX })
                           : t('search_ask_some', { n: noteHits.length })}
                     </button>
+                    </div>
                   )}
                 </section>
               )
             })}
 
           {typed && !notes.isLoading && total === 0 && !notesFailed && (
-            <div className="px-6 py-10 text-center text-sm" style={{ color: 'var(--ink-muted)' }}>
+            <div className="a-empty">
               {scope === 'all' ? (
                 <>
-                  <p>{t('search_none_any')}</p>
-                  <p className="md:hidden">{t('search_none_try')}</p>
+                  <b>{t('search_none_any')}</b>
+                  <p>{t('search_none_try')}</p>
                 </>
               ) : (
                 <>
-                  <p>{t(NONE_KEYS[scope])}</p>
-                  <button type="button" className="a-btn secondary mt-3" onClick={() => pickScope('all')}>
+                  <b>{t(NONE_KEYS[scope])}</b>
+                  <button type="button" className="a-btn secondary" onClick={() => pickScope('all')}>
                     {t('search_everything')}
                   </button>
                 </>
@@ -505,7 +485,7 @@ function SearchPanel({ start, close }: { start: OpenDetail; close: () => void })
           )}
         </div>
 
-        <div className="hidden md:flex items-center gap-4 px-4 py-2 text-xs" style={{ color: 'var(--ink-muted)', borderTop: '1px solid var(--hairline)' }}>
+        <div className="sr-foot">
           <span>{t('search_key_up_down')}</span>
           <span>{t('search_key_enter')}</span>
           <span>{t('search_key_tab')}</span>

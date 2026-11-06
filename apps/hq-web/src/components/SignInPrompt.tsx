@@ -5,16 +5,14 @@ import { signInWithCode } from '~/lib/deviceSignIn'
 import { isSharedComputer, setSharedComputer } from '~/lib/sharedComputer'
 import { t } from '~/strings'
 
-const INPUT_CLASS =
-  'flex-1 min-w-0 px-3 py-1.5 rounded-lg text-xs font-mono bg-white/5 border border-white/10 text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-white/30'
-const BUTTON_CLASS =
-  'px-3 py-1.5 rounded-lg text-xs font-mono border border-white/10 bg-white/5 text-neutral-100 hover:bg-white/10 flex-shrink-0 disabled:opacity-40'
+const INPUT_CLASS = 'a-input a-mono hq-signin-input'
+const BUTTON_CLASS = 'a-btn secondary'
 
 function ErrorLine({ message }: { message: string | null }) {
   if (!message) return null
   return (
-    <p className="text-xs flex items-start gap-1.5" role="alert" style={{ color: 'var(--warn)' }}>
-      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-px" aria-hidden="true" />
+    <p className="a-body-sm a-warn-t hq-signin-row" role="alert">
+      <AlertTriangle className="a-ic xs" aria-hidden="true" />
       {message}
     </p>
   )
@@ -53,21 +51,21 @@ function CodeForm() {
     void redeem(code)
   }
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2">
+    <form onSubmit={submit} className="hq-signin-form">
       {fromQr && (
         <div role="status">
-          <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+          <p className="a-body-b">
             {t('signin_from_qr_title')}
           </p>
-          <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+          <p className="a-body-sm a-muted">
             {t('signin_from_qr_body')}
           </p>
         </div>
       )}
-      <label htmlFor="hq-sign-in-code" className="text-xs" style={{ color: 'var(--text-dim)' }}>
+      <label htmlFor="hq-sign-in-code" className="a-body-sm a-muted">
         {t('signin_code_label')}
       </label>
-      <div className="flex flex-wrap gap-2">
+      <div className="hq-signin-row">
         <input
           id="hq-sign-in-code"
           value={code}
@@ -86,10 +84,10 @@ function CodeForm() {
         </button>
       </div>
       <ErrorLine message={error} />
-      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+      <p className="a-body-sm a-muted">
         {t('signin_phishing')}
       </p>
-      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+      <p className="a-body-sm a-muted">
         {t('signin_where_code')}
       </p>
     </form>
@@ -109,11 +107,11 @@ function TokenForm() {
     window.location.reload()
   }
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2">
-      <label htmlFor="hq-sign-in-link" className="text-xs" style={{ color: 'var(--text-dim)' }}>
+    <form onSubmit={submit} className="hq-signin-form">
+      <label htmlFor="hq-sign-in-link" className="a-body-sm a-muted">
         {t('signin_link_label')}
       </label>
-      <div className="flex flex-wrap gap-2">
+      <div className="hq-signin-row">
         <input
           id="hq-sign-in-link"
           type="password"
@@ -157,23 +155,25 @@ export function SignedOutView({ pathname, embedded }: { pathname: string; embedd
   // The phone's own sign-in is the one to use, so the page shows one line and no shell.
   if (embedded) {
     return (
-      <div className="h-full flex items-center justify-center p-6 text-center">
-        <p className="text-sm" style={{ color: 'var(--text-dim)' }}>
+      <div className="a-empty">
+        <p>
           {t('embed_signed_out')}
         </p>
       </div>
     )
   }
   return (
-    <div className="h-full flex flex-col items-center justify-center gap-3 p-6 text-center">
-      <KeyRound className="w-6 h-6" style={{ color: 'var(--warn)' }} aria-hidden="true" />
-      <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+    <div className="a-empty">
+      <span className="a-empty-ic warn">
+        <KeyRound className="a-ic" aria-hidden="true" />
+      </span>
+      <h2 className="a-h3">
         {pathname.startsWith('/inbox') ? t('state_signed_out') : signedOutTitle(pathname)}
       </h2>
-      <p className="text-sm max-w-sm" style={{ color: 'var(--text-dim)' }}>
+      <p>
         {pathname.startsWith('/inbox') ? t('signed_out_inbox_line') : t('signed_out_line')}
       </p>
-      <button type="button" onClick={openSignIn} className="a-btn min-h-11">
+      <button type="button" onClick={openSignIn} className="a-btn">
         {t('signed_out_button')}
       </button>
     </div>
@@ -184,20 +184,19 @@ export function SignedOutView({ pathname, embedded }: { pathname: string; embedd
 function SharedComputerChoice() {
   const [shared, setShared] = useState(isSharedComputer)
   return (
-    <label className="flex items-start gap-2 text-xs" style={{ color: 'var(--text-primary)' }}>
+    <label className="hq-signin-shared a-body-sm">
       <input
         type="checkbox"
         role="switch"
-        className="mt-0.5"
         checked={shared}
         onChange={(e) => {
           setSharedComputer(e.target.checked)
           setShared(e.target.checked)
         }}
       />
-      <span className="flex flex-col gap-0.5">
-        {t('shared_computer_label')}
-        <span style={{ color: 'var(--text-dim)' }}>{t('signin_shared_line')}</span>
+      <span>
+        <b>{t('shared_computer_label')}</b>
+        <span className="a-muted hq-block">{t('signin_shared_line')}</span>
       </span>
     </label>
   )
@@ -241,7 +240,7 @@ export function SignInPrompt() {
       <div className="a-scrim" onClick={close} />
       <div className="a-sheet center" role="dialog" aria-modal="true" aria-labelledby="hq-sign-in-title">
         <div className="a-handle" />
-        <div className="a-sheet-head" style={{ justifyContent: 'flex-end' }}>
+        <div className="a-sheet-head hq-signin-head">
           <button className="a-ib" type="button" aria-label={t('signin_sheet_close')} onClick={close}>
             <svg className="a-ic" viewBox="0 0 24 24" aria-hidden="true">
               <path d="M18 6 6 18" />
@@ -260,8 +259,8 @@ export function SignInPrompt() {
 /** The full page for a browser that never signed in to this HQ: no shell, the same content as the sheet. */
 export function SignInPage() {
   return (
-    <div className="h-full w-full overflow-y-auto">
-      <div className="mx-auto my-8 w-[calc(100%-2rem)] max-w-xl flex flex-col gap-4">
+    <div className="hq-signin-page">
+      <div className="hq-signin-col">
         <SignInSheet />
       </div>
     </div>
@@ -272,23 +271,23 @@ export function SignInPage() {
 export function SignInSheet() {
   const signedOut = hasWebToken() || wasSignedOut()
   return (
-    <div className="flex flex-col gap-3">
+    <div className="hq-signin">
       <h2 className="a-h2" id="hq-sign-in-title">
         {t('signin_title')}
       </h2>
-      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+      <p className="a-body-sm a-muted">
         {t(signedOut ? 'signin_signed_out_by_hq' : 'signin_first_time')}
       </p>
-      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+      <p className="a-body-sm a-muted">
         {t('signin_line')}
       </p>
       <CodeForm />
       <SharedComputerChoice />
-      <p className="text-xs text-center" style={{ color: 'var(--text-dim)' }}>
+      <p className="a-body-sm a-muted hq-signin-or">
         {t('signin_or')}
       </p>
       <TokenForm />
-      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+      <p className="a-body-sm a-muted">
         {t('signin_else')}
       </p>
     </div>
