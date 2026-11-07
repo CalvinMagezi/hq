@@ -202,12 +202,13 @@ fn moved_on(e: &anyhow::Error) -> bool {
 
 /// Takes the item off every device's list.
 fn resolve(db: &hq_db::Database, item_id: &str, choice: Choice) {
-    let (engagement, state) = crate::notifications_api::action_outcome(match choice {
+    let engagement = crate::notifications_api::action_outcome(match choice {
         Choice::Approve => "approve",
         Choice::Decline => "dismiss",
     })
-    .unwrap_or(("dismissed", "dismissed"));
-    if let Err(e) = crate::notifications_api::record_action(db, item_id, engagement, state) {
+    .unwrap_or("dismissed");
+    // An item answered elsewhere in the meantime stays as it was.
+    if let Err(e) = crate::notifications_api::record_action(db, item_id, engagement) {
         tracing::warn!(item = %item_id, error = %e, "dialog answer: could not resolve the inbox item");
     }
 }

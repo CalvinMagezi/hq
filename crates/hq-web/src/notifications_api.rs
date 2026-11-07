@@ -301,11 +301,11 @@ pub(crate) fn aggregate_notifications(
     })
 }
 
-/// Maps a client action to the value item's `(engagement, state)`.
-pub(crate) fn action_outcome(action: &str) -> Option<(&'static str, &'static str)> {
+/// Maps a client action to the value item's engagement.
+pub(crate) fn action_outcome(action: &str) -> Option<&'static str> {
     match action {
-        "approve" | "engage" => Some(("approved", "engaged")),
-        "dismiss" | "reject" => Some(("dismissed", "dismissed")),
+        "approve" | "engage" => Some("approved"),
+        "dismiss" | "reject" => Some("dismissed"),
         _ => None,
     }
 }
@@ -355,23 +355,28 @@ pub(crate) async fn restore_notification_handler(
     }
 }
 
+/// Answers the item whose id is exactly `val_id`. Never a prefix: one approval approves exactly
+/// that request, and an approval is signed wherever it lands, so the inbox never shows
+/// "approved" for something the approval gate treats as unapproved. An item already answered,
+/// expired or spent is left alone and reported as such.
 pub(crate) fn record_action(
     db: &hq_db::Database,
     val_id: &str,
     engagement: &str,
-    db_state: &str,
-) -> anyhow::Result<bool> {
-    // The token path only matches delivered items; anything else is updated by exact id.
-    if hq_db::value_items::record_engagement_by_token(db, val_id, engagement)? {
-        return Ok(true);
-    }
-    let updated = db.with_conn(|conn| {
-        Ok(conn.execute(
-            "UPDATE value_items SET state=?2, engagement=?3, engaged_at=datetime('now') WHERE id=?1",
-            rusqlite::params![val_id, db_state, engagement],
-        )?)
-    })?;
-    Ok(updated > 0)
+) -> anyhow::Result<hq_db::value_items::Answered> {
+    hq_db::value_items::answer_by_id(db, val_id, engagement)
+}
+
+/// What the person sees when the item was settled before their answer arrived.
+fn settled_message(state: hq_core::types::ValueState) -> String {
+    use hq_core::types::ValueState;
+    let how = match state {
+        ValueState::Engaged => "was already approved",
+        ValueState::Dismissed => "was already declined or cleared",
+        ValueState::Expired => "has expired",
+        _ => "is no longer waiting",
+    };
+    format!("This item {how}; your answer was not recorded.")
 }
 
 pub(crate) async fn list_notifications_handler(
@@ -434,20 +439,24 @@ pub(crate) async fn notification_action_handler(
         return ApiError::bad_request(format!("unrecognized notification ID format '{id}'"))
             .into_response();
     };
-    let Some((engagement, db_state)) = action_outcome(&body.action) else {
+    let Some(engagement) = action_outcome(&body.action) else {
         return ApiError::bad_request(format!("unknown action '{}' for value item", body.action))
             .into_response();
     };
     if let Err(e) = refuse_unanswered_dialog(&state.db, val_id, &body.action) {
         return e.into_response();
     }
-    match record_action(&state.db, val_id, engagement, db_state) {
+    use hq_db::value_items::Answered;
+    match record_action(&state.db, val_id, engagement) {
         Err(e) => {
             warn!(id = %id, action = %body.action, error = %e, "notification action failed");
             return ApiError::internal(e).into_response();
         }
-        Ok(false) => return ApiError::not_found().into_response(),
-        Ok(true) => {}
+        Ok(Answered::NotFound) => return ApiError::not_found().into_response(),
+        Ok(Answered::Settled(s)) => {
+            return ApiError::Conflict(settled_message(s)).into_response();
+        }
+        Ok(Answered::Recorded | Answered::AlreadySo) => {}
     }
     info!(id = %id, action = %body.action, new_state = engagement, "notification action executed");
     state.broadcast(
@@ -851,6 +860,68 @@ mod tests {
         assert_eq!(act("val_abc12345", "explode").await.status(), 400);
         let approved = aggregate_notifications(&state.db, Some("approved"), None, 10).unwrap();
         assert_eq!(approved.notifications[0].state, NotificationState::Approved);
+    }
+
+    /// One approve approves exactly the item it names. A short id used to approve and sign every
+    /// delivered item sharing that prefix, owner-approval requests included; an item that was
+    /// not delivered was marked approved without a signature; and a spent approval came back.
+    #[tokio::test]
+    async fn approving_by_id_approves_exactly_that_item_and_signs_it() {
+        use hq_core::types::{ValueItem, ValueKind};
+        use hq_db::value_items as vi;
+        let dir = tempfile::tempdir().unwrap();
+        let state = Arc::new(WsState::new(dir.path().to_path_buf(), None));
+        let ask = |dedup: &str, id: &str| {
+            let mut item =
+                ValueItem::new("owner-approval", ValueKind::ActionNeeded, "Run it?", "b")
+                    .with_dedup_key(dedup);
+            item.id = id.into();
+            vi::insert(&state.db, &item).unwrap();
+            vi::set_delivered(&state.db, id).unwrap();
+        };
+        ask("owner:a", "feed0001-aaaa");
+        ask("owner:b", "feed0002-bbbb");
+        let act = |id: &str, action: &str| {
+            let body = NotificationActionRequest {
+                action: action.into(),
+            };
+            notification_action_handler(State(state.clone()), AxumPath(id.into()), Json(body))
+        };
+
+        assert_eq!(act("val_feed", "approve").await.status(), 404);
+        assert!(!vi::is_signed_approval(&state.db, "owner:a").unwrap());
+        assert!(!vi::is_signed_approval(&state.db, "owner:b").unwrap());
+
+        assert_eq!(act("val_feed0001-aaaa", "approve").await.status(), 200);
+        assert!(vi::is_signed_approval(&state.db, "owner:a").unwrap());
+        assert!(!vi::is_signed_approval(&state.db, "owner:b").unwrap());
+        assert_eq!(
+            act("val_feed0001-aaaa", "approve").await.status(),
+            200,
+            "the same answer again changes nothing"
+        );
+
+        // Spent by the one call it approved, it cannot be approved back into a second run.
+        assert!(vi::consume_approval(&state.db, "owner:a").unwrap());
+        assert_eq!(act("val_feed0001-aaaa", "approve").await.status(), 409);
+        assert!(!vi::consume_approval(&state.db, "owner:a").unwrap());
+        assert_eq!(act("val_feed0001-aaaa", "dismiss").await.status(), 409);
+
+        // Never delivered: approved and signed all the same, or the gate would not run it.
+        let mut waiting = ValueItem::new("owner-approval", ValueKind::ActionNeeded, "Run?", "b")
+            .with_dedup_key("owner:c");
+        waiting.id = "feed0003-cccc".into();
+        vi::insert(&state.db, &waiting).unwrap();
+        assert_eq!(act("val_feed0003-cccc", "approve").await.status(), 200);
+        assert!(vi::is_signed_approval(&state.db, "owner:c").unwrap());
+
+        assert_eq!(act("val_feed0002-bbbb", "dismiss").await.status(), 200);
+        assert_eq!(
+            act("val_feed0002-bbbb", "approve").await.status(),
+            409,
+            "a declined request is not approved afterwards"
+        );
+        assert!(!vi::is_signed_approval(&state.db, "owner:b").unwrap());
     }
 
     #[tokio::test]

@@ -438,9 +438,13 @@ mod tests {
             let text = std::fs::read_to_string(&path).unwrap_or_default();
             let body = text.split("#[cfg(test)]").next().unwrap_or_default();
             let grants_here = name.ends_with("folder_request.rs");
-            let bad = ["approve_by_id(", "record_engagement_by_token("]
-                .iter()
-                .any(|c| body.contains(c))
+            let bad = [
+                "approve_by_id(",
+                "record_engagement_by_token(",
+                "answer_by_id(",
+            ]
+            .iter()
+            .any(|c| body.contains(c))
                 || (!grants_here && body.contains("folder_grants::grant("));
             if bad {
                 offenders.push(name.into_owned());

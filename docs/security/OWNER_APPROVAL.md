@@ -56,6 +56,12 @@ task history. This list is narrower than the claude.ai connector's (`CONNECTOR_C
   key, so a database write cannot move it to another call.
 - An approval lets exactly one call through and lasts 24 hours. A decline lasts as long and is
   reported to the model, which is told not to retry the same call.
+- An answer names exactly one request. The web inbox and the phone answer by the item's full id
+  (`hq_db::value_items::answer_by_id`), and an approval there is signed whether or not the item had
+  been delivered yet. A request already answered, expired or spent answers 409 and is left as it
+  was, so approving again never re-arms a spent approval. The short refs a chat button or
+  `hq queue approve` take are prefixes, and one that matches more than one waiting request is
+  refused instead of approving them all.
 - The call waits up to 60 seconds in the turn. If the owner has not answered by then, the model is
   told the call is waiting and to make exactly the same call again once the owner approves it.
 - One chat may have at most 5 requests waiting. A web chat that has no thread yet shares the scope
