@@ -62,7 +62,7 @@ fn text<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 fn repo(args: &Value) -> Result<String> {
     let r = text(args, "repo").context("`repo` is required, as owner/name")?;
-    if !REPO.is_match(r) || r.starts_with('-') || r.contains("..") {
+    if !is_valid_repo(r) {
         bail!("`repo` must look like owner/name");
     }
     Ok(r.to_string())
@@ -331,9 +331,14 @@ impl HqTool for GithubReadTool {
     }
 }
 
-/// `owner/name`, as the tool validates a repository.
+/// `owner/name`, as the tool validates a repository. Neither part may start with a dot: `o/.`
+/// would name the owner folder of the clone root (and the refresh would delete it), `../x` its
+/// parent, and GitHub allows neither as an owner or a repository name.
 pub(crate) fn is_valid_repo(repo: &str) -> bool {
-    REPO.is_match(repo) && !repo.starts_with('-') && !repo.contains("..")
+    REPO.is_match(repo)
+        && !repo.starts_with('-')
+        && !repo.contains("..")
+        && repo.split('/').all(|part| !part.starts_with('.'))
 }
 
 /// GET of an API path read for verification: `gh` when installed, otherwise public data over
@@ -599,6 +604,19 @@ mod tests {
 
     fn call(v: Value) -> Result<GhCall> {
         build_call(&v)
+    }
+
+    /// `o/.` joined to the clone root is the owner folder, which a refresh or a cut-short
+    /// tarball fetch removes with everything in it.
+    #[test]
+    fn a_repo_part_that_is_or_starts_with_a_dot_is_refused() {
+        for bad in ["o/.", "./r", "o/..", "../r", "o/.git", ".o/r", "o/.hidden"] {
+            assert!(!is_valid_repo(bad), "{bad}");
+            assert!(repo(&json!({ "repo": bad })).is_err(), "{bad}");
+        }
+        for good in ["o/r", "o/r.js", "o.io/r", "o-x/r_y", "o/r."] {
+            assert!(is_valid_repo(good), "{good}");
+        }
     }
 
     #[test]
