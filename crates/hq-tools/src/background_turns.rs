@@ -18,8 +18,13 @@ const RESULT_EXCERPT_CHARS: usize = 600;
 
 const NO_ORIGIN: &str = "watches need a chat origin: this session was not started from a Telegram or Discord chat, so there is nowhere to deliver firings";
 
-pub fn create_background_turn_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
-    vec![Box::new(BackgroundTurnStatusTool { db })]
+/// `background_turn_status`. With a chat `origin` it finds only that chat's turns; with none
+/// (the web app, the CLI, an MCP client, all the owner's own) it looks across every chat.
+pub fn create_background_turn_tools(
+    db: Arc<Database>,
+    origin: Option<WatchOrigin>,
+) -> Vec<Box<dyn HqTool>> {
+    vec![Box::new(BackgroundTurnStatusTool { db, origin })]
 }
 
 /// The chat a watch reports to, taken from the session's request identity.
@@ -119,6 +124,9 @@ fn row_summary(row: &BackgroundTurnRow) -> Value {
 
 pub struct BackgroundTurnStatusTool {
     db: Arc<Database>,
+    /// The chat this session answers, when it is a relay chat. A guest's chat must not read
+    /// the owner's turns (their prompts and results) by guessing a short ref.
+    origin: Option<WatchOrigin>,
 }
 
 #[async_trait]
@@ -152,6 +160,8 @@ impl HqTool for BackgroundTurnStatusTool {
         let row = self
             .db
             .with_conn(|c| background_turns::get_by_prefix(c, id.trim()))?
+            // Another chat's turn reads as missing, so a ref cannot be probed.
+            .filter(|row| self.origin.as_ref().is_none_or(|o| o.owns(row)))
             .ok_or_else(|| anyhow::anyhow!("no background turn matches `{id}`"))?;
         Ok(row_summary(&row))
     }
@@ -374,12 +384,41 @@ mod tests {
             background_turns::mark_completed(c, "abcdef12-3456", "all green", 60)
         })
         .unwrap();
-        let tool = BackgroundTurnStatusTool { db };
+        let tool = BackgroundTurnStatusTool {
+            db: db.clone(),
+            origin: None,
+        };
         let out = tool.execute(json!({ "id": "abcdef12" })).await.unwrap();
         assert_eq!(out["status"], "completed");
         assert_eq!(out["short_ref"], "abcdef12");
         assert_eq!(out["result_excerpt"], "all green");
         assert!(tool.execute(json!({ "id": "zzzzzzzz" })).await.is_err());
+
+        // A relay chat sees its own turns only; the turn above is Telegram chat 1's.
+        let own = BackgroundTurnStatusTool {
+            db: db.clone(),
+            origin: WatchOrigin::from_identity(&RequestIdentity::from_telegram(1)),
+        };
+        assert_eq!(
+            own.execute(json!({ "id": "abcdef12" })).await.unwrap()["status"],
+            "completed"
+        );
+        for other in [
+            RequestIdentity::from_telegram(2),
+            RequestIdentity::from_discord(1),
+        ] {
+            let tool = BackgroundTurnStatusTool {
+                db: db.clone(),
+                origin: WatchOrigin::from_identity(&other),
+            };
+            let err = tool
+                .execute(json!({ "id": "abcdef12" }))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("no background turn matches"), "{err}");
+            assert!(!err.contains("all green"));
+        }
     }
 
     fn telegram_origin() -> Option<WatchOrigin> {
