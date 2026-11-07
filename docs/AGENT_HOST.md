@@ -309,6 +309,19 @@ What it cannot do:
   writable.
 - **Start `open`, `osascript` or `launchctl`** (macOS), or look up the launcher service. An app
   started that way runs outside the sandbox.
+- **Drive the machine's control sockets.** The open profile shares `/run`, so the Docker
+  daemon socket and the user's systemd-manager and session-bus sockets under
+  `XDG_RUNTIME_DIR` (`systemd/private`, `bus`, `docker.sock`) are masked: a connect to one
+  fails, so `systemd-run --user` and `docker` cannot reach a manager that would start a
+  process outside every namespace. The agent's own SSH, gpg and keyring sockets in the same
+  directory stay reachable. On macOS the equivalent is blocked by the denied launcher service.
+
+This leaves one residual on Linux under this profile: the network namespace is the machine's
+own, so a service listening on an abstract unix socket (one with no filesystem path) is still
+reachable, and an X11 server at `/tmp/.X11-unix` is reachable if one is running. Neither carries
+HQ's own authority; both come with sharing the machine's network, which the open profile does on
+purpose. Use `profile: strict` (it gets a private empty `/run` and its own network namespace) for
+agents running on untrusted content on a machine where that matters.
 
 This is a wall around HQ, not a boundary against an agent that means harm. It reaches
 everything else you can, and a prompt-injected agent can read a file and send it anywhere.

@@ -685,6 +685,41 @@ fn an_open_filesystem_writes_anywhere_but_keeps_what_the_rules_protect() {
 }
 
 #[test]
+fn a_masked_unix_socket_cannot_be_connected_to_while_a_sibling_stays_open() {
+    let backend = need_backend!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().canonicalize().unwrap();
+    let (ctrl, sibling) = (dir.join("ctrl.sock"), dir.join("agent.sock"));
+    let l1 = UnixListener::bind(&ctrl).unwrap();
+    let l2 = UnixListener::bind(&sibling).unwrap();
+    for l in [l1, l2] {
+        std::thread::spawn(move || while l.accept().is_ok() {});
+    }
+    let project = dir.join("project");
+    std::fs::create_dir(&project).unwrap();
+    let mut s = sandbox(&project);
+    // The open profile masks control sockets while leaving the rest of /run shared.
+    s.open_filesystem = true;
+    s.masked_files = vec![ctrl.clone()];
+    let probe = |p: &Path| {
+        format!(
+            "python3 -c \"import socket; c=socket.socket(socket.AF_UNIX); c.connect('{}'); print('C'+'ONN')\" 2>&1",
+            p.display()
+        )
+    };
+    let out = inside(
+        backend,
+        &s,
+        &format!("{}; {}", probe(&ctrl), probe(&sibling)),
+    );
+    assert_eq!(
+        out.matches("CONN").count(),
+        1,
+        "the masked socket must refuse and the sibling must connect: {out}"
+    );
+}
+
+#[test]
 fn an_open_filesystem_leaves_the_network_and_shared_directories_alone() {
     let backend = need_backend!();
     let h = host();

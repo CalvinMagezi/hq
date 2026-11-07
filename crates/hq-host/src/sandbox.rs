@@ -180,6 +180,14 @@ const TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/var/folders", "/dev"];
 /// What bubblewrap gives each agent a private empty copy of instead: the shared
 /// temporary directories, and /run, where the system's own sockets live.
 const PRIVATE_TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/run"];
+/// Sockets that hand out control of the machine outside every namespace: the
+/// container runtime and the user's systemd manager and session bus. The open
+/// profile shares `/run`, so each is masked (see `control_sockets`). Mirrors
+/// `hq_agent::bash_sandbox`, which masks the same for HQ's own bash tool.
+const DOCKER_SOCKETS: &[&str] = &["/var/run/docker.sock", "/run/docker.sock"];
+/// Relative to `XDG_RUNTIME_DIR` (`/run/user/<uid>`), beside the SSH, gpg and
+/// keyring sockets that coding work needs, which stay reachable.
+const RUNTIME_SOCKETS: &[&str] = &["systemd/private", "bus", "docker.sock"];
 const NODE_PROXY_SWITCH: &str = "NODE_USE_ENV_PROXY";
 const PROXY_ENV_NAMES: &[&str] = &["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"];
 /// The vault folder that holds HQ's database (sign-in tokens, approvals, paired
@@ -433,6 +441,26 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|h| h.is_absolute())
+}
+
+/// The control sockets to mask under the open profile: the Docker daemon, and the
+/// systemd-user and session-bus sockets under `XDG_RUNTIME_DIR`. The whole runtime
+/// directory stays visible so the agent's own SSH, gpg and keyring sockets work.
+fn control_sockets() -> Vec<PathBuf> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|r| r.is_absolute());
+    control_sockets_in(runtime.as_deref())
+}
+
+/// `control_sockets` with the runtime directory passed in, so it is testable
+/// without mutating the process environment.
+fn control_sockets_in(runtime: Option<&Path>) -> Vec<PathBuf> {
+    let mut sockets: Vec<PathBuf> = DOCKER_SOCKETS.iter().map(PathBuf::from).collect();
+    if let Some(runtime) = runtime {
+        sockets.extend(RUNTIME_SOCKETS.iter().map(|rel| runtime.join(rel)));
+    }
+    sockets
 }
 
 /// The launch a policy is for, beyond the spec.
@@ -865,7 +893,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
     }
     let readonly_files = keep(files);
     let readonly_subpaths = keep(dirs);
-    let masked_files = keep(masked_files);
+    let mut masked_files = keep(masked_files);
     // The directories above everything protected stay where they are: moving one
     // would carry a hidden directory out from under the rule that names it, or
     // (under bubblewrap, where a read-only path is a mount that moves with its
@@ -879,6 +907,14 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
             .chain(masked_files.iter().map(PathBuf::as_path)),
         home,
     );
+    // The machine's control sockets: the open profile shares /run, so without this
+    // a pane could drive the user's systemd user manager (`systemd-run --user`) or
+    // Docker daemon and start a process outside every namespace. A `/dev/null` bind
+    // (or a Seatbelt deny) makes a connect fail; the mask is itself an unrenameable
+    // mount point, so the socket cannot be freed by moving its directory. The
+    // agent's own SSH, gpg and keyring sockets under the same directory are left
+    // alone. The strict profile already gets a private empty `/run`.
+    masked_files.extend(keep(control_sockets()));
     let macos = cfg!(target_os = "macos");
     AgentSandbox {
         project,
@@ -1512,6 +1548,26 @@ mod tests {
             ]
         );
         assert_eq!(HqPaths::new(None, &[]), HqPaths::default());
+    }
+
+    #[test]
+    fn the_open_profile_masks_the_machine_control_sockets_but_not_siblings() {
+        let runtime = PathBuf::from("/run/user/1000");
+        let socks = control_sockets_in(Some(&runtime));
+        for p in [
+            PathBuf::from("/var/run/docker.sock"),
+            PathBuf::from("/run/docker.sock"),
+            runtime.join("bus"),
+            runtime.join("systemd/private"),
+            runtime.join("docker.sock"),
+        ] {
+            assert!(socks.contains(&p), "{} not masked", p.display());
+        }
+        // The agent's own SSH, gpg and keyring sockets under the same directory stay.
+        for name in ["ssh-agent.sock", "gnupg/S.gpg-agent", "keyring/ssh"] {
+            assert!(!socks.contains(&runtime.join(name)), "{name} masked");
+        }
+        assert_eq!(control_sockets_in(None).len(), DOCKER_SOCKETS.len());
     }
 
     #[test]
