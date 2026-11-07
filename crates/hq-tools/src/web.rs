@@ -80,6 +80,7 @@ mod tests;
 mod tools;
 mod types;
 
+pub(crate) use fetch::read_limited;
 pub use health::probe_search_backends;
 #[cfg(test)]
 use ssrf::is_non_public_ip;
