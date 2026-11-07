@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
 use super::injection::{injection_denial, without_default_drive};
-use super::paths::{PATH_TOOLS, path_args_for_tool};
+use super::paths::{PATH_TOOLS, path_args_for_tool, path_values};
 use super::taint::{TaintTracker, is_untrusted_source};
 use super::{DenialNotifier, DenialTracker, RepeatCallTracker};
 use crate::coding::text_result;
@@ -186,12 +186,8 @@ impl GovernedTool {
     /// Validate path arguments in the tool call.
     fn check_paths(&self, args: &Value) -> Option<String> {
         let tool_name = self.inner.name();
-        let path_keys = path_args_for_tool(tool_name);
-
-        for key in path_keys {
-            if let Some(path_val) = args.get(*key).and_then(|v| v.as_str())
-                && !self.is_path_allowed(path_val)
-            {
+        for path_val in path_values(tool_name, args) {
+            if !self.is_path_allowed(path_val) {
                 return Some(format!(
                     "Access denied: path '{}' is outside allowed directories. \
                          Allowed: {:?}",
