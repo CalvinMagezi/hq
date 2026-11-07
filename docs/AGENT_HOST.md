@@ -283,6 +283,10 @@ What it cannot do:
   `~/.hq/config.yaml` or `/opt/hq/config.yaml`) with its backups and every `*.env` file beside
   it (such as `/opt/hq/mcp.env`). The host resolves the vault and config the way HQ does on
   its own machine when `hq host serve` starts, so restart the host after moving either.
+  Hiding the host directory stops reads of `host.sock`, and on macOS, where a unix-socket
+  connect counts as outbound network rather than a file read, a connect to it is denied as
+  well, so a pane cannot sit on the host's pending connection slots; the agent's own
+  `agent.sock` stays reachable for its hooks.
 - **Change what HQ loads into its own sessions.** The vault's `_system`, `_threads`,
   `_agents`, `skills`, `_moc`, `_plans` and `_embeddings` folders are read-only to it, and the
   folders above them cannot be renamed. Notes elsewhere in the vault stay writable.

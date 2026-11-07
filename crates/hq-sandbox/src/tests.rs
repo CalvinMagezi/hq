@@ -20,6 +20,7 @@ fn sandbox(project: &Path) -> AgentSandbox {
         private_tmp: vec![],
         read_restrictions: vec![],
         hide_other_processes: false,
+        denied_sockets: vec![],
         network: Network::Full,
     }
 }
@@ -717,6 +718,37 @@ fn a_masked_unix_socket_cannot_be_connected_to_while_a_sibling_stays_open() {
         1,
         "the masked socket must refuse and the sibling must connect: {out}"
     );
+}
+
+#[test]
+fn a_denied_socket_is_refused_even_under_an_open_network() {
+    let mut s = sandbox(Path::new("/p"));
+    s.network = Network::Full;
+    s.denied_sockets = vec!["/run/hq/host.sock".into()];
+    let p = seatbelt_profile(&s);
+    assert!(
+        p.contains("(deny network-outbound (literal \"/run/hq/host.sock\"))"),
+        "{p}"
+    );
+    // The open network itself adds nothing, so the deny stands.
+    assert!(!p.contains("agent.sock"), "only host.sock is denied: {p}");
+    // Under a proxy network the deny comes after the allow list, so nothing
+    // re-opens it, while the agent socket stays allowed.
+    s.network = Network::Proxy {
+        port: 1,
+        unix_sockets: vec!["/run/hq/agent.sock".into()],
+        relay: None,
+        loopback_ports: vec![],
+    };
+    let p = seatbelt_profile(&s);
+    let deny = p
+        .rfind("(deny network-outbound (literal \"/run/hq/host.sock\"))")
+        .expect("the host socket is denied");
+    let allow = p
+        .find("(allow network-outbound")
+        .expect("agent.sock allowed");
+    assert!(allow < deny, "the socket deny must come last: {p}");
+    assert!(p.contains("/run/hq/agent.sock"));
 }
 
 #[test]

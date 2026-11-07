@@ -826,6 +826,9 @@ fn strict_policy(
             }])
             .collect(),
         hide_other_processes: true,
+        // The proxy network already denies everything but the proxy port and the
+        // agent socket, so the host control socket needs no extra rule here.
+        denied_sockets: Vec::new(),
         network: Network::Proxy {
             port,
             unix_sockets: vec![socket],
@@ -862,6 +865,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
         claude_files,
         claude_dirs,
         hq_readonly,
+        run_dir,
         ..
     } = wall;
     let keep = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
@@ -916,6 +920,14 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
     // alone. The strict profile already gets a private empty `/run`.
     masked_files.extend(keep(control_sockets()));
     let macos = cfg!(target_os = "macos");
+    // Seatbelt judges a unix-socket connect as network-outbound, so hiding the run
+    // directory (a file-read deny) does not stop a connect to the host's own
+    // control socket inside it, where an agent could sit on the pending
+    // unauthenticated slots. Deny the connect by path; the agent's own `agent.sock`
+    // stays reachable for its hooks. Bubblewrap needs nothing: the run directory is
+    // an empty tmpfs there and `host.sock` is not bound back, so it is absent.
+    let host_sock = server::socket_path(&run_dir);
+    let denied_sockets = if macos { vec![host_sock] } else { Vec::new() };
     AgentSandbox {
         project,
         open_filesystem: true,
@@ -939,6 +951,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
         private_tmp: Vec::new(),
         read_restrictions: Vec::new(),
         hide_other_processes: true,
+        denied_sockets,
         network: Network::Full,
     }
 }
@@ -1548,6 +1561,39 @@ mod tests {
             ]
         );
         assert_eq!(HqPaths::new(None, &[]), HqPaths::default());
+    }
+
+    #[test]
+    fn the_open_profile_denies_a_connect_to_the_host_control_socket() {
+        let f = fixture();
+        let claude = f.claude();
+        for bwrap in [true, false] {
+            let s = policy(
+                &spec_with(Profile::Open),
+                &f.target(&claude, bwrap),
+                None,
+                None,
+            )
+            .unwrap();
+            let host_sock = server::socket_path(&f.run_dir);
+            if cfg!(target_os = "macos") {
+                assert!(
+                    s.denied_sockets.contains(&host_sock),
+                    "the host socket connect is denied under Seatbelt"
+                );
+            } else {
+                assert!(
+                    s.denied_sockets.is_empty(),
+                    "bubblewrap leaves host.sock out of the tmpfs run dir: {:?}",
+                    s.denied_sockets
+                );
+            }
+            // The agent's own socket is never denied: its hooks connect to it.
+            assert!(
+                !s.denied_sockets
+                    .contains(&server::agent_socket_path(&f.run_dir))
+            );
+        }
     }
 
     #[test]

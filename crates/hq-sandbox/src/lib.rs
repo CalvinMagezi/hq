@@ -109,6 +109,13 @@ pub struct AgentSandbox {
     pub read_restrictions: Vec<ReadRestriction>,
     /// Hide other processes: their environments and their details.
     pub hide_other_processes: bool,
+    /// Unix sockets the agent may not connect to even when `network` is `Full`.
+    /// Seatbelt judges a unix-socket connect as `network-outbound`, so a hidden
+    /// run directory (a file-read deny) does not stop a connect to the host
+    /// control socket inside it; this denies the connect by path. Bubblewrap
+    /// needs nothing here: a hidden directory is an empty tmpfs, so a socket not
+    /// bound back is simply absent.
+    pub denied_sockets: Vec<PathBuf>,
     pub network: Network,
 }
 
@@ -281,6 +288,14 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
                 allowed.join(" ")
             ));
         }
+    }
+    // After the network rules, so nothing re-allows these: a connect to the host
+    // control socket is denied even under an otherwise open network.
+    if !s.denied_sockets.is_empty() {
+        p.push_str(&format!(
+            "(deny network-outbound {})",
+            literals(&s.denied_sockets)
+        ));
     }
     p
 }
