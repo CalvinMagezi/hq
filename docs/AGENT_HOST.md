@@ -440,8 +440,9 @@ resume one on purpose (`harness_session_resume`).
 
 - **Locking** is open to everyone who can drive the host: `hq host lockdown
   "<reason>"` on the machine, the `host.lockdown` method (also through the ssh
-  gate), HQ's `host_lockdown` tool, which locks every host when none is named,
-  and the **Stop all** button on the web app's Workbench page (beside New agent,
+  gate), HQ's `host_lockdown` tool, which locks every host when none is named
+  (from a claude.ai connector it waits for the owner's approval like the other
+  host tools, since one call stops every agent everywhere), and the **Stop all** button on the web app's Workbench page (beside New agent,
   one tap and a confirmation on a phone; `POST /api/workbench/lockdown`). The
   Workbench names any locked computer above its agent list.
   It kills every agent the host runs with its whole process group at once (no

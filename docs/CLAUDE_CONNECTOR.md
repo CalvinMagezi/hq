@@ -136,7 +136,7 @@ On top of the scope:
 
 - **Your approval for high-risk calls.** Mail and other Google Workspace calls, remote MCP
   accounts, messages into your chat or an agent's mailbox, config changes, pairing a machine,
-  reading or typing into a terminal pane, self-update, skill, slash-command
+  reading or typing into a terminal pane, locking down a host, self-update, skill, slash-command
   and agent-definition edits, deleting a task, file reads and writes outside the vault (file
   edits, folder listings, git diffs, status and logs, exports to a path, convert and OCR),
   commits, PRs and clones, and `hq_ask` in full mode each wait for you. HQ sends

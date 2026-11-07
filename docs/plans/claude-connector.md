@@ -179,6 +179,7 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    `crates/hq-mcp/src/gateway.rs` (a registry test checks every name is a served tool): Google
    Workspace, `agent_send_message` (it reaches the owner's chat or an agent that acts on it),
    `config_manage`, `host_add`, `host_send` and `host_read` (any pane, including the owner's),
+   `host_lockdown` (one call stops every agent on every host until each machine unlocks),
    self-update install and
    rollback, skill and slash-command edits (they persist instructions), task deletes,
    file edits, folder listings (`list_dir`), git reads (`git_diff`, `git_status`, `git_log`),

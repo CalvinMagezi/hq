@@ -529,6 +529,9 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "github_write",
     "host_send",
     "host_read",
+    // One call stops every agent on every host, the owner's included, until someone at each
+    // machine unlocks it.
+    "host_lockdown",
     "convert_to_markdown",
     "convert_from_markdown",
     "ocr_extract_text",
@@ -1063,6 +1066,10 @@ mod tests {
         for tool in ["list_dir", "git_diff", "git_status", "git_log"] {
             assert!(needs_owner_confirmation(&registry, tool, &none), "{tool}");
         }
+        assert!(
+            needs_owner_confirmation(&registry, "host_lockdown", &json!({"reason": "r"})),
+            "one call would stop every agent on every host"
+        );
         assert!(needs_owner_confirmation(
             &registry,
             "hq_ask",
