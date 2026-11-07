@@ -270,6 +270,36 @@ pub(crate) fn image_mime(ext: &str) -> &'static str {
     }
 }
 
+/// Who wrote the message a chat message replies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QuotedAuthor {
+    /// HQ's own bot.
+    Hq,
+    /// The owner (allowlisted or paired), writing it themselves.
+    Owner,
+    /// Anyone else: another person, another bot, a webhook, a forwarded message.
+    Other,
+}
+
+/// The taint source a turn starts with when it quotes someone other than the owner or HQ.
+pub(crate) const UNTRUSTED_QUOTE_SOURCE: &str = "a quoted chat message not written by the owner";
+
+impl QuotedAuthor {
+    /// The label the quote carries in the prompt: only HQ's own bot is "assistant".
+    pub(crate) fn label(self, name: &str) -> &str {
+        match self {
+            Self::Hq => "assistant",
+            Self::Owner | Self::Other => name,
+        }
+    }
+
+    /// `untrusted_input` for the turn: a quote from an outsider is text the owner did not write,
+    /// so the session starts as if it had read untrusted content.
+    pub(crate) fn untrusted_input(self) -> Option<String> {
+        (self == Self::Other).then(|| UNTRUSTED_QUOTE_SOURCE.to_string())
+    }
+}
+
 /// Prefix a message with the one it replies to, so the model sees the thread.
 pub(crate) fn quote_reply(who: &str, quoted: &str, body: &str) -> String {
     let quoted = hq_core::text::truncate_chars(quoted, QUOTE_CHARS);

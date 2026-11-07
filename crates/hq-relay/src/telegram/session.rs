@@ -196,6 +196,16 @@ fn spawn_watch_scheduler(
 }
 
 impl TgRelay {
+    /// Who wrote `reply`, the message a new one quotes: HQ, the owner, or someone else.
+    fn quoted_author(&self, reply: &teloxide::types::Message) -> crate::relay_common::QuotedAuthor {
+        super::access::classify_quote(
+            reply.from.as_ref().map(|u| (u.id.0, u.is_bot)),
+            reply.forward_origin().is_some(),
+            super::access::bot_user_id(&self.bot_token),
+            |id| super::access::is_owner_chat(&self.vault_path, &self.hq_cfg.relay, id),
+        )
+    }
+
     async fn handle(&self, bot: Bot, msg: teloxide::types::Message) {
         let chat_key = msg.chat.id.0;
         match authorize_chat(
@@ -229,11 +239,12 @@ impl TgRelay {
         let text = match msg.reply_to_message() {
             Some(reply) => match reply.text() {
                 Some(quoted) => {
-                    let who = reply
+                    let name = reply
                         .from
                         .as_ref()
-                        .map(|u| if u.is_bot { "assistant" } else { &u.first_name })
+                        .map(|u| u.first_name.as_str())
                         .unwrap_or("someone");
+                    let who = self.quoted_author(reply).label(name);
                     crate::relay_common::quote_reply(who, quoted, &raw_text)
                 }
                 None => raw_text.clone(),
@@ -518,6 +529,11 @@ impl TgRelay {
                 title: telegram_thread_title(&msg.chat),
             };
             let threads = self.threads.clone();
+            // A quote of someone else's words is untrusted text in the owner's turn.
+            let untrusted_input = msg
+                .reply_to_message()
+                .filter(|reply| reply.text().is_some())
+                .and_then(|reply| self.quoted_author(reply).untrusted_input());
             let reply = dispatch_hq(
                 &text,
                 &enriched_prompt,
@@ -528,6 +544,7 @@ impl TgRelay {
                 threads,
                 caller,
                 mirror,
+                untrusted_input,
             );
             Ok(reply.await)
         };

@@ -168,6 +168,36 @@ pub fn is_owner_chat(vault_path: &Path, relay: &RelayConfig, chat_id: i64) -> bo
     role_for_chat(chat_id, relay, Some(owner)) == TelegramRole::Owner
 }
 
+/// HQ's own Telegram user id. A bot token is `<bot id>:<secret>`.
+pub fn bot_user_id(token: &str) -> Option<u64> {
+    token.split(':').next()?.parse().ok()
+}
+
+/// Who wrote a message someone replied to. `from` is the author's user id and
+/// whether it is a bot; a forwarded message is someone else's words whoever
+/// forwarded it. A private chat's id is its user's id, so `is_owner` takes one.
+pub fn classify_quote(
+    from: Option<(u64, bool)>,
+    forwarded: bool,
+    self_id: Option<u64>,
+    is_owner: impl Fn(i64) -> bool,
+) -> crate::relay_common::QuotedAuthor {
+    use crate::relay_common::QuotedAuthor;
+    let Some((id, is_bot)) = from else {
+        return QuotedAuthor::Other;
+    };
+    if forwarded {
+        return QuotedAuthor::Other;
+    }
+    if self_id == Some(id) {
+        return QuotedAuthor::Hq;
+    }
+    match i64::try_from(id) {
+        Ok(id) if !is_bot && is_owner(id) => QuotedAuthor::Owner,
+        _ => QuotedAuthor::Other,
+    }
+}
+
 /// Display name for a chat (from `telegram_users` or fallback `tg-{id}`).
 pub fn display_name_for_chat(chat_id: i64, relay: &RelayConfig) -> String {
     relay
@@ -297,6 +327,35 @@ mod tests {
         assert_eq!(role_for_chat(1, &relay, Some(1)), TelegramRole::Owner);
         assert_eq!(role_for_chat(2, &relay, Some(1)), TelegramRole::Guest);
         assert_eq!(display_name_for_chat(2, &relay), "Bob");
+    }
+
+    #[test]
+    fn a_quote_is_trusted_only_from_hq_or_the_owner() {
+        use crate::relay_common::QuotedAuthor;
+        let owner = |id: i64| id == 1;
+        let me = Some(900);
+        assert_eq!(bot_user_id("900:secret-part"), Some(900));
+        assert_eq!(bot_user_id("not-a-token"), None);
+        assert_eq!(
+            classify_quote(Some((900, true)), false, me, owner),
+            QuotedAuthor::Hq
+        );
+        assert_eq!(
+            classify_quote(Some((1, false)), false, me, owner),
+            QuotedAuthor::Owner
+        );
+        for (from, forwarded) in [
+            (Some((2, false)), false),  // another person in a group
+            (Some((901, true)), false), // another bot, once labelled "assistant"
+            (Some((1, false)), true),   // the owner forwarding someone else's words
+            (None, false),
+        ] {
+            let who = classify_quote(from, forwarded, me, owner);
+            assert_eq!(who, QuotedAuthor::Other, "{from:?} {forwarded}");
+            assert!(who.untrusted_input().is_some());
+            assert_eq!(who.label("Sam"), "Sam");
+        }
+        assert!(QuotedAuthor::Owner.untrusted_input().is_none());
     }
 
     #[test]
