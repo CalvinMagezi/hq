@@ -34,7 +34,7 @@ pub fn batch_cosine_similarity(query: &[f32], matrix: &[f32], dim: usize) -> Vec
 // ─── Embedding Serialization Helpers ─────────────────────────────────────────
 
 /// Serialize `&[f32]` to bytes (little-endian, matching JS Float32Array layout).
-pub(super) fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
+pub fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
     embedding.iter().flat_map(|f| f.to_le_bytes()).collect()
 }
 

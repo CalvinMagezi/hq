@@ -14,8 +14,13 @@ use super::{notebook_from_path, title_from_path};
 /// Turn free text into a safe FTS5 query: each alphanumeric run becomes a quoted
 /// phrase (so `AND`/`OR`/`NOT`/`NEAR` are plain words), joined by implicit AND.
 /// Text with no searchable characters yields an empty string.
-pub(super) fn sanitize_fts_query(query: &str) -> String {
+pub fn sanitize_fts_query(query: &str) -> String {
     join_terms(query, " ")
+}
+
+/// [`sanitize_fts_query`] with the terms joined by OR: any of them may match.
+pub fn sanitize_fts_query_any(query: &str) -> String {
+    join_terms(query, " OR ")
 }
 
 fn join_terms(query: &str, joiner: &str) -> String {

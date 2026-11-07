@@ -461,6 +461,7 @@ pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
         match fold_thread(&db, &thread_id, &cfg, &summarizer).await {
             Ok(done) if !done.is_empty() => {
                 tracing::info!(thread_id, ?done, "chat history folded");
+                embed_folds(&db, &done).await;
             }
             Ok(_) => {}
             Err(e) => tracing::warn!(
@@ -469,6 +470,41 @@ pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
             ),
         }
     });
+}
+
+/// Embeds new fold summaries with the on-device model, when the owner chose local embeddings,
+/// so `session_search` can find them by meaning offline. A remote embedder is never used here:
+/// it would make every fold a second paid call. Failures only cost the meaning search.
+async fn embed_folds(db: &Database, done: &[FoldOutcome]) {
+    let local = hq_core::config::HqConfig::load().is_ok_and(|c| {
+        c.daemon.embedding_provider == hq_core::config::EmbeddingProvider::Local && c.embeds_notes()
+    });
+    if !local {
+        return;
+    }
+    for outcome in done {
+        let (FoldOutcome::Folded { fold_id, .. } | FoldOutcome::Distilled { fold_id, .. }) =
+            outcome;
+        let Ok(Some(fold)) = db.with_conn(|c| thread_folds::get(c, fold_id)) else {
+            continue;
+        };
+        match hq_memory::generate_embedding_local(&fold.summary).await {
+            Ok(vector) => {
+                let stored = db.with_conn(|c| {
+                    hq_db::chat_search::store_fold_embedding(
+                        c,
+                        &fold,
+                        hq_memory::LOCAL_EMBEDDING_MODEL,
+                        &vector,
+                    )
+                });
+                if let Err(e) = stored {
+                    tracing::debug!(fold_id, "could not store fold embedding: {e:#}");
+                }
+            }
+            Err(e) => tracing::debug!(fold_id, "fold summary not embedded: {e:#}"),
+        }
+    }
 }
 
 #[cfg(test)]

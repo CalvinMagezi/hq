@@ -87,6 +87,21 @@ pub fn get_thread(conn: &Connection, thread_id: &str) -> Result<Option<ChatThrea
     Ok(result)
 }
 
+/// The thread a chat platform conversation is mirrored into, if it has one.
+pub fn find_platform_thread(
+    conn: &Connection,
+    platform: &str,
+    external_id: &str,
+) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT thread_id FROM chat_threads WHERE platform = ?1 AND external_id = ?2",
+        params![platform, external_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 /// Find the thread bound to a given platform + external chat/channel/contact id, or
 /// create one if none exists yet. Idempotent: repeated calls for the same
 /// `(platform, external_id)` always return the same thread.
