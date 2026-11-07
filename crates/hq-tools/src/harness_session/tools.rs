@@ -457,10 +457,14 @@ impl HqTool for HarnessSessionListTool {
             .unwrap_or(false);
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
+            // A claude.ai connection sees only the sessions it may drive; the owner's stay theirs.
+            let keep = |r: &registry::HarnessSessionRow| {
+                super::connector_may_drive(&db, &args, &r.id).is_ok()
+            };
             if task.is_empty() {
-                super::list_with(&db, status, with_worktrees)
+                super::list_with(&db, status, with_worktrees, &keep)
             } else {
-                super::list_for_task(&db, &task)
+                super::list_for_task(&db, &task, &keep)
             }
         })
         .await?
@@ -497,6 +501,9 @@ impl HqTool for HarnessSessionStatusTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
+        // Its row holds the goal, folder, branch and resume token, which a connection reads
+        // only for sessions it may drive.
+        super::connector_may_drive(&db, &args, &id)?;
         let caller = super::caller_session(&args).map(str::to_string);
         tokio::task::spawn_blocking(move || {
             // A launched agent may look at itself, its parent and its children.
@@ -835,6 +842,7 @@ impl HqTool for HarnessSessionWaitTool {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         let timeout = std::time::Duration::from_secs(secs.clamp(3, super::MAX_WAIT.as_secs()));
+        super::connector_may_drive(&db, &args, &id)?;
         let caller = super::caller_session(&args).map(str::to_string);
         tokio::task::spawn_blocking(move || {
             db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;

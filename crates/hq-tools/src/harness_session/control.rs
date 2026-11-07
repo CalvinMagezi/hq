@@ -215,17 +215,19 @@ pub(super) fn with_pending(view: &mut Value, agent: &AgentInfo) {
 }
 
 pub fn list(db: &Arc<Database>, status_filter: Option<String>) -> Result<Value> {
-    list_with(db, status_filter, false)
+    list_with(db, status_filter, false, &|_| true)
 }
 
 /// `list`, and with `worktree_status` each running session that has a live worktree also reports
-/// it, one host call each.
+/// it, one host call each. Only the rows `keep` passes are shown (or polled).
 pub fn list_with(
     db: &Arc<Database>,
     status_filter: Option<String>,
     worktree_status: bool,
+    keep: &dyn Fn(&HarnessSessionRow) -> bool,
 ) -> Result<Value> {
     let rows = db.with_conn(move |c| registry::list(c, status_filter.as_deref(), 50))?;
+    let rows: Vec<HarnessSessionRow> = rows.into_iter().filter(|r| keep(r)).collect();
     let mut views = session_views(&rows);
     if worktree_status {
         for (row, view) in rows.iter().zip(views.iter_mut()) {
@@ -603,13 +605,18 @@ pub fn live_fields(
 
 /// Every session launched for one task (id or display id), with live status
 /// for the running ones.
-pub fn list_for_task(db: &Arc<Database>, task: &str) -> Result<Value> {
+pub fn list_for_task(
+    db: &Arc<Database>,
+    task: &str,
+    keep: &dyn Fn(&HarnessSessionRow) -> bool,
+) -> Result<Value> {
     let (task_id, rows) = db.with_conn(|c| {
         let found =
             hq_db::tasks::get_task(c, task)?.ok_or_else(|| anyhow::anyhow!("no task '{task}'"))?;
         let rows = registry::list_for_mission(c, &found.id)?;
         Ok((found.display_id, rows))
     })?;
+    let rows: Vec<HarnessSessionRow> = rows.into_iter().filter(|r| keep(r)).collect();
     Ok(json!({ "task": task_id, "sessions": session_views(&rows) }))
 }
 

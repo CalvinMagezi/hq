@@ -3500,6 +3500,76 @@ fn a_connection_drives_only_sessions_a_connection_started() {
     );
 }
 
+#[tokio::test]
+async fn a_connection_reads_the_state_of_only_the_sessions_it_may_drive() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    for (id, origin) in [
+        ("hs-owner", registry::ORIGIN_USER),
+        ("hs-claude", registry::ORIGIN_CONNECTOR),
+        ("hs-worker", registry::ORIGIN_USER),
+    ] {
+        db.with_conn(|c| {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id,
+                    harness: "claude-code",
+                    label: "t",
+                    cwd: "/srv/work",
+                    mission_id: None,
+                    placement: registry::Placement {
+                        host: "native",
+                        agent_name: id,
+                        workspace_id: id,
+                        pane_id: id,
+                    },
+                    purpose: None,
+                },
+            )?;
+            registry::set_origin(c, id, origin)?;
+            // Ended, so listing them asks no host.
+            registry::set_status(c, id, registry::STATUS_STOPPED)
+        })
+        .unwrap();
+    }
+    db.with_conn(|c| registry::set_parent(c, "hs-worker", "hs-claude", 1))
+        .unwrap();
+    let tools = tools::create_harness_session_tools(db.clone(), None, None);
+    let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
+    let connector = json!({ CONNECTOR_ARG: "Claude" });
+    let listed = |v: Value| {
+        let mut ids: Vec<String> = v["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["session"]["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+
+    let seen = tool("harness_session_list")
+        .execute(connector.clone())
+        .await
+        .unwrap();
+    assert_eq!(listed(seen), ["hs-claude", "hs-worker"]);
+    let all = tool("harness_session_list")
+        .execute(json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed(all), ["hs-claude", "hs-owner", "hs-worker"]);
+
+    for name in ["harness_session_status", "harness_session_wait"] {
+        let mut args = connector.clone();
+        args["session_id"] = json!("hs-owner");
+        let err = tool(name).execute(args).await.unwrap_err().to_string();
+        assert!(
+            err.contains("may drive only sessions it started"),
+            "{name}: {err}"
+        );
+    }
+}
+
 /// The host's `agent.pending` reply for a Copilot path dialog numbered `seq`.
 fn pending_json(seq: u64) -> String {
     format!(
