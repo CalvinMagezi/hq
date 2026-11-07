@@ -1,6 +1,7 @@
 # Context fold: long conversations that remember
 
-Status: proposal. Nothing here is built yet.
+Status: phases 1 to 6 built (see "What was built" at the end). Phase 0, the measurement, needs a
+real install and is still to do.
 
 ## The problem
 
@@ -153,7 +154,7 @@ reverted like code.
 
 Replace `session_search`'s `LIKE` scan with one tool pair:
 
-- `history_search(query, thread?)`: FTS5 over `chat_messages` (a new `chat_fts` content table kept
+- `session_search(query, thread?)` (kept under its old name): FTS5 over `chat_messages` (a new `chat_fts` content table kept
   in sync by triggers) plus semantic search over **fold summaries only**, embedded with the local
   Model2Vec model (`potion-base-8M`, already on the phone, about 36 MB resident, works offline).
   Fold summaries are few and dense, so embedding them costs almost nothing. Embedding every chat
@@ -247,32 +248,67 @@ Nothing above should be tuned by feel.
 |---|---|---|
 | 0 | Measure: cache read share by origin, thread lengths, the volatile parts of the system prompt | Numbers written down here |
 | 1 | `thread_folds`, fold job, ported rules, assembly for web and phone chat, deletion handling, prefix test, recall test with the fake summarizer | Recall test green; no change for threads under the budget |
-| 2 | `chat_fts`, `history_search` and `history_restore` replacing `session_search`, fold embeddings on the local model | Search works offline on the Mobile profile |
-| 3 | Relays read history from `chat_messages` plus folds instead of `ChannelState.messages` | Telegram thread keeps continuity past 30 messages |
+| 2 | `chat_fts`, `session_search` on FTS5 plus `history_restore`, fold embeddings on the local model | Search works offline on the Mobile profile |
+| 3 | Relays get the mirrored thread's fold blocks in front of their own window | Telegram thread keeps continuity past 30 messages |
 | 4 | Turn context moved to the tail, `cache_control` on OpenRouter for Anthropic models | Cache read share up in the ledger |
-| 5 | Fold-time ingestion, `chat:` evidence in the graph and context packets, typed relations | Fewer calls per turn at equal or better recall |
+| 5 | `chat:` evidence in the graph and context packets, typed relations from folds | Edges verified against the message; dropped when it goes |
 | 6 | The single long turn: incremental, turn-safe, tool spill | Existing compaction tests plus a spill round trip |
-
-Phases 1 and 4 can ship independently. Phase 5 is the most valuable and the riskiest, so it waits
-for the recall test to exist.
 
 ## Config
 
 ```yaml
-context:
-  fold:
-    enabled: true          # off: today's newest-N window
-    tail_tokens: 12000
-    tail_messages: 30
-    blocks_budget_tokens: 6000
-    model: bulk
+context_fold:
+  enabled: true          # off: the newest 20 messages, as before
+  tail_messages: 16      # a fold runs when the tail passes twice this...
+  tail_tokens: 6000      # ...or twice this, and leaves about this much
+  blocks_budget_tokens: 6000
+  model: bulk
+  stable_prompt: true    # memories and concept matches go in a note before the message
 ```
+
+Relay chats fold their mirrored thread down to half of the channel's kept window (10 messages)
+whatever `tail_messages` says, so nothing falls between the window and the blocks.
+
+## What was built
+
+- **Phase 1.** `hq_db::thread_folds` (migration 115) and `hq_agent::fold`: `load_view`,
+  `fold_thread`, `plan_cut`, `plan_distill`, `spawn_fold`, the rules in `fold/rules.rs`. Web and
+  phone chat build history from the view (`thread_history` in `crates/hq-web/src/ws/mod.rs`) and
+  fold after each saved reply. `chat::delete_messages_from` drops the blocks an edit reaches.
+- **Phase 2.** `hq_db::chat_search` (migration 116: `chat_fts`, `fold_fts`,
+  `thread_fold_embeddings`). `session_search` keeps its name (skills and allowlists use it) and now
+  ranks with FTS5, falls back to the old substring scan, and returns matching summaries;
+  `history_restore` is new. Fold summaries are embedded only with the local Model2Vec model.
+- **Phase 3.** `native_run::fold_blocks` and `fold_after_turn` for Telegram and Discord. The
+  channel's own `ChannelState.messages` stays the source of its recent window, so images, parked
+  replies and failure markers behave as before.
+- **Phase 4.** `split_volatile` in `builder/prompt.rs` and `AgentSession::set_turn_context`; the
+  OpenRouter `cache_control` hint in `openai_compat::mutate_body_for_endpoint`.
+- **Phase 5.** Fold summaries may end with `RELATIONS:` lines, checked against the cited message
+  (`fold::split_relations`) and written with `chat:<thread>/<message>` evidence
+  (`fold::record_relations_in`). `graph_paths` verifies that evidence against `chat_messages`;
+  context packets read it and `verify_citations_in` re-checks it.
+- **Phase 6.** `session/context.rs`: incremental compaction, call-safe cuts, tool calls in the
+  summary input, no silent drop, the background summary tied to a layout generation.
+  `hq_tools::spill` and `tool_output_read` keep and return full tool output and compacted turns.
+
+Not done, on purpose:
+
+- **Per-turn memory ingestion is unchanged.** Moving ingestion to fold time would leave short chats,
+  which never fold, with no memories at all. Relations from folds cost no extra call, so they ship;
+  replacing per-turn ingestion waits for the phase 0 numbers.
+- **The thread-continuity lines are still dropped.** `blocks_to_system_prompt` keeps only
+  system-role blocks, so the merged `_threads` user and assistant lines the context engine budgets
+  never reach the model. That predates this work and is its own change.
+- **No real-model recall numbers yet.** `real_model_keeps_amounts_decisions_and_open_asks` in
+  `crates/hq-agent/tests/fold_recall.rs` is the opt-in check
+  (`cargo test -p hq-agent --test fold_recall -- --ignored`).
 
 ## Open questions
 
-- Should a fold of a family member's Discord request ever reach the owner's memory? Probably not:
-  folds inherit the thread's caller and the memory ingester's existing caller rules.
-- Is 12,000 tokens right for cheap models with 32K or 64K windows? Default it from the resolved
-  model's window, and measure.
-- Relay `ChannelState.messages` holds exact API history including harness session ids. Phase 3
-  needs to check nothing else reads it before it stops being the source.
+- Should a fold of a family member's Discord request ever reach the owner's memory? Folds stay in
+  their own channel's thread; per-turn ingestion is unchanged.
+- Are the defaults right for cheap models with 32K or 64K windows? Measure, then default them from
+  the resolved model's window.
+- A mobile instance with its data saver on still folds: a fold is one small call per eight or so
+  exchanges, and it is what keeps the chat's memory. Revisit if the numbers say otherwise.
