@@ -32,6 +32,8 @@ mod hooks;
 #[cfg(unix)]
 mod host;
 #[cfg(unix)]
+mod host_git;
+#[cfg(unix)]
 mod keys;
 #[cfg(unix)]
 mod lockdown;

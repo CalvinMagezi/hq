@@ -449,6 +449,24 @@ protocol line replaced by an error, and a pane that stops reading its terminal
 fails a write after 5 seconds instead of holding the connection. A client also
 refuses a host directory that is not owned by you and private to you.
 
+#### Git the host runs
+
+The host itself runs git, outside every sandbox, in repositories an open agent can write:
+`worktree.add`, `worktree.status`, `worktree.remove`, the `.worktreeinclude` copies, and
+`agent.head`. A repository's configuration can name commands git runs on its own, and those
+would run with the host's reach rather than the agent's. So host git runs with
+`core.fsmonitor=false`, no hooks (`core.hooksPath=/dev/null`, which also stops
+`post-checkout` on `worktree add`), no transport at all (`protocol.allow=never`, so no lazy
+fetch, `core.sshCommand` or remote helper), `log.showSignature=false` (no `gpg.program`), and
+every filter driver the configuration names emptied for that command. The host never asks
+for a diff, so `textconv` and external diff drivers never run.
+
+What is left: filter drivers are read from the configuration just before each command, so an
+agent that adds a new driver in the moment between the two can still have it run once by the
+host. The strict profile closes that, since a strict agent cannot write `.git/config`. Running
+host git inside the agent's own sandbox would close it for the open profile too; that is not
+built yet.
+
 ### Agent compatibility
 
 What each agent needed to start under the strict sandbox, and whether it has been run signed in end to

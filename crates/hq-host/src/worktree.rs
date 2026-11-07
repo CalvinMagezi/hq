@@ -8,7 +8,6 @@ use crate::names::check_folder_name;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The folder under the HQ folder that holds every worktree.
 pub const WORKTREES_DIR: &str = "worktrees";
@@ -92,16 +91,14 @@ impl From<std::io::Error> for WorktreeError {
     }
 }
 
-/// Runs git in `dir` with no prompt and no inherited repository from the environment.
+/// Runs git in `dir` with no prompt, no inherited repository from the environment, and none
+/// of the commands the repository's own configuration names (`crate::host_git`).
 fn git(dir: &Path, args: &[&str]) -> Result<String, WorktreeError> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let mut cmd = crate::host_git::command(dir).ok_or_else(|| {
+        WorktreeError::Git("git could not read the repository's configuration".into())
+    })?;
+    let out = cmd
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
         .output()
         .map_err(|e| WorktreeError::Git(format!("git could not run: {e}")))?;
     if out.status.success() {
@@ -434,6 +431,7 @@ pub fn remove(root: &Path, path: &Path) -> Result<Removed, WorktreeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     fn branch(name: &str) -> Base {
         Base::Branch {
