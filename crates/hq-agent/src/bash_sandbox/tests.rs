@@ -10,6 +10,8 @@ fn ctx(network: bool) -> SandboxContext {
         masked_files: vec![PathBuf::from("/home/u/.ssh/id_ed25519")],
         readonly_files: vec![PathBuf::from("/home/u/.ssh/authorized_keys")],
         readonly_dirs: vec![PathBuf::from("/home/u/.hq/tunnel")],
+        hidden_dirs: vec![PathBuf::from("/home/u/.hq/run")],
+        hidden_sockets: vec![PathBuf::from("/home/u/.hq/run/host/host.sock")],
         network,
         read_only: false,
     }
@@ -73,7 +75,7 @@ fn seatbelt_denies_masked_reads_and_network() {
     );
     assert!(profile.contains("(deny network-outbound (remote ip))"));
     assert!(profile.contains("(subpath \"/work/repo\")"));
-    assert!(!seatbelt_profile(&ctx(true)).contains("network-outbound"));
+    assert!(!seatbelt_profile(&ctx(true)).contains("(remote ip)"));
 }
 
 #[test]
@@ -161,6 +163,8 @@ fn run_wrapped(backend: &Backend, dir: &Path, secret: &Path, command: &str) -> (
         masked_files: vec![secret.to_path_buf()],
         readonly_files: Vec::new(),
         readonly_dirs: Vec::new(),
+        hidden_dirs: Vec::new(),
+        hidden_sockets: Vec::new(),
         network: false,
         read_only: false,
     };
@@ -222,6 +226,8 @@ async fn seatbelt_lets_a_command_read_a_read_only_directory_but_not_write_into_i
         masked_files: Vec::new(),
         readonly_files: Vec::new(),
         readonly_dirs: vec![plane.clone()],
+        hidden_dirs: Vec::new(),
+        hidden_sockets: Vec::new(),
         network: false,
         read_only: false,
     };
@@ -607,4 +613,173 @@ async fn read_only_bash_still_investigates_but_cannot_launch_apps() {
         !launched.contains("rc=0"),
         "open or a copied binary ran: {launched}"
     );
+}
+
+/// HQ's control plane: the host's token and sockets, the ssh multiplex sockets, the pairing key and
+/// the web sign-in. A command that reached any of them would act as HQ outside the sandbox.
+#[cfg(unix)]
+fn control_plane_home() -> (tempfile::TempDir, PathBuf, std::os::unix::net::UnixListener) {
+    let home = tempfile::tempdir().unwrap();
+    let root = home.path().canonicalize().unwrap();
+    for dir in [".hq/run/host", ".hq/run/ssh", ".hq/bridge"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+    }
+    std::fs::write(root.join(".hq/run/host/operator.token"), "operator-secret").unwrap();
+    std::fs::write(root.join(".hq/bridge/bridge.key"), "pairing-secret").unwrap();
+    std::fs::write(root.join(".hq/web.token"), "web-secret").unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(root.join(".hq/run/host/host.sock"))
+        .expect("bind a unix socket in the temp home");
+    (home, root, listener)
+}
+
+#[cfg(unix)]
+#[test]
+fn hqs_control_plane_is_hidden_from_bash() {
+    let (_guard, root, _listener) = control_plane_home();
+    let hidden = outermost(existing_canonical(hidden_dirs(Some(&root))));
+    assert!(hidden.contains(&root.join(".hq/run")), "{hidden:?}");
+    assert!(hidden.contains(&root.join(".hq/bridge")), "{hidden:?}");
+    assert!(
+        !hidden
+            .iter()
+            .any(|d| d.starts_with(root.join(".hq/run")) && *d != root.join(".hq/run")),
+        "a directory inside a hidden one is already hidden: {hidden:?}"
+    );
+    let sockets = sockets_under(&hidden);
+    assert_eq!(sockets, vec![root.join(".hq/run/host/host.sock")]);
+    let masked = existing_canonical(masked_files(Some(&root)));
+    assert!(masked.contains(&root.join(".hq/web.token")), "{masked:?}");
+
+    let ctx = SandboxContext {
+        writable: vec![root.clone()],
+        hidden_dirs: hidden.clone(),
+        hidden_sockets: sockets,
+        ..ctx(true)
+    };
+    let args = strings(&bwrap_args(&ctx, "true"));
+    let run = root.join(".hq/run").to_string_lossy().into_owned();
+    let home = root.to_string_lossy().into_owned();
+    let tmpfs = position(&args, &["--tmpfs", &run]).expect("an empty tmpfs over ~/.hq/run");
+    let bind = position(&args, &["--bind", &home, &home]).unwrap();
+    assert!(
+        bind < tmpfs,
+        "the writable HOME bind would show the directory again"
+    );
+    let profile = seatbelt_profile(&ctx);
+    let hide = profile
+        .split("(deny file-read* file-write*")
+        .skip(1)
+        .any(|rule| {
+            rule.split(")(")
+                .next()
+                .is_some_and(|r| r.contains(&format!("(subpath \"{run}\"")))
+        });
+    assert!(hide, "no read deny for {run}: {profile}");
+    assert!(
+        profile.contains(&format!(
+            "(deny network-outbound (remote unix-socket (path-literal \"{run}/host/host.sock\")))"
+        )),
+        "{profile}"
+    );
+}
+
+#[test]
+fn nested_hidden_directories_collapse_to_the_outer_one() {
+    let dirs = outermost(vec![
+        PathBuf::from("/h/.hq/run"),
+        PathBuf::from("/h/.hq/run/host"),
+        PathBuf::from("/h/.hq/bridge"),
+    ]);
+    assert_eq!(
+        dirs,
+        vec![PathBuf::from("/h/.hq/run"), PathBuf::from("/h/.hq/bridge")]
+    );
+    let dirs = outermost(vec![
+        PathBuf::from("/h/.hq/run/host"),
+        PathBuf::from("/h/.hq/run"),
+    ]);
+    assert_eq!(dirs, vec![PathBuf::from("/h/.hq/run")]);
+}
+
+/// Every file the sandbox masks or hides is also denied to the agent's own file tools, so the two
+/// lists cannot drift apart again.
+#[test]
+fn everything_bash_masks_is_denied_to_file_tools_too() {
+    let home = dirs::home_dir().unwrap();
+    for rel in HQ_KEY_FILES.iter().chain(HQ_HIDDEN_DIRS) {
+        assert!(
+            crate::governance::secrets::HOME_SECRET_PATHS
+                .iter()
+                .any(|denied| Path::new(rel).starts_with(denied)),
+            "{rel} is masked from bash but readable with read_file"
+        );
+        assert!(
+            crate::governance::secrets::classify_path(&home.join(rel).join("x")).is_some()
+                || crate::governance::secrets::classify_path(&home.join(rel)).is_some(),
+            "{rel}"
+        );
+    }
+}
+
+/// Runs a command in a real sandbox over [`control_plane_home`] and checks it can neither read the
+/// host's token or the pairing key nor connect to the host's socket.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn assert_control_plane_unreachable(backend: &Backend) {
+    let (_guard, root, _listener) = control_plane_home();
+    let hidden = outermost(existing_canonical(hidden_dirs(Some(&root))));
+    let ctx = SandboxContext {
+        cwd: root.clone(),
+        writable: vec![root.clone()],
+        masked_files: existing_canonical(vec![root.join(".hq/web.token")]),
+        readonly_files: Vec::new(),
+        readonly_dirs: Vec::new(),
+        hidden_sockets: sockets_under(&hidden),
+        hidden_dirs: hidden,
+        network: true,
+        read_only: false,
+    };
+    let run = |command: &str| {
+        let Launch::Wrapped { program, args } = wrap(backend, &ctx, command) else {
+            panic!("expected a wrapped launch");
+        };
+        let out = std::process::Command::new(program)
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    // Positive control: a profile the backend rejects would make every denial below pass.
+    assert!(
+        run(INSIDE_WRITE).contains("ok"),
+        "the sandbox broke normal work"
+    );
+    let sock = root.join(".hq/run/host/host.sock");
+    let out = run(&format!(
+        "cat .hq/run/host/operator.token .hq/bridge/bridge.key .hq/web.token; \
+         python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect(\"{}\"); print(\"connected\")'; \
+         echo done",
+        sock.display()
+    ));
+    assert!(out.contains("done"), "{out}");
+    for secret in ["operator-secret", "pairing-secret", "web-secret"] {
+        assert!(!out.contains(secret), "{secret} readable: {out}");
+    }
+    assert!(
+        !out.contains("connected"),
+        "reached the host's socket: {out}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn seatbelt_keeps_a_command_off_the_hosts_socket_and_token() {
+    assert_control_plane_unreachable(available_backend().expect("sandbox-exec ships with macOS"));
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "needs bubblewrap with unprivileged user namespaces; run with `cargo test -p hq-agent bwrap -- --ignored`"]
+async fn bwrap_keeps_a_command_off_the_hosts_socket_and_token() {
+    assert_control_plane_unreachable(available_backend().expect("bwrap installed and working"));
 }

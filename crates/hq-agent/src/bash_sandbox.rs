@@ -17,6 +17,8 @@ const SSH_PUBLIC_FILES: &[&str] = &["known_hosts", "config", "authorized_keys"];
 /// `HQ_CONFIG_PATH` points the daemon somewhere else.
 const HQ_KEY_FILES: &[&str] = &[
     ".hq/config.yaml",
+    // The sign-in `hq web` mints for an open bind: a bearer token for the owner's web app.
+    ".hq/web.token",
     ".hq/wallet.enc",
     ".hq/seed.enc",
     ".hq/secret.key",
@@ -29,6 +31,13 @@ const HQ_KEY_FILES: &[&str] = &[
     ".hq/tunnel/key",
     ".hq/tunnel/join.conf",
 ];
+
+/// Directories a command may not see into at all, because what they hold acts as HQ: the built-in
+/// host's `operator.token`, `host.sock` and `agent.sock` (`run/host`; a connection there starts any
+/// process outside this sandbox), the ssh multiplex sockets to other machines (`run/ssh`, each an
+/// open login), and this device's pairing identity (`bridge`). Bubblewrap mounts an empty tmpfs
+/// over each; Seatbelt denies reading them and connecting to the sockets inside.
+const HQ_HIDDEN_DIRS: &[&str] = &[".hq/run", ".hq/bridge"];
 
 /// Directories whose contents decide who the machine trusts on the private plane (the hub's
 /// devices, the tunnel's hub and its serve and reach maps). A command may read them but not change
@@ -109,6 +118,11 @@ pub struct SandboxContext {
     pub readonly_files: Vec<PathBuf>,
     /// Directories inside a writable root that must stay read-only, with everything in them.
     pub readonly_dirs: Vec<PathBuf>,
+    /// Directories hidden whole (see [`HQ_HIDDEN_DIRS`]).
+    pub hidden_dirs: Vec<PathBuf>,
+    /// Unix sockets inside `hidden_dirs`. Seatbelt checks a socket connect as network, not as a file
+    /// read, so each needs its own rule there.
+    pub hidden_sockets: Vec<PathBuf>,
     pub network: bool,
 }
 
@@ -126,6 +140,7 @@ impl SandboxContext {
         }
         writable.push(std::env::temp_dir());
         writable.extend(SCRATCH_ROOTS.iter().map(PathBuf::from));
+        let hidden = outermost(existing_canonical(hidden_dirs(home.as_deref())));
         Self {
             read_only: settings.read_only,
             cwd,
@@ -133,6 +148,8 @@ impl SandboxContext {
             masked_files: existing_canonical(masked_files(home.as_deref())),
             readonly_files: existing_canonical(readonly_files(home.as_deref())),
             readonly_dirs: existing_canonical(readonly_dirs(home.as_deref())),
+            hidden_dirs: hidden.clone(),
+            hidden_sockets: sockets_under(&hidden),
             network: settings.network,
         }
     }
@@ -169,6 +186,70 @@ fn readonly_files(home: Option<&Path>) -> Vec<PathBuf> {
         );
     }
     files
+}
+
+/// [`HQ_HIDDEN_DIRS`] under HOME, plus the host's directory wherever `HQ_HOST_DIR` moved it.
+fn hidden_dirs(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = home
+        .map(|home| HQ_HIDDEN_DIRS.iter().map(|rel| home.join(rel)).collect())
+        .unwrap_or_default();
+    // A misconfigured value that holds HOME would hide the whole home directory.
+    let host_dir = hq_core::config::native_host_dir();
+    if !home.is_some_and(|h| h.starts_with(&host_dir)) {
+        dirs.push(host_dir);
+    }
+    dirs
+}
+
+/// Drops every directory that sits inside another one in the list: hiding the outer one hides it.
+fn outermost(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    for dir in dirs {
+        if !out.iter().any(|kept| dir.starts_with(kept)) {
+            out.retain(|kept| !kept.starts_with(&dir));
+            out.push(dir);
+        }
+    }
+    out
+}
+
+/// How deep [`sockets_under`] looks: `run/host/<sock>` and `run/ssh/<sock>` sit two levels down.
+const HIDDEN_SOCKET_DEPTH: usize = 3;
+
+/// Unix sockets under `dirs`, a few levels deep, without following links.
+fn sockets_under(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if is_socket(&kind) {
+                out.push(entry.path());
+            } else if kind.is_dir() && depth > 1 {
+                walk(&entry.path(), depth - 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for dir in dirs {
+        walk(dir, HIDDEN_SOCKET_DEPTH, &mut out);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+#[cfg(unix)]
+fn is_socket(kind: &std::fs::FileType) -> bool {
+    std::os::unix::fs::FileTypeExt::is_socket(kind)
+}
+
+#[cfg(not(unix))]
+fn is_socket(_kind: &std::fs::FileType) -> bool {
+    false
 }
 
 fn readonly_dirs(home: Option<&Path>) -> Vec<PathBuf> {
@@ -526,6 +607,10 @@ pub fn bwrap_args(ctx: &SandboxContext, command: &str) -> Vec<OsString> {
     for file in &ctx.masked_files {
         args.extend(["--ro-bind".into(), "/dev/null".into(), file.into()]);
     }
+    // After every bind, so neither a writable HOME nor the read-only root shows them again.
+    for dir in &ctx.hidden_dirs {
+        args.extend(["--tmpfs".into(), dir.into()]);
+    }
     args.extend(["--chdir".into(), ctx.cwd.clone().into()]);
     args.extend(["bash".into(), "-c".into(), command.into()]);
     args
@@ -574,6 +659,22 @@ pub fn seatbelt_profile(ctx: &SandboxContext) -> String {
             "(deny file-read* file-write* {})",
             masked.join(" ")
         ));
+    }
+    if !ctx.hidden_dirs.is_empty() {
+        let dirs: Vec<String> = ctx
+            .hidden_dirs
+            .iter()
+            .map(|p| format!("(subpath {})", sbpl_string(p)))
+            .collect();
+        profile.push_str(&format!("(deny file-read* file-write* {})", dirs.join(" ")));
+    }
+    if !ctx.hidden_sockets.is_empty() {
+        let sockets: Vec<String> = ctx
+            .hidden_sockets
+            .iter()
+            .map(|p| format!("(remote unix-socket (path-literal {}))", sbpl_string(p)))
+            .collect();
+        profile.push_str(&format!("(deny network-outbound {})", sockets.join(" ")));
     }
     if !ctx.network {
         profile.push_str("(deny network-outbound (remote ip))");
