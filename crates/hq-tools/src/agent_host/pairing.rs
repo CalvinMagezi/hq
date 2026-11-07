@@ -120,6 +120,62 @@ pub struct Added {
     pub authorize_command: String,
     /// False when the config already described this host.
     pub config_changed: bool,
+    /// The ssh target of the entry of the same name this one replaced, when it replaced one.
+    pub replaced: Option<String>,
+}
+
+/// The `ssh` and `identity_file` the config text already has for host `name`, when it has
+/// an entry for it.
+fn existing_entry(text: &str, name: &str) -> Option<(Option<String>, Option<String>)> {
+    let parsed: serde_yaml::Value = serde_yaml::from_str(text).ok()?;
+    let entry = [SECTION, LEGACY_SECTION]
+        .iter()
+        .map(|s| &parsed[s.trim_end_matches(':')]["hosts"][name])
+        .find(|e| !e.is_null())?;
+    let field = |k: &str| entry[k].as_str().map(str::to_string);
+    Some((field("ssh"), field("identity_file")))
+}
+
+/// A field of a join code fit to show the owner: the code is the other machine's word.
+fn shown(text: &str) -> String {
+    let clean = text
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '));
+    if clean && !text.is_empty() && text.len() <= MAX_NAME_LEN {
+        text.to_string()
+    } else {
+        "(not shown)".into()
+    }
+}
+
+/// What a `host_add` call would do, decoded from its join code, for the owner reading the
+/// approval request: the code itself is opaque.
+pub fn describe_add(args: &serde_json::Value) -> Option<String> {
+    let code = args.get("join")?.as_str()?;
+    let join = match decode_join(code) {
+        Ok(join) => join,
+        Err(e) => {
+            return Some(format!(
+                "The join code does not decode ({e}), so this call fails."
+            ));
+        }
+    };
+    let replace = args.get("replace").and_then(serde_json::Value::as_bool) == Some(true);
+    Some(format!(
+        "The join code pairs a machine as host '{}': HQ connects to {}@{} over ssh (it says its system is {}) and can run coding agents there.{}",
+        join.name,
+        join.user,
+        join.addr,
+        shown(&join.os),
+        if replace {
+            format!(
+                " replace: true replaces any host already called '{}'.",
+                join.name
+            )
+        } else {
+            String::new()
+        }
+    ))
 }
 
 fn ensure_key(path: &Path, name: &str) -> Result<String> {
@@ -157,12 +213,14 @@ fn ensure_key(path: &Path, name: &str) -> Result<String> {
 }
 
 /// Records the machine as a built-in host in the config at `config_path`, with a
-/// key pair under `ssh_dir`, and returns the command for the machine to run.
+/// key pair under `ssh_dir`, and returns the command for the machine to run. A host of the
+/// same name that points somewhere else is replaced only with `replace`.
 pub fn add_host_at(
     config_path: &Path,
     join_code: &str,
     gateway_addr: &str,
     ssh_dir: &Path,
+    replace: bool,
 ) -> Result<Added> {
     let join = decode_join(join_code)?;
     if !valid_addr(gateway_addr) {
@@ -171,10 +229,31 @@ pub fn add_host_at(
         );
     }
     let identity = ssh_dir.join(format!("hq_gate_{}", join.name));
-    let public_key = ensure_key(&identity, &join.name)?;
     let ssh = format!("{}@{}", join.user, join.addr);
     let existing = std::fs::read_to_string(config_path).unwrap_or_default();
     let identity_text = identity.display().to_string();
+    // Before a key is made, so a refusal leaves nothing behind. A join code names its host
+    // itself, so without this one code could quietly repoint a host the owner already uses.
+    let replaced = match existing_entry(&existing, &join.name) {
+        Some((old_ssh, old_identity))
+            if old_ssh.as_deref() == Some(ssh.as_str())
+                && old_identity.as_deref() == Some(identity_text.as_str()) =>
+        {
+            None
+        }
+        Some((old_ssh, _)) => {
+            let old = old_ssh.unwrap_or_else(|| "no ssh address".into());
+            if !replace {
+                bail!(
+                    "a host named '{}' is already in the config ({old}); this join code would replace it with {ssh}. Pass replace: true only if that is meant",
+                    join.name
+                );
+            }
+            Some(old)
+        }
+        None => None,
+    };
+    let public_key = ensure_key(&identity, &join.name)?;
     let changed = match insert_host(&existing, &join.name, &ssh, &identity_text)? {
         Some(updated) => {
             write_config(config_path, &existing, &updated)?;
@@ -189,11 +268,12 @@ pub fn add_host_at(
         identity_file: identity,
         public_key,
         config_changed: changed,
+        replaced,
     })
 }
 
 /// `add_host_at` for the config and ssh directory this process uses.
-pub fn add_host(join_code: &str, gateway_addr: Option<&str>) -> Result<Added> {
+pub fn add_host(join_code: &str, gateway_addr: Option<&str>, replace: bool) -> Result<Added> {
     let gateway = match gateway_addr {
         Some(addr) => addr.to_string(),
         None => tailscale_ip()
@@ -207,6 +287,7 @@ pub fn add_host(join_code: &str, gateway_addr: Option<&str>) -> Result<Added> {
         join_code,
         &gateway,
         &home.join(".ssh"),
+        replace,
     )
 }
 

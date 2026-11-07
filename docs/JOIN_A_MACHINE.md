@@ -86,6 +86,11 @@ hq host add hqjoin1.…
 or have the HQ's agent call the `host_add` tool with the code. It creates a key for the machine,
 records it as a host, and prints one command that starts with `hq host authorize`.
 
+The join code names the host itself. When a host of that name is already set up and points
+somewhere else, `host_add` refuses unless it is called with `replace: true`, and the approval
+request you get for it spells out the name, `user@address` and system the code carries, since
+the code itself is unreadable. `hq host add` in your own terminal replaces it and says so.
+
 ### 3. On the machine
 
 Run that `hq host authorize …` command. It lets the HQ's key (and only that key, and only from the

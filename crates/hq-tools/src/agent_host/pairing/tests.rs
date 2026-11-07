@@ -80,7 +80,7 @@ fn adding_a_host_writes_the_config_and_a_key_and_is_idempotent() {
     let config = dir.path().join("config.yaml");
     std::fs::write(&config, "default_model: relay\n").unwrap();
     let code = encode_join(&join("laptop"));
-    let first = add_host_at(&config, &code, "100.64.0.1", &dir.path().join("ssh")).unwrap();
+    let first = add_host_at(&config, &code, "100.64.0.1", &dir.path().join("ssh"), false).unwrap();
     assert!(first.config_changed);
     assert_eq!(first.ssh, "dev@100.64.0.9");
     assert!(first.public_key.starts_with("ssh-ed25519 "));
@@ -106,12 +106,45 @@ fn adding_a_host_writes_the_config_and_a_key_and_is_idempotent() {
         .mode();
     assert_eq!(mode & 0o777, 0o600);
 
-    let second = add_host_at(&config, &code, "100.64.0.1", &dir.path().join("ssh")).unwrap();
+    let second = add_host_at(&config, &code, "100.64.0.1", &dir.path().join("ssh"), false).unwrap();
     assert!(
         !second.config_changed,
         "the same machine twice changes nothing"
     );
     assert_eq!(second.public_key, first.public_key, "and keeps its key");
+}
+
+#[test]
+fn a_join_code_cannot_quietly_repoint_a_host_already_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.yaml");
+    let ssh = dir.path().join("ssh");
+    std::fs::write(&config, SAMPLE).unwrap();
+    let before = std::fs::read_to_string(&config).unwrap();
+    // `laptop` is me@100.64.0.2 in the config; this code says it is dev@100.64.0.9.
+    let code = encode_join(&join("laptop"));
+    let err = add_host_at(&config, &code, "100.64.0.1", &ssh, false)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("already in the config (me@100.64.0.2)"),
+        "{err}"
+    );
+    assert!(err.contains("replace: true"), "{err}");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), before);
+    assert!(!ssh.join("hq_gate_laptop").exists(), "no key is made");
+
+    // Replacing makes a key, which needs OpenSSH.
+    if Command::new("ssh-keygen").arg("-?").output().is_err() {
+        return;
+    }
+    let replaced = add_host_at(&config, &code, "100.64.0.1", &ssh, true).unwrap();
+    assert_eq!(replaced.replaced.as_deref(), Some("me@100.64.0.2"));
+    let loaded = HqConfig::load_from_path(&config).unwrap();
+    assert_eq!(loaded.agent_host.hosts["laptop"].ssh, "dev@100.64.0.9");
+    // The same machine again is no replacement.
+    let again = add_host_at(&config, &code, "100.64.0.1", &ssh, false).unwrap();
+    assert!(!again.config_changed && again.replaced.is_none());
 }
 
 #[test]
@@ -123,7 +156,8 @@ fn a_gateway_address_that_is_not_an_address_is_refused() {
             &dir.path().join("c.yaml"),
             &code,
             "x;y",
-            &dir.path().join("ssh")
+            &dir.path().join("ssh"),
+            false
         )
         .is_err()
     );

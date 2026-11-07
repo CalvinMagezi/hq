@@ -13,6 +13,7 @@ pub mod background_turns;
 pub mod subagent_runs;
 
 pub mod agent_host;
+pub mod approval_note;
 pub mod brand;
 pub mod budget_status;
 pub mod capabilities;

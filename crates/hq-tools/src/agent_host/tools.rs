@@ -347,7 +347,8 @@ impl HqTool for HostAddTool {
             "type": "object",
             "properties": {
                 "join": { "type": "string", "description": "The join code, starting with hqjoin1." },
-                "gateway_addr": { "type": "string", "description": "This HQ's tailnet address as the machine will see it. Found automatically when tailscale runs here." }
+                "gateway_addr": { "type": "string", "description": "This HQ's tailnet address as the machine will see it. Found automatically when tailscale runs here." },
+                "replace": { "type": "boolean", "description": "Replace a host of the same name that points elsewhere. Without it that is refused." }
             },
             "required": ["join"]
         })
@@ -363,11 +364,14 @@ impl HqTool for HostAddTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let join = arg_str(&args, "join");
         let gateway = Some(arg_str(&args, "gateway_addr")).filter(|g| !g.is_empty());
-        let added = blocking(move || super::pairing::add_host(&join, gateway.as_deref())).await??;
+        let replace = args.get("replace").and_then(Value::as_bool) == Some(true);
+        let added = blocking(move || super::pairing::add_host(&join, gateway.as_deref(), replace))
+            .await??;
         Ok(json!({
             "host": added.name,
             "ssh": added.ssh,
             "config_changed": added.config_changed,
+            "replaced": added.replaced,
             "run_on_the_machine": added.authorize_command,
             "next": format!("Run that command on the machine, then call host_check with host '{}'.", added.name),
         }))

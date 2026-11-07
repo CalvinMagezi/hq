@@ -174,13 +174,16 @@ impl OwnerApproval {
                  be approved. Split it into smaller calls."
             ));
         }
+        let note = hq_tools::approval_note::for_call(tool, &held)
+            .map(|n| format!("{n}\n\n"))
+            .unwrap_or_default();
         let mut item = ValueItem::new(
             SOURCE,
             ValueKind::ActionNeeded,
             format!("HQ wants to run {tool}"),
             format!(
                 "{}Your chat with HQ asks to run {tool} with exactly these arguments:\n\n{shown}\n\n\
-                 Approve to let it run once. Dismiss to refuse.",
+                 {note}Approve to let it run once. Dismiss to refuse.",
                 self.spoken
                     .as_ref()
                     .map(|q| format!("You said: \u{201c}{q}\u{201d}\n\n"))

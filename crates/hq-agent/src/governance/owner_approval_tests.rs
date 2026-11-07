@@ -169,3 +169,31 @@ async fn a_spoken_question_is_quoted_at_the_top_of_its_request() {
         "{body}"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_host_add_request_shows_what_its_join_code_says() {
+    use hq_tools::agent_host::pairing::{Join, encode_join};
+    let (db, approval) = approval();
+    let code = encode_join(&Join {
+        name: "laptop".into(),
+        user: "dev".into(),
+        addr: "100.64.0.9".into(),
+        os: "linux".into(),
+    });
+    approval.check("host_add", &json!({ "join": code })).await;
+    let id = request_id(&db, "host_add");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(
+                c.query_row("SELECT body FROM value_items WHERE id = ?1", [&id], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert!(
+        body.contains("host 'laptop': HQ connects to dev@100.64.0.9"),
+        "{body}"
+    );
+}
