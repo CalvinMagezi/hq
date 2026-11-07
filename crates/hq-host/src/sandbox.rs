@@ -182,6 +182,75 @@ const TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/var/folders", "/dev"];
 const PRIVATE_TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/run"];
 const NODE_PROXY_SWITCH: &str = "NODE_USE_ENV_PROXY";
 const PROXY_ENV_NAMES: &[&str] = &["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"];
+/// The vault folder that holds HQ's database (sign-in tokens, approvals, paired
+/// devices) and its keys (TLS, web push).
+const VAULT_PRIVATE_DIRS: &[&str] = &["_data"];
+/// Vault folders HQ reads back into its own sessions as instructions or history:
+/// identity and profiles, chat threads, agent definitions, skills, pinned maps
+/// and plans, and the memory index. An agent may read them but not change them.
+const VAULT_READONLY_DIRS: &[&str] = &[
+    "_system",
+    "_threads",
+    "_agents",
+    "skills",
+    "Skills",
+    "_skills",
+    "_moc",
+    "_plans",
+    "_embeddings",
+];
+/// Beside the config file: its backups start with its name; env files hold keys.
+const ENV_FILE_SUFFIX: &str = ".env";
+
+/// What HQ keeps on this machine outside `~/.hq` that no agent may use as HQ:
+/// the vault's database folder, the config file in force with its backups and the
+/// env files beside it, and the vault folders HQ loads into its own sessions. The
+/// host learns them from this machine's own HQ config (`hq host serve`), so a host
+/// on another machine protects that machine's vault, not the caller's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HqPaths {
+    /// Directories no agent may read or write.
+    pub hidden: Vec<PathBuf>,
+    /// Files no agent may read or write.
+    pub masked: Vec<PathBuf>,
+    /// Directories an agent may read but not write.
+    pub readonly: Vec<PathBuf>,
+}
+
+impl HqPaths {
+    /// The paths for a vault and the HQ config files in force (the file HQ reads,
+    /// the one it writes, the approval key). Each config file is masked with its
+    /// backups and the `*.env` files in its directory.
+    pub fn new(vault: Option<&Path>, config_files: &[PathBuf]) -> Self {
+        let mut masked = Vec::new();
+        for file in config_files {
+            masked.push(file.clone());
+            let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
+                continue;
+            };
+            let name = name.to_string_lossy().into_owned();
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let entry_name = entry.file_name().to_string_lossy().into_owned();
+                let backup = entry_name.starts_with(&name);
+                if (backup || entry_name.ends_with(ENV_FILE_SUFFIX)) && entry.path().is_file() {
+                    masked.push(entry.path());
+                }
+            }
+        }
+        Self {
+            hidden: vault
+                .map(|v| under(v, VAULT_PRIVATE_DIRS))
+                .unwrap_or_default(),
+            masked,
+            readonly: vault
+                .map(|v| under(v, VAULT_READONLY_DIRS))
+                .unwrap_or_default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -217,7 +286,9 @@ pub enum Profile {
     /// The agent works as the user would in a terminal: the whole filesystem to
     /// read and write, the machine's own network, shared `/tmp` and devices. What
     /// stays out of reach is HQ itself: the host directory with its tokens,
-    /// `~/.hq`, other processes' environments, other Claude accounts, and (unless
+    /// `~/.hq`, the vault's database and HQ's config file (see [`HqPaths`]), with
+    /// the vault folders HQ loads kept read-only, other processes' environments,
+    /// other Claude accounts, and (unless
     /// `hide_credentials` is off) the credential stores. A few files the user's own
     /// tools run later, such as shell startup files, stay read-only.
     Open,
@@ -376,6 +447,8 @@ struct Target<'a> {
     kind: Option<&'a str>,
     /// The sandbox program is bubblewrap, which can only mount over a path that exists.
     bwrap: bool,
+    /// HQ's own paths outside `~/.hq` on this machine.
+    hq: &'a HqPaths,
 }
 
 /// What both profiles keep out of an agent's hands: the host directory (the
@@ -397,6 +470,11 @@ struct Wall {
     masked_files: Vec<PathBuf>,
     claude_files: Vec<PathBuf>,
     claude_dirs: Vec<PathBuf>,
+    /// HQ's hidden directories and masked files outside `~/.hq` (also in `hidden`
+    /// and `masked_files`), and the vault folders that stay read-only.
+    hq_hidden: Vec<PathBuf>,
+    hq_masked: Vec<PathBuf>,
+    hq_readonly: Vec<PathBuf>,
 }
 
 fn under(base: &Path, names: &[&str]) -> Vec<PathBuf> {
@@ -501,6 +579,28 @@ fn wall(spec: &SandboxSpec, t: &Target, bridge: Option<&Bridge>) -> Result<Wall,
                 allow: Vec::new(),
             }),
     );
+    // HQ's paths outside `~/.hq`, whatever the profile or the credential setting.
+    // One already inside a hidden directory needs nothing more.
+    let walled: Vec<PathBuf> = hidden.iter().map(|h| h.dir.clone()).collect();
+    let outside_walls = |paths: &[PathBuf]| -> Vec<PathBuf> {
+        canonical(paths.iter().cloned())
+            .into_iter()
+            .filter(|p| !walled.iter().any(|w| p.starts_with(w)))
+            .collect()
+    };
+    let hq_hidden = outside_walls(&t.hq.hidden);
+    let hq_masked = outside_walls(&t.hq.masked);
+    let hq_readonly = outside_walls(&t.hq.readonly);
+    hidden.extend(hq_hidden.iter().map(|dir| HiddenDir {
+        dir: dir.clone(),
+        allow: Vec::new(),
+    }));
+    let mut masked_files = if hide_credentials {
+        under(home, SECRET_HOME_FILES)
+    } else {
+        Vec::new()
+    };
+    masked_files.extend(hq_masked.iter().cloned());
     Ok(Wall {
         project,
         run_dir,
@@ -509,11 +609,7 @@ fn wall(spec: &SandboxSpec, t: &Target, bridge: Option<&Bridge>) -> Result<Wall,
         revealed,
         agent_readable,
         hidden,
-        masked_files: if hide_credentials {
-            under(home, SECRET_HOME_FILES)
-        } else {
-            Vec::new()
-        },
+        masked_files,
         claude_files: CLAUDE_DIR_READONLY_FILES
             .iter()
             .map(|f| claude_dir.join(f))
@@ -522,6 +618,9 @@ fn wall(spec: &SandboxSpec, t: &Target, bridge: Option<&Bridge>) -> Result<Wall,
             .iter()
             .map(|d| claude_dir.join(d))
             .collect(),
+        hq_hidden,
+        hq_masked,
+        hq_readonly,
     })
 }
 
@@ -565,6 +664,9 @@ fn strict_policy(
         masked_files,
         claude_files,
         claude_dirs,
+        hq_hidden,
+        hq_masked,
+        hq_readonly,
     } = wall;
     let private_tmp = if bwrap {
         canonical(PRIVATE_TMP_ROOTS.iter().map(PathBuf::from))
@@ -630,6 +732,22 @@ fn strict_policy(
         paths.into_iter().filter(|p| !bwrap || p.exists()).collect()
     };
     let macos = cfg!(target_os = "macos");
+    // HQ's paths outside `~/.hq` matter here only where a writable root reaches them
+    // (a repository that keeps its vault in `.vault/`): Seatbelt closes the hidden
+    // ones to writes, and both keep their parents where they are.
+    let hq_dirs: Vec<PathBuf> = hq_readonly
+        .iter()
+        .cloned()
+        .chain(hq_hidden.iter().filter(|_| !bwrap).cloned())
+        .collect();
+    let pinned_dirs = pinned_parents(
+        hq_hidden
+            .iter()
+            .chain(&hq_readonly)
+            .chain(&hq_masked)
+            .map(PathBuf::as_path),
+        home,
+    );
     let read_allow = canonical(
         under(home, HOME_READABLE)
             .into_iter()
@@ -655,9 +773,10 @@ fn strict_policy(
                 .into_iter()
                 .chain(project_dirs)
                 .chain(revealed)
+                .chain(hq_dirs)
                 .collect(),
         ),
-        pinned_dirs: Vec::new(),
+        pinned_dirs,
         denied_programs: if macos {
             DENIED_PROGRAMS.iter().map(PathBuf::from).collect()
         } else {
@@ -714,6 +833,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
         masked_files,
         claude_files,
         claude_dirs,
+        hq_readonly,
         ..
     } = wall;
     let keep = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
@@ -736,6 +856,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
     let mut dirs = claude_dirs;
     dirs.extend(under(home, OPEN_READONLY_HOME_DIRS));
     dirs.extend(revealed);
+    dirs.extend(hq_readonly);
     if !bwrap {
         // Seatbelt hides a path by refusing reads of it, so with every write allowed
         // the hidden directories must be closed to writes too. Under bubblewrap a
@@ -744,6 +865,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
     }
     let readonly_files = keep(files);
     let readonly_subpaths = keep(dirs);
+    let masked_files = keep(masked_files);
     // The directories above everything protected stay where they are: moving one
     // would carry a hidden directory out from under the rule that names it, or
     // (under bubblewrap, where a read-only path is a mount that moves with its
@@ -753,7 +875,8 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
             .iter()
             .map(|h| h.dir.as_path())
             .chain(readonly_subpaths.iter().map(PathBuf::as_path))
-            .chain(readonly_files.iter().map(PathBuf::as_path)),
+            .chain(readonly_files.iter().map(PathBuf::as_path))
+            .chain(masked_files.iter().map(PathBuf::as_path)),
         home,
     );
     let macos = cfg!(target_os = "macos");
@@ -775,7 +898,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
         } else {
             Vec::new()
         },
-        masked_files: keep(masked_files),
+        masked_files,
         hidden_dirs: hidden,
         private_tmp: Vec::new(),
         read_restrictions: Vec::new(),
@@ -855,6 +978,8 @@ pub(crate) struct Launch<'a> {
     pub agent: Option<&'a str>,
     pub env: &'a [(String, String)],
     pub helper: Option<&'a Path>,
+    /// HQ's own paths outside `~/.hq` on this machine.
+    pub hq: &'a HqPaths,
 }
 
 /// Wraps `argv` in the platform sandbox, and under the strict profile opens the
@@ -873,6 +998,7 @@ pub(crate) fn confine(
         agent,
         env,
         helper,
+        hq,
     } = *launch;
     let refuse = |why: &str| HostError::Sandbox(why.to_string());
     // The caller cannot know this machine's home, so `{home}` in a launch argument is filled in here.
@@ -982,6 +1108,7 @@ pub(crate) fn confine(
                 home: &home_path,
                 kind,
                 bwrap: matches!(backend, Backend::Bwrap(_)),
+                hq,
             };
             policy(spec, &target, port, bridge.as_ref())
         })
@@ -1121,6 +1248,11 @@ mod tests {
         home: PathBuf,
         run_dir: PathBuf,
         project: PathBuf,
+        /// The vault, under HOME as by default.
+        vault: PathBuf,
+        /// A config directory outside HOME, as `/opt/hq` on a server.
+        config_dir: PathBuf,
+        hq: HqPaths,
     }
 
     fn fixture() -> Fixture {
@@ -1129,7 +1261,14 @@ mod tests {
         let home = root.join("home");
         let run_dir = root.join("run");
         let project = root.join("project");
+        let vault = home.join(".vault");
+        let config_dir = root.join("srv");
         for dir in [
+            vault.join("_data"),
+            vault.join("_system"),
+            vault.join("skills/demo"),
+            vault.join("Notebooks"),
+            config_dir.clone(),
             home.join(".hq"),
             home.join(".ssh"),
             home.join(".aws"),
@@ -1167,15 +1306,27 @@ mod tests {
             (run_dir.join("hooks/b.policy.json"), SECRET),
             (project.join(".git/config"), "[core]"),
             (project.join(".mcp.json"), "{}"),
+            (vault.join("_data/vault.db"), SECRET),
+            (vault.join("_system/SOUL.md"), "SOUL"),
+            (vault.join("skills/demo/SKILL.md"), "SKILL"),
+            (vault.join("Notebooks/note.md"), "NOTE"),
+            (config_dir.join("config.yaml"), SECRET),
+            (config_dir.join("config.yaml.bak"), SECRET),
+            (config_dir.join("mcp.env"), SECRET),
+            (config_dir.join("README"), "PUBLIC"),
         ] {
             std::fs::write(path, text).unwrap();
         }
+        let hq = HqPaths::new(Some(&vault), &[config_dir.join("config.yaml")]);
         Fixture {
             _tmp: tmp,
             root,
             home,
             run_dir,
             project,
+            vault,
+            config_dir,
+            hq,
         }
     }
 
@@ -1206,6 +1357,7 @@ mod tests {
                 home: &self.home,
                 kind,
                 bwrap,
+                hq: &self.hq,
             }
         }
     }
@@ -1309,6 +1461,60 @@ mod tests {
     }
 
     #[test]
+    fn the_vault_database_and_the_config_are_walled_off_under_both_profiles() {
+        let f = fixture();
+        let claude = f.claude();
+        for (profile, port) in [(Profile::Open, None), (Profile::Strict, Some(18080))] {
+            for bwrap in [true, false] {
+                let mut spec = spec_with(profile);
+                // HQ's paths do not depend on the credential setting.
+                spec.hide_credentials = false;
+                let s = policy(&spec, &f.target(&claude, bwrap), port, None).unwrap();
+                assert!(
+                    hidden_dirs(&s).contains(&f.vault.join("_data").as_path()),
+                    "{profile:?}"
+                );
+                for file in ["config.yaml", "config.yaml.bak", "mcp.env"] {
+                    assert!(
+                        s.masked_files.contains(&f.config_dir.join(file)),
+                        "{file} masked under {profile:?}"
+                    );
+                }
+                assert!(!s.masked_files.contains(&f.config_dir.join("README")));
+                for dir in ["_system", "skills"] {
+                    assert!(
+                        s.readonly_subpaths.contains(&f.vault.join(dir)),
+                        "{dir} read-only under {profile:?}"
+                    );
+                }
+                assert!(
+                    !s.readonly_subpaths.contains(&f.vault.join("Notebooks")),
+                    "notes stay writable"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_hq_paths_are_the_vaults_private_folders_and_the_config_with_its_siblings() {
+        let f = fixture();
+        assert_eq!(f.hq.hidden, vec![f.vault.join("_data")]);
+        assert!(f.hq.readonly.contains(&f.vault.join("_threads")));
+        let mut masked = f.hq.masked.clone();
+        masked.sort();
+        masked.dedup();
+        assert_eq!(
+            masked,
+            vec![
+                f.config_dir.join("config.yaml"),
+                f.config_dir.join("config.yaml.bak"),
+                f.config_dir.join("mcp.env"),
+            ]
+        );
+        assert_eq!(HqPaths::new(None, &[]), HqPaths::default());
+    }
+
+    #[test]
     fn the_strict_policy_is_the_one_it_always_was() {
         let f = fixture();
         let claude = f.claude();
@@ -1319,7 +1525,14 @@ mod tests {
             None,
         )
         .unwrap();
-        assert!(!s.open_filesystem && s.pinned_dirs.is_empty());
+        assert!(!s.open_filesystem);
+        assert!(
+            s.pinned_dirs
+                .iter()
+                .all(|d| d.starts_with(&f.vault) || f.config_dir.starts_with(d)),
+            "only HQ's own paths are pinned: {:?}",
+            s.pinned_dirs
+        );
         assert!(matches!(s.network, Network::Proxy { port: 18080, .. }));
         assert!(s.read_restrictions.iter().any(|r| r.root == f.home));
         assert!(s.readonly_files.contains(&f.project.join(".git/config")));
@@ -1376,7 +1589,11 @@ mod tests {
         for dir in [".ssh", ".aws", ".config/gh"] {
             assert!(!hidden.contains(&f.home.join(dir).as_path()), "{dir}");
         }
-        assert!(s.masked_files.is_empty());
+        assert!(
+            !s.masked_files.iter().any(|m| m.starts_with(&f.home)),
+            "{:?}",
+            s.masked_files
+        );
         // HQ's own directory and other accounts stay hidden whatever the setting says.
         for dir in [".hq", ".claude-work"] {
             assert!(hidden.contains(&f.home.join(dir).as_path()), "{dir}");
@@ -1530,8 +1747,20 @@ mod tests {
              mv {home}/.claude {home}/.claude.moved 2>/dev/null; mkdir -p {home}/.claude; \
              t planted_settings 'echo PLANTED > {home}/.claude/settings.json'; \
              mv {home}/.config {home}/.config.moved 2>/dev/null; t moved_gh 'sees {home}/.config.moved/gh/hosts.yml'; \
-             t shared_tmp 'echo x > {shared}'; echo DONE",
-            shared = shared.display()
+             t shared_tmp 'echo x > {shared}'; \
+             t vault_db 'sees {vault}/_data/vault.db'; t list_vault_db 'ls {vault}/_data | grep -q vault'; \
+             t write_vault_db 'echo x > {vault}/_data/vault.db'; \
+             t write_system 'echo x > {vault}/_system/x'; t write_soul 'echo x >> {vault}/_system/SOUL.md'; \
+             t write_skill 'echo x > {vault}/skills/demo/SKILL.md'; t read_soul 'grep -q SOUL {vault}/_system/SOUL.md'; \
+             t read_note 'grep -q NOTE {vault}/Notebooks/note.md'; t write_note 'echo x > {vault}/Notebooks/new.md'; \
+             mv {vault} {vault}.moved 2>/dev/null; mkdir -p {vault}/_system 2>/dev/null; \
+             t planted_system 'echo PLANTED > {vault}/_system/SOUL.md'; \
+             t config 'sees {cfg}/config.yaml'; t config_backup 'sees {cfg}/config.yaml.bak'; t env_file 'sees {cfg}/mcp.env'; \
+             t write_config 'echo x > {cfg}/config.yaml'; t read_beside_config 'grep -q PUBLIC {cfg}/README'; \
+             echo DONE",
+            shared = shared.display(),
+            vault = f.vault.display(),
+            cfg = f.config_dir.display(),
         );
         let wrapped = hq_sandbox::wrap(backend, &s, &["sh".into(), "-c".into(), script])
             .expect("the policy can be enforced here");
@@ -1572,6 +1801,22 @@ mod tests {
             ("moved_gh", false),
             ("planted_settings", false),
             ("shared_tmp", true),
+            ("vault_db", false),
+            // Bubblewrap lets it land in the empty mount; the real file is checked below.
+            ("write_vault_db", bwrap),
+            ("list_vault_db", false),
+            ("write_system", false),
+            ("write_soul", false),
+            ("write_skill", false),
+            ("read_soul", true),
+            ("read_note", true),
+            ("write_note", true),
+            ("planted_system", false),
+            ("config", false),
+            ("config_backup", false),
+            ("env_file", false),
+            ("write_config", false),
+            ("read_beside_config", true),
         ] {
             let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
             assert!(out.contains(&want), "expected {want}; got:\n{out}");
@@ -1592,6 +1837,20 @@ mod tests {
             std::fs::read_to_string(f.home.join(".claude/settings.json")).unwrap(),
             "{}",
             "a renamed parent freed a read-only file"
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.vault.join("_data/vault.db")).unwrap(),
+            SECRET,
+            "a write reached the vault database"
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.vault.join("_system/SOUL.md")).unwrap(),
+            "SOUL"
+        );
+        assert!(!f.vault.join("_system/x").exists());
+        assert_eq!(
+            std::fs::read_to_string(f.config_dir.join("config.yaml")).unwrap(),
+            SECRET
         );
     }
 }

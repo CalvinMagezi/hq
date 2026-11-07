@@ -276,9 +276,16 @@ machine's devices. `git push -u`, a repository's own hook installer, `brew insta
 
 What it cannot do:
 
-- **Reach HQ's control plane.** It cannot read or write the host directory except its own
-  `agent.sock`, hook and MCP files (the operator token and every other session's token live
-  there), or `~/.hq`.
+- **Read or write HQ's own files.** The host directory except its own `agent.sock`, hook and
+  MCP files (the operator token and every other session's token live there); `~/.hq`; the
+  vault's `_data` folder (the database with sign-in tokens, owner approvals and paired
+  devices, and the TLS and web push keys); and the config file in force (`HQ_CONFIG_PATH`,
+  `~/.hq/config.yaml` or `/opt/hq/config.yaml`) with its backups and every `*.env` file beside
+  it (such as `/opt/hq/mcp.env`). The host resolves the vault and config the way HQ does on
+  its own machine when `hq host serve` starts, so restart the host after moving either.
+- **Change what HQ loads into its own sessions.** The vault's `_system`, `_threads`,
+  `_agents`, `skills`, `_moc`, `_plans` and `_embeddings` folders are read-only to it, and the
+  folders above them cannot be renamed. Notes elsewhere in the vault stay writable.
 - **See other processes' environments** (`ps eww`, `/proc/<pid>/environ`), which hold the
   daemon's and the other agents' tokens. The price is that `ps`, `lsof` and `kill` show only
   the agent's own processes: a server an earlier session left running is invisible, so pick
@@ -317,7 +324,9 @@ cannot be moved aside and replaced; work inside them is unaffected. `allow_domai
 The agent:
 
 - cannot read the run directory except `host.sock` and its own hook and MCP
-  files, nor `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube` or `~/.hq`;
+  files, nor `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube` or `~/.hq`, nor the vault's `_data`
+  folder or HQ's config file and the env files beside it, wherever they are, and cannot
+  write the vault folders HQ loads into its sessions (as under the open profile);
 - can write only its project, `~/.claude`, caches and the temporary directories
   (plus `agent_host.sandbox.writable`);
 - cannot see other processes' environments;
