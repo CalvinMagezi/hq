@@ -135,9 +135,14 @@ pub fn canonical_json(v: &serde_json::Value) -> String {
 
 /// SHA-256 of a file as lowercase hex.
 pub fn file_sha256(path: &std::path::Path) -> Result<String> {
-    let mut hasher = Sha256::new();
     let mut file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
-    std::io::copy(&mut file, &mut hasher)?;
+    reader_sha256(&mut file)
+}
+
+/// SHA-256 of everything left in `reader`, as lowercase hex.
+pub fn reader_sha256(reader: &mut impl std::io::Read) -> Result<String> {
+    let mut hasher = Sha256::new();
+    std::io::copy(reader, &mut hasher)?;
     Ok(hex::encode(hasher.finalize()))
 }
 

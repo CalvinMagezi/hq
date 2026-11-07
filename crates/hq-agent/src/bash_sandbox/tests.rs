@@ -456,6 +456,33 @@ fn gate_keys_are_masked_and_the_gate_authorized_keys_file_is_read_only() {
 }
 
 #[test]
+fn the_install_paths_are_read_only() {
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(home.path().join("bin")).unwrap();
+    std::fs::write(home.path().join("bin/hq"), "binary").unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let install = elsewhere.path().join("hq");
+    // What `HqConfig::load` registers from `self_update.install_paths`.
+    hq_core::config::protected::register(hq_core::config::protected::ProtectedFiles {
+        readonly: vec![install.clone()],
+    });
+    let read_only = readonly_files(Some(home.path()));
+    assert!(
+        read_only.contains(&home.path().join("bin/hq")),
+        "{read_only:?}"
+    );
+    assert!(read_only.contains(&install), "{read_only:?}");
+    // Enforced as a read-only bind after the writable HOME bind, as authorized_keys is.
+    let ctx = SandboxContext {
+        readonly_files: vec![PathBuf::from("/home/u/bin/hq")],
+        ..ctx(true)
+    };
+    let args = strings(&bwrap_args(&ctx, "true"));
+    let ro = position(&args, &["--ro-bind", "/home/u/bin/hq", "/home/u/bin/hq"]).unwrap();
+    assert!(position(&args, &["--bind", "/home/u", "/home/u"]).unwrap() < ro);
+}
+
+#[test]
 fn the_private_planes_secrets_are_masked_and_its_directories_are_read_only() {
     let home = tempfile::tempdir().unwrap();
     for (dir, files) in [

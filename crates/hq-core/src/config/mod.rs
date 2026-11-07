@@ -18,6 +18,7 @@ mod mcp_connector;
 mod memory;
 pub mod model_switch;
 mod profile;
+pub mod protected;
 mod relay;
 mod self_update;
 mod skills;
@@ -648,6 +649,8 @@ impl HqConfig {
             config.vault_path =
                 prefer_server_path(home_vault, std::path::Path::new(SERVER_VAULT_PATH));
         }
+        // The bash sandbox and the secret classifier read these per command.
+        protected::register(protected::ProtectedFiles::from_config(&config));
         Ok(config)
     }
 

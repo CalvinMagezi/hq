@@ -106,7 +106,12 @@ and the OS sandbox. That is also why `required` is the default.
 ### Extra sandbox rules
 
 `authorized_keys*` under `~/.ssh` is bound read-only, so the agent cannot plant
-a login key even though HOME is writable. The Docker socket
+a login key even though HOME is writable. `~/bin/hq` and every
+`self_update.install_paths` entry (resolved through symlinks, so a
+`/usr/local/bin/hq` that points at `~/bin/hq` is covered) are read-only too: a
+command may run `hq` but not replace the binary the daemon restarts into. That
+also means `scripts/install-hq.sh` cannot be run from the agent's shell. The
+Docker socket
 (`/var/run/docker.sock`, `/run/docker.sock`) and the systemd user sockets in
 `XDG_RUNTIME_DIR` are masked. Remaining design-level residuals: HOME stays
 writable, so shell rc files and `~/.config` autostart entries can be modified

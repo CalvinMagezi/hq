@@ -47,6 +47,10 @@ const HQ_READONLY_DIRS: &[&str] = &[".hq/net", ".hq/tunnel"];
 /// Where this machine keeps the signing keys it uses to call a host's TCP gate, and the file that
 /// lists which keys may call this machine's gate.
 const HQ_GATE_KEY_DIR: &str = ".hq/gate";
+
+/// Where `scripts/install-hq.sh` and the default self-update config put `hq`, relative to
+/// HOME. `/usr/local/bin/hq` is often a symlink to it, and HOME is writable.
+const DEFAULT_INSTALL_PATH: &str = "bin/hq";
 const HQ_GATE_AUTHORIZED_KEYS: &str = ".hq/gate_authorized_keys";
 
 const DOCKER_SOCKETS: &[&str] = &["/var/run/docker.sock", "/run/docker.sock"];
@@ -173,10 +177,14 @@ fn masked_files(home: Option<&Path>) -> Vec<PathBuf> {
 /// Files that stay readable but must not be written, since a write would give
 /// the agent a foothold that outlives the sandbox.
 fn readonly_files(home: Option<&Path>) -> Vec<PathBuf> {
+    // The self-update install paths: `hq self-apply` checks the binary it installs,
+    // but a write here would replace the binary the daemon runs without it.
+    let mut files = hq_core::config::protected::registered().readonly;
     let Some(home) = home else {
-        return Vec::new();
+        return files;
     };
-    let mut files = vec![home.join(HQ_GATE_AUTHORIZED_KEYS)];
+    files.push(home.join(HQ_GATE_AUTHORIZED_KEYS));
+    files.push(home.join(DEFAULT_INSTALL_PATH));
     if let Ok(entries) = std::fs::read_dir(home.join(".ssh")) {
         files.extend(
             entries
