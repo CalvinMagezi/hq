@@ -51,7 +51,14 @@ swapped binary needs a new approval.
   binary over the install path. The barrier against that is the bash sandbox
   (`BASH_SANDBOX.md`, which masks the key file), not this gate. Production
   deployments should use `hq update` (signed releases) and leave self-update off.
-- `self_update_check` and the release build run code from the edited tree
-  (tests, `build.rs`) before and after approval. Read the branch, not just the
-  diff stat, before approving.
+- `self_update_check` runs `cargo check` and `cargo test` on the edited tree
+  before anything is approved, and the release build runs it again after. Its
+  build scripts (`build.rs`), proc macros and tests are code the agent may have
+  written, and they run as the HQ user, outside the bash sandbox, with the HQ
+  user's files, environment and network. No approval stands in front of
+  `self_update_check`: an agent that may call it can run code of its choosing
+  that way. The approval guards the install, not the check. Read the branch,
+  not just the diff stat, before approving.
+- `packages` on `self_update_check` takes plain crate names only (letters,
+  digits, `-` and `_`), so a value cannot reach cargo as an option.
 - Installed binaries are built locally and are not signed.
