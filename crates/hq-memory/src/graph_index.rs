@@ -66,7 +66,7 @@ pub fn parse_page_edges(page_path: &str, body: &str) -> Vec<PageEdge> {
         let src = cap
             .get(3)
             .map(|m| m.as_str().trim())
-            .filter(|s| safe_vault_path(s));
+            .filter(|s| safe_vault_path(s) || hq_db::chat::is_evidence_ref(s));
         edges.push(PageEdge {
             relation: cap[1].to_string(),
             target_slug: canonical_slug(&cap[2]),

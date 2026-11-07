@@ -181,11 +181,92 @@ impl Summarizer for LlmSummarizer {
     }
 }
 
+/// Relations a fold summary may state, as `- relation: Subject -> Object (m:ref)` lines after
+/// `RELATIONS:`. They become typed edges in the entity graph with the cited message as evidence.
+pub const RELATIONS: &[&str] = &[
+    "decided_for",
+    "decided_against",
+    "prefers",
+    "owes",
+    "works_with",
+    "part_of",
+    "replaces",
+    "depends_on",
+    "located_in",
+];
+
+/// A relation a fold found, with the chat message that states it (`chat:<thread>/<message>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relation {
+    pub relation: String,
+    pub subject: String,
+    pub object: String,
+    pub evidence: String,
+}
+
+/// Splits the `RELATIONS:` section off a summary. A relation is kept only when it uses a known
+/// relation, cites a message in the folded range, and that message names both ends word for
+/// word; the rest is dropped, so a summary cannot put a guess into the graph.
+pub fn split_relations(raw: &str, range: &[StoredMessage]) -> (String, Vec<Relation>) {
+    let Some(at) = raw.find("RELATIONS:") else {
+        return (raw.to_string(), Vec::new());
+    };
+    let (summary, section) = raw.split_at(at);
+    let mut out = Vec::new();
+    for line in section.lines().skip(1) {
+        let Some(rel) = parse_relation_line(line.trim(), range) else {
+            continue;
+        };
+        if !out.contains(&rel) && out.len() < 5 {
+            out.push(rel);
+        }
+    }
+    (summary.trim_end().to_string(), out)
+}
+
+fn parse_relation_line(line: &str, range: &[StoredMessage]) -> Option<Relation> {
+    let rest = line.strip_prefix("- ")?;
+    let (relation, rest) = rest.split_once(':')?;
+    let relation = relation.trim();
+    if !RELATIONS.contains(&relation) {
+        return None;
+    }
+    let open = rest.rfind("(m:")?;
+    let reference = rest[open + 3..].trim().strip_suffix(')')?.trim();
+    let (subject, object) = rest[..open].split_once("->")?;
+    let (subject, object) = (subject.trim(), object.trim());
+    let fits = |s: &str| !s.is_empty() && s.chars().count() <= 60 && !s.contains(['[', ']', '\n']);
+    if !fits(subject) || !fits(object) || reference.len() < 4 {
+        return None;
+    }
+    let message = range
+        .iter()
+        .find(|m| m.message.message_id.starts_with(reference))?;
+    let body = message.message.content.to_lowercase();
+    if !body.contains(&subject.to_lowercase()) || !body.contains(&object.to_lowercase()) {
+        return None;
+    }
+    Some(Relation {
+        relation: relation.to_string(),
+        subject: subject.to_string(),
+        object: object.to_string(),
+        evidence: hq_db::chat::evidence_ref(
+            &message.message.thread_id,
+            &message.message.message_id,
+        ),
+    })
+}
+
 /// What one call to [`fold_thread`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FoldOutcome {
-    /// A tier-1 block over this many messages.
-    Folded { fold_id: String, messages: usize },
+    /// A tier-1 block over this many messages, and the relations it found (none for a block
+    /// over someone other than the owner's words).
+    Folded {
+        fold_id: String,
+        messages: usize,
+        relations: Vec<Relation>,
+    },
     /// A tier-2 block that absorbed this many blocks.
     Distilled { fold_id: String, blocks: usize },
 }
@@ -333,6 +414,11 @@ pub async fn fold_thread(
         let range = &tail[..cut];
         let input = render_input(range);
         let raw = summarizer.summarize(rules::TIER1_RULES, &input).await?;
+        let (raw, mut relations) = split_relations(&raw, range);
+        let tainted = range.iter().any(is_untrusted);
+        if tainted {
+            relations.clear();
+        }
         let first = &range[0].message;
         let last = &range[cut - 1].message;
         let summary = finish_summary(
@@ -356,7 +442,7 @@ pub async fn fold_thread(
                     summary: &summary,
                     source_tokens: range.iter().map(tokens_of).sum::<usize>() as i64,
                     summary_tokens: count_tokens_char_weighted(&summary) as i64,
-                    tainted: range.iter().any(is_untrusted),
+                    tainted,
                     model: &model,
                 },
             )
@@ -364,6 +450,7 @@ pub async fn fold_thread(
         done.push(FoldOutcome::Folded {
             fold_id: fold.id,
             messages: cut,
+            relations,
         });
     }
     if let Some(outcome) = distill(db, thread_id, cfg, summarizer).await? {
@@ -462,6 +549,7 @@ pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
             Ok(done) if !done.is_empty() => {
                 tracing::info!(thread_id, ?done, "chat history folded");
                 embed_folds(&db, &done).await;
+                record_relations(&db, &done);
             }
             Ok(_) => {}
             Err(e) => tracing::warn!(
@@ -470,6 +558,56 @@ pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
             ),
         }
     });
+}
+
+/// Writes the relations new folds found onto the concept pages (`_graph/`), each citing its chat
+/// message, and reindexes the pages it touched. The graph re-reads that message whenever a path
+/// uses the edge, so a deleted or edited message drops it.
+pub fn record_relations_in(
+    db: &Database,
+    vault: &hq_vault::VaultClient,
+    done: &[FoldOutcome],
+) -> usize {
+    let mut written = 0;
+    for outcome in done {
+        let FoldOutcome::Folded { relations, .. } = outcome else {
+            continue;
+        };
+        for r in relations {
+            let added = hq_memory::concept_pages::add_relation(
+                vault,
+                &r.subject,
+                &r.relation,
+                &r.object,
+                Some(&r.evidence),
+            );
+            if let Err(e) = added {
+                tracing::debug!(relation = %r.relation, "fold relation not written: {e:#}");
+                continue;
+            }
+            written += 1;
+            for name in [&r.subject, &r.object] {
+                let page = hq_memory::concept_pages::concept_page_rel_path(name);
+                let _ = hq_memory::graph_index::reindex_page(db, vault, &page);
+            }
+        }
+    }
+    written
+}
+
+fn record_relations(db: &Database, done: &[FoldOutcome]) {
+    let any = done
+        .iter()
+        .any(|d| matches!(d, FoldOutcome::Folded { relations, .. } if !relations.is_empty()));
+    if !any {
+        return;
+    }
+    let Ok(config) = hq_core::config::HqConfig::load() else {
+        return;
+    };
+    if let Ok(vault) = hq_vault::VaultClient::new(config.vault_path.clone()) {
+        record_relations_in(db, &vault, done);
+    }
 }
 
 /// Embeds new fold summaries with the on-device model, when the owner chose local embeddings,

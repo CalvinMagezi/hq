@@ -7,7 +7,7 @@
 use super::types::ChildRequest;
 use chrono::{DateTime, Utc};
 use hq_db::Database;
-use hq_memory::context_packet::{CitationReport, ContextPacket, build_packet, verify_citations};
+use hq_memory::context_packet::{CitationReport, ContextPacket, build_packet};
 use hq_vault::VaultClient;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -65,11 +65,14 @@ pub(super) async fn prepare_async(
 
 pub(super) fn check_citations(
     vault_path: &Path,
+    db: Option<&Database>,
     output: &str,
     packet: &ContextPacket,
 ) -> Option<CitationReport> {
     let vault = VaultClient::new(vault_path.to_path_buf()).ok()?;
-    Some(verify_citations(output, packet, &vault))
+    Some(hq_memory::context_packet::verify_citations_in(
+        output, packet, &vault, db,
+    ))
 }
 
 #[cfg(test)]
@@ -198,7 +201,7 @@ mod tests {
         let (_, packet) = prepare(dir.path(), None, child("a", "g", "billing"), Utc::now());
         let packet = packet.unwrap();
         let answer = "Due in 30 days [S1], also [S4].\nSources used: S1\nGaps: none";
-        let report = check_citations(dir.path(), answer, &packet).unwrap();
+        let report = check_citations(dir.path(), None, answer, &packet).unwrap();
         assert_eq!(report.verified, vec!["S1"]);
         assert_eq!(report.unknown, vec!["S4"]);
         assert!(report.lists_sources_and_gaps);

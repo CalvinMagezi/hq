@@ -269,3 +269,24 @@ fn secrets_never_reach_a_stored_summary() {
     assert!(!out.contains(&key), "{out}");
     assert!(finish_summary("   ", "a", "a").is_empty());
 }
+
+#[test]
+fn relations_need_a_known_kind_a_real_ref_and_both_names_in_that_message() {
+    let mut said = stored("user", "We pay rent to Example Estates from now on");
+    said.message.message_id = "abcdef12-0000-0000-0000-000000000000".into();
+    let range = vec![said, stored("assistant", "ok")];
+    let raw = "Goal as of this block: rent\nRELATIONS:\n\
+        - decided_for: rent -> Example Estates (m:abcdef12)\n\
+        - decided_for: rent -> Nowhere Ltd (m:abcdef12)\n\
+        - loves: rent -> Example Estates (m:abcdef12)\n\
+        - decided_for: rent -> Example Estates (m:99999999)\n\
+        - decided_for: rent -> Example Estates (m:abcdef12)";
+    let (summary, relations) = split_relations(raw, &range);
+    assert_eq!(summary, "Goal as of this block: rent");
+    assert_eq!(relations.len(), 1, "{relations:?}");
+    assert_eq!(relations[0].object, "Example Estates");
+    assert!(relations[0].evidence.starts_with("chat:t/abcdef12"));
+    let (same, none) = split_relations("no section here", &range);
+    assert_eq!(same, "no section here");
+    assert!(none.is_empty());
+}

@@ -363,6 +363,46 @@ pub fn delete_messages_from(conn: &Connection, thread_id: &str, message_id: &str
     Ok(deleted)
 }
 
+/// The evidence form a graph relation uses to point at one chat message:
+/// `chat:<thread_id>/<message_id>`.
+pub fn evidence_ref(thread_id: &str, message_id: &str) -> String {
+    format!("chat:{thread_id}/{message_id}")
+}
+
+/// Whether `evidence` has the `chat:<thread_id>/<message_id>` shape (ids of hex and dashes).
+pub fn is_evidence_ref(evidence: &str) -> bool {
+    parse_evidence_ref(evidence).is_some()
+}
+
+fn parse_evidence_ref(evidence: &str) -> Option<(&str, &str)> {
+    let (thread, message) = evidence.trim().strip_prefix("chat:")?.split_once('/')?;
+    let ok = |s: &str| s.len() >= 8 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    (ok(thread) && ok(message)).then_some((thread, message))
+}
+
+/// The chat message a `chat:` evidence ref points at, if it still exists.
+pub fn read_evidence(conn: &Connection, evidence: &str) -> Result<Option<ChatMessage>> {
+    let Some((thread, message)) = parse_evidence_ref(evidence) else {
+        return Ok(None);
+    };
+    conn.query_row(
+        "SELECT message_id, thread_id, role, content, created_at FROM chat_messages
+          WHERE thread_id = ?1 AND message_id = ?2",
+        params![thread, message],
+        |row| {
+            Ok(ChatMessage {
+                message_id: row.get(0)?,
+                thread_id: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 /// Whether any chat message, in any thread (archived ones too), contains `needle`.
 pub fn any_message_mentions(conn: &Connection, needle: &str) -> Result<bool> {
     conn.query_row(
