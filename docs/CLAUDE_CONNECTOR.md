@@ -156,8 +156,8 @@ On top of the scope:
   keeps its tags and assignees but sends nobody a message: no agent mailbox and not your chat.
   An agent sees the task when it looks at its queue, never as something pushed at it.
 - **Coding sessions are not gated**, so Claude can drive agents for you, but only in the host's
-  HQ folder, `handoff_cwd_allow` folders and folders you approved when it asked, only the sessions it started (yours stay yours), and
-  every one it starts sends you a notice with what it was told.
+  HQ folder, `handoff_cwd_allow` folders and folders you approved when it asked, only the sessions it started (yours stay yours: it cannot drive them or have a session it starts observe them), and
+  every one it starts sends you a notice with what it was told and which sessions it observes.
 - **Provenance.** Tasks Claude writes are attributed to `mcp:connector/<connection name>`.
 - **Limits and records.** 120 calls a minute per connection. Every call is logged (tool, outcome
   and a hash of its arguments, never the arguments) for 30 days: Settings shows the newest, and

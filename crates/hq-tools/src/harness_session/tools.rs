@@ -274,6 +274,7 @@ impl HqTool for HarnessSessionSpawnTool {
         {
             observe = super::team::writers(&self.db, root);
         }
+        super::subscribe::check_spawn_observe(&self.db, &args, &observe)?;
         let worktree = super::checkout::parse_worktree(&args)?;
         let owns = super::checkout::parse_owns(&args)?;
         let policy = super::policy::parse(&args);
@@ -358,7 +359,10 @@ impl HqTool for HarnessSessionSpawnTool {
             report["cwd_note"] = json!(note);
         }
         super::tag_origin(&self.db, &report, origin);
-        let brief = super::connector_brief(&args, &["prompt", "goal", "done_criteria"]);
+        let brief = super::with_observed(
+            super::connector_brief(&args, &["prompt", "goal", "done_criteria"]),
+            &observe,
+        );
         let cwd = report["cwd"].as_str().unwrap_or("unknown").to_string();
         super::notify_connector_start(&self.db, &args, &report, &brief, &cwd);
         Ok(report)

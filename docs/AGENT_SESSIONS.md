@@ -875,7 +875,9 @@ hands them, and that is mechanical rather than a matter of prompt wording:
   with the observed agent's last reply or screen tail, and types it in when the observer is
   next idle, the same route a delegated child uses to report to its parent. The text is the
   observed agent's screen and is presented as such, never as an instruction. Spawn reports
-  `observing` and says so in `observing_note`. The ids are checked before anything launches.
+  `observing` and says so in `observing_note`. The ids are checked before anything launches:
+  a claude.ai connection may name only sessions it started and their teams, and the handoff
+  key none, the same line `harness_session_subscribe` holds.
 - **Subscribing while running.** `harness_session_subscribe(session_ids, kinds?)` does the same
   for a session that is already running, so a Copilot coder can hear when the agy session it
   waits on finishes without polling. A session subscribes only itself, needs a task, and may

@@ -3481,6 +3481,23 @@ fn a_connection_drives_only_sessions_a_connection_started() {
     );
     assert_eq!(call_origin(None, &connector), registry::ORIGIN_CONNECTOR);
     assert_eq!(call_origin(None, &json!({})), registry::ORIGIN_MCP);
+
+    // Observing at spawn holds the same line: a connection hears only from its own sessions.
+    let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let check = subscribe::check_spawn_observe;
+    assert!(check(&db, &connector, &ids(&["hs-claude", "hs-worker"])).is_ok());
+    let err = check(&db, &connector, &ids(&["hs-claude", "hs-owner"])).unwrap_err();
+    assert!(err.to_string().contains("hs-owner"), "{err}");
+    assert!(check(&db, &connector, &ids(&["hs-owners-worker"])).is_err());
+    assert!(check(&db, &connector, &[]).is_ok());
+    let handoff = json!({ HANDOFF_SCOPE_ARG: true });
+    let err = check(&db, &handoff, &ids(&["hs-claude"])).unwrap_err();
+    assert!(err.to_string().contains("handoff key"), "{err}");
+    assert!(check(&db, &handoff, &[]).is_ok());
+    assert!(
+        check(&db, &json!({}), &ids(&["hs-owner"])).is_ok(),
+        "the owner observes any session"
+    );
 }
 
 /// The host's `agent.pending` reply for a Copilot path dialog numbered `seq`.

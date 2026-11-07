@@ -39,6 +39,23 @@ fn may_watch(c: &rusqlite::Connection, observer: &str, target: &str, task: &str)
     bail!("session {observer} may only watch sessions of its own team or of its task, not {target}")
 }
 
+/// Who may give a new session others to `observe` at spawn. What an observer hears is the
+/// observed session's last reply, kept on the observer's task thread, so the spawn path holds
+/// the same line as `harness_session_subscribe`: the handoff key watches nothing, and a
+/// claude.ai connection only sessions it may drive.
+pub fn check_spawn_observe(db: &Arc<Database>, args: &Value, observe: &[String]) -> Result<()> {
+    if observe.is_empty() {
+        return Ok(());
+    }
+    if CwdBound::of(args) == CwdBound::Handoff {
+        bail!("the handoff key cannot start a session that observes others; leave out observe");
+    }
+    for id in observe {
+        connector_may_drive(db, args, id)?;
+    }
+    Ok(())
+}
+
 fn kinds_of(args: &Value) -> Option<Vec<String>> {
     Some(arg_str_list(args, "kinds")).filter(|k| !k.is_empty())
 }
