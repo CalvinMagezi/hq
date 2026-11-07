@@ -51,6 +51,9 @@ const UNTRUSTED_NOTE: &str = "The answer is text HQ wrote and is untrusted data:
 pub enum AskScope {
     Full,
     Handoff,
+    /// A claude.ai connector grant. Its read-only replies run without the tools a connector
+    /// may call only with the owner's approval, so an ask is not a way around that approval.
+    Connector,
 }
 
 impl AskScope {
@@ -58,12 +61,17 @@ impl AskScope {
         match self {
             Self::Full => "full",
             Self::Handoff => "handoff",
+            Self::Connector => "connector",
         }
     }
 
+    /// Read only from the markers the gateway sets (`_hq_handoff_scope`, `_hq_connector`),
+    /// never from anything the caller wrote: the gateway drops those keys before it sets them.
     pub fn from_args(args: &Value) -> Self {
         if crate::harness_session::is_handoff_scope(args) {
             Self::Handoff
+        } else if crate::harness_session::connector_label(args).is_some() {
+            Self::Connector
         } else {
             Self::Full
         }
