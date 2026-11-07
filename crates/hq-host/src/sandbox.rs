@@ -736,23 +736,34 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
     let mut dirs = claude_dirs;
     dirs.extend(under(home, OPEN_READONLY_HOME_DIRS));
     dirs.extend(revealed);
-    let mut pinned_dirs = Vec::new();
     if !bwrap {
         // Seatbelt hides a path by refusing reads of it, so with every write allowed
-        // the hidden directories must be closed to writes too, and so must the
-        // directories above them. Under bubblewrap a hidden directory is a mount
-        // over an empty one, which cannot be renamed, written or carried off.
+        // the hidden directories must be closed to writes too. Under bubblewrap a
+        // hidden directory is a mount over an empty one, which cannot be written.
         dirs.extend(hidden.iter().map(|h| h.dir.clone()));
-        pinned_dirs = pinned_parents(&hidden, home);
     }
+    let readonly_files = keep(files);
+    let readonly_subpaths = keep(dirs);
+    // The directories above everything protected stay where they are: moving one
+    // would carry a hidden directory out from under the rule that names it, or
+    // (under bubblewrap, where a read-only path is a mount that moves with its
+    // parent) free the protected path for a planted copy.
+    let pinned_dirs = pinned_parents(
+        hidden
+            .iter()
+            .map(|h| h.dir.as_path())
+            .chain(readonly_subpaths.iter().map(PathBuf::as_path))
+            .chain(readonly_files.iter().map(PathBuf::as_path)),
+        home,
+    );
     let macos = cfg!(target_os = "macos");
     AgentSandbox {
         project,
         open_filesystem: true,
         writable: Vec::new(),
         writable_files: Vec::new(),
-        readonly_files: keep(files),
-        readonly_subpaths: keep(dirs),
+        readonly_files,
+        readonly_subpaths,
         pinned_dirs,
         denied_programs: if macos {
             DENIED_PROGRAMS.iter().map(PathBuf::from).collect()
@@ -791,15 +802,13 @@ fn with_link_targets(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     out
 }
 
-/// The directories above each hidden one, up to but not including HOME (or the
-/// filesystem root): moving one would carry the hidden directory out from under
-/// the rule that names it.
-fn pinned_parents(hidden: &[HiddenDir], home: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = hidden
-        .iter()
-        .flat_map(|h| {
-            h.dir
-                .ancestors()
+/// The directories above each protected path, up to but not including HOME (or
+/// the filesystem root): moving one would carry the path out from under the rule
+/// that names it.
+fn pinned_parents<'a>(protected: impl Iterator<Item = &'a Path>, home: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = protected
+        .flat_map(|p| {
+            p.ancestors()
                 .skip(1)
                 .take_while(|a| *a != home && a.parent().is_some())
                 .map(Path::to_path_buf)
@@ -1281,17 +1290,20 @@ mod tests {
                     .any(|p| p.starts_with(&f.project)),
                 "the project's own .git/hooks, .git/config and .mcp.json stay writable"
             );
-            // Seatbelt needs the hidden directories closed to writes and their parents
-            // pinned; a bubblewrap mount needs neither.
-            assert_eq!(s.pinned_dirs.is_empty(), bwrap, "{:?}", s.pinned_dirs);
+            // Seatbelt needs the hidden directories closed to writes; a bubblewrap
+            // mount does not. Both pin the parents of what they protect.
             assert_eq!(s.readonly_subpaths.contains(&f.run_dir), !bwrap);
-            if !bwrap {
-                assert!(s.pinned_dirs.contains(&f.home.join(".config")));
+            for dir in [".config", ".claude"] {
                 assert!(
-                    !s.pinned_dirs.contains(&f.home),
-                    "home itself is not pinned"
+                    s.pinned_dirs.contains(&f.home.join(dir)),
+                    "{dir} pinned: {:?}",
+                    s.pinned_dirs
                 );
             }
+            assert!(
+                !s.pinned_dirs.contains(&f.home),
+                "home itself is not pinned"
+            );
             hq_sandbox::bwrap_args(&s, &["true".to_string()]).expect("no relay is needed");
         }
     }
@@ -1515,6 +1527,8 @@ mod tests {
              t write_hook 'echo x > {project}/.git/hooks/pre-commit'; t write_git_config 'echo x >> {project}/.git/config'; \
              t write_mcp 'echo x > {project}/.mcp.json'; \
              t write_hq 'echo x > {home}/.hq/new'; t write_run 'echo x > {run}/new'; \
+             mv {home}/.claude {home}/.claude.moved 2>/dev/null; mkdir -p {home}/.claude; \
+             t planted_settings 'echo PLANTED > {home}/.claude/settings.json'; \
              mv {home}/.config {home}/.config.moved 2>/dev/null; t moved_gh 'sees {home}/.config.moved/gh/hosts.yml'; \
              t shared_tmp 'echo x > {shared}'; echo DONE",
             shared = shared.display()
@@ -1556,6 +1570,7 @@ mod tests {
             ("write_git_config", true),
             ("write_mcp", true),
             ("moved_gh", false),
+            ("planted_settings", false),
             ("shared_tmp", true),
         ] {
             let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
@@ -1572,6 +1587,11 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(f.home.join(".zshrc")).unwrap(),
             "# rc"
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.home.join(".claude/settings.json")).unwrap(),
+            "{}",
+            "a renamed parent freed a read-only file"
         );
     }
 }

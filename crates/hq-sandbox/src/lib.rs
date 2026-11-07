@@ -88,8 +88,11 @@ pub struct AgentSandbox {
     pub readonly_subpaths: Vec<PathBuf>,
     /// Directories that must not be renamed or removed, only because something
     /// protected lies below them: moving the parent would put the protected path
-    /// out of reach of every rule that names it. Seatbelt matches paths, so it
-    /// needs the rule; bubblewrap does not, a mount stays with its directory.
+    /// out of reach of every rule that names it. Seatbelt denies the unlink.
+    /// Bubblewrap binds each one over itself, since a mount point cannot be
+    /// renamed: a read-only mount moves with its parent, so without the pin a
+    /// renamed parent would free the protected path for a planted copy. Writes
+    /// inside a pinned directory are unaffected.
     pub pinned_dirs: Vec<PathBuf>,
     /// Programs the agent may not start (macOS: a way out of the sandbox).
     pub denied_programs: Vec<PathBuf>,
@@ -336,6 +339,25 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
         }
     }
     for dir in std::iter::once(&s.project).chain(&s.writable) {
+        args.extend(["--bind".into(), dir.into(), dir.into()]);
+    }
+    // After the writable roots (a later bind would shadow a pin inside one) and
+    // before the read-only binds and hidden directories (a pin bound later would
+    // shadow them). With a read-only root, only a pin inside a writable root can
+    // be renamed at all, and binding any other one writable would open it.
+    let mut pins: Vec<&PathBuf> = s
+        .pinned_dirs
+        .iter()
+        .filter(|d| d.is_dir())
+        .filter(|d| {
+            s.open_filesystem
+                || std::iter::once(&s.project)
+                    .chain(&s.writable)
+                    .any(|w| d.starts_with(w))
+        })
+        .collect();
+    pins.sort_by_key(|d| d.components().count());
+    for dir in pins {
         args.extend(["--bind".into(), dir.into(), dir.into()]);
     }
     for path in s.readonly_files.iter().chain(&s.readonly_subpaths) {

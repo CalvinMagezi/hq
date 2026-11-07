@@ -751,6 +751,83 @@ fn moving_a_parent_cannot_expose_a_hidden_directory() {
 }
 
 #[test]
+fn moving_a_parent_cannot_free_a_read_only_path_for_a_planted_copy() {
+    let backend = need_backend!();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let parent = root.join("vault");
+    let locked = parent.join("_system");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(locked.join("SOUL.md"), "ORIGINAL").unwrap();
+    let project = root.join("project");
+    std::fs::create_dir(&project).unwrap();
+    let mut s = sandbox(&project);
+    s.open_filesystem = true;
+    s.readonly_subpaths = vec![locked.clone()];
+    s.pinned_dirs = vec![parent.clone()];
+    let out = inside(
+        backend,
+        &s,
+        &format!(
+            "echo x > {p}/note.md && echo INSIDE-OK; mv {p} {r}/moved; \
+             mkdir -p {p}/_system; echo PLANTED > {p}/_system/SOUL.md; echo DONE",
+            p = parent.display(),
+            r = root.display()
+        ),
+    );
+    assert!(out.contains("DONE"), "{out}");
+    assert!(
+        out.contains("INSIDE-OK"),
+        "pinning must not stop writes inside: {out}"
+    );
+    assert!(
+        !root.join("moved").exists(),
+        "the pinned directory moved: {out}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(locked.join("SOUL.md")).unwrap(),
+        "ORIGINAL",
+        "{out}"
+    );
+}
+
+#[test]
+fn bubblewrap_pins_only_what_a_read_only_root_leaves_movable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let (project, outside) = (root.join("p"), root.join("h"));
+    let inner = project.join(".vault");
+    for d in [&inner, &outside] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mut s = sandbox(&project);
+    s.pinned_dirs = vec![inner.clone(), outside.clone()];
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let bound = |d: &Path| {
+        let d = d.to_string_lossy().into_owned();
+        args.windows(3)
+            .any(|w| w[0] == "--bind" && w[1] == d && w[2] == d)
+    };
+    assert!(bound(&inner), "a pin inside the project: {args:?}");
+    assert!(
+        !bound(&outside),
+        "a pin outside every writable root would open it: {args:?}"
+    );
+    s.open_filesystem = true;
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let o = outside.to_string_lossy().into_owned();
+    assert!(args.windows(3).any(|w| w == ["--bind", &o, &o]), "{args:?}");
+}
+
+#[test]
 fn an_open_filesystem_binds_the_real_root_and_devices_writable() {
     let mut s = sandbox(Path::new("/p"));
     s.open_filesystem = true;

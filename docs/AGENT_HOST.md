@@ -307,7 +307,9 @@ This is a wall around HQ, not a boundary against an agent that means harm. It re
 everything else you can, and a prompt-injected agent can read a file and send it anywhere.
 The guard against that is the agent's own permission mode and classifier, as in your terminal.
 Under bubblewrap a path that does not exist cannot be protected (an agent can create a
-`~/.zshrc` you do not have); Seatbelt denies it either way. `allow_domains`, `writable`,
+`~/.zshrc` you do not have); Seatbelt denies it either way. The directories above a protected
+path (`~/.config`, `~/.claude` and the like) cannot be renamed or removed, so a protected path
+cannot be moved aside and replaced; work inside them is unaffected. `allow_domains`, `writable`,
 `readable` and `loopback_ports` do nothing under this profile.
 
 #### The strict profile
