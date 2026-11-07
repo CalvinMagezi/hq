@@ -336,6 +336,15 @@ pub async fn run_discord_relay(
             sender: Arc::new(move |channel: u64| {
                 dc_sender(sender_http.clone(), ChannelId::new(channel))
             }),
+            // The family channel and its threads are guests' chats; read fresh each time.
+            owner_chat: Arc::new(|channel: u64| {
+                let config = crate::native_run::load_config("discord owner check");
+                !family::is_family_chat(
+                    &config.vault_path,
+                    config.relay.discord_family_channel_id,
+                    channel,
+                )
+            }),
         };
         tokio::spawn(crate::subagent_followup::run_subagent_followups(
             surface.clone(),

@@ -30,6 +30,9 @@ pub struct WatchOrigin {
     pub user_id: String,
     /// A restricted audience (a guest): it may not tie a watch to a task, since the watch writes onto it.
     pub restricted: bool,
+    /// A Discord family guest. A watch fires later as an unattended owner turn, so a guest may
+    /// not create one. (A Telegram guest never gets `watch_create`: its profile denies it.)
+    pub guest: bool,
 }
 
 impl WatchOrigin {
@@ -49,6 +52,7 @@ impl WatchOrigin {
             chat_id,
             user_id: identity.user_id.clone(),
             restricted: !identity.scope.is_unrestricted(),
+            guest: identity.family_guest.is_some(),
         })
     }
 
@@ -197,6 +201,9 @@ impl HqTool for WatchCreateTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let origin = require_origin(&self.origin)?;
+        if origin.guest {
+            anyhow::bail!("watches are for the owner only; a guest cannot create one");
+        }
         let prompt = arg_str(&args, "prompt");
         if prompt.trim().is_empty() {
             anyhow::bail!("prompt is required");
@@ -500,6 +507,29 @@ mod tests {
         tools[2].execute(json!({ "id": short })).await.unwrap();
         let listed = tools[1].execute(json!({})).await.unwrap();
         assert!(listed["watches"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_family_guest_cannot_create_a_watch() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        let mut identity = RequestIdentity::from_discord(7);
+        identity.family_guest = Some(hq_core::identity::FamilyGuestInfo {
+            name: "Sam".into(),
+            origin_channel_id: 7,
+            owner_name: "the owner".into(),
+            allowed_harnesses: vec![],
+        });
+        let tools = create_watch_tools(db.clone(), WatchOrigin::from_identity(&identity));
+        let err = tools[0]
+            .execute(json!({ "interval_minutes": 10, "prompt": "x" }))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("owner only"), "{err}");
+        assert!(
+            db.with_conn(background_turns::list_running)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

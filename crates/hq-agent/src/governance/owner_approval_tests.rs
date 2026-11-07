@@ -136,6 +136,18 @@ fn reads_and_notes_never_need_the_owner() {
     assert!(!needs_owner("read_file", "coding", &json!({})));
 }
 
+// A watch runs later as an unattended turn that never asks the owner, so a
+// model (or text it read) creating one must be approved first.
+#[test]
+fn creating_a_watch_needs_the_owner() {
+    assert!(needs_owner(
+        "watch_create",
+        "scheduling",
+        &json!({"interval_minutes": 10, "prompt": "check"})
+    ));
+    assert!(!needs_owner("watch_list", "scheduling", &json!({})));
+}
+
 #[tokio::test]
 async fn a_spoken_question_is_quoted_at_the_top_of_its_request() {
     let db = Arc::new(Database::open_memory().unwrap());

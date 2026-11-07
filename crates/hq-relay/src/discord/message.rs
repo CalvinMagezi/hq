@@ -204,12 +204,18 @@ impl Handler {
         content: &str,
         lower: &str,
     ) -> ControlFlow<(), Option<String>> {
+        // The family channel and its threads are guest chats, whoever types there.
+        let is_owner = !self.family_authorized(msg).await
+            && !self
+                .is_family_channel_or_thread(effective_channel.get())
+                .await;
         let reply = crate::chat_commands::registry_command(
             lower,
             content,
             "discord",
             effective_channel.get(),
             None,
+            is_owner,
             || {
                 let config = hq_core::config::HqConfig::load().ok()?;
                 Database::open(&config.db_path()).ok().map(Arc::new)

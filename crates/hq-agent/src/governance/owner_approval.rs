@@ -32,6 +32,8 @@ const OWNER_CONFIRM_TOOLS: &[&str] = &[
     "google_workspace",
     "skill_manage",
     "slash_command_manage",
+    // A watch fires unattended on an interval with no owner to ask, so creating one is asked.
+    "watch_create",
     "harness_session_spawn",
     "harness_session_handoff",
     "agent_delegate",

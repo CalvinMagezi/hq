@@ -111,3 +111,11 @@ confirm identity on your behalf.
 ## Family guest harness limit
 
 `relay.discord_family_allowed_harnesses` lists the host harnesses a family guest may start. It defaults to `["agy"]`. Set it to `[]` to allow any harness. Approval prompts address the Telegram owner by the name in `relay.telegram_users`.
+
+## No watches in the family channel
+
+A watch firing and a sub-agent follow-up run later as unattended turns with the owner's tools, so
+neither runs in the family channel or its threads. `/watch` and `resume` are refused there (for
+the owner too), a family guest's `watch_create` is refused, a watch already stored for one of those
+chats is stopped at its next firing with a notice, and a follow-up for one goes to the owner's
+inbox instead. `/unwatch` still works.

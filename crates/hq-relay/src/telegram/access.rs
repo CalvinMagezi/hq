@@ -158,6 +158,16 @@ pub fn role_for_chat(chat_id: i64, relay: &RelayConfig, owner_id: Option<i64>) -
     TelegramRole::Guest
 }
 
+/// Whether `chat_id` is an owner's chat right now. Asked before an unattended
+/// turn (a watch firing, a sub-agent follow-up) runs there, since those carry
+/// the owner's tools and no guest role.
+pub fn is_owner_chat(vault_path: &Path, relay: &RelayConfig, chat_id: i64) -> bool {
+    let Some(owner) = owner_chat_id(vault_path, relay) else {
+        return false;
+    };
+    role_for_chat(chat_id, relay, Some(owner)) == TelegramRole::Owner
+}
+
 /// Display name for a chat (from `telegram_users` or fallback `tg-{id}`).
 pub fn display_name_for_chat(chat_id: i64, relay: &RelayConfig) -> String {
     relay
@@ -287,6 +297,29 @@ mod tests {
         assert_eq!(role_for_chat(1, &relay, Some(1)), TelegramRole::Owner);
         assert_eq!(role_for_chat(2, &relay, Some(1)), TelegramRole::Guest);
         assert_eq!(display_name_for_chat(2, &relay), "Bob");
+    }
+
+    #[test]
+    fn only_an_owners_chat_may_run_unattended_turns() {
+        let v = vault();
+        let relay = RelayConfig {
+            telegram_authorized_chat_id: Some(1),
+            telegram_allowed_chat_ids: vec![3],
+            telegram_users: vec![TelegramUserEntry {
+                chat_id: 2,
+                name: "Bob".into(),
+                role: TelegramUserRole::Guest,
+            }],
+            ..Default::default()
+        };
+        assert!(is_owner_chat(v.path(), &relay, 1));
+        assert!(!is_owner_chat(v.path(), &relay, 2), "a named guest");
+        assert!(!is_owner_chat(v.path(), &relay, 3), "an allowlisted guest");
+        assert!(!is_owner_chat(v.path(), &relay, 4), "a stranger");
+        assert!(
+            !is_owner_chat(v.path(), &RelayConfig::default(), 1),
+            "no owner at all"
+        );
     }
 
     fn vault() -> tempfile::TempDir {

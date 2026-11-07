@@ -174,6 +174,11 @@ fn spawn_watch_scheduler(
         sender: Arc::new(move |chat: i64| {
             tg_sender(sender_bot.clone(), teloxide::types::ChatId(chat))
         }),
+        // Read fresh each time, so a chat demoted to guest stops getting firings.
+        owner_chat: Arc::new(|chat: i64| {
+            let config = crate::native_run::load_config("telegram owner check");
+            super::access::is_owner_chat(&config.vault_path, &config.relay, chat)
+        }),
     };
     tokio::spawn(crate::subagent_followup::run_subagent_followups(
         surface.clone(),
@@ -406,6 +411,7 @@ impl TgRelay {
             "telegram",
             msg.chat.id.0,
             Some(&caller.identity.user_id),
+            caller.role == TelegramRole::Owner,
             || Some(self.db.clone()),
         );
         match reply {

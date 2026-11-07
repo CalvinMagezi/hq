@@ -46,14 +46,24 @@ enum RegistryCommand {
     Unwatch(String),
 }
 
+/// Reply to a guest who types `/watch` or `resume`.
+pub(crate) const OWNER_ONLY_REGISTRY_REPLY: &str =
+    "Watches and resume are only for the owner of this HQ.";
+
 /// Run `resume`, `watch` or `unwatch` when `lower` is one; `None` otherwise.
 /// `open_db` runs only for a matched command, so plain messages pay nothing.
+///
+/// `is_owner` is false for a guest (a Telegram guest, a Discord family member,
+/// or anyone in the family channel). A watch fires later as an unattended turn
+/// with the owner's tools, and a resume replays someone else's prompt, so both
+/// are refused for a guest. `unwatch` stays open: it can only stop things.
 pub(crate) fn registry_command(
     lower: &str,
     text: &str,
     platform: &str,
     chat_key: impl Display,
     identity: Option<&str>,
+    is_owner: bool,
     open_db: impl FnOnce() -> Option<Arc<Database>>,
 ) -> Option<CommandReply> {
     let usage = |text: &str| Some(CommandReply::Done(text.to_string()));
@@ -71,6 +81,9 @@ pub(crate) fn registry_command(
         };
         RegistryCommand::Unwatch(turn_ref)
     };
+    if !is_owner && !matches!(cmd, RegistryCommand::Unwatch(_)) {
+        return usage(OWNER_ONLY_REGISTRY_REPLY);
+    }
     let Some(db) = open_db() else {
         return usage(REGISTRY_UNAVAILABLE);
     };
@@ -536,8 +549,37 @@ mod tests {
 
     #[test]
     fn plain_messages_never_open_the_registry() {
-        let reply = registry_command("hello", "hello", "telegram", 1, None, || panic!("opened"));
+        let reply = registry_command("hello", "hello", "telegram", 1, None, true, || {
+            panic!("opened")
+        });
         assert!(reply.is_none());
+    }
+
+    #[test]
+    fn a_guest_cannot_watch_or_resume_but_can_unwatch() {
+        for cmd in ["/watch 10 is it green?", "resume", "resume abcdef12"] {
+            let reply = registry_command(cmd, cmd, "telegram", 1, None, false, || {
+                panic!("a guest's {cmd} reached the registry")
+            });
+            let Some(CommandReply::Done(text)) = reply else {
+                panic!("{cmd}: expected a refusal");
+            };
+            assert_eq!(text, OWNER_ONLY_REGISTRY_REPLY, "{cmd}");
+        }
+        let db = Arc::new(Database::open_memory().unwrap());
+        let reply = registry_command(
+            "/unwatch abcdef12",
+            "/unwatch abcdef12",
+            "telegram",
+            1,
+            None,
+            false,
+            || Some(db.clone()),
+        );
+        let Some(CommandReply::Done(text)) = reply else {
+            panic!("expected an unwatch reply");
+        };
+        assert_ne!(text, OWNER_ONLY_REGISTRY_REPLY);
     }
 
     const LINK: &str = "https://hq.example.ts.net:8443/vault#token=abc123";
