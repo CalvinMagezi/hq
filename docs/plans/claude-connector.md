@@ -181,7 +181,8 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    `config_manage`, `host_add`, `host_send` and `host_read` (any pane, including the owner's),
    self-update install and
    rollback, skill and slash-command edits (they persist instructions), task deletes,
-   file edits, commits, PRs and clones on the HQ host, and the convert and OCR tools (they read
+   file edits, folder listings (`list_dir`), git reads (`git_diff`, `git_status`, `git_log`),
+   commits, PRs and clones on the HQ host, and the convert and OCR tools (they read
    and write host paths). Some count only by their arguments: a vault export with `output`
    (it writes anywhere the HQ user can), and a vault write, move or delete whose `path`, `from`
    or `to` is inside `SYSTEM_VAULT_FOLDERS` (`skills/`, `_skills/`, `_commands/` and `agents/`

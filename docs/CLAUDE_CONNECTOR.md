@@ -138,7 +138,7 @@ On top of the scope:
   accounts, messages into your chat or an agent's mailbox, config changes, pairing a machine,
   reading or typing into a terminal pane, self-update, skill, slash-command
   and agent-definition edits, deleting a task, file reads and writes outside the vault (file
-  edits, exports to a path, convert and OCR),
+  edits, folder listings, git diffs, status and logs, exports to a path, convert and OCR),
   commits, PRs and clones, and `hq_ask` in full mode each wait for you. HQ sends
   the exact call to your chat (and the web inbox) with Approve and Dismiss. One approval runs that
   call once, with exactly those arguments. Claude is told to call again after you approve. A

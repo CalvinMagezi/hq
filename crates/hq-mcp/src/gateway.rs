@@ -517,6 +517,12 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "task_delete",
     "note_review",
     "file_edit_batch",
+    // They read the HQ host's disk outside the vault: any folder's listing, and the git
+    // repository HQ runs in.
+    "list_dir",
+    "git_diff",
+    "git_status",
+    "git_log",
     "git_commit",
     "git_pr",
     "github_clone",
@@ -1053,6 +1059,10 @@ mod tests {
             !needs_owner_confirmation(&registry, "harness_session_spawn", &none),
             "coding sessions are deliberately not gated"
         );
+        // Reads of the host's disk outside the vault wait, as the connector doc promises.
+        for tool in ["list_dir", "git_diff", "git_status", "git_log"] {
+            assert!(needs_owner_confirmation(&registry, tool, &none), "{tool}");
+        }
         assert!(needs_owner_confirmation(
             &registry,
             "hq_ask",

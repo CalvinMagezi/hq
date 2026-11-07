@@ -154,43 +154,98 @@ impl HqTool for GitDiffTool {
     }
 
     async fn execute(&self, args: Value) -> Result<Value> {
-        let mut cmd = tokio::process::Command::new("git");
-        cmd.arg("diff").arg("--color=never");
-
-        if args
-            .get("staged")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            cmd.arg("--cached");
-        }
-        if args.get("stat").and_then(|v| v.as_bool()).unwrap_or(false) {
-            cmd.arg("--stat");
-        }
-        if let Some(r) = args.get("ref").and_then(|v| v.as_str()) {
-            // A leading dash would be parsed as an option (`--output=<path>` writes a file).
-            if r.starts_with('-') {
-                return Ok(json!({"error": "ref must not start with '-'"}));
-            }
-            cmd.arg(r);
-        }
-        if let Some(files) = args.get("files").and_then(|v| v.as_array()) {
-            cmd.arg("--");
-            for f in files {
-                if let Some(s) = f.as_str() {
-                    cmd.arg(s);
-                }
-            }
-        }
-
-        let out = cmd.output().await?;
-        let diff = String::from_utf8_lossy(&out.stdout).to_string();
-
-        Ok(json!({
-            "diff": truncate_output(&diff, MAX_OUTPUT_BYTES),
-            "lines": diff.lines().count()
-        }))
+        diff_in(None, &args).await
     }
+}
+
+/// Why `file` may not be handed to `git diff`, if it may not. Given two paths and one of them
+/// outside the work tree (or no work tree at all), `git diff` silently becomes
+/// `git diff --no-index` and prints any two files the HQ user can read, `~/.hq/config.yaml`
+/// included. So a path must be relative, stay inside the directory it is read from, and carry
+/// no pathspec magic (`:(top)`, `:/`) that would resolve it somewhere else.
+fn diff_path_refusal(file: &str) -> Option<String> {
+    use std::path::{Component, Path};
+    if file.is_empty() {
+        return Some("an empty path".into());
+    }
+    if file.starts_with(':') {
+        return Some(format!("'{file}': pathspec magic is not accepted"));
+    }
+    if file.contains('\\') || file.contains('\0') {
+        return Some(format!("'{file}': use a plain relative path"));
+    }
+    let escapes = Path::new(file).components().any(|c| {
+        matches!(
+            c,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    });
+    escapes
+        .then(|| format!("'{file}': only paths inside the repository, relative and without '..'"))
+}
+
+/// `git diff` in `cwd` (the process's own directory when `None`). Refuses to run outside a work
+/// tree, where git would compare any two files instead.
+async fn diff_in(cwd: Option<&std::path::Path>, args: &Value) -> Result<Value> {
+    let git = || {
+        let mut cmd = tokio::process::Command::new("git");
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        cmd
+    };
+    let mut files = Vec::new();
+    if let Some(list) = args.get("files").and_then(|v| v.as_array()) {
+        for f in list.iter().filter_map(Value::as_str) {
+            if let Some(why) = diff_path_refusal(f) {
+                return Ok(json!({ "error": format!("git_diff refused {why}") }));
+            }
+            files.push(f.to_string());
+        }
+    }
+    let inside = git()
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .await?;
+    if !inside.status.success() || String::from_utf8_lossy(&inside.stdout).trim() != "true" {
+        return Ok(json!({ "error": "git_diff runs only inside a git work tree" }));
+    }
+
+    let mut cmd = git();
+    // No external diff program and no textconv filter: both run a command named by config.
+    cmd.arg("diff")
+        .arg("--color=never")
+        .arg("--no-ext-diff")
+        .arg("--no-textconv");
+
+    if args
+        .get("staged")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        cmd.arg("--cached");
+    }
+    if args.get("stat").and_then(|v| v.as_bool()).unwrap_or(false) {
+        cmd.arg("--stat");
+    }
+    if let Some(r) = args.get("ref").and_then(|v| v.as_str()) {
+        // A leading dash would be parsed as an option (`--output=<path>` writes a file).
+        if r.starts_with('-') {
+            return Ok(json!({"error": "ref must not start with '-'"}));
+        }
+        cmd.arg(r);
+    }
+    // Always end the options: whatever follows is a path, and `ref` is only ever a revision.
+    cmd.arg("--");
+    cmd.args(&files);
+
+    let out = cmd.output().await?;
+    let diff = String::from_utf8_lossy(&out.stdout).to_string();
+
+    Ok(json!({
+        "diff": truncate_output(&diff, MAX_OUTPUT_BYTES),
+        "lines": diff.lines().count()
+    }))
 }
 
 /// Collects a unified diff of every uncommitted change in `cwd`: staged and
@@ -475,5 +530,85 @@ mod option_injection_tests {
             .unwrap();
         assert!(out["error"].is_string(), "{out}");
         assert!(!std::path::Path::new("/tmp/hq-should-not-exist").exists());
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CEILING_DIRECTORIES", dir.parent().unwrap())
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    /// Two paths with one outside the work tree turn `git diff` into `--no-index`, which prints
+    /// any file the HQ user can read: through a connector, that was HQ's own config.
+    #[tokio::test]
+    async fn git_diff_does_not_print_files_outside_the_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let secret = root.path().join("secret.txt");
+        std::fs::write(&secret, "the-secret-value\n").unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-q", "."]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+
+        let secret = secret.to_str().unwrap();
+        for files in [
+            json!(["/dev/null", secret]),
+            json!(["a.txt", "/dev/null"]),
+            json!(["/dev/null", "../secret.txt"]),
+            json!(["a.txt", ":(top)../secret.txt"]),
+        ] {
+            let out = diff_in(Some(&repo), &json!({ "files": files }))
+                .await
+                .unwrap();
+            assert!(out["error"].is_string(), "{files}: {out}");
+            assert!(!out.to_string().contains("the-secret-value"), "{files}");
+        }
+        // A ref is only ever a revision, never one of two paths.
+        let out = diff_in(
+            Some(&repo),
+            &json!({ "ref": "/dev/null", "files": ["a.txt"] }),
+        )
+        .await
+        .unwrap();
+        assert!(!out.to_string().contains("one"), "{out}");
+
+        // Outside any repository, two relative paths would be compared as plain files.
+        let loose = root.path().join("loose");
+        std::fs::create_dir(&loose).unwrap();
+        std::fs::write(loose.join("x"), "the-secret-value\n").unwrap();
+        std::fs::write(loose.join("y"), "other\n").unwrap();
+        let out = diff_in(Some(&loose), &json!({ "files": ["x", "y"] }))
+            .await
+            .unwrap();
+        assert!(out["error"].is_string(), "{out}");
+        assert!(!out.to_string().contains("the-secret-value"));
+    }
+
+    #[tokio::test]
+    async fn git_diff_still_shows_changes_inside_the_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-q", "."]);
+        std::fs::write(repo.join("a.txt"), "one\n").unwrap();
+        git(&repo, &["add", "a.txt"]);
+        std::fs::write(repo.join("a.txt"), "two\n").unwrap();
+        let out = diff_in(Some(&repo), &json!({ "files": ["./a.txt"] }))
+            .await
+            .unwrap();
+        assert!(out["diff"].as_str().unwrap().contains("+two"), "{out}");
+        let staged = diff_in(Some(&repo), &json!({ "staged": true }))
+            .await
+            .unwrap();
+        assert!(
+            staged["diff"].as_str().unwrap().contains("+one"),
+            "{staged}"
+        );
     }
 }
