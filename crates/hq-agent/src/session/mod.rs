@@ -127,8 +127,12 @@ impl Default for SelfHealingConfig {
 /// A pre-computed summary ready for instant compaction.
 pub(super) struct PrecomputedSummary {
     pub text: String,
-    /// Number of messages from the front that this summary covers.
+    /// The summary covers `messages[start..covers_up_to]`.
+    pub start: usize,
     pub covers_up_to: usize,
+    /// `compaction_generation` when the snapshot was taken. A compaction since then moved the
+    /// messages, so the indices no longer name the same range and the summary is discarded.
+    pub generation: u64,
 }
 
 /// Helper for accumulating streaming tool call deltas.
@@ -205,6 +209,8 @@ pub struct AgentSession {
     pub(super) tool_call_count: u32,
     pub(super) tool_count: usize,
     pub(super) precomputed: Arc<Mutex<Option<PrecomputedSummary>>>,
+    /// Bumped by every compaction, so a background summary of an older layout is not applied.
+    pub(super) compaction_generation: u64,
     pub(super) preemptive_handle: Option<tokio::task::JoinHandle<()>>,
     pub(super) post_turn_callback: Option<PostTurnCallback>,
     /// Context gathered for this turn only (recent memories, matching concept pages), sent as
@@ -288,6 +294,7 @@ impl AgentSession {
             tool_call_count: 0,
             tool_count,
             precomputed: Arc::new(Mutex::new(None)),
+            compaction_generation: 0,
             preemptive_handle: None,
             post_turn_callback: None,
             turn_context: None,

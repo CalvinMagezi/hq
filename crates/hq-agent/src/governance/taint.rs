@@ -24,6 +24,7 @@ const UNTRUSTED_SOURCE_TOOLS: &[&str] = &[
     "host_read",
     "session_search",
     "history_restore",
+    "tool_output_read",
     "vault_read",
     "vault_batch_read",
     "vault_read_section",

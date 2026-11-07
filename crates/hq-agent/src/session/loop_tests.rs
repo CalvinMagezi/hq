@@ -2152,3 +2152,183 @@ async fn turn_context_goes_just_before_the_message_once_and_the_exchange_stays_c
         "blank context is no context"
     );
 }
+
+fn plain(role: MessageRole, content: &str) -> ChatMessage {
+    ChatMessage {
+        image_parts: Vec::new(),
+        role,
+        content: content.to_string(),
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+        reasoning_content: None,
+    }
+}
+
+fn big_tool_result(id: &str) -> ChatMessage {
+    ChatMessage {
+        tool_call_id: Some(id.to_string()),
+        ..plain(MessageRole::Tool, &"z ".repeat(20_000))
+    }
+}
+
+fn calling(id: &str) -> ChatMessage {
+    ChatMessage {
+        tool_calls: vec![tool_call(id, serde_json::json!({"path": "src/lib.rs"}))],
+        ..plain(MessageRole::Assistant, "")
+    }
+}
+
+#[tokio::test]
+async fn a_second_compaction_leaves_the_first_summary_as_written() {
+    let mock = Arc::new(MockProvider::new(
+        vec![
+            BufferedReply::Complete("first summary".to_string()),
+            BufferedReply::Complete("second summary".to_string()),
+        ],
+        vec![],
+    ));
+    let mut agent = session(mock.clone(), vec![]);
+    for i in 0..10 {
+        agent.push_message(plain(MessageRole::User, &format!("ask {i}")));
+        agent.push_message(calling(&format!("c{i}")));
+        agent.push_message(big_tool_result(&format!("id-c{i}")));
+    }
+    agent.compact().await;
+    let first = agent.messages[0].content.clone();
+    assert!(first.contains("first summary"));
+    for i in 10..20 {
+        agent.push_message(plain(MessageRole::User, &format!("ask {i}")));
+        agent.push_message(calling(&format!("c{i}")));
+        agent.push_message(big_tool_result(&format!("id-c{i}")));
+    }
+    agent.compact().await;
+    assert_eq!(agent.messages[0].content, first, "never summarized again");
+    assert!(agent.messages[1].content.contains("second summary"));
+    let second_request = &mock.requests.lock().unwrap()[1];
+    assert!(
+        !second_request.messages[0].content.contains("first summary"),
+        "the second summary reads only the new messages"
+    );
+    assert!(
+        second_request.messages[0].content.contains("-> called c1"),
+        "tool calls reach the summarizer"
+    );
+}
+
+#[tokio::test]
+async fn a_cut_never_leaves_a_tool_result_without_its_call() {
+    let mock = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("summary".to_string())],
+        vec![],
+    ));
+    let mut agent = session(mock, vec![]);
+    for i in 0..6 {
+        agent.push_message(plain(MessageRole::User, &format!("ask {i}")));
+        agent.push_message(calling(&format!("c{i}")));
+        for j in 0..3 {
+            agent.push_message(big_tool_result(&format!("id-c{i}-{j}")));
+        }
+    }
+    agent.compact().await;
+    let after_summary = &agent.messages[1];
+    assert_ne!(
+        after_summary.role,
+        MessageRole::Tool,
+        "{:?}",
+        after_summary.role
+    );
+    for (i, m) in agent.messages.iter().enumerate() {
+        if m.role == MessageRole::Tool {
+            let prev = &agent.messages[i - 1];
+            assert!(prev.role == MessageRole::Tool || !prev.tool_calls.is_empty());
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_failed_summary_keeps_small_batches_and_spills_large_ones() {
+    let vault = tempfile::tempdir().unwrap();
+    // Small after pruning: the messages come back as they were (tool output cut).
+    let mock = Arc::new(MockProvider::new(vec![BufferedReply::AuthFailure], vec![]));
+    let mut agent = session(mock, vec![]);
+    agent.set_vault_path(vault.path().to_path_buf());
+    for i in 0..4 {
+        agent.push_message(plain(MessageRole::User, &format!("ask {i}")));
+        agent.push_message(calling(&format!("c{i}")));
+        agent.push_message(big_tool_result(&format!("id-c{i}")));
+    }
+    for i in 0..10 {
+        agent.push_message(plain(MessageRole::Assistant, &format!("reply {i}")));
+    }
+    agent.compact().await;
+    assert_eq!(agent.messages[0].content, "ask 0", "kept, not dropped");
+
+    // Large: a cut copy plus the full text on disk, readable by ref.
+    let mock = Arc::new(MockProvider::new(vec![BufferedReply::AuthFailure], vec![]));
+    let mut agent = session(mock, vec![]);
+    agent.set_vault_path(vault.path().to_path_buf());
+    for i in 0..40 {
+        agent.push_message(plain(MessageRole::User, &format!("ask {i}")));
+        agent.push_message(calling(&format!("c{i}")));
+        agent.push_message(big_tool_result(&format!("id-c{i}")));
+    }
+    agent.compact().await;
+    let note = &agent.messages[0].content;
+    assert!(note.contains("could not be summarized"), "{note}");
+    let r = note
+        .split_whitespace()
+        .find(|w| w.starts_with("spill:"))
+        .unwrap()
+        .trim_end_matches(';');
+    let (full, _) = hq_tools::spill::read(vault.path(), r, 0, 1_000_000).unwrap();
+    assert!(
+        full.contains("ask 0"),
+        "the oldest compacted message is on disk"
+    );
+}
+
+#[tokio::test]
+async fn a_background_summary_of_an_older_layout_is_not_applied() {
+    let mock = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("fresh".to_string())],
+        vec![],
+    ));
+    let mut agent = session(mock, vec![]);
+    for i in 0..30 {
+        agent.push_message(plain(
+            MessageRole::User,
+            &format!("ask {i} {}", "w ".repeat(400)),
+        ));
+        agent.push_message(plain(
+            MessageRole::Assistant,
+            &format!("reply {i} {}", "w ".repeat(400)),
+        ));
+    }
+    *agent.precomputed.lock().await = Some(crate::session::PrecomputedSummary {
+        text: "stale".to_string(),
+        start: 0,
+        covers_up_to: 20,
+        generation: agent.compaction_generation + 1,
+    });
+    agent.compact().await;
+    assert!(agent.messages[0].content.contains("fresh"));
+    assert!(!agent.messages[0].content.contains("stale"));
+}
+
+#[test]
+fn a_cut_tool_output_names_where_its_full_text_is() {
+    let vault = tempfile::tempdir().unwrap();
+    let mut agent = session(idle_provider(), vec![]);
+    agent.set_vault_path(vault.path().to_path_buf());
+    let long: String = (0..6_000).map(|i| format!("line {i}\n")).collect();
+    let cut = agent.microcompact_result("bash", long.clone());
+    assert!(cut.len() < long.len());
+    let r = cut
+        .split(['(', ')', ' ', '"'])
+        .find(|w| w.starts_with("spill:"))
+        .expect("a spill ref")
+        .trim_end_matches('.');
+    let (full, total) = hq_tools::spill::read(vault.path(), r, 0, 10_000_000).unwrap();
+    assert_eq!(total, long.chars().count());
+    assert!(full.contains("line 3000"));
+}
