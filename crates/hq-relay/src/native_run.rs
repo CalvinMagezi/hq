@@ -225,6 +225,66 @@ impl TurnRow {
     }
 }
 
+/// The fold settings for a relay chat. A relay keeps its own recent history (between
+/// `KEPT_HISTORY` and `MAX_HISTORY` messages, see `ChannelState::stage_turn`), so its mirrored
+/// thread folds down to half of `KEPT_HISTORY`: everything older than the channel's own window
+/// is then always in a block, and nothing falls between the two.
+pub(crate) fn relay_fold_config(config: &HqConfig) -> hq_core::config::ContextFoldConfig {
+    hq_core::config::ContextFoldConfig {
+        tail_messages: crate::relay_common::KEPT_HISTORY / 2,
+        ..config.context_fold.clone()
+    }
+}
+
+/// The fold blocks of a relay chat's mirrored thread, to go in front of the channel's own
+/// history. Empty when folding is off, the chat was never mirrored or the database is missing.
+pub(crate) fn fold_blocks(
+    db: Option<&Database>,
+    config: &HqConfig,
+    platform: &str,
+    external_id: &str,
+) -> Vec<ChatMessage> {
+    if !config.context_fold.enabled {
+        return Vec::new();
+    }
+    let Some(db) = db else { return Vec::new() };
+    let blocks = db.with_conn(|conn| {
+        let Some(thread) = hq_db::chat::find_platform_thread(conn, platform, external_id)? else {
+            return Ok(Vec::new());
+        };
+        hq_db::thread_folds::active(conn, &thread)
+    });
+    match blocks {
+        Ok(blocks) => hq_agent::fold::block_messages(&blocks),
+        Err(e) => {
+            tracing::debug!(
+                platform,
+                external_id,
+                "no fold blocks for relay chat: {e:#}"
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// After a relay reply: fold the mirrored thread's older messages in the background.
+pub(crate) fn fold_after_turn(
+    db: Option<&Arc<Database>>,
+    config: &HqConfig,
+    platform: &str,
+    external_id: &str,
+) {
+    let cfg = relay_fold_config(config);
+    let Some(db) = db.filter(|_| cfg.enabled) else {
+        return;
+    };
+    let thread =
+        db.with_conn(|conn| hq_db::chat::find_platform_thread(conn, platform, external_id));
+    if let Ok(Some(thread)) = thread {
+        hq_agent::fold::spawn_fold((**db).clone(), thread, cfg);
+    }
+}
+
 /// Where a chat turn's reply is mirrored for the web UI.
 pub(crate) struct Mirror {
     pub platform: &'static str,
@@ -310,5 +370,50 @@ pub(crate) struct AbortOnDrop(pub tokio::task::JoinHandle<()>);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
         self.0.abort();
+    }
+}
+
+#[cfg(test)]
+mod fold_tests {
+    use super::*;
+
+    #[test]
+    fn a_relay_chat_gets_its_mirrored_threads_blocks_and_folds_inside_its_own_window() {
+        let config = HqConfig::default();
+        let cfg = relay_fold_config(&config);
+        // Folded down to half of what the channel keeps, so its window always overlaps a block.
+        assert!(cfg.target_messages() * 2 <= crate::relay_common::KEPT_HISTORY);
+
+        let db = Database::open_memory().unwrap();
+        assert!(fold_blocks(Some(&db), &config, "telegram", "42").is_empty());
+        db.with_conn(|c| {
+            let t = hq_db::chat::find_or_create_platform_thread(c, "telegram", "42", "chat")?;
+            let a = hq_db::chat::add_message(c, &t.thread_id, "user", "first")?;
+            let b = hq_db::chat::add_message(c, &t.thread_id, "assistant", "second")?;
+            hq_db::thread_folds::insert(
+                c,
+                &hq_db::thread_folds::NewFold {
+                    thread_id: &t.thread_id,
+                    tier: 1,
+                    first_msg_id: &a.message_id,
+                    last_msg_id: &b.message_id,
+                    message_count: 2,
+                    summary: "Goal as of this block: the rent",
+                    source_tokens: 4,
+                    summary_tokens: 8,
+                    tainted: false,
+                    model: "test",
+                },
+            )
+        })
+        .unwrap();
+        let blocks = fold_blocks(Some(&db), &config, "telegram", "42");
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].content.contains("the rent"));
+        assert!(fold_blocks(Some(&db), &config, "discord", "42").is_empty());
+
+        let mut off = config.clone();
+        off.context_fold.enabled = false;
+        assert!(fold_blocks(Some(&db), &off, "telegram", "42").is_empty());
     }
 }

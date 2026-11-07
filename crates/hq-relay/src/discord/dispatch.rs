@@ -116,7 +116,15 @@ rather than trying to work around it.{harness_rule}\n\n"
         repo_root,
         session,
         hq_agent::native_hq::NativeHqHooks {
-            history: inputs.history,
+            history: crate::native_run::fold_blocks(
+                row.db.as_deref(),
+                &config,
+                "discord",
+                &channel_key.to_string(),
+            )
+            .into_iter()
+            .chain(inputs.history)
+            .collect(),
             image_parts: inputs.images,
             on_event: Some(on_event),
             on_cancel: Some(crate::native_run::cancel_hook(threads, channel_key)),
@@ -131,6 +139,12 @@ rather than trying to work around it.{harness_rule}\n\n"
     drop(_ticker);
     crate::native_run::clear_cancel(threads, channel_key).await;
     row.close(&run);
+    crate::native_run::fold_after_turn(
+        row.db.as_ref(),
+        &config,
+        "discord",
+        &channel_key.to_string(),
+    );
     run.map(|r| r.text)
 }
 

@@ -238,7 +238,7 @@ impl ChannelState {
 
 /// History length that triggers a trim, and how many recent messages survive it.
 const MAX_HISTORY: usize = 30;
-const KEPT_HISTORY: usize = 20;
+pub(crate) const KEPT_HISTORY: usize = 20;
 const QUOTE_CHARS: usize = 500;
 const INSIGHT_LINE_CHARS: usize = 160;
 

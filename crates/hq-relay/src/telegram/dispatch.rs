@@ -101,7 +101,15 @@ pub(super) async fn dispatch_hq(
         repo_root,
         session,
         hq_agent::native_hq::NativeHqHooks {
-            history: inputs.history,
+            history: crate::native_run::fold_blocks(
+                row.db.as_deref(),
+                &config,
+                "telegram",
+                &chat_id.0.to_string(),
+            )
+            .into_iter()
+            .chain(inputs.history)
+            .collect(),
             image_parts: inputs.images,
             on_event: Some(feed_hook(feed, fallback_seen.clone())),
             on_cancel: Some(crate::native_run::cancel_hook(&threads, chat_key)),
@@ -116,6 +124,12 @@ pub(super) async fn dispatch_hq(
     row.close(&run);
     drop(_ticker);
     crate::native_run::clear_cancel(&threads, chat_key).await;
+    crate::native_run::fold_after_turn(
+        row.db.as_ref(),
+        &config,
+        "telegram",
+        &chat_id.0.to_string(),
+    );
 
     let result_text = match run {
         Ok(r) => r.text,
