@@ -210,7 +210,13 @@ impl SessionBuilder {
                         reducers = manifest.reducers_applied.len(),
                         "ContextEngine: assembled context"
                     );
-                    blocks_to_system_prompt(&blocks)
+                    if self.config.context_fold.stable_prompt {
+                        let (stable, volatile) = split_volatile(&blocks);
+                        session.set_turn_context(volatile);
+                        stable
+                    } else {
+                        blocks_to_system_prompt(&blocks)
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(%e, "ContextEngine failed, falling back to vault soul");
@@ -531,6 +537,27 @@ pub(super) fn blocks_to_system_prompt(blocks: &[crate::context::block::ContextBl
         .map(|b| b.content.as_ref())
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// Blocks that change from one message to the next: recent memories and the concept pages
+/// matched to the last message. Everything else in the system prompt (soul, harness
+/// instructions, pinned notes) changes only when the owner edits it.
+fn is_volatile(block: &crate::context::block::ContextBlock) -> bool {
+    let id = block.metadata.id.as_str();
+    id == "long_term_memory" || id.starts_with("search_")
+}
+
+/// The system prompt without the volatile blocks, and those blocks as the turn's context note.
+pub(super) fn split_volatile(blocks: &[crate::context::block::ContextBlock]) -> (String, String) {
+    let (volatile, stable): (Vec<_>, Vec<_>) = blocks
+        .iter()
+        .filter(|b| matches!(b.role, hq_core::types::MessageRole::System))
+        .cloned()
+        .partition(is_volatile);
+    (
+        blocks_to_system_prompt(&stable),
+        blocks_to_system_prompt(&volatile),
+    )
 }
 
 pub(super) fn truncate_to_chars(s: &str, max_chars: usize) -> String {

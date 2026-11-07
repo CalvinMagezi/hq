@@ -2111,3 +2111,44 @@ async fn a_deferred_tool_is_found_declared_and_called() {
         "and it ran"
     );
 }
+
+#[tokio::test]
+async fn turn_context_goes_just_before_the_message_once_and_the_exchange_stays_clean() {
+    let provider = Arc::new(MockProvider::new(
+        vec![BufferedReply::Complete("first".to_string())],
+        vec![],
+    ));
+    let mut agent = session(provider, vec![]);
+    agent.set_system_prompt("stable prompt".into());
+    agent.set_turn_context("- recent memory: the rent is due on the 1st".into());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    agent.set_post_turn_callback(Arc::new(move |exchange| {
+        let _ = tx.send(exchange);
+    }));
+
+    agent.prompt("when is the rent due?").await.unwrap();
+
+    let users: Vec<&str> = agent
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::User)
+        .map(|m| m.content.as_str())
+        .collect();
+    assert_eq!(users.len(), 2);
+    assert!(users[0].starts_with(crate::session::r#loop::TURN_CONTEXT_HEADER));
+    assert!(users[0].contains("the rent is due on the 1st"));
+    assert_eq!(users[1], "when is the rent due?");
+    assert_eq!(agent.system_prompt.as_deref(), Some("stable prompt"));
+    assert!(agent.turn_context().is_none(), "used once");
+    let exchange = rx.recv().await.unwrap();
+    assert_eq!(
+        exchange[0].1, "when is the rent due?",
+        "memory ingestion sees the owner's words only"
+    );
+
+    agent.set_turn_context("   ".into());
+    assert!(
+        agent.turn_context().is_none(),
+        "blank context is no context"
+    );
+}

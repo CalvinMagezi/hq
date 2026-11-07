@@ -951,3 +951,27 @@ async fn the_models_prompt_does_not_change_with_what_the_person_used() {
         offer_block(seasoned.system_prompt().unwrap_or_default())
     );
 }
+
+#[test]
+fn memories_and_concept_matches_leave_the_system_prompt_for_the_turn_note() {
+    use crate::context::block::ContextBlock;
+    use hq_core::types::MessageRole;
+    let block = |id: &str, role, text: &str| {
+        let mut b = ContextBlock::new(role, text);
+        b.metadata.id = id.to_string();
+        b
+    };
+    let blocks = vec![
+        block("search_0", MessageRole::System, "concept page match"),
+        block("system_soul", MessageRole::System, "who HQ is"),
+        block("harness_instructions", MessageRole::System, "tools"),
+        block("pinned_0", MessageRole::System, "a pinned note"),
+        block("long_term_memory", MessageRole::System, "recent memories"),
+        block("thread_0", MessageRole::User, "an old line"),
+    ];
+    let (stable, volatile) = super::prompt::split_volatile(&blocks);
+    assert!(stable.contains("who HQ is") && stable.contains("a pinned note"));
+    assert!(!stable.contains("recent memories") && !stable.contains("concept page match"));
+    assert!(volatile.contains("recent memories") && volatile.contains("concept page match"));
+    assert!(!volatile.contains("an old line") && !stable.contains("an old line"));
+}

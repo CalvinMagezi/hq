@@ -208,6 +208,20 @@ impl OpenRouterProvider {
             }
         }
 
+        // Claude through OpenRouter caches only when asked. A top-level `cache_control` turns on
+        // automatic caching up to the last cacheable block, moving forward as the chat grows
+        // (openrouter.ai/docs/features/prompt-caching). Other models there cache by prefix on
+        // their own, so they get nothing extra.
+        if self.api_base.contains("openrouter.ai")
+            && body["model"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("anthropic/"))
+            && let Some(obj) = body.as_object_mut()
+        {
+            obj.entry("cache_control")
+                .or_insert_with(|| serde_json::json!({"type": "ephemeral"}));
+        }
+
         // Kimi Code's coding endpoint rejects any temperature but 1 ("invalid
         // temperature: only 1 is allowed for this model", confirmed live against
         // k3-256k, k3 and k2p7-code on 2026-07-26; the earlier 0.6 constraint
@@ -221,6 +235,43 @@ impl OpenRouterProvider {
                 serde_json::json!(KIMI_CODING_TEMPERATURE),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod cache_hint_tests {
+    use super::OpenRouterProvider;
+    use crate::provider::ChatRequest;
+
+    fn body_for(provider: &OpenRouterProvider, model: &str) -> serde_json::Value {
+        let request = ChatRequest {
+            model: model.to_string(),
+            messages: Vec::new(),
+            tools: Vec::new(),
+            temperature: None,
+            max_tokens: None,
+        };
+        let mut body = serde_json::json!({"model": model, "messages": []});
+        provider.mutate_body_for_endpoint(&mut body, &request);
+        body
+    }
+
+    #[test]
+    fn claude_on_openrouter_asks_for_caching_and_nothing_else_does() {
+        let openrouter = OpenRouterProvider::new("k");
+        let body = body_for(&openrouter, "anthropic/claude-haiku-5.5");
+        assert_eq!(body["cache_control"]["type"], "ephemeral");
+        assert!(
+            body_for(&openrouter, "deepseek/deepseek-chat")
+                .get("cache_control")
+                .is_none()
+        );
+        let other = OpenRouterProvider::new_with_base("k", "https://api.example.com/v1");
+        assert!(
+            body_for(&other, "anthropic/claude-haiku-5.5")
+                .get("cache_control")
+                .is_none()
+        );
     }
 }
 

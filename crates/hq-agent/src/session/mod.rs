@@ -207,6 +207,10 @@ pub struct AgentSession {
     pub(super) precomputed: Arc<Mutex<Option<PrecomputedSummary>>>,
     pub(super) preemptive_handle: Option<tokio::task::JoinHandle<()>>,
     pub(super) post_turn_callback: Option<PostTurnCallback>,
+    /// Context gathered for this turn only (recent memories, matching concept pages), sent as
+    /// a note just before the next user message instead of inside the system prompt, so the
+    /// system prompt and history stay byte-identical from turn to turn and stay cached.
+    pub(super) turn_context: Option<String>,
     pub last_resolved_model: Option<String>,
     pub session_id: String,
     pub(super) telemetry_db: Option<Arc<hq_db::Database>>,
@@ -286,6 +290,7 @@ impl AgentSession {
             precomputed: Arc::new(Mutex::new(None)),
             preemptive_handle: None,
             post_turn_callback: None,
+            turn_context: None,
             last_resolved_model: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             telemetry_db: None,
@@ -459,6 +464,16 @@ impl AgentSession {
 
     pub fn set_post_turn_callback(&mut self, callback: PostTurnCallback) {
         self.post_turn_callback = Some(callback);
+    }
+
+    /// Context for the next prompt only; see the `turn_context` field.
+    pub fn set_turn_context(&mut self, context: String) {
+        self.turn_context = (!context.trim().is_empty()).then_some(context);
+    }
+
+    /// The context the next prompt will carry, if any.
+    pub fn turn_context(&self) -> Option<&str> {
+        self.turn_context.as_deref()
     }
 
     pub fn set_system_prompt(&mut self, prompt: String) {

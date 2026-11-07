@@ -30,6 +30,12 @@ pub struct ContextFoldConfig {
     /// The model (or alias) that writes fold summaries. A cheap one is enough.
     #[serde(default = "default_model")]
     pub model: String,
+
+    /// Keep the system prompt the same from turn to turn: what changes every message (recent
+    /// memories, matching concept pages) goes in a note just before the message instead, so a
+    /// provider's prompt cache can reuse the system prompt and the history behind it.
+    #[serde(default = "default_enabled")]
+    pub stable_prompt: bool,
 }
 
 fn default_enabled() -> bool {
@@ -60,6 +66,7 @@ impl Default for ContextFoldConfig {
             tail_messages: default_tail_messages(),
             blocks_budget_tokens: default_blocks_budget_tokens(),
             model: default_model(),
+            stable_prompt: default_enabled(),
         }
     }
 }
