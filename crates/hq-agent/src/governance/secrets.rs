@@ -16,7 +16,7 @@ pub enum SecretTier {
 /// Home-relative credential stores. hq reaches what lives in them through
 /// dedicated code paths (provider construction from config), never through a
 /// generic read tool, so denying them costs no legitimate functionality.
-const HOME_SECRET_PATHS: &[&str] = &[
+pub(crate) const HOME_SECRET_PATHS: &[&str] = &[
     ".ssh",
     ".aws",
     ".gnupg",
@@ -28,6 +28,13 @@ const HOME_SECRET_PATHS: &[&str] = &[
     ".netrc",
     ".git-credentials",
     ".hq/config.yaml",
+    // The owner's web sign-in that `hq web` mints for an open bind.
+    ".hq/web.token",
+    // The built-in host's operator token and sockets, and the ssh multiplex sockets: either one
+    // starts processes outside every sandbox.
+    ".hq/run",
+    // This device's pairing identity: whoever holds it is this device to every paired machine.
+    ".hq/bridge",
     ".hq/wallet.enc",
     ".hq/seed.enc",
     ".hq/secret.key",
@@ -94,6 +101,12 @@ const GWS_CONFIG_DIR_ENV: &str = "GOOGLE_WORKSPACE_CLI_CONFIG_DIR";
 /// `paths::sensitive_denied_paths`. The sandbox does not mask these, so the
 /// `gws` and `gh` CLIs keep working from bash.
 pub fn always_denied_roots() -> Vec<PathBuf> {
+    always_denied_roots_with(&hq_core::config::protected::registered())
+}
+
+fn always_denied_roots_with(
+    protected: &hq_core::config::protected::ProtectedFiles,
+) -> Vec<PathBuf> {
     let home = dirs::home_dir();
     let mut roots: Vec<PathBuf> = match &home {
         Some(home) => HOME_SECRET_PATHS.iter().map(|rel| home.join(rel)).collect(),
@@ -109,6 +122,19 @@ pub fn always_denied_roots() -> Vec<PathBuf> {
     roots.push(hq_core::config::HqConfig::config_read_path());
     roots.push(hq_core::config::HqConfig::config_file_path());
     roots.push(hq_core::approval_key::key_path());
+    // `HQ_HOST_DIR` can move the host's directory out of `~/.hq/run`. As with the gws dir, a value
+    // that holds HOME would deny every file.
+    let host_dir = hq_core::config::native_host_dir();
+    if !home.as_ref().is_some_and(|h| h.starts_with(&host_dir)) {
+        roots.push(host_dir);
+    }
+    // Key files the config names (the backup key): they open archives that may hold the config.
+    for file in &protected.secret {
+        if let Ok(canonical) = file.canonicalize() {
+            roots.push(canonical);
+        }
+        roots.push(file.clone());
+    }
     // github_write checks its own pushes against these records; a worker must not rewrite them.
     roots.push(hq_tools::github::records_root());
     roots
@@ -327,6 +353,23 @@ mod tests {
         classify_path(Path::new(p))
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn the_configured_backup_key_is_always_denied_under_both_spellings() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("backup.key");
+        std::fs::write(&key, "k").unwrap();
+        let link = dir.path().join("link.key");
+        std::os::unix::fs::symlink(&key, &link).unwrap();
+        let protected = hq_core::config::protected::ProtectedFiles {
+            secret: vec![link.clone()],
+            readonly: Vec::new(),
+        };
+        let roots = always_denied_roots_with(&protected);
+        assert!(roots.contains(&link));
+        assert!(roots.contains(&key.canonicalize().unwrap()));
+    }
+
     #[test]
     fn private_keys_are_always_secret_but_public_halves_are_not() {
         assert_eq!(tier("/work/deploy/id_ed25519"), Some(SecretTier::Always));
@@ -350,6 +393,12 @@ mod tests {
             ".hq/tunnel/key",
             ".hq/tunnel/join.conf",
             ".hq/tunnel/maps.toml",
+            ".hq/web.token",
+            ".hq/run/host/operator.token",
+            ".hq/run/host/host.sock",
+            ".hq/run/host/agent.sock",
+            ".hq/run/ssh/mux-laptop",
+            ".hq/bridge/bridge.key",
             ".netrc",
         ] {
             assert_eq!(

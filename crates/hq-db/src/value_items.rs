@@ -148,12 +148,12 @@ pub fn set_delivered(db: &Database, id: &str) -> Result<()> {
     })
 }
 
-/// Record engagement on a delivered item whose id starts with `token`.
-/// Returns true if a row matched. `outcome` is "approved" or "dismissed".
+/// Record engagement on the one delivered item whose id starts with `token`, the short ref a
+/// chat button or a typed `approve <token>` carries. Returns true if a row matched. `outcome` is
+/// "approved" or "dismissed". A token that matches more than one delivered item is refused
+/// rather than answering all of them: an approval approves exactly one request.
 pub fn record_engagement_by_token(db: &Database, token: &str, outcome: &str) -> Result<bool> {
-    // Reached from an unauthenticated web API route (hq-web's notifications
-    // endpoint takes this straight from a URL path segment) — a short or
-    // wildcard-only token must never become "match every delivered row".
+    // A short or wildcard-only token must never become "match every delivered row".
     if token.len() < MIN_ID_PREFIX_LEN {
         return Ok(false);
     }
@@ -165,15 +165,80 @@ pub fn record_engagement_by_token(db: &Database, token: &str, outcome: &str) -> 
     db.with_conn(|c| {
         let pattern = format!("{}%", escape_like(token));
         let ids = matching_ids(c, &pattern, "delivered")?;
+        let [id] = ids.as_slice() else {
+            if ids.len() > 1 {
+                anyhow::bail!(
+                    "'{token}' matches {} items; use the full id from the inbox",
+                    ids.len()
+                );
+            }
+            return Ok(false);
+        };
         let n = c.execute(
-            "UPDATE value_items SET state=?3, engagement=?2, engaged_at=?4 \
-             WHERE id LIKE ?1 ESCAPE '\\' AND state='delivered'",
-            params![pattern, outcome, state, ts(&Utc::now())],
+            "UPDATE value_items SET state=?3, engagement=?2, engaged_at=?4, engagement_mac=NULL \
+             WHERE id = ?1 AND state='delivered'",
+            params![id, outcome, state, ts(&Utc::now())],
         )?;
-        if state == "engaged" {
-            sign_approvals(c, &ids);
+        if n > 0 && state == "engaged" {
+            sign_approvals(c, std::slice::from_ref(id));
         }
         Ok(n > 0)
+    })
+}
+
+/// How answering one item by its exact id went ([`answer_by_id`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answered {
+    /// The item was waiting and now carries the answer; an approval is signed.
+    Recorded,
+    /// The item already carried this same answer. Nothing was written.
+    AlreadySo,
+    /// The item was answered the other way, expired, or its approval was spent. Nothing was
+    /// written, so a spent approval is never re-armed.
+    Settled(ValueState),
+    NotFound,
+}
+
+/// Answer the one item whose id is exactly `id`, while it waits (pending, routed or delivered).
+/// `outcome` is "approved" (signed with the install key, like every other owner approval) or
+/// "dismissed". The web inbox and the phone send the full id, so no prefix is ever matched here.
+pub fn answer_by_id(db: &Database, id: &str, outcome: &str) -> Result<Answered> {
+    let state = match outcome {
+        "approved" => ValueState::Engaged,
+        "dismissed" => ValueState::Dismissed,
+        other => anyhow::bail!("unknown outcome '{other}'"),
+    };
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE value_items SET state=?2, engagement=?3, engaged_at=?4, engagement_mac=NULL \
+             WHERE id = ?1 AND state IN ('pending','routed','delivered')",
+            params![id, state.as_str(), outcome, ts(&Utc::now())],
+        )?;
+        if n > 0 {
+            if state == ValueState::Engaged {
+                sign_approvals(c, &[id.to_string()]);
+            }
+            return Ok(Answered::Recorded);
+        }
+        let current: Option<(String, Option<String>)> = c
+            .query_row(
+                "SELECT state, engagement FROM value_items WHERE id = ?1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((current, engagement)) = current else {
+            return Ok(Answered::NotFound);
+        };
+        let current = ValueState::from_str(&current).unwrap_or(ValueState::Expired);
+        // A spent approval reads `used`: approving it again is not "already so", it is over.
+        Ok(
+            if current == state && engagement.as_deref() == Some(outcome) {
+                Answered::AlreadySo
+            } else {
+                Answered::Settled(current)
+            },
+        )
     })
 }
 
@@ -376,7 +441,8 @@ pub fn latest_state_by_dedup(db: &Database, dedup_key: &str) -> Result<Option<Va
 }
 
 /// Approve one active item (pending/routed/delivered) by id or id-prefix, for
-/// operators without a chat relay. Same prefix rules as [`dismiss_by_id`].
+/// operators without a chat relay (`hq queue approve`). Same length rule as
+/// [`dismiss_by_id`]; a prefix that matches more than one active item is refused.
 pub fn approve_by_id(db: &Database, id_or_token: &str) -> Result<bool> {
     if id_or_token.len() < MIN_ID_PREFIX_LEN {
         anyhow::bail!(
@@ -386,12 +452,23 @@ pub fn approve_by_id(db: &Database, id_or_token: &str) -> Result<bool> {
     db.with_conn(|c| {
         let pattern = format!("{}%", escape_like(id_or_token));
         let ids = matching_ids(c, &pattern, "pending','routed','delivered")?;
+        let [id] = ids.as_slice() else {
+            if ids.len() > 1 {
+                anyhow::bail!(
+                    "'{id_or_token}' matches {} items; give more of the id",
+                    ids.len()
+                );
+            }
+            return Ok(false);
+        };
         let n = c.execute(
-            "UPDATE value_items SET state='engaged', engagement='approved', engaged_at=?2 \
-             WHERE id LIKE ?1 ESCAPE '\\' AND state IN ('pending','routed','delivered')",
-            params![pattern, ts(&Utc::now())],
+            "UPDATE value_items SET state='engaged', engagement='approved', engaged_at=?2, \
+             engagement_mac=NULL WHERE id = ?1 AND state IN ('pending','routed','delivered')",
+            params![id, ts(&Utc::now())],
         )?;
-        sign_approvals(c, &ids);
+        if n > 0 {
+            sign_approvals(c, std::slice::from_ref(id));
+        }
         Ok(n > 0)
     })
 }
@@ -482,9 +559,8 @@ pub fn count_by_state(db: &Database) -> Result<Vec<(String, i64)>> {
 /// so a prefix like `%` or `_` can't turn a targeted lookup into "match every
 /// row". Pair with `LIKE ... ESCAPE '\'` at every call site — this must be
 /// applied everywhere an id/token prefix reaches a `LIKE` clause, not just
-/// the CLI path; `record_engagement_by_token` takes its token
-/// from an unauthenticated web API route (`hq-web`'s notifications endpoint),
-/// which is the more exposed caller.
+/// the CLI path; `record_engagement_by_token` takes its token from a chat
+/// button or message. The web inbox answers by exact id ([`answer_by_id`]).
 fn escape_like(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('%', "\\%")
@@ -917,6 +993,72 @@ mod tests {
         let token: String = item.id.chars().take(8).collect();
         insert(&db, &item).unwrap(); // still pending, not delivered
         assert!(!record_engagement_by_token(&db, &token, "approved").unwrap());
+    }
+
+    /// A short ref that names two waiting items answers neither: an approval approves exactly
+    /// one request, so the person has to say which.
+    #[test]
+    fn an_ambiguous_prefix_approves_nothing() {
+        let db = open_db();
+        for (id, dedup) in [("cafe0001-a", "ask:a"), ("cafe0002-b", "ask:b")] {
+            let mut item =
+                ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key(dedup);
+            item.id = id.into();
+            insert(&db, &item).unwrap();
+            set_delivered(&db, id).unwrap();
+        }
+        assert!(record_engagement_by_token(&db, "cafe", "approved").is_err());
+        assert!(approve_by_id(&db, "cafe").is_err());
+        assert_eq!(list_by_state(&db, ValueState::Engaged).unwrap().len(), 0);
+        assert!(!is_signed_approval(&db, "ask:a").unwrap());
+        assert!(!is_signed_approval(&db, "ask:b").unwrap());
+
+        assert!(record_engagement_by_token(&db, "cafe0001", "approved").unwrap());
+        assert!(is_signed_approval(&db, "ask:a").unwrap());
+        assert!(!is_signed_approval(&db, "ask:b").unwrap());
+        assert!(
+            approve_by_id(&db, "cafe").unwrap(),
+            "the one item still waiting is no longer ambiguous"
+        );
+        assert!(is_signed_approval(&db, "ask:b").unwrap());
+    }
+
+    #[test]
+    fn answer_by_id_matches_the_whole_id_and_never_reopens_a_settled_item() {
+        let db = open_db();
+        let mut item =
+            ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("ask:x");
+        item.id = "beef0001-x".into();
+        insert(&db, &item).unwrap();
+
+        assert_eq!(
+            answer_by_id(&db, "beef", "approved").unwrap(),
+            Answered::NotFound
+        );
+        assert_eq!(
+            answer_by_id(&db, "beef0001-x", "approved").unwrap(),
+            Answered::Recorded,
+            "a pending item is answered, not only a delivered one"
+        );
+        assert!(is_signed_approval(&db, "ask:x").unwrap());
+        assert_eq!(
+            answer_by_id(&db, "beef0001-x", "approved").unwrap(),
+            Answered::AlreadySo
+        );
+        assert!(consume_approval(&db, "ask:x").unwrap());
+        assert_eq!(
+            answer_by_id(&db, "beef0001-x", "approved").unwrap(),
+            Answered::Settled(ValueState::Engaged)
+        );
+        assert!(
+            !consume_approval(&db, "ask:x").unwrap(),
+            "a spent approval is not re-armed"
+        );
+        assert_eq!(
+            answer_by_id(&db, "beef0001-x", "dismissed").unwrap(),
+            Answered::Settled(ValueState::Engaged)
+        );
+        assert!(answer_by_id(&db, "beef0001-x", "bogus").is_err());
     }
 
     #[test]

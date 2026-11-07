@@ -1,7 +1,7 @@
 //! `hq host`: run or inspect the built-in agent host.
 
 use anyhow::{Context, Result, bail};
-use hq_host::{BurstLimit, Client, Detector, Host, Server, socket_path};
+use hq_host::{BurstLimit, Client, Detector, Host, HqPaths, Server, socket_path};
 use serde_json::json;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
@@ -119,12 +119,32 @@ struct Caps {
     max_starts: usize,
 }
 
+/// HQ's own paths on this machine outside `~/.hq`, resolved the way `HqConfig::load`
+/// resolves them (an explicit `HQ_CONFIG_PATH`, else `~/.hq/config.yaml`, else the
+/// server's `/opt/hq/config.yaml`; the configured vault, else the server's): the
+/// vault's database and instruction folders, the config file in force with the
+/// file writers use, and the approval key beside it. Every sandboxed agent is
+/// walled off from them.
+fn hq_paths() -> HqPaths {
+    use hq_core::config::HqConfig;
+    let vault = HqConfig::load()
+        .map(|c| c.vault_path)
+        .unwrap_or_else(|_| HqConfig::default().vault_path);
+    let config_files = [
+        HqConfig::config_read_path(),
+        HqConfig::config_file_path(),
+        hq_core::approval_key::key_path(),
+    ];
+    HqPaths::new(Some(&vault), &config_files)
+}
+
 async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> {
     if caps.max_agents == 0 || caps.max_starts == 0 {
         bail!("--max-agents and --max-starts must be at least 1");
     }
     let host = Arc::new(
         Host::with_detector(state_rules())
+            .with_hq_paths(hq_paths())
             .with_state_dir(&dir)
             .with_require_sandbox(!allow_unsandboxed)
             .with_max_agents(caps.max_agents)

@@ -270,13 +270,16 @@ fn ask_owner(
             ),
         });
     }
+    let note = hq_tools::approval_note::for_call(&call.tool, &call.args)
+        .map(|n| format!("{n}\n\n"))
+        .unwrap_or_default();
     let mut item = ValueItem::new(
         SOURCE,
         ValueKind::ActionNeeded,
         format!("Claude wants to run {}", call.tool),
         format!(
             "The claude.ai connection \"{}\" asks to run {} with exactly these arguments:\n\n{shown}\n\n\
-             Approve to let it run once. Dismiss to refuse. If you did not ask Claude for this, \
+             {note}Approve to let it run once. Dismiss to refuse. If you did not ask Claude for this, \
              dismiss it and disconnect the connection in Settings.",
             grant.label, call.tool
         ),

@@ -1,7 +1,8 @@
 //! Vault reorganization tools: move, trash, mkdir, frontmatter mutation.
 //!
-//! The safety rails (protected `_system`/`_threads`/`_data`/`_trash`
-//! directories, trash-not-delete, wikilink rewriting) live in
+//! The safety rails (protected `_system`/`_threads`/`_data`/`_trash` directories and the
+//! instruction folders `skills`/`_skills`/`_commands`/`agents`/`_mailboxes`, however the path
+//! is spelled; trash-not-delete; wikilink rewriting) live in
 //! `hq_vault::reorg`; these tools add dry-run plumbing and search-index sync.
 
 use anyhow::Result;
@@ -110,13 +111,14 @@ impl HqTool for VaultMoveTool {
         let report =
             tokio::task::spawn_blocking(move || vault.move_note(&f, &t, dry_run)).await??;
         if !dry_run {
-            reindex_moved_note(self.db.as_ref(), &self.vault, &from, &to);
+            // The report carries both paths in their one spelling, the key the index uses.
+            reindex_moved_note(self.db.as_ref(), &self.vault, &report.from, &report.to);
             if let (Some(recorder), Some(before)) = (recorder, before) {
                 let (referrers, args, from, to) = (
                     report.referrers.clone(),
                     args.clone(),
-                    from.clone(),
-                    to.clone(),
+                    report.from.clone(),
+                    report.to.clone(),
                 );
                 let _ = tokio::task::spawn_blocking(move || {
                     recorder.after_move(&from, &to, &referrers, &before, &args)
@@ -162,6 +164,10 @@ impl HqTool for VaultDeleteTool {
         let trashed_to =
             tokio::task::spawn_blocking(move || vault.trash_note(&p, dry_run)).await??;
         if !dry_run {
+            // `trash_note` accepted the path, so it parses.
+            let path = hq_vault::rel_path::RelPath::parse(&path)
+                .map(|p| p.normalized())
+                .unwrap_or(path);
             remove_from_index(self.db.as_ref(), &path);
             if let Some(db) = self.db.as_ref() {
                 crate::provenance::Recorder::new(db.clone(), self.vault.vault_path().to_path_buf())

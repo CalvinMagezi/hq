@@ -34,6 +34,19 @@ pub(super) fn is_family_authorized(
     channel_id == family_channel || family_threads.contains(&channel_id)
 }
 
+/// Whether `channel_id` is the family channel or a thread HQ made under it, read
+/// from disk. Used where no `Handler` is at hand (the watch scheduler), to keep
+/// unattended owner turns out of the guests' chats.
+pub(super) fn is_family_chat(
+    vault_path: &Path,
+    family_channel_id: Option<u64>,
+    channel_id: u64,
+) -> bool {
+    family_channel_id.is_some_and(|family| {
+        family == channel_id || load_family_threads(vault_path).contains(&channel_id)
+    })
+}
+
 /// Path to the persisted family thread ids file.
 pub(super) fn family_threads_path(vault_path: &Path) -> std::path::PathBuf {
     vault_path
@@ -285,5 +298,16 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert!(loaded.contains(&123456789));
         assert!(loaded.contains(&987654321));
+    }
+
+    #[test]
+    fn the_family_channel_and_its_threads_are_family_chats() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let vault = temp_dir.path();
+        record_family_thread(vault, 55);
+        assert!(is_family_chat(vault, Some(50), 50));
+        assert!(is_family_chat(vault, Some(50), 55));
+        assert!(!is_family_chat(vault, Some(50), 60));
+        assert!(!is_family_chat(vault, None, 55), "family handling off");
     }
 }

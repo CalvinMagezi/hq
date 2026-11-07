@@ -4,3 +4,6 @@ b0250b78c27f91c350cca907834fa3f91bcc87be:apps/site/public/install.ps1:generic-ap
 # their `gitleaks:allow` comments off the fixture lines; fixed in a later commit.
 8bc00b4854df93a8590eba869d8fee8558f7e4f2:crates/hq-core/src/redact.rs:generic-api-key:250
 8bc00b4854df93a8590eba869d8fee8558f7e4f2:crates/hq-core/src/redact.rs:generic-api-key:260
+# Reviewed: RFC 6455's sample Sec-WebSocket-Key in a router test, flagged as a
+# generic key; the line carries `gitleaks:allow` from a later commit.
+8885b31d5eb16c8e5196686ae9b90fe9cbbed488:crates/hq-web/src/lib.rs:generic-api-key:855

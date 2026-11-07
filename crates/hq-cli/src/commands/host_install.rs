@@ -568,7 +568,11 @@ pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
 /// Runs on the HQ side: pairs the machine the join code names.
 pub fn add(code: Option<&str>, gateway: Option<&str>) -> Result<()> {
     let code = code.context("usage: hq host add <join code from `hq host join`>")?;
-    let added = hq_tools::agent_host::pairing::add_host(code, gateway)?;
+    // Typed by the owner at this machine, so a host of the same name is replaced, and said so.
+    let added = hq_tools::agent_host::pairing::add_host(code, gateway, true)?;
+    if let Some(old) = &added.replaced {
+        println!("Replaced the host '{}' that pointed at {old}.", added.name);
+    }
     println!(
         "Host '{}' ({}) {} in the config.",
         added.name,

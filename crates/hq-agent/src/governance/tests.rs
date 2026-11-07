@@ -582,3 +582,96 @@ async fn default_mode_waits_for_the_owner_only_where_a_chat_can_ask() {
     assert_eq!(run_bash(PermissionMode::Default, false).await, "ran");
     assert_eq!(run_bash(PermissionMode::AcceptEdits, true).await, "ran");
 }
+
+/// A do-nothing tool under a real tool's name, so governance applies that tool's rules.
+struct NamedTool(&'static str);
+
+#[async_trait]
+impl AgentTool for NamedTool {
+    fn name(&self) -> &str {
+        self.0
+    }
+    fn description(&self) -> &str {
+        "test tool"
+    }
+    fn parameters(&self) -> Value {
+        Value::Object(Default::default())
+    }
+    async fn execute(&self, _id: &str, _args: Value) -> Result<ToolResult> {
+        Ok(ToolResult {
+            content: vec![],
+            details: None,
+            context_modifier: None,
+        })
+    }
+}
+
+fn governed_named(name: &'static str, allowed: PathBuf, mode: PermissionMode) -> GovernedTool {
+    GovernedTool {
+        inner: Box::new(NamedTool(name)),
+        allowed_paths: vec![allowed],
+        denied_paths: vec![],
+        permission_mode: mode,
+        denial_tracker: DenialTracker::new(),
+        repeat_call_tracker: RepeatCallTracker::new(),
+        denial_notifier: None,
+        owner_approval: None,
+        notified_denials: Arc::new(Mutex::new(HashSet::new())),
+        plan_file_path: None,
+        files_read: Arc::new(Mutex::new(HashSet::new())),
+        allow_defer: true,
+        taint: TaintTracker::new(),
+    }
+}
+
+fn denied(result: &ToolResult) -> bool {
+    result
+        .content
+        .first()
+        .is_some_and(|c| c.text.contains("outside allowed directories"))
+}
+
+/// `edit_file` was refused outside the workspace while `file_edit_batch`, `rollback_file` and
+/// `grep` reached the same files, because the allowlist only knew the first tool's argument.
+#[tokio::test]
+async fn every_file_tool_is_held_to_the_allowed_directories() {
+    let work = tempfile::tempdir().unwrap();
+    let root = work.path().canonicalize().unwrap();
+    let inside = root.join("notes.md");
+    let outside = "/etc/hostname";
+    for mode in [
+        PermissionMode::AcceptEdits,
+        PermissionMode::BypassPermissions,
+    ] {
+        let batch = governed_named("file_edit_batch", root.clone(), mode.clone());
+        let edit = |path: &str| {
+            serde_json::json!({"edits": [
+                {"file_path": inside.to_str().unwrap(), "old_string": "a", "new_string": "b"},
+                {"file_path": path, "old_string": "a", "new_string": "b"},
+            ]})
+        };
+        assert!(
+            denied(&batch.execute("t", edit(outside)).await.unwrap()),
+            "{mode:?}"
+        );
+        assert!(!denied(
+            &batch
+                .execute("t", edit(inside.to_str().unwrap()))
+                .await
+                .unwrap()
+        ));
+
+        let rollback = governed_named("rollback_file", root.clone(), mode.clone());
+        let args = serde_json::json!({"file_path": outside});
+        assert!(
+            denied(&rollback.execute("t", args).await.unwrap()),
+            "{mode:?}"
+        );
+
+        let grep = governed_named("grep", root.clone(), mode.clone());
+        let args = serde_json::json!({"pattern": "x", "path": "/etc"});
+        assert!(denied(&grep.execute("t", args).await.unwrap()), "{mode:?}");
+        let args = serde_json::json!({"pattern": "x", "path": root.to_str().unwrap()});
+        assert!(!denied(&grep.execute("t", args).await.unwrap()));
+    }
+}

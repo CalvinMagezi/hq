@@ -32,6 +32,8 @@ mod hooks;
 #[cfg(unix)]
 mod host;
 #[cfg(unix)]
+mod host_git;
+#[cfg(unix)]
 mod keys;
 #[cfg(unix)]
 mod lockdown;
@@ -106,7 +108,7 @@ pub use relay::{run_relay, sandbox_init};
 #[cfg(unix)]
 pub use report::{STALE_WORKING_AFTER, combine as combine_state, state_for};
 #[cfg(unix)]
-pub use sandbox::{Allow, Mode as SandboxMode, Profile as SandboxProfile, SandboxSpec};
+pub use sandbox::{Allow, HqPaths, Mode as SandboxMode, Profile as SandboxProfile, SandboxSpec};
 #[cfg(unix)]
 pub use server::{Limits, Server, StopHandle, agent_socket_path, socket_path};
 #[cfg(unix)]

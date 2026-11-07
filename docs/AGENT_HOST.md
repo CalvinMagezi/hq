@@ -276,9 +276,20 @@ machine's devices. `git push -u`, a repository's own hook installer, `brew insta
 
 What it cannot do:
 
-- **Reach HQ's control plane.** It cannot read or write the host directory except its own
-  `agent.sock`, hook and MCP files (the operator token and every other session's token live
-  there), or `~/.hq`.
+- **Read or write HQ's own files.** The host directory except its own `agent.sock`, hook and
+  MCP files (the operator token and every other session's token live there); `~/.hq`; the
+  vault's `_data` folder (the database with sign-in tokens, owner approvals and paired
+  devices, and the TLS and web push keys); and the config file in force (`HQ_CONFIG_PATH`,
+  `~/.hq/config.yaml` or `/opt/hq/config.yaml`) with its backups and every `*.env` file beside
+  it (such as `/opt/hq/mcp.env`). The host resolves the vault and config the way HQ does on
+  its own machine when `hq host serve` starts, so restart the host after moving either.
+  Hiding the host directory stops reads of `host.sock`, and on macOS, where a unix-socket
+  connect counts as outbound network rather than a file read, a connect to it is denied as
+  well, so a pane cannot sit on the host's pending connection slots; the agent's own
+  `agent.sock` stays reachable for its hooks.
+- **Change what HQ loads into its own sessions.** The vault's `_system`, `_threads`,
+  `_agents`, `skills`, `_moc`, `_plans` and `_embeddings` folders are read-only to it, and the
+  folders above them cannot be renamed. Notes elsewhere in the vault stay writable.
 - **See other processes' environments** (`ps eww`, `/proc/<pid>/environ`), which hold the
   daemon's and the other agents' tokens. The price is that `ps`, `lsof` and `kill` show only
   the agent's own processes: a server an earlier session left running is invisible, so pick
@@ -302,12 +313,39 @@ What it cannot do:
   writable.
 - **Start `open`, `osascript` or `launchctl`** (macOS), or look up the launcher service. An app
   started that way runs outside the sandbox.
+- **Drive the machine's control sockets.** The open profile shares `/run`, so the Docker
+  daemon socket and the user's systemd-manager and session-bus sockets under
+  `XDG_RUNTIME_DIR` (`systemd/private`, `bus`, `docker.sock`) are masked: a connect to one
+  fails, so `systemd-run --user` and `docker` cannot reach a manager that would start a
+  process outside every namespace. The agent's own SSH, gpg and keyring sockets in the same
+  directory stay reachable. On macOS the equivalent is blocked by the denied launcher service.
+
+This leaves one residual on Linux under this profile: the network namespace is the machine's
+own, so a service listening on an abstract unix socket (one with no filesystem path) is still
+reachable, and an X11 server at `/tmp/.X11-unix` is reachable if one is running. Neither carries
+HQ's own authority; both come with sharing the machine's network, which the open profile does on
+purpose. Use `profile: strict` (it gets a private empty `/run` and its own network namespace) for
+agents running on untrusted content on a machine where that matters.
+
+One more thing shares the machine's network: HQ's own web server. An open-profile agent keeps
+loopback, so if HQ's web runs on this machine with no `web_auth_token` set, the agent can call
+`http://127.0.0.1:<web port>/api/...` with `curl` and act as the owner through the web API (a
+command-line request sends no `Origin`, so the origin guard does not stop it). This is the
+tokenless-loopback convenience working as designed, not a hole the sandbox can close while the
+network is shared: the API is the owner's, reached from the owner's machine. When you run agents
+on untrusted content, set `web_auth_token` (every web and API call then needs the bearer token,
+which is not in the agent's environment) or run those agents under `profile: strict` (its proxy
+network reaches only the model and the listed hosts, never loopback). The strict profile's
+`loopback_ports` opens a named local port to an agent deliberately; the web port is not one of
+them unless you add it.
 
 This is a wall around HQ, not a boundary against an agent that means harm. It reaches
 everything else you can, and a prompt-injected agent can read a file and send it anywhere.
 The guard against that is the agent's own permission mode and classifier, as in your terminal.
 Under bubblewrap a path that does not exist cannot be protected (an agent can create a
-`~/.zshrc` you do not have); Seatbelt denies it either way. `allow_domains`, `writable`,
+`~/.zshrc` you do not have); Seatbelt denies it either way. The directories above a protected
+path (`~/.config`, `~/.claude` and the like) cannot be renamed or removed, so a protected path
+cannot be moved aside and replaced; work inside them is unaffected. `allow_domains`, `writable`,
 `readable` and `loopback_ports` do nothing under this profile.
 
 #### The strict profile
@@ -315,7 +353,9 @@ Under bubblewrap a path that does not exist cannot be protected (an agent can cr
 The agent:
 
 - cannot read the run directory except `host.sock` and its own hook and MCP
-  files, nor `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube` or `~/.hq`;
+  files, nor `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube` or `~/.hq`, nor the vault's `_data`
+  folder or HQ's config file and the env files beside it, wherever they are, and cannot
+  write the vault folders HQ loads into its sessions (as under the open profile);
 - can write only its project, `~/.claude`, caches and the temporary directories
   (plus `agent_host.sandbox.writable`);
 - cannot see other processes' environments;
@@ -409,6 +449,24 @@ protocol line replaced by an error, and a pane that stops reading its terminal
 fails a write after 5 seconds instead of holding the connection. A client also
 refuses a host directory that is not owned by you and private to you.
 
+#### Git the host runs
+
+The host itself runs git, outside every sandbox, in repositories an open agent can write:
+`worktree.add`, `worktree.status`, `worktree.remove`, the `.worktreeinclude` copies, and
+`agent.head`. A repository's configuration can name commands git runs on its own, and those
+would run with the host's reach rather than the agent's. So host git runs with
+`core.fsmonitor=false`, no hooks (`core.hooksPath=/dev/null`, which also stops
+`post-checkout` on `worktree add`), no transport at all (`protocol.allow=never`, so no lazy
+fetch, `core.sshCommand` or remote helper), `log.showSignature=false` (no `gpg.program`), and
+every filter driver the configuration names emptied for that command. The host never asks
+for a diff, so `textconv` and external diff drivers never run.
+
+What is left: filter drivers are read from the configuration just before each command, so an
+agent that adds a new driver in the moment between the two can still have it run once by the
+host. The strict profile closes that, since a strict agent cannot write `.git/config`. Running
+host git inside the agent's own sandbox would close it for the open profile too; that is not
+built yet.
+
 ### Agent compatibility
 
 What each agent needed to start under the strict sandbox, and whether it has been run signed in end to
@@ -440,8 +498,9 @@ resume one on purpose (`harness_session_resume`).
 
 - **Locking** is open to everyone who can drive the host: `hq host lockdown
   "<reason>"` on the machine, the `host.lockdown` method (also through the ssh
-  gate), HQ's `host_lockdown` tool, which locks every host when none is named,
-  and the **Stop all** button on the web app's Workbench page (beside New agent,
+  gate), HQ's `host_lockdown` tool, which locks every host when none is named
+  (from a claude.ai connector it waits for the owner's approval like the other
+  host tools, since one call stops every agent everywhere), and the **Stop all** button on the web app's Workbench page (beside New agent,
   one tap and a confirmation on a phone; `POST /api/workbench/lockdown`). The
   Workbench names any locked computer above its agent list.
   It kills every agent the host runs with its whole process group at once (no

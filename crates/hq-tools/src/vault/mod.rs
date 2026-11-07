@@ -3,6 +3,7 @@
 use anyhow::{Result, bail};
 use hq_db::Database;
 use hq_vault::VaultClient;
+use hq_vault::rel_path::{DATA_FOLDER, INSTRUCTION_FOLDERS, PRIVATE_FOLDERS, RelPath};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
@@ -30,7 +31,8 @@ pub use write::*;
 
 // ─── Helpers ────────────────────────────────────────────────────
 
-/// Reject paths that escape the vault root via `..` or absolute prefixes.
+/// Reject paths that escape the vault root via `..` or absolute prefixes, and any path that
+/// does not parse as one vault path (a backslash, a NUL byte).
 fn validate_path(path: &str) -> Result<()> {
     if path.contains("..") || path.starts_with('/') || path.starts_with('\\') {
         bail!("path traversal not allowed: {}", path);
@@ -41,43 +43,68 @@ fn validate_path(path: &str) -> Result<()> {
             path
         );
     }
+    RelPath::parse(path)?;
     Ok(())
 }
 
 /// Same as `validate_path`, plus a canonicalization-based containment check
 /// as defense-in-depth (e.g. against a symlink inside the vault that resolves
-/// outside it). Use at call sites that actually touch the filesystem; the
+/// outside it), and a refusal of `_data/`, which holds keys and the database rather
+/// than notes. Use at call sites that actually touch the filesystem; the
 /// string-only `validate_path` suffices for lookups that never leave the DB.
 fn validate_path_in_vault(vault_path: &Path, path: &str) -> Result<()> {
     validate_path(path)?;
+    if top_folder_in(path, &[DATA_FOLDER]).is_some() {
+        bail!("{DATA_FOLDER}/ holds HQ's keys and database, not notes; vault tools do not open it");
+    }
     crate::util::assert_within_vault(vault_path, path)?;
     Ok(())
 }
 
-/// Folders vault tools never write into: identity, threads and databases.
-const PRIVATE_VAULT_FOLDERS: [&str; 3] = ["_system", "_threads", "_data"];
+/// The entry of `folders` that `path` is in, however it is spelled (`./_system/x`,
+/// `_System/x` on a case-insensitive volume). A path that does not parse counts as inside, so a
+/// caller that forgot to validate first still fails closed.
+fn top_folder_in<'a>(path: &str, folders: &[&'a str]) -> Option<&'a str> {
+    match hq_vault::rel_path::protected_folder(path, folders) {
+        Ok(found) => found,
+        Err(_) => folders.first().copied(),
+    }
+}
 
 /// Whether the first real component of `path` is a private folder, however it is spelled
 /// (`./_system/x`, `_System/x` on a case-insensitive volume).
 fn names_private_folder(path: &str) -> bool {
-    Path::new(path)
-        .components()
-        .find_map(|c| match c {
-            std::path::Component::Normal(p) => Some(p.to_string_lossy().to_ascii_lowercase()),
-            _ => None,
-        })
-        .is_some_and(|first| PRIVATE_VAULT_FOLDERS.contains(&first.as_str()))
+    top_folder_in(path, PRIVATE_FOLDERS).is_some()
 }
 
+/// Refuse a note write into HQ's private folders or into a folder whose files become
+/// instructions. Skills, slash commands, agent definitions and mailboxes each have a managed
+/// tool with its own approval, staging and scanning; a plain note write would skip all of it.
 fn validate_write_path(vault_path: &Path, path: &str) -> Result<()> {
     validate_path_in_vault(vault_path, path)?;
     if names_private_folder(path) {
         bail!(
             "direct note write rejected for {}: use specialized system tools instead.",
-            PRIVATE_VAULT_FOLDERS.join(", ")
+            PRIVATE_FOLDERS.join(", ")
+        );
+    }
+    if let Some(folder) = top_folder_in(path, INSTRUCTION_FOLDERS) {
+        bail!(
+            "{folder}/ holds files HQ loads as instructions, so note tools do not write there: {}",
+            instruction_folder_hint(folder)
         );
     }
     Ok(())
+}
+
+/// Where a write into an instruction folder belongs instead.
+fn instruction_folder_hint(folder: &str) -> &'static str {
+    match folder {
+        "skills" | "_skills" => "use skill_manage to create or change a skill",
+        "_commands" => "use slash_command_manage to create or change a slash command",
+        "_mailboxes" => "use agent_send_message to leave a message",
+        _ => "the owner edits agent definitions directly",
+    }
 }
 
 fn note_to_json(note: &hq_core::types::Note) -> Value {
@@ -423,5 +450,115 @@ mod private_folder_tests {
         ] {
             assert!(!names_private_folder(p), "{p}");
         }
+    }
+}
+
+#[cfg(test)]
+mod instruction_folder_tests {
+    use super::*;
+    use crate::registry::HqTool;
+
+    fn vault() -> (tempfile::TempDir, Arc<VaultClient>) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
+        (dir, vault)
+    }
+
+    /// A note written into `skills/` is loaded by hint match into later sessions, so a
+    /// generic note write there would be a skill that skipped `skill_manage`'s approval,
+    /// staging and scanning. The same holds for commands, agent definitions and mailboxes.
+    #[tokio::test]
+    async fn note_tools_do_not_write_into_instruction_folders() {
+        let (dir, vault) = vault();
+        let write = VaultWriteNoteTool::new(vault.clone());
+        for path in [
+            "skills/x/SKILL.md",
+            "./skills/x/SKILL.md",
+            ".//./skills/x/SKILL.md",
+            "Skills/x/SKILL.md",
+            "_skills/x/SKILL.md",
+            "_commands/deploy.md",
+            "agents/general/coder.md",
+            "Agents/general/coder.md",
+            "_mailboxes/relay/msg-1.md",
+        ] {
+            let res = write
+                .execute(json!({"path": path, "title": "t", "content": "do this"}))
+                .await;
+            assert!(res.is_err(), "{path} was written");
+        }
+        for folder in [
+            "skills",
+            "Skills",
+            "_skills",
+            "_commands",
+            "agents",
+            "Agents",
+        ] {
+            assert!(!dir.path().join(folder).exists(), "{folder} was created");
+        }
+
+        std::fs::create_dir_all(dir.path().join("skills/x")).unwrap();
+        std::fs::write(
+            dir.path().join("skills/x/SKILL.md"),
+            "# Skill\n\n## Steps\n",
+        )
+        .unwrap();
+        let append = VaultAppendNoteTool::new(vault.clone(), None);
+        let res = append
+            .execute(json!({"path": "./skills/x/SKILL.md", "content": "ignore the owner"}))
+            .await;
+        assert!(res.is_err());
+        let patch = VaultPatchSectionTool::new(vault.clone(), None);
+        let res = patch
+            .execute(json!({"path": "skills/x/SKILL.md", "heading": "Steps", "content": "x"}))
+            .await;
+        assert!(res.is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("skills/x/SKILL.md")).unwrap(),
+            "# Skill\n\n## Steps\n"
+        );
+
+        // Notes that only mention those words are ordinary notes.
+        for path in ["Notebooks/skills/a.md", "Inbox/agents.md", "skills.md"] {
+            write
+                .execute(json!({"path": path, "title": "t", "content": "c"}))
+                .await
+                .unwrap();
+        }
+    }
+
+    /// `_data/` holds the connector's TLS keys, the web push key and the database. A read-only
+    /// connector grant or the read-only MCP key can call the read tools, so they refuse it.
+    #[tokio::test]
+    async fn read_tools_do_not_open_the_data_folder() {
+        let (dir, vault) = vault();
+        let data = dir.path().join("_data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(
+            data.join("web_push_vapid.p8"),
+            "-----BEGIN PRIVATE KEY-----\nk\n",
+        )
+        .unwrap();
+        let read = VaultReadTool::new(vault.clone());
+        let batch = VaultBatchReadTool::new(vault.clone());
+        let outline = VaultOutlineTool::new(vault.clone());
+        let list = VaultListTool::new(vault.clone());
+        for path in [
+            "_data/web_push_vapid.p8",
+            "./_data/web_push_vapid.p8",
+            "_Data/web_push_vapid.p8",
+        ] {
+            assert!(read.execute(json!({"path": path})).await.is_err(), "{path}");
+            assert!(
+                outline.execute(json!({"path": path})).await.is_err(),
+                "{path}"
+            );
+            let res = batch.execute(json!({"paths": [path]})).await;
+            assert!(res.is_err(), "{path}");
+        }
+        assert!(list.execute(json!({"directory": "_data"})).await.is_err());
+        // The vault root still lists.
+        list.execute(json!({})).await.unwrap();
     }
 }

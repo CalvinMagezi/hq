@@ -62,25 +62,26 @@ impl Handler {
     }
 
     /// Mention/DM gate plus the allowlist. Logs a rejection only for a sender
-    /// that reached the check; an unmentioned bot or guild message stays silent.
+    /// that reached the check; an unmentioned guild message and this bot's own
+    /// messages stay silent.
     pub(super) async fn authorized_owner(&self, msg: &Message, bot_id: UserId) -> bool {
         let is_mention = msg.mentions.iter().any(|u| u.id == bot_id);
         let is_dm = msg.guild_id.is_none();
-        // Webhook posts also carry `author.bot`, but any member with Manage
-        // Webhooks can create one, so only a real bot account skips the allowlist.
-        let is_real_bot = msg.author.bot && msg.webhook_id.is_none();
+        // Bot accounts and webhook posts go through the same allowlist as
+        // people: whoever passes is treated as the owner.
         let allowed = authorize_incoming(
             &self.vault_path,
             msg.author.id.get(),
-            is_real_bot,
+            bot_id.get(),
             is_mention,
             is_dm,
             &self.discord_allowed_user_ids,
         )
         .await;
-        if !allowed && !is_real_bot && (is_mention || is_dm) {
+        if !allowed && msg.author.id != bot_id && (is_mention || is_dm) {
             tracing::warn!(
                 user_id = msg.author.id.get(),
+                is_bot = msg.author.bot,
                 "discord: rejecting message from unauthorized user"
             );
         }
@@ -106,7 +107,7 @@ impl Handler {
     }
 
     /// Only an allowlisted human in a DM gets the link. Checked here rather than
-    /// trusted from the message gate, which also admits family users and bots.
+    /// trusted from the message gate, which also admits family users.
     async fn login_decision(
         &self,
         user_id: u64,
@@ -203,12 +204,18 @@ impl Handler {
         content: &str,
         lower: &str,
     ) -> ControlFlow<(), Option<String>> {
+        // The family channel and its threads are guest chats, whoever types there.
+        let is_owner = !self.family_authorized(msg).await
+            && !self
+                .is_family_channel_or_thread(effective_channel.get())
+                .await;
         let reply = crate::chat_commands::registry_command(
             lower,
             content,
             "discord",
             effective_channel.get(),
             None,
+            is_owner,
             || {
                 let config = hq_core::config::HqConfig::load().ok()?;
                 Database::open(&config.db_path()).ok().map(Arc::new)
@@ -274,6 +281,12 @@ impl Handler {
             .family_user_name(msg.author.id.get())
             .map(|s| s.to_string());
         let scope = self.disclosure_scope(msg.author.id.get(), guest_name.is_some());
+        // A quote of someone else's words is untrusted text in this turn.
+        let bot_id = ctx.cache.current_user().id;
+        let untrusted_input = self
+            .referenced_author(msg, bot_id)
+            .await
+            .and_then(|author| author.untrusted_input());
         let result = dispatch_hq(
             &content,
             &enriched_prompt,
@@ -285,6 +298,7 @@ impl Handler {
             mirror,
             guest_name,
             scope,
+            untrusted_input,
         )
         .await;
         typing.abort();
@@ -542,6 +556,49 @@ impl Handler {
     }
 }
 
+/// Who wrote a referenced message: HQ itself, the owner, or anyone else (a
+/// webhook post counts as anyone else, whatever name it shows).
+pub(super) fn classify_reference(
+    author_id: u64,
+    from_webhook: bool,
+    bot_id: u64,
+    author_is_owner: bool,
+) -> crate::relay_common::QuotedAuthor {
+    use crate::relay_common::QuotedAuthor;
+    if from_webhook {
+        QuotedAuthor::Other
+    } else if author_id == bot_id {
+        QuotedAuthor::Hq
+    } else if author_is_owner {
+        QuotedAuthor::Owner
+    } else {
+        QuotedAuthor::Other
+    }
+}
+
+impl Handler {
+    /// Who wrote the message `msg` replies to, if it replies to one.
+    pub(super) async fn referenced_author(
+        &self,
+        msg: &Message,
+        bot_id: UserId,
+    ) -> Option<crate::relay_common::QuotedAuthor> {
+        let referenced = msg.referenced_message.as_deref()?;
+        let is_owner = is_message_author_allowed(
+            &self.vault_path,
+            referenced.author.id.get(),
+            &self.discord_allowed_user_ids,
+        )
+        .await;
+        Some(classify_reference(
+            referenced.author.id.get(),
+            referenced.webhook_id.is_some(),
+            bot_id.get(),
+            is_owner,
+        ))
+    }
+}
+
 /// The text to act on: mentions stripped, reply context prepended. `None` when empty.
 pub(super) fn inbound_text(msg: &Message, bot_id: UserId) -> Option<String> {
     let raw = msg
@@ -555,7 +612,8 @@ pub(super) fn inbound_text(msg: &Message, bot_id: UserId) -> Option<String> {
     }
     Some(match &msg.referenced_message {
         Some(referenced) => {
-            let who = if referenced.author.bot {
+            // Only HQ's own messages are "assistant"; another bot shows its name.
+            let who = if referenced.author.id == bot_id && referenced.webhook_id.is_none() {
                 "assistant"
             } else {
                 &referenced.author.name
@@ -573,4 +631,32 @@ fn spawn_typing(ctx: Ctx, channel: ChannelId) -> tokio::task::JoinHandle<()> {
             tokio::time::sleep(TYPING_REFRESH).await;
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::relay_common::QuotedAuthor;
+
+    const HQ: u64 = 4242;
+
+    #[test]
+    fn only_quotes_from_hq_or_the_owner_are_trusted() {
+        assert_eq!(classify_reference(HQ, false, HQ, false), QuotedAuthor::Hq);
+        assert_eq!(classify_reference(7, false, HQ, true), QuotedAuthor::Owner);
+        for (author, webhook, owner) in [
+            (8, false, false), // someone else in the channel, or another bot
+            (7, true, true),   // a webhook post shown under the owner's id
+            (HQ, true, false), // a webhook made to look like HQ
+        ] {
+            let who = classify_reference(author, webhook, HQ, owner);
+            assert_eq!(who, QuotedAuthor::Other, "{author} {webhook} {owner}");
+            assert_eq!(
+                who.untrusted_input().as_deref(),
+                Some(crate::relay_common::UNTRUSTED_QUOTE_SOURCE)
+            );
+        }
+        assert_eq!(QuotedAuthor::Hq.untrusted_input(), None);
+        assert_eq!(QuotedAuthor::Owner.untrusted_input(), None);
+    }
 }

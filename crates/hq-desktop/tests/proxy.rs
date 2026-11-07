@@ -56,11 +56,21 @@ async fn echo_request(State(seen): State<Seen>, headers: HeaderMap, body: String
     res
 }
 
-async fn socket(ws: WebSocketUpgrade) -> Response {
+async fn socket(ws: WebSocketUpgrade, headers: HeaderMap) -> Response {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
     ws.on_upgrade(|mut s: WebSocket| async move {
         while let Some(Ok(m)) = s.recv().await {
             if let Message::Text(t) = m {
-                let _ = s.send(Message::Text(format!("echo:{t}").into())).await;
+                let reply = if t.as_str() == "host?" {
+                    format!("host:{host}")
+                } else {
+                    format!("echo:{t}")
+                };
+                let _ = s.send(Message::Text(reply.into())).await;
             }
         }
     })
@@ -420,6 +430,15 @@ async fn the_chat_socket_passes_through_and_other_upgrades_do_not() {
         .unwrap()
         .unwrap();
     assert_eq!(got, M::text("echo:hi"));
+    // HQ checks the window's Origin against Host, so the socket must carry the proxy's Host
+    // (the window's own address), as plain requests do, not the upstream's.
+    ws.send(M::text("host?")).await.unwrap();
+    let got = tokio::time::timeout(std::time::Duration::from_secs(3), ws.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(got, M::text(format!("host:127.0.0.1:{}", rig.port())));
     ws.close(None).await.unwrap();
 
     // A socket HQ would accept on another path is not carried, and the machine paths are not either.

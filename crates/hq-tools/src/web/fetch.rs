@@ -175,7 +175,7 @@ pub(super) fn classify_body(content_type: &str, body: &[u8]) -> BodyKind {
 }
 
 /// Read a body without ever buffering more than `limit` bytes.
-pub(super) async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
+pub(crate) async fn read_limited(mut resp: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
     if let Some(len) = resp.content_length()
         && len as usize > limit
     {

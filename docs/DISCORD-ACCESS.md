@@ -70,13 +70,11 @@ There is no per-guild or DM-only/guild-only scoping — see
 `crates/hq-core/src/config/relay.rs`'s doc comment on `discord_allowed_user_ids`
 for the authoritative field-level statement this page summarizes.
 
-A **genuine bot account** (any other Discord bot user)
-is exempt from the allowlist entirely, but only when it explicitly
-@-mentions this bot — this keeps cross-agent channels mention-gated and
-loop-free without requiring bot accounts to be allowlisted. A
-webhook-posted message is *not* exempt even though Discord also marks its
-author `bot: true` — webhooks are impersonation-shaped (anyone with Manage
-Webhooks on a channel can post as one), not trusted-bot-shaped.
+Other bot accounts and webhook posts get no exemption. Anything that passes
+this check is treated as the owner (it sees what the owner sees and can run
+`!permission` and `!model`), so a bot is refused like any other stranger
+unless its id is in `discord_allowed_user_ids`. Allowlist a bot only if you
+would hand it your own account. The bot never answers its own messages.
 
 ## Vault files
 
@@ -113,3 +111,11 @@ confirm identity on your behalf.
 ## Family guest harness limit
 
 `relay.discord_family_allowed_harnesses` lists the host harnesses a family guest may start. It defaults to `["agy"]`. Set it to `[]` to allow any harness. Approval prompts address the Telegram owner by the name in `relay.telegram_users`.
+
+## No watches in the family channel
+
+A watch firing and a sub-agent follow-up run later as unattended turns with the owner's tools, so
+neither runs in the family channel or its threads. `/watch` and `resume` are refused there (for
+the owner too), a family guest's `watch_create` is refused, a watch already stored for one of those
+chats is stopped at its next firing with a notice, and a follow-up for one goes to the owner's
+inbox instead. `/unwatch` still works.

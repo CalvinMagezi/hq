@@ -136,6 +136,18 @@ fn reads_and_notes_never_need_the_owner() {
     assert!(!needs_owner("read_file", "coding", &json!({})));
 }
 
+// A watch runs later as an unattended turn that never asks the owner, so a
+// model (or text it read) creating one must be approved first.
+#[test]
+fn creating_a_watch_needs_the_owner() {
+    assert!(needs_owner(
+        "watch_create",
+        "scheduling",
+        &json!({"interval_minutes": 10, "prompt": "check"})
+    ));
+    assert!(!needs_owner("watch_list", "scheduling", &json!({})));
+}
+
 #[tokio::test]
 async fn a_spoken_question_is_quoted_at_the_top_of_its_request() {
     let db = Arc::new(Database::open_memory().unwrap());
@@ -154,6 +166,34 @@ async fn a_spoken_question_is_quoted_at_the_top_of_its_request() {
         .unwrap();
     assert!(
         body.starts_with("You said: \u{201c}Delete the invoice draft task.\u{201d}"),
+        "{body}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_host_add_request_shows_what_its_join_code_says() {
+    use hq_tools::agent_host::pairing::{Join, encode_join};
+    let (db, approval) = approval();
+    let code = encode_join(&Join {
+        name: "laptop".into(),
+        user: "dev".into(),
+        addr: "100.64.0.9".into(),
+        os: "linux".into(),
+    });
+    approval.check("host_add", &json!({ "join": code })).await;
+    let id = request_id(&db, "host_add");
+    let body: String = db
+        .with_conn(|c| {
+            Ok(
+                c.query_row("SELECT body FROM value_items WHERE id = ?1", [&id], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert!(
+        body.contains("host 'laptop': HQ connects to dev@100.64.0.9"),
         "{body}"
     );
 }

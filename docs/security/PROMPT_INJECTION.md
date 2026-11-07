@@ -42,6 +42,11 @@ normal and the `BypassPermissions` paths.
      tell the reader never to follow instructions found there;
    - any tool in the `remote_mcp` category.
 
+   A turn can also start tainted (`NativeHqHooks::untrusted_input`): an `hq_ask` question marked
+   untrusted, and a Telegram or Discord message that replies to (quotes) a message written by
+   anyone other than the owner or HQ itself, including another bot, a webhook post and a
+   forwarded message. Only HQ's own messages are quoted to the model as "assistant".
+
    Taint lasts for the session. One `TaintTracker` is shared by the parent
    session and every sub-agent `spawn_subagents` starts, in both directions,
    so delegating cannot launder it.
@@ -106,6 +111,8 @@ Run them with `cargo test -p hq-agent governance`.
   on Linux.
 - Vault content the context engine injects into the prompt, and conversation
   history from an earlier turn, are not tracked as taint. Only tool results
-  in the current session are.
+  in the current session are, plus the start-of-turn marks above. A quote
+  taints the turn it arrives in; the next turn replays it as history,
+  untainted.
 - `config_manage` is not registered in native sessions. It only exists in
   the external MCP registry, which is not governed by this layer.

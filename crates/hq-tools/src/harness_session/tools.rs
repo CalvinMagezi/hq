@@ -274,6 +274,7 @@ impl HqTool for HarnessSessionSpawnTool {
         {
             observe = super::team::writers(&self.db, root);
         }
+        super::subscribe::check_spawn_observe(&self.db, &args, &observe)?;
         let worktree = super::checkout::parse_worktree(&args)?;
         let owns = super::checkout::parse_owns(&args)?;
         let policy = super::policy::parse(&args);
@@ -358,7 +359,10 @@ impl HqTool for HarnessSessionSpawnTool {
             report["cwd_note"] = json!(note);
         }
         super::tag_origin(&self.db, &report, origin);
-        let brief = super::connector_brief(&args, &["prompt", "goal", "done_criteria"]);
+        let brief = super::with_observed(
+            super::connector_brief(&args, &["prompt", "goal", "done_criteria"]),
+            &observe,
+        );
         let cwd = report["cwd"].as_str().unwrap_or("unknown").to_string();
         super::notify_connector_start(&self.db, &args, &report, &brief, &cwd);
         Ok(report)
@@ -453,10 +457,14 @@ impl HqTool for HarnessSessionListTool {
             .unwrap_or(false);
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
+            // A claude.ai connection sees only the sessions it may drive; the owner's stay theirs.
+            let keep = |r: &registry::HarnessSessionRow| {
+                super::connector_may_drive(&db, &args, &r.id).is_ok()
+            };
             if task.is_empty() {
-                super::list_with(&db, status, with_worktrees)
+                super::list_with(&db, status, with_worktrees, &keep)
             } else {
-                super::list_for_task(&db, &task)
+                super::list_for_task(&db, &task, &keep)
             }
         })
         .await?
@@ -493,6 +501,9 @@ impl HqTool for HarnessSessionStatusTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
+        // Its row holds the goal, folder, branch and resume token, which a connection reads
+        // only for sessions it may drive.
+        super::connector_may_drive(&db, &args, &id)?;
         let caller = super::caller_session(&args).map(str::to_string);
         tokio::task::spawn_blocking(move || {
             // A launched agent may look at itself, its parent and its children.
@@ -565,7 +576,7 @@ impl HqTool for HarnessSessionSendTool {
         "harness_session_send"
     }
     fn description(&self) -> &str {
-        "Steer a running harness session. `text` is submitted as a prompt. If the session is blocked at a dialog the text is refused: read the dialog with harness_session_pending and answer it with harness_session_answer, or pass `keys` (logical names such as enter, esc, down, ctrl+c) when HQ cannot read it."
+        "Steer a running harness session. `text` is submitted as a prompt. If the session is blocked at a dialog the text is refused: read the dialog with harness_session_pending and answer it with harness_session_answer, or pass `keys` (logical names such as enter, esc, down, ctrl+c) when HQ cannot read it. Unless the owner typed this turn, keys at a dialog are refused except esc and ctrl+c at one HQ cannot read."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -592,11 +603,12 @@ impl HqTool for HarnessSessionSendTool {
             anyhow::bail!("pass `text` to submit a prompt or `keys` to press keys");
         }
         let chat = self.chat.clone();
+        let who = super::answer::Answerer::of(&args, chat.as_ref());
         tokio::task::spawn_blocking(move || {
             if keys.is_empty() {
                 super::send(&db, &id, &text, chat.as_ref())
             } else {
-                super::send_keys(&db, &id, &keys, chat.as_ref())
+                super::send_keys(&db, &id, &keys, chat.as_ref(), who)
             }
         })
         .await?
@@ -830,6 +842,7 @@ impl HqTool for HarnessSessionWaitTool {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         let timeout = std::time::Duration::from_secs(secs.clamp(3, super::MAX_WAIT.as_secs()));
+        super::connector_may_drive(&db, &args, &id)?;
         let caller = super::caller_session(&args).map(str::to_string);
         tokio::task::spawn_blocking(move || {
             db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;

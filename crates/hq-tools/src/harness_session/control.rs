@@ -215,17 +215,19 @@ pub(super) fn with_pending(view: &mut Value, agent: &AgentInfo) {
 }
 
 pub fn list(db: &Arc<Database>, status_filter: Option<String>) -> Result<Value> {
-    list_with(db, status_filter, false)
+    list_with(db, status_filter, false, &|_| true)
 }
 
 /// `list`, and with `worktree_status` each running session that has a live worktree also reports
-/// it, one host call each.
+/// it, one host call each. Only the rows `keep` passes are shown (or polled).
 pub fn list_with(
     db: &Arc<Database>,
     status_filter: Option<String>,
     worktree_status: bool,
+    keep: &dyn Fn(&HarnessSessionRow) -> bool,
 ) -> Result<Value> {
     let rows = db.with_conn(move |c| registry::list(c, status_filter.as_deref(), 50))?;
+    let rows: Vec<HarnessSessionRow> = rows.into_iter().filter(|r| keep(r)).collect();
     let mut views = session_views(&rows);
     if worktree_status {
         for (row, view) in rows.iter().zip(views.iter_mut()) {
@@ -603,13 +605,18 @@ pub fn live_fields(
 
 /// Every session launched for one task (id or display id), with live status
 /// for the running ones.
-pub fn list_for_task(db: &Arc<Database>, task: &str) -> Result<Value> {
+pub fn list_for_task(
+    db: &Arc<Database>,
+    task: &str,
+    keep: &dyn Fn(&HarnessSessionRow) -> bool,
+) -> Result<Value> {
     let (task_id, rows) = db.with_conn(|c| {
         let found =
             hq_db::tasks::get_task(c, task)?.ok_or_else(|| anyhow::anyhow!("no task '{task}'"))?;
         let rows = registry::list_for_mission(c, &found.id)?;
         Ok((found.display_id, rows))
     })?;
+    let rows: Vec<HarnessSessionRow> = rows.into_iter().filter(|r| keep(r)).collect();
     Ok(json!({ "task": task_id, "sessions": session_views(&rows) }))
 }
 
@@ -851,16 +858,68 @@ pub(super) fn send_text(db: &Arc<Database>, session_id: &str, text: &str) -> Res
     }
 }
 
+/// The keys an automated caller may press at a dialog HQ cannot read: they back out of it and
+/// never pick an option.
+const BACK_OUT_KEYS: &[&str] = &["esc", "escape", "ctrl+c"];
+
+/// Keys are a way round `harness_session_answer`, which keeps the "remember" options and the
+/// losing commands to the owner. So an automated caller may not press keys at a dialog HQ can
+/// read (it answers that by option), and at one HQ cannot read it may only back out.
+pub(super) fn check_keys_at_dialog(
+    host: &Host,
+    row: &HarnessSessionRow,
+    blocked: bool,
+    keys: &[String],
+    who: answer::Answerer,
+) -> Result<()> {
+    let answer::Answerer::Automated(by) = who else {
+        return Ok(());
+    };
+    let read = match host.pending(&row.agent_name) {
+        Ok(read) => read,
+        Err(e) if matches!(e.code(), Some("unsupported" | "unknown_method")) => None,
+        Err(e) => return Err(e.into()),
+    };
+    if let Some(read) = read {
+        bail!(
+            "session {} is waiting at dialog {} and HQ can read it, so {by} answers it with harness_session_answer (seq {}), not with keys",
+            row.id,
+            read.seq,
+            read.seq
+        );
+    }
+    let backs_out = keys
+        .iter()
+        .all(|k| BACK_OUT_KEYS.contains(&k.to_ascii_lowercase().as_str()));
+    if blocked && !backs_out {
+        bail!(
+            "session {} is blocked at a dialog HQ cannot read, so {by} may only back out of it (esc or ctrl+c). The owner answers it from the Sessions panel or their phone.",
+            row.id
+        );
+    }
+    Ok(())
+}
+
 /// Press logical keys (`enter`, `esc`, `down`, `ctrl+c`), for answering dialogs.
 pub fn send_keys(
     db: &Arc<Database>,
     session_id: &str,
     keys: &[String],
     chat: Option<&WatchingChat>,
+    who: answer::Answerer,
 ) -> Result<Value> {
     let sent = metered(db, session_id, chat, SendKind::Keys, || {
         let row = get_row(db, session_id)?;
-        let host = require_alive(&row)?;
+        let (host, agent) = locate(&row)?;
+        let Some(agent) = agent else {
+            bail!(
+                "session {} is not running (no agent '{}' on host '{}')",
+                row.id,
+                row.agent_name,
+                row.host
+            );
+        };
+        check_keys_at_dialog(&host, &row, agent.status == AgentStatus::Blocked, keys, who)?;
         host.send_keys(&row.agent_name, keys)?;
         Ok(())
     });

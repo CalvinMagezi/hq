@@ -281,8 +281,13 @@ impl SessionBuilder {
             ),
         );
         tools.extend(hq_tools::agent_host::tools::create_host_tools(db.clone()));
+        let origin = self
+            .identity
+            .as_ref()
+            .and_then(hq_tools::background_turns::WatchOrigin::from_identity);
         tools.extend(hq_tools::background_turns::create_background_turn_tools(
             db.clone(),
+            origin.clone(),
         ));
         // A session with no chat (CLI, proxy) sees only unrouted runs, never
         // another chat's.
@@ -293,10 +298,6 @@ impl SessionBuilder {
                     .unwrap_or_else(hq_db::subagent_runs::Origin::unrouted),
             ),
         ));
-        let origin = self
-            .identity
-            .as_ref()
-            .and_then(hq_tools::background_turns::WatchOrigin::from_identity);
         tools.extend(hq_tools::background_turns::create_watch_tools(
             db.clone(),
             origin,

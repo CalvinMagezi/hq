@@ -270,6 +270,25 @@ impl HqTool for SelfUpdateBeginTool {
     }
 }
 
+/// Longest crate name taken; real ones are far shorter.
+const MAX_PACKAGE_LEN: usize = 64;
+
+/// Each name goes to cargo as `-p <name>`, so it must be a plain crate name: one that starts
+/// with `-` (such as `--config=...`) would be read as an option, and some options run commands.
+fn check_packages(packages: &[String]) -> Result<()> {
+    for p in packages {
+        let plain = !p.is_empty()
+            && p.len() <= MAX_PACKAGE_LEN
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            && !p.starts_with('-');
+        if !plain {
+            bail!("{p:?} is not a crate name: use letters, digits, '-' and '_' only");
+        }
+    }
+    Ok(())
+}
+
 pub struct SelfUpdateCheckTool {
     config: HqConfig,
     db: Arc<Database>,
@@ -304,6 +323,7 @@ impl HqTool for SelfUpdateCheckTool {
             .cloned()
             .map(|v| serde_json::from_value(v).unwrap_or_default())
             .unwrap_or_default();
+        check_packages(&packages)?;
         let run = self
             .db
             .with_conn(move |c| hq_db::self_update_runs::get(c, run_id))?
@@ -755,6 +775,36 @@ mod tests {
         db.with_conn(|c| runs::set_status(c, run_id, runs::STATUS_CHECKED))
             .unwrap();
         (SelfUpdateInstallTool::new(config, db.clone()), db, run_id)
+    }
+
+    #[tokio::test]
+    async fn a_package_that_reads_as_a_cargo_option_is_refused_before_cargo_runs() {
+        let repo = git_repo();
+        let db = Arc::new(Database::open_memory().unwrap());
+        let run_id = db
+            .with_conn(|c| runs::insert(c, "tweak", "self/x", "HEAD", None))
+            .unwrap();
+        let tool = SelfUpdateCheckTool {
+            config: config_for(repo.path(), true),
+            db: db.clone(),
+        };
+        for bad in [
+            "--config=build.rustc-wrapper=/bin/sh",
+            "-q",
+            "hq vault",
+            "",
+            "hq-*",
+        ] {
+            let err = tool
+                .execute(json!({ "run_id": run_id, "packages": [bad] }))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("is not a crate name"), "{bad}: {err}");
+        }
+        let run = db.with_conn(|c| runs::get(c, run_id)).unwrap().unwrap();
+        assert_eq!(run.status, runs::STATUS_OPEN, "nothing was checked");
+        assert!(check_packages(&["hq-vault".into(), "hq_core".into()]).is_ok());
     }
 
     #[test]

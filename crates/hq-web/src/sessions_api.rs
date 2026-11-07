@@ -689,7 +689,7 @@ pub(crate) async fn send_handler(
                 format!("text, {} characters", t.chars().count()),
             ),
             (_, Some(k)) => (
-                harness::send_keys(&db, &id, k, None)?,
+                harness::send_keys(&db, &id, k, None, harness::answer::Answerer::Owner)?,
                 format!("keys: {}", k.join(" ")),
             ),
             _ => unreachable!("exactly one of text or keys was checked"),

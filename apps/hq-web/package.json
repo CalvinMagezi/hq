@@ -18,7 +18,7 @@
     "@tanstack/react-query-persist-client": "^5.103.2",
     "@tanstack/react-router": "^1",
     "@tanstack/react-start": "^1",
-    "dompurify": "^3.4.6",
+    "dompurify": "^3.4.17",
     "framer-motion": "^12.16.0",
     "idb-keyval": "^6.3.0",
     "lucide-react": "^0.525.0",
@@ -40,7 +40,7 @@
     "@vitejs/plugin-react": "^4",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vite": "^7"
+    "vite": "^7.3.7"
   },
   "overrides": {
     "@xmldom/xmldom": "^0.8.15"

@@ -23,6 +23,7 @@ pub mod ingest;
 pub mod note_pdf;
 pub mod ocr;
 pub mod outbound;
+pub mod pandoc;
 pub mod types;
 
 pub use inbound::InboundConverter;

@@ -44,8 +44,13 @@ stay available. `host_add` and `model_switch` write the config file. See `TECHDE
 
 ## Protecting identity and config for every role
 
-- Vault write tools refuse `_system`, `_threads` and `_data` however the path is spelled
-  (`./_system/x`, `_System/x`).
+- Vault write tools refuse `_system`, `_threads` and `_data`, and the folders whose files
+  become instructions (`skills`, `_skills`, `_commands`, `agents`, `_mailboxes`), however the
+  path is spelled (`./_system/x`, `.//./skills/x`, `_System/x`). One parser,
+  `hq_vault::rel_path::RelPath`, reads the path for the note tools, the move, trash and
+  frontmatter tools (which also refuse `_trash`) and the connector gateway. Skills and slash
+  commands change only through `skill_manage` and `slash_command_manage`. The vault read tools
+  refuse `_data`, which holds keys and the database.
 - `harness_session_spawn`, `harness_session_handoff` and `spawn_with` refuse a working directory that
   is the vault, HQ's config directory, a private vault folder, or a folder above the vault that is not
   a git checkout, on the host that holds the vault. A repo with its vault in `.vault/` can still be a

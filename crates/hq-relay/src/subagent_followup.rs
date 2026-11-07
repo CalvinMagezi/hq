@@ -47,6 +47,16 @@ async fn deliver<K: ChatKey>(surface: &WatchSurface<K>, db: &Arc<Database>, f: F
         followup::failed(db, &f, "the chat id could not be parsed");
         return;
     };
+    // A follow-up runs unattended with the owner's tools and no guest role, so
+    // it never runs in a guest's chat; the owner's inbox gets it instead.
+    if !(surface.owner_chat)(key) {
+        followup::refused(
+            db,
+            &f,
+            "it was started from a guest's chat, where HQ does not run follow-up turns",
+        );
+        return;
+    }
     if !claim_chat(&surface.threads, key).await {
         followup::busy(db, &f);
         return;
@@ -105,4 +115,111 @@ async fn run_turn<K: ChatKey>(
         (surface.sender)(key)(text.to_string());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hq_core::config::CollaborationConfig;
+    use hq_core::types::ValueKind;
+    use hq_db::subagent_runs::{self as runs, NewRun, Origin, Settlement};
+    use std::collections::HashMap;
+    use tokio::sync::Mutex as TokioMutex;
+
+    fn settled_run(db: &Database, run_id: &str, chat: &str) {
+        let now = chrono::Utc::now().timestamp();
+        db.with_conn(|c| {
+            runs::insert_run(
+                c,
+                &NewRun {
+                    run_id: run_id.into(),
+                    parent_run_id: None,
+                    parent_turn_id: None,
+                    origin: Some(Origin {
+                        platform: "telegram".into(),
+                        chat_id: chat.into(),
+                        thread_id: None,
+                        identity: None,
+                    }),
+                    task_id: None,
+                    child_id: "c".into(),
+                    role: "general".into(),
+                    goal: "look something up".into(),
+                    success_criteria: vec![],
+                    required_tools: vec![],
+                    detached: true,
+                    owner_pid: Some(1),
+                    followup_depth: 0,
+                },
+                now,
+            )?;
+            runs::settle(
+                c,
+                run_id,
+                &Settlement {
+                    exec_status: runs::EXEC_COMPLETED.into(),
+                    accept_status: runs::ACCEPT_UNVERIFIED.into(),
+                    missing_deliverables: vec![],
+                    blocker_reason: None,
+                    next_action: None,
+                    output_full: "ok".into(),
+                    output_preview: "ok".into(),
+                    error: None,
+                    resolved_backend: "hq".into(),
+                },
+                now,
+                true,
+            )
+            .map(|_| ())
+        })
+        .unwrap();
+    }
+
+    // A follow-up turn carries the owner's tools and no guest role, so in a
+    // guest's chat it must never start; the owner's inbox hears about it.
+    #[tokio::test]
+    async fn a_followup_for_a_guests_chat_never_runs_and_reaches_the_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(Database::open(&dir.path().join("vault.db")).unwrap());
+        settled_run(&db, "run-guest111", "42");
+        let cfg = CollaborationConfig {
+            supervision_followup: true,
+            ..Default::default()
+        };
+        let f = followup::claim_followups(&db, &cfg, "telegram", "w").remove(0);
+        let threads = Arc::new(TokioMutex::new(HashMap::new()));
+        let sent = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let surface = WatchSurface {
+            platform: "telegram",
+            threads: threads.clone(),
+            system_prompt: Arc::new(String::new()),
+            progress_chars: 100,
+            identity: hq_core::identity::RequestIdentity::from_telegram,
+            sender: {
+                let sent = sent.clone();
+                Arc::new(move |_key: i64| -> crate::relay_common::ChatSender {
+                    let sent = sent.clone();
+                    Arc::new(move |text| sent.lock().unwrap().push(text))
+                })
+            },
+            owner_chat: Arc::new(|key: i64| key != 42),
+        };
+        deliver(&surface, &db, f).await;
+        assert!(
+            threads.lock().await.is_empty(),
+            "the chat was never claimed"
+        );
+        assert!(sent.lock().unwrap().is_empty());
+        assert!(
+            followup::claim_followups(&db, &cfg, "telegram", "w").is_empty(),
+            "not retried"
+        );
+        let item = hq_db::value_items::find_active_by_dedup(
+            &db,
+            ValueKind::ActionNeeded,
+            "subagent-run-run-guest111",
+        )
+        .unwrap();
+        assert!(item.is_some(), "the owner's inbox has it");
+    }
 }

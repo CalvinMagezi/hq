@@ -69,6 +69,14 @@ background-turn lookups and the code-intelligence tools
 (`hq_tools::ask::HANDOFF_ASK_DENIED_PREFIXES`). Vault reads and search, task reads, memory graph,
 skills and web search and fetch remain. The full key's read-only turns keep the whole read-only set.
 
+A **claude.ai connector** ask in `read_only` mode loses the same tools plus every tool a connector
+may call only with the owner's approval (`hq_mcp::gateway::CONNECTOR_CONFIRM_TOOLS`: `host_read`,
+the convert and OCR tools, `list_dir`, the git tools and the rest). Ask turns run without owner
+approval, so without this a read-only question would reach what the connector itself has to ask
+for. The scope comes from the `_hq_connector` marker the gateway sets, never from an argument. A
+`full` ask from a connector has already waited for the owner's approval of that exact call, so its
+reply keeps the tools a web chat turn has.
+
 A thread owned by a read-only ask never receives a session-driver or sub-agent follow-up turn,
 which would run with full tools: the wake is dropped (a driver wake leaves one plain notice in the
 chat). In every thread, an MCP client's question is shown to later turns as
@@ -97,7 +105,8 @@ Claude). Three rules cut it:
 
 - The full key (`AGENTHQ_API_KEY`) may use both modes. The handoff key
   (`AGENTHQ_HANDOFF_API_KEY`) may ask only in `read_only` mode and can read back only the asks
-  it made. The Spark key cannot call either tool. Both tools refuse a Discord family guest.
+  it made. A connector grant asks in its own `connector` scope and reads back only connector asks.
+  The Spark key cannot call either tool. Both tools refuse a Discord family guest.
 - At most 3 questions per key may be waiting at once (checked in the same transaction that files
   the ask), 6 new ones may start per minute (in memory), and 200 per 24 hours. A repeat call with a known
   `external_id` does not count.

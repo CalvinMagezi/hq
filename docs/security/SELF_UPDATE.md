@@ -37,9 +37,13 @@ including one steered by injected content, to run new code as the HQ user.
 4. On the next call the tool commits, signs `run | tree | binary hash` with the
    same key, stores the signature on the run and marks it `approved`, then
    starts the detached `hq self-apply`.
-5. `hq self-apply` recomputes the tree and the binary hash and verifies the
-   signature immediately before the swap. A forged `approved` row without the
-   key, or a binary replaced after approval, is refused and reported.
+5. `hq self-apply` copies `target/release/hq` once into an unnamed temporary
+   file (no other process can open it), hashes that copy, recomputes the tree
+   and verifies the signature against both. It then waits for its parent and
+   writes every install path from that same copy, never from the build path
+   again, so a binary put into `target/release/hq` during the wait is not what
+   gets installed. A forged `approved` row without the key, or a binary replaced
+   after approval, is refused and reported.
 
 The approval names the run, the tree and the built bytes, so a rebuilt or
 swapped binary needs a new approval.
@@ -49,9 +53,18 @@ swapped binary needs a new approval.
 - Signatures stop a database-only forgery. An agent with a full shell as the
   same OS user and no sandbox can read `approval.key`, sign for itself, or copy a
   binary over the install path. The barrier against that is the bash sandbox
-  (`BASH_SANDBOX.md`, which masks the key file), not this gate. Production
+  (`BASH_SANDBOX.md`), not this gate: it masks the key file and binds `~/bin/hq`
+  and every `self_update.install_paths` entry read-only. Install paths outside
+  HOME, such as `/usr/local/bin/hq`, are read-only there anyway. Production
   deployments should use `hq update` (signed releases) and leave self-update off.
-- `self_update_check` and the release build run code from the edited tree
-  (tests, `build.rs`) before and after approval. Read the branch, not just the
-  diff stat, before approving.
+- `self_update_check` runs `cargo check` and `cargo test` on the edited tree
+  before anything is approved, and the release build runs it again after. Its
+  build scripts (`build.rs`), proc macros and tests are code the agent may have
+  written, and they run as the HQ user, outside the bash sandbox, with the HQ
+  user's files, environment and network. No approval stands in front of
+  `self_update_check`: an agent that may call it can run code of its choosing
+  that way. The approval guards the install, not the check. Read the branch,
+  not just the diff stat, before approving.
+- `packages` on `self_update_check` takes plain crate names only (letters,
+  digits, `-` and `_`), so a value cannot reach cargo as an option.
 - Installed binaries are built locally and are not signed.

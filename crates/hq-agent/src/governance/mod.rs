@@ -35,7 +35,7 @@ mod governed_tool;
 mod injection;
 mod owner_approval;
 mod paths;
-mod secrets;
+pub(crate) mod secrets;
 mod taint;
 mod trackers;
 

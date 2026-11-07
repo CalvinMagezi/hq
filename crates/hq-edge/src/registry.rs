@@ -299,27 +299,25 @@ pub fn allow_device(path: &Path, device: Registered) -> Result<(), ListError> {
     if let Some(dir) = path.parent() {
         ensure_private_dir(dir).map_err(|e| std::io::Error::other(e.to_string()))?;
     }
+    let mut text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e.into()),
+    };
     // The list may not end in a newline (an editor left it so): without one, the new id would
     // join the last line, or vanish into a trailing comment.
-    let needs_break =
-        std::fs::read(path).is_ok_and(|bytes| bytes.last().is_some_and(|b| *b != b'\n'));
-    let mut line = String::new();
-    if needs_break {
-        line.push('\n');
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
     }
-    line.push_str(&device.id.to_string());
+    text.push_str(&device.id.to_string());
     if let Some(relay) = &device.relay {
-        line.push(' ');
-        line.push_str(&relay.to_string());
+        text.push(' ');
+        text.push_str(&relay.to_string());
     }
-    line.push('\n');
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .mode(PRIVATE_FILE_MODE)
-        .open(path)?;
-    file.write_all(line.as_bytes())?;
-    Ok(())
+    text.push('\n');
+    // A whole new file renamed over the list, as a revoke writes it: an append in place could be
+    // read half written, and the edge refuses a list it cannot parse (every device, briefly).
+    replace_file(path, text.as_bytes())
 }
 
 /// Removes a device from the list. Returns whether it was there. Open connections to it are cut
@@ -550,6 +548,31 @@ mod tests {
             vec![a, c],
             "the new id must not vanish into the comment"
         );
+    }
+
+    /// An append in place can be read half written; a reader of the list must only ever see the
+    /// old file or the new one.
+    #[test]
+    fn allow_replaces_the_list_instead_of_appending_to_it() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.txt");
+        let (a, b) = (id(), id());
+        write(&path, &format!("{a}\n"), 0o600);
+        let before = std::fs::metadata(&path).unwrap().ino();
+        let mut reader = std::fs::File::open(&path).unwrap();
+        allow_device(&path, Registered { id: b, relay: None }).unwrap();
+        let mut seen = String::new();
+        reader.read_to_string(&mut seen).unwrap();
+        assert_eq!(
+            seen,
+            format!("{a}\n"),
+            "an open reader keeps the whole old list"
+        );
+        assert_ne!(std::fs::metadata(&path).unwrap().ino(), before);
+        let ids: Vec<_> = list_devices(&path).unwrap().iter().map(|d| d.id).collect();
+        assert_eq!(ids, vec![a, b]);
+        assert!(!path.with_extension("tmp").exists());
     }
 
     #[test]

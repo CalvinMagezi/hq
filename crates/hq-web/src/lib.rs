@@ -810,6 +810,7 @@ mod web_auth_router_tests {
         assert_ne!(status(&app, authed).await, StatusCode::UNAUTHORIZED);
         let preflight = |origin: &str| {
             Request::options("/api/spaces")
+                .header("host", "127.0.0.1:5678")
                 .header("origin", origin)
                 .header("access-control-request-method", "GET")
                 .body(Body::empty())
@@ -817,25 +818,85 @@ mod web_auth_router_tests {
         };
         let own = app
             .clone()
-            .oneshot(preflight("http://localhost:5173"))
+            .oneshot(preflight("http://127.0.0.1:5678"))
             .await
             .unwrap();
         assert_eq!(own.status(), StatusCode::OK);
         assert_eq!(
             own.headers()["access-control-allow-origin"],
-            "http://localhost:5173"
+            "http://127.0.0.1:5678"
         );
-        let hostile = app
-            .clone()
-            .oneshot(preflight("https://evil.example"))
-            .await
-            .unwrap();
+        for refused in ["https://evil.example", "http://localhost:5173"] {
+            let hostile = app.clone().oneshot(preflight(refused)).await.unwrap();
+            assert!(
+                !hostile
+                    .headers()
+                    .contains_key("access-control-allow-origin"),
+                "{refused} must not be granted read access"
+            );
+        }
+    }
+
+    /// The default install: sign-in off, loopback bind, nothing in `web_allowed_origins`. A page
+    /// on another local port (a dev server, a notebook, a downloaded file served with
+    /// `python -m http.server`) can neither open the chat socket nor read or write the API.
+    /// HQ's own page and clients that send no `Origin` keep working.
+    #[tokio::test]
+    async fn another_local_port_cannot_use_an_unauthenticated_instance() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.allowed_origins = Vec::new();
+        let app = create_router(Arc::new(state));
+        let socket = |origin: Option<&str>| {
+            let mut b = local("GET", "/ws")
+                .header("connection", "upgrade")
+                .header("upgrade", "websocket")
+                .header("sec-websocket-version", "13")
+                // RFC 6455's sample key ("the sample nonce"), not a secret.
+                .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="); // gitleaks:allow
+            if let Some(origin) = origin {
+                b = b.header("origin", origin);
+            }
+            b.body(Body::empty()).unwrap()
+        };
+        let create = |origin: Option<&str>, title: &str| {
+            let mut b =
+                local("POST", "/api/note/create").header("content-type", "application/json");
+            if let Some(origin) = origin {
+                b = b.header("origin", origin);
+            }
+            b.body(Body::from(format!(r#"{{"title":"{title}","content":""}}"#)))
+                .unwrap()
+        };
+
+        for foreign in ["http://localhost:3000", "http://127.0.0.1:8888"] {
+            assert_eq!(
+                status(&app, socket(Some(foreign))).await,
+                StatusCode::FORBIDDEN,
+                "{foreign} opening /ws"
+            );
+            assert_eq!(
+                status(&app, create(Some(foreign), "pwned")).await,
+                StatusCode::FORBIDDEN,
+                "{foreign} posting to /api"
+            );
+        }
+        assert!(!vault.path().join("Notebooks/Inbox/pwned.md").exists());
+
+        // Without a real connection the upgrade cannot complete, but it got past the guards.
+        for origin in [Some("http://127.0.0.1:5678"), None] {
+            assert_ne!(
+                status(&app, socket(origin)).await,
+                StatusCode::FORBIDDEN,
+                "{origin:?} opening /ws"
+            );
+        }
         assert!(
-            !hostile
-                .headers()
-                .contains_key("access-control-allow-origin"),
-            "a hostile origin must not be granted read access"
+            status(&app, create(Some("http://127.0.0.1:5678"), "own"))
+                .await
+                .is_success()
         );
+        assert!(status(&app, create(None, "cli")).await.is_success());
     }
 
     fn local(method: &str, uri: &str) -> axum::http::request::Builder {
@@ -932,15 +993,15 @@ mod web_auth_router_tests {
         }
     }
 
-    /// A page on another loopback port passes the origin check, so session-changing
-    /// requests also need a header it cannot add without a failed CORS preflight.
+    /// Session-changing requests also need a header no other page can add without a failed
+    /// CORS preflight, a second wall behind the origin check.
     #[tokio::test]
     async fn session_posts_need_the_client_header() {
         let vault = tempfile::TempDir::new().unwrap();
         let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
         let post = |path: &str, header: bool| {
             let mut b = local("POST", path)
-                .header("origin", "http://localhost:9999")
+                .header("origin", "http://127.0.0.1:5678")
                 .header("content-type", "application/json");
             if header {
                 b = b.header("x-hq-client", "web");
@@ -985,7 +1046,7 @@ mod web_auth_router_tests {
             );
         }
         let preflight = Request::options("/api/harness-sessions/hs-none/send")
-            .header("origin", "http://localhost:9999")
+            .header("origin", "http://127.0.0.1:5678")
             .header("host", "127.0.0.1:5678")
             .header("access-control-request-method", "POST")
             .header("access-control-request-headers", "x-hq-client,content-type")

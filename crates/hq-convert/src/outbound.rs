@@ -9,6 +9,7 @@ use tracing::{debug, warn};
 use which::which;
 
 use crate::brand::BrandKit;
+use crate::pandoc::{self, ImageRule};
 use crate::types::{ConvertError, ExportFormat};
 
 /// Converts Markdown content to other formats by calling `pandoc`.
@@ -39,11 +40,13 @@ fn reference_doc_arg(format: &ExportFormat, brand: Option<&BrandKit>) -> Option<
 
 /// How the Markdown is read. Raw TeX and raw attributes are off: pandoc would otherwise pass
 /// `\input{/some/file}` or `` `\input{...}`{=latex} `` through to LaTeX, which reads the named file
-/// into the PDF. A document must not be able to pull in files or run commands.
+/// into the PDF. A document must not be able to pull in files or run commands: the reader and the
+/// writer also run with `--sandbox`, and every image is checked between the two
+/// (`crate::pandoc`), since pandoc fetches a PDF's images outside its sandbox.
 const READER: &str = "markdown-raw_tex-raw_attribute";
 
-/// The full pandoc command line. The format is always the enum's fixed name, so nothing a caller
-/// types reaches `-t`.
+/// The writer's command line, over the checked JSON document. The format is always the enum's
+/// fixed name, so nothing a caller types reaches `-t`.
 fn pandoc_args(
     input: &Path,
     format: &ExportFormat,
@@ -51,9 +54,10 @@ fn pandoc_args(
     brand: Option<&BrandKit>,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec![
+        "--sandbox".to_string(),
         input.to_string_lossy().into_owned(),
         "-f".to_string(),
-        READER.to_string(),
+        "json".to_string(),
         "-t".to_string(),
         format.pandoc_format().to_string(),
         "-o".to_string(),
@@ -79,22 +83,45 @@ impl OutboundConverter {
         which("pandoc").map_err(|_| ConvertError::PandocNotFound)
     }
 
-    /// Convert `markdown` to `format` at `dest`. `brand` only styles docx and
-    /// pptx, the formats with a pandoc `--reference-doc`; PDF needs `xelatex`.
+    /// Convert `markdown` to `format` at `dest`, keeping only `data:` images. `brand` only
+    /// styles docx and pptx, the formats with a pandoc `--reference-doc`; PDF needs `xelatex`.
     pub async fn convert(
         markdown: &str,
         format: &ExportFormat,
         dest: &Path,
         brand: Option<&BrandKit>,
     ) -> Result<(), ConvertError> {
+        Self::convert_with_images(markdown, format, dest, brand, ImageRule::DataOnly).await
+    }
+
+    /// [`Self::convert`], with `images` deciding which images the document keeps. Anything
+    /// else is replaced by its alt text before pandoc writes, so no image target makes pandoc
+    /// read a file or make a request. Refuses a pandoc without `--sandbox` (older than 2.15).
+    pub async fn convert_with_images(
+        markdown: &str,
+        format: &ExportFormat,
+        dest: &Path,
+        brand: Option<&BrandKit>,
+        images: ImageRule<'_>,
+    ) -> Result<(), ConvertError> {
         let pandoc = Self::check_pandoc()?;
+        pandoc::ensure_sandbox(&pandoc)?;
 
         // A file input keeps large documents off the child's stdin pipe.
         let tmp_dir = tempfile::tempdir().map_err(ConvertError::Io)?;
         let input_path = tmp_dir.path().join("input.md");
         std::fs::write(&input_path, markdown.as_bytes()).map_err(ConvertError::Io)?;
+        let (ast, dropped) = pandoc::read_confined(&pandoc, &input_path, READER, images).await?;
+        if dropped > 0 {
+            warn!(
+                dropped,
+                "images outside what this export may embed were left out"
+            );
+        }
+        let ast_path = tmp_dir.path().join("input.json");
+        std::fs::write(&ast_path, ast).map_err(ConvertError::Io)?;
 
-        let args = pandoc_args(&input_path, format, dest, brand);
+        let args = pandoc_args(&ast_path, format, dest, brand);
 
         debug!(
             pandoc = %pandoc.display(),
@@ -107,7 +134,7 @@ impl OutboundConverter {
         cmd.kill_on_drop(true).args(&args);
         crate::run_tool(cmd, "pandoc").await.map_err(|msg| {
             warn!(error = %msg, "pandoc conversion failed");
-            ConvertError::OutboundFailed(msg)
+            pandoc::failure(msg)
         })?;
         Ok(())
     }
@@ -133,11 +160,14 @@ mod tests {
 
     #[test]
     fn the_target_is_always_a_fixed_name_and_the_reader_has_no_raw_tex() {
+        assert_eq!(READER, "markdown-raw_tex-raw_attribute");
         for format in ExportFormat::ALL {
             let args = args_for(format);
+            assert_eq!(args[0], "--sandbox", "every pandoc run is sandboxed");
             assert_eq!(after(&args, "-t"), format.pandoc_format());
             assert!(ExportFormat::names().contains(after(&args, "-t")));
-            assert_eq!(after(&args, "-f"), "markdown-raw_tex-raw_attribute");
+            // The writer reads only the checked document, never the Markdown.
+            assert_eq!(after(&args, "-f"), "json");
             assert_eq!(after(&args, "-o"), "/tmp/out/doc");
             // No filter, template or other file-loading option is ever added.
             for a in &args {
@@ -151,6 +181,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The brand's reference doc is named on the command line, which `--sandbox` lets the
+    /// writer read.
+    #[test]
+    fn a_brand_reference_doc_is_passed_beside_the_sandbox() {
+        let kit = BrandKit {
+            brand: "acme".into(),
+            primary_color: "#000000".into(),
+            secondary_colors: Vec::new(),
+            font: "Inter".into(),
+            logo_light: None,
+            logo_dark: None,
+            reference_docx: Some("/vault/Branding/ref.docx".into()),
+            reference_pptx: None,
+            voice_notes: String::new(),
+        };
+        let args = pandoc_args(
+            Path::new("/tmp/in/input.json"),
+            &ExportFormat::Docx,
+            Path::new("/tmp/out/doc.docx"),
+            Some(&kit),
+        );
+        assert_eq!(args[0], "--sandbox");
+        assert!(args.contains(&"--reference-doc=/vault/Branding/ref.docx".to_string()));
     }
 
     #[test]
@@ -174,7 +229,7 @@ mod tests {
         let secret = dir.path().join("secret.txt");
         std::fs::write(&secret, "TOP-SECRET-MARKER").unwrap();
         let md = format!(
-            "# Title\n\n\\input{{{p}}}\n\nText `\\input{{{p}}}`{{=latex}}\n",
+            "# Title\n\n\\input{{{p}}}\n\nText `\\input{{{p}}}`{{=latex}}\n\n![key]({p})\n\n![ref][r]\n\n[r]: {p}\n",
             p = secret.display()
         );
         let out = dir.path().join("out.html");
@@ -184,6 +239,21 @@ mod tests {
         let html = std::fs::read_to_string(&out).unwrap();
         assert!(html.contains("<h1"), "{html}");
         assert!(!html.contains("TOP-SECRET-MARKER"), "{html}");
+        assert!(
+            !html.contains("<img"),
+            "no image points at the file: {html}"
+        );
+        // RTF embeds images: neither image may bring the file's bytes along.
+        let rtf = dir.path().join("out.rtf");
+        OutboundConverter::convert(&md, &ExportFormat::Rtf, &rtf, None)
+            .await
+            .unwrap();
+        let rtf = std::fs::read_to_string(&rtf).unwrap();
+        let hex: String = b"TOP-SECRET".iter().map(|b| format!("{b:02x}")).collect();
+        assert!(
+            !rtf.contains(&hex) && !rtf.contains("TOP-SECRET-MARKER"),
+            "{rtf}"
+        );
 
         // What xelatex would be given: the TeX is text, not a command. Read with plain
         // `markdown` it is passed through untouched, which is what let a document read files.

@@ -49,6 +49,52 @@ fn with_inventory(files: &[FileEntry], body: &str) -> String {
     }
 }
 
+/// Longest stored name kept from a sender's file name, in characters.
+const MAX_SENT_NAME_CHARS: usize = 100;
+
+/// The last path component of a sender-chosen file name, with control
+/// characters dropped. `None` when nothing usable is left (empty, `.`, `..`).
+/// Both separators count, so `..\..\x` and `/etc/x` reduce to `x`.
+fn safe_file_name(raw: &str) -> Option<String> {
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or(raw);
+    let cleaned: String = base
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_SENT_NAME_CHARS)
+        .collect();
+    let cleaned = cleaned.trim();
+    match cleaned {
+        "" | "." | ".." => None,
+        name => Some(name.to_string()),
+    }
+}
+
+/// Where a document is stored: Telegram's unique file id first, so two files
+/// with one name never overwrite each other, then the sender's name reduced to
+/// one safe component.
+fn document_file_name(sent: Option<&str>, unique_id: &str) -> String {
+    let id: String = unique_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .collect();
+    match sent.and_then(safe_file_name) {
+        Some(name) => format!("doc_{id}_{name}"),
+        None => format!("doc_{id}"),
+    }
+}
+
+/// `dir/filename`, refused unless `filename` is exactly one ordinary path
+/// component, so a download can never land outside the media folder.
+fn media_path(dir: &std::path::Path, filename: &str) -> Result<std::path::PathBuf> {
+    let mut parts = std::path::Path::new(filename).components();
+    match (parts.next(), parts.next()) {
+        (Some(std::path::Component::Normal(_)), None) if !filename.contains(['/', '\\', '\0']) => {
+            Ok(dir.join(filename))
+        }
+        _ => anyhow::bail!("refusing to store media under the name {filename:?}"),
+    }
+}
+
 /// Download a file from Telegram's CDN to a local path.
 async fn download_file(
     bot: &Bot,
@@ -142,13 +188,8 @@ pub async fn handle_media(
 
 impl MediaOut<'_> {
     async fn download(&self, file_id: &FileId, filename: &str) -> Result<std::path::PathBuf> {
-        download_file(
-            self.bot,
-            self.token,
-            file_id,
-            &self.media_dir.join(filename),
-        )
-        .await
+        let dest = media_path(&self.media_dir, filename)?;
+        download_file(self.bot, self.token, file_id, &dest).await
     }
 
     /// A compressed photo, attached as an image part (FR-017).
@@ -158,11 +199,10 @@ impl MediaOut<'_> {
             .await;
     }
 
+    /// The sender picks a document's name, so it is reduced to one safe file
+    /// name before it touches the disk.
     async fn document(&mut self, doc: &teloxide::types::Document) {
-        let filename = doc
-            .file_name
-            .clone()
-            .unwrap_or_else(|| format!("doc_{}", doc.file.unique_id));
+        let filename = document_file_name(doc.file_name.as_deref(), &doc.file.unique_id.0);
         self.download_and_attach(&doc.file.id, &filename, "document")
             .await;
     }
@@ -231,5 +271,48 @@ mod tests {
         assert_eq!(merged.text.matches("[Attachments this turn").count(), 1);
         assert!(merged.text.contains("[A level text]") && merged.text.contains("[GCSE text]"));
         assert_eq!(merged.files.len(), 2);
+    }
+
+    // A sender-chosen document name used to be joined onto the media folder
+    // as is, so `../../_system/...` or an absolute path wrote anywhere.
+    #[test]
+    fn a_document_name_never_leaves_the_media_folder() {
+        let dir = std::path::Path::new("/vault/_media/2026-01-01");
+        for sent in [
+            "../../_system/.telegram-auth-chat",
+            "/etc/passwd",
+            "..\\..\\_system\\x",
+            "a/../../b",
+            "..",
+            ".",
+            "",
+            "evil\0name",
+            "line\nbreak.txt",
+        ] {
+            let name = document_file_name(Some(sent), "AgAD-x_1");
+            let path = media_path(dir, &name).unwrap_or_else(|e| panic!("{sent:?}: {e}"));
+            assert_eq!(path.parent(), Some(dir), "{sent:?} -> {name:?}");
+            assert!(name.starts_with("doc_AgAD-x_1"), "{name}");
+            assert!(!name.contains(['/', '\\', '\0', '\n']), "{name:?}");
+        }
+        assert_eq!(
+            document_file_name(Some("../../_system/.telegram-auth-chat"), "u1"),
+            "doc_u1_.telegram-auth-chat"
+        );
+        assert_eq!(
+            document_file_name(Some("report.pdf"), "u1"),
+            "doc_u1_report.pdf"
+        );
+        assert_eq!(document_file_name(Some(".."), "u1"), "doc_u1");
+        assert_eq!(document_file_name(None, "u/../1"), "doc_u1");
+    }
+
+    #[test]
+    fn media_path_refuses_anything_but_one_plain_name() {
+        let dir = std::path::Path::new("/vault/_media/d");
+        for bad in ["../x", "/etc/passwd", "a/b", "..", ".", "", "a\\b"] {
+            assert!(media_path(dir, bad).is_err(), "{bad:?}");
+        }
+        assert!(media_path(dir, "voice_1.ogg").is_ok());
     }
 }

@@ -16,6 +16,18 @@ use serde_json::{Value, json};
 
 use crate::registry::HqTool;
 
+/// The most a server reply may be. A tool reply is cut far below this before a model
+/// sees it; the cap only keeps a hostile or broken server from filling memory.
+const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
+
+/// A client that never follows a redirect: a 307 or 308 would send the same POST, with
+/// the tool arguments and the bearer token for this server, to whatever host it names.
+fn http_client() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?)
+}
+
 struct RemoteMcpClient {
     http: reqwest::Client,
     server: RemoteMcpServer,
@@ -38,8 +50,21 @@ impl RemoteMcpClient {
         let resp = builder.send().await?;
 
         let status = resp.status();
-        let body: Value = resp.json().await?;
         let name = &self.server.name;
+        if status.is_redirection() {
+            anyhow::bail!(
+                "{name} MCP server answered {method} with a redirect ({status}), which is not followed: set the final URL in remote_mcp"
+            );
+        }
+        let bytes = crate::web::read_limited(resp, MAX_RESPONSE_BYTES).await?;
+        let body: Value = match serde_json::from_slice(&bytes) {
+            Ok(body) => body,
+            Err(_) if !status.is_success() => {
+                let text: String = String::from_utf8_lossy(&bytes).chars().take(500).collect();
+                anyhow::bail!("{name} MCP HTTP error {status} for {method}: {text}");
+            }
+            Err(e) => anyhow::bail!("{name} MCP reply to {method} is not JSON: {e}"),
+        };
         if !status.is_success() {
             anyhow::bail!("{name} MCP HTTP error {status} for {method}: {body}");
         }
@@ -85,7 +110,7 @@ const BEHAVIORAL_PROMPT: &str = "Authentication for this remote MCP server is al
 /// Call a tool on a named remote MCP server directly.
 pub async fn call_named_server(server: &RemoteMcpServer, tool: &str, args: Value) -> Result<Value> {
     let client = RemoteMcpClient {
-        http: reqwest::Client::new(),
+        http: http_client()?,
         server: server.clone(),
         counter: AtomicU64::new(1),
     };
@@ -136,8 +161,8 @@ impl RemoteMcpTool {
             "{summary}. Reply \"approve {token}\" or \"deny {token}\", or use the buttons — family-confirm-{token}"
         );
         let mut msg = hq_core::mailbox::new_message(
-            "family-confirm",
-            "relay",
+            hq_core::mailbox::FAMILY_CONFIRM_SENDER,
+            hq_core::mailbox::RELAY_MAILBOX,
             hq_core::types::MailboxMessageType::Nudge,
             Some("Family Action Approval"),
             &content,
@@ -245,10 +270,20 @@ pub fn create_remote_mcp_tools(
     family_guest: Option<crate::family_guest::FamilyGuestContext>,
 ) -> Vec<Box<dyn HqTool>> {
     let mut tools: Vec<Box<dyn HqTool>> = Vec::new();
+    if servers.is_empty() {
+        return tools;
+    }
+    let http = match http_client() {
+        Ok(http) => http,
+        Err(e) => {
+            tracing::warn!(error = %e, "remote_mcp: no HTTP client, remote MCP tools left out");
+            return tools;
+        }
+    };
     for server in servers {
         let name = server.name.clone();
         let client = Arc::new(RemoteMcpClient {
-            http: reqwest::Client::new(),
+            http: http.clone(),
             server: server.clone(),
             counter: AtomicU64::new(1),
         });
@@ -292,6 +327,73 @@ mod tests {
         assert!(tools.iter().all(|t| t.category() == REMOTE_MCP_CATEGORY));
         assert!(tools.iter().all(|t| t.requires_live_user_turn()));
         assert!(tools[0].is_read_only() && !tools[1].is_read_only());
+    }
+
+    fn server_at(url: String) -> RemoteMcpServer {
+        RemoteMcpServer {
+            name: "acme".into(),
+            url,
+            api_key: Some("secret-token".into()),
+            live_user_turn_only: false,
+        }
+    }
+
+    /// A 307 would re-POST the tool arguments and the bearer token to the host it names.
+    #[tokio::test]
+    async fn a_redirect_is_refused_and_not_followed() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let elsewhere = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"result": {}})))
+            .expect(0)
+            .mount(&elsewhere)
+            .await;
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(307).insert_header("Location", elsewhere.uri().as_str()),
+            )
+            .mount(&server)
+            .await;
+        let err = call_named_server(&server_at(server.uri()), "t", json!({"a": 1}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("redirect"), "{err}");
+        elsewhere.verify().await;
+    }
+
+    #[tokio::test]
+    async fn an_oversized_reply_is_refused() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_bytes(vec![b' '; MAX_RESPONSE_BYTES + 1]),
+            )
+            .mount(&server)
+            .await;
+        let err = call_named_server(&server_at(server.uri()), "t", json!({}))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("too large"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_normal_reply_still_works() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let reply = json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": "{\"ok\": true}"}]}});
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+            .mount(&server)
+            .await;
+        let out = call_named_server(&server_at(server.uri()), "t", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(out["ok"], true);
     }
 
     #[tokio::test]

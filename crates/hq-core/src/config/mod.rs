@@ -18,6 +18,7 @@ mod mcp_connector;
 mod memory;
 pub mod model_switch;
 mod profile;
+pub mod protected;
 mod relay;
 mod self_update;
 mod skills;
@@ -215,8 +216,9 @@ pub struct HqConfig {
     pub web_auth_token: Option<String>,
 
     /// Browser origins (for example "https://hq.example.ts.net:8443") allowed to
-    /// call the API and open the chat socket, besides loopback origins and the
-    /// page's own origin. Their hostnames are also accepted as the `Host` of an
+    /// call the API and open the chat socket, besides the page's own origin
+    /// (`Origin` matching `Host`). A page on another loopback port is not trusted
+    /// unless it is listed here. Their hostnames are also accepted as the `Host` of an
     /// unauthenticated instance, which is what stops DNS rebinding.
     #[serde(default)]
     pub web_allowed_origins: Vec<String>,
@@ -647,6 +649,8 @@ impl HqConfig {
             config.vault_path =
                 prefer_server_path(home_vault, std::path::Path::new(SERVER_VAULT_PATH));
         }
+        // The bash sandbox and the secret classifier read these per command.
+        protected::register(protected::ProtectedFiles::from_config(&config));
         Ok(config)
     }
 
