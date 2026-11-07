@@ -31,6 +31,7 @@ use which::which;
 
 use crate::brand::BrandKit;
 use crate::outbound::OutboundConverter;
+use crate::pandoc::{self, ImageRule, percent_decode};
 use crate::types::{ConvertError, ExportFormat};
 
 const RENDER_TIMEOUT: Duration = Duration::from_secs(120);
@@ -341,25 +342,6 @@ fn capitalise(s: &str) -> String {
     }
 }
 
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%'
-            && let Some(hex) = s.get(i + 1..i + 3)
-            && let Ok(v) = u8::from_str_radix(hex, 16)
-        {
-            out.push(v);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 /// Resolve `name` to an existing file inside `vault`: next to the note, then
 /// from the vault root, then by bare file name anywhere in the vault. Returns
 /// `None` for absolute paths, `..` escapes and symlinks that leave the vault.
@@ -548,7 +530,7 @@ pub async fn export_note_pdf(
     if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)?;
     }
-    render(&prepared, &engine, dest, brand).await?;
+    render(&prepared, vault, &engine, dest, brand).await?;
 
     let size_bytes = std::fs::metadata(dest)
         .map_err(|_| ConvertError::OutboundFailed("renderer finished but wrote no file".into()))?
@@ -579,8 +561,13 @@ pub async fn export_note_pdf_bytes(
     Ok((info, bytes))
 }
 
+/// How a note is read for the HTML engines. Raw HTML is off so a note cannot smuggle in
+/// `<img src=file://...>` or script.
+const NOTE_READER: &str = "gfm-raw_html+footnotes";
+
 async fn render(
     prepared: &PreparedNote,
+    vault: &Path,
     engine: &PdfEngine,
     dest: &Path,
     brand: Option<&BrandKit>,
@@ -593,49 +580,18 @@ async fn render(
                 .trim(),
             prepared.markdown
         );
-        return OutboundConverter::convert(&doc, &ExportFormat::Pdf, dest, brand).await;
+        return OutboundConverter::convert_with_images(
+            &doc,
+            &ExportFormat::Pdf,
+            dest,
+            brand,
+            ImageRule::Vault(vault),
+        )
+        .await;
     }
 
-    let pandoc = OutboundConverter::check_pandoc()?;
     let tmp = tempfile::tempdir()?;
-    let md = tmp.path().join("note.md");
-    let css = tmp.path().join("style.css");
-    let html = tmp.path().join("note.html");
-    std::fs::write(&md, &prepared.markdown)?;
-    std::fs::write(&css, stylesheet(brand))?;
-
-    let mut cmd = Command::new(&pandoc);
-    cmd.kill_on_drop(true)
-        .arg(&md)
-        // Raw HTML is off so a note cannot smuggle in <img src=file://...> or script.
-        .args([
-            "-f",
-            "gfm-raw_html+footnotes",
-            "-t",
-            "html5",
-            "--standalone",
-        ])
-        .arg("--embed-resources")
-        .arg(format!("--css={}", css.display()))
-        .arg("--metadata")
-        .arg(format!("title={}", prepared.title))
-        .arg("-o")
-        .arg(&html);
-    if let Some(logo) = brand
-        .and_then(|b| b.logo_light.as_ref())
-        .filter(|p| p.is_file())
-    {
-        let header = tmp.path().join("logo.html");
-        std::fs::write(
-            &header,
-            format!(
-                "<img src=\"{}\" style=\"height:36px;margin-bottom:8px\" alt=\"\">",
-                logo.display()
-            ),
-        )?;
-        cmd.arg(format!("--include-before-body={}", header.display()));
-    }
-    run_with_timeout(cmd, "pandoc").await?;
+    let html = note_html(prepared, vault, brand, tmp.path()).await?;
 
     match engine {
         PdfEngine::Browser(bin) => {
@@ -664,6 +620,71 @@ async fn render(
             run_with_timeout(cmd, "weasyprint").await
         }
         PdfEngine::Xelatex => unreachable!("handled above"),
+    }
+}
+
+/// The note as one standalone HTML file in `tmp`, for the browser and WeasyPrint engines.
+///
+/// `prepare_note` already points images at the vault, but only for the image syntax it
+/// recognises on one line, so the document is checked again in pandoc's own form: every image
+/// that is not a file in the vault is left out, and the ones that are are inlined. The
+/// stylesheet and the logo go in as text and a `data:` URI. Both pandoc runs are sandboxed, so
+/// nothing in the note can make pandoc read a file, and the HTML handed to the renderer refers
+/// to no file or address at all.
+async fn note_html(
+    prepared: &PreparedNote,
+    vault: &Path,
+    brand: Option<&BrandKit>,
+    tmp: &Path,
+) -> Result<PathBuf, ConvertError> {
+    let pandoc_bin = OutboundConverter::check_pandoc()?;
+    pandoc::ensure_sandbox(&pandoc_bin)?;
+    let md = tmp.join("note.md");
+    let json = tmp.join("note.json");
+    let style = tmp.join("style.html");
+    let html = tmp.join("note.html");
+    std::fs::write(&md, &prepared.markdown)?;
+    let (ast, _) =
+        pandoc::read_confined(&pandoc_bin, &md, NOTE_READER, ImageRule::Vault(vault)).await?;
+    std::fs::write(&json, ast)?;
+    std::fs::write(
+        &style,
+        format!("<style>\n{}\n</style>\n", stylesheet(brand)),
+    )?;
+
+    let mut cmd = Command::new(&pandoc_bin);
+    cmd.kill_on_drop(true)
+        .arg("--sandbox")
+        .arg(&json)
+        .args(["-f", "json", "-t", "html5", "--standalone"])
+        .arg("--embed-resources")
+        .arg(format!("--include-in-header={}", style.display()))
+        .arg("--metadata")
+        .arg(format!("title={}", prepared.title))
+        .arg("-o")
+        .arg(&html);
+    if let Some(logo) = brand
+        .and_then(|b| b.logo_light.as_ref())
+        .filter(|p| p.is_file())
+        .and_then(|p| pandoc::image_data_uri(p))
+    {
+        let header = tmp.join("logo.html");
+        std::fs::write(
+            &header,
+            format!("<img src=\"{logo}\" style=\"height:36px;margin-bottom:8px\" alt=\"\">"),
+        )?;
+        cmd.arg(format!("--include-before-body={}", header.display()));
+    }
+    match tokio::time::timeout(RENDER_TIMEOUT, crate::run_tool(cmd, "pandoc")).await {
+        Ok(Ok(_)) => Ok(html),
+        Ok(Err(msg)) => {
+            warn!(error = %msg, "note html failed");
+            Err(pandoc::failure(msg))
+        }
+        Err(_) => Err(ConvertError::OutboundFailed(format!(
+            "pandoc did not finish within {}s",
+            RENDER_TIMEOUT.as_secs()
+        ))),
     }
 }
 
@@ -921,6 +942,43 @@ mod tests {
             file_url(Path::new("/tmp/a b/x.html")),
             "file:///tmp/a%20b/x.html"
         );
+    }
+
+    /// The HTML the browser and WeasyPrint engines print: a vault image is inlined, an image the
+    /// line rewrite does not see (a reference-style one pointing outside the vault) is left out,
+    /// and the result refers to no file. Needs only pandoc (2.15 or newer).
+    /// Run with: `cargo test -p hq-convert -- --ignored note_html_refers_to_no_file`
+    #[tokio::test]
+    #[ignore = "needs pandoc on this machine"]
+    async fn note_html_refers_to_no_file() {
+        let v = vault();
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.png");
+        std::fs::write(&secret, b"OUTSIDE-THE-VAULT").unwrap();
+        let raw = format!(
+            "Text\n\n![[chart.png]]\n\n![leak][r]\n\n[r]: {}\n",
+            secret.display()
+        );
+        let prepared = prep(&raw, &v);
+        let tmp = tempfile::tempdir().unwrap();
+        let html = note_html(&prepared, v.path(), None, tmp.path())
+            .await
+            .unwrap();
+        let html = std::fs::read_to_string(html).unwrap();
+        assert!(
+            html.contains("data:image/png;base64,"),
+            "vault image inlined"
+        );
+        assert!(!html.contains(&*secret.to_string_lossy()), "{html}");
+        assert!(
+            !html.contains("T1VUU0lERS"),
+            "the outside file's bytes are not embedded"
+        );
+        assert!(
+            !html.contains("src=\"/"),
+            "nothing refers to a file: {html}"
+        );
+        assert!(html.contains("<style"), "the stylesheet is inline");
     }
 
     /// Needs pandoc plus a Chromium-family browser, WeasyPrint or xelatex.

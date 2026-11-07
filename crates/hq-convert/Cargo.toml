@@ -29,6 +29,9 @@ scraper = { workspace = true }
 encoding_rs = "0.8"
 sha2 = { workspace = true }
 chrono = { workspace = true }
+# pandoc's JSON document, read to check every image before pandoc writes it (`pandoc.rs`).
+serde_json = { workspace = true }
+base64 = { workspace = true }
 
 [features]
 default = []

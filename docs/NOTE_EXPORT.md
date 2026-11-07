@@ -36,6 +36,16 @@ renderer sits behind every entry point, and none of it needs an external tool.
 `pptx` is not written by this exporter yet. For a `pptx`, or a `docx` built on a
 brand's Word template, use the `convert_from_markdown` tool, which still runs pandoc.
 
+Every pandoc run HQ makes (`convert_from_markdown` and the older PDF engines below) passes
+`--sandbox`, so it needs pandoc 2.15 or newer and refuses an older one. The document is first
+read into pandoc's JSON form and every image is checked before anything is written: an image
+is kept only as a `data:` URI or as a file inside the vault (inlined), and anything else, a
+path elsewhere on the machine or a web address, is replaced by its alt text. pandoc fetches a
+PDF's images outside its own sandbox, which is why the check is HQ's and not left to pandoc.
+Debian and Ubuntu package pandoc without its data files inside the binary, and that build
+cannot write docx, pptx, odt or epub under `--sandbox`; install a release from
+https://pandoc.org/installing.html for those.
+
 The table formats need a table: a note without one is an error, not an empty file.
 In spreadsheets, numbers are stored as numbers, but values with leading zeros
 (`007`) and very long digit strings (ids, phone numbers) stay text. Text that
