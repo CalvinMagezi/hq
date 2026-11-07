@@ -327,6 +327,18 @@ HQ's own authority; both come with sharing the machine's network, which the open
 purpose. Use `profile: strict` (it gets a private empty `/run` and its own network namespace) for
 agents running on untrusted content on a machine where that matters.
 
+One more thing shares the machine's network: HQ's own web server. An open-profile agent keeps
+loopback, so if HQ's web runs on this machine with no `web_auth_token` set, the agent can call
+`http://127.0.0.1:<web port>/api/...` with `curl` and act as the owner through the web API (a
+command-line request sends no `Origin`, so the origin guard does not stop it). This is the
+tokenless-loopback convenience working as designed, not a hole the sandbox can close while the
+network is shared: the API is the owner's, reached from the owner's machine. When you run agents
+on untrusted content, set `web_auth_token` (every web and API call then needs the bearer token,
+which is not in the agent's environment) or run those agents under `profile: strict` (its proxy
+network reaches only the model and the listed hosts, never loopback). The strict profile's
+`loopback_ports` opens a named local port to an agent deliberately; the web port is not one of
+them unless you add it.
+
 This is a wall around HQ, not a boundary against an agent that means harm. It reaches
 everything else you can, and a prompt-injected agent can read a file and send it anywhere.
 The guard against that is the agent's own permission mode and classifier, as in your terminal.
