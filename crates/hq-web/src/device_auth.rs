@@ -193,7 +193,7 @@ pub(crate) fn no_store(status: StatusCode, body: serde_json::Value) -> Response 
 
 /// `POST /api/auth/device-code`: behind the web token, so only a signed-in device gets one.
 pub(crate) async fn device_code_handler(State(state): State<Arc<WsState>>) -> Response {
-    if !state.web_auth_enabled() {
+    if !state.web_auth_enabled_async().await {
         return ApiError::not_found().into_response();
     }
     let (code, expires_at) = state.device_codes.issue(now());
@@ -219,7 +219,7 @@ pub(crate) async fn exchange_handler(
     headers: HeaderMap,
     Json(body): Json<ExchangeBody>,
 ) -> Response {
-    if !state.web_auth_enabled() {
+    if !state.web_auth_enabled_async().await {
         return ApiError::not_found().into_response();
     }
     let _serialized = state.auth_lock.lock().await;
