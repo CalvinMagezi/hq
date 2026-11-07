@@ -35,6 +35,10 @@ on:
         description: "Release version `hq --version` reports; empty for the Cargo.toml version"
         type: string
         default: ""
+    outputs:
+      sha256:
+        description: "sha256 of hq-android-arm64, from the job that built it. Callers check the artifact against this, not against the .sha256 file inside it."
+        value: ${{ jobs.build.outputs.sha256 }}
 
 permissions:
   contents: read
@@ -52,6 +56,8 @@ jobs:
     name: Build hq (aarch64-linux-android)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -95,10 +101,13 @@ jobs:
           ls -l "$bin"
 
       - name: Package
+        id: package
         run: |
           mkdir -p dist
           cp "target/$HQ_TARGET/release-small/hq" dist/hq-android-arm64
           (cd dist && sha256sum hq-android-arm64 > hq-android-arm64.sha256)
+          sum=$(cat dist/hq-android-arm64.sha256)
+          echo "sha256=${sum%% *}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
