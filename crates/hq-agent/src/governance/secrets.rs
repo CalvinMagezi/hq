@@ -101,6 +101,12 @@ const GWS_CONFIG_DIR_ENV: &str = "GOOGLE_WORKSPACE_CLI_CONFIG_DIR";
 /// `paths::sensitive_denied_paths`. The sandbox does not mask these, so the
 /// `gws` and `gh` CLIs keep working from bash.
 pub fn always_denied_roots() -> Vec<PathBuf> {
+    always_denied_roots_with(&hq_core::config::protected::registered())
+}
+
+fn always_denied_roots_with(
+    protected: &hq_core::config::protected::ProtectedFiles,
+) -> Vec<PathBuf> {
     let home = dirs::home_dir();
     let mut roots: Vec<PathBuf> = match &home {
         Some(home) => HOME_SECRET_PATHS.iter().map(|rel| home.join(rel)).collect(),
@@ -121,6 +127,13 @@ pub fn always_denied_roots() -> Vec<PathBuf> {
     let host_dir = hq_core::config::native_host_dir();
     if !home.as_ref().is_some_and(|h| h.starts_with(&host_dir)) {
         roots.push(host_dir);
+    }
+    // Key files the config names (the backup key): they open archives that may hold the config.
+    for file in &protected.secret {
+        if let Ok(canonical) = file.canonicalize() {
+            roots.push(canonical);
+        }
+        roots.push(file.clone());
     }
     // github_write checks its own pushes against these records; a worker must not rewrite them.
     roots.push(hq_tools::github::records_root());
@@ -338,6 +351,23 @@ mod tests {
 
     fn tier(p: &str) -> Option<SecretTier> {
         classify_path(Path::new(p))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_configured_backup_key_is_always_denied_under_both_spellings() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("backup.key");
+        std::fs::write(&key, "k").unwrap();
+        let link = dir.path().join("link.key");
+        std::os::unix::fs::symlink(&key, &link).unwrap();
+        let protected = hq_core::config::protected::ProtectedFiles {
+            secret: vec![link.clone()],
+            readonly: Vec::new(),
+        };
+        let roots = always_denied_roots_with(&protected);
+        assert!(roots.contains(&link));
+        assert!(roots.contains(&key.canonicalize().unwrap()));
     }
 
     #[test]

@@ -165,6 +165,9 @@ impl SandboxContext {
 /// paths to the agent's own tools.
 fn masked_files(home: Option<&Path>) -> Vec<PathBuf> {
     let mut files = hq_config_files();
+    // The backup key file named in the config: it opens every backup, and a backup may
+    // hold config.yaml (`hq restore --config-out` would hand back what is masked above).
+    files.extend(hq_core::config::protected::registered().secret);
     files.extend(control_sockets());
     if let Some(home) = home {
         files.extend(HQ_KEY_FILES.iter().map(|rel| home.join(rel)));

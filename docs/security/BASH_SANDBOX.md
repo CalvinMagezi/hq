@@ -47,6 +47,8 @@ the host.
      `config.yaml*` backups, and `*.env` files next to it (on the VPS,
      `/opt/hq/*.env`);
    - `~/.hq/config.yaml`, `web.token`, `wallet.enc`, `seed.enc` and `secret.key`;
+   - the backup key file named by `backup.key_file`, which opens backups that
+     may hold the config (`docs/BACKUP.md`);
    - every file in `~/.ssh` except `*.pub`, `known_hosts*`, `config` and
      `authorized_keys*`.
 

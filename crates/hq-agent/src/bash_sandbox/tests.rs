@@ -455,15 +455,18 @@ fn gate_keys_are_masked_and_the_gate_authorized_keys_file_is_read_only() {
     );
 }
 
+/// One test for both, since they share the process-wide registry `HqConfig::load` fills.
 #[test]
-fn the_install_paths_are_read_only() {
+fn the_install_paths_are_read_only_and_the_backup_key_is_masked() {
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(home.path().join("bin")).unwrap();
     std::fs::write(home.path().join("bin/hq"), "binary").unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let install = elsewhere.path().join("hq");
-    // What `HqConfig::load` registers from `self_update.install_paths`.
+    let key = elsewhere.path().join("backup.key");
+    // What `HqConfig::load` registers from `self_update.install_paths` and `backup.key_file`.
     hq_core::config::protected::register(hq_core::config::protected::ProtectedFiles {
+        secret: vec![key.clone()],
         readonly: vec![install.clone()],
     });
     let read_only = readonly_files(Some(home.path()));
@@ -472,6 +475,8 @@ fn the_install_paths_are_read_only() {
         "{read_only:?}"
     );
     assert!(read_only.contains(&install), "{read_only:?}");
+    // `hq restore --key-file <key> --config-out` would otherwise hand back the masked config.
+    assert!(masked_files(Some(home.path())).contains(&key));
     // Enforced as a read-only bind after the writable HOME bind, as authorized_keys is.
     let ctx = SandboxContext {
         readonly_files: vec![PathBuf::from("/home/u/bin/hq")],
