@@ -3507,6 +3507,54 @@ fn pending_json(seq: u64) -> String {
     )
 }
 
+/// Pressing `keys` on session `hs-a` (blocked or not) as `who`, against a host whose
+/// `agent.pending` replies `pending`. Returns the refusal, if any.
+fn keys_refusal(
+    pending: String,
+    blocked: bool,
+    keys: &[&str],
+    who: answer::Answerer,
+) -> Option<String> {
+    let (_dir, host) = fake_host(&[("agent pending", pending, None)]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_watched(&db, "hs-a", None);
+    let row = control::get_row(&db, "hs-a").unwrap();
+    let host: crate::agent_host::Host = Arc::new(host);
+    let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+    control::check_keys_at_dialog(&host, &row, blocked, &keys, who)
+        .err()
+        .map(|e| e.to_string())
+}
+
+#[test]
+fn keys_from_an_automated_caller_cannot_answer_a_dialog_round_harness_session_answer() {
+    let drive = answer::Answerer::Automated("a Drive turn");
+    // A dialog HQ can read is answered by option, where "remember" stays the owner's.
+    let why = keys_refusal(pending_json(7), true, &["down", "enter"], drive).unwrap();
+    assert!(why.contains("harness_session_answer"), "{why}");
+    assert!(keys_refusal(pending_json(7), true, &["esc"], drive).is_some());
+    assert!(
+        keys_refusal(
+            pending_json(7),
+            true,
+            &["down", "enter"],
+            answer::Answerer::Owner
+        )
+        .is_none(),
+        "the owner's keys are the owner's call"
+    );
+
+    // One HQ cannot read: an automated caller may only back out.
+    let unread = r#"{"id":"x","result":{"state":"blocked","pending":null}}"#.to_string();
+    let why = keys_refusal(unread.clone(), true, &["enter"], drive).unwrap();
+    assert!(why.contains("esc or ctrl+c"), "{why}");
+    assert!(keys_refusal(unread.clone(), true, &["2"], drive).is_some());
+    assert!(keys_refusal(unread.clone(), true, &["esc"], drive).is_none());
+    assert!(keys_refusal(unread.clone(), true, &["ctrl+c", "Escape"], drive).is_none());
+    // Not at a dialog: keys work as before.
+    assert!(keys_refusal(unread, false, &["down", "enter"], drive).is_none());
+}
+
 fn answer_on(
     host: ScriptedHost,
     seq: u64,

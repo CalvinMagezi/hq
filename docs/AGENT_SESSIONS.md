@@ -29,7 +29,7 @@ a model instead of starting on its default, and so does an id that could read as
 | Tool | Effect |
 |------|--------|
 | `harness_session_spawn` | Start an agent on a host. Returns a `session_id`. |
-| `harness_session_send` | Submit a prompt, or press `keys` (`down`, `enter`, `esc`, `ctrl+c`) for a dialog HQ cannot read. |
+| `harness_session_send` | Submit a prompt, or press `keys` (`down`, `enter`, `esc`, `ctrl+c`) for a dialog HQ cannot read. Drive, an agent session, a claude.ai connection, an `hq_ask` reply and a turn that read untrusted content answer a dialog HQ can read with `harness_session_answer`, never with keys, and at one it cannot read may only press `esc` or `ctrl+c`. |
 | `harness_session_pending` | The dialog a blocked session waits at, as data: its number (`seq`), kind, question, command or path, folder and options. |
 | `harness_session_answer` | Answer that dialog by option (`seq` and `option`), or `decline` it, optionally with a `message` sent as the next prompt. |
 | `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. |

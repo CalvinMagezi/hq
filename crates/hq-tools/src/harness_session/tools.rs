@@ -569,7 +569,7 @@ impl HqTool for HarnessSessionSendTool {
         "harness_session_send"
     }
     fn description(&self) -> &str {
-        "Steer a running harness session. `text` is submitted as a prompt. If the session is blocked at a dialog the text is refused: read the dialog with harness_session_pending and answer it with harness_session_answer, or pass `keys` (logical names such as enter, esc, down, ctrl+c) when HQ cannot read it."
+        "Steer a running harness session. `text` is submitted as a prompt. If the session is blocked at a dialog the text is refused: read the dialog with harness_session_pending and answer it with harness_session_answer, or pass `keys` (logical names such as enter, esc, down, ctrl+c) when HQ cannot read it. Unless the owner typed this turn, keys at a dialog are refused except esc and ctrl+c at one HQ cannot read."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -596,11 +596,12 @@ impl HqTool for HarnessSessionSendTool {
             anyhow::bail!("pass `text` to submit a prompt or `keys` to press keys");
         }
         let chat = self.chat.clone();
+        let who = super::answer::Answerer::of(&args, chat.as_ref());
         tokio::task::spawn_blocking(move || {
             if keys.is_empty() {
                 super::send(&db, &id, &text, chat.as_ref())
             } else {
-                super::send_keys(&db, &id, &keys, chat.as_ref())
+                super::send_keys(&db, &id, &keys, chat.as_ref(), who)
             }
         })
         .await?
