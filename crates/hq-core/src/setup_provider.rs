@@ -57,6 +57,23 @@ pub struct KeyedProviders {
 }
 
 impl KeyedProviders {
+    /// Which providers hold a key in `config` or in the conventional variables the router reads
+    /// (`env` looks one up). A blank value counts as unset.
+    pub fn of(config: &HqConfig, env: impl Fn(&str) -> Option<String>) -> Self {
+        let set = |k: &Option<String>| k.as_deref().is_some_and(|k| !k.trim().is_empty());
+        let in_env = |names: &[&str]| {
+            names
+                .iter()
+                .any(|n| env(n).is_some_and(|v| !v.trim().is_empty()))
+        };
+        Self {
+            openrouter: set(&config.openrouter_api_key) || in_env(&["OPENROUTER_API_KEY"]),
+            anthropic: set(&config.anthropic_api_key) || in_env(&["ANTHROPIC_API_KEY"]),
+            google: set(&config.google_ai_api_key)
+                || in_env(&["GOOGLE_AI_API_KEY", "GEMINI_API_KEY"]),
+        }
+    }
+
     fn any(self) -> bool {
         self.openrouter || self.anthropic || self.google
     }
@@ -155,6 +172,21 @@ mod tests {
             );
             assert_eq!(c.default_model, CHEAP_ANTHROPIC_MODEL, "{stock}");
         }
+    }
+
+    #[test]
+    fn keys_are_found_in_the_config_or_the_environment() {
+        let env = |n: &str| (n == "OPENROUTER_API_KEY").then(|| "sk-or-x".to_string());
+        let keyed = KeyedProviders::of(&HqConfig::default(), env);
+        assert!(keyed.openrouter && !keyed.anthropic && !keyed.google);
+        let blank = |n: &str| (n == "GEMINI_API_KEY").then(|| "  ".to_string());
+        assert_eq!(
+            KeyedProviders::of(&HqConfig::default(), blank),
+            KeyedProviders::default()
+        );
+        let mut c = HqConfig::default();
+        SetupProvider::Anthropic.set_key(&mut c, "k".into());
+        assert_eq!(KeyedProviders::of(&c, |_| None), ANTHROPIC_ONLY);
     }
 
     #[test]

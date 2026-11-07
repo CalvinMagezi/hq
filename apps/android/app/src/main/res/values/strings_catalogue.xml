@@ -2941,6 +2941,7 @@
     <string name="helpers_start">Start</string>
     <string name="helpers_looking_computers">Looking for your computers…</string>
     <string name="helpers_could_not_list">HQ could not list your computers.</string>
+    <string name="helpers_pair_a_computer">Helpers run on a computer, not on this phone. Pair one in Settings, Other devices.</string>
     <string name="tasks_more">More</string>
     <string name="tasks_group_waiting">Waiting on you</string>
     <string name="tasks_group_due">Due or starting today</string>

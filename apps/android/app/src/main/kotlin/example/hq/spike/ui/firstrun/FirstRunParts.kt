@@ -89,6 +89,7 @@ fun PlainField(label: String, value: String, hint: String, enabled: Boolean = tr
 @Composable
 fun SecretField(
     label: String, value: String, hint: String, show: Boolean, enabled: Boolean = true, bad: Boolean = false,
+    fieldModifier: Modifier = Modifier,
     onShow: () -> Unit, onChange: (String) -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
@@ -102,7 +103,7 @@ fun SecretField(
             Box {
                 if (value.isEmpty()) Text(hint, style = HqType.Body, color = Mts.InkMuted)
                 BasicTextField(
-                    value, onChange, Modifier.fillMaxWidth(), enabled = enabled, singleLine = true,
+                    value, onChange, fieldModifier.fillMaxWidth(), enabled = enabled, singleLine = true,
                     textStyle = HqType.Body.copy(color = Mts.Ink, fontFamily = FontFamily.Monospace, letterSpacing = 0.1.em), cursorBrush = SolidColor(Mts.Ink),
                     visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),

@@ -649,9 +649,23 @@ impl HqConfig {
             config.vault_path =
                 prefer_server_path(home_vault, std::path::Path::new(SERVER_VAULT_PATH));
         }
+        config.follow_phone_keys(|name| std::env::var(name).ok());
         // The bash sandbox and the secret classifier read these per command.
         protected::register(protected::ProtectedFiles::from_config(&config));
         Ok(config)
+    }
+
+    /// On a phone the app seals keys in the Android Keystore and hands them to HQ as environment
+    /// variables; it never writes config.yaml, so setup's move of a stock default onto the key's
+    /// cheap model never happens there. Do it in memory, by the rule `hq env` and web setup use,
+    /// so a phone with only an OpenRouter key does not ask for the `relay` alias. A model the owner
+    /// picked is left alone, and nothing is written back.
+    fn follow_phone_keys(&mut self, env: impl Fn(&str) -> Option<String>) {
+        if !self.profile.is_mobile() {
+            return;
+        }
+        let keyed = crate::setup_provider::KeyedProviders::of(self, env);
+        crate::setup_provider::follow_keys(self, keyed);
     }
 
     /// The defaults → config-file layers of the merge chain, without the

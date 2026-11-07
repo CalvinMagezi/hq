@@ -148,6 +148,17 @@ overwritten and deleted afterwards. Then continue to Start. Backups are made wit
 **Keys later.** Settings, "Keys on this phone" lists the names of the sealed credentials (never the values),
 and adds, replaces or removes one. `hq` restarts to read the change.
 
+**Which model a sealed key gets.** The app hands sealed keys to `hq` as environment variables
+(`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`) and never writes a model into `config.yaml`. So on the Mobile
+profile a default nobody chose (the `relay` alias or a local model) follows the keys at load, by the rule
+`hq env` and the web setup use: an OpenRouter key gets setup's cheap OpenRouter model, an Anthropic key
+alone gets Anthropic's. Nothing is written back, and a model the owner picked is left alone. Settings,
+"Your keys" shows such a key as set outside the app. The `relay` alias also has a paid OpenRouter route
+behind its free one, so a host whose only key is OpenRouter's still answers when the free model does not.
+
+**Helpers.** Claude, Codex and the other helpers run on a computer, never on the phone. Pair one first
+([JOIN_A_MACHINE.md](JOIN_A_MACHINE.md)); until then the start sheet says so instead of offering the phone.
+
 ## The bridge on the phone
 
 The phone can pair with another machine of its owner by QR code and then be reached by key, with no

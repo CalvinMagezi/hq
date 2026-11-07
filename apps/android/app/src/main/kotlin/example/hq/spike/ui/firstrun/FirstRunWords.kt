@@ -61,6 +61,7 @@ object FirstRunWords {
     const val KEYS_SAVED = "Saved. HQ is restarting."
     const val KEYS_REMOVED = "Removed. HQ is restarting."
     const val KEYS_NOT_REMOVED = "That key could not be removed."
+    fun keysReplacing(label: String) = "Paste the new $label key below, then save. The old one stays until you do."
 
     const val ERR_KEY_EMPTY = "Paste your key first."
     const val ERR_KEY_SPACES = "A key has no spaces or line breaks."

@@ -1,5 +1,6 @@
 package example.hq.spike.ui.helpers
 
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.EdgeRun
 import example.hq.spike.data.HqClient.HelperRow
 import java.time.LocalDateTime
@@ -304,6 +305,13 @@ class HelperWordsTest {
         val offline = HelperWords.card(w, row(agent = "unknown", reachable = false, alive = null, host = "laptop", detail = error), null, now)
         assertEquals("This phone has no key to reach your laptop yet", offline.line)
         assertEquals("HQ cannot reach your mac-mini right now", HelperWords.card(w, row(agent = "unknown", reachable = false, alive = null), null, now).line)
+    }
+
+    @Test fun withOnlyThisPhoneListedTheSheetSaysToPairAComputer() {
+        val phone = HqClient.HelperHost("local", reachable = false, error = "no host running")
+        assertEquals("Helpers run on a computer, not on this phone. Pair one in Settings, Other devices.", HelperWords.noComputer(w, listOf(phone)))
+        val laptop = HqClient.HelperHost("laptop", reachable = false, error = "connection refused")
+        assertEquals("HQ cannot reach your laptop right now.", HelperWords.noComputer(w, listOf(phone, laptop)))
     }
 
     @Test fun aRowWithNoLastSeenTimeUsesWhenItStarted() {
