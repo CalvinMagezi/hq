@@ -115,6 +115,11 @@ tool as `blocked`. On macOS, OCR uses the system's Vision framework, and `brew i
 and `brew install --cask libreoffice` add the others. On a server, install them by hand: the
 installer leaves them out (`deploy/README.md`).
 
+An old Office file is anyone's file, so LibreOffice opens it with a fresh profile of its own that
+turns off macros, embedded active content and DDE, link following and link updates, and with
+none of HQ's environment but `PATH` and the language settings (no provider keys or tokens).
+It still runs as the HQ user with the machine's network: it is not sandboxed yet.
+
 ## Limits
 
 - Files over 64 MiB, archives with more than 20,000 parts or that unpack to more than
