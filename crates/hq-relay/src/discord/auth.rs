@@ -77,32 +77,29 @@ pub(super) fn try_pair_dm(
 }
 
 /// Pure authorization decision for an incoming message, factored out of
-/// `EventHandler::message` (FR-006a) so the combination of mention/DM/bot/
+/// `EventHandler::message` (FR-006a) so the combination of mention/DM/
 /// allowlist checks is exercisable without a live Discord gateway connection
-/// or a constructible `serenity::Message`/`Context` — before this, only the
-/// allowlist predicate (`is_message_author_allowed`) in isolation was
-/// tested, never this combined decision.
+/// or a constructible `serenity::Message`/`Context`.
+///
+/// Bot accounts and webhook posts get no exemption. Whatever passes here is
+/// treated as the owner (disclosure scope, `!permission`, `!model`, the
+/// active channel), so a bot has to be allowlisted like anyone else. This
+/// bot's own messages (`self_id`) are never authorized, so it cannot answer
+/// itself in a DM.
 pub(super) async fn authorize_incoming(
     vault_path: &std::path::Path,
     author_id: u64,
-    is_real_bot: bool,
+    self_id: u64,
     is_mention: bool,
     is_dm: bool,
     allowed: &[u64],
 ) -> bool {
-    // Other bots only get a response when they explicitly @mention this
-    // bot, which keeps bot-to-bot channels loop-free. Already mention-gated,
-    // so no further authorization check.
-    if is_real_bot {
-        return is_mention;
+    if author_id == self_id {
+        return false;
     }
     if !(is_mention || is_dm) {
         return false;
     }
-    // Human senders — and webhook-posted messages, which are
-    // impersonation-shaped rather than trusted-bot-shaped — must be
-    // authorized (explicit allowlist, or the trust-on-first-use owner when
-    // unset).
     is_message_author_allowed(vault_path, author_id, allowed).await
 }
 
@@ -125,15 +122,17 @@ mod tests {
     }
 
     // FR-006a: nothing previously exercised the *combination* of
-    // mention/DM/bot/allowlist checks together — only the allowlist
+    // mention/DM/allowlist checks together — only the allowlist
     // predicate in isolation. These drive `authorize_incoming` directly with
     // synthetic ids, which doesn't need a live Discord gateway connection or
     // a constructible `serenity::Message`/`Context`.
+    const SELF_ID: u64 = 4242;
+
     #[tokio::test]
     async fn unauthorized_dm_sender_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         assert!(
-            !authorize_incoming(dir.path(), 999, false, false, true, &[111]).await,
+            !authorize_incoming(dir.path(), 999, SELF_ID, false, true, &[111]).await,
             "a DM from a non-allowlisted user must be rejected"
         );
     }
@@ -142,7 +141,7 @@ mod tests {
     async fn unauthorized_non_mention_guild_message_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         assert!(
-            !authorize_incoming(dir.path(), 999, false, false, false, &[111]).await,
+            !authorize_incoming(dir.path(), 999, SELF_ID, false, false, &[111]).await,
             "a guild message that neither mentions the bot nor is a DM must be rejected"
         );
     }
@@ -150,23 +149,33 @@ mod tests {
     #[tokio::test]
     async fn allowlisted_sender_is_authorized_via_mention_or_dm() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(authorize_incoming(dir.path(), 111, false, true, false, &[111]).await);
-        assert!(authorize_incoming(dir.path(), 111, false, false, true, &[111]).await);
+        assert!(authorize_incoming(dir.path(), 111, SELF_ID, true, false, &[111]).await);
+        assert!(authorize_incoming(dir.path(), 111, SELF_ID, false, true, &[111]).await);
     }
 
+    // A bot account that @mentioned HQ used to skip the allowlist and got
+    // owner turns. Now it has to be allowlisted or be the paired owner.
     #[tokio::test]
-    async fn real_bot_account_is_authorized_on_mention_regardless_of_allowlist() {
+    async fn a_mentioning_bot_account_is_refused_unless_allowlisted() {
         let dir = tempfile::tempdir().unwrap();
         assert!(
-            authorize_incoming(dir.path(), 999, true, true, false, &[111]).await,
-            "an @-mentioning real bot account is exempt from the allowlist"
+            !authorize_incoming(dir.path(), 999, SELF_ID, true, false, &[111]).await,
+            "a bot outside the allowlist is refused even when it mentions HQ"
+        );
+        assert!(
+            !authorize_incoming(dir.path(), 999, SELF_ID, true, false, &[]).await,
+            "with no allowlist and no paired owner a bot is refused"
+        );
+        assert!(
+            authorize_incoming(dir.path(), 999, SELF_ID, true, false, &[999]).await,
+            "an owner can still allowlist a bot by id"
         );
     }
 
     #[tokio::test]
-    async fn real_bot_account_without_a_mention_is_not_authorized() {
+    async fn the_bot_never_authorizes_its_own_messages() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!authorize_incoming(dir.path(), 999, true, false, true, &[111]).await);
+        assert!(!authorize_incoming(dir.path(), SELF_ID, SELF_ID, true, true, &[SELF_ID]).await);
     }
 
     #[tokio::test]

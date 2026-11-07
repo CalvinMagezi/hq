@@ -121,11 +121,9 @@ pub struct RelayConfig {
     /// paired: run `hq pair --platform discord` and DM the bot `!pair <code>`
     /// (the owner is recorded in `_system/.discord-auth-user`). Set this
     /// explicitly to lock the bot down to specific Discord user IDs up
-    /// front. Never applied to bot-authored messages from a genuine bot
-    /// account (those are mention-gated separately in `hq-relay`), so other
-    /// agents in a shared server can still talk to this bot and to each
-    /// other freely — a webhook-posted message is not exempt, even though
-    /// Discord also marks its author `bot: true`.
+    /// front. Bot accounts and webhook posts are checked the same way as
+    /// people: whoever passes is treated as the owner, so a bot must be listed
+    /// here by id to be answered.
     #[serde(default)]
     pub discord_allowed_user_ids: Vec<u64>,
 

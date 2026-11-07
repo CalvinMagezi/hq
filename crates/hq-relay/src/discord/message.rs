@@ -62,25 +62,26 @@ impl Handler {
     }
 
     /// Mention/DM gate plus the allowlist. Logs a rejection only for a sender
-    /// that reached the check; an unmentioned bot or guild message stays silent.
+    /// that reached the check; an unmentioned guild message and this bot's own
+    /// messages stay silent.
     pub(super) async fn authorized_owner(&self, msg: &Message, bot_id: UserId) -> bool {
         let is_mention = msg.mentions.iter().any(|u| u.id == bot_id);
         let is_dm = msg.guild_id.is_none();
-        // Webhook posts also carry `author.bot`, but any member with Manage
-        // Webhooks can create one, so only a real bot account skips the allowlist.
-        let is_real_bot = msg.author.bot && msg.webhook_id.is_none();
+        // Bot accounts and webhook posts go through the same allowlist as
+        // people: whoever passes is treated as the owner.
         let allowed = authorize_incoming(
             &self.vault_path,
             msg.author.id.get(),
-            is_real_bot,
+            bot_id.get(),
             is_mention,
             is_dm,
             &self.discord_allowed_user_ids,
         )
         .await;
-        if !allowed && !is_real_bot && (is_mention || is_dm) {
+        if !allowed && msg.author.id != bot_id && (is_mention || is_dm) {
             tracing::warn!(
                 user_id = msg.author.id.get(),
+                is_bot = msg.author.bot,
                 "discord: rejecting message from unauthorized user"
             );
         }
@@ -106,7 +107,7 @@ impl Handler {
     }
 
     /// Only an allowlisted human in a DM gets the link. Checked here rather than
-    /// trusted from the message gate, which also admits family users and bots.
+    /// trusted from the message gate, which also admits family users.
     async fn login_decision(
         &self,
         user_id: u64,
