@@ -868,10 +868,13 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
         run_dir,
         ..
     } = wall;
+    // Bubblewrap cannot mount on a path that runs through a symlinked directory
+    // (`/var/run` is a link to `/run` on most Linux systems), so it takes only the
+    // real form of such a path, which `with_link_targets` lists beside it.
     let keep = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
         with_link_targets(paths)
             .into_iter()
-            .filter(|p| !bwrap || p.exists())
+            .filter(|p| !bwrap || (p.exists() && parent_is_real(p)))
             .collect()
     };
     let mut files = claude_files;
@@ -954,6 +957,13 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
         denied_sockets,
         network: Network::Full,
     }
+}
+
+/// Whether the directories above `path` are themselves real, with no symlink on
+/// the way (the last component may still be a link).
+fn parent_is_real(path: &Path) -> bool {
+    path.parent()
+        .is_none_or(|dir| dir.canonicalize().is_ok_and(|real| real == dir))
 }
 
 /// The paths, and for any that is a symlink where it leads: Seatbelt judges the
@@ -1954,5 +1964,26 @@ mod tests {
             std::fs::read_to_string(f.config_dir.join("config.yaml")).unwrap(),
             SECRET
         );
+    }
+
+    /// `/var/run` is a link to `/run` on most Linux systems, and bubblewrap cannot
+    /// mount on a path through it: the mask must land on the real path instead.
+    #[cfg(unix)]
+    #[test]
+    fn a_path_through_a_linked_directory_is_masked_at_its_real_place() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("run")).unwrap();
+        std::os::unix::fs::symlink(root.join("run"), root.join("var-run")).unwrap();
+        std::fs::write(root.join("run/control.sock"), "").unwrap();
+        let through_link = root.join("var-run/control.sock");
+        let real = root.join("run/control.sock");
+        assert!(!parent_is_real(&through_link));
+        assert!(parent_is_real(&real));
+        let kept: Vec<PathBuf> = with_link_targets(vec![through_link])
+            .into_iter()
+            .filter(|p| p.exists() && parent_is_real(p))
+            .collect();
+        assert_eq!(kept, vec![real]);
     }
 }
