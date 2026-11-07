@@ -417,6 +417,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "114_device_names",
         include_str!("../sql/114_device_names.sql"),
     ),
+    (
+        "115_thread_folds",
+        include_str!("../sql/115_thread_folds.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

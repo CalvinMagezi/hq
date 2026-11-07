@@ -327,6 +327,8 @@ pub fn delete_messages_from(conn: &Connection, thread_id: &str, message_id: &str
     let Some((created, rowid)) = message_position(conn, thread_id, message_id)? else {
         return Ok(0);
     };
+    // Fold blocks that summarize a deleted message would put it back in the model's view.
+    crate::thread_folds::drop_reaching(conn, thread_id, message_id)?;
     let deleted = conn.execute(
         "DELETE FROM chat_messages WHERE thread_id = ?1 AND (created_at, rowid) >= (?2, ?3)",
         params![thread_id, created, rowid],

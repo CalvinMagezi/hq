@@ -10,6 +10,7 @@ pub mod builder;
 pub(crate) mod callable_agents;
 pub(crate) mod coding;
 pub mod context;
+pub mod fold;
 pub mod followup;
 pub mod governance;
 pub(crate) mod lsp;
