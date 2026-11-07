@@ -135,8 +135,59 @@ pub fn clean_list(items: Vec<String>, valid: impl Fn(&str) -> bool) -> Vec<Strin
         .collect()
 }
 
+/// Dial-back relays from the other machine (its card, its details), kept only when they pass
+/// [`is_plain_https_relay`]: a relay is reached with an HTTP upgrade request, so a hostile peer
+/// must not be able to aim this machine at something on its own network.
 pub fn clean_relays(items: Vec<String>) -> Vec<String> {
-    clean_list(items, |s| s.parse::<RelayUrl>().is_ok())
+    clean_list(items, |s| {
+        is_plain_https_relay(s) && s.parse::<RelayUrl>().is_ok()
+    })
+}
+
+/// Lowercase letters, digits and hyphens in dot-separated labels, at least two of them, 253
+/// characters at most.
+pub(crate) fn is_plain_dns_name(name: &str) -> bool {
+    name.len() <= 253
+        && name.split('.').count() >= 2
+        && name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+}
+
+/// A relay URL this machine will dial when another party (a scanned ticket, the other machine's
+/// card, an edge) names it: https on a DNS name (not an address, not `localhost`, not a name that
+/// stays on the local network), no credentials, the default port, at most 253 characters. The
+/// relay is reached with an HTTP upgrade request before the other side is authenticated, so
+/// anything else is refused rather than dialed.
+pub(crate) fn is_plain_https_relay(text: &str) -> bool {
+    if text.len() > 253 {
+        return false;
+    }
+    let Ok(url) = url::Url::parse(text) else {
+        return false;
+    };
+    let host = match url.host() {
+        Some(url::Host::Domain(d)) => d.to_ascii_lowercase(),
+        _ => return false,
+    };
+    let local = host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".internal")
+        || host.ends_with('.') && host.trim_end_matches('.').ends_with("localhost");
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && !local
+        && host.contains('.')
+        && is_plain_dns_name(host.trim_end_matches('.'))
 }
 
 pub fn clean_addrs(items: Vec<String>) -> Vec<String> {
@@ -220,7 +271,14 @@ mod tests {
         let card = Card {
             id: base32,
             name: "\u{1b}[2Jdesk\u{202E}".into(),
-            relays: vec!["https://relay.example.com".into(), "not a url".into()],
+            relays: vec![
+                "https://relay.example.com".into(),
+                "not a url".into(),
+                // Dialed with an HTTP upgrade when reconnecting: nothing on the local network.
+                "http://192.168.1.1/".into(),
+                "https://printer.local/".into(),
+                "https://relay.example.com:6379/".into(),
+            ],
             addrs: many,
         };
         let card = normalize_card(card).unwrap();

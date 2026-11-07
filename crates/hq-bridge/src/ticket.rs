@@ -156,9 +156,21 @@ impl Ticket {
             Some(_) => bail!("this ticket is from a newer version of HQ: update HQ here"),
             None => bail!("the ticket is damaged"),
         }
-        let ticket: Ticket =
+        let mut ticket: Ticket =
             serde_json::from_slice(&json).map_err(|_| anyhow!("the ticket is damaged"))?;
         ticket.check()?;
+        // A relay is dialed with an HTTP upgrade request before the host is authenticated, so a
+        // hostile QR code must not aim this machine at its own network: only a plain https relay
+        // on a public-looking name is kept.
+        let named_relays = !ticket.relays.is_empty();
+        ticket
+            .relays
+            .retain(|relay| crate::wire::is_plain_https_relay(relay));
+        if named_relays && ticket.relays.is_empty() && ticket.addrs.is_empty() {
+            bail!(
+                "the ticket names only relays this device will not use (https on a public name, no port)"
+            );
+        }
         Ok(ticket)
     }
 
@@ -341,6 +353,45 @@ mod tests {
             Ticket::parse(&crowded.link()).is_err(),
             "too many addresses"
         );
+    }
+
+    /// A relay is reached with an HTTP upgrade before the host is authenticated: a hostile QR code
+    /// must not make the joiner send requests to its own network.
+    #[test]
+    fn a_ticket_keeps_only_plain_https_relays_on_a_name() {
+        let local = [
+            "http://192.168.1.1/",
+            "https://192.168.1.1/",
+            "https://127.0.0.1:6379/",
+            "https://router.local/",
+            "https://relay.example.com:8443/",
+            "http://relay.example.com/",
+        ];
+        let mixed = Ticket {
+            relays: local
+                .iter()
+                .map(|s| s.to_string())
+                .chain(["https://relay.example.com".to_string()])
+                .collect(),
+            ..sample()
+        };
+        let back = Ticket::parse(&mixed.link()).unwrap();
+        assert_eq!(back.relays.len(), 1, "{:?}", back.relays);
+        assert!(back.relays[0].starts_with("https://relay.example.com"));
+
+        // Nothing usable left and no address to try: refused with a reason, not dialed.
+        let only_local = Ticket {
+            relays: local.iter().map(|s| s.to_string()).collect(),
+            addrs: Vec::new(),
+            ..sample()
+        };
+        let err = Ticket::parse(&only_local.link()).unwrap_err().to_string();
+        assert!(err.contains("relays this device will not use"), "{err}");
+
+        // The default public relays (with their trailing dot) still pass.
+        assert!(crate::wire::is_plain_https_relay(
+            "https://use1-1.relay.n0.iroh-canary.iroh.link./"
+        ));
     }
 
     #[test]
