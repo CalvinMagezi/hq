@@ -147,10 +147,10 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   and answering an Inbox item (`/api/notifications/{id}/answer` and `/action`), must
   carry `X-HQ-Client` (the PWA's `hqFetch` adds it to every non-GET, and the Android
   app sends it too). A PWA cached from before the header loses `drive`, `goal` and
-  `unwatch` until its worker updates the shell. The origin guard trusts any loopback page when no web token
-  is set, and a plain form post needs no preflight, so the header (which the CORS
-  layer does not allow) is what keeps another local page from typing into an
-  agent. The Vite dev server proxies `/api`, so it stays same-origin.
+  `unwatch` until its worker updates the shell. The origin guard (see "Cross-origin
+  requests") is what keeps another local page out; the header, which the CORS layer
+  does not allow, is a second wall behind it. The Vite dev server proxies `/api`
+  and `/ws` and keeps `Host`, so it stays same-origin.
 - **Vault files.** `<img>` tags and download links cannot send headers either.
   With a token set, the PWA fetches the file with the header and shows it from a
   blob URL (`src/lib/useAssetUrl.ts`). pdf.js gets the header directly.
@@ -401,15 +401,35 @@ CORS only hides responses from a hostile page. It does not stop the request
 itself, and it does not apply to WebSockets. So `origin::origin_guard` refuses a
 request to `/api`, `/ws` or `/mcp` when:
 
-- it carries an `Origin` that is not a loopback origin, not listed in
-  `web_allowed_origins`, and not the server's own origin (`Origin` authority
-  equal to `Host`); or
+- it carries an `Origin` that is neither listed in `web_allowed_origins` nor the
+  server's own origin (an `http` or `https` `Origin` whose authority equals
+  `Host`, default ports ignored); or
 - no web token is set and its `Host` is neither a loopback name nor the host of
   a `web_allowed_origins` entry. This stops DNS rebinding, where a hostile name
   resolves to 127.0.0.1 and the page becomes same-origin with HQ.
 
+Being on loopback is not enough. A page on another local port (a dev server a
+coding agent is building, a notebook, a downloaded HTML file opened through
+`python -m http.server`) is another origin, so with sign-in off it can neither
+open `/ws`, where it would read every chat and tool frame and could send turns as
+the owner, nor call `/api`. This holds with sign-in on too, and the same rule
+covers `*.localhost` names.
+
 CORS grants read access to the same set of origins and no others. Requests with
-no `Origin` (curl, MCP clients, the Telegram relay) are not affected.
+no `Origin` (curl, MCP clients, the Telegram relay, `hq chat --server`) are not
+affected.
+
+Proxies that keep the client's `Host` stay same-origin and need no entry: the
+Vite dev server (`bun run dev` on port 4747 proxies `/api` and `/ws` to 5678
+without rewriting `Host`), Docker port mappings, and the desktop app's loopback
+proxy, which also passes the window's `Host` on the chat socket. A front end on
+another origin that is meant to talk to HQ directly, for example a dev server you
+run without the proxy, must be listed:
+
+```yaml
+web_allowed_origins:
+  - http://localhost:3000
+```
 
 List every origin the PWA is served from, including the port:
 

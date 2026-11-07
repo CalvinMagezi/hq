@@ -419,10 +419,13 @@ fn upstream_gone(you_stopped: bool) -> Response {
     (StatusCode::BAD_GATEWAY, [(UPSTREAM_GONE_HEADER, value)]).into_response()
 }
 
-/// Headers the chat socket's own handshake needs upstream.
-const WS_FORWARDED: [&str; 5] = [
+/// Headers the chat socket's own handshake needs upstream. `host` is the client's, as on every
+/// other request: HQ accepts a browser `Origin` only when it matches `Host`, and the window's
+/// origin is this proxy's address, not the upstream's.
+const WS_FORWARDED: [&str; 6] = [
     "authorization",
     "cookie",
+    "host",
     "origin",
     "sec-websocket-protocol",
     "user-agent",

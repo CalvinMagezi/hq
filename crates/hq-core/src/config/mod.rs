@@ -215,8 +215,9 @@ pub struct HqConfig {
     pub web_auth_token: Option<String>,
 
     /// Browser origins (for example "https://hq.example.ts.net:8443") allowed to
-    /// call the API and open the chat socket, besides loopback origins and the
-    /// page's own origin. Their hostnames are also accepted as the `Host` of an
+    /// call the API and open the chat socket, besides the page's own origin
+    /// (`Origin` matching `Host`). A page on another loopback port is not trusted
+    /// unless it is listed here. Their hostnames are also accepted as the `Host` of an
     /// unauthenticated instance, which is what stops DNS rebinding.
     #[serde(default)]
     pub web_allowed_origins: Vec<String>,

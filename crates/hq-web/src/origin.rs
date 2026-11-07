@@ -3,7 +3,9 @@
 //! A page on another site can make a victim's browser send requests to a local
 //! instance. CORS alone does not stop that: it only hides responses, never
 //! blocks a state-changing request or a WebSocket. So a browser request that
-//! carries a foreign `Origin` is refused before it reaches a handler, and an
+//! carries a foreign `Origin` (anything but this server's own origin or one in
+//! `web_allowed_origins`, a page on another loopback port included) is refused
+//! before it reaches a handler, and an
 //! instance without a web token also checks `Host` against the names it is
 //! reachable under, because a rebound DNS name makes the attacker same-origin.
 
@@ -37,20 +39,39 @@ fn origin_authority(origin: &str) -> Option<&str> {
     origin.split_once("://").map(|(_, rest)| rest)
 }
 
-/// Whether a browser `Origin` may call this server: a loopback page, one of the
-/// configured origins, or the page this server itself served (same origin).
+/// `authority` without the default port of `scheme`, so `Host: hq.example:443` and
+/// `Origin: https://hq.example` name the same server.
+fn without_default_port<'a>(scheme: &str, authority: &'a str) -> &'a str {
+    let default = match scheme {
+        "http" => ":80",
+        "https" => ":443",
+        _ => return authority,
+    };
+    authority.strip_suffix(default).unwrap_or(authority)
+}
+
+/// Whether a browser `Origin` may call this server: one of the configured origins, or the
+/// page this server itself served (an `http` or `https` origin whose authority is `Host`).
+///
+/// Being on loopback earns nothing. A dev server, a notebook or `python -m http.server` on
+/// another local port is a different origin, and with sign-in off it could otherwise read the
+/// chat socket and type into it as the owner. A page HQ serves, directly or through a proxy
+/// that keeps `Host` (the Vite dev server, the desktop app's proxy), is same-origin.
 pub(crate) fn origin_allowed(origin: &str, host_header: Option<&str>, allowed: &[String]) -> bool {
     let origin = normalize_origin(origin);
-    let Some(authority) = origin_authority(&origin) else {
+    let Some((scheme, authority)) = origin.split_once("://") else {
         return false;
     };
-    if is_loopback_name(&hostname(authority)) {
-        return true;
-    }
     if allowed.iter().any(|a| normalize_origin(a) == origin) {
         return true;
     }
-    host_header.is_some_and(|h| h.trim().eq_ignore_ascii_case(authority))
+    if !matches!(scheme, "http" | "https") {
+        return false;
+    }
+    host_header.is_some_and(|h| {
+        let host = h.trim().to_ascii_lowercase();
+        without_default_port(scheme, &host) == without_default_port(scheme, authority)
+    })
 }
 
 /// Whether `Host` names this server: loopback, or the host of a configured
@@ -100,8 +121,8 @@ pub(crate) fn rejection(
 
 /// Header every browser request that changes a harness session must carry. A
 /// hostile page on another origin cannot set it without a CORS preflight, and
-/// the CORS layer does not list it, so the preflight fails even for a page on
-/// another loopback port (which `origin_allowed` otherwise trusts).
+/// the CORS layer does not list it, so the preflight fails. It is a second wall
+/// behind [`origin_allowed`].
 pub(crate) const CLIENT_HEADER: &str = "x-hq-client";
 
 const SESSION_API_PREFIX: &str = "/api/harness-sessions/";
@@ -205,11 +226,29 @@ mod tests {
     }
 
     #[test]
-    fn loopback_configured_and_same_origin_are_allowed() {
+    fn configured_and_same_origin_are_allowed() {
         let allowed = tailnet();
-        assert!(origin_allowed("http://localhost:5173", None, &[]));
-        assert!(origin_allowed("http://127.0.0.1:5678", None, &[]));
-        assert!(origin_allowed("http://[::1]:5678", None, &[]));
+        assert!(origin_allowed(
+            "http://127.0.0.1:5678",
+            Some("127.0.0.1:5678"),
+            &[]
+        ));
+        assert!(origin_allowed("http://[::1]:5678", Some("[::1]:5678"), &[]));
+        assert!(origin_allowed(
+            "http://localhost:4747",
+            Some("LOCALHOST:4747"),
+            &[]
+        ));
+        assert!(origin_allowed(
+            "https://hq.example.ts.net",
+            Some("hq.example.ts.net:443"),
+            &[]
+        ));
+        assert!(origin_allowed(
+            "http://localhost:3000",
+            Some("127.0.0.1:5678"),
+            &["http://localhost:3000".to_string()]
+        ));
         assert!(origin_allowed(
             "https://HQ.example.ts.net:8443",
             None,
@@ -241,6 +280,41 @@ mod tests {
             None,
             &allowed
         ));
+    }
+
+    /// A dev server, a notebook or a downloaded HTML file served on another local port is
+    /// another origin: loopback is not a credential.
+    #[test]
+    fn another_local_port_is_another_origin() {
+        let host = Some("127.0.0.1:5678");
+        for origin in [
+            "http://localhost:3000",
+            "http://127.0.0.1:8000",
+            "http://127.0.0.1:5679",
+            "http://[::1]:8888",
+            "http://app.localhost:5678",
+            "http://localhost:5678",
+        ] {
+            assert!(!origin_allowed(origin, host, &[]), "{origin}");
+        }
+        assert!(!origin_allowed("http://localhost:5173", None, &[]));
+        assert!(!origin_allowed("file://127.0.0.1:5678", host, &[]));
+        for path in ["/ws", "/api/tasks", "/mcp"] {
+            for has_token in [false, true] {
+                assert!(
+                    rejection(
+                        &Method::GET,
+                        path,
+                        host,
+                        Some("http://localhost:3000"),
+                        &[],
+                        has_token
+                    )
+                    .is_some(),
+                    "{path}"
+                );
+            }
+        }
     }
 
     #[test]
