@@ -290,3 +290,24 @@ fn relations_need_a_known_kind_a_real_ref_and_both_names_in_that_message() {
     assert_eq!(same, "no section here");
     assert!(none.is_empty());
 }
+
+#[tokio::test]
+async fn needs_fold_matches_what_a_fold_would_do() {
+    let db = Database::open_memory().unwrap();
+    let (short, _) = thread_with(&db, 6);
+    assert!(!needs_fold(&db, &short, &cfg(6)).unwrap());
+    let (long, _) = thread_with(&db, 40);
+    assert!(needs_fold(&db, &long, &cfg(6)).unwrap());
+    fold_thread(&db, &long, &cfg(6), &KeepFacts::new())
+        .await
+        .unwrap();
+    assert!(
+        !needs_fold(&db, &long, &cfg(6)).unwrap(),
+        "folded down to target"
+    );
+    let off = ContextFoldConfig {
+        enabled: false,
+        ..cfg(6)
+    };
+    assert!(!needs_fold(&db, &long, &off).unwrap());
+}

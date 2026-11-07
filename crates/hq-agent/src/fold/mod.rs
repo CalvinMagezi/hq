@@ -537,6 +537,23 @@ async fn distill(
     }))
 }
 
+/// Whether [`fold_thread`] would do anything now: the tail is past its trigger, or the blocks
+/// are past their budget. Reads only the database.
+pub fn needs_fold(db: &Database, thread_id: &str, cfg: &ContextFoldConfig) -> Result<bool> {
+    if !cfg.enabled {
+        return Ok(false);
+    }
+    db.with_conn(|conn| {
+        let blocks = thread_folds::active(conn, thread_id)?;
+        if plan_distill(&blocks, cfg).is_some() {
+            return Ok(true);
+        }
+        let after = blocks.last().map(|b| b.last_msg_id.as_str());
+        let tail = thread_folds::messages_after(conn, thread_id, after, 5_000)?;
+        Ok(plan_cut(&tail, cfg).is_some())
+    })
+}
+
 /// Runs [`fold_thread`] in the background with the model from config, logging instead of
 /// failing. Chat surfaces call this after a reply is saved.
 pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
@@ -544,6 +561,18 @@ pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
         return;
     }
     tokio::spawn(async move {
+        // Most replies leave nothing to fold: check before building a model client.
+        match needs_fold(&db, &thread_id, &cfg) {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(e) => {
+                tracing::debug!(
+                    thread_id,
+                    "could not check whether the chat needs a fold: {e:#}"
+                );
+                return;
+            }
+        }
         let summarizer = LlmSummarizer::from_config(&cfg);
         match fold_thread(&db, &thread_id, &cfg, &summarizer).await {
             Ok(done) if !done.is_empty() => {
