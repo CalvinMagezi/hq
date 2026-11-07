@@ -543,6 +543,9 @@ impl Importer {
             Plan::Create(p) => (p, true),
             Plan::Update(p) => (p, false),
         };
+        // A note lands beside its source by default, so a file in an instruction folder would
+        // otherwise turn into a note there.
+        validate_write_path(self.root(), &path)?;
         obj.insert("destination".into(), json!(path));
         index.reserved.insert(path.clone());
         if s.dry_run {

@@ -186,7 +186,10 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    (it writes anywhere the HQ user can), and a vault write, move or delete whose `path`, `from`
    or `to` is inside `SYSTEM_VAULT_FOLDERS` (`skills/`, `_skills/`, `_commands/` and `agents/`
    become instructions; `_system/`, `_threads/`, `_data/`, `_trash/` and `_mailboxes/` are HQ's
-   own state). Every remote MCP server's tools count too (they act on the owner's accounts), and
+   own state), read with `hq_vault::rel_path::RelPath` so `.//./skills/x` counts as `skills/x`.
+   The note tools themselves refuse writes into the instruction folders and the private ones,
+   so this check is the second layer there. Every remote MCP server's tools count too (they act
+   on the owner's accounts), and
    `hq_ask` in `full` mode, read by the tool's own parser (otherwise HQ's own agent is a way
    around the list). Harness session tools are deliberately not on it: Claude driving coding
    sessions is much of the point. The consequence, stated plainly: a spawned coding agent runs

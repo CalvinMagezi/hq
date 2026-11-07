@@ -10,10 +10,23 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::rel_path::RelPath;
 use crate::remediation;
 
-/// Directories the reorg tools may never touch, in either direction.
-const PROTECTED_PREFIXES: &[&str] = &["_system", "_threads", "_data", "_trash"];
+/// Directories the reorg tools may never touch, in either direction: HQ's private folders, the
+/// trash, and the folders whose files become instructions (moving a note into `skills/` makes it
+/// a skill; their own tools carry the approval and checks).
+const PROTECTED_FOLDERS: &[&str] = &[
+    "_system",
+    "_threads",
+    "_data",
+    "_trash",
+    "skills",
+    "_skills",
+    "_commands",
+    "agents",
+    "_mailboxes",
+];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MoveReport {
@@ -26,16 +39,17 @@ pub struct MoveReport {
     pub links_rewritten: u32,
 }
 
-fn guard_rel_path(rel: &str) -> Result<()> {
-    if rel.is_empty() || rel.starts_with('/') || rel.contains("..") {
-        bail!("invalid vault path '{rel}': must be relative, no traversal");
+/// The path in its one spelling, refused when it is not a plain path inside the vault or when
+/// it is in a protected folder however it is written (`./_system/x`, `_System/x`).
+fn guard_rel_path(rel: &str) -> Result<String> {
+    let parsed = RelPath::parse(rel)?;
+    if parsed.is_root() {
+        bail!("invalid vault path '{rel}': names no note");
     }
-    for p in PROTECTED_PREFIXES {
-        if rel == *p || rel.starts_with(&format!("{p}/")) {
-            bail!("'{rel}' is protected: {p}/ cannot be reorganized by tools");
-        }
+    if let Some(p) = parsed.top_in(PROTECTED_FOLDERS) {
+        bail!("'{rel}' is protected: {p}/ cannot be reorganized by tools");
     }
-    Ok(())
+    Ok(parsed.normalized())
 }
 
 fn require_md(rel: &str) -> Result<()> {
@@ -99,8 +113,8 @@ pub(crate) fn move_note(
     to: &str,
     dry_run: bool,
 ) -> Result<MoveReport> {
-    guard_rel_path(from)?;
-    guard_rel_path(to)?;
+    let from = &guard_rel_path(from)?;
+    let to = &guard_rel_path(to)?;
     require_md(from)?;
     require_md(to)?;
     let src = vault_path.join(from);
@@ -149,7 +163,7 @@ pub(crate) fn move_note(
 /// Move a note into `_trash/YYYY-MM-DD/<original path>`. Never a hard delete.
 /// Returns the trash-relative destination path.
 pub(crate) fn trash_note(vault_path: &Path, rel: &str, dry_run: bool) -> Result<String> {
-    guard_rel_path(rel)?;
+    let rel = &guard_rel_path(rel)?;
     require_md(rel)?;
     let src = vault_path.join(rel);
     if !src.is_file() {
@@ -185,7 +199,7 @@ pub(crate) fn update_frontmatter(
     set: HashMap<String, serde_yaml::Value>,
     remove: Vec<String>,
 ) -> Result<()> {
-    guard_rel_path(rel)?;
+    let rel = &guard_rel_path(rel)?;
     require_md(rel)?;
     let path = vault_path.join(rel);
     if !path.is_file() {
@@ -307,6 +321,57 @@ mod tests {
             assert!(trash_note(tmp.path(), bad, true).is_err());
         }
         assert!(guard_rel_path("../escape.md").is_err());
+    }
+
+    /// The same protected file written another way is still protected: a model that could
+    /// replace `_system/SOUL.md` through `./_system/SOUL.md` would rewrite the system prompt of
+    /// every later session.
+    #[test]
+    fn protected_folders_hold_however_the_path_is_spelled() {
+        let tmp = setup();
+        let sys = tmp.path().join("_system");
+        std::fs::create_dir_all(&sys).unwrap();
+        std::fs::write(sys.join("SOUL.md"), "# Soul").unwrap();
+        for bad in [
+            "./_system/SOUL.md",
+            ".//./_system/SOUL.md",
+            "_system//SOUL.md",
+            "_System/SOUL.md",
+            "./skills/x/SKILL.md",
+            "Skills/x/SKILL.md",
+            "_commands/deploy.md",
+            "Agents/coder.md",
+            "_mailboxes/relay/m.md",
+        ] {
+            assert!(
+                move_note(tmp.path(), "Notebooks/Projects/Beta.md", bad, true).is_err(),
+                "move to {bad}"
+            );
+            assert!(
+                move_note(tmp.path(), bad, "Notebooks/x.md", true).is_err(),
+                "move from {bad}"
+            );
+            assert!(trash_note(tmp.path(), bad, true).is_err(), "trash {bad}");
+            assert!(
+                update_frontmatter(tmp.path(), bad, HashMap::new(), vec![]).is_err(),
+                "frontmatter {bad}"
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(sys.join("SOUL.md")).unwrap(),
+            "# Soul"
+        );
+        // Ordinary notes still move however they are written.
+        let report = move_note(
+            tmp.path(),
+            "./Notebooks/Projects/Beta.md",
+            "Notebooks//Beta.md",
+            false,
+        )
+        .unwrap();
+        assert_eq!(report.from, "Notebooks/Projects/Beta.md");
+        assert_eq!(report.to, "Notebooks/Beta.md");
+        assert!(tmp.path().join("Notebooks/Beta.md").is_file());
     }
 
     #[test]

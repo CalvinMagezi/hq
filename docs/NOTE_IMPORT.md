@@ -142,7 +142,9 @@ installer leaves them out (`deploy/README.md`).
 `vault_inventory` and `vault_import` live in the `vault` category (`hq_discover`
 lists them). From claude.ai an import needs no approval unless a path, folder or
 destination is in a system folder (`skills/`, `_system/`, `_commands/`, `agents/`
-and so on), the same rule as other vault writes. A session that has run an import
+and so on), the same rule as other vault writes. Whoever calls it, an import never
+writes a note into `skills/`, `_skills/`, `_commands/`, `agents/` or `_mailboxes/`
+(their files become instructions) or into `_system/`, `_threads/` or `_data/`. A session that has run an import
 counts as having read untrusted content, because the preview is the document's
 text. Restricted audiences (family members, guests) cannot use either tool.
 
