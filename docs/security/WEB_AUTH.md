@@ -138,8 +138,10 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   that port never receives it. `--local` forces the in-process backend.
 - **`GET /api/hello`** answers without the web token, like `/health`: the install id
   (random, kept in `.vault/_data/hq_id`), the edition, the version, the oldest client the
-  server supports and, while HQ is opening, the start step. A browser keys its saved copy
-  by the id before it signs in. Nothing in it is content or a credential. While HQ opens,
+  server supports, the host's time zone (`tz`, an IANA name, and `tz_offset_minutes`, so the
+  apps can show times HQ keeps in its own zone) and, while HQ is opening, the start step. A
+  browser keys its saved copy by the id before it signs in. Nothing in it is content or a
+  credential, but anyone who can reach the port learns roughly where the host's clock is set. While HQ opens,
   every other route on the port answers 503 `{"starting": true}`
   (`crates/hq-web/src/hello.rs`).
 - **Session-changing requests.** `send`, `adopt`, `stop`, `resume`, `rename`,
