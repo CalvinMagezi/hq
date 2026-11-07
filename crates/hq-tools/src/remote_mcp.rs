@@ -136,8 +136,8 @@ impl RemoteMcpTool {
             "{summary}. Reply \"approve {token}\" or \"deny {token}\", or use the buttons — family-confirm-{token}"
         );
         let mut msg = hq_core::mailbox::new_message(
-            "family-confirm",
-            "relay",
+            hq_core::mailbox::FAMILY_CONFIRM_SENDER,
+            hq_core::mailbox::RELAY_MAILBOX,
             hq_core::types::MailboxMessageType::Nudge,
             Some("Family Action Approval"),
             &content,

@@ -796,8 +796,10 @@ pub(crate) fn progress_sink(
 mod tests;
 
 /// Mailbox senders that are part of a chat, not notifications: a family member's request in a
-/// Discord chat waits for the owner's answer in that chat.
-const CHAT_FLOW_SENDERS: &[&str] = &["family-confirm"];
+/// Discord chat waits for the owner's answer in that chat. Each is reserved
+/// (`hq_core::mailbox::RESERVED_SENDERS`), so no tool can send as one, and the relay mailbox
+/// takes no broadcasts.
+const CHAT_FLOW_SENDERS: &[&str] = &[hq_core::mailbox::FAMILY_CONFIRM_SENDER];
 
 /// Empties the relay mailbox. Notices are dropped, since chat relays carry chat only; the chat
 /// flows among them are returned to the caller.
@@ -852,5 +854,12 @@ mod chat_only_tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn every_chat_flow_sender_is_one_no_tool_can_claim() {
+        for sender in CHAT_FLOW_SENDERS {
+            assert!(hq_core::mailbox::is_reserved_sender(sender), "{sender}");
+        }
     }
 }
