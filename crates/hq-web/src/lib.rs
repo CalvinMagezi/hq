@@ -852,7 +852,8 @@ mod web_auth_router_tests {
                 .header("connection", "upgrade")
                 .header("upgrade", "websocket")
                 .header("sec-websocket-version", "13")
-                .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==");
+                // RFC 6455's sample key ("the sample nonce"), not a secret.
+                .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="); // gitleaks:allow
             if let Some(origin) = origin {
                 b = b.header("origin", origin);
             }
