@@ -455,20 +455,59 @@ async fn start_telegram(
 /// Where the web UI is looked for when `web_static_dir` is unset. The first candidate with an
 /// `index.html` wins; with none, the first is returned so the "no web UI build" warning names it.
 pub(crate) fn default_static_dir(repo_root: &std::path::Path) -> std::path::PathBuf {
-    let mut candidates = vec![
-        repo_root.join("web").join("dist"),
+    first_with_index(static_dir_candidates(
+        repo_root,
+        dirs::home_dir().as_deref(),
+    ))
+}
+
+/// The web UI directories HQ would serve from, in the order it tries them: `web_static_dir`
+/// alone when it is set, else the candidates up to and including the one with an
+/// `index.html` (all of them when none has one). A coding agent must not be able to write any
+/// of them, since a build placed in one ahead of the real UI would be served in its place; the
+/// host keeps them read-only to its agents.
+pub(crate) fn served_static_dirs(config: &HqConfig) -> Vec<std::path::PathBuf> {
+    if let Some(dir) = &config.web_static_dir {
+        return vec![dir.clone()];
+    }
+    let repo_root = config.vault_path.parent().unwrap_or(&config.vault_path);
+    let candidates = static_dir_candidates(repo_root, dirs::home_dir().as_deref());
+    match candidates
+        .iter()
+        .position(|c| c.join("index.html").exists())
+    {
+        Some(served) => candidates[..=served].to_vec(),
+        None => candidates,
+    }
+}
+
+/// The places `default_static_dir` looks, in order. `home` is the user's home directory.
+fn static_dir_candidates(
+    repo_root: &std::path::Path,
+    home: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    // With the vault in its default place (`~/.vault`) the "repository" is the home directory
+    // itself, where these two would be folders any program the user runs (a coding agent
+    // among them) could create ahead of the installed UI.
+    if home != Some(repo_root) {
+        candidates.push(repo_root.join("web").join("dist"));
         // A source checkout after `bun run build` (what `hq web --build` runs).
-        repo_root
-            .join("apps")
-            .join("hq-web")
-            .join("dist")
-            .join("client"),
-    ];
-    // A portable install keeps the web files next to the program: `hq.exe` and `web\`. They are
-    // plain files, so a policy that restricts which programs run does not touch them.
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
+        candidates.push(
+            repo_root
+                .join("apps")
+                .join("hq-web")
+                .join("dist")
+                .join("client"),
+        );
+    }
+    // A portable Windows install keeps the web files next to the program: `hq.exe` and `web\`.
+    // They are plain files, so a policy that restricts which programs run does not touch them.
+    // Elsewhere the program sits in a bin directory (`~/.local/bin`) that other tools write.
+    if cfg!(windows)
+        && let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
     {
         candidates.push(dir.join("web"));
     }
@@ -482,7 +521,7 @@ pub(crate) fn default_static_dir(repo_root: &std::path::Path) -> std::path::Path
         candidates.push(dir.join("agent-hq").join("web").join("dist"));
     }
     candidates.push(std::path::PathBuf::from("/usr/local/share/hq/web/dist"));
-    first_with_index(candidates)
+    candidates
 }
 
 fn first_with_index(candidates: Vec<std::path::PathBuf>) -> std::path::PathBuf {
@@ -551,7 +590,54 @@ mod web_port_tests {
 
 #[cfg(test)]
 mod static_dir_tests {
-    use super::first_with_index;
+    use super::{first_with_index, static_dir_candidates};
+    use std::path::Path;
+
+    #[test]
+    fn the_ui_is_never_looked_for_beside_the_program_or_in_the_home_directory() {
+        let home = Path::new("/home/example");
+        let at_home = static_dir_candidates(home, Some(home));
+        assert!(
+            at_home
+                .iter()
+                .all(|c| !c.starts_with(home.join("web")) && !c.starts_with(home.join("apps"))),
+            "{at_home:?}"
+        );
+        let exe_dir = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("web");
+        assert_eq!(at_home.contains(&exe_dir), cfg!(windows));
+        // A checkout or a server directory beside the vault is still looked in first.
+        let checkout = Path::new("/srv/example/hq");
+        let there = static_dir_candidates(checkout, Some(home));
+        assert_eq!(there[0], checkout.join("web/dist"));
+        assert_eq!(there[1], checkout.join("apps/hq-web/dist/client"));
+        assert_eq!(
+            there.last().unwrap(),
+            Path::new("/usr/local/share/hq/web/dist")
+        );
+    }
+
+    #[test]
+    fn the_served_dirs_are_the_configured_one_or_every_candidate_up_to_the_served_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("hq");
+        std::fs::create_dir_all(root.join("apps/hq-web/dist/client")).unwrap();
+        std::fs::write(root.join("apps/hq-web/dist/client/index.html"), "x").unwrap();
+        let mut config = hq_core::config::HqConfig {
+            vault_path: root.join(".vault"),
+            web_static_dir: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::served_static_dirs(&config),
+            vec![root.join("web/dist"), root.join("apps/hq-web/dist/client")]
+        );
+        config.web_static_dir = Some(root.join("ui"));
+        assert_eq!(super::served_static_dirs(&config), vec![root.join("ui")]);
+    }
 
     #[test]
     fn picks_the_first_candidate_that_has_an_index() {

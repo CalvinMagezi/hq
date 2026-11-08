@@ -5,10 +5,11 @@
 #![cfg(unix)]
 
 use hq_host::{
-    Allow, Host, HostError, ReadSource, SandboxMode, SandboxProfile, SandboxSpec, SpawnSpec,
+    Allow, Host, HostError, HqPaths, ReadSource, SandboxMode, SandboxProfile, SandboxSpec,
+    SpawnSpec,
 };
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -676,4 +677,201 @@ fn the_profile_is_reported_per_agent() {
         );
         host.kill(name).unwrap();
     }
+}
+
+/// Every vault folder HQ's own tools refuse to write as a plain note, because HQ loads
+/// it as instructions or acts on it as messages, is read-only to an agent too. `_data`
+/// is hidden outright. macOS compares names without case, so `Agents` covers `agents`
+/// there; on Linux the real folder is `Agents` and must be listed as such.
+#[test]
+fn every_folder_hq_loads_from_the_vault_is_read_only_to_an_agent() {
+    let listed: Vec<String> = hq_host::VAULT_READONLY_DIRS
+        .iter()
+        .map(|d| d.to_lowercase())
+        .collect();
+    for folder in hq_vault::rel_path::INSTRUCTION_FOLDERS
+        .iter()
+        .chain(hq_vault::rel_path::PRIVATE_FOLDERS)
+        .filter(|f| **f != hq_vault::rel_path::DATA_FOLDER)
+    {
+        assert!(
+            listed.contains(&folder.to_lowercase()),
+            "{folder} is missing from VAULT_READONLY_DIRS"
+        );
+    }
+    // The folder HQ loads agent definitions from, spelled as it is on disk.
+    assert!(hq_host::VAULT_READONLY_DIRS.contains(&"Agents"));
+}
+
+/// A tree shaped like an install outside HOME: a vault, a config directory with no unit
+/// env file yet, the `hq` binary (also reached through a linked directory, which
+/// bubblewrap cannot mount through) and one that is not installed yet.
+struct Install {
+    _tmp: tempfile::TempDir,
+    root: PathBuf,
+    vault: PathBuf,
+    config_dir: PathBuf,
+}
+
+fn install() -> Install {
+    let tmp = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let vault = root.join("vault");
+    let config_dir = root.join("srv");
+    for dir in [
+        vault.join("Agents"),
+        vault.join("Notebooks"),
+        config_dir.clone(),
+        root.join("bin"),
+    ] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    std::fs::write(vault.join("Agents/coder.md"), "AGENT").unwrap();
+    std::fs::write(config_dir.join("config.yaml"), SECRET).unwrap();
+    std::fs::write(root.join("bin/hq"), "HQ-BINARY").unwrap();
+    std::os::unix::fs::symlink(root.join("bin"), root.join("linkbin")).unwrap();
+    Install {
+        _tmp: tmp,
+        root,
+        vault,
+        config_dir,
+    }
+}
+
+impl Install {
+    fn paths(&self) -> HqPaths {
+        HqPaths::new(Some(&self.vault), &[self.config_dir.join("config.yaml")])
+            .with_readonly_files([self.root.join("linkbin/hq"), self.root.join("later/hq")])
+    }
+}
+
+#[test]
+fn an_open_agent_cannot_change_the_hq_binary_or_the_vault_folders_hq_acts_on() {
+    if !sandbox_available() {
+        return;
+    }
+    let dir = run_dir();
+    let project = tempfile::tempdir().unwrap();
+    let i = install();
+    let host = Host::new()
+        .with_helper_binary(env!("CARGO_BIN_EXE_hq"))
+        .with_hq_paths(i.paths());
+    host.set_run_dir(dir.path());
+    let script = format!(
+        "t() {{ if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }}; \
+         t bin 'echo x > {root}/bin/hq'; t linked_bin 'echo x > {root}/linkbin/hq'; \
+         t later_bin 'mkdir -p {root}/later && echo x > {root}/later/hq'; \
+         t agents 'echo x > {vault}/Agents/x.md'; t agent_def 'echo x >> {vault}/Agents/coder.md'; \
+         t commands 'mkdir -p {vault}/_commands && echo x > {vault}/_commands/x.md'; \
+         t relay 'mkdir -p {vault}/_mailboxes/relay && echo x > {vault}/_mailboxes/relay/m.md'; \
+         t note 'echo x > {vault}/Notebooks/n.md'; \
+         t unit_env 'echo LD_PRELOAD=/x > {cfg}/gh.env'; t other_file 'echo x > {cfg}/notes.txt'; \
+         mv {root}/bin {root}/bin.moved 2>/dev/null; mkdir -p {root}/bin; \
+         t planted_bin 'echo PLANTED > {root}/bin/hq'; echo DONE",
+        root = i.root.display(),
+        vault = i.vault.display(),
+        cfg = i.config_dir.display(),
+    );
+    let out = run(&host, "a", project.path(), open(), &script);
+    for (probe, allowed) in [
+        ("bin", false),
+        ("linked_bin", false),
+        // Seatbelt denies a path before it exists; bubblewrap cannot, and a binary
+        // that is not there yet is not made for it.
+        ("later_bin", cfg!(target_os = "linux")),
+        ("agents", false),
+        ("agent_def", false),
+        ("commands", false),
+        ("relay", false),
+        ("note", true),
+        ("unit_env", false),
+        ("other_file", true),
+        ("planted_bin", false),
+    ] {
+        let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
+        assert!(out.contains(&want), "expected {want}; got:\n{out}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(i.root.join("bin/hq")).unwrap(),
+        "HQ-BINARY"
+    );
+    assert!(!i.vault.join("_commands/x.md").exists());
+    assert!(!i.vault.join("_mailboxes/relay/m.md").exists());
+    // Made empty by the host under bubblewrap so the mask had something to land on.
+    let env = std::fs::read_to_string(i.config_dir.join("gh.env")).unwrap_or_default();
+    assert!(!env.contains("LD_PRELOAD"), "{env}");
+    host.kill("a").unwrap();
+}
+
+/// Set in the copy of this test binary that runs with a home directory of its own.
+const FAKE_HOME: &str = "HQ_HOST_SANDBOX_FAKE_HOME";
+
+/// The login items and the installed binary live in HOME, so this runs in a copy of the
+/// test binary with a throwaway HOME, where `~/.config/systemd/user` does not exist yet.
+#[test]
+fn an_open_agent_cannot_add_a_login_item_or_replace_the_hq_binary_in_home() {
+    if !sandbox_available() {
+        return;
+    }
+    if std::env::var_os(FAKE_HOME).is_none() {
+        let tmp = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let home = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+        std::fs::write(home.join(".local/bin/hq"), "HQ-BINARY").unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "an_open_agent_cannot_add_a_login_item_or_replace_the_hq_binary_in_home",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("HOME", &home)
+            .env(FAKE_HOME, "1")
+            .output()
+            .unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(out.status.success(), "{text}");
+        assert!(text.contains("1 passed"), "{text}");
+        assert_eq!(
+            std::fs::read_to_string(home.join(".local/bin/hq")).unwrap(),
+            "HQ-BINARY"
+        );
+        assert!(!home.join(".config/systemd/user/x.service").exists());
+        assert!(!home.join(".config/autostart/x.desktop").exists());
+        return;
+    }
+    let home = PathBuf::from(std::env::var("HOME").unwrap());
+    assert!(!home.join(".config/systemd/user").exists());
+    let dir = run_dir();
+    let project = tempfile::tempdir().unwrap();
+    let host = host_for(dir.path());
+    let h = home.display();
+    let script = format!(
+        "t() {{ if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }}; \
+         t unit 'mkdir -p {h}/.config/systemd/user && echo x > {h}/.config/systemd/user/x.service'; \
+         t autostart 'mkdir -p {h}/.config/autostart && echo x > {h}/.config/autostart/x.desktop'; \
+         t bin 'echo x > {h}/.local/bin/hq'; t tool 'echo x > {h}/.local/bin/tool'; \
+         t web 'mkdir -p {h}/.local/bin/web && echo x > {h}/.local/bin/web/index.html'; \
+         mv {h}/.local/bin {h}/.local/bin.moved 2>/dev/null; mkdir -p {h}/.local/bin; \
+         t planted 'echo PLANTED > {h}/.local/bin/hq'; echo DONE"
+    );
+    let out = run(&host, "a", project.path(), open(), &script);
+    for (probe, allowed) in [
+        ("unit", false),
+        ("autostart", false),
+        ("bin", false),
+        // Other tools may be installed beside it, and a `web` folder there is no longer
+        // where HQ looks for its UI (outside Windows).
+        ("tool", true),
+        ("web", true),
+        ("planted", false),
+    ] {
+        let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
+        assert!(out.contains(&want), "expected {want}; got:\n{out}");
+    }
+    host.kill("a").unwrap();
 }

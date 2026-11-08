@@ -281,15 +281,23 @@ What it cannot do:
   vault's `_data` folder (the database with sign-in tokens, owner approvals and paired
   devices, and the TLS and web push keys); and the config file in force (`HQ_CONFIG_PATH`,
   `~/.hq/config.yaml` or `/opt/hq/config.yaml`) with its backups and every `*.env` file beside
-  it (such as `/opt/hq/mcp.env`). The host resolves the vault and config the way HQ does on
-  its own machine when `hq host serve` starts, so restart the host after moving either.
+  it (such as `/opt/hq/mcp.env`). The env files HQ's service units load from there
+  (`mcp.env`, `openrouter.env`, `gws.env`, `gh.env`) are masked even when you have none, so an
+  agent cannot create one for the service to load at its next start; under bubblewrap the
+  host makes each missing one, empty and private, so the mask has a file to land on. The host
+  resolves the vault and config the way HQ does on its own machine when `hq host serve`
+  starts, so restart the host after moving either. `hq host install` writes `HQ_VAULT_PATH`
+  and `HQ_CONFIG_PATH` into the service when they are set in the shell you run it from, and
+  the host logs an error at start when the vault it would protect does not exist.
   Hiding the host directory stops reads of `host.sock`, and on macOS, where a unix-socket
   connect counts as outbound network rather than a file read, a connect to it is denied as
   well, so a pane cannot sit on the host's pending connection slots; the agent's own
   `agent.sock` stays reachable for its hooks.
-- **Change what HQ loads into its own sessions.** The vault's `_system`, `_threads`,
-  `_agents`, `skills`, `_moc`, `_plans` and `_embeddings` folders are read-only to it, and the
-  folders above them cannot be renamed. Notes elsewhere in the vault stay writable.
+- **Change what HQ loads into its own sessions or acts on.** The vault's `_system`,
+  `_threads`, `Agents`, `_agents`, `skills` (and its older spellings `Skills` and `_skills`),
+  `_commands`, `_mailboxes`, `_moc`, `_plans` and `_embeddings` folders are read-only to it,
+  and the folders above them cannot be renamed. A file in `_mailboxes/relay` is acted on as a
+  request, so a pane cannot leave one there. Notes elsewhere in the vault stay writable.
 - **See other processes' environments** (`ps eww`, `/proc/<pid>/environ`), which hold the
   daemon's and the other agents' tokens. The price is that `ps`, `lsof` and `kill` show only
   the agent's own processes: a server an earlier session left running is invisible, so pick
@@ -308,9 +316,21 @@ What it cannot do:
 - **Write the files your own tools run later, outside the sandbox**: shell startup files
   (`~/.zshrc`, `~/.bashrc`, `~/.profile` and the others), `~/.gitconfig` and `~/.config/git`,
   login items (`~/.config/autostart`, `~/.config/systemd/user`, `~/Library/LaunchAgents`),
-  `~/.claude.json`, and Claude's `settings*.json` and `hooks` in its config directory. A
-  project's own `.git/hooks`, `.git/config`, `.mcp.json` and `.claude/settings.json` are
-  writable.
+  `~/.claude.json`, and Claude's `settings*.json` and `hooks` in its config directory. Also
+  what HQ itself runs or serves: the `hq` binary (`~/.local/bin/hq`, `~/bin/hq`, the binary
+  the host runs from and the path it was started as, and `self_update.install_paths`), the
+  MCP client configs `hq mcp install` writes (`~/.cursor/mcp.json`, VS Code's user `mcp.json`
+  and `settings.json`, Claude Desktop's config, `~/.copilot/mcp.json`, opencode's and
+  Antigravity's) and Codex's `~/.codex/config.toml`, each of which names commands its client
+  runs later; and the web UI HQ serves (`web_static_dir`, or each folder HQ would look in up
+  to the one it serves from), unless it lies in the agent's own project. HQ no longer looks
+  for its UI in a `web` folder beside the binary (except on Windows) or, with the vault at
+  `~/.vault`, in `~/web/dist` or `~/apps/hq-web/dist/client`, all of which any program you
+  run could create ahead of the installed UI. The directories
+  above them cannot be renamed, so `~/.local/bin` cannot be moved aside for a planted copy;
+  other files in them stay writable. Codex cannot record a folder as trusted in its own
+  `config.toml` from inside the sandbox. A project's own `.git/hooks`, `.git/config`,
+  `.mcp.json` and `.claude/settings.json` are writable.
 - **Start `open`, `osascript` or `launchctl`** (macOS), or look up the launcher service. An app
   started that way runs outside the sandbox.
 - **Drive the machine's control sockets.** The open profile shares `/run`, so the Docker
@@ -342,8 +362,16 @@ them unless you add it.
 This is a wall around HQ, not a boundary against an agent that means harm. It reaches
 everything else you can, and a prompt-injected agent can read a file and send it anywhere.
 The guard against that is the agent's own permission mode and classifier, as in your terminal.
-Under bubblewrap a path that does not exist cannot be protected (an agent can create a
-`~/.zshrc` you do not have); Seatbelt denies it either way. The directories above a protected
+Under bubblewrap a rule needs a path that exists, so before each launch the host makes every
+protected directory you do not have yet, private to you (mode 0700): `~/.config/systemd/user`,
+`~/.config/autostart`, `~/.config/git`, Claude's `hooks`, the vault folders above and a web UI
+folder HQ would look in. It does not make files, since an empty one would change what your
+tools do, so a protected file you do not have can still be created by an agent there: a
+`~/.zshrc` or other shell startup file, `~/.gitconfig`, Claude's `settings.json`, an MCP client
+config you have never written, or `hq` in a bin directory it is not installed in. Nor does it
+make `skills` in a vault that keeps its skills under an older spelling (`Skills`, `_skills`):
+HQ would switch to the new empty folder. The host warns about that case instead; rename the
+folder to `skills`. Seatbelt denies a path whether it exists or not. The directories above a protected
 path (`~/.config`, `~/.claude` and the like) cannot be renamed or removed, so a protected path
 cannot be moved aside and replaced; work inside them is unaffected. `allow_domains`, `writable`,
 `readable` and `loopback_ports` do nothing under this profile.
@@ -460,6 +488,13 @@ would run with the host's reach rather than the agent's. So host git runs with
 fetch, `core.sshCommand` or remote helper), `log.showSignature=false` (no `gpg.program`), and
 every filter driver the configuration names emptied for that command. The host never asks
 for a diff, so `textconv` and external diff drivers never run.
+
+The `git` it runs, like the `bwrap` it wraps agents in, is taken from a directory only root
+can write (`/usr/bin`, `/bin`, `/usr/local/bin`, then any such `PATH` entry), never from the
+first match on `PATH`: a service's `PATH` can include `~/.local/bin`, which an open agent can
+write. Only when no root-owned copy exists does it use the first on `PATH`, with a warning.
+The services `hq host install` writes also list `~/.local/bin` and `~/bin` after the system
+directories.
 
 What is left: filter drivers are read from the configuration just before each command, so an
 agent that adds a new driver in the moment between the two can still have it run once by the
