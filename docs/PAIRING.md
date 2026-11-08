@@ -209,6 +209,11 @@ hq bridge join            # paste or scan the phone's link, then type the digits
 hq bridge serve           # keeps the forward and the gate service up
 ```
 
+`hq bridge pair --setup` (or `join --setup`) on a machine also takes the owner's steps below: it
+turns the gate on at `127.0.0.1:7747` when `agent_host.gate_listen` is unset, installs the host and,
+after the pairing, `hq bridge serve` as login services, and names the machine after itself. See "One
+command, for the phone app" in [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md).
+
 Two things stay with the owner. The machine offers its gate only when `agent_host.gate_listen` is a
 loopback address that `agent_host.gate_allowed_sources` admits (`hq bridge serve` prints a one-line
 hint otherwise; setup never moves the gate). The hub offers `web` only when `bridge.web_listen` is

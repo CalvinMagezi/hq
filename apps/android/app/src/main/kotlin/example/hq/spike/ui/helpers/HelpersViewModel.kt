@@ -121,6 +121,7 @@ class HelpersActions(
     val onJob: (String) -> Unit = {},
     val onHarness: (String) -> Unit = {},
     val onNextHost: () -> Unit = {},
+    val onRefreshHosts: () -> Unit = {},
     val onStartSubmit: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
 )
@@ -169,6 +170,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onJob = { j -> _state.update { s -> s.copy(start = s.start?.copy(job = j, error = null)) } },
         onHarness = { h -> _state.update { s -> s.copy(start = s.start?.copy(harness = h)) } },
         onNextHost = ::nextHost,
+        onRefreshHosts = ::loadHosts,
         onStartSubmit = ::submitStart,
         onDismissLine = { _state.update { it.copy(line = null) } },
     )
@@ -418,9 +420,20 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun openStart() {
         _state.update { it.copy(start = StartForm()) }
+        loadHosts()
+    }
+
+    /** Asks HQ where helpers can run. Also when the owner comes back to an open sheet, which may be from pairing a computer. */
+    private fun loadHosts() {
+        if (_state.value.start == null) return
         viewModelScope.launch {
             val hosts = try { client.helperHosts() } catch (e: HqUnavailable) { emptyList() }
-            _state.update { s -> s.start?.let { f -> s.copy(start = f.copy(hosts = hosts, host = f.host ?: hosts.firstOrNull { it.reachable }?.name)) } ?: s }
+            _state.update { s ->
+                s.start?.let { f ->
+                    val kept = f.host?.takeIf { name -> hosts.any { it.name == name && it.reachable } }
+                    s.copy(start = f.copy(hosts = hosts, host = kept ?: hosts.firstOrNull { it.reachable }?.name))
+                } ?: s
+            }
         }
     }
 

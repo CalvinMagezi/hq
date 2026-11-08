@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const LAUNCHD_LABEL: &str = "com.hq.host";
-const SYSTEMD_UNIT: &str = "hq-host.service";
+pub(crate) const SYSTEMD_UNIT: &str = "hq-host.service";
 const DIR_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 /// Longest public key line accepted.
@@ -23,7 +23,7 @@ const KEY_TYPES: &[&str] = &[
     "ecdsa-sha2-nistp521",
 ];
 
-fn home() -> Result<PathBuf> {
+pub(crate) fn home() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|h| h.is_absolute())
@@ -51,7 +51,7 @@ pub(crate) fn service_binary(home: &Path) -> Result<PathBuf> {
 /// user's own. A coding agent under the open profile can write `~/.local/bin` and `~/bin`,
 /// so a `git` planted there must not come before the real one in a process that runs
 /// outside the sandbox. Programs found only there (an agent CLI) are still found.
-fn path_env(home: &Path) -> String {
+pub(crate) fn path_env(home: &Path) -> String {
     format!(
         "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin:{home}/.local/bin:{home}/bin",
         home = home.display()
@@ -216,7 +216,7 @@ pub(crate) fn systemd_unit_with(exe: &Path, home: &Path, env: &[(&str, String)])
     )
 }
 
-fn write_private(path: &Path, text: &str) -> Result<()> {
+pub(crate) fn write_private(path: &Path, text: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -230,7 +230,7 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
     Ok(())
 }
 
-fn run(program: &str, args: &[&str]) -> Result<()> {
+pub(crate) fn run(program: &str, args: &[&str]) -> Result<()> {
     let out = Command::new(program)
         .args(args)
         .output()

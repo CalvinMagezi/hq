@@ -52,6 +52,8 @@ pub mod bridge;
 #[cfg(all(unix, feature = "bridge"))]
 pub mod bridge_control;
 #[cfg(all(unix, feature = "bridge"))]
+pub mod bridge_setup;
+#[cfg(all(unix, feature = "bridge"))]
 pub mod claude;
 pub mod connector;
 pub mod install;
