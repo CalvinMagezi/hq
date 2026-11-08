@@ -907,7 +907,11 @@ fn init_tracing() {
     // Reports print their own findings; startup and migration logs would bury them.
     let is_report = args
         .get(1)
-        .is_some_and(|a| matches!(a.as_str(), "doctor" | "health" | "ps" | "status"));
+        .is_some_and(|a| matches!(a.as_str(), "doctor" | "health" | "ps" | "status"))
+        // Pairing walks a person through a code and six digits; a fresh database's migrations
+        // would scroll the code off the screen.
+        || (args.get(1).is_some_and(|a| a == "bridge")
+            && args.get(2).is_some_and(|a| a == "pair" || a == "join"));
     let default_level = if is_chat || is_tunnel_run {
         "off"
     } else if is_edge {

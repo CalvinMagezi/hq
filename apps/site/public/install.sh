@@ -3,6 +3,7 @@
 #
 #   curl -fsSL https://agent-hq.online/install.sh | bash
 #   curl -fsSL https://agent-hq.online/install.sh | bash -s -- --channel main --prefix ~/bin
+#   curl -fsSL https://agent-hq.online/install.sh | bash -s -- --pair    # a computer for the phone's helpers
 #
 # It downloads the channel pointer and manifest, verifies their minisign signatures
 # against the key below, checks the archive SHA-256, and only then installs the binary.
@@ -18,6 +19,7 @@ CHANNEL="stable"
 PREFIX="${HQ_PREFIX:-$HOME/.local/bin}"
 WEB=1
 WEB_ONLY=0
+PAIR=0
 WORK=""
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-hq"
 
@@ -27,12 +29,14 @@ cleanup() { [ -z "$WORK" ] || rm -rf "$WORK"; }
 
 usage() {
     cat <<'USAGE'
-usage: install.sh [--channel stable|main] [--prefix DIR] [--no-web | --web-only]
+usage: install.sh [--channel stable|main] [--prefix DIR] [--no-web | --web-only] [--pair]
 
   --channel   release channel (default: stable)
   --prefix    directory for the hq binary (default: ~/.local/bin, or $HQ_PREFIX)
   --no-web    skip the web UI (installed under ~/.local/share/agent-hq/web)
   --web-only  install only the web UI, for an hq built from source (any platform, no bun)
+  --pair      set this computer up to run helpers for the HQ on your phone: install hq without
+              the web UI, then run `hq bridge pair --setup`, which shows a code for the phone to scan
 
 The first download is verified with the minisign tool when it is installed, otherwise with
 OpenSSL 1.1.1 or newer. On macOS the system OpenSSL cannot do this, so install minisign
@@ -189,10 +193,12 @@ main() {
             --prefix) [ $# -ge 2 ] || die "--prefix needs a value"; PREFIX="$2"; shift 2 ;;
             --no-web) WEB=0; shift ;;
             --web-only) WEB_ONLY=1; shift ;;
+            --pair) PAIR=1; WEB=0; shift ;;
             -h | --help) usage; exit 0 ;;
             *) die "unknown option: $1 (try --help)" ;;
         esac
     done
+    [ "$PAIR" -eq 0 ] || [ "$WEB_ONLY" -eq 0 ] || die "--pair installs hq itself; it cannot be used with --web-only"
     printf '%s' "$CHANNEL" | grep -Eq '^[A-Za-z0-9_.-]+$' || die "--channel must be a plain name"
     for tool in curl tar awk sed base64; do
         command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
@@ -271,6 +277,10 @@ main() {
         *) echo; echo "Add $PREFIX to your PATH, for example: export PATH=\"$PREFIX:\$PATH\"" ;;
     esac
     warn_other_installs
+    if [ "$PAIR" -eq 1 ]; then
+        pair_with_phone
+        return 0
+    fi
     cat <<NEXT
 
 Next steps:
@@ -281,6 +291,18 @@ Next steps:
 
 Always-on server with signed automatic updates: https://github.com/$REPO/blob/main/deploy/README.md
 NEXT
+}
+
+# The pairing asks for six digits, and under `curl | bash` standard input is the script, so the
+# terminal is opened for it. Without a terminal there is nobody to type them: say what to run.
+pair_with_phone() {
+    echo
+    if ! { : </dev/tty; } 2>/dev/null; then
+        echo "Installed. To pair with your phone, run in a terminal: $PREFIX/hq bridge pair --setup"
+        return 0
+    fi
+    say "Setting this computer up for your phone. Open Helpers on the phone and tap Scan the code."
+    "$PREFIX/hq" bridge pair --setup </dev/tty
 }
 
 main "$@"

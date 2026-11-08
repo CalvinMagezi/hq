@@ -99,6 +99,19 @@ object HelperWords {
 
     private val THIS_PHONE = setOf("", "local", "native")
 
+    /**
+     * True when the start sheet should walk the owner through pairing a computer instead of asking where to run: HQ listed
+     * its places and none is a paired computer. A paired computer that is only offline is not this case.
+     */
+    fun needsComputer(hosts: List<HqClient.HelperHost>?): Boolean =
+        !hosts.isNullOrEmpty() && hosts.none { it.reachable } && hosts.all { it.name in THIS_PHONE }
+
+    /**
+     * What the owner runs on the computer: the signed install script, then `hq bridge pair --setup`, which shows the code the
+     * phone scans. A build published from another repository changes this line along with the script's address.
+     */
+    const val PAIR_COMMAND = "curl -fsSL https://agent-hq.online/install.sh | bash -s -- --pair"
+
     fun title(w: Words, row: HelperRow): String {
         val job = listOf(row.label, row.goal, row.taskTitle).firstOrNull { !it.isNullOrBlank() }?.trim()?.lineSequence()?.first()?.trim()
         return job?.let { if (it.length > MAX_TITLE) it.take(MAX_TITLE).trimEnd() + "…" else it } ?: w.s(R.string.helpers_default_title, agentName(w, row.harness))

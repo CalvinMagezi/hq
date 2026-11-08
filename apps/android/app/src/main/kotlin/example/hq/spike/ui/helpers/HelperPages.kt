@@ -1,5 +1,8 @@
 package example.hq.spike.ui.helpers
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,6 +28,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -39,12 +46,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import example.hq.spike.R
 import example.hq.spike.ui.chat.ActionRow
 import example.hq.spike.ui.chat.SheetFrame
 import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.inbox.PrimaryButton
+import example.hq.spike.ui.pairing.PairingActivity
 import example.hq.spike.ui.shell.ConfirmCopy
 import example.hq.spike.ui.shell.ConfirmDialog
 import example.hq.spike.ui.shell.HqIcons
@@ -354,21 +363,70 @@ private fun StartSheet(form: StartForm, actions: HelpersActions) {
                     ) { Text(label, style = HqType.BodyBold, color = Mts.Ink) }
                 }
             }
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape).clickable(role = Role.Button, onClickLabel = stringResource(R.string.helpers_change_computer), onClick = actions.onNextHost).padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.helpers_where), style = HqType.BodyBold, color = Mts.Ink)
-                    Text(whereWords(example.hq.spike.ui.shell.rememberWords(), form), style = HqType.BodySm, color = if (form.host == null && form.hosts != null) Mts.Amber else Mts.InkMuted)
-                }
-                if ((form.hosts.orEmpty().count { it.reachable }) > 1) Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
-            }
-            Text(stringResource(R.string.helpers_it_asks_before_it), style = SmallText, color = Mts.InkMuted)
-            form.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
-            PrimaryButton(stringResource(if (form.busy) R.string.helpers_starting else R.string.helpers_start), Modifier.fillMaxWidth(), enabled = form.job.isNotBlank() && form.host != null && !form.busy, onClick = actions.onStartSubmit)
+            if (HelperWords.needsComputer(form.hosts)) PairComputer(actions) else StartWhere(form, shape, actions)
         }
     }
+}
+
+@Composable
+private fun StartWhere(form: StartForm, shape: RoundedCornerShape, actions: HelpersActions) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape).clickable(role = Role.Button, onClickLabel = stringResource(R.string.helpers_change_computer), onClick = actions.onNextHost).padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.helpers_where), style = HqType.BodyBold, color = Mts.Ink)
+            Text(whereWords(example.hq.spike.ui.shell.rememberWords(), form), style = HqType.BodySm, color = if (form.host == null && form.hosts != null) Mts.Amber else Mts.InkMuted)
+        }
+        if ((form.hosts.orEmpty().count { it.reachable }) > 1) Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+    }
+    Text(stringResource(R.string.helpers_it_asks_before_it), style = SmallText, color = Mts.InkMuted)
+    form.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
+    PrimaryButton(stringResource(if (form.busy) R.string.helpers_starting else R.string.helpers_start), Modifier.fillMaxWidth(), enabled = form.job.isNotBlank() && form.host != null && !form.busy, onClick = actions.onStartSubmit)
+}
+
+/**
+ * The start sheet with no computer to run on: the one line to run on the computer (copied, or sent to it from this phone), then
+ * the scanner for the code that line shows. Coming back to the sheet asks HQ again, so a computer paired meanwhile shows up.
+ */
+@Composable
+private fun PairComputer(actions: HelpersActions) {
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+    LifecycleResumeEffect(Unit) {
+        actions.onRefreshHosts()
+        onPauseOrDispose {}
+    }
+    val shape = RoundedCornerShape(12.dp)
+    Text(stringResource(R.string.helpers_pair_title), style = HqType.BodyBold, color = Mts.Ink)
+    Text(stringResource(R.string.helpers_pair_body), style = HqType.BodySm, color = Mts.InkMuted)
+    Text(
+        HelperWords.PAIR_COMMAND, style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink,
+        modifier = Modifier.fillMaxWidth().clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(12.dp),
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        PairAction(stringResource(if (copied) R.string.helpers_pair_copied else R.string.helpers_pair_copy), Modifier.weight(1f)) {
+            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("hq", HelperWords.PAIR_COMMAND))
+            copied = true
+        }
+        PairAction(stringResource(R.string.helpers_pair_send), Modifier.weight(1f)) {
+            val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, HelperWords.PAIR_COMMAND)
+            context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+    Text(stringResource(R.string.helpers_pair_then), style = HqType.BodySm, color = Mts.InkMuted)
+    PrimaryButton(stringResource(R.string.helpers_pair_scan), Modifier.fillMaxWidth()) {
+        context.startActivity(Intent(context, PairingActivity::class.java).putExtra(PairingActivity.EXTRA_SCREEN, "scan"))
+    }
+    Text(stringResource(R.string.helpers_pair_needs), style = SmallText, color = Mts.InkMuted)
+}
+
+@Composable
+private fun PairAction(label: String, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1) }
 }
 
 private fun whereWords(w: example.hq.spike.ui.shell.Words, f: StartForm): String = when {

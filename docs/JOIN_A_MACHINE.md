@@ -5,6 +5,36 @@ Windows) joins it by pairing with the phone: scan, type six digits, done. Pairin
 sides with no configuration ([PAIRING.md](PAIRING.md), "What pairing sets up"). The older path
 over Tailscale with a join code still works; it is at the end of this page.
 
+## One command, for the phone app
+
+On a Mac or a Linux computer (on Windows, inside WSL2), with the phone app open on Helpers:
+
+```
+curl -fsSL https://agent-hq.online/install.sh | bash -s -- --pair
+```
+
+It installs `hq` from a signed release (without the web UI: the phone holds HQ) and runs
+`hq bridge pair --setup`, which:
+
+1. turns on the host's gate at `127.0.0.1:7747` for loopback (left alone if you set
+   `agent_host.gate_listen` yourself) and starts the host as a login service;
+2. shows a QR code. On the phone, in Helpers, tap **Scan the code**. The phone shows six digits;
+   type them on the computer;
+3. after the pairing, runs `hq bridge serve` as a login service (LaunchAgent `com.hq.bridge` on
+   macOS, user unit `hq-bridge.service` on Linux), so the phone reaches the computer whenever it
+   is on.
+
+The computer is named after itself (the Mac's name, else its host name) and uses the phone app's
+relay (`--relay default`, n0's public relays) unless you pass `--relay`. The coding agent must be
+installed and signed in on the computer; the command says so when it finds neither Claude Code nor
+Codex. Where a service cannot be installed (no systemd user session), it says which command to keep
+running instead. `hq bridge join --setup` does the same from the other direction, with a link the
+phone shows.
+
+The phone app shows this line, with Copy and "Send to my computer", when Helpers has no computer.
+
+## Step by step
+
 You need: an `hq` binary on the machine built with pairing (`~/.local/bin/hq`, from a
 [release](https://github.com/CalvinMagezi/hq/releases)), and the coding agent you want (for example
 Claude Code) installed and signed in on the machine.

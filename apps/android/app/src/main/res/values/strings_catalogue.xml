@@ -2947,6 +2947,14 @@
     <string name="helpers_looking_computers">Looking for your computers…</string>
     <string name="helpers_could_not_list">HQ could not list your computers.</string>
     <string name="helpers_pair_a_computer">Helpers run on a computer, not on this phone. Pair one in Settings, Other devices.</string>
+    <string name="helpers_pair_title">First, pair a computer</string>
+    <string name="helpers_pair_body">Helpers run on a Mac or Linux computer you own, not on this phone. On that computer, open Terminal and run this line. It installs HQ and shows a code.</string>
+    <string name="helpers_pair_copy">Copy</string>
+    <string name="helpers_pair_copied">Copied</string>
+    <string name="helpers_pair_send">Send to my computer</string>
+    <string name="helpers_pair_then">Then scan the code on the computer\'s screen. This phone shows six digits: type them into the computer.</string>
+    <string name="helpers_pair_scan">Scan the code</string>
+    <string name="helpers_pair_needs">The computer also needs Claude Code or Codex, signed in once. On Windows, run the line inside WSL2.</string>
     <string name="tasks_more">More</string>
     <string name="tasks_group_waiting">Waiting on you</string>
     <string name="tasks_group_due">Due or starting today</string>
