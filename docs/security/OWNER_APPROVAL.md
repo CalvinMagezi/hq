@@ -63,6 +63,13 @@ into or answer only a coding agent its own web chat watches. The reasoning is in
   comes from the runtime (`web:<thread>`, `relay:<platform>:<chat>`), never from the model. The
   digest is SHA-256 of the arguments with keys sorted and the runtime's `_hq_*` keys left out
   (`hq_core::approval_key::args_digest`, shared with the connector).
+- A call that acts on stored text its arguments do not carry is bound to that text too
+  (`hq_tools::approval_note::stored_text` and `bound_digest`). Today that is
+  `harness_session_handoff` with no `prompt` of its own, which types the task's title, description
+  and acceptance criteria into the agent: the request quotes that prompt as it stands, its hash is
+  folded into the digest, and the text is read again just before the call runs. If the task was
+  edited after the owner approved, nothing runs and the next call asks about the new text. The
+  connector's gate does the same.
 - The owner's approval is signed with the install's approval key over the item id and the dedup
   key, so a database write cannot move it to another call.
 - An approval lets exactly one call through and lasts 24 hours. A decline lasts as long and is

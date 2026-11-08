@@ -121,25 +121,54 @@ impl OwnerApproval {
         owner_approval_prefix(&self.scope)
     }
 
-    fn key(&self, tool: &str, args: &Value) -> String {
+    /// Bound to the arguments and to any stored text the call acts on (a handoff's task text).
+    fn key(&self, tool: &str, args: &Value, stored: Option<&str>) -> String {
         let digest = hq_core::approval_key::args_digest(args);
+        let digest = hq_tools::approval_note::bound_digest(&digest, stored);
         format!("{}{tool}:{digest}", self.prefix())
+    }
+
+    fn stored_text(&self, tool: &str, args: &Value) -> Result<Option<String>, String> {
+        hq_tools::approval_note::stored_text(&self.db, tool, args).map_err(|e| {
+            tracing::warn!(%e, "owner approval: reading what the call acts on failed");
+            lookup_failed()
+        })
     }
 
     /// `None` when the call may run now; otherwise the text the model gets instead.
     pub async fn check(&self, tool: &str, args: &Value) -> Option<String> {
-        let key = self.key(tool, args);
+        let stored = match self.stored_text(tool, args) {
+            Ok(stored) => stored,
+            Err(stop) => return Some(stop),
+        };
+        let key = self.key(tool, args, stored.as_deref());
         match self.gate(tool, &key) {
-            Gate::Run => return None,
+            Gate::Run => return self.unchanged(tool, args, stored.as_deref()),
             Gate::Stop(text) => return Some(text),
             Gate::Ask => {
-                if let Err(refused) = self.ask(tool, args, &key) {
+                if let Err(refused) = self.ask(tool, args, &key, stored.as_deref()) {
                     return Some(refused);
                 }
             }
             Gate::Wait => {}
         }
-        self.wait(tool, &key).await
+        match self.wait(tool, &key).await {
+            None => self.unchanged(tool, args, stored.as_deref()),
+            waiting => waiting,
+        }
+    }
+
+    /// An approval covers the stored text the owner saw; a call whose text changed since then
+    /// does not run on it.
+    fn unchanged(&self, tool: &str, args: &Value, approved: Option<&str>) -> Option<String> {
+        match self.stored_text(tool, args) {
+            Ok(now) if now.as_deref() == approved => None,
+            Ok(_) => Some(format!(
+                "The task this {tool} call works on changed after the owner approved it, so \
+                 nothing ran. Make the same call again to ask the owner about the task as it is now."
+            )),
+            Err(stop) => Some(stop),
+        }
     }
 
     /// Where this exact call's approval stands, spending it when it is there. A store that
@@ -157,7 +186,7 @@ impl OwnerApproval {
         }
     }
 
-    fn ask(&self, tool: &str, args: &Value, key: &str) -> Result<(), String> {
+    fn ask(&self, tool: &str, args: &Value, key: &str, stored: Option<&str>) -> Result<(), String> {
         let waiting = value_items::count_waiting_with_prefix(&self.db, &self.prefix())
             .map_err(|_| lookup_failed())?;
         if waiting >= MAX_WAITING_APPROVALS {
@@ -168,15 +197,18 @@ impl OwnerApproval {
         }
         let held = without_runtime_keys(args);
         let shown = serde_json::to_string_pretty(&held).unwrap_or_default();
-        if shown.chars().count() > MAX_APPROVAL_ARGS_CHARS {
+        let stored_chars = stored.map_or(0, |s| s.chars().count());
+        if shown.chars().count() + stored_chars > MAX_APPROVAL_ARGS_CHARS {
             return Err(format!(
                 "This {tool} call is too large for the owner to review in a message, so it cannot \
                  be approved. Split it into smaller calls."
             ));
         }
         let note = hq_tools::approval_note::for_call(tool, &held)
+            .into_iter()
+            .chain(stored.map(hq_tools::approval_note::stored_note))
             .map(|n| format!("{n}\n\n"))
-            .unwrap_or_default();
+            .collect::<String>();
         let mut item = ValueItem::new(
             SOURCE,
             ValueKind::ActionNeeded,
