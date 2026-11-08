@@ -229,6 +229,17 @@ object UpdateLogic {
     /** True when it has been a day since the last check, or the clock moved back past it. */
     fun due(lastCheckMs: Long, nowMs: Long): Boolean = lastCheckMs <= 0 || nowMs < lastCheckMs || nowMs - lastCheckMs >= CHECK_EVERY_MS
 
+    /** Opening the app asks again once the last answer is this old, so a new version shows without a trip to Settings. */
+    const val FOREGROUND_CHECK_MS = 6L * 60 * 60 * 1000
+
+    /**
+     * Whether coming back to the app should ask for a new version. Never before the first check, which the hub makes
+     * ten minutes after it starts; after that, once the last answer is [FOREGROUND_CHECK_MS] old. The ask is a few KB
+     * (the signed manifest); the app itself still downloads only when the owner taps Update.
+     */
+    fun foregroundDue(lastCheckMs: Long, nowMs: Long): Boolean =
+        lastCheckMs > 0 && (nowMs < lastCheckMs || nowMs - lastCheckMs >= FOREGROUND_CHECK_MS)
+
     /** The Android release name for an API level, because owners know "Android 10", not "29". */
     fun androidName(sdk: Int): String = androidNumber(sdk)?.let { "Android $it" } ?: "a newer Android"
 

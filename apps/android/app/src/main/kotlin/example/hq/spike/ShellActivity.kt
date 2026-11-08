@@ -432,6 +432,12 @@ class ShellActivity : ComponentActivity() {
                     strip = { place ->
                         val server = shown is Connection.ServerUnreachable || shown is Connection.ServerSignedOut
                         if (place != Place.Chat && (!server || place == Place.Inbox)) example.hq.spike.ui.connection.OfflineStrip(shown, savedAt, { connectionOpen = true }, ::tryStartAgain)
+                        // A new version is said on every place, not only inside Settings.
+                        example.hq.spike.ui.settings.UpdateLine(
+                            settingsState,
+                            onUpdate = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Update) },
+                            onNotNow = settings.actions.onUpdateNotNow,
+                        )
                     },
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { openSearch(example.hq.spike.ui.search.SearchStart()) }, onOpenSearch = ::openSearch, onSettings = settings.actions.onOpen, updateDot = settingsState.updateDot,

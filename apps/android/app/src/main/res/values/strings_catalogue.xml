@@ -441,6 +441,8 @@
     <string name="upd_card_body">AgentHQ %1$s · %2$s download</string>
     <string name="upd_card_body_no_size">AgentHQ %1$s is ready</string>
     <string name="upd_card_see">See update</string>
+    <string name="upd_line_ready">AgentHQ %1$s is ready to install</string>
+    <string name="upd_line_update">Update</string>
     <string name="upd_card_save_copy">Save a copy of my notes</string>
     <string name="upd_page_title">Update AgentHQ</string>
     <string name="upd_fact_phone">On this phone</string>
