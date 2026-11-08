@@ -271,6 +271,21 @@ so the automatic breakpoint at the end of a request is never a prefix of the nex
 history was written again every turn. Both Anthropic paths (`anthropic/wire.rs` and
 OpenRouter in `openai_compat`) now put a breakpoint on the block before the note.
 
+The same two arms on a copy of a real vault (the retired VPS vault, 359 memories, 1,286 chat
+messages), six questions about the owner's own projects, family, money, servers and tools:
+
+| Layout | First call | Calls 3 onward |
+|---|---|---|
+| `stable_prompt: false` | 0 read, 76,234 written | 76,382 to 78,022 read, 102 to 166 written (1,116 and 1,551 on tool rounds) |
+| `stable_prompt: true` (fixed) | 46,371 read, 29,890 written | 74,690 to 76,527 read, 1,610 to 1,864 written |
+
+The recalled memories did not change between these turns, so the old system prompt cached
+almost perfectly and the note (about 1,700 tokens here) is pure extra write. At Anthropic's
+prices (a write 1.25 times an input token, a read 0.1 times) that is about a quarter more input
+cost per turn. So `stable_prompt` now defaults to **false**: the code and both breakpoints stay,
+and an owner whose memories do change turn to turn can turn it on. Revisit with the phone's
+ledger.
+
 In a fresh vault the memories and concept matches never change, so the old layout writes less
 (the note, about 370 tokens, is written each turn). The stable layout wins when that content
 changes between turns, which in the old layout rewrites the system prompt and the whole history
@@ -294,7 +309,7 @@ context_fold:
   tail_tokens: 6000      # ...or twice this, and leaves about this much
   blocks_budget_tokens: 6000
   model: bulk
-  stable_prompt: true    # memories and concept matches go in a note before the message
+  stable_prompt: false   # true: memories and concept matches go in a note before the message
 ```
 
 Relay chats fold their mirrored thread down to half of the channel's kept window (10 messages)

@@ -544,6 +544,39 @@ async fn standard_profile_registers_history_tools() {
     }
 }
 
+/// The history tools read every thread, so a family guest in Discord never gets them.
+#[test]
+fn only_the_owners_sessions_read_the_owners_chats() {
+    let config = HqConfig::default();
+    // Discord defaults to deny; the relay widens the scope only for a verified owner.
+    let mut owner = hq_core::identity::RequestIdentity::from_discord(7);
+    owner.scope = hq_core::privacy::DisclosureScope::Unrestricted;
+    let mut guest = owner.clone();
+    guest.family_guest = Some(hq_core::identity::FamilyGuestInfo {
+        name: "Sam".into(),
+        origin_channel_id: 7,
+        owner_name: "owner".into(),
+        allowed_harnesses: Vec::new(),
+    });
+    assert!(SessionBuilder::from_config(&config).reads_owner_history());
+    assert!(
+        SessionBuilder::from_config(&config)
+            .with_identity(owner)
+            .reads_owner_history()
+    );
+    assert!(
+        !SessionBuilder::from_config(&config)
+            .with_identity(guest)
+            .reads_owner_history()
+    );
+    assert!(
+        !SessionBuilder::from_config(&config)
+            .with_identity(hq_core::identity::RequestIdentity::from_discord(7))
+            .reads_owner_history(),
+        "an unverified Discord audience is restricted"
+    );
+}
+
 /// Governance wraps every tool, so a metadata method it fails to forward
 /// collapses to the trait default for the entire registry. `should_defer`
 /// was permanently false, which made `deferred_catalog()` always empty and

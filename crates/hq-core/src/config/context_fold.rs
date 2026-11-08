@@ -33,8 +33,10 @@ pub struct ContextFoldConfig {
 
     /// Keep the system prompt the same from turn to turn: what changes every message (recent
     /// memories, matching concept pages) goes in a note just before the message instead, so a
-    /// provider's prompt cache can reuse the system prompt and the history behind it.
-    #[serde(default = "default_enabled")]
+    /// provider's prompt cache can reuse the system prompt and the history behind it. Off by
+    /// default: measured on a real vault, the note costs more cache writes per turn than the old
+    /// layout loses (`docs/plans/context-fold.md`, phase 0).
+    #[serde(default)]
     pub stable_prompt: bool,
 }
 
@@ -66,7 +68,7 @@ impl Default for ContextFoldConfig {
             tail_messages: default_tail_messages(),
             blocks_budget_tokens: default_blocks_budget_tokens(),
             model: default_model(),
-            stable_prompt: default_enabled(),
+            stable_prompt: false,
         }
     }
 }
