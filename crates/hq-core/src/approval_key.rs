@@ -55,6 +55,11 @@ pub fn load_or_create_key_at(path: &std::path::Path) -> Result<Vec<u8>> {
 
 /// HMAC-SHA256 as lowercase hex.
 pub fn hmac_hex(key: &[u8], message: &str) -> String {
+    hex::encode(hmac_sha256(key, message.as_bytes()))
+}
+
+/// HMAC-SHA256 (RFC 2104) of a byte message.
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     let mut block = [0u8; HMAC_BLOCK];
     if key.len() > HMAC_BLOCK {
         block[..32].copy_from_slice(&Sha256::digest(key));
@@ -64,11 +69,11 @@ pub fn hmac_hex(key: &[u8], message: &str) -> String {
     let pad = |byte: u8| block.map(|b| b ^ byte);
     let mut inner = Sha256::new();
     inner.update(pad(0x36));
-    inner.update(message.as_bytes());
+    inner.update(message);
     let mut outer = Sha256::new();
     outer.update(pad(0x5c));
     outer.update(inner.finalize());
-    hex::encode(outer.finalize())
+    outer.finalize().into()
 }
 
 pub fn verify_hex(key: &[u8], message: &str, mac: &str) -> bool {

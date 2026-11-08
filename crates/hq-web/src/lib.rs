@@ -993,6 +993,30 @@ mod web_auth_router_tests {
         }
     }
 
+    /// A client holding the web token can check, signed out and without sending it, that the
+    /// server on the port holds the same token.
+    #[tokio::test]
+    async fn hello_proves_it_holds_the_web_token_without_a_sign_in() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let token = "t".repeat(32);
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.web_auth_token = Some(token.clone());
+        let app = create_router(Arc::new(state));
+        let nonce = hq_core::server_proof::new_nonce();
+        let hello = local("GET", &format!("{}?proof={nonce}", hello::HELLO_PATH))
+            .body(Body::empty())
+            .unwrap();
+        let v = json_of(&app, hello).await;
+        let proof = v["proof"].as_str().expect("an answer");
+        assert!(hq_core::server_proof::verify(&token, &nonce, proof));
+        assert!(!v.to_string().contains(&token), "the token never leaves");
+
+        let bad = local("GET", &format!("{}?proof=short", hello::HELLO_PATH))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status(&app, bad).await, StatusCode::BAD_REQUEST);
+    }
+
     /// Session-changing requests also need a header no other page can add without a failed
     /// CORS preflight, a second wall behind the origin check.
     #[tokio::test]

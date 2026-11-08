@@ -16,7 +16,7 @@ use tracing::info;
 pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
     // The web port answers "Starting HQ" from the first moment, before the slow steps below.
     let early = if component == "all" {
-        bind_web_early(config).await
+        bind_web_early(config).await?
     } else {
         None
     };
@@ -239,24 +239,56 @@ fn web_addr(bind: &str, port: u16) -> std::net::SocketAddr {
         .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], port)))
 }
 
+/// Whether HQ is useless without its web port, so a port it cannot bind ends the process. On the
+/// phone the app is the only way in, and another app may hold the port while HQ is down: running
+/// on without a web server would leave that app answering in HQ's place, unnoticed. Ending makes
+/// the app's supervisor see the failure, report it and try again.
+fn web_port_required(config: &HqConfig) -> bool {
+    cfg!(target_os = "android") || config.profile.is_mobile()
+}
+
+/// Exit status of a start that ended because the web port could not be bound.
+const WEB_BIND_FAILED_EXIT: i32 = 3;
+
 /// Binds the web port before the vault and database open, answering `/api/hello` with the start
-/// step and every other route with "starting". `None` leaves the port to [`spawn_web_server`].
-async fn bind_web_early(config: &HqConfig) -> Option<hq_web::hello::StartingServer> {
-    hq_web::auth::check_web_bind(&config.web_bind, config.web_auth_token.as_deref()).ok()?;
-    let server = hq_web::hello::StartingServer::new(&config.vault_path, config.profile)
-        .inspect_err(|e| tracing::warn!("ws: no early start page: {e:#}"))
-        .ok()?;
-    let listener = tokio::net::TcpListener::bind(web_addr(&config.web_bind, config.ws_port))
-        .await
-        .inspect_err(|e| tracing::error!(port = config.ws_port, "ws: failed to bind port: {e}"))
-        .ok()?;
+/// step and every other route with "starting". `None` leaves the port to [`spawn_web_server`];
+/// an error means the port is required ([`web_port_required`]) and could not be bound.
+async fn bind_web_early(config: &HqConfig) -> Result<Option<hq_web::hello::StartingServer>> {
+    if hq_web::auth::check_web_bind(&config.web_bind, config.web_auth_token.as_deref()).is_err() {
+        return Ok(None);
+    }
+    let Some(server) = hq_web::hello::StartingServer::new(
+        &config.vault_path,
+        config.profile,
+        config.web_auth_token.as_deref(),
+    )
+    .inspect_err(|e| tracing::warn!("ws: no early start page: {e:#}"))
+    .ok() else {
+        return Ok(None);
+    };
+    let listener =
+        match tokio::net::TcpListener::bind(web_addr(&config.web_bind, config.ws_port)).await {
+            Ok(listener) => listener,
+            Err(e) if web_port_required(config) => {
+                return Err(e).with_context(|| {
+                    format!(
+                        "could not listen on the web port {}; not starting without it",
+                        config.ws_port
+                    )
+                });
+            }
+            Err(e) => {
+                tracing::error!(port = config.ws_port, "ws: failed to bind port: {e}");
+                return Ok(None);
+            }
+        };
     let app = server.router();
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!("ws server error: {e}");
         }
     });
-    Some(server)
+    Ok(Some(server))
 }
 
 /// The WebSocket and web UI server. An open non-loopback bind skips only this
@@ -292,9 +324,10 @@ fn spawn_web_server(
         return;
     }
     let (bind, port) = (config.web_bind.clone(), config.ws_port);
+    let required = web_port_required(config);
     tokio::spawn(async move {
         info!(port, "ws: starting server");
-        serve_web(state, &bind, port).await;
+        serve_web(state, &bind, port, required).await;
     });
 }
 
@@ -347,12 +380,17 @@ pub(crate) fn build_web_state(
     state
 }
 
-async fn serve_web(state: Arc<hq_web::WsState>, bind: &str, port: u16) {
+async fn serve_web(state: Arc<hq_web::WsState>, bind: &str, port: u16, required: bool) {
     let app = hq_web::create_router(state);
     let listener = match tokio::net::TcpListener::bind(web_addr(bind, port)).await {
         Ok(listener) => listener,
         Err(e) => {
             tracing::error!(port, "ws: failed to bind port: {e}");
+            if required {
+                // See `web_port_required`: no HQ on the phone runs on without its web port.
+                eprintln!("Could not listen on the web port {port}: {e}. Stopping.");
+                std::process::exit(WEB_BIND_FAILED_EXIT);
+            }
             return;
         }
     };
@@ -453,6 +491,62 @@ fn first_with_index(candidates: Vec<std::path::PathBuf>) -> std::path::PathBuf {
         .into_iter()
         .find(|c| c.join("index.html").exists())
         .unwrap_or(first)
+}
+
+#[cfg(test)]
+mod web_port_tests {
+    use super::*;
+
+    fn config_on(
+        vault: &std::path::Path,
+        port: u16,
+        profile: hq_core::config::Profile,
+    ) -> HqConfig {
+        HqConfig {
+            vault_path: vault.to_path_buf(),
+            web_auth_token: Some("example-web-token".into()),
+            web_bind: "127.0.0.1".into(),
+            ws_port: port,
+            profile,
+            ..Default::default()
+        }
+    }
+
+    /// Another program on the port: the phone's HQ ends, so its supervisor sees it; elsewhere
+    /// HQ starts without the early page and reports the port later.
+    #[tokio::test]
+    async fn a_taken_web_port_ends_the_phone_start_only() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = squatter.local_addr().unwrap().port();
+
+        let mobile = config_on(vault.path(), port, hq_core::config::Profile::Mobile);
+        assert!(web_port_required(&mobile));
+        let err = bind_web_early(&mobile).await.err().expect("refused");
+        assert!(err.to_string().contains(&port.to_string()), "{err:#}");
+
+        let full = config_on(vault.path(), port, hq_core::config::Profile::Full);
+        assert_eq!(web_port_required(&full), cfg!(target_os = "android"));
+        if !web_port_required(&full) {
+            assert!(bind_web_early(&full).await.unwrap().is_none());
+        }
+        drop(squatter);
+    }
+
+    #[tokio::test]
+    async fn a_free_web_port_is_held_from_the_start() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let port = {
+            let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            free.local_addr().unwrap().port()
+        };
+        let mobile = config_on(vault.path(), port, hq_core::config::Profile::Mobile);
+        assert!(bind_web_early(&mobile).await.unwrap().is_some());
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", port)).is_err(),
+            "HQ holds the port"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -188,7 +188,8 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("could not listen on {addr}"))?;
-    let starting = hq_web::hello::StartingServer::new(&config.vault_path, config.profile)?;
+    let starting =
+        hq_web::hello::StartingServer::new(&config.vault_path, config.profile, token.as_deref())?;
     let serving = tokio::spawn(axum::serve(listener, starting.router()).into_future());
 
     let vault =

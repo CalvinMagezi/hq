@@ -22,6 +22,7 @@ pub mod paths;
 pub mod privacy;
 pub mod prose_quality;
 pub mod redact;
+pub mod server_proof;
 pub mod setup_provider;
 pub mod telegram_access;
 #[cfg(any(test, feature = "test-util"))]

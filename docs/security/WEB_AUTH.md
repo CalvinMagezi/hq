@@ -143,7 +143,8 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   browser keys its saved copy by the id before it signs in. Nothing in it is content or a
   credential, but anyone who can reach the port learns roughly where the host's clock is set. While HQ opens,
   every other route on the port answers 503 `{"starting": true}`
-  (`crates/hq-web/src/hello.rs`).
+  (`crates/hq-web/src/hello.rs`). It can also prove the server holds the web token;
+  see "Proving the server is HQ" below.
 - **Session-changing requests.** `send`, `adopt`, `stop`, `resume`, `rename`,
   `archive`, `drive`, `goal`, `unwatch` and `answer` under `/api/harness-sessions/`,
   and answering an Inbox item (`/api/notifications/{id}/answer` and `/action`), must
@@ -193,6 +194,56 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   before the first redirect and the banner trades it. On the new device the
   banner trades the code at `POST /api/auth/exchange` for a device token of its
   own. Details below.
+
+### Proving the server is HQ
+
+Any program on a machine can listen on a free loopback port. While HQ is not holding its web
+port (it is starting, restarting, or crashed), another app on the phone, or another program on
+the desktop, can bind `127.0.0.1:<ws_port>` and wait for a client to send it the owner's token.
+A client that already holds the configured web token checks the server first, without sending
+the token:
+
+1. The client makes a fresh random nonce of 32 bytes (16 to 64 are accepted) and asks
+   `GET /api/hello?proof=<nonce>`, the nonce in base64url without padding.
+2. HQ answers with the usual hello body plus
+   `"proof": base64url(HMAC-SHA256(key, "hq-server-proof/1" || nonce))`, where `key` is the
+   configured web token's UTF-8 bytes and `"hq-server-proof/1"` is those 17 ASCII bytes. No
+   padding on the output either.
+3. The client computes the same value with the token it holds and compares. Only a server
+   that knows the token can answer, and a new nonce each time means no answer can be replayed.
+
+The early start page answers it too, so a client can check the port while HQ is still opening.
+HQ answers only when a web token is configured (with none, there is nothing a client could
+leak), and whether or not the owner signed that token out, so a client recovering from "Sign
+out everywhere" can still tell HQ from a stranger before it acts on the 401. A nonce that is
+not base64url without padding, or not 16 to 64 bytes, gets a 400 and no answer; the length is
+checked before decoding. The route is not rate limited: one HMAC per request costs no more than
+the rest of the hello. Nothing else in HQ is signed with the web token, so the answer is good
+for nothing but this. Device tokens are not covered; the clients that check are the ones that
+hold the configured token (the Android app and the desktop app).
+
+Test vector (`crates/hq-core/src/server_proof.rs`): token `example-web-token`, nonce bytes
+`0x00..0x1f` (`AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8`), proof
+`s887Mn5Ba7kWekr_rkJlZl5zEYzF3_5f3jGwuiy_PXk`.
+
+What each client does with it:
+
+- **Android app** (`example.hq.spike.ServerProof`). Before the first Bearer request to the
+  phone's HQ after hq starts or restarts, or after a request to it failed to connect, it runs the
+  check, and sends nothing with the token until it passes. A proof holds for the hq child it
+  was made against; a new child (a restart, a crash, a new token) needs a new one. A 401 replaces
+  the token (`HubService.recoverToken`) only once the server that sent it has proved itself
+  afresh, so a stranger's 401 cannot make the app mint a new token and send that too. The alert
+  poller waits until hq has started and the check passes. On the phone, `hq start all` ends with
+  an error when it cannot bind the web port instead of running on without a web server, so the
+  app restarts it and shows it did not start.
+- **Desktop app** (`crates/hq-desktop`). The main window's `#token=` link goes only to an
+  upstream that passed the check just before; otherwise the window opens without it and the
+  person signs in there.
+
+The check covers the moment it is made. A web page that holds the token (the web app in the
+phone's web view or the desktop window) keeps sending it to the port on later requests, and the
+web app does not run the check itself yet.
 
 ### `/api/auth/exchange`, the one unauthenticated `/api` route
 
