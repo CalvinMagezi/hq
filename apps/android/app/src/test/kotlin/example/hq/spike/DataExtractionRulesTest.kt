@@ -6,7 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The backup rules: the cloud takes nothing, a phone-to-phone copy takes the vault only (not the saved copy, the outbox, keys or the bridge key). */
+/** The backup rules: the cloud takes nothing, a phone-to-phone copy takes the vault only (not the saved copy, the outbox, keys or the bridge key), and leaves the keys HQ keeps inside the vault behind. */
 class DataExtractionRulesTest {
     private val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(File("src/main/res/xml/data_extraction_rules.xml"))
 
@@ -21,7 +21,11 @@ class DataExtractionRulesTest {
 
     @Test fun deviceTransferTakesOnlyTheVaultFolder() {
         assertEquals(listOf("file" to "hqhome/.vault"), rules("device-transfer", "include"))
-        assertTrue(rules("device-transfer", "exclude").isEmpty())
+        // Exactly the keys inside the vault: the claude.ai connector's TLS keys and the web push signing key.
+        assertEquals(
+            listOf("file" to "hqhome/.vault/_data/connector_tls", "file" to "hqhome/.vault/_data/web_push_vapid.p8"),
+            rules("device-transfer", "exclude"),
+        )
     }
 
     @Test fun theManifestPointsAtTheRulesAndTurnsOldBackupOff() {
