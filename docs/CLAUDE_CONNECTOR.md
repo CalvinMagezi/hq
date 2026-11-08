@@ -136,9 +136,10 @@ On top of the scope:
 
 - **Your approval for high-risk calls.** Mail and other Google Workspace calls, remote MCP
   accounts, messages into your chat or an agent's mailbox, config changes, pairing a machine,
-  reading or typing into a terminal pane, self-update, skill, slash-command and agent-definition
-  edits, deleting a task, file reads and writes outside the vault (file edits, exports to a path,
-  convert and OCR), commits, PRs and clones, and `hq_ask` in full mode each wait for you. HQ sends
+  reading or typing into a terminal pane, locking down a host, self-update, skill, slash-command
+  and agent-definition edits, deleting a task, file reads and writes outside the vault (file
+  edits, folder listings, git diffs, status and logs, exports to a path, convert and OCR),
+  commits, PRs and clones, and `hq_ask` in full mode each wait for you. HQ sends
   the exact call to your chat (and the web inbox) with Approve and Dismiss. One approval runs that
   call once, with exactly those arguments. Claude is told to call again after you approve. A
   request, and a dismissal, lasts a day.
@@ -146,13 +147,17 @@ On top of the scope:
   create and update tasks (tags, assignees and all), without asking you. A deleted note goes to
   `_trash/` and stays there for 30 days. The exception is the vault's system folders: `skills/`,
   `_commands/` and `agents/` (they become instructions), and `_system/`, `_threads/`, `_data/`,
-  `_trash/` and `_mailboxes/` (HQ's own identity, history and mail). A write, move or delete
-  that touches one of those waits for you like the calls above. A task Claude files or updates
+  `_trash/` and `_mailboxes/` (HQ's own identity, history and mail). HQ's note tools do not
+  write, move or trash anything in most of them for anyone, however the path is spelled
+  (`./skills/x`, `Skills/x`): a skill or slash command changes only through `skill_manage` or
+  `slash_command_manage`, which wait for you. Any other write, move or delete that touches one
+  of those folders waits for you like the calls above. The note readers do not open `_data/`
+  at all (it holds keys and the database), on any grant. A task Claude files or updates
   keeps its tags and assignees but sends nobody a message: no agent mailbox and not your chat.
   An agent sees the task when it looks at its queue, never as something pushed at it.
 - **Coding sessions are not gated**, so Claude can drive agents for you, but only in the host's
-  HQ folder, `handoff_cwd_allow` folders and folders you approved when it asked, only the sessions it started (yours stay yours), and
-  every one it starts sends you a notice with what it was told.
+  HQ folder, `handoff_cwd_allow` folders and folders you approved when it asked, only the sessions it started (yours stay yours: it cannot drive them, list them, read their status or have a session it starts observe them), and
+  every one it starts sends you a notice with what it was told and which sessions it observes.
 - **Provenance.** Tasks Claude writes are attributed to `mcp:connector/<connection name>`.
 - **Limits and records.** 120 calls a minute per connection. Every call is logged (tool, outcome
   and a hash of its arguments, never the arguments) for 30 days: Settings shows the newest, and

@@ -10,6 +10,9 @@
 use anyhow::{Context, Result};
 use hq_core::config::HqConfig;
 use hq_core::types::{ValueItem, ValueKind};
+use std::fs::File;
+use std::io::{Seek, SeekFrom};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -40,11 +43,47 @@ fn git_tree(repo: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn copy_to_install_paths(src: &Path, dests: &[PathBuf]) -> (Vec<String>, Vec<String>) {
+/// The built binary, copied once into a file with no name and hashed there.
+///
+/// The build output sits in the repository, which the agent's shell can write, and
+/// `run` waits up to `PARENT_WAIT_SECS` between the check and the install. Hashing
+/// the path and copying the path again later would install whatever was put there in
+/// between. The staged copy is an unnamed temporary file (unlinked as soon as it is
+/// created), so no other process can open it, and every install path is written from
+/// this one file handle: the bytes that were verified are the bytes installed.
+struct StagedBinary {
+    file: File,
+    sha256: String,
+}
+
+fn stage_binary(built: &Path) -> Result<StagedBinary> {
+    let mut src = File::open(built).with_context(|| format!("open {}", built.display()))?;
+    let mut file = tempfile::tempfile().context("create a private copy of the built binary")?;
+    std::io::copy(&mut src, &mut file)
+        .with_context(|| format!("copy {} to a private file", built.display()))?;
+    file.seek(SeekFrom::Start(0))?;
+    let sha256 = hq_core::approval_key::reader_sha256(&mut file)?;
+    Ok(StagedBinary { file, sha256 })
+}
+
+/// Write `src` from its start to `dest`, executable, as `std::fs::copy` would.
+fn install_one(src: &mut File, dest: &Path) -> std::io::Result<()> {
+    src.seek(SeekFrom::Start(0))?;
+    let mut out = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(dest)?;
+    std::io::copy(src, &mut out)?;
+    out.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+    out.sync_all()
+}
+
+fn copy_to_install_paths(src: &mut File, dests: &[PathBuf]) -> (Vec<String>, Vec<String>) {
     let mut ok = Vec::new();
     let mut failed = Vec::new();
     for dest in dests {
-        match std::fs::copy(src, dest) {
+        match install_one(src, dest) {
             Ok(_) => {
                 // Copying a rebuilt binary over the install path drops its signature, and with
                 // it the macOS folder approvals.
@@ -138,10 +177,11 @@ fn ensure_applicable(
 
 /// The approval must carry a valid signature from the install key (a bare
 /// database write cannot make one) and name the exact binary about to be
-/// installed. Checked immediately before the swap.
+/// installed: `actual` is the hash of the staged copy the install is made from.
 fn verify_approval(
     run: &hq_db::self_update_runs::SelfUpdateRun,
     built: &Path,
+    actual: &str,
     key: &[u8],
     tree: &str,
 ) -> Result<()> {
@@ -152,8 +192,7 @@ fn verify_approval(
     if !hq_core::approval_key::verify_hex(key, &message, mac) {
         anyhow::bail!("run #{}: approval signature is invalid", run.id);
     }
-    let actual = hq_core::approval_key::file_sha256(built)?;
-    if &actual != approved_sha {
+    if actual != approved_sha {
         anyhow::bail!(
             "run #{}: {} changed after approval (sha256 {actual}, approved {approved_sha})",
             run.id,
@@ -178,21 +217,29 @@ pub async fn run(config: &HqConfig, run_id: i64) -> Result<()> {
 
     let tree = git_tree(&repo)?;
     let key = hq_core::approval_key::load_or_create_key()?;
-    if let Err(e) = verify_approval(&run, &built, &key, &tree) {
-        notify(
-            config,
-            ValueKind::ActionNeeded,
-            &format!("Self-update #{run_id} refused"),
-            &e.to_string(),
-            &format!("self-apply-{run_id}-refused"),
-        );
-        return Err(e);
-    }
+    // Verified and installed from the same private copy, never from the path again.
+    let checked = stage_binary(&built).and_then(|staged| {
+        verify_approval(&run, &built, &staged.sha256, &key, &tree).map(|()| staged)
+    });
+    let mut staged = match checked {
+        Ok(staged) => staged,
+        Err(e) => {
+            notify(
+                config,
+                ValueKind::ActionNeeded,
+                &format!("Self-update #{run_id} refused"),
+                &e.to_string(),
+                &format!("self-apply-{run_id}-refused"),
+            );
+            return Err(e);
+        }
+    };
 
     wait_for_parent_exit().await;
 
     let install_paths = &config.self_update.install_paths;
-    let (installed, failed) = copy_to_install_paths(&built, install_paths);
+    let (installed, failed) = copy_to_install_paths(&mut staged.file, install_paths);
+    drop(staged);
     if installed.is_empty() {
         db.with_conn(move |c| {
             hq_db::self_update_runs::set_status(c, run_id, hq_db::self_update_runs::STATUS_FAILED)
@@ -221,8 +268,10 @@ pub async fn run(config: &HqConfig, run_id: i64) -> Result<()> {
         let mut restored = Vec::new();
         if let Some(ref snapshot) = run.prev_binary_path {
             let snapshot = PathBuf::from(snapshot);
-            if snapshot.is_file() {
-                let (ok, _) = copy_to_install_paths(&snapshot, install_paths);
+            if snapshot.is_file()
+                && let Ok(mut snapshot) = File::open(&snapshot)
+            {
+                let (ok, _) = copy_to_install_paths(&mut snapshot, install_paths);
                 restored = ok;
             }
         }
@@ -342,13 +391,17 @@ mod tests {
         }
     }
 
+    fn staged_sha(bin: &Path) -> String {
+        stage_binary(bin).unwrap().sha256
+    }
+
     #[test]
     fn a_signed_approval_for_the_same_binary_verifies() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("hq");
         std::fs::write(&bin, "binary").unwrap();
         let run = approved_run(b"key", &bin);
-        assert!(verify_approval(&run, &bin, b"key", "tree").is_ok());
+        assert!(verify_approval(&run, &bin, &staged_sha(&bin), b"key", "tree").is_ok());
     }
 
     #[test]
@@ -356,9 +409,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("hq");
         std::fs::write(&bin, "binary").unwrap();
+        let sha = staged_sha(&bin);
         let forged = approved_run(b"attacker-guess", &bin);
-        assert!(verify_approval(&forged, &bin, b"real-key", "tree").is_err());
-        assert!(verify_approval(&run_with(STATUS_APPROVED), &bin, b"real-key", "tree").is_err());
+        assert!(verify_approval(&forged, &bin, &sha, b"real-key", "tree").is_err());
+        let unsigned = run_with(STATUS_APPROVED);
+        assert!(verify_approval(&unsigned, &bin, &sha, b"real-key", "tree").is_err());
     }
 
     #[test]
@@ -368,7 +423,7 @@ mod tests {
         std::fs::write(&bin, "binary").unwrap();
         let run = approved_run(b"key", &bin);
         std::fs::write(&bin, "swapped").unwrap();
-        let err = verify_approval(&run, &bin, b"key", "tree").unwrap_err();
+        let err = verify_approval(&run, &bin, &staged_sha(&bin), b"key", "tree").unwrap_err();
         assert!(err.to_string().contains("changed after approval"), "{err}");
     }
 
@@ -378,6 +433,32 @@ mod tests {
         let bin = dir.path().join("hq");
         std::fs::write(&bin, "binary").unwrap();
         let run = approved_run(b"key", &bin);
-        assert!(verify_approval(&run, &bin, b"key", "other-tree").is_err());
+        assert!(verify_approval(&run, &bin, &staged_sha(&bin), b"key", "other-tree").is_err());
+    }
+
+    /// The race this closes: the build output is replaced after the check, while
+    /// self-apply waits for its parent. What lands on the install paths is the
+    /// verified copy, not what the path holds by then.
+    #[test]
+    fn a_binary_swapped_after_the_check_is_not_what_gets_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("hq");
+        std::fs::write(&bin, "approved bytes").unwrap();
+        let run = approved_run(b"key", &bin);
+        let mut staged = stage_binary(&bin).unwrap();
+        verify_approval(&run, &bin, &staged.sha256, b"key", "tree").unwrap();
+
+        // Rewritten in place, the same inode the check read.
+        std::fs::write(&bin, "swapped in during the wait").unwrap();
+
+        let dests = vec![dir.path().join("a"), dir.path().join("b")];
+        std::fs::write(&dests[1], "old binary").unwrap();
+        let (ok, failed) = copy_to_install_paths(&mut staged.file, &dests);
+        assert_eq!(ok.len(), 2, "{failed:?}");
+        for dest in &dests {
+            assert_eq!(std::fs::read(dest).unwrap(), b"approved bytes");
+            let mode = std::fs::metadata(dest).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755, "{}", dest.display());
+        }
     }
 }

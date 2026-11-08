@@ -41,6 +41,7 @@ async fn dispatch_hq_native(
     mirror: Mirror,
     guest_name: Option<String>,
     scope: hq_core::privacy::DisclosureScope,
+    untrusted_input: Option<String>,
 ) -> Result<String> {
     let config = crate::native_run::load_config("discord dispatch");
     // A Discord message was just received; a live person is driving this turn.
@@ -132,6 +133,7 @@ rather than trying to work around it.{harness_rule}\n\n"
             on_detached: Some(on_detached),
             on_child_completion: Some(row.child_sink(send.clone(), DC_PROGRESS_CHARS)),
             permission_preset: inputs.permission_preset,
+            untrusted_input,
             ..row.hooks(&config, identity, send, DC_PROGRESS_CHARS)
         },
     )
@@ -223,6 +225,7 @@ pub(super) async fn dispatch_hq(
     mirror: Mirror,
     guest_name: Option<String>,
     scope: hq_core::privacy::DisclosureScope,
+    untrusted_input: Option<String>,
 ) -> Result<Result<String>, &'static str> {
     {
         let mut t = threads.lock().await;
@@ -243,6 +246,7 @@ pub(super) async fn dispatch_hq(
         mirror,
         guest_name,
         scope,
+        untrusted_input,
     )
     .await;
 

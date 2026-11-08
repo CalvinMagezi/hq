@@ -20,6 +20,7 @@ fn sandbox(project: &Path) -> AgentSandbox {
         private_tmp: vec![],
         read_restrictions: vec![],
         hide_other_processes: false,
+        denied_sockets: vec![],
         network: Network::Full,
     }
 }
@@ -685,6 +686,72 @@ fn an_open_filesystem_writes_anywhere_but_keeps_what_the_rules_protect() {
 }
 
 #[test]
+fn a_masked_unix_socket_cannot_be_connected_to_while_a_sibling_stays_open() {
+    let backend = need_backend!();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().canonicalize().unwrap();
+    let (ctrl, sibling) = (dir.join("ctrl.sock"), dir.join("agent.sock"));
+    let l1 = UnixListener::bind(&ctrl).unwrap();
+    let l2 = UnixListener::bind(&sibling).unwrap();
+    for l in [l1, l2] {
+        std::thread::spawn(move || while l.accept().is_ok() {});
+    }
+    let project = dir.join("project");
+    std::fs::create_dir(&project).unwrap();
+    let mut s = sandbox(&project);
+    // The open profile masks control sockets while leaving the rest of /run shared.
+    s.open_filesystem = true;
+    s.masked_files = vec![ctrl.clone()];
+    let probe = |p: &Path| {
+        format!(
+            "python3 -c \"import socket; c=socket.socket(socket.AF_UNIX); c.connect('{}'); print('C'+'ONN')\" 2>&1",
+            p.display()
+        )
+    };
+    let out = inside(
+        backend,
+        &s,
+        &format!("{}; {}", probe(&ctrl), probe(&sibling)),
+    );
+    assert_eq!(
+        out.matches("CONN").count(),
+        1,
+        "the masked socket must refuse and the sibling must connect: {out}"
+    );
+}
+
+#[test]
+fn a_denied_socket_is_refused_even_under_an_open_network() {
+    let mut s = sandbox(Path::new("/p"));
+    s.network = Network::Full;
+    s.denied_sockets = vec!["/run/hq/host.sock".into()];
+    let p = seatbelt_profile(&s);
+    assert!(
+        p.contains("(deny network-outbound (literal \"/run/hq/host.sock\"))"),
+        "{p}"
+    );
+    // The open network itself adds nothing, so the deny stands.
+    assert!(!p.contains("agent.sock"), "only host.sock is denied: {p}");
+    // Under a proxy network the deny comes after the allow list, so nothing
+    // re-opens it, while the agent socket stays allowed.
+    s.network = Network::Proxy {
+        port: 1,
+        unix_sockets: vec!["/run/hq/agent.sock".into()],
+        relay: None,
+        loopback_ports: vec![],
+    };
+    let p = seatbelt_profile(&s);
+    let deny = p
+        .rfind("(deny network-outbound (literal \"/run/hq/host.sock\"))")
+        .expect("the host socket is denied");
+    let allow = p
+        .find("(allow network-outbound")
+        .expect("agent.sock allowed");
+    assert!(allow < deny, "the socket deny must come last: {p}");
+    assert!(p.contains("/run/hq/agent.sock"));
+}
+
+#[test]
 fn an_open_filesystem_leaves_the_network_and_shared_directories_alone() {
     let backend = need_backend!();
     let h = host();
@@ -748,6 +815,83 @@ fn moving_a_parent_cannot_expose_a_hidden_directory() {
         out.contains("SIBLING-OK"),
         "pinning a directory must not stop work inside it: {out}"
     );
+}
+
+#[test]
+fn moving_a_parent_cannot_free_a_read_only_path_for_a_planted_copy() {
+    let backend = need_backend!();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let parent = root.join("vault");
+    let locked = parent.join("_system");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(locked.join("SOUL.md"), "ORIGINAL").unwrap();
+    let project = root.join("project");
+    std::fs::create_dir(&project).unwrap();
+    let mut s = sandbox(&project);
+    s.open_filesystem = true;
+    s.readonly_subpaths = vec![locked.clone()];
+    s.pinned_dirs = vec![parent.clone()];
+    let out = inside(
+        backend,
+        &s,
+        &format!(
+            "echo x > {p}/note.md && echo INSIDE-OK; mv {p} {r}/moved; \
+             mkdir -p {p}/_system; echo PLANTED > {p}/_system/SOUL.md; echo DONE",
+            p = parent.display(),
+            r = root.display()
+        ),
+    );
+    assert!(out.contains("DONE"), "{out}");
+    assert!(
+        out.contains("INSIDE-OK"),
+        "pinning must not stop writes inside: {out}"
+    );
+    assert!(
+        !root.join("moved").exists(),
+        "the pinned directory moved: {out}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(locked.join("SOUL.md")).unwrap(),
+        "ORIGINAL",
+        "{out}"
+    );
+}
+
+#[test]
+fn bubblewrap_pins_only_what_a_read_only_root_leaves_movable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    let (project, outside) = (root.join("p"), root.join("h"));
+    let inner = project.join(".vault");
+    for d in [&inner, &outside] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mut s = sandbox(&project);
+    s.pinned_dirs = vec![inner.clone(), outside.clone()];
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let bound = |d: &Path| {
+        let d = d.to_string_lossy().into_owned();
+        args.windows(3)
+            .any(|w| w[0] == "--bind" && w[1] == d && w[2] == d)
+    };
+    assert!(bound(&inner), "a pin inside the project: {args:?}");
+    assert!(
+        !bound(&outside),
+        "a pin outside every writable root would open it: {args:?}"
+    );
+    s.open_filesystem = true;
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let o = outside.to_string_lossy().into_owned();
+    assert!(args.windows(3).any(|w| w == ["--bind", &o, &o]), "{args:?}");
 }
 
 #[test]

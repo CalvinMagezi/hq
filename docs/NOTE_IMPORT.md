@@ -115,6 +115,11 @@ tool as `blocked`. On macOS, OCR uses the system's Vision framework, and `brew i
 and `brew install --cask libreoffice` add the others. On a server, install them by hand: the
 installer leaves them out (`deploy/README.md`).
 
+An old Office file is anyone's file, so LibreOffice opens it with a fresh profile of its own that
+turns off macros, embedded active content and DDE, link following and link updates, and with
+none of HQ's environment but `PATH` and the language settings (no provider keys or tokens).
+It still runs as the HQ user with the machine's network: it is not sandboxed yet.
+
 ## Limits
 
 - Files over 64 MiB, archives with more than 20,000 parts or that unpack to more than
@@ -142,7 +147,9 @@ installer leaves them out (`deploy/README.md`).
 `vault_inventory` and `vault_import` live in the `vault` category (`hq_discover`
 lists them). From claude.ai an import needs no approval unless a path, folder or
 destination is in a system folder (`skills/`, `_system/`, `_commands/`, `agents/`
-and so on), the same rule as other vault writes. A session that has run an import
+and so on), the same rule as other vault writes. Whoever calls it, an import never
+writes a note into `skills/`, `_skills/`, `_commands/`, `agents/` or `_mailboxes/`
+(their files become instructions) or into `_system/`, `_threads/` or `_data/`. A session that has run an import
 counts as having read untrusted content, because the preview is the document's
 text. Restricted audiences (family members, guests) cannot use either tool.
 

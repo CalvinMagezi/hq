@@ -37,12 +37,22 @@ env:
 # run on Ubuntu 22.04 hosts and newer. A newer runner image links against a newer
 # glibc and the updater refuses it on older hosts (its pre-swap `--version` check fails).
 
-# Jobs that run repository build code (the `build` legs and `web`) never see the
-# signing key: they have no environment and no secrets. `package` runs no build
-# code at all, only scripts/release/package.sh on the downloaded artifacts, so a
-# hostile dependency in a build job cannot rewrite a binary between its build
-# and the hash in the manifest. `sign` runs only the release scripts and
-# re-checks the exact artifact set. Change `runs-on` to move a job between a
+# Jobs that run repository build code (`test`, the `build` legs, `web`,
+# `android-hq`) never see the signing key: they have no environment and no
+# secrets. They do hold the run's artifact token, though, and `test` runs every
+# dev-dependency and bun package while the other jobs are still going, so any of
+# them could delete and re-upload another job's artifact under the same name.
+# Artifacts are therefore never trusted by name. Each job that produces one
+# hashes it in that same job and publishes the hash as a job output, which no
+# other job can change: `package` checks every binary and the web build against
+# those outputs before packaging and publishes the manifest's hash as its own
+# output, and `sign` refuses to sign unless the downloaded manifest has exactly
+# that hash (the manifest pins every tarball, and verify.sh checks them before
+# anything is published). The Android jobs anchor their inputs the same way.
+# What this does not cover: a hostile dependency of hq-cli itself runs inside a
+# build leg and can poison that leg's binary (and its output) at build time, so
+# review of Cargo.lock changes still matters. `package` and `sign` run no build
+# code, only the release scripts. Change `runs-on` to move a job between a
 # persistent self-hosted runner and an ephemeral one.
 jobs:
   test:
@@ -125,6 +135,14 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read # checkout only
+    # One output per platform, written only by that platform's leg (a matrix
+    # job's outputs are the union of what its legs set). `package` checks the
+    # downloaded binaries against these, never against anything in an artifact.
+    outputs:
+      sha256_linux_x86_64: ${{ steps.hash.outputs.sha256_linux_x86_64 }}
+      sha256_linux_aarch64: ${{ steps.hash.outputs.sha256_linux_aarch64 }}
+      sha256_darwin_aarch64: ${{ steps.hash.outputs.sha256_darwin_aarch64 }}
+      sha256_darwin_x86_64: ${{ steps.hash.outputs.sha256_darwin_x86_64 }}
     strategy:
       fail-fast: true
       matrix:
@@ -187,6 +205,14 @@ jobs:
           case "$out" in *"$VERSION"*) ;; *) echo "version missing from --version" >&2; exit 1 ;; esac
           case "$out" in *"${GIT_SHA:0:7}"*) ;; *) echo "git sha missing from --version" >&2; exit 1 ;; esac
 
+      - name: Hash the binary
+        id: hash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          if command -v sha256sum > /dev/null; then sum=$(sha256sum target/release/hq); else sum=$(shasum -a 256 target/release/hq); fi
+          echo "sha256_${PLATFORM//-/_}=${sum%% *}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hq-bin-${{ matrix.platform }}
@@ -201,6 +227,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read # checkout only
+    outputs:
+      tree_sha256: ${{ steps.hash.outputs.tree_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -216,6 +244,17 @@ jobs:
           bun install --frozen-lockfile
           bun run build
 
+      # One hash over every file's path and content, published as a job output. The
+      # consumers recompute it over the whole downloaded tree, so a file added,
+      # removed or changed after this step fails them. Hidden paths are left out here
+      # only because upload-artifact leaves them out of the artifact.
+      - name: Hash the web build
+        id: hash
+        working-directory: apps/hq-web/dist/client
+        run: |
+          tree=$(find . -mindepth 1 -name '.*' -prune -o -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum | sha256sum)
+          echo "tree_sha256=${tree%% *}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: web-dist
@@ -224,7 +263,8 @@ jobs:
           retention-days: 7
 
   # Runs no build code and installs nothing: only the release script, with the
-  # runner's own jq, on artifacts built by the jobs above.
+  # runner's own jq, on artifacts built by the jobs above, after checking each one
+  # against the hash its own job published.
   package:
     name: Package
     if: github.ref == 'refs/heads/main'
@@ -233,6 +273,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read # checkout only
+    outputs:
+      manifest_sha256: ${{ steps.anchor.outputs.manifest_sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -247,6 +289,31 @@ jobs:
         with:
           name: web-dist
           path: web-dist
+
+      # The expected hashes are job outputs of `build` and `web`, which no other job
+      # can change. The artifacts themselves are only as trustworthy as every job
+      # that holds this run's artifact token.
+      - name: Check the artifacts against the hashes their jobs published
+        env:
+          SHA_LINUX_X86_64: ${{ needs.build.outputs.sha256_linux_x86_64 }}
+          SHA_LINUX_AARCH64: ${{ needs.build.outputs.sha256_linux_aarch64 }}
+          SHA_DARWIN_AARCH64: ${{ needs.build.outputs.sha256_darwin_aarch64 }}
+          SHA_DARWIN_X86_64: ${{ needs.build.outputs.sha256_darwin_x86_64 }}
+          WEB_TREE_SHA256: ${{ needs.web.outputs.tree_sha256 }}
+        run: |
+          for want in "$SHA_LINUX_X86_64" "$SHA_LINUX_AARCH64" "$SHA_DARWIN_AARCH64" "$SHA_DARWIN_X86_64" "$WEB_TREE_SHA256"; do
+            [[ "$want" =~ ^[0-9a-f]{64}$ ]] || { echo "a build job did not publish its hash" >&2; exit 1; }
+          done
+          printf '%s  %s\n' \
+            "$SHA_LINUX_X86_64" hq-bins/hq-bin-linux-x86_64/hq \
+            "$SHA_LINUX_AARCH64" hq-bins/hq-bin-linux-aarch64/hq \
+            "$SHA_DARWIN_AARCH64" hq-bins/hq-bin-darwin-aarch64/hq \
+            "$SHA_DARWIN_X86_64" hq-bins/hq-bin-darwin-x86_64/hq | sha256sum --check --strict -
+          # Every file, hidden ones included: the web job's tree has none, so one here was added later.
+          tree=$(cd web-dist && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum | sha256sum)
+          [ "${tree%% *}" = "$WEB_TREE_SHA256" ] || { echo "web-dist is not the tree the web job built" >&2; exit 1; }
+          # Nothing but regular files and directories, so the hashes above cover everything packaged.
+          [ -z "$(find hq-bins web-dist ! -type f ! -type d)" ] || { echo "artifacts hold something other than files" >&2; exit 1; }
 
       - name: Package (unsigned)
         env:
@@ -265,6 +332,13 @@ jobs:
           bash scripts/release/package.sh --version "$VERSION" --git-sha "$GIT_SHA" --channel main \
             --requires-db-snapshot "$REQUIRES_SNAPSHOT" "${extra[@]}" \
             "${bin_args[@]}" --web-dist web-dist --out dist-release
+
+      # The manifest names every tarball's sha256, so its own hash pins the whole bundle.
+      - name: Publish the manifest hash
+        id: anchor
+        run: |
+          sum=$(sha256sum dist-release/manifest.json)
+          echo "manifest_sha256=${sum%% *}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -316,8 +390,15 @@ jobs:
       - name: Check the unsigned manifest matches this run
         env:
           GIT_SHA: ${{ github.sha }}
+          MANIFEST_SHA256: ${{ needs.package.outputs.manifest_sha256 }}
         run: |
           m=dist-release/manifest.json
+          # Any job of this run could have replaced the release-dist artifact, so the bundle is the one
+          # `package` built only if the manifest has the hash `package` published as a job output. The
+          # tarballs are then held to the manifest (verify.sh) before anything is published.
+          [[ "$MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "package did not publish a manifest hash" >&2; exit 1; }
+          sum=$(sha256sum "$m")
+          [ "${sum%% *}" = "$MANIFEST_SHA256" ] || { echo "manifest.json is not the one package built" >&2; exit 1; }
           [ "$(jq -r .version "$m")" = "$VERSION" ] || { echo "manifest version mismatch" >&2; exit 1; }
           [ "$(jq -r .git_sha "$m")" = "$GIT_SHA" ] || { echo "manifest git_sha mismatch" >&2; exit 1; }
           [ "$(jq -r .channel "$m")" = "main" ] || { echo "manifest channel mismatch" >&2; exit 1; }
@@ -330,6 +411,9 @@ jobs:
           on_disk=$(cd dist-release && find . -mindepth 1 | sed 's#^\./##' | LC_ALL=C sort)
           want_disk=$(printf '%s\nSHA256SUMS\nmanifest.json\n' "$expected" | LC_ALL=C sort)
           [ "$on_disk" = "$want_disk" ] || { echo "dist-release does not hold exactly the expected files:" >&2; echo "$on_disk" >&2; exit 1; }
+          # SHA256SUMS is published too and is not covered by the manifest hash: it must say exactly what the manifest says.
+          sums_want=$(jq -r '.artifacts[] | "\(.sha256)  \(.name)"' "$m" | LC_ALL=C sort)
+          [ "$(LC_ALL=C sort dist-release/SHA256SUMS)" = "$sums_want" ] || { echo "SHA256SUMS does not match the manifest" >&2; exit 1; }
 
       - name: Refuse to overwrite an existing release
         env:
@@ -399,6 +483,8 @@ jobs:
     environment: release
     permissions:
       contents: read # checkout only
+    outputs:
+      apk_sha256: ${{ steps.apk.outputs.apk_sha256 }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
@@ -416,9 +502,19 @@ jobs:
           name: web-dist
           path: android-in/web
 
-      - name: Check hq and fetch the pinned Caddy
+      # The expected hashes are job outputs of `android-hq` and `web`, not files from the artifacts,
+      # which any job of this run could have replaced.
+      - name: Check hq and the web build, and fetch the pinned Caddy
+        env:
+          HQ_SHA256: ${{ needs.android-hq.outputs.sha256 }}
+          WEB_TREE_SHA256: ${{ needs.web.outputs.tree_sha256 }}
         run: |
-          (cd android-in/hq && sha256sum -c hq-android-arm64.sha256)
+          [[ "$HQ_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "android-hq did not publish its hash" >&2; exit 1; }
+          [[ "$WEB_TREE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "web did not publish its hash" >&2; exit 1; }
+          echo "$HQ_SHA256  android-in/hq/hq-android-arm64" | sha256sum --check --strict -
+          tree=$(cd android-in/web && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum | sha256sum)
+          [ "${tree%% *}" = "$WEB_TREE_SHA256" ] || { echo "web-dist is not the tree the web job built" >&2; exit 1; }
+          [ -z "$(find android-in/hq android-in/web ! -type f ! -type d)" ] || { echo "artifacts hold something other than files" >&2; exit 1; }
           mkdir -p android-in/caddy
           url="https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_arm64.tar.gz"
           curl -fsSL --retry 3 -o android-in/caddy.tar.gz "$url"
@@ -460,6 +556,7 @@ jobs:
             -Phq.releasesRepo="${{ github.repository }}"
 
       - name: Check the APK is signed by the release key
+        id: apk
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
@@ -467,6 +564,8 @@ jobs:
           bash scripts/release/android-check.sh "$apk"
           mkdir -p android-out
           cp "$apk" android-out/agent-hq-android.apk
+          sum=$(sha256sum android-out/agent-hq-android.apk)
+          echo "apk_sha256=${sum%% *}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -523,10 +622,16 @@ jobs:
           path: android-out
 
       - name: Describe the APK
+        env:
+          APK_SHA256: ${{ needs.android-apk.outputs.apk_sha256 }}
         run: |
           export JAVA_HOME="$JAVA_HOME_21_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
-          [ "$(ls android-out)" = "agent-hq-android.apk" ] || { echo "android-out holds more than the APK" >&2; exit 1; }
+          [ "$(ls -A android-out)" = "agent-hq-android.apk" ] || { echo "android-out holds more than the APK" >&2; exit 1; }
+          # The APK android-apk built, by the hash it published as a job output, not just any APK
+          # someone uploaded under the artifact's name.
+          [[ "$APK_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "android-apk did not publish the APK hash" >&2; exit 1; }
+          echo "$APK_SHA256  android-out/agent-hq-android.apk" | sha256sum --check --strict -
           # seq is the signing time in seconds, so it rises across release, promote and withdraw, and a
           # phone refuses a replayed older manifest (resolutions.md D-3).
           bash scripts/release/android-channel.sh --apk android-out/agent-hq-android.apk --version "$VERSION" --tag "$TAG" \

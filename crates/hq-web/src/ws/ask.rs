@@ -63,13 +63,28 @@ impl AskTurn {
     }
 
     /// Every ask loses the config tool: an asker must not rewrite HQ's settings.
+    ///
+    /// A read-only connector ask loses the handoff list and every tool a connector may call only
+    /// once the owner approves it (`CONNECTOR_CONFIRM_TOOLS`): owner approval is off in ask
+    /// turns, so otherwise a question would read terminal panes or host files the connector
+    /// cannot read directly. A full-mode connector ask already waited for the owner's approval
+    /// at the gateway, so it keeps what a web chat turn has.
     pub(super) fn denied_tool_prefixes(&self) -> Vec<String> {
-        let scoped: Vec<String> = match self.scope {
-            AskScope::Handoff => hq_tools::ask::HANDOFF_ASK_DENIED_PREFIXES
+        let handoff = || {
+            hq_tools::ask::HANDOFF_ASK_DENIED_PREFIXES
                 .iter()
                 .map(|p| p.to_string())
+        };
+        let scoped: Vec<String> = match (self.scope, self.mode) {
+            (AskScope::Handoff, _) => handoff().collect(),
+            (AskScope::Connector, AskMode::ReadOnly) => handoff()
+                .chain(
+                    hq_mcp::gateway::CONNECTOR_CONFIRM_TOOLS
+                        .iter()
+                        .map(|t| t.to_string()),
+                )
                 .collect(),
-            AskScope::Full => Vec::new(),
+            (AskScope::Connector, AskMode::Full) | (AskScope::Full, _) => Vec::new(),
         };
         scoped
             .into_iter()
@@ -340,6 +355,46 @@ mod tests {
             .with_conn(|c| asks::get(c, &ask.ask_id))
             .unwrap()
             .unwrap()
+    }
+
+    #[test]
+    fn a_read_only_connector_ask_loses_the_tools_a_connector_needs_approval_for() {
+        let turn = |scope, mode| AskTurn {
+            ask_id: "a".into(),
+            mode,
+            scope,
+            untrusted: false,
+            model: None,
+        };
+        let denied = turn(AskScope::Connector, AskMode::ReadOnly).denied_tool_prefixes();
+        let blocks = |tool: &str| denied.iter().any(|p| tool.starts_with(p.as_str()));
+        for tool in [
+            "host_read",
+            "host_lockdown",
+            "convert_to_markdown",
+            "ocr_extract_text",
+            "read_file",
+            "grep",
+            "find_files",
+            "list_dir",
+            "git_diff",
+            "google_workspace",
+            "call_researcher",
+            "config_manage",
+        ] {
+            assert!(blocks(tool), "{tool}");
+        }
+        assert!(!blocks("vault_read") && !blocks("vault_search"));
+        // The full key's read-only asks and an approved full connector ask are unchanged.
+        for (scope, mode) in [
+            (AskScope::Full, AskMode::ReadOnly),
+            (AskScope::Connector, AskMode::Full),
+        ] {
+            assert_eq!(
+                turn(scope, mode).denied_tool_prefixes(),
+                vec!["config_manage".to_string()]
+            );
+        }
     }
 
     #[test]

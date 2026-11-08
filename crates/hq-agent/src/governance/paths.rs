@@ -7,6 +7,9 @@ pub(super) const PATH_TOOLS: &[&str] = &[
     "edit_file",
     "find_files",
     "list_dir",
+    "grep",
+    "file_edit_batch",
+    "rollback_file",
     "bash",
 ];
 
@@ -73,8 +76,27 @@ pub(super) const SECRET_CHECKED_ARG_KEYS: &[&str] =
 /// Which argument keys contain file paths for each tool.
 pub(super) fn path_args_for_tool(tool_name: &str) -> &[&str] {
     match tool_name {
-        "read_file" | "write_file" | "edit_file" => &["file_path"],
-        "find_files" | "list_dir" => &["path"],
+        "read_file" | "write_file" | "edit_file" | "rollback_file" => &["file_path"],
+        "find_files" | "list_dir" | "grep" => &["path"],
         _ => &[],
     }
+}
+
+/// Every path a call names: the tool's top-level path keys, plus each `edits[].file_path` of a
+/// batch edit. A path the allowlist never sees is a path it never refuses.
+pub(super) fn path_values<'a>(tool_name: &str, args: &'a serde_json::Value) -> Vec<&'a str> {
+    let mut paths: Vec<&str> = path_args_for_tool(tool_name)
+        .iter()
+        .filter_map(|key| args.get(*key).and_then(|v| v.as_str()))
+        .collect();
+    if tool_name == "file_edit_batch"
+        && let Some(edits) = args.get("edits").and_then(|v| v.as_array())
+    {
+        paths.extend(
+            edits
+                .iter()
+                .filter_map(|edit| edit.get("file_path").and_then(|v| v.as_str())),
+        );
+    }
+    paths
 }

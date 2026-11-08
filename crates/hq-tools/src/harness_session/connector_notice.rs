@@ -22,6 +22,20 @@ pub fn connector_brief(args: &Value, fields: &[&str]) -> String {
         .join("\n")
 }
 
+/// The brief with the sessions the new one observes: what they say reaches it as well, so the
+/// owner sees whom it was set to watch.
+pub fn with_observed(brief: String, observe: &[String]) -> String {
+    if observe.is_empty() {
+        return brief;
+    }
+    let line = format!("observe: {}", observe.join(", "));
+    if brief.is_empty() {
+        line
+    } else {
+        format!("{brief}\n{line}")
+    }
+}
+
 /// The notice for a session started on a connector grant, or `None` for any other caller and
 /// for a handoff that found a session already working (nothing started).
 pub fn connector_start_notice(
@@ -108,6 +122,21 @@ mod tests {
         );
         let existing = json!({"handoff": "existing_session", "session_id": "hs-1"});
         assert!(connector_start_notice(&args, &existing, &brief, "/srv").is_none());
+    }
+
+    #[test]
+    fn the_sessions_it_observes_are_in_the_notice() {
+        let args = json!({ super::super::CONNECTOR_ARG: "Claude" });
+        let observe = vec!["hs-a".to_string(), "hs-b".to_string()];
+        let brief = with_observed("prompt: review it".into(), &observe);
+        assert_eq!(brief, "prompt: review it\nobserve: hs-a, hs-b");
+        let item = connector_start_notice(&args, &report(), &brief, "/srv").unwrap();
+        assert!(item.body.contains("observe: hs-a, hs-b"), "{}", item.body);
+        assert_eq!(
+            with_observed(String::new(), &observe),
+            "observe: hs-a, hs-b"
+        );
+        assert_eq!(with_observed("x".into(), &[]), "x");
     }
 
     #[test]

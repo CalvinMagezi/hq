@@ -47,6 +47,12 @@ A backup is sealed with a key. Two ways to make one:
 Name one. With none named, `backup.key_file` from the config is used. A key file must be a plain
 file (not a link) owned by you, with no group or world access; otherwise it is refused.
 
+The configured `backup.key_file` is masked from the agent's bash sandbox (it reads as empty) and
+denied to the file tools, like `config.yaml` itself: with the key, a command could open a backup
+made with `include_config` and write the config back out with `--config-out`. So `hq backup` and
+`hq restore` with that key work from your own terminal, not from inside an agent's shell. A key
+or passphrase file you name only on the command line is not known to HQ and is not covered.
+
 **Keep a copy of the key somewhere other than the machine that holds the backups**, such as a
 password manager. Without it a backup cannot be opened, and nobody, including the HQ authors, can
 recover it. Anyone who has both the key and a backup can read the backup.

@@ -249,6 +249,9 @@ pub struct Host {
     /// The `hq` binary a Linux sandbox runs its egress relay with; this process's
     /// own binary when unset (right for `hq host serve`).
     helper: Option<PathBuf>,
+    /// HQ's own paths on this machine outside `~/.hq` (the vault's database and
+    /// instruction folders, the config file), walled off from every sandboxed agent.
+    hq_paths: sandbox::HqPaths,
     /// Where `lockdown.json` lives (the state directory). A host without one keeps
     /// its lockdown in memory.
     lockdown_dir: Option<PathBuf>,
@@ -318,6 +321,7 @@ impl Host {
             egress: Arc::new(Egress::new()),
             require_sandbox: false,
             helper: None,
+            hq_paths: sandbox::HqPaths::default(),
             lockdown_dir: None,
             memory_lockdown: Mutex::new(None),
             burst_limit: None,
@@ -337,6 +341,14 @@ impl Host {
     /// process is not itself `hq` (a test binary, an embedding).
     pub fn with_helper_binary(mut self, path: impl Into<PathBuf>) -> Self {
         self.helper = Some(path.into());
+        self
+    }
+
+    /// The paths HQ keeps on this machine outside `~/.hq`, which every sandboxed
+    /// agent is kept from (hidden or masked) or may only read. `hq host serve` passes
+    /// what this machine's HQ config resolves to.
+    pub fn with_hq_paths(mut self, paths: sandbox::HqPaths) -> Self {
+        self.hq_paths = paths;
         self
     }
 
@@ -545,6 +557,7 @@ impl Host {
                         agent: spec.agent.as_deref(),
                         env: &spec.env,
                         helper: self.helper.as_deref(),
+                        hq: &self.hq_paths,
                     },
                 )?)
             }

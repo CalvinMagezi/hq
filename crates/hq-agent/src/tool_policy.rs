@@ -153,6 +153,8 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
                 "dev_cancel".into(),
                 "native_code".into(),
                 "notify_owner".into(),
+                // A watch fires later as an unattended owner turn.
+                "watch_create".into(),
                 // The owner's own chats and tool output, across every thread.
                 "session_search".into(),
                 "history_restore".into(),
@@ -344,13 +346,17 @@ mod tests {
     #[test]
     fn telegram_guest_profile_denies_bash() {
         let profile = default_profile_for_agent("telegram_guest").unwrap();
-        let t = tools(&["bash", "github_write", "vault_search"]);
+        let t = tools(&["bash", "github_write", "watch_create", "vault_search"]);
         let filtered = filter(t, Preset::Named(profile));
         let names: Vec<_> = filtered.iter().map(|t| t.name().to_string()).collect();
         assert!(!names.contains(&"bash".into()));
         assert!(
             !names.contains(&"github_write".into()),
             "a guest never publishes to GitHub"
+        );
+        assert!(
+            !names.contains(&"watch_create".into()),
+            "a guest never schedules an unattended turn"
         );
         assert!(names.contains(&"vault_search".into()));
     }

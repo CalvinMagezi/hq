@@ -25,14 +25,8 @@ pub struct Copied {
 /// Runs git in `dir` with `input` on stdin; `None` when git cannot run. Exit status is the
 /// caller's to read, since `check-ignore` exits 1 for "none of these".
 fn git_lines(dir: &Path, args: &[&str], input: Option<&str>) -> Option<(bool, Vec<String>)> {
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let mut child = crate::host_git::command(dir)?
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
         .stdin(if input.is_some() {
             Stdio::piped()
         } else {

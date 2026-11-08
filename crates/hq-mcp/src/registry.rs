@@ -42,7 +42,11 @@ pub fn create_default_registry(
         None,
     ));
     tools.extend(agent_host::tools::create_host_tools(db.clone()));
-    tools.extend(background_turns::create_background_turn_tools(db.clone()));
+    // MCP callers hold an owner's key, so they look across every chat.
+    tools.extend(background_turns::create_background_turn_tools(
+        db.clone(),
+        None,
+    ));
     tools.extend(subagent_runs::create_subagent_run_tools(db.clone(), None));
     tools.extend(tasks::create_task_tools(
         vault_path.clone(),

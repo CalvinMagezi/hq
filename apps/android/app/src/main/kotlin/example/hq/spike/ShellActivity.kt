@@ -46,6 +46,7 @@ import example.hq.spike.ui.inbox.InboxCard
 import example.hq.spike.ui.inbox.AllowedPage
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
+import example.hq.spike.ui.inbox.SignOutAsk
 import example.hq.spike.ui.firstrun.NotifUpgraderSheet
 import example.hq.spike.ui.inbox.InboxUi
 import example.hq.spike.ui.inbox.InboxViewModel
@@ -582,6 +583,7 @@ class ShellActivity : ComponentActivity() {
         }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
+        SignOutAsk(inboxState, inbox.actions)
         inboxState.allowed?.let { a -> AllowedPage(a, inbox.actions) { thread -> inbox.actions.onAllowedDone(); chat.actions.onOpenChat(thread); go(Place.Chat) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasksState.edge, tasks.actions) }

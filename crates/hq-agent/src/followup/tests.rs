@@ -288,3 +288,21 @@ fn a_lost_claim_does_not_acknowledge_or_rerun() {
         .unwrap();
     assert!(!delivered(&db, &f));
 }
+
+#[test]
+fn a_refused_followup_is_not_retried_and_goes_to_the_owner() {
+    let db = db();
+    add_run(&db, "run-rrrrrr11", "t1", 1);
+    settle(&db, "run-rrrrrr11", runs::ACCEPT_UNVERIFIED, "ok");
+    let f = claim_followups(&db, &cfg(true), "web", "w").remove(0);
+    refused(&db, &f, "the chat is a guest's");
+    assert!(claim_followups(&db, &cfg(true), "web", "w").is_empty());
+    let item = hq_db::value_items::find_active_by_dedup(
+        &db,
+        ValueKind::ActionNeeded,
+        "subagent-run-run-rrrrrr11",
+    )
+    .unwrap()
+    .expect("the owner hears about it");
+    assert!(item.body.contains("the chat is a guest's"), "{}", item.body);
+}

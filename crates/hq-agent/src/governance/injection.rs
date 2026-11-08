@@ -25,9 +25,9 @@ const WATCH_STARTING_TOOLS: &[&str] = &[
     "harness_session_goal",
 ];
 
-/// Answers a harness session's dialog; a tainted turn may not pick an option that widens what
-/// the agent may do from now on.
-const DIALOG_ANSWER_TOOL: &str = "harness_session_answer";
+/// Answer a harness session's dialog, by option or by keys; a tainted turn may not pick an
+/// option that widens what the agent may do from now on, nor press keys at a dialog.
+const DIALOG_ANSWER_TOOLS: &[&str] = &["harness_session_answer", "harness_session_send"];
 
 /// A tainted turn must not hand itself prompt approvals, so what it newly
 /// watches starts with Drive off, and its answers to a dialog are one-time
@@ -38,7 +38,7 @@ pub(super) fn without_default_drive(
     taint: &TaintTracker,
 ) -> Value {
     if taint.is_tainted()
-        && (WATCH_STARTING_TOOLS.contains(&tool_name) || tool_name == DIALOG_ANSWER_TOOL)
+        && (WATCH_STARTING_TOOLS.contains(&tool_name) || DIALOG_ANSWER_TOOLS.contains(&tool_name))
         && let Some(obj) = args.as_object_mut()
     {
         obj.insert(
@@ -157,7 +157,7 @@ mod tests {
     fn a_tainted_turn_answers_a_dialog_as_untrusted_and_a_clean_one_does_not() {
         let taint = TaintTracker::new();
         let args = json!({ "session_id": "hs-1", "seq": 3, "option": 2 });
-        let clean = without_default_drive(DIALOG_ANSWER_TOOL, args.clone(), &taint);
+        let clean = without_default_drive("harness_session_answer", args.clone(), &taint);
         assert!(
             clean
                 .get(hq_tools::harness_session::UNTRUSTED_TURN_ARG)
@@ -165,11 +165,18 @@ mod tests {
         );
 
         taint.mark("harness_session_pending");
-        let marked = without_default_drive(DIALOG_ANSWER_TOOL, args.clone(), &taint);
+        let marked = without_default_drive("harness_session_answer", args.clone(), &taint);
         assert_eq!(
             marked[hq_tools::harness_session::UNTRUSTED_TURN_ARG],
             true,
             "reading the dialog is reading the agent's output"
+        );
+        let keys = json!({ "session_id": "hs-1", "keys": ["down", "enter"] });
+        let pressed = without_default_drive("harness_session_send", keys, &taint);
+        assert_eq!(
+            pressed[hq_tools::harness_session::UNTRUSTED_TURN_ARG],
+            true,
+            "keys answer a dialog too"
         );
         let other = without_default_drive("task_get", args, &taint);
         assert!(

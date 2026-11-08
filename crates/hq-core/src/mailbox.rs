@@ -153,7 +153,8 @@ pub fn peek_messages(vault_path: &Path, harness_id: &str) -> Result<Vec<MailboxM
 /// messages. See FEATURE-REQUESTS.md FR-001b.
 pub const META_INTERRUPT: &str = "interrupt";
 
-/// Broadcast a message to all harnesses with mailboxes.
+/// Broadcast a message to all harnesses with mailboxes, except the relay's: a
+/// broadcast is never a chat message.
 pub fn broadcast(
     vault_path: &Path,
     from: &str,
@@ -183,7 +184,7 @@ pub fn broadcast_with_meta(
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|name| name != from)
+        .filter(|name| name != from && !name.eq_ignore_ascii_case(RELAY_MAILBOX))
         .collect();
 
     let mut sent = 0;
@@ -292,6 +293,21 @@ pub const ARCHIVE_DIR: &str = "archive";
 /// The mailbox the chat relays empty. Only a family member's request (`family-confirm`) comes
 /// back out of it; every other message is dropped, since chat relays carry chat only.
 pub const RELAY_MAILBOX: &str = "relay";
+
+/// The sender of a family member's request, the one message the Discord relay posts from the
+/// relay mailbox. Only HQ's own runtime writes it.
+pub const FAMILY_CONFIRM_SENDER: &str = "family-confirm";
+
+/// Sender ids only HQ's runtime may use. A tool that lets a caller pick its sender id (such as
+/// `agent_send_message`) refuses these, so no model can pass a message off as one of them.
+pub const RESERVED_SENDERS: &[&str] = &[FAMILY_CONFIRM_SENDER];
+
+/// Whether `sender` is one of [`RESERVED_SENDERS`], ignoring ASCII case.
+pub fn is_reserved_sender(sender: &str) -> bool {
+    RESERVED_SENDERS
+        .iter()
+        .any(|r| r.eq_ignore_ascii_case(sender.trim()))
+}
 
 /// Mailboxes with live pollers. Moving their mail would drop work in flight.
 pub const RESERVED_MAILBOXES: &[&str] = &[RELAY_MAILBOX, "agent-worker"];
@@ -479,6 +495,33 @@ mod tests {
         assert_eq!(message_count(vault, "agent-b").unwrap(), 1);
         assert_eq!(message_count(vault, "agent-c").unwrap(), 1);
         assert_eq!(message_count(vault, "agent-a").unwrap(), 0);
+    }
+
+    // The relay mailbox feeds the owner's Discord channel, so a broadcast
+    // (which any caller can make) must never land there.
+    #[test]
+    fn a_broadcast_never_reaches_the_relay_mailbox() {
+        let tmp = TempDir::new().unwrap();
+        let vault = tmp.path();
+        ensure_mailbox(vault, RELAY_MAILBOX).unwrap();
+        ensure_mailbox(vault, "agent-b").unwrap();
+        let sent = broadcast(
+            vault,
+            FAMILY_CONFIRM_SENDER,
+            MailboxMessageType::Nudge,
+            "hello",
+        )
+        .unwrap();
+        assert_eq!(sent, 1);
+        assert_eq!(message_count(vault, RELAY_MAILBOX).unwrap(), 0);
+        assert_eq!(message_count(vault, "agent-b").unwrap(), 1);
+    }
+
+    #[test]
+    fn reserved_senders_match_whatever_the_case() {
+        assert!(is_reserved_sender("family-confirm"));
+        assert!(is_reserved_sender(" Family-Confirm "));
+        assert!(!is_reserved_sender("agent"));
     }
 
     /// Write a message backdated past the archival cutoff.

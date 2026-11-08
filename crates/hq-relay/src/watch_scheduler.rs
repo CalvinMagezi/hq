@@ -40,6 +40,24 @@ impl std::fmt::Display for ChatBusy {
 
 impl std::error::Error for ChatBusy {}
 
+/// Returned by a dispatch whose chat is not the owner's (now). A firing runs as
+/// an unattended turn with the owner's tools and no one to approve its calls,
+/// so the tick closes the watch instead of firing it.
+#[derive(Debug)]
+pub(crate) struct NotOwnerChat;
+
+impl std::fmt::Display for NotOwnerChat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not an owner's chat")
+    }
+}
+
+impl std::error::Error for NotOwnerChat {}
+
+/// Why a watch in a guest's chat was stopped instead of fired.
+pub(crate) const NOT_OWNER_CHAT_REASON: &str =
+    "Watches run only in the owner's chat, and this one is a guest's.";
+
 /// Default poll cadence for the watch scheduler.
 pub const DEFAULT_POLL_SECS: u64 = 30;
 
@@ -177,6 +195,22 @@ pub async fn tick(
                 }
                 tracing::info!(watch = %row.id, "watch scheduler: chat busy, retrying next tick");
             }
+            Err(e) if e.is::<NotOwnerChat>() => {
+                tracing::warn!(watch = %row.id, chat = %row.chat_id, "watch scheduler: not an owner's chat, stopping the watch");
+                let notice = format!(
+                    "Watch `{}` stopped. {NOT_OWNER_CHAT_REASON}",
+                    background_turns::short_ref(&row.id)
+                );
+                if let Err(e) = db.with_conn(|c| {
+                    background_turns::mark_completed(c, &row.id, NOT_OWNER_CHAT_REASON, now)
+                }) {
+                    tracing::warn!(%e, watch = %row.id, "watch scheduler: closing a guest's watch failed");
+                    continue;
+                }
+                if let Err(e) = notify(row.clone(), notice).await {
+                    tracing::warn!(%e, watch = %row.id, "watch scheduler: guest-watch notice failed");
+                }
+            }
             Err(e) => tracing::warn!(%e, watch = %row.id, "watch scheduler: dispatch failed"),
         }
     }
@@ -192,6 +226,11 @@ pub(crate) struct WatchSurface<K> {
     pub progress_chars: usize,
     pub identity: fn(K) -> RequestIdentity,
     pub sender: Arc<dyn Fn(K) -> ChatSender + Send + Sync>,
+    /// Whether this chat is the owner's, asked again before every watch firing
+    /// and sub-agent follow-up. Those turns run unattended with the owner's
+    /// tools, so a guest's chat (a Telegram guest, the Discord family channel
+    /// and its threads) never gets one, whoever created the row.
+    pub owner_chat: Arc<dyn Fn(K) -> bool + Send + Sync>,
 }
 
 /// The scheduler's dispatch and notify closures for one surface.
@@ -246,6 +285,9 @@ async fn dispatch_watch_firing<K: ChatKey>(
     row: BackgroundTurnRow,
 ) -> Result<()> {
     let key = parse_chat_key::<K>(&row)?;
+    if !(surface.owner_chat)(key) {
+        return Err(NotOwnerChat.into());
+    }
     if !claim_chat(&surface.threads, key).await {
         return Err(ChatBusy.into());
     }
@@ -304,7 +346,9 @@ async fn run_watch_firing<K: ChatKey>(
         hq_agent::native_hq::NativeHqHooks {
             on_detached: Some(on_detached),
             permission_preset,
-            // Nobody is in the chat to approve a firing, and its approvals must not be the chat's.
+            // Nobody is in the chat to approve a firing, and its approvals must not be the chat's,
+            // so nothing in it asks. That is why only the owner can create a watch and why
+            // `dispatch_watch_firing` checks the chat is still the owner's before every firing.
             owner_approval: None,
             ..turn.hooks(
                 &config,
@@ -723,12 +767,78 @@ mod tests {
             progress_chars: 100,
             identity: RequestIdentity::from_discord,
             sender,
+            owner_chat: Arc::new(|_| true),
         });
 
         let err = dispatch(row).await.unwrap_err();
         assert!(err.is::<ChatBusy>());
         assert!(threads.lock().await[&42].turn_in_flight);
         assert!(sent.lock().unwrap().is_empty());
+    }
+
+    // A watch in a guest's chat (made before guests were refused, or by any
+    // other path) would fire as an unattended turn with the owner's tools.
+    #[tokio::test]
+    async fn a_watch_in_a_guests_chat_is_refused_before_it_takes_the_chat() {
+        let db = Database::open_memory().unwrap();
+        seed_watch(&db, "w-guest", "telegram", 60, None);
+        let mut row = db
+            .with_conn(|c| background_turns::get(c, "w-guest"))
+            .unwrap()
+            .unwrap();
+        row.chat_id = "42".to_string();
+        let threads = Arc::new(TokioMutex::new(HashMap::<i64, ChannelState>::new()));
+        let (dispatch, _) = watch_callbacks(WatchSurface {
+            platform: "telegram",
+            threads: threads.clone(),
+            system_prompt: Arc::new(String::new()),
+            progress_chars: 100,
+            identity: RequestIdentity::from_telegram,
+            sender: Arc::new(|_key: i64| -> ChatSender { Arc::new(|_| {}) }),
+            owner_chat: Arc::new(|key: i64| key != 42),
+        });
+        let err = dispatch(row).await.unwrap_err();
+        assert!(err.is::<NotOwnerChat>());
+        assert!(
+            !threads
+                .lock()
+                .await
+                .get(&42)
+                .is_some_and(|s| s.turn_in_flight),
+            "the guest's chat slot was not taken"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_stops_a_watch_whose_chat_is_not_the_owners() {
+        let db = Database::open_memory().unwrap();
+        seed_watch(&db, "w-guest", "telegram", 60, None);
+        let refuse: WatchDispatch = Arc::new(|_row| Box::pin(async { Err(NotOwnerChat.into()) }));
+        let notified = Arc::new(Mutex::new(Vec::new()));
+        tick(
+            &db,
+            "telegram",
+            T0 + 100,
+            &refuse,
+            &recording_notify(notified.clone()),
+        )
+        .await
+        .unwrap();
+        let row = db
+            .with_conn(|c| background_turns::get(c, "w-guest"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.status, background_turns::STATUS_COMPLETED);
+        assert_eq!(row.result_text.as_deref(), Some(NOT_OWNER_CHAT_REASON));
+        assert!(
+            db.with_conn(|c| background_turns::list_due_watches(c, T0 + 10_000))
+                .unwrap()
+                .is_empty(),
+            "the watch never fires again"
+        );
+        let notices = notified.lock().unwrap();
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].1.contains("stopped"), "{:?}", notices[0]);
     }
 
     #[tokio::test]

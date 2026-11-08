@@ -375,5 +375,5 @@ private fun whereWords(w: example.hq.spike.ui.shell.Words, f: StartForm): String
     f.hosts == null -> w.s(R.string.helpers_looking_computers)
     f.host != null -> HelperWords.placeName(w, f.host).replaceFirstChar(Char::uppercase)
     f.hosts.isEmpty() -> w.s(R.string.helpers_could_not_list)
-    else -> f.hosts.first().let { HelperWords.hostProblem(w, it.name, it.error) }
+    else -> HelperWords.noComputer(w, f.hosts)
 }

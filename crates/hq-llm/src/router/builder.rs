@@ -375,6 +375,11 @@ const LLAMA_70B_FREE: &str = "meta-llama/llama-3.3-70b-instruct:free";
 /// Paid OpenRouter fallback for background aliases: the free Llama route above
 /// is often unavailable, and an OpenRouter-only host has nothing else to try.
 const OPENROUTER_BACKGROUND_FALLBACK: &str = "deepseek/deepseek-v4-flash";
+/// Paid OpenRouter fallback for the chat aliases (`relay`, `premium`, `plan`, `code`): the model
+/// a first-run setup picks for an OpenRouter key. Without it an OpenRouter-only install (a phone
+/// whose key was sealed by the app, or a config left on `relay`) had only a free route, and a
+/// free model that is withdrawn or rate limited failed every turn.
+const OPENROUTER_CHAT_FALLBACK: &str = hq_core::setup_provider::CHEAP_OPENROUTER_MODEL;
 
 /// (alias, provider, model id, cost tier), kept only for registered providers.
 /// Ollama rows are local routes. Order matters for ties, so rows follow the
@@ -434,7 +439,9 @@ const ALIAS_ROUTES: &[(&str, &str, &str, CostTier)] = &[
     ("relay", "groq", "llama-3.3-70b-versatile", Free),
     ("premium", "groq", "llama-3.3-70b-versatile", Free),
     ("relay", "openrouter", "deepseek/deepseek-r1:free", Free),
+    ("relay", "openrouter", OPENROUTER_CHAT_FALLBACK, Budget),
     ("premium", "openrouter", "deepseek/deepseek-r1:free", Free),
+    ("premium", "openrouter", OPENROUTER_CHAT_FALLBACK, Budget),
     ("relay", "gemini", "gemini-2.5-flash", Budget),
     ("premium", "gemini", "gemini-2.5-flash", Budget),
     ("relay", "openai", "gpt-4o-mini", Budget),
@@ -452,6 +459,7 @@ const ALIAS_ROUTES: &[(&str, &str, &str, CostTier)] = &[
         "google/gemini-2.0-flash-exp:free",
         Free,
     ),
+    ("plan", "openrouter", OPENROUTER_CHAT_FALLBACK, Budget),
     ("plan", "gemini", "gemini-2.5-flash", Budget),
     ("plan", "openai", "o4-mini", Standard),
     ("code", "kimi", "kimi-k2.5", Standard),
@@ -466,6 +474,7 @@ const ALIAS_ROUTES: &[(&str, &str, &str, CostTier)] = &[
         "qwen/qwen3-coder-480b-a35b-instruct:free",
         Free,
     ),
+    ("code", "openrouter", OPENROUTER_CHAT_FALLBACK, Budget),
     ("code", "gemini", "gemini-2.5-flash", Budget),
     ("code", "openai", "o4-mini", Standard),
     ("code", "ollama", OLLAMA_TOOL_MODEL, Free),
@@ -965,6 +974,23 @@ mod config_key_provider_tests {
             route(&router, "google/gemini-2.5-flash"),
             vec![("gemini".to_string(), "gemini-2.5-flash".to_string())]
         );
+    }
+
+    /// An OpenRouter-only install (the phone app's first run) asks for `relay` until a model is
+    /// picked, so each chat alias needs a paid route besides the free one.
+    #[test]
+    fn an_openrouter_key_alone_serves_the_chat_aliases_with_a_paid_model() {
+        let router = router_with_only("OPENROUTER_API_KEY");
+        for alias in ["relay", "premium", "plan", "code"] {
+            let routes = route(&router, alias);
+            assert!(
+                routes.contains(&(
+                    "openrouter".to_string(),
+                    super::OPENROUTER_CHAT_FALLBACK.to_string()
+                )),
+                "{alias}: {routes:?}"
+            );
+        }
     }
 
     #[test]

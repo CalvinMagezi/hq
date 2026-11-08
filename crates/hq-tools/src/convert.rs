@@ -163,8 +163,10 @@ impl HqTool for ConvertFromMarkdownTool {
 
     fn description(&self) -> &str {
         "Export Markdown content to another format (DOCX, PDF, PPTX, HTML, EPUB, RTF) using pandoc. \
-         Pandoc must be installed: `brew install pandoc` on macOS. Pass `brand` for docx/pptx to \
-         apply that client's reference-doc styling — see brand_assets_list for what's registered."
+         Pandoc 2.15 or newer must be installed: `brew install pandoc` on macOS. Pass `brand` for docx/pptx to \
+         apply that client's reference-doc styling — see brand_assets_list for what's registered. \
+         Images are embedded only from the vault (a relative path is taken from the vault root) or as data: URIs; \
+         any other image is replaced by its alt text."
     }
 
     fn parameters(&self) -> Value {
@@ -246,9 +248,15 @@ impl HqTool for ConvertFromMarkdownTool {
 
         info!(format = %format, dest = %dest.display(), "convert_from_markdown: exporting");
 
-        OutboundConverter::convert(content, &format, &dest, brand_kit.as_ref())
-            .await
-            .map_err(|e| anyhow::anyhow!("export failed: {e}"))?;
+        OutboundConverter::convert_with_images(
+            content,
+            &format,
+            &dest,
+            brand_kit.as_ref(),
+            hq_convert::pandoc::ImageRule::Vault(&self.vault_path),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("export failed: {e}"))?;
 
         let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
 

@@ -329,6 +329,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val dialog: AlertDialog? = null,
         /** For an owner approval: the call HQ will make, and whether HQ says it loses something. Null from an older server. */
         val approval: ApprovalFacts? = null,
+        /** For a new sign-in: the device that signed in, which Sign it out signs out. */
+        val signInDevice: String? = null,
     )
 
     /** What HQ says an approval is about: [tool] and [args] verbatim, [loses] and [verb] (one of [LOSING_VERBS]) decided by HQ, never by the card's words. */
@@ -365,6 +367,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                         n.getString("id"), n.optString("kind", ""), n.optString("title", ""), n.optString("description", ""), n.optString("state", ""),
                         n.optString("created_at", ""), meta?.optStringOrNull("link"), extra?.optStringOrNull("source_task"), extra?.optStringOrNull("val_kind"),
                         n.optJSONArray("actions").strings(), alertDialog(meta), approvalFacts(meta),
+                        signInDevice(meta),
                     )
                 },
                 o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),
@@ -724,6 +727,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 }
 
 /** The dialog in a notification's metadata, or null for any other notice. */
+/** The device a new sign-in item is about, from `metadata.sign_in.device_id`; read the same way by the Inbox and the shade. */
+internal fun signInDevice(meta: JSONObject?): String? = meta?.optJSONObject("sign_in")?.optString("device_id")?.ifBlank { null }
+
 internal fun alertDialog(meta: JSONObject?): HqClient.AlertDialog? {
     val d = meta?.optJSONObject("dialog") ?: return null
     val session = d.optString("session_id", "").ifBlank { return null }

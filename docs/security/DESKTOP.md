@@ -77,7 +77,7 @@ any more; the proxy's routes and checks are unchanged.
 | `/mcp`, `/oauth/token`, `/oauth/revoke`, `/.well-known/*` answer 404 | Those belong to the public machine door, not this one |
 | The chat socket is proxied only on `/ws` | No other upgrade is carried |
 | Stopping the proxy waits two seconds for open responses, then drops them | An event stream never ends by itself; waiting for it would hang the app's quit |
-| **No credential is ever added.** `Host`, `Authorization`, `Cookie` and `X-HQ-Client` go through as the client sent them | A proxy that signed requests in would hand the whole API to any local page or process, because HQ trusts any loopback origin. Consent therefore needs the browser to be signed in to HQ, like any other browser |
+| **No credential is ever added.** `Host`, `Authorization`, `Cookie` and `X-HQ-Client` go through as the client sent them, on the chat socket too | A proxy that signed requests in would hand the whole API to any local process that can reach it. HQ accepts the window's `Origin` because it matches the `Host` the proxy passes on, so the socket carries the client's `Host` as well. Consent therefore needs the browser to be signed in to HQ, like any other browser |
 | `Access-Control-*` response headers are dropped; a second CSP, `nosniff`, `Referrer-Policy: no-referrer` and `Cross-Origin-Resource-Policy: same-origin` are added | Same-origin for its clients, nothing wider |
 | `Set-Cookie` passes through unchanged | See the open item in section 6 |
 

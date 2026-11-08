@@ -52,6 +52,7 @@ pub(super) async fn dispatch_hq(
     threads: Arc<TokioMutex<HashMap<i64, ChannelState>>>,
     caller: Arc<CallerContext>,
     mirror: Mirror,
+    untrusted_input: Option<String>,
 ) -> String {
     let config = crate::native_run::load_config("telegram dispatch");
     let inputs = crate::native_run::turn_inputs(&threads, chat_key).await;
@@ -117,6 +118,7 @@ pub(super) async fn dispatch_hq(
             on_detached: Some(on_detached),
             on_child_completion: Some(row.child_sink(send.clone(), TG_PROGRESS_CHARS)),
             permission_preset: inputs.permission_preset,
+            untrusted_input,
             ..row.hooks(&config, caller.identity.clone(), send, TG_PROGRESS_CHARS)
         },
     )

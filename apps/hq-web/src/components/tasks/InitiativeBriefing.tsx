@@ -3,7 +3,7 @@ import { fetchInitiativeActivityClient, type InitiativeActivity } from '~/lib/ta
 import { STATUS_LABELS, type TaskStatus } from '~/lib/tasksApi'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { usePolled } from '../sessions/usePolled'
-import { ageLabel, authorLabel, briefingIsEmpty, freshnessLines, reviewBadge, reviewSummary } from './activity'
+import { ageLabel, authorLabel, briefingIsEmpty, lastActivityLine, reviewBadge, reviewSummary } from './activity'
 import { t } from '~/strings'
 import './leaf.css'
 
@@ -101,8 +101,7 @@ export function InitiativeBriefingView({ view, nowMs }: { view: InitiativeActivi
       )}
 
       <p className="a-cap a-muted">
-        As of {freshnessLines(view.freshness, nowMs).join(' · ')}. Generated now. Status and ownership come from the task
-        system only; a note edit is not progress.
+        {lastActivityLine(view.freshness, nowMs)}
       </p>
     </div>
   )

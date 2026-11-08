@@ -226,4 +226,16 @@ class InboxWordsTest {
         assertEquals(null, c.dialog)
         assertEquals("s-42", c.sessionId)
     }
+
+    @Test fun aNewSignInIsItsOwnCardAndNeverAnApprovalToAllow() {
+        val signIn = item("A new sign-in to your HQ", "Signed in with a code signed in with a one-time code at 2026-11-06 14:08 UTC.", source = "device_sign_in").copy(signInDevice = "dev-7")
+        val c = InboxWords.card(signIn)
+        assertEquals(CardKind.SignIn, c.kind)
+        assertEquals("dev-7", c.signInDevice)
+        assertFalse(c.canAllow)
+        // The server's own description is not shown: the card composes its line from the catalogue.
+        assertEquals("", c.body)
+        val lists = inboxLists(listOf(item("Delete 3 old backups?", "Remove them."), signIn), emptyList())
+        assertEquals(CardKind.SignIn, lists.needs.first().kind)
+    }
 }

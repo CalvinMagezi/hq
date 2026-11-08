@@ -519,12 +519,21 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "task_delete",
     "note_review",
     "file_edit_batch",
+    // They read the HQ host's disk outside the vault: any folder's listing, and the git
+    // repository HQ runs in.
+    "list_dir",
+    "git_diff",
+    "git_status",
+    "git_log",
     "git_commit",
     "git_pr",
     "github_clone",
     "github_write",
     "host_send",
     "host_read",
+    // One call stops every agent on every host, the owner's included, until someone at each
+    // machine unlocks it.
+    "host_lockdown",
     "convert_to_markdown",
     "convert_from_markdown",
     "ocr_extract_text",
@@ -533,19 +542,21 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
 /// Vault folders a connector may not change without the owner's approval. Notes in the first
 /// four become instructions (skills, slash commands and agent definitions); the rest hold HQ's
 /// own identity, threads, databases, retired notes and agent mailboxes. The vault tools refuse
-/// most of the second group themselves, so this also covers a tool that stops doing so.
+/// writes into the first group and most of the second themselves, so this also covers a tool
+/// that stops doing so. Names are compared against the path's top folder as
+/// `hq_vault::rel_path::RelPath` reads it.
 /// Everything else in the vault is the owner's notes, which Claude may create, change, move and
 /// trash freely: a delete there is a move into `_trash/`, kept for 30 days.
 pub const SYSTEM_VAULT_FOLDERS: &[&str] = &[
-    "skills/",
-    "_skills/",
-    "_commands/",
-    "agents/",
-    "_system/",
-    "_threads/",
-    "_data/",
-    "_trash/",
-    "_mailboxes/",
+    "skills",
+    "_skills",
+    "_commands",
+    "agents",
+    "_system",
+    "_threads",
+    "_data",
+    "_trash",
+    "_mailboxes",
 ];
 /// Vault tools that create, change, move or trash a note at `path` (or move one from `from` to
 /// `to`). They wait for approval only when one of those paths is in a system folder.
@@ -607,16 +618,18 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
 }
 
 /// Whether `path` is, or is inside, one of [`SYSTEM_VAULT_FOLDERS`], however it is spelled
-/// (`./Skills/x`, `/_System/x`, or the folder alone).
+/// (`./Skills/x`, `.//./skills/x`, `/_System/x`, or the folder alone). The path is read through
+/// the same parser the vault tools use, so a spelling cannot open the file for the tool and
+/// still look ordinary here. A path that does not parse waits too: the tool would refuse it, and
+/// approving a refused call costs nothing.
 fn in_system_folder(path: &str) -> bool {
-    let path = path
-        .trim()
-        .trim_start_matches("./")
-        .trim_start_matches('/')
-        .to_ascii_lowercase();
-    SYSTEM_VAULT_FOLDERS
-        .iter()
-        .any(|f| path.starts_with(f) || path == f.trim_end_matches('/'))
+    // The vault tools refuse an absolute path; read one as vault-relative so the folder
+    // still decides.
+    let relative = path.trim().trim_start_matches('/');
+    !matches!(
+        hq_vault::rel_path::protected_folder(relative, SYSTEM_VAULT_FOLDERS),
+        Ok(None)
+    )
 }
 
 /// The longest session id a marker carries; anything else is cut.
@@ -1051,6 +1064,14 @@ mod tests {
             !needs_owner_confirmation(&registry, "harness_session_spawn", &none),
             "coding sessions are deliberately not gated"
         );
+        // Reads of the host's disk outside the vault wait, as the connector doc promises.
+        for tool in ["list_dir", "git_diff", "git_status", "git_log"] {
+            assert!(needs_owner_confirmation(&registry, tool, &none), "{tool}");
+        }
+        assert!(
+            needs_owner_confirmation(&registry, "host_lockdown", &json!({"reason": "r"})),
+            "one call would stop every agent on every host"
+        );
         assert!(needs_owner_confirmation(
             &registry,
             "hq_ask",
@@ -1075,6 +1096,12 @@ mod tests {
                 "_System/SOUL.md",
                 "_mailboxes/relay/m.md",
                 "_data",
+                ".//./skills/x/SKILL.md",
+                "skills//x/SKILL.md",
+                "./_system/./SOUL.md",
+                "s\u{212a}ills/x/SKILL.md",
+                "../Notebooks/a.md",
+                "skills\\x\\SKILL.md",
             ] {
                 assert!(
                     needs_owner_confirmation(&registry, tool, &json!({ "path": path })),

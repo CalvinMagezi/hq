@@ -179,14 +179,19 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    `crates/hq-mcp/src/gateway.rs` (a registry test checks every name is a served tool): Google
    Workspace, `agent_send_message` (it reaches the owner's chat or an agent that acts on it),
    `config_manage`, `host_add`, `host_send` and `host_read` (any pane, including the owner's),
+   `host_lockdown` (one call stops every agent on every host until each machine unlocks),
    self-update install and
    rollback, skill and slash-command edits (they persist instructions), task deletes,
-   file edits, commits, PRs and clones on the HQ host, and the convert and OCR tools (they read
+   file edits, folder listings (`list_dir`), git reads (`git_diff`, `git_status`, `git_log`),
+   commits, PRs and clones on the HQ host, and the convert and OCR tools (they read
    and write host paths). Some count only by their arguments: a vault export with `output`
    (it writes anywhere the HQ user can), and a vault write, move or delete whose `path`, `from`
    or `to` is inside `SYSTEM_VAULT_FOLDERS` (`skills/`, `_skills/`, `_commands/` and `agents/`
    become instructions; `_system/`, `_threads/`, `_data/`, `_trash/` and `_mailboxes/` are HQ's
-   own state). Every remote MCP server's tools count too (they act on the owner's accounts), and
+   own state), read with `hq_vault::rel_path::RelPath` so `.//./skills/x` counts as `skills/x`.
+   The note tools themselves refuse writes into the instruction folders and the private ones,
+   so this check is the second layer there. Every remote MCP server's tools count too (they act
+   on the owner's accounts), and
    `hq_ask` in `full` mode, read by the tool's own parser (otherwise HQ's own agent is a way
    around the list). Harness session tools are deliberately not on it: Claude driving coding
    sessions is much of the point. The consequence, stated plainly: a spawned coding agent runs

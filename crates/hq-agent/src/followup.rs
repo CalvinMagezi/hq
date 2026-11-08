@@ -171,6 +171,18 @@ pub fn turn_failed(db: &Database, f: &Followup) {
     }
 }
 
+/// The surface will not run a follow-up turn in this chat (a guest's chat, where an
+/// unattended turn would carry the owner's tools). Acknowledged so it is not retried,
+/// and handed to the owner's inbox instead.
+pub fn refused(db: &Database, f: &Followup, why: &str) {
+    if !delivered(db, f) {
+        return;
+    }
+    for (_, run) in &f.items {
+        escalate(db, run, why);
+    }
+}
+
 /// The chat had a reply running: try again shortly without spending an attempt.
 pub fn busy(db: &Database, f: &Followup) {
     let at = now();

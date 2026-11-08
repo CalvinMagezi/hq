@@ -3481,6 +3481,93 @@ fn a_connection_drives_only_sessions_a_connection_started() {
     );
     assert_eq!(call_origin(None, &connector), registry::ORIGIN_CONNECTOR);
     assert_eq!(call_origin(None, &json!({})), registry::ORIGIN_MCP);
+
+    // Observing at spawn holds the same line: a connection hears only from its own sessions.
+    let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let check = subscribe::check_spawn_observe;
+    assert!(check(&db, &connector, &ids(&["hs-claude", "hs-worker"])).is_ok());
+    let err = check(&db, &connector, &ids(&["hs-claude", "hs-owner"])).unwrap_err();
+    assert!(err.to_string().contains("hs-owner"), "{err}");
+    assert!(check(&db, &connector, &ids(&["hs-owners-worker"])).is_err());
+    assert!(check(&db, &connector, &[]).is_ok());
+    let handoff = json!({ HANDOFF_SCOPE_ARG: true });
+    let err = check(&db, &handoff, &ids(&["hs-claude"])).unwrap_err();
+    assert!(err.to_string().contains("handoff key"), "{err}");
+    assert!(check(&db, &handoff, &[]).is_ok());
+    assert!(
+        check(&db, &json!({}), &ids(&["hs-owner"])).is_ok(),
+        "the owner observes any session"
+    );
+}
+
+#[tokio::test]
+async fn a_connection_reads_the_state_of_only_the_sessions_it_may_drive() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    for (id, origin) in [
+        ("hs-owner", registry::ORIGIN_USER),
+        ("hs-claude", registry::ORIGIN_CONNECTOR),
+        ("hs-worker", registry::ORIGIN_USER),
+    ] {
+        db.with_conn(|c| {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id,
+                    harness: "claude-code",
+                    label: "t",
+                    cwd: "/srv/work",
+                    mission_id: None,
+                    placement: registry::Placement {
+                        host: "native",
+                        agent_name: id,
+                        workspace_id: id,
+                        pane_id: id,
+                    },
+                    purpose: None,
+                },
+            )?;
+            registry::set_origin(c, id, origin)?;
+            // Ended, so listing them asks no host.
+            registry::set_status(c, id, registry::STATUS_STOPPED)
+        })
+        .unwrap();
+    }
+    db.with_conn(|c| registry::set_parent(c, "hs-worker", "hs-claude", 1))
+        .unwrap();
+    let tools = tools::create_harness_session_tools(db.clone(), None, None);
+    let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
+    let connector = json!({ CONNECTOR_ARG: "Claude" });
+    let listed = |v: Value| {
+        let mut ids: Vec<String> = v["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["session"]["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+
+    let seen = tool("harness_session_list")
+        .execute(connector.clone())
+        .await
+        .unwrap();
+    assert_eq!(listed(seen), ["hs-claude", "hs-worker"]);
+    let all = tool("harness_session_list")
+        .execute(json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed(all), ["hs-claude", "hs-owner", "hs-worker"]);
+
+    for name in ["harness_session_status", "harness_session_wait"] {
+        let mut args = connector.clone();
+        args["session_id"] = json!("hs-owner");
+        let err = tool(name).execute(args).await.unwrap_err().to_string();
+        assert!(
+            err.contains("may drive only sessions it started"),
+            "{name}: {err}"
+        );
+    }
 }
 
 /// The host's `agent.pending` reply for a Copilot path dialog numbered `seq`.
@@ -3488,6 +3575,54 @@ fn pending_json(seq: u64) -> String {
     format!(
         r#"{{"id":"x","result":{{"state":"blocked","rule":"approval_dialog","pending_seq":{seq},"pending":{{"kind":"path","question":"Do you want to allow this?","command":"/tmp -> /private/tmp","options":[{{"id":1,"label":"Yes","remember":false,"typed":false,"selected":false}},{{"id":2,"label":"Yes, and remember this path for this session","remember":true,"typed":false,"selected":true}},{{"id":3,"label":"No (Esc)","remember":false,"typed":false,"selected":false}}],"truncated":false,"text":"Allow path access"}}}}}}"#
     )
+}
+
+/// Pressing `keys` on session `hs-a` (blocked or not) as `who`, against a host whose
+/// `agent.pending` replies `pending`. Returns the refusal, if any.
+fn keys_refusal(
+    pending: String,
+    blocked: bool,
+    keys: &[&str],
+    who: answer::Answerer,
+) -> Option<String> {
+    let (_dir, host) = fake_host(&[("agent pending", pending, None)]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    seed_watched(&db, "hs-a", None);
+    let row = control::get_row(&db, "hs-a").unwrap();
+    let host: crate::agent_host::Host = Arc::new(host);
+    let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+    control::check_keys_at_dialog(&host, &row, blocked, &keys, who)
+        .err()
+        .map(|e| e.to_string())
+}
+
+#[test]
+fn keys_from_an_automated_caller_cannot_answer_a_dialog_round_harness_session_answer() {
+    let drive = answer::Answerer::Automated("a Drive turn");
+    // A dialog HQ can read is answered by option, where "remember" stays the owner's.
+    let why = keys_refusal(pending_json(7), true, &["down", "enter"], drive).unwrap();
+    assert!(why.contains("harness_session_answer"), "{why}");
+    assert!(keys_refusal(pending_json(7), true, &["esc"], drive).is_some());
+    assert!(
+        keys_refusal(
+            pending_json(7),
+            true,
+            &["down", "enter"],
+            answer::Answerer::Owner
+        )
+        .is_none(),
+        "the owner's keys are the owner's call"
+    );
+
+    // One HQ cannot read: an automated caller may only back out.
+    let unread = r#"{"id":"x","result":{"state":"blocked","pending":null}}"#.to_string();
+    let why = keys_refusal(unread.clone(), true, &["enter"], drive).unwrap();
+    assert!(why.contains("esc or ctrl+c"), "{why}");
+    assert!(keys_refusal(unread.clone(), true, &["2"], drive).is_some());
+    assert!(keys_refusal(unread.clone(), true, &["esc"], drive).is_none());
+    assert!(keys_refusal(unread.clone(), true, &["ctrl+c", "Escape"], drive).is_none());
+    // Not at a dialog: keys work as before.
+    assert!(keys_refusal(unread, false, &["down", "enter"], drive).is_none());
 }
 
 fn answer_on(

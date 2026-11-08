@@ -6,12 +6,13 @@ import type { TaskItem } from '~/lib/tasksApi'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
+import { t, type StringKey } from '~/strings'
 import './leaf.css'
 import {
   ageLabel,
   authorLabel,
-  freshnessLines,
-  gapTitle,
+  gapLine,
+  lastActivityLine,
   panelKind,
   reviewBadge,
   reviewSummary,
@@ -73,13 +74,12 @@ function Gaps({ gaps, total }: { gaps: readonly ActivityGap[]; total: number }) 
   const rest = gaps.slice(GAPS_SHOWN)
   const row = (g: ActivityGap, i: number) => (
     <li key={`${g.kind}-${g.subject ?? ''}-${i}`} className="a-why l-break">
-      <AlertCircle className="a-ic xs" aria-hidden="true" /><span><b>{gapTitle(g)}</b>
-      {g.subject ? `: ${g.subject}` : ''}. {g.detail}.</span>
+      <AlertCircle className="a-ic xs" aria-hidden="true" /><span>{gapLine(g)}</span>
     </li>
   )
   return (
     <div className="l-pad">
-      <div className="a-label mb-1">Gaps ({total})</div>
+      <div className="a-label mb-1">{t('act_worth_a_look', { n: total })}</div>
       <ul className="l-stack">{shown.map(row)}</ul>
       {rest.length > 0 && (
         <details className="l-details mt-1">
@@ -91,10 +91,10 @@ function Gaps({ gaps, total }: { gaps: readonly ActivityGap[]; total: number }) 
   )
 }
 
-const KIND_NOTE: Record<PanelKind, string | null> = {
+const KIND_NOTE: Record<PanelKind, StringKey | null> = {
   contributors: null,
-  unattributed_only: 'Changes are linked to this task but none has a known author. HQ does not guess one.',
-  none: 'Nothing has been recorded on this task: no lease, session or note. Its status is whatever the task says.',
+  unattributed_only: 'act_unattributed_only',
+  none: 'act_none',
 }
 
 /** The activity view for one task. Presentational: the data is passed in, so it renders the same for any fixture. */
@@ -114,16 +114,16 @@ export function TaskActivityView({
     <section aria-label="Activity" data-kind={kind}>
       <SectionLabel>Activity</SectionLabel>
       <div className="a-card l-lines">
-        {KIND_NOTE[kind] && <p className="a-body-sm a-muted l-pad">{KIND_NOTE[kind]}</p>}
+        {KIND_NOTE[kind] && <p className="a-body-sm a-muted l-pad">{t(KIND_NOTE[kind])}</p>}
 
         {view.holders.length > 0 && (
           <div className="l-pad">
-            <div className="a-label">Held by</div>
+            <div className="a-label">{t('act_held_by')}</div>
             <ul className="a-body-sm">
               {view.holders.map((h) => (
                 <li key={h.lease_id}>
                   {h.actor}
-                  {h.harness ? ` on ${h.harness}` : ''}, last heartbeat {ageLabel(h.last_heartbeat_at, nowMs)}
+                  {h.harness ? ` on ${h.harness}` : ''}, {t('act_holder_last', { ago: ageLabel(h.last_heartbeat_at, nowMs) })}
                 </li>
               ))}
             </ul>
@@ -137,7 +137,7 @@ export function TaskActivityView({
               {view.sessions.map((s) => (
                 <li key={s.id}>
                   {s.registered === false ? (
-                    <span className="a-warn-t">{s.id}: not in the session registry</span>
+                    <span className="a-warn-t">{t('act_session_unknown', { id: s.id })}</span>
                   ) : (
                     <>
                       {s.agent || s.harness || s.id}{' '}
@@ -219,8 +219,7 @@ export function TaskActivityView({
         <Gaps gaps={view.gaps} total={view.gaps_total} />
 
         <p className="a-cap a-muted l-pad">
-          As of {freshnessLines(view.freshness, nowMs).join(' · ')}. Generated now from the task system, sessions and
-          note records. A note being edited is not progress, and status comes only from the task.
+          {lastActivityLine(view.freshness, nowMs)}
         </p>
       </div>
     </section>

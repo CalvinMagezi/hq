@@ -805,3 +805,20 @@ async fn only_the_full_key_may_choose_the_model() {
         "nothing started"
     );
 }
+
+/// A connector grant's asks are its own scope, so the web runner can strip the tools a connector
+/// reaches only with the owner's approval from their read-only replies.
+#[tokio::test]
+async fn a_connector_ask_runs_in_the_connector_scope() {
+    let r = rig(Plan::AnswerSoon("ok"));
+    let mut args = json!({"question": "q"});
+    args[crate::harness_session::CONNECTOR_ARG] = json!("Claude on the web");
+    let out = r.ask.execute(args).await.unwrap();
+    assert_eq!(out["status"], "answered");
+    assert_eq!(r.runner.starts.lock().unwrap()[0].3, AskScope::Connector);
+    // Another key's asks are not this grant's to read.
+    let full = r.ask.execute(json!({"question": "other"})).await.unwrap();
+    let mut read = json!({"ask_id": full["ask_id"], "wait_secs": 0});
+    read[crate::harness_session::CONNECTOR_ARG] = json!("Claude on the web");
+    assert!(r.result.execute(read).await.is_err());
+}

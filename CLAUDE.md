@@ -81,9 +81,11 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   (to be renamed) holds the client: `NativeBackend` talks to the host on this
   machine, or to one on another machine over SSH through a key pinned to
   `hq host gate`. Agents run in a process sandbox whose profile is
-  `agent_host.sandbox.profile`: `open` (default) walls off only HQ itself (host tokens, `~/.hq`,
-  other processes' environments, other Claude accounts, credential stores unless
-  `hide_credentials: false`) and leaves the rest of the machine and its network to the agent;
+  `agent_host.sandbox.profile`: `open` (default) walls off HQ's own files (host tokens, `~/.hq`, the vault's `_data`,
+  the config file and `*.env` beside it; the vault folders HQ loads, such as `_system` and
+  `skills`, are read-only), other processes' environments, other Claude accounts and
+  credential stores unless `hide_credentials: false`, and leaves the rest of the machine and
+  its network to the agent;
   `strict` adds an egress allowlist and read and write allowlists (`crates/hq-host/src/sandbox.rs`).
   `hq host join` / `hq host add` / the `host_add` tool pair a machine.
   `harness_session_*`, the read-only `host_list`/`host_agents`/`host_read`

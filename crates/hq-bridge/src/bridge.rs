@@ -15,7 +15,7 @@ use crate::setup::{
 };
 use crate::share::{SHARE_ALPN, ShareProtocol};
 use crate::ticket::{Purpose, Ticket};
-use crate::wire::{Card, MAX_DIAL_ITEMS};
+use crate::wire::{Card, MAX_DIAL_ITEMS, is_plain_dns_name, is_plain_https_relay};
 use anyhow::{Context, Result, anyhow, bail};
 use hq_db::{Database, bridge as peers};
 use iroh::{
@@ -1018,51 +1018,12 @@ fn edge_record(
     })
 }
 
-/// Lowercase letters, digits and hyphens in dot-separated labels, at least two of them, 253
-/// characters at most.
-fn is_plain_dns_name(name: &str) -> bool {
-    name.len() <= 253
-        && name.split('.').count() >= 2
-        && name.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= 63
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        })
-}
-
-/// A relay URL the device may adopt: https on a DNS name (not an address, not `localhost`, not a
-/// name that stays on the local network), no credentials, the default port, at most 253
-/// characters. Anything else is refused rather than dialed.
+/// A relay URL the device may adopt from an edge, by the rule in [`is_plain_https_relay`].
 fn plain_https_relay(text: &str) -> Result<String> {
-    let bad = || anyhow!("the edge offered a relay this device will not use");
-    if text.len() > 253 {
-        return Err(bad());
-    }
-    let url = url::Url::parse(text).map_err(|_| bad())?;
-    let host = match url.host() {
-        Some(url::Host::Domain(d)) => d.to_ascii_lowercase(),
-        _ => return Err(bad()),
-    };
-    let local = host == "localhost"
-        || host.ends_with(".localhost")
-        || host.ends_with(".local")
-        || host.ends_with(".internal")
-        || host.ends_with('.') && host.trim_end_matches('.').ends_with("localhost");
-    if url.scheme() != "https"
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.port().is_some()
-        || local
-        || !host.contains('.')
-        || !is_plain_dns_name(host.trim_end_matches('.'))
-    {
-        return Err(bad());
-    }
-    Ok(url.to_string())
+    is_plain_https_relay(text)
+        .then(|| url::Url::parse(text).map(|url| url.to_string()).ok())
+        .flatten()
+        .ok_or_else(|| anyhow!("the edge offered a relay this device will not use"))
 }
 
 /// The DNS label an edge reaches a device at: the first [`LABEL_BYTES`] bytes of its id, as hex.

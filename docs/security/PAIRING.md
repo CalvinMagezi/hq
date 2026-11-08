@@ -248,9 +248,15 @@ should-fix items; each was checked and closed:
 - **Addresses in a ticket.** By default the ticket lists the throwaway endpoint's addresses, so it
   shows the host's local and public IP addresses to whoever sees the QR code. `--no-addrs` leaves
   them out; the spike measured that a relay-only ticket still ends on a direct path.
-- **A scanned ticket is untrusted input.** It can name up to 8 addresses and relays the joiner
-  will try to reach with a QUIC handshake. Nothing else is sent to them before the host is
-  authenticated.
+- **A scanned ticket is untrusted input.** It can name up to 8 addresses, which the joiner tries
+  to reach with a QUIC handshake, and up to 8 relays, which it reaches with an HTTP upgrade
+  request (iroh's relay protocol) before the host is authenticated. So a relay is kept only when it
+  is https on a DNS name with the default port and no credentials, and the name is not
+  `localhost`, `.local` or `.internal`; an address, a port or a local name is dropped, and a ticket
+  left with no relay and no address is refused. The same rule applies to the relays in the other
+  machine's card and dial-back details, which a reconnect dials later. A DNS name can still
+  resolve to a private address; that is not checked. A self-hosted relay must therefore listen on
+  443 under a public name.
 - **A revoke from another process is not pushed.** It takes effect at the next request or
   handshake; a connection that sends nothing stays open, and idle, until its owner revokes through
   the bridge's own API or it closes.

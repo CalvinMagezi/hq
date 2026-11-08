@@ -3,6 +3,7 @@
 pub mod client;
 pub mod frontmatter;
 pub mod notes;
+pub mod rel_path;
 pub mod remediation;
 pub mod reorg;
 pub mod system;

@@ -88,6 +88,17 @@ object HelperWords {
         else -> w.s(R.string.helpers_host_unreachable, placeName(w, name))
     }
 
+    /**
+     * The start sheet's Where line when no computer answers. A phone runs no helper itself, so when this phone is the only place
+     * listed the way on is to pair a computer; otherwise the first paired computer's problem is named, not this phone's.
+     */
+    fun noComputer(w: Words, hosts: List<HqClient.HelperHost>): String {
+        val computer = hosts.firstOrNull { it.name !in THIS_PHONE } ?: return w.s(R.string.helpers_pair_a_computer)
+        return hostProblem(w, computer.name, computer.error)
+    }
+
+    private val THIS_PHONE = setOf("", "local", "native")
+
     fun title(w: Words, row: HelperRow): String {
         val job = listOf(row.label, row.goal, row.taskTitle).firstOrNull { !it.isNullOrBlank() }?.trim()?.lineSequence()?.first()?.trim()
         return job?.let { if (it.length > MAX_TITLE) it.take(MAX_TITLE).trimEnd() + "…" else it } ?: w.s(R.string.helpers_default_title, agentName(w, row.harness))

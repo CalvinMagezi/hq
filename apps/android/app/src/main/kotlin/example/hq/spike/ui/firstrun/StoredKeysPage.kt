@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -25,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import example.hq.spike.HubService
@@ -55,6 +58,11 @@ fun StoredKeysPage() {
     var line by remember { mutableStateOf<String?>(null) }
     var bad by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    // Replace fills in a name that looks just like the field's hint, so it also moves the cursor to the key and says so.
+    val keyField = remember { FocusRequester() }
+    var replaceAsked by remember { mutableIntStateOf(0) }
+    LaunchedEffect(replaceAsked) { if (replaceAsked > 0) keyField.requestFocus() }
+    fun replace(n: String) { name = n; value = ""; bad = false; line = FirstRunWords.keysReplacing(KeyNames.display(n)); replaceAsked++ }
 
     suspend fun reload() { names = withContext(Dispatchers.IO) { KeyVault.names(context) } }
     LaunchedEffect(Unit) { reload() }
@@ -71,14 +79,14 @@ fun StoredKeysPage() {
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(HqIcons.Key, null, Modifier.size(20.dp), tint = Mts.InkMuted)
                     Text(KeyNames.display(n), style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                    TextAction("Replace", enabled = !busy) { name = n; line = null }
+                    TextAction("Replace", enabled = !busy) { replace(n) }
                     TextAction(FirstRunWords.KEYS_REMOVE, enabled = !busy) { confirming = n; line = null }
                 }
             }
         }
         Text(FirstRunWords.KEYS_ADD, style = HqType.BodyBold, color = Mts.Ink)
         PlainField(FirstRunWords.KEYS_NAME_LABEL, name, FirstRunWords.KEYS_NAME_HINT, !busy) { name = it.trim(); line = null }
-        SecretField(FirstRunWords.KEY_LABEL, value, FirstRunWords.KEY_HINT, show, !busy, bad = bad, onShow = { show = !show }) { value = it; line = null }
+        SecretField(FirstRunWords.KEY_LABEL, value, FirstRunWords.KEY_HINT, show, !busy, bad = bad, fieldModifier = Modifier.focusRequester(keyField), onShow = { show = !show }) { value = it; line = null }
         line?.let { Message(it, good = !bad) }
         GreenPill(FirstRunWords.KEYS_SAVE, enabled = name.isNotEmpty() && value.isNotEmpty(), busy = busy) {
             val problem = KeyVault.problem(name, value) ?: KeyShape.keyProblem(value)
@@ -100,12 +108,12 @@ fun StoredKeysPage() {
             }
         }
     }
-    }
+    // Inside the Box: Settings lays its pages out in a Column, so a second root here would sit below the page, off screen.
     confirming?.let { n ->
         val only = KeyVault.isOnlyModelKey(names.orEmpty(), n)
         ConfirmDialog(
             ConfirmCopy.removeKey(context, ConfirmCopy.keyLabel(n), only), onKeep = { confirming = null }, busy = busy,
-            onExtra = { name = n; confirming = null; line = null },
+            onExtra = { confirming = null; replace(n) },
             onAct = {
                 busy = true
                 scope.launch {
@@ -118,5 +126,6 @@ fun StoredKeysPage() {
                 }
             },
         )
+    }
     }
 }

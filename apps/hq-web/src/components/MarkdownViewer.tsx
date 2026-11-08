@@ -8,6 +8,7 @@ import { toastNotice } from '~/lib/toast'
 import { useHQStore } from '~/store/hqStore'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { blockRemoteImages } from '~/lib/remoteImages'
+import { chartSlot, fillChartSlots } from '~/lib/chartSlots'
 import { parseChart, parseMermaidPie, renderChartHtml } from '~/lib/chart'
 import { codespanHtml, vaultLinkTarget } from '~/lib/noteRefs'
 
@@ -37,24 +38,6 @@ function ensureMarkedConfigured() {
     return markedConfigured
 }
 
-// Chart SVG is built from validated numbers and escaped labels, then spliced in after DOMPurify,
-// so the sanitizer profile stays HTML-only for untrusted markdown.
-const chartSvgBySlot = new Map<number, string>()
-let nextChartSlot = 0
-
-function chartSlot(html: string) {
-    const id = nextChartSlot++
-    chartSvgBySlot.set(id, html)
-    return `<div data-chart-slot="${id}"></div>`
-}
-
-function fillChartSlots(sanitized: string) {
-    return sanitized.replace(/<div data-chart-slot="(\d+)"><\/div>/g, (match, id) => {
-        const html = chartSvgBySlot.get(Number(id))
-        chartSvgBySlot.delete(Number(id))
-        return html ?? match
-    })
-}
 
 async function configureMarked() {
     // A failed chunk load (offline, or stale after a redeploy) still registers the renderers, unhighlighted.

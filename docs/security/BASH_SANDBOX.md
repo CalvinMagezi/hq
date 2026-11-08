@@ -46,9 +46,22 @@ the host.
    - the HQ config file (`HQ_CONFIG_PATH`, or `~/.hq/config.yaml`), its
      `config.yaml*` backups, and `*.env` files next to it (on the VPS,
      `/opt/hq/*.env`);
-   - `~/.hq/config.yaml`, `wallet.enc`, `seed.enc` and `secret.key`;
+   - `~/.hq/config.yaml`, `web.token`, `wallet.enc`, `seed.enc` and `secret.key`;
+   - the backup key file named by `backup.key_file`, which opens backups that
+     may hold the config (`docs/BACKUP.md`);
    - every file in `~/.ssh` except `*.pub`, `known_hosts*`, `config` and
      `authorized_keys*`.
+
+   Both backends also hide these directories whole, because what they hold
+   acts as HQ: `~/.hq/run` (the built-in host's `operator.token`, `host.sock`
+   and `agent.sock`, where one request starts a process outside this sandbox,
+   and the ssh multiplex sockets, each an open login on another machine), the
+   host's directory wherever `HQ_HOST_DIR` puts it, and `~/.hq/bridge` (this
+   device's pairing key). Bubblewrap mounts an empty tmpfs over each. Seatbelt
+   denies reading them and connecting to the sockets inside them, since it
+   treats a socket connect as network, not as a file read. The agent's own
+   file tools are refused the same paths (`governance::secrets`), and a test
+   fails if a path the sandbox masks is ever missing from that list.
 
    The mask list is short on purpose. `~/.config/gh`, the gws config dir and
    `~/.herenow` stay readable because `gh`, `gws` and here.now's
@@ -95,7 +108,12 @@ and the OS sandbox. That is also why `required` is the default.
 ### Extra sandbox rules
 
 `authorized_keys*` under `~/.ssh` is bound read-only, so the agent cannot plant
-a login key even though HOME is writable. The Docker socket
+a login key even though HOME is writable. `~/bin/hq` and every
+`self_update.install_paths` entry (resolved through symlinks, so a
+`/usr/local/bin/hq` that points at `~/bin/hq` is covered) are read-only too: a
+command may run `hq` but not replace the binary the daemon restarts into. That
+also means `scripts/install-hq.sh` cannot be run from the agent's shell. The
+Docker socket
 (`/var/run/docker.sock`, `/run/docker.sock`) and the systemd user sockets in
 `XDG_RUNTIME_DIR` are masked. Remaining design-level residuals: HOME stays
 writable, so shell rc files and `~/.config` autostart entries can be modified
@@ -151,7 +169,7 @@ restart the daemon.
 ## Known consequences
 
 - `hq ...` run *from the bash tool* cannot read the masked config and falls
-  back to defaults. Agents should use HQ's own tools for HQ operations.
+  back to defaults, and `hq host ...` from bash cannot reach the host. Agents should use HQ's own tools for HQ operations.
 - `ssh`/`scp`/`git` over ssh from bash can no longer read private key files.
   They work when the key is loaded in the ssh-agent (`SSH_AUTH_SOCK` is
   passed through), or when the operator sets `sandbox: off`. `gh` and HTTPS
