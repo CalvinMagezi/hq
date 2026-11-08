@@ -1,7 +1,7 @@
 # Context fold: long conversations that remember
 
-Status: phases 1 to 6 built (see "What was built" at the end). Phase 0, the measurement, needs a
-real install and is still to do.
+Status: phases 1 to 6 built (see "What was built" at the end). Phase 0 measured on an isolated
+install; the real-vault ledger comparison is still to do.
 
 ## The problem
 
@@ -254,6 +254,37 @@ Nothing above should be tuned by feel.
 | 5 | `chat:` evidence in the graph and context packets, typed relations from folds | Edges verified against the message; dropped when it goes |
 | 6 | The single long turn: incremental, turn-safe, tool spill | Existing compaction tests plus a spill round trip |
 
+## Phase 0 numbers (2026-11-08)
+
+Measured on an isolated install of this branch (debug build, its own config, vault and port,
+`anthropic/claude-haiku-5.5` on Anthropic's own API, a fresh vault). Cache read and write
+tokens per chat call, from `task_outcomes`, six one-line questions per arm in a new thread:
+
+| Layout | Calls 1 and 2 | Calls 3 to 6 |
+|---|---|---|
+| `stable_prompt: false` (the old layout) | 46,230 read, about 5,330 written | about 51,600 read, 14 to 63 written |
+| `stable_prompt: true`, first build | 46,230 read, about 5,350 written | 46,230 read, 5,380 to 5,470 written, growing |
+| `stable_prompt: true`, fixed | 46,230 read, about 5,370 written | about 51,300 read, 370 to 420 written |
+
+The first build of the stable layout was worse: the turn note sits before the user's message,
+so the automatic breakpoint at the end of a request is never a prefix of the next one, and the
+history was written again every turn. Both Anthropic paths (`anthropic/wire.rs` and
+OpenRouter in `openai_compat`) now put a breakpoint on the block before the note.
+
+In a fresh vault the memories and concept matches never change, so the old layout writes less
+(the note, about 370 tokens, is written each turn). The stable layout wins when that content
+changes between turns, which in the old layout rewrites the system prompt and the whole history
+after it. That needs a real vault's ledger: compare `hq usage` cache share on the phone a week
+before and after this ships.
+
+Smoke test on the same install: a 36-message thread folded 18 messages into one block on the
+next reply (`chat history folded` in the log, summary by the `bulk` route); asked for the exact
+wording of a folded message, the model called `history_restore` and quoted it; editing that
+message dropped the block, and `chat_fts` stayed in step with the thread (6 rows for 6
+messages). Migration 116 on a copy of a real database (1,286 chat messages, 1.15 MB of text):
+0.03 s, file 38.5 MB to 42.6 MB. Telegram and Discord were not run live; their fold paths are
+covered by unit tests only.
+
 ## Config
 
 ```yaml
@@ -311,6 +342,10 @@ Fixed in review, before the PR:
 - A fold whose range an edit deleted while the summary ran is refused
   (`thread_folds::write` checks both ends still exist).
 - A Telegram guest cannot call `session_search`, `history_restore` or `tool_output_read`.
+- HQ's own chat sessions had no `session_search`, `history_restore` or `tool_output_read`
+  (they were in the MCP registry only, and `tool_output_read` nowhere), so the refs every block
+  and spill note carries led nowhere. They are now registered for native sessions.
+- The stable prompt layout lost the history cache on Anthropic models (see Phase 0 numbers).
 
 ## Open questions
 

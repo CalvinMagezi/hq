@@ -258,7 +258,18 @@ impl SessionBuilder {
         vault_path: &Path,
         db: &Arc<hq_db::Database>,
     ) -> Vec<Box<dyn hq_tools::HqTool>> {
-        let mut tools = Vec::new();
+        let mut tools: Vec<Box<dyn hq_tools::HqTool>> = Vec::new();
+
+        // Fold blocks and spill notes name these tools, so the session must have them.
+        tools.push(Box::new(hq_tools::session_search::SessionSearchTool::new(
+            db.clone(),
+        )));
+        tools.push(Box::new(hq_tools::session_search::HistoryRestoreTool::new(
+            db.clone(),
+        )));
+        tools.push(Box::new(hq_tools::spill::ToolOutputReadTool::new(
+            vault_path.to_path_buf(),
+        )));
 
         // Self-update lifecycle — branch + test + reinstall of HQ's own binary
         if self.config.self_update.enabled {
@@ -556,6 +567,9 @@ const MOBILE_EAGER_TOOLS: &[&str] = &[
     "notify_owner",
     "report_progress",
     "background_turn_status",
+    // Every fold block names history_restore, so the model calls it without a search first.
+    "session_search",
+    "history_restore",
     "hq",
 ];
 

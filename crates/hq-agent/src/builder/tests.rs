@@ -533,6 +533,17 @@ async fn standard_profile_registers_task_tools() {
     }
 }
 
+/// Fold blocks tell the model to call `history_restore` and spill notes `tool_output_read`; they
+/// were reachable only over MCP, so a chat could never act on its own history.
+#[tokio::test]
+async fn standard_profile_registers_history_tools() {
+    let standard = build_measurement_session(SessionProfile::Standard).await;
+    let names = standard.tool_names().await;
+    for required in ["session_search", "history_restore", "tool_output_read"] {
+        assert!(names.iter().any(|n| n == required), "missing {required}");
+    }
+}
+
 /// Governance wraps every tool, so a metadata method it fails to forward
 /// collapses to the trait default for the entire registry. `should_defer`
 /// was permanently false, which made `deferred_catalog()` always empty and

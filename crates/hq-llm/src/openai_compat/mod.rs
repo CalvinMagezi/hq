@@ -220,6 +220,9 @@ impl OpenRouterProvider {
         {
             obj.entry("cache_control")
                 .or_insert_with(|| serde_json::json!({"type": "ephemeral"}));
+            if let Some(messages) = obj.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                mark_history_before_turn_context(messages);
+            }
         }
 
         // Kimi Code's coding endpoint rejects any temperature but 1 ("invalid
@@ -238,6 +241,37 @@ impl OpenRouterProvider {
     }
 }
 
+/// Puts a cache breakpoint on the message before the newest turn-context note. The note changes
+/// every turn, so the automatic breakpoint at the end is never a prefix of the next request; this
+/// one is, and the next turn reads the conversation so far from it. Tool results are left alone.
+fn mark_history_before_turn_context(messages: &mut [serde_json::Value]) {
+    let is_note = |m: &serde_json::Value| {
+        m.get("content")
+            .and_then(|c| c.as_str())
+            .is_some_and(|c| c.starts_with(hq_core::types::TURN_CONTEXT_HEADER))
+    };
+    let Some(note) = messages.iter().rposition(is_note) else {
+        return;
+    };
+    let Some(before) = note.checked_sub(1).and_then(|i| messages.get_mut(i)) else {
+        return;
+    };
+    if before.get("role").and_then(|r| r.as_str()) == Some("tool") {
+        return;
+    }
+    let Some(text) = before
+        .get("content")
+        .and_then(|c| c.as_str())
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+    else {
+        return;
+    };
+    before["content"] = serde_json::json!([
+        {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+    ]);
+}
+
 #[cfg(test)]
 mod cache_hint_tests {
     use super::OpenRouterProvider;
@@ -254,6 +288,34 @@ mod cache_hint_tests {
         let mut body = serde_json::json!({"model": model, "messages": []});
         provider.mutate_body_for_endpoint(&mut body, &request);
         body
+    }
+
+    #[test]
+    fn claude_on_openrouter_marks_the_history_before_the_turn_note() {
+        let openrouter = OpenRouterProvider::new("k");
+        let request = ChatRequest {
+            model: "anthropic/claude-haiku-5.5".to_string(),
+            messages: Vec::new(),
+            tools: Vec::new(),
+            temperature: None,
+            max_tokens: None,
+        };
+        let note = format!("{}\nmemories", hq_core::types::TURN_CONTEXT_HEADER);
+        let mut body = serde_json::json!({"model": "anthropic/claude-haiku-5.5", "messages": [
+            {"role": "system", "content": "soul"},
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": note},
+            {"role": "user", "content": "q2"},
+        ]});
+        openrouter.mutate_body_for_endpoint(&mut body, &request);
+        assert_eq!(body["messages"][2]["content"][0]["text"], "a1");
+        assert_eq!(
+            body["messages"][2]["content"][0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert!(body["messages"][1]["content"].is_string());
+        assert!(body["messages"][4]["content"].is_string());
     }
 
     #[test]
