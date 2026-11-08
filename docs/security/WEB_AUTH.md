@@ -518,6 +518,11 @@ origin it is served from is missing from this list.
   so set `web_auth_token` on shared machines.
 - The token lives in the PWA's local storage, so script injection into the PWA
   would expose it. Vault HTML is sanitised with DOMPurify before rendering.
+- Any valid token can connect a Telegram or Discord bot, issue a code that pairs a new
+  chat app owner (with "Pair a different account", after removing the current one) and
+  replace a model provider's key. None of these asks for the sign-in again. Each puts a
+  notice in the owner's inbox (source `settings-change`, which web push carries) naming
+  the device that did it, so the owner can sign it out and undo the change.
 - Any valid token can sign every other device out, the owner's included. That
   holder could already drive the whole agent; the owner gets back in with `/login`
   or a new operator link and signs out everywhere again.

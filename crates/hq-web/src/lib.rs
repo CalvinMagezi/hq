@@ -159,6 +159,34 @@ impl WsState {
         }
     }
 
+    /// Tells the owner a sign-in changed who controls HQ or what it pays with (a chat app's bot
+    /// or owner, a model provider's key), naming the device that did it. A stolen device token
+    /// can make these changes; the notice is how the owner hears of them.
+    pub(crate) fn notify_owner_of_change(
+        &self,
+        credential: Option<&auth::WebCredential>,
+        title: &str,
+        what: &str,
+    ) {
+        let who = match credential {
+            Some(auth::WebCredential::Device(id)) => {
+                hq_db::web_auth::list(&self.db, chrono::Utc::now().timestamp())
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|d| &d.id == id))
+                    .map(|d| format!("the device \"{}\"", d.label))
+                    .unwrap_or_else(|| "a signed-in device".to_string())
+            }
+            Some(auth::WebCredential::Configured) => "the original login link".to_string(),
+            None => "this server".to_string(),
+        };
+        let body = format!(
+            "{what} This was done from {who} at {} UTC. If it was not you, sign that device out \
+             in Settings, Devices (or sign out everywhere) and undo the change.",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M")
+        );
+        self.notify_owner(SETTINGS_CHANGE_SOURCE, title, &body);
+    }
+
     /// The edition this server runs as. Lite is decided by the config the server was started
     /// with; a server with no readable config is the full profile.
     pub fn profile(&self) -> hq_core::config::Profile {
@@ -260,6 +288,9 @@ pub(crate) const CHANGE_NOTES: &str = "notes";
 pub(crate) const CHANGE_HELPERS: &str = "helpers";
 pub(crate) const CHANGE_BUDGET: &str = "budget";
 pub(crate) const CHANGE_SETTINGS: &str = "settings";
+
+/// Inbox source of the notices [`WsState::notify_owner_of_change`] puts there.
+pub(crate) const SETTINGS_CHANGE_SOURCE: &str = "settings-change";
 
 /// Create the web router — vault-focused endpoints only.
 pub fn create_router(state: Arc<WsState>) -> Router {
@@ -886,6 +917,36 @@ mod web_auth_router_tests {
         );
         let public = body_json(&app, mcp(true)).await;
         assert_eq!(public["error"]["message"], "Unauthorized", "{public}");
+    }
+
+    /// A change a stolen sign-in could make lands in the owner's inbox naming the device.
+    #[test]
+    fn a_settings_change_notice_names_the_device_that_made_it() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let state = WsState::new(vault.path().to_path_buf(), None);
+        let minted = hq_db::web_auth::mint(&state.db, "Work laptop", 0, None).unwrap();
+        let device = auth::WebCredential::Device(minted.id);
+        state.notify_owner_of_change(Some(&device), "A key was changed", "HQ uses a new key.");
+        state.notify_owner_of_change(
+            Some(&auth::WebCredential::Configured),
+            "A bot was connected",
+            "HQ answers as a bot.",
+        );
+        let items =
+            hq_db::value_items::list_by_state(&state.db, hq_core::types::ValueState::Pending)
+                .unwrap();
+        let body = |title: &str| {
+            items
+                .iter()
+                .find(|i| i.title == title && i.source_task == SETTINGS_CHANGE_SOURCE)
+                .map(|i| i.body.clone())
+                .unwrap()
+        };
+        let key = body("A key was changed");
+        assert!(key.starts_with("HQ uses a new key."), "{key}");
+        assert!(key.contains("\"Work laptop\""), "{key}");
+        assert!(key.contains("sign that device out"), "{key}");
+        assert!(body("A bot was connected").contains("the original login link"));
     }
 
     /// The guard sits inside CORS and in front of every /api route, but never

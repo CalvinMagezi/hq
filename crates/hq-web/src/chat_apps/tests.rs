@@ -366,3 +366,16 @@ async fn every_write_needs_a_web_token() {
         .unwrap();
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
 }
+
+#[test]
+fn a_pairing_code_tells_the_owner_and_says_when_an_owner_was_removed() {
+    let (title, body) = pair_notice(Platform::Telegram, true);
+    assert!(title.contains("unpaired"), "{title}");
+    assert!(
+        body.contains("removed") && body.contains("Telegram"),
+        "{body}"
+    );
+    let (title, body) = pair_notice(Platform::Discord, false);
+    assert!(title.contains("Discord"), "{title}");
+    assert!(body.contains("becomes HQ's owner"), "{body}");
+}
