@@ -99,6 +99,28 @@ detect_platform() {
 detect_platform
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
+
+# This script and the root updater (`hq update`) run $BIN as root, so it must be a plain file in a
+# folder only root can change. `scripts/install-hq.sh --link` (a laptop's setup) makes it a link
+# to a file the user owns, which root must never run.
+check_root_binary() {
+    local dir owner mode
+    dir="$(dirname "$BIN")"
+    if [ -d "$dir" ]; then
+        owner="$(stat -c %u "$dir")"
+        mode="$(stat -c %a "$dir")"
+        [ "$owner" = 0 ] && [ $((8#$mode & 8#022)) -eq 0 ] \
+            || die "$dir must belong to root and not be writable by group or others (it is uid $owner, mode $mode)"
+    fi
+    [ -e "$BIN" ] || [ -L "$BIN" ] || return 0
+    [ ! -L "$BIN" ] || die "$BIN is a symbolic link (to $(readlink "$BIN")), and root would run whatever it points at. Remove it (this script then installs a root-owned copy) and re-run"
+    [ -f "$BIN" ] || die "$BIN is not a regular file"
+    owner="$(stat -c %u "$BIN")"
+    mode="$(stat -c %a "$BIN")"
+    [ "$owner" = 0 ] || die "$BIN belongs to uid $owner, not root, and root would run it. Run chown root:root $BIN (or remove it) and re-run"
+    [ $((8#$mode & 8#022)) -eq 0 ] || die "$BIN can be written by group or others (mode $mode). Run chmod 755 $BIN and re-run"
+}
+check_root_binary
 [ -n "$REPO" ] && [ -n "$PUBKEY_FILE" ] || usage
 printf '%s' "$REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || die "--repo must look like <owner>/<repo>"
 printf '%s' "$CHANNEL" | grep -Eq '^[A-Za-z0-9_.-]+$' || die "--channel must be a plain name"

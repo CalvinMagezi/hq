@@ -178,7 +178,12 @@ The `hq` service user runs LLM-driven tools, so it is treated as hostile to the
 updater. Everything root swaps lives under root-owned directories: the binary in
 `/usr/local/bin`, state and backups in `/var/lib/hq-update`, and the web tree in
 `/usr/local/share/hq/web/dist` (the installer points `hq.service` at it with a
-drop-in setting `HQ_WEB_STATIC_DIR`). Root never opens or writes a
+drop-in setting `HQ_WEB_STATIC_DIR`). Root never runs a binary another user can
+change: `hq-updater`, `deploy/install.sh` and `hq update` itself (when run as root)
+refuse a `bin_path`, or a running `hq`, that is a symbolic link, not owned by root,
+writable by group or others, or in a folder that is. `scripts/install-hq.sh --link`
+(a laptop's setup) makes `/usr/local/bin/hq` such a link, so a host set up that way
+is refused until the link is replaced with a root-owned copy. Root never opens or writes a
 service-owned path: the vault database is snapshotted, counted and restored by
 `hq update-db`, which the updater starts as the `hq` user (`setpriv`/`runuser`,
 no new privileges, cleared environment, and `--setsid --bounding-set=-all

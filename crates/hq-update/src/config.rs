@@ -284,6 +284,46 @@ pub fn is_trusted_file(path: &Path) -> bool {
     owner_ok && meta.mode() & 0o022 == 0 && meta.is_file()
 }
 
+/// Why a process running as `trusted_uid` (root, in production) must not run, back up or swap the
+/// binary at `path`, if it must not: a link (`install-hq.sh --link` points `/usr/local/bin/hq` at
+/// a file in a user's home), anything but a plain file, a file or folder another user owns or that
+/// group or others can write. A missing file is fine: a fresh install has none yet.
+pub fn unsafe_binary_for(path: &Path, trusted_uid: u32) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let shown = path.display();
+    let loose = |m: &std::fs::Metadata| m.uid() != trusted_uid || m.mode() & 0o022 != 0;
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Some(format!("cannot inspect {shown}: {e}")),
+        Ok(m) if m.file_type().is_symlink() => {
+            return Some(format!(
+                "{shown} is a symbolic link, so root would run whatever it points at; replace it with a root-owned copy"
+            ));
+        }
+        Ok(m) if !m.is_file() => return Some(format!("{shown} is not a regular file")),
+        Ok(m) if loose(&m) => {
+            return Some(format!(
+                "{shown} must belong to root and be writable by nobody else (it is uid {}, mode {:o})",
+                m.uid(),
+                m.mode() & 0o7777
+            ));
+        }
+        Ok(_) => {}
+    }
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty())?;
+    match std::fs::metadata(dir) {
+        Ok(m) if loose(&m) => Some(format!(
+            "{} must belong to root and be writable by nobody else (it is uid {}, mode {:o})",
+            dir.display(),
+            m.uid(),
+            m.mode() & 0o7777
+        )),
+        Ok(_) => None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => Some(format!("cannot inspect {}: {e}", dir.display())),
+    }
+}
+
 /// Resolves the trusted public key text. Order: the configured
 /// `pubkey_path`, then `default_path` when it exists, then the key compiled
 /// into the binary. A key file that is not root-owned and read-only to
@@ -320,6 +360,46 @@ pub fn resolve_public_key(
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    fn me() -> u32 {
+        // SAFETY: geteuid has no preconditions.
+        unsafe { libc::geteuid() }
+    }
+
+    /// Mutation: `unsafe_binary_for` reads `metadata` (following links) instead of
+    /// `symlink_metadata`. The link to a file this user owns then passes.
+    #[test]
+    fn root_never_trusts_a_link_or_a_file_others_can_change() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let bin = dir.path().join("hq");
+        assert_eq!(
+            unsafe_binary_for(&bin, me()),
+            None,
+            "a fresh install has none"
+        );
+        std::fs::write(&bin, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(unsafe_binary_for(&bin, me()), None);
+        // Another owner: the uid this process is not.
+        let why = unsafe_binary_for(&bin, me().wrapping_add(1)).unwrap();
+        assert!(why.contains("must belong to root"), "{why}");
+
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(unsafe_binary_for(&bin, me()).is_some(), "group writable");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        let why = unsafe_binary_for(&bin, me()).unwrap();
+        assert!(why.contains(&dir.path().display().to_string()), "{why}");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let real = dir.path().join("hq-real");
+        std::fs::rename(&bin, &real).unwrap();
+        std::os::unix::fs::symlink(&real, &bin).unwrap();
+        let why = unsafe_binary_for(&bin, me()).unwrap();
+        assert!(why.contains("symbolic link"), "{why}");
+    }
 
     fn no_env(_: &str) -> Option<String> {
         None

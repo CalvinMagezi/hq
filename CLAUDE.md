@@ -225,7 +225,9 @@ sudo ./scripts/install-hq.sh --link   # ONCE per machine, then never sudo again
 `~/bin/hq`. That path is hardcoded in the launchd plist, the MCP configs, and
 three Rust sources (`mcp.rs`, `cursor_mcp_config.rs`, `self_update.rs`), so the
 symlink keeps every one of them working while making the actual write
-unprivileged.
+unprivileged. It is for a developer's own machine only: the root updater and
+`deploy/install.sh` refuse a linked or user-owned `/usr/local/bin/hq`, since root
+would then run a file the user can change.
 
 Do not compare `--version` to check for staleness: it does not bump between
 builds. `--check` compares content hashes, and the installer verifies that the
