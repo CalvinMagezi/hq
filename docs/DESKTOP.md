@@ -228,7 +228,11 @@ The **Desktop release** workflow (`.github/workflows/desktop-release.yml`, run b
 2. **Sign** downloads that bundle and runs only `scripts/desktop/sign-macos.sh` on it, in the
    `desktop-release` environment that holds the Apple secrets. The certificate and the notary key
    never share a job with build code. For the same reason the app is not signed by `tauri build`,
-   which would need the certificate in the build job.
+   which would need the certificate in the build job. The job runs only for `main` or a
+   `desktop-vX.Y.Z` tag, and before it touches a secret it checks the ref again and that the
+   commit is on `main`, so a run dispatched from another branch or a tag on an unmerged commit
+   never reaches the Apple secrets. The environment's own rule (main and `desktop-v*` tags only)
+   is set in the repository settings; see `deploy/runner/RUNBOOK.md`.
 
 What the script does depends on which secrets the environment has:
 

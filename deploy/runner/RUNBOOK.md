@@ -41,18 +41,25 @@ Settings, Environments, `release`:
 - "Prevent self-review" on if there is more than one maintainer. Do not allow administrators to bypass protection rules.
 - Environment secrets `MINISIGN_KEY` and `MINISIGN_PASSWORD` (omit the password only if the key has none).
 
+Settings, Environments, `desktop-release` (the Apple signing and notary secrets, used only by the `sign` job of `desktop-release.yml`):
+- Deployment branches and tags: **Selected branches and tags**, the branch `main` and the tag pattern `desktop-v*`. Nothing else.
+- Required reviewers: recommended, as for `release`. Same self-review and no-bypass settings.
+- Environment secrets `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, optional `APPLE_SIGNING_IDENTITY`, and for notarization `APPLE_API_ISSUER`, `APPLE_API_KEY` and `APPLE_API_KEY_P8` (`docs/DESKTOP.md`).
+- The workflow checks the same thing itself before any secret is used: the `sign` job runs only for `main` or a `desktop-vX.Y.Z` tag, and refuses a commit that is not on `main`. The environment rule is still needed, because a workflow edited on another branch would not carry those checks.
+
 Settings, Rules, Rulesets (target branch `main`, enforcement Active, no bypass list for admins):
 - Require a pull request with at least one approving review, dismiss stale approvals, require review from Code Owners (`.github/CODEOWNERS` lists `.github/`, `scripts/release/`, `release/`, `deploy/runner/`, the scan scripts and configs, every copy of the release key and the code that checks it (`packages/agent-hq/lib/`, `apps/site/public/install.sh` and `install.ps1`, `scripts/check-release-keys.sh`, `scripts/check-site-install-scripts.sh`), and `packages/claude-plugin/`). CI's personal-data job runs `scripts/check-release-keys.sh`, which fails when any embedded minisign key differs from `release/minisign.pub`.
 - Require status checks: the `ci.yml` jobs.
 - Block force pushes and deletions. Require signed commits if all maintainers can sign.
 - A second ruleset (or a path restriction in the first) that blocks changes to `.github/workflows/**` except through the reviewed pull request path above, so a workflow edit cannot land without code-owner approval.
 - Tag ruleset: restrict creating and deleting `v*` and `channel-*` tags to the release workflow's actor.
+- Tag ruleset for `desktop-v*`: only maintainers may create these tags (a bypass list of the maintainer role, nobody else), and nobody may update (move) or delete one. Pushing such a tag starts a signed desktop build, and the environment rule above admits any `desktop-v*` tag, so this ruleset is what keeps that a maintainer's decision.
 
 Account security: two-factor authentication for every account with write or admin access, and fine-grained or no personal access tokens.
 
 ## Workflow notes
 
-The `release` and `promote` workflows refuse any ref but `main`, use `workflow_dispatch` (plus an optional `push` to `main` trigger for `release.yml`, commented out by default), and never use `pull_request*` triggers. `release` and `promote` use separate concurrency groups.
+The `release` and `promote` workflows refuse any ref but `main`, use `workflow_dispatch` (plus an optional `push` to `main` trigger for `release.yml`, commented out by default), and never use `pull_request*` triggers. `release` and `promote` use separate concurrency groups. `desktop-release` signs only from `main` or a `desktop-v*` tag whose commit is on `main`; `windows-lite` signs and attaches only from `main` or after a Release run.
 
 ## Signing key (owner, on your own machine)
 
