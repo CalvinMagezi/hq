@@ -230,6 +230,10 @@ pub struct AgentSession {
     /// Skills loaded or already suggested this session, so each is nudged at most once.
     pub(super) skills_in_play: std::collections::HashSet<String>,
     pub(super) vault_path: Option<std::path::PathBuf>,
+    /// The taint its governed tools share, so the skill review knows whether the session read
+    /// text an outsider could have written. `None` (a session not built by `SessionBuilder`)
+    /// counts as tainted.
+    pub(super) taint: Option<crate::governance::TaintTracker>,
     /// Wall-clock start time; set when the session is created.
     pub(crate) start_time: Instant,
     /// Set to true by relay !cancel command; loop checks this each turn.
@@ -297,6 +301,7 @@ impl AgentSession {
             skill_review_mark: 0,
             skills_in_play: std::collections::HashSet::new(),
             vault_path: None,
+            taint: None,
             start_time: Instant::now(),
             cancel: Arc::new(AtomicBool::new(false)),
             pending_steer: Arc::new(std::sync::Mutex::new(None)),
@@ -337,6 +342,11 @@ impl AgentSession {
 
     pub fn set_telemetry_db(&mut self, db: Arc<hq_db::Database>) {
         self.telemetry_db = Some(db);
+    }
+
+    /// Share the governed tools' taint tracker with the session's own hooks.
+    pub fn set_taint(&mut self, taint: crate::governance::TaintTracker) {
+        self.taint = Some(taint);
     }
 
     pub fn set_vault_path(&mut self, path: std::path::PathBuf) {

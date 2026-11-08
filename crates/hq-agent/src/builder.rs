@@ -597,8 +597,13 @@ impl SessionBuilder {
         let session_id = uuid::Uuid::new_v4().to_string();
         tools.extend(self.skill_tools(&vault_path, shared_db.clone(), &session_id));
         tools.extend(std::mem::take(&mut self.extra_tools));
-        let (governed_registry, preset) =
-            self.govern_tools(tools, &vault_path, &allowed_paths, &session_config, taint);
+        let (governed_registry, preset) = self.govern_tools(
+            tools,
+            &vault_path,
+            &allowed_paths,
+            &session_config,
+            taint.clone(),
+        );
         let tool_count = governed_registry.len();
 
         // Derived here, before the registry moves into `AgentSession::new`.
@@ -637,6 +642,7 @@ impl SessionBuilder {
             session_config.clone(),
         );
         session.session_id = session_id;
+        session.set_taint(taint);
         if self.role == SessionRole::Orchestrator {
             session.set_role_denial(Arc::new(crate::session::role_denial::RoleDenial::new(
                 ORCHESTRATOR_REMOVED_TOOLS,
