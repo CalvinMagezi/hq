@@ -47,11 +47,41 @@ pub(crate) fn service_binary(home: &Path) -> Result<PathBuf> {
     Ok(exe)
 }
 
+/// The service's `PATH`: the system's own directories first, then Homebrew's, then the
+/// user's own. A coding agent under the open profile can write `~/.local/bin` and `~/bin`,
+/// so a `git` planted there must not come before the real one in a process that runs
+/// outside the sandbox. Programs found only there (an agent CLI) are still found.
 fn path_env(home: &Path) -> String {
     format!(
-        "{}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        home.display()
+        "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin:{home}/.local/bin:{home}/bin",
+        home = home.display()
     )
+}
+
+/// HQ's location variables the service must share with the shell that installed it, so the
+/// host protects the vault and config HQ really uses: without them `hq host serve` would
+/// guard the default ones.
+const LOCATION_VARS: &[&str] = &["HQ_VAULT_PATH", "HQ_CONFIG_PATH"];
+
+/// The location variables set (and absolute) in this process, to write into a service.
+fn location_env() -> Vec<(&'static str, String)> {
+    LOCATION_VARS
+        .iter()
+        .filter_map(|name| {
+            let value = std::env::var(name).ok()?;
+            let usable = Path::new(&value).is_absolute() && !value.contains(['\n', '\r', '\0']);
+            usable.then_some((*name, value))
+        })
+        .collect()
+}
+
+/// One systemd `Environment=` line, quoted so spaces, quotes and `%` survive.
+fn systemd_env_line(name: &str, value: &str) -> String {
+    let value = value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('%', "%%");
+    format!("Environment=\"{name}={value}\"\n")
 }
 
 fn xml_escape(text: &str) -> String {
@@ -72,9 +102,24 @@ pub(crate) struct LaunchAgent<'a> {
 
 impl LaunchAgent<'_> {
     pub(crate) fn plist(&self, exe: &Path, home: &Path) -> String {
+        self.plist_with(exe, home, &location_env())
+    }
+
+    /// The plist with `env` added to its environment.
+    pub(crate) fn plist_with(&self, exe: &Path, home: &Path, env: &[(&str, String)]) -> String {
         let program: String = std::iter::once(exe.to_string_lossy().into_owned())
             .chain(self.args.iter().map(|a| (*a).to_string()))
             .map(|a| format!("<string>{}</string>", xml_escape(&a)))
+            .collect();
+        let extra: String = env
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "\n    <key>{}</key><string>{}</string>",
+                    xml_escape(k),
+                    xml_escape(v)
+                )
+            })
             .collect();
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -85,7 +130,7 @@ impl LaunchAgent<'_> {
     {program}
   </array>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>{path}</string>
+    <key>PATH</key><string>{path}</string>{extra}
   </dict>
   <key>WorkingDirectory</key><string>{home}</string>
   <key>RunAtLoad</key><true/>
@@ -158,8 +203,14 @@ pub(crate) fn user_domain() -> Result<String> {
 }
 
 pub(crate) fn systemd_unit(exe: &Path, home: &Path) -> String {
+    systemd_unit_with(exe, home, &location_env())
+}
+
+/// The unit with `env` added to its environment.
+pub(crate) fn systemd_unit_with(exe: &Path, home: &Path, env: &[(&str, String)]) -> String {
+    let extra: String = env.iter().map(|(k, v)| systemd_env_line(k, v)).collect();
     format!(
-        "[Unit]\nDescription=Agent HQ built-in host\n\n[Service]\nExecStart={exe} host serve\nEnvironment=PATH={path}\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n",
+        "[Unit]\nDescription=Agent HQ built-in host\n\n[Service]\nExecStart={exe} host serve\nEnvironment=PATH={path}\n{extra}Restart=on-failure\n\n[Install]\nWantedBy=default.target\n",
         exe = exe.display(),
         path = path_env(home),
     )

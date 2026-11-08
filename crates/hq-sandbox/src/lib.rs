@@ -440,7 +440,7 @@ fn probe() -> Option<Backend> {
         );
         return ok.then_some(Backend::SandboxExec(program));
     }
-    let program = which::which("bwrap").ok()?;
+    let program = trusted_program("bwrap")?;
     let ok = run(
         &program,
         &[
@@ -456,6 +456,67 @@ fn probe() -> Option<Backend> {
         ],
     );
     ok.then_some(Backend::Bwrap(program))
+}
+
+/// Where a program HQ runs outside every sandbox is looked for first. They are
+/// normally owned by root, so an agent running as the user cannot put a copy there.
+const SYSTEM_BIN_DIRS: &[&str] = &["/usr/bin", "/bin", "/usr/local/bin"];
+
+/// The program `name` from a place no agent can write: the first of the system
+/// directories, then of `PATH`, where the file and every directory above it are
+/// owned by root and writable by no one else. Failing that, the first `name` on
+/// `PATH`, with a warning, since a sandboxed agent running as the user could have
+/// put it there. `None` when there is none at all.
+///
+/// A launch service's `PATH` often starts with `~/.local/bin`, which an agent under
+/// the open profile can write; a `git` or `bwrap` planted there would run with the
+/// host's reach, outside the sandbox, every time the host called it.
+pub fn trusted_program(name: &str) -> Option<PathBuf> {
+    let path_dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    if let Some(found) = trusted_in(
+        name,
+        SYSTEM_BIN_DIRS
+            .iter()
+            .map(PathBuf::from)
+            .chain(path_dirs.iter().cloned()),
+    ) {
+        return Some(found);
+    }
+    let found = path_dirs
+        .iter()
+        .map(|d| d.join(name))
+        .find(|p| p.is_file())?;
+    eprintln!(
+        "hq: using {} from PATH; it is not in a directory only root can write, so a sandboxed agent may be able to replace it",
+        found.display()
+    );
+    Some(found)
+}
+
+/// The first `dirs/<name>` that is a root-owned file in root-owned directories.
+fn trusted_in(name: &str, dirs: impl Iterator<Item = PathBuf>) -> Option<PathBuf> {
+    dirs.filter(|d| d.is_absolute())
+        .map(|d| d.join(name))
+        .find_map(|p| root_owned(&p))
+}
+
+/// The real path of `path` when it, and every directory above it, is owned by root
+/// and not writable by group or others.
+#[cfg(unix)]
+fn root_owned(path: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    const SHARED_WRITE: u32 = 0o022;
+    let real = path.canonicalize().ok()?;
+    let safe =
+        |p: &Path| std::fs::metadata(p).is_ok_and(|m| m.uid() == 0 && m.mode() & SHARED_WRITE == 0);
+    (real.is_file() && real.ancestors().all(safe)).then_some(real)
+}
+
+#[cfg(not(unix))]
+fn root_owned(_path: &Path) -> Option<PathBuf> {
+    None
 }
 
 fn run(program: &Path, args: &[&str]) -> bool {

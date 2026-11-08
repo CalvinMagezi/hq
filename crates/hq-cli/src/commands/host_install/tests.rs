@@ -20,7 +20,53 @@ fn the_unit_runs_the_host_and_restarts_it() {
     );
     assert!(unit.contains("ExecStart=/srv/example/.local/bin/hq host serve"));
     assert!(unit.contains("Restart=on-failure"));
-    assert!(unit.contains("/srv/example/.local/bin:"));
+    assert!(unit.contains(":/srv/example/.local/bin:"));
+}
+
+/// An agent can write `~/.local/bin` and `~/bin`; a `git` planted there must not win over
+/// the system's in a service that runs outside the sandbox.
+#[test]
+fn the_services_path_puts_the_users_own_directories_last() {
+    let path = path_env(Path::new("/srv/example"));
+    let dirs: Vec<&str> = path.split(':').collect();
+    let at = |d: &str| dirs.iter().position(|x| *x == d).unwrap();
+    for user in [
+        "/srv/example/.local/bin",
+        "/srv/example/bin",
+        "/opt/homebrew/bin",
+    ] {
+        for system in ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
+            assert!(at(system) < at(user), "{system} before {user}: {path}");
+        }
+    }
+    assert!(at("/usr/local/bin") < at("/srv/example/.local/bin"));
+}
+
+#[test]
+fn the_vault_and_config_the_installer_used_go_into_the_service() {
+    let env = [
+        ("HQ_VAULT_PATH", "/srv/my vault/100%".to_string()),
+        ("HQ_CONFIG_PATH", "/srv/a\"b/config.yaml".to_string()),
+    ];
+    let unit = systemd_unit_with(
+        Path::new("/srv/example/.local/bin/hq"),
+        Path::new("/srv/example"),
+        &env,
+    );
+    assert!(
+        unit.contains("Environment=\"HQ_VAULT_PATH=/srv/my vault/100%%\"\n"),
+        "{unit}"
+    );
+    assert!(
+        unit.contains("Environment=\"HQ_CONFIG_PATH=/srv/a\\\"b/config.yaml\"\n"),
+        "{unit}"
+    );
+    let plist = host_agent(Path::new("/h")).plist_with(Path::new("/h/hq"), Path::new("/h"), &env);
+    assert!(plist.contains("<key>HQ_VAULT_PATH</key><string>/srv/my vault/100%</string>"));
+    assert!(plist.contains("<key>HQ_CONFIG_PATH</key><string>/srv/a\"b/config.yaml</string>"));
+    // Nothing set, nothing written.
+    let bare = systemd_unit_with(Path::new("/h/hq"), Path::new("/h"), &[]);
+    assert!(!bare.contains("HQ_"), "{bare}");
 }
 
 #[test]

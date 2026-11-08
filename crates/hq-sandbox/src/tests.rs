@@ -942,3 +942,35 @@ fn an_open_seatbelt_profile_has_no_blanket_write_denial_but_keeps_every_carve_ou
     s.open_filesystem = false;
     assert!(seatbelt_profile(&s).contains("(deny file-write*)(allow file-write*"));
 }
+
+#[test]
+fn a_program_is_taken_only_from_a_place_only_root_can_write() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    // The shell is root's on every system these tests run on.
+    let sh =
+        trusted_in("sh", ["/bin", "/usr/bin"].iter().map(PathBuf::from)).expect("a root-owned sh");
+    assert!(sh.is_absolute() && sh.is_file());
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().canonicalize().unwrap();
+    let planted = dir.join("git");
+    std::fs::write(&planted, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let as_root = std::fs::metadata(&dir).unwrap().uid() == 0;
+    // A directory anyone can write is never trusted, whoever owns it.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(trusted_in("git", std::iter::once(dir.clone())), None);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Nor a file anyone can write.
+    std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(trusted_in("git", std::iter::once(dir.clone())), None);
+    std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // A directory the user owns is the case that matters: an agent runs as the user.
+    if !as_root {
+        assert_eq!(trusted_in("git", std::iter::once(dir.clone())), None);
+    }
+    // A relative PATH entry names nothing.
+    assert_eq!(
+        trusted_in("sh", std::iter::once(PathBuf::from("bin"))),
+        None
+    );
+}

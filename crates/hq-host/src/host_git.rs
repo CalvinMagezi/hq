@@ -16,8 +16,9 @@
 //! running host git inside the agent's own sandbox, which is not done yet
 //! (docs/AGENT_HOST.md, "Git the host runs").
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 /// Settings that stop git running anything a repository names, whatever the repository says.
 const PINS: &[(&str, &str)] = &[
@@ -42,9 +43,17 @@ const FILTER_KEYS: &[(&str, &str)] = &[
 /// Most filter drivers emptied; a configuration with more is refused.
 const MAX_DRIVERS: usize = 64;
 
+/// The git binary the host runs, resolved once: from a directory only root can write when
+/// there is one, so a `git` an agent planted on the service's `PATH` (such as `~/.local/bin`,
+/// which the open profile can write) is not the one the host runs.
+pub(crate) fn program() -> &'static Path {
+    static GIT: OnceLock<PathBuf> = OnceLock::new();
+    GIT.get_or_init(|| hq_sandbox::trusted_program("git").unwrap_or_else(|| PathBuf::from("git")))
+}
+
 /// The bare command, without the repository's own pins. Every host git call goes through here.
 fn base(dir: &Path) -> Command {
-    let mut cmd = Command::new("git");
+    let mut cmd = Command::new(program());
     cmd.arg("--no-pager").arg("-C").arg(dir);
     for (k, v) in PINS {
         cmd.arg("-c").arg(format!("{k}={v}"));
@@ -128,7 +137,6 @@ mod tests {
     use crate::worktree::{self, Base};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
 
     fn run(dir: &Path, args: &[&str]) -> String {
         let out = Command::new("git")
@@ -299,5 +307,17 @@ mod tests {
         assert_eq!(read("filter.a=b.smudge"), "");
         assert_eq!(read("filter.proc.process"), "");
         assert_eq!(read("filter.evil.required"), "false");
+    }
+
+    /// A `git` early on `PATH` in a directory the user owns is passed over for the system's.
+    #[test]
+    fn host_git_is_the_systems_and_not_the_first_on_path() {
+        let git = program();
+        if Path::new("/usr/bin/git").is_file() {
+            assert!(git.is_absolute(), "{}", git.display());
+            if let Some(home) = std::env::var_os("HOME").filter(|h| h != "/") {
+                assert!(!git.starts_with(home), "{}", git.display());
+            }
+        }
     }
 }
