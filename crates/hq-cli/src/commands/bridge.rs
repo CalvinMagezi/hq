@@ -53,8 +53,8 @@ pub struct NetArgs {
     /// How the two machines find each other besides a direct path: none (the default), default
     /// (n0's public relays, meant for development and testing only), auto (the relay of the edge
     /// this device registered with, else none) or a relay URL
-    #[arg(long, default_value = "none")]
-    relay: String,
+    #[arg(long)]
+    relay: Option<String>,
     /// Where the registered edge's streams are piped when this machine serves: a unix socket path
     /// or a loopback ip:port. By default the connector door (`mcp_connector.tls.door_listen`, else
     /// a private socket under the vault's `_data/connector_door`). `off` does not accept the edge
@@ -81,6 +81,10 @@ pub struct NetArgs {
 }
 
 impl NetArgs {
+    fn relay_or<'a>(&'a self, default: &'a str) -> &'a str {
+        self.relay.as_deref().unwrap_or(default)
+    }
+
     fn role_or(&self, default: Role) -> Role {
         match self.role {
             Some(RoleArg::Machine) => Role::Machine,
@@ -101,6 +105,11 @@ pub enum BridgeAction {
         #[arg(long, default_value_t = hq_bridge::code::DEFAULT_TTL.as_secs(),
               value_parser = clap::value_parser!(u64).range(MIN_TTL_SECS..=MAX_TTL_SECS))]
         ttl: u64,
+        /// Set this computer up to run helpers for the phone, all in one go: turn on the host's
+        /// gate on loopback, run the host and then `hq bridge serve` as login services, name this
+        /// computer after itself and use the phone app's relay unless --relay names another
+        #[arg(long)]
+        setup: bool,
     },
     /// Pair with the machine that shows a link (from its QR code or copied text)
     Join {
@@ -109,6 +118,9 @@ pub enum BridgeAction {
         link: Option<String>,
         #[command(flatten)]
         net: NetArgs,
+        /// Set this computer up to run helpers, as `hq bridge pair --setup` does
+        #[arg(long)]
+        setup: bool,
     },
     /// Register this device with an `hq edge`: scan or paste the link its `hq edge invite` shows.
     /// The person at the edge types the six digits this machine shows. Afterwards the edge can
@@ -393,7 +405,7 @@ async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) ->
     } else {
         net.bind.clone()
     };
-    let relay = relay_mode(&resolve_relay(&net.relay, &db)?)?;
+    let relay = relay_mode(&resolve_relay(net.relay_or("none"), &db)?)?;
     let door = if serve { edge_door(net)? } else { None };
     let config = HqConfig::load().ok();
     let services = if serve {
@@ -427,8 +439,27 @@ async fn start(net: &NetArgs, db: Database, serve: bool, setup: Option<Role>) ->
 pub async fn run(config: &HqConfig, action: BridgeAction) -> Result<()> {
     let db = Database::open(&config.db_path())?;
     match action {
-        BridgeAction::Pair { net, ttl } => pair(&net, db, Duration::from_secs(ttl)).await,
-        BridgeAction::Join { link, net } => join(&net, db, &read_link(link)?).await,
+        BridgeAction::Pair { net, ttl, setup } => {
+            let ttl = Duration::from_secs(ttl);
+            if !setup {
+                return pair(&net, db, ttl).await.map(|_| ());
+            }
+            let net = setup_net(&net)?;
+            if pair(&net, db, ttl).await? {
+                super::bridge_setup::finish(net.relay_or(super::bridge_setup::SETUP_RELAY));
+            }
+            Ok(())
+        }
+        BridgeAction::Join { link, net, setup } => {
+            let link = read_link(link)?;
+            if !setup {
+                return join(&net, db, &link).await;
+            }
+            let net = setup_net(&net)?;
+            join(&net, db, &link).await?;
+            super::bridge_setup::finish(net.relay_or(super::bridge_setup::SETUP_RELAY));
+            Ok(())
+        }
         BridgeAction::Register { link, replace, net } => {
             register(&net, db, &read_link(link)?, replace).await
         }
@@ -460,7 +491,24 @@ pub(crate) async fn typed_digits_match(expected: &str) -> bool {
     .unwrap_or(false)
 }
 
-async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
+/// `--setup`: a machine only. Prepares this computer, and names the relay and the computer so the
+/// service written after pairing uses the same ones.
+fn setup_net(net: &NetArgs) -> Result<NetArgs> {
+    if net.role == Some(RoleArg::Hub) {
+        bail!("--setup sets up a computer that runs helpers; it cannot be used with --as hub");
+    }
+    super::bridge_setup::prepare()?;
+    let mut net = net.clone();
+    net.relay
+        .get_or_insert_with(|| super::bridge_setup::SETUP_RELAY.to_string());
+    if net.name.is_none() {
+        net.name = super::bridge_setup::computer_name();
+    }
+    Ok(net)
+}
+
+/// Shows a ticket and pairs one device. True when a device was paired.
+async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<bool> {
     let role = net.role_or(Role::Machine);
     let bridge = start(net, db, false, Some(role)).await?;
     let mut open = bridge
@@ -487,7 +535,7 @@ async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
     let Some(request) = request else {
         println!("No device paired: the ticket ended.");
         bridge.shutdown().await;
-        return Ok(());
+        return Ok(false);
     };
     println!(
         "\"{}\" ({}) wants to pair.",
@@ -507,11 +555,12 @@ async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
         _ = tokio::signal::ctrl_c() => {}
     }
     let joiner = request.joiner.to_string();
-    if accept && peers::is_paired(bridge.db(), &joiner).unwrap_or(false) {
+    let paired = accept && peers::is_paired(bridge.db(), &joiner).unwrap_or(false);
+    if paired {
         after_pairing(&bridge, &joiner, role).await;
     }
     bridge.shutdown().await;
-    Ok(())
+    Ok(paired)
 }
 
 /// Setup right after a pairing: a machine runs it, a hub waits for the machine to. A failure
@@ -844,7 +893,7 @@ async fn share_offer(share: &hq_core::config::ShareModel) -> Result<hq_bridge::s
 }
 
 async fn run_control(net: &NetArgs, db: Database) -> Result<()> {
-    let relay = resolve_relay(&net.relay, &db)?;
+    let relay = resolve_relay(net.relay_or("none"), &db)?;
     // The phone app's helper: a hub unless told otherwise.
     let role = net.role_or(Role::Hub);
     let bridge = start(net, db, true, Some(role)).await?;
@@ -945,7 +994,7 @@ mod tests {
 
     fn net(relay: &str, edge_door: Option<&str>) -> NetArgs {
         NetArgs {
-            relay: relay.into(),
+            relay: Some(relay.into()),
             edge_door: edge_door.map(Into::into),
             bind: Vec::new(),
             key: None,

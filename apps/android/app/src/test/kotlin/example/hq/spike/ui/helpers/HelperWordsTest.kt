@@ -314,6 +314,17 @@ class HelperWordsTest {
         assertEquals("HQ cannot reach your laptop right now.", HelperWords.noComputer(w, listOf(phone, laptop)))
     }
 
+    @Test fun theSheetWalksThroughPairingOnlyWhenNoComputerIsPaired() {
+        val phone = HqClient.HelperHost("local", reachable = false, error = null)
+        val laptop = HqClient.HelperHost("laptop", reachable = false, error = "connection refused")
+        assertTrue(HelperWords.needsComputer(listOf(phone)))
+        assertFalse(HelperWords.needsComputer(listOf(phone, laptop)))
+        assertFalse(HelperWords.needsComputer(listOf(phone.copy(reachable = true))))
+        assertFalse(HelperWords.needsComputer(emptyList()))
+        assertFalse(HelperWords.needsComputer(null))
+        assertTrue(HelperWords.PAIR_COMMAND.endsWith("--pair"))
+    }
+
     @Test fun aRowWithNoLastSeenTimeUsesWhenItStarted() {
         val old = row(status = "stopped", agent = "idle", seen = "", created = "2026-10-19 10:00:00")
         val c = HelperWords.card(w, old, null, now)

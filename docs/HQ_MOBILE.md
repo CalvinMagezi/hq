@@ -156,8 +156,11 @@ alone gets Anthropic's. Nothing is written back, and a model the owner picked is
 "Your keys" shows such a key as set outside the app. The `relay` alias also has a paid OpenRouter route
 behind its free one, so a host whose only key is OpenRouter's still answers when the free model does not.
 
-**Helpers.** Claude, Codex and the other helpers run on a computer, never on the phone. Pair one first
-([JOIN_A_MACHINE.md](JOIN_A_MACHINE.md)); until then the start sheet says so instead of offering the phone.
+**Helpers.** Claude, Codex and the other helpers run on a computer, never on the phone. With no
+computer paired, the start sheet shows the one line to run on the computer (Copy, or "Send to my
+computer" through the share sheet) and a **Scan the code** button that opens the pairing scanner; the
+sheet asks HQ again when the owner comes back to it. See "One command, for the phone app" in
+[JOIN_A_MACHINE.md](JOIN_A_MACHINE.md).
 
 ## The bridge on the phone
 
