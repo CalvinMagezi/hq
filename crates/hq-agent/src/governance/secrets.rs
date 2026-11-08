@@ -153,7 +153,8 @@ fn is_always_secret_location(path: &Path) -> bool {
 }
 
 /// Backups of the HQ config (`config.yaml.bak-*`) and `*.env` files next to
-/// it hold the same keys; on the VPS these are `/opt/hq/*.env`.
+/// it hold the same keys. A server installed with `deploy/install.sh` keeps its env files in
+/// root-only `/etc/hq` instead; older installs still have them beside `/opt/hq/config.yaml`.
 fn is_hq_config_sibling(path: &Path) -> bool {
     let config = hq_core::config::HqConfig::config_read_path();
     let (Some(config_dir), Some(config_name)) = (config.parent(), config.file_name()) else {
