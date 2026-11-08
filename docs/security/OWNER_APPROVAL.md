@@ -16,9 +16,13 @@ tool with exactly those arguments in their inbox (web app, web push, phone app).
 | Daemon tasks, `/watch` firings, web chat Drive and follow-up turns, task verification | No |
 | Coding agents already running in the host | No. Starting one asks (below); after that its dialogs follow its command policy (`docs/AGENT_SESSIONS.md`) |
 
-A session with no approval store (`owner_approval: None` in `NativeHqHooks`) never asks: its calls
-run as they would with `governance.ask_owner: false`. That is why the turns in the "No" rows are
-limited before they start instead. A watch can only be set by the owner: `/watch` and `resume` are
+A session with no approval store (`owner_approval: None` in `NativeHqHooks`) never asks: until it
+reads outside text its calls run as they would with `governance.ask_owner: false`. That is why the
+turns in the "No" rows are limited before they start instead. Once such a session has read outside
+text (it is tainted, `PROMPT_INJECTION.md`) it never starts, briefs or types into a coding agent,
+and an unattended one (`/watch` firings, Drive and follow-up turns, marked
+`NativeHqHooks::unattended`) refuses every call that would ask in a chat, leaving an item in the
+owner's inbox saying what it left for them. A watch can only be set by the owner: `/watch` and `resume` are
 refused for a Telegram guest and in the Discord family channel and its threads, `watch_create` is
 denied to guests and asks the owner in a chat. Before every firing and every sub-agent follow-up
 turn the relay checks again that the chat is the owner's, and stops a watch (or hands the
@@ -38,12 +42,19 @@ off everywhere.
 - HQ itself: `config_manage` (except `get`), `self_update_install`, `self_update_rollback`, `skill_manage`, `slash_command_manage`, `task_delete`
 - scheduling an unattended turn: `watch_create`. A watch firing runs later with the owner's tools
   and nobody to ask, so the model (or text it read) setting one up is asked about once, here
-- other machines and agents: `host_add`, `host_send`, `agent_send_message`, and starting a coding agent (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`), which is as strong as `bash`. Steering an agent already started (`harness_session_send`, `harness_session_answer`) does not ask
+- other machines and agents: `host_add`, `host_send`, `agent_send_message`, and starting a coding agent (`harness_session_spawn`, `harness_session_handoff`, `agent_delegate`), which is as strong as `bash`. Steering an agent already started (`harness_session_send`, `harness_session_answer`) does not ask in a clean session; see below for a tainted one
 - exports to a path: `convert_from_markdown`, `vault_export` and `vault_export_pdf` when given `output`
 - the owner's other accounts: `google_workspace` and every remote MCP server (`remote_mcp:`)
 
 Reads never ask, and neither do notes and tasks, which the owner can undo from the vault and the
-task history. This list is narrower than the claude.ai connector's (`CONNECTOR_CONFIRM_TOOLS` in
+task history.
+
+Once the session has read outside text, a few more calls ask, in every permission mode but bypass
+(`tainted_reason` in `crates/hq-agent/src/governance/tainted_calls.rs`): `harness_session_send`,
+`web_fetch` of a host the owner did not name in this chat or of an address carrying more than 200
+bytes of path and query, and `web_search` with a query over 150 characters. A tainted turn may type
+into or answer only a coding agent its own web chat watches. The reasoning is in
+`PROMPT_INJECTION.md`, rules 4 and 5. This list is narrower than the claude.ai connector's (`CONNECTOR_CONFIRM_TOOLS` in
 `crates/hq-mcp/src/gateway.rs`), which also guards reads because its caller is remote.
 
 ## How an approval is bound

@@ -597,6 +597,7 @@ impl HqTool for HarnessSessionSendTool {
         let id = arg_str(&args, "session_id");
         super::spawned_may_target(&args, &id)?;
         super::connector_may_drive(&db, &args, &id)?;
+        super::untrusted_may_target(&db, &args, self.chat.as_ref(), &id)?;
         let text = arg_str(&args, "text");
         let keys = arg_str_list(&args, "keys");
         if text.is_empty() && keys.is_empty() {
@@ -690,6 +691,7 @@ impl HqTool for HarnessSessionAnswerTool {
         let id = arg_str(&args, "session_id");
         super::spawned_may_target(&args, &id)?;
         super::connector_may_drive(&db, &args, &id)?;
+        super::untrusted_may_target(&db, &args, self.chat.as_ref(), &id)?;
         let seq = args.get("seq").and_then(Value::as_u64).ok_or_else(|| {
             anyhow::anyhow!("pass `seq`, the dialog's number from harness_session_pending")
         })?;

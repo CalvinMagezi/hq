@@ -183,6 +183,34 @@ pub fn spawned_may_target(args: &Value, target: &str) -> Result<()> {
     }
 }
 
+/// A turn that has read outside text (governance set [`UNTRUSTED_TURN_ARG`]) may type into or
+/// answer only a session its own web chat watches: one it started there, or one the owner
+/// brought into it. Never a session another chat, a relay or an MCP client runs.
+pub fn untrusted_may_target(
+    db: &Arc<Database>,
+    args: &Value,
+    chat: Option<&WatchingChat>,
+    target: &str,
+) -> Result<()> {
+    if args.get(UNTRUSTED_TURN_ARG).and_then(Value::as_bool) != Some(true) {
+        return Ok(());
+    }
+    let owned = match chat {
+        Some(chat) => db
+            .with_conn(|c| registry::get(c, target))?
+            .is_some_and(|r| r.owner_thread.as_deref() == Some(chat.thread.as_str())),
+        None => false,
+    };
+    if owned {
+        return Ok(());
+    }
+    bail!(
+        "this turn has read content from outside, so it may type into only a session its own \
+         chat started or watches; {target} is not one of them. Tell the owner what you wanted \
+         to send so they can do it."
+    )
+}
+
 /// What a driver turn is about to type: text prompts and key presses are budgeted separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendKind {

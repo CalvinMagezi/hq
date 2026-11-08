@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 use super::injection::{injection_denial, without_default_drive};
 use super::paths::{PATH_TOOLS, path_args_for_tool, path_values};
 use super::taint::{TaintTracker, is_untrusted_source};
+use super::tainted_calls::{tainted_reason, unasked_denial};
 use super::{DenialNotifier, DenialTracker, RepeatCallTracker};
 use crate::coding::text_result;
 use crate::tools::AgentTool;
@@ -287,6 +288,9 @@ impl GovernedTool {
             self.notify_denial(&denial);
             return Ok(text_result(denial));
         }
+        if let Some(denial) = self.unasked_denial(&args) {
+            return Ok(text_result(denial));
+        }
         debug!(
             tool = tool_name,
             "BypassPermissions — skipping permission checks"
@@ -334,14 +338,36 @@ impl GovernedTool {
         None
     }
 
-    /// In `PermissionMode::Default`, a call that needs the owner runs only once they approve
-    /// exactly it. `Some` carries what the model gets instead.
-    async fn owner_decision(&self, args: &Value) -> Option<String> {
-        let approval = self.owner_approval.as_ref()?;
+    fn needs_owner(&self, args: &Value) -> bool {
+        !self.inner.is_read_only()
+            && super::needs_owner(self.inner.name(), self.inner.category(), args)
+    }
+
+    /// In a tainted session with no approval store, what may not run because nobody can be
+    /// asked; counted, and put in the owner's inbox as what was left for them.
+    fn unasked_denial(&self, args: &Value) -> Option<String> {
+        if self.owner_approval.is_some() {
+            return None;
+        }
         let tool_name = self.inner.name();
-        let asks = matches!(self.permission_mode, PermissionMode::Default)
-            && !self.inner.is_read_only()
-            && super::needs_owner(tool_name, self.inner.category(), args);
+        let denial = unasked_denial(tool_name, args, &self.taint, self.needs_owner(args))?;
+        self.record_denial("denial threshold exceeded under the injection policy");
+        warn!(tool = tool_name, denial = %denial, "tainted session with nobody to ask");
+        self.notify_denial(&denial);
+        Some(denial)
+    }
+
+    /// In `PermissionMode::Default`, a call that needs the owner runs only once they approve
+    /// exactly it; so does, in any mode but bypass, a call a tainted session needs the owner for
+    /// (`tainted_reason`). `Some` carries what the model gets instead.
+    async fn owner_decision(&self, args: &Value) -> Option<String> {
+        let Some(approval) = self.owner_approval.as_ref() else {
+            return self.unasked_denial(args);
+        };
+        let tool_name = self.inner.name();
+        let asks = (matches!(self.permission_mode, PermissionMode::Default)
+            && self.needs_owner(args))
+            || tainted_reason(tool_name, args, &self.taint).is_some();
         if !asks {
             return None;
         }

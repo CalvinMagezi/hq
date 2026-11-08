@@ -251,6 +251,10 @@ pub struct SessionBuilder {
     tool_deny_prefixes: Vec<String>,
     /// Why the session counts as having read untrusted text before its first tool call.
     untrusted_input: Option<String>,
+    /// Nobody is there to approve a call; see [`Self::unattended`].
+    unattended: bool,
+    /// Text the owner wrote themselves; see [`Self::owner_words`].
+    owner_words: Vec<String>,
     /// A declared backend (or its model) the session's own turns run on, instead of the chain.
     pinned_model: Option<String>,
     /// Set once the session is pinned: its children then run on its provider, never on the
@@ -293,6 +297,8 @@ impl SessionBuilder {
             session_profile: SessionProfile::Standard,
             tool_deny_prefixes: Vec::new(),
             untrusted_input: None,
+            unattended: false,
+            owner_words: Vec::new(),
             pinned_model: None,
             pinned: false,
             role: SessionRole::default(),
@@ -494,6 +500,20 @@ impl SessionBuilder {
         self
     }
 
+    /// Mark a turn nobody is there to approve (a watch firing, a turn the web driver or a
+    /// follow-up started). Once it reads outside text, it runs nothing that needs the owner.
+    pub fn unattended(mut self, unattended: bool) -> Self {
+        self.unattended = unattended;
+        self
+    }
+
+    /// Text the owner wrote themselves (their messages, a watch they created). Hosts named in
+    /// it stay reachable from `web_fetch` after the session reads outside text.
+    pub fn owner_words(mut self, words: impl IntoIterator<Item = String>) -> Self {
+        self.owner_words.extend(words);
+        self
+    }
+
     pub fn session_profile(mut self, profile: SessionProfile) -> Self {
         self.session_profile = profile;
         self
@@ -583,6 +603,12 @@ impl SessionBuilder {
         let taint = crate::governance::TaintTracker::new();
         if let Some(source) = &self.untrusted_input {
             taint.mark(source);
+        }
+        if self.unattended {
+            taint.set_unattended();
+        }
+        for words in &self.owner_words {
+            taint.note_owner_words(words);
         }
         tools.extend(self.subagent_tools(
             &backends.provider,

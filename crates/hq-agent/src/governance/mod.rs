@@ -37,6 +37,7 @@ mod owner_approval;
 mod paths;
 pub(crate) mod secrets;
 mod taint;
+mod tainted_calls;
 mod trackers;
 
 use governed_tool::GovernedTool;

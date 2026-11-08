@@ -30,6 +30,7 @@ async-stream = { workspace = true }
 which = { workspace = true }
 libc = "0.2"
 tokio-stream = { workspace = true }
+url = { workspace = true }
 urlencoding = "2"
 tiktoken-rs = { workspace = true }
 lru = { workspace = true }
