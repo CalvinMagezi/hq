@@ -668,6 +668,47 @@ pub async fn probe_health(port: u16) -> bool {
     )
 }
 
+/// The most of a hello answer read when checking the server: far more than HQ sends.
+const PROOF_READ_MAX: usize = 64 * 1024;
+const PROOF_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Whether the server at `upstream` proved just now that it holds `token`, without the token
+/// being sent: a fresh nonce to `GET /api/hello?proof=`, answered with the HMAC only the token's
+/// holder can make (`hq_core::server_proof`, docs/security/WEB_AUTH.md). Any program can listen
+/// on the loopback port while HQ is not, so a sign-in goes only to an upstream that passes this.
+pub async fn proves_hq(upstream: std::net::SocketAddr, token: &str) -> bool {
+    let nonce = hq_core::server_proof::new_nonce();
+    let attempt = async {
+        let mut stream = tokio::net::TcpStream::connect(upstream).await.ok()?;
+        let request = format!(
+            "GET /api/hello?{}={nonce} HTTP/1.0\r\nHost: {upstream}\r\nConnection: close\r\n\r\n",
+            hq_core::server_proof::PARAM
+        );
+        stream.write_all(request.as_bytes()).await.ok()?;
+        let mut answer = Vec::new();
+        (&mut stream)
+            .take(PROOF_READ_MAX as u64)
+            .read_to_end(&mut answer)
+            .await
+            .ok()?;
+        let split = answer.windows(4).position(|w| w == b"\r\n\r\n")?;
+        let head = std::str::from_utf8(&answer[..split]).ok()?;
+        if head.split_whitespace().nth(1)? != "200" {
+            return None;
+        }
+        let body: serde_json::Value = serde_json::from_slice(&answer[split + 4..]).ok()?;
+        let proof = body
+            .get(hq_core::server_proof::PARAM)?
+            .as_str()?
+            .to_string();
+        Some(hq_core::server_proof::verify(token, &nonce, &proof))
+    };
+    matches!(
+        tokio::time::timeout(PROOF_TIMEOUT, attempt).await,
+        Ok(Some(true))
+    )
+}
+
 /// Where the app looks for `hq`, in order: next to the app, `~/bin`, `/usr/local/bin`, then
 /// every directory on `PATH`.
 pub fn search_path(
@@ -808,6 +849,47 @@ fn is_runnable(path: &Path) -> bool {
     }
 }
 
+/// Answers `GET /api/hello?proof=` the way a server holding `token` does, or with `body`
+/// when given (a stranger on the port); returns its address.
+#[cfg(test)]
+pub(crate) async fn tests_support_fake_hello(
+    token: &'static str,
+    body: Option<&'static str>,
+) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut s, _)) = listener.accept().await {
+            let mut buf = [0u8; 1024];
+            let n = s.read(&mut buf).await.unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let nonce = request
+                .split_whitespace()
+                .nth(1)
+                .and_then(|p| p.split_once("proof="))
+                .map(|(_, n)| n.to_string())
+                .unwrap_or_default();
+            let answer = match body {
+                Some(b) => b.to_string(),
+                None => {
+                    let bytes = hq_core::server_proof::decode_nonce(&nonce).unwrap();
+                    serde_json::json!({
+                        "hq_id": "x",
+                        "proof": hq_core::server_proof::answer(token, &bytes),
+                    })
+                    .to_string()
+                }
+            };
+            let _ = s
+                .write_all(format!("HTTP/1.0 200 OK\r\n\r\n{answer}").as_bytes())
+                .await;
+        }
+    });
+    addr
+}
+
 /// A port nothing listens on, for tests in other modules.
 #[cfg(test)]
 pub(crate) fn tests_support_unused_port() -> u16 {
@@ -822,6 +904,26 @@ pub(crate) fn tests_support_unused_port() -> u16 {
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn only_a_server_holding_the_token_proves_it_is_hq() {
+        let token = "example-web-token";
+        assert!(proves_hq(tests_support_fake_hello(token, None).await, token).await);
+        assert!(
+            !proves_hq(tests_support_fake_hello("another-token", None).await, token).await,
+            "a server with another token"
+        );
+        for stranger in [r#"{"hq_id":"x"}"#, r#"{"proof":"AAAA"}"#, "not json"] {
+            assert!(
+                !proves_hq(tests_support_fake_hello(token, Some(stranger)).await, token).await,
+                "{stranger}"
+            );
+        }
+        let nothing: std::net::SocketAddr = format!("127.0.0.1:{}", tests_support_unused_port())
+            .parse()
+            .unwrap();
+        assert!(!proves_hq(nothing, token).await, "nothing listening");
+    }
 
     /// Answers `GET /health` with 200 until dropped, on a port the OS chose.
     struct FakeHealth {
