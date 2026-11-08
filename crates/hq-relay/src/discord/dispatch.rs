@@ -144,6 +144,7 @@ rather than trying to work around it.{harness_rule}\n\n"
         &config,
         "discord",
         &channel_key.to_string(),
+        guest_name.as_deref(),
     );
     run.map(|r| r.text)
 }

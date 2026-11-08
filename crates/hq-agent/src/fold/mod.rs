@@ -106,6 +106,21 @@ pub fn render_block(block: &Fold) -> String {
     out
 }
 
+/// The taint source a turn starts with when one of the thread's active blocks summarizes
+/// untrusted content, so the summary is held to the same policy as the original messages.
+pub const TAINTED_FOLD_SOURCE: &str =
+    "a chat summary of messages from someone other than the owner";
+
+/// [`TAINTED_FOLD_SOURCE`] when any active block of the thread is tainted, otherwise `None`.
+/// A read failure counts as tainted: the policy fails closed.
+pub fn tainted_source(db: &Database, thread_id: &str) -> Option<String> {
+    let tainted = db
+        .with_conn(|conn| thread_folds::active(conn, thread_id))
+        .map(|blocks| blocks.iter().any(|b| b.tainted))
+        .unwrap_or(true);
+    tainted.then(|| TAINTED_FOLD_SOURCE.to_string())
+}
+
 /// The blocks as history messages, oldest first. Callers append their own tail after these.
 pub fn block_messages(blocks: &[Fold]) -> Vec<ChatMessage> {
     blocks
@@ -349,13 +364,22 @@ pub fn is_untrusted(m: &StoredMessage) -> bool {
         .is_some_and(|kind| kind == "mcp")
 }
 
+/// How a fold labels the person writing in a thread the owner drives.
+pub const OWNER_SPEAKER: &str = "owner";
+
+/// How a fold labels the person writing in a guest's thread, such as a family member's channel.
+pub fn guest_speaker(name: &str) -> String {
+    format!("{name} (a guest, not the owner)")
+}
+
 /// The messages as a fold call reads them: one line of ref, role and date, then the text.
-pub fn render_input(messages: &[StoredMessage]) -> String {
+/// `speaker` labels the thread's own user messages.
+pub fn render_input(messages: &[StoredMessage], speaker: &str) -> String {
     let mut out = String::new();
     for m in messages {
         let who = match m.message.role.as_str() {
             "user" if is_untrusted(m) => "someone other than the owner",
-            "user" => "owner",
+            "user" => speaker,
             "assistant" => "HQ",
             other => other,
         };
@@ -395,6 +419,17 @@ pub async fn fold_thread(
     cfg: &ContextFoldConfig,
     summarizer: &dyn Summarizer,
 ) -> Result<Vec<FoldOutcome>> {
+    fold_thread_as(db, thread_id, cfg, summarizer, OWNER_SPEAKER).await
+}
+
+/// [`fold_thread`] for a thread whose user messages come from `speaker` (see [`guest_speaker`]).
+pub async fn fold_thread_as(
+    db: &Database,
+    thread_id: &str,
+    cfg: &ContextFoldConfig,
+    summarizer: &dyn Summarizer,
+    speaker: &str,
+) -> Result<Vec<FoldOutcome>> {
     if !cfg.enabled {
         return Ok(Vec::new());
     }
@@ -412,11 +447,12 @@ pub async fn fold_thread(
             break;
         };
         let range = &tail[..cut];
-        let input = render_input(range);
+        let input = render_input(range, speaker);
         let raw = summarizer.summarize(rules::TIER1_RULES, &input).await?;
         let (raw, mut relations) = split_relations(&raw, range);
         let tainted = range.iter().any(is_untrusted);
-        if tainted {
+        // Only the owner's own words may become edges in the owner's graph.
+        if tainted || speaker != OWNER_SPEAKER {
             relations.clear();
         }
         let first = &range[0].message;
@@ -555,8 +591,9 @@ pub fn needs_fold(db: &Database, thread_id: &str, cfg: &ContextFoldConfig) -> Re
 }
 
 /// Runs [`fold_thread`] in the background with the model from config, logging instead of
-/// failing. Chat surfaces call this after a reply is saved.
-pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
+/// failing. Chat surfaces call this after a reply is saved; `speaker` is [`OWNER_SPEAKER`] or
+/// [`guest_speaker`].
+pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig, speaker: String) {
     if !cfg.enabled {
         return;
     }
@@ -574,7 +611,7 @@ pub fn spawn_fold(db: Database, thread_id: String, cfg: ContextFoldConfig) {
             }
         }
         let summarizer = LlmSummarizer::from_config(&cfg);
-        match fold_thread(&db, &thread_id, &cfg, &summarizer).await {
+        match fold_thread_as(&db, &thread_id, &cfg, &summarizer, &speaker).await {
             Ok(done) if !done.is_empty() => {
                 tracing::info!(thread_id, ?done, "chat history folded");
                 embed_folds(&db, &done).await;

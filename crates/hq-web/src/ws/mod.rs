@@ -779,7 +779,14 @@ impl ChatTurn {
                 .chain(driver_turn.then(|| CONFIG_TOOL.to_string()))
                 .collect(),
             permission_preset: self.ask.as_ref().and_then(ask::AskTurn::permission_preset),
-            untrusted_input: self.ask.as_ref().and_then(ask::AskTurn::untrusted_source),
+            untrusted_input: self
+                .ask
+                .as_ref()
+                .and_then(ask::AskTurn::untrusted_source)
+                .or_else(|| {
+                    let thread = self.tid.as_deref()?;
+                    hq_agent::fold::tainted_source(&self.db, thread)
+                }),
             pinned_model: self.ask.as_ref().and_then(|a| a.model.clone()),
             role: hooks_role,
             owner_approval: (!automated).then(|| self.owner_approval(&config)).flatten(),
@@ -836,7 +843,12 @@ impl ChatTurn {
         // After the reply is saved and the chat freed: fold older history if the thread grew
         // past its tail target. It never holds up this reply.
         if let Some(t) = &self.tid {
-            hq_agent::fold::spawn_fold(self.db.clone(), t.clone(), config.context_fold.clone());
+            hq_agent::fold::spawn_fold(
+                self.db.clone(),
+                t.clone(),
+                config.context_fold.clone(),
+                hq_agent::fold::OWNER_SPEAKER.to_string(),
+            );
         }
     }
 

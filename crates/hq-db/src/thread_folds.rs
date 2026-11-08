@@ -258,6 +258,16 @@ pub fn insert_distilled(conn: &Connection, new: &NewFold<'_>, absorbed: &[String
 }
 
 fn write(conn: &Connection, new: &NewFold<'_>) -> Result<Fold> {
+    // The summary call takes seconds; an edit in that time may have deleted part of the range.
+    let (Some(start), Some(end)) = (
+        position(conn, new.thread_id, new.first_msg_id)?,
+        position(conn, new.thread_id, new.last_msg_id)?,
+    ) else {
+        bail!("a message in the fold range is gone");
+    };
+    if start > end {
+        bail!("the fold range ends before it starts");
+    }
     let fold = Fold {
         id: Uuid::new_v4().to_string(),
         thread_id: new.thread_id.to_string(),
@@ -375,6 +385,16 @@ mod tests {
         assert!(insert(&conn, &new(&t, &ids[2], &ids[5])).is_err());
         assert!(insert(&conn, &new(&t, &ids[3], &ids[5])).is_err());
         assert_eq!(active(&conn, &t).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_fold_over_messages_an_edit_deleted_is_refused() {
+        let (conn, t, ids) = setup();
+        // An edit lands while the summary call runs: messages 3 onward are gone.
+        crate::chat::delete_messages_from(&conn, &t, &ids[3]).unwrap();
+        assert!(insert(&conn, &new(&t, &ids[0], &ids[3])).is_err());
+        assert!(insert(&conn, &new(&t, &ids[2], &ids[0])).is_err());
+        assert!(active(&conn, &t).unwrap().is_empty());
     }
 
     #[test]

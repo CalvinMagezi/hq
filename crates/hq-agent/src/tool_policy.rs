@@ -153,6 +153,10 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
                 "dev_cancel".into(),
                 "native_code".into(),
                 "notify_owner".into(),
+                // The owner's own chats and tool output, across every thread.
+                "session_search".into(),
+                "history_restore".into(),
+                "tool_output_read".into(),
             ],
             allow_tools: vec![],
         }),
@@ -349,6 +353,13 @@ mod tests {
             "a guest never publishes to GitHub"
         );
         assert!(names.contains(&"vault_search".into()));
+    }
+
+    #[test]
+    fn telegram_guest_cannot_read_the_owners_chats() {
+        let profile = default_profile_for_agent("telegram_guest").unwrap();
+        let t = tools(&["session_search", "history_restore", "tool_output_read"]);
+        assert!(filter(t, Preset::Named(profile)).is_empty());
     }
 
     #[test]

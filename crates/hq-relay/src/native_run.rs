@@ -267,12 +267,15 @@ pub(crate) fn fold_blocks(
     }
 }
 
-/// After a relay reply: fold the mirrored thread's older messages in the background.
+/// After a relay reply: fold the mirrored thread's older messages in the background. `guest`
+/// names the person when the chat is not the owner's own, so the summary does not call them the
+/// owner.
 pub(crate) fn fold_after_turn(
     db: Option<&Arc<Database>>,
     config: &HqConfig,
     platform: &str,
     external_id: &str,
+    guest: Option<&str>,
 ) {
     let cfg = relay_fold_config(config);
     let Some(db) = db.filter(|_| cfg.enabled) else {
@@ -281,7 +284,11 @@ pub(crate) fn fold_after_turn(
     let thread =
         db.with_conn(|conn| hq_db::chat::find_platform_thread(conn, platform, external_id));
     if let Ok(Some(thread)) = thread {
-        hq_agent::fold::spawn_fold((**db).clone(), thread, cfg);
+        let speaker = guest.map_or_else(
+            || hq_agent::fold::OWNER_SPEAKER.to_string(),
+            hq_agent::fold::guest_speaker,
+        );
+        hq_agent::fold::spawn_fold((**db).clone(), thread, cfg, speaker);
     }
 }
 

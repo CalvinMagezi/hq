@@ -304,10 +304,20 @@ Not done, on purpose:
   `crates/hq-agent/tests/fold_recall.rs` is the opt-in check
   (`cargo test -p hq-agent --test fold_recall -- --ignored`).
 
+Fixed in review, before the PR:
+
+- A tainted block now taints the web turn that loads it (`fold::tainted_source`), as the
+  original messages would have. Relay threads hold no MCP messages, so they cannot be tainted.
+- A fold whose range an edit deleted while the summary ran is refused
+  (`thread_folds::write` checks both ends still exist).
+- A Telegram guest cannot call `session_search`, `history_restore` or `tool_output_read`.
+
 ## Open questions
 
 - Should a fold of a family member's Discord request ever reach the owner's memory? Folds stay in
-  their own channel's thread; per-turn ingestion is unchanged.
+  their own channel's thread; per-turn ingestion is unchanged. A guest's thread (a family
+  member's Discord channel, a Telegram guest) is summarized with the guest's name, never as the
+  owner, and its relations are never written to the owner's graph.
 - Are the defaults right for cheap models with 32K or 64K windows? Measure, then default them from
   the resolved model's window.
 - A mobile instance with its data saver on still folds: a fold is one small call per eight or so

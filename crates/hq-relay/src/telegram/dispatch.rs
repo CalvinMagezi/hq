@@ -129,6 +129,7 @@ pub(super) async fn dispatch_hq(
         &config,
         "telegram",
         &chat_id.0.to_string(),
+        (caller.role == TelegramRole::Guest).then_some(caller.display_name.as_str()),
     );
 
     let result_text = match run {

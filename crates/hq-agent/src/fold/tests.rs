@@ -107,6 +107,18 @@ fn no_cut_under_the_trigger_and_a_turn_aligned_cut_over_it() {
 }
 
 #[test]
+fn a_guest_thread_is_not_summarized_as_the_owner() {
+    let msgs = [
+        stored("user", "can you book the bus"),
+        stored("assistant", "booked"),
+    ];
+    let guest = render_input(&msgs, &guest_speaker("Sam"));
+    assert!(guest.contains("Sam (a guest, not the owner) ("), "{guest}");
+    assert!(!guest.contains("] owner ("), "{guest}");
+    assert!(render_input(&msgs, OWNER_SPEAKER).contains("] owner ("));
+}
+
+#[test]
 fn a_cut_never_splits_two_owner_messages_from_their_reply() {
     // user, user, assistant repeated: the only boundaries are after each assistant.
     let tail: Vec<_> = (0..12)
