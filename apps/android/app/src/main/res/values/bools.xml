@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Below Android 12 the system only checks that a RecognitionService caller holds the microphone permission, not that it may
+         use the microphone right now, so an app in the background could have listened through HQ. values-v31 turns it on from Android 12. -->
+    <bool name="recognition_service_enabled">false</bool>
+</resources>
