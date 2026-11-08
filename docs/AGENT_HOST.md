@@ -496,6 +496,15 @@ write. Only when no root-owned copy exists does it use the first on `PATH`, with
 The services `hq host install` writes also list `~/.local/bin` and `~/bin` after the system
 directories.
 
+HQ's own git tools (`git_status`, `git_log`, `git_diff`, `git_commit`, `git_pr`) run git the
+same way, since they too run outside any sandbox in repositories an agent may have written.
+Two differences: a diff is always taken with `--no-ext-diff --no-textconv`, and a push
+(`git_pr`) needs a transport, so it keeps every other pin and refuses outright when the
+repository's own configuration names a program a push would run (`core.sshCommand`,
+`core.gitProxy`, `core.askPass`, a credential helper, a remote's receive-pack). A signing
+program set in the repository's configuration falls back to the standard one; one the owner set
+globally is used as it is. `git_commit` therefore no longer runs the repository's hooks.
+
 What is left: filter drivers are read from the configuration just before each command, so an
 agent that adds a new driver in the moment between the two can still have it run once by the
 host. The strict profile closes that, since a strict agent cannot write `.git/config`. Running

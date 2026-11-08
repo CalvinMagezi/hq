@@ -31,6 +31,24 @@ const PINS: &[(&str, &str)] = &[
     ("log.showSignature", "false"),
 ];
 
+/// Signing programs (`commit.gpgSign` runs them) and what each falls back to when the
+/// repository's own configuration names one. A value from the owner's global configuration
+/// (such as a password manager's ssh signer) is left alone.
+const LOCAL_SIGNING_PROGRAMS: &[(&str, &str)] = &[
+    ("gpg.program", "gpg"),
+    ("gpg.ssh.program", "ssh-keygen"),
+    ("gpg.x509.program", "gpgsm"),
+    ("gpg.ssh.defaultkeycommand", ""),
+];
+
+/// The one pin a push cannot keep: it needs a transport. `ext::` stays closed, since it runs
+/// whatever command the URL names.
+const TRANSPORT_PIN: &str = "protocol.allow";
+
+/// Keys in a repository's own configuration that make a push run a program. A push from a
+/// repository that sets one is refused rather than run (see [`for_push`]).
+const PUSH_PROGRAM_KEYS: &str = r"^(core\.sshcommand|core\.gitproxy|core\.askpass|credential\..*|remote\..*\.(receivepack|uploadpack|vcs))$";
+
 /// The keys of every filter driver git could run, per driver, and what each is set to.
 const FILTER_KEYS: &[(&str, &str)] = &[
     ("clean", ""),
@@ -53,10 +71,20 @@ pub(crate) fn program() -> &'static Path {
 
 /// The bare command, without the repository's own pins. Every host git call goes through here.
 fn base(dir: &Path) -> Command {
+    base_with(dir, false)
+}
+
+fn base_with(dir: &Path, transport: bool) -> Command {
     let mut cmd = Command::new(program());
     cmd.arg("--no-pager").arg("-C").arg(dir);
     for (k, v) in PINS {
+        if transport && *k == TRANSPORT_PIN {
+            continue;
+        }
         cmd.arg("-c").arg(format!("{k}={v}"));
+    }
+    if transport {
+        cmd.arg("-c").arg("protocol.ext.allow=never");
     }
     cmd.env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_NO_LAZY_FETCH", "1")
@@ -110,11 +138,80 @@ fn filter_drivers(dir: &Path) -> Option<Vec<String>> {
 /// Git in `dir`, with every repository-named command off. `None` when the repository's filter
 /// drivers cannot be read or are too many to pin, so the caller runs nothing.
 pub(crate) fn command(dir: &Path) -> Option<Command> {
+    pinned(dir, false)
+}
+
+/// [`command`] for HQ's own git tools, which run git in the session's repositories outside any
+/// sandbox, the same exposure the host has.
+pub fn hardened(dir: &Path) -> Option<Command> {
+    pinned(dir, false)
+}
+
+/// [`hardened`] with a transport, for a push. `None` as well when the repository's own
+/// configuration names a program the push would run (an ssh command, a proxy, an askpass or
+/// credential helper, a remote's receive-pack): a global setting the owner made still applies.
+pub fn for_push(dir: &Path) -> Option<Command> {
+    if !repository_keys(dir, PUSH_PROGRAM_KEYS)?.is_empty() {
+        return None;
+    }
+    pinned(dir, true)
+}
+
+/// Keys matching `pattern` that the repository itself sets (its `.git/config` or a worktree's
+/// config, both of which an agent working in it can write), lowercased. Works inside or outside
+/// a repository; `None` when git cannot say.
+fn repository_keys(dir: &Path, pattern: &str) -> Option<Vec<String>> {
+    let out = base(dir)
+        .args([
+            "config",
+            "--show-scope",
+            "--name-only",
+            "--get-regexp",
+            pattern,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    // Exit 1 means no key matched.
+    match out.status.code() {
+        Some(0) | Some(1) => {}
+        _ => return None,
+    }
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|l| l.split_once('\t'))
+            .filter(|(scope, _)| matches!(*scope, "local" | "worktree"))
+            .map(|(_, key)| key.trim().to_ascii_lowercase())
+            .collect(),
+    )
+}
+
+/// The signing-program keys the repository's own configuration sets. `None` when git cannot say.
+fn local_signing_programs(dir: &Path) -> Option<Vec<&'static (&'static str, &'static str)>> {
+    let keys = repository_keys(
+        dir,
+        r"^gpg\.(program|ssh\.program|x509\.program|ssh\.defaultkeycommand)$",
+    )?;
+    Some(
+        LOCAL_SIGNING_PROGRAMS
+            .iter()
+            .filter(|(k, _)| keys.iter().any(|key| key == k))
+            .collect(),
+    )
+}
+
+fn pinned(dir: &Path, transport: bool) -> Option<Command> {
     let drivers = filter_drivers(dir)?;
     if drivers.len() > MAX_DRIVERS {
         return None;
     }
-    let mut cmd = base(dir);
+    let signing = local_signing_programs(dir)?;
+    let mut cmd = base_with(dir, transport);
+    for (key, fallback) in signing {
+        cmd.arg("-c").arg(format!("{key}={fallback}"));
+    }
     // Through the environment rather than `-c`, so a driver name holding `=` is still one key.
     let mut n = 0usize;
     for name in &drivers {
@@ -287,6 +384,92 @@ mod tests {
         assert_eq!(wt.copied, [".env"], "{wt:?}");
         assert_eq!(s.changed, 0, "{s:?}");
         assert!(gone.removed, "{gone:?}");
+    }
+
+    /// HQ's own git tools commit and diff in the session's repository, outside any sandbox: a
+    /// pre-commit hook, a signing program or a diff driver the repository names must not run.
+    #[test]
+    fn hardened_git_commits_and_diffs_without_running_what_the_repository_names() {
+        let (tmp, repo, _root, marker) = hostile();
+        let e = tmp.path().join("evil.sh").display().to_string();
+        fs::copy(&e, repo.join(".git/hooks/pre-commit")).unwrap();
+        fs::copy(&e, tmp.path().join("hooks/pre-commit")).unwrap();
+        for (k, v) in [
+            ("commit.gpgSign", "true".to_string()),
+            ("diff.evil.textconv", e.clone()),
+            ("diff.evil.command", e.clone()),
+        ] {
+            run(&repo, &["config", k, &v]);
+        }
+        fs::write(repo.join(".gitattributes"), "*.txt filter=evil diff=evil\n").unwrap();
+        fs::write(repo.join("a.txt"), "changed\n").unwrap();
+        let _ = fs::remove_file(&marker);
+        let mut all = Vec::new();
+
+        let git = |args: &[&str]| {
+            let out = hardened(&repo)
+                .expect("hardened git")
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let diff = git(&["diff", "--no-ext-diff", "--no-textconv"]);
+        ran(&marker, "diff", &mut all);
+        git(&["add", "-A"]);
+        ran(&marker, "add", &mut all);
+        git(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "x",
+        ]);
+        ran(&marker, "commit", &mut all);
+        assert!(
+            all.is_empty(),
+            "ran repository commands:\n{}",
+            all.join("\n")
+        );
+        assert!(diff.contains("changed"), "{diff}");
+    }
+
+    /// A push needs a transport, so it cannot keep every pin; it refuses a repository whose own
+    /// configuration names a program the push would run instead.
+    #[test]
+    fn a_push_refuses_a_repository_that_names_a_program_and_allows_a_plain_one() {
+        let (_tmp, repo, _root, _marker) = hostile();
+        assert!(
+            for_push(&repo).is_none(),
+            "core.sshCommand is set in this repository"
+        );
+        let plain = tempfile::tempdir().unwrap();
+        run(plain.path(), &["init", "-q", "-b", "main"]);
+        let cmd = for_push(plain.path()).expect("a plain repository may push");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !args.iter().any(|a| a == "protocol.allow=never"),
+            "{args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "protocol.ext.allow=never"),
+            "{args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "core.hooksPath=/dev/null"),
+            "{args:?}"
+        );
     }
 
     #[test]

@@ -33,6 +33,8 @@ mod hooks;
 mod host;
 #[cfg(unix)]
 mod host_git;
+/// Git with every program a repository can name pinned off, for code outside any sandbox.
+pub use host_git::{for_push as hardened_git_for_push, hardened as hardened_git};
 #[cfg(unix)]
 mod keys;
 #[cfg(unix)]
