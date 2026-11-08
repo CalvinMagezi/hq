@@ -8,35 +8,94 @@ use super::{AgentSession, PrecomputedSummary};
 
 pub use hq_core::tokens::count_tokens_char_weighted as estimate_token_count;
 
+/// Every compaction summary starts with this, so later compactions leave it in place.
+const SUMMARY_PREFIX: &str = "[CONTEXT SUMMARY";
+
+/// How many of the newest messages a compaction keeps as they are.
+const KEEP_RECENT: usize = 10;
+
+/// A compaction whose summary failed puts the (tool-pruned) messages back when they are at most
+/// this many tokens, instead of dropping them.
+const RESTORE_ON_FAILURE_TOKENS: usize = 8_000;
+
+/// Characters of a tool call's arguments shown to the summarizer.
+const TOOL_ARGS_CHARS: usize = 300;
+
+fn is_summary(m: &ChatMessage) -> bool {
+    m.role == MessageRole::User && m.content.starts_with(SUMMARY_PREFIX)
+}
+
+/// Where the messages after the leading summaries begin. Earlier summaries are never rewritten:
+/// each compaction summarizes only what came after them, so detail is summarized once.
+fn summaries_end(messages: &[ChatMessage]) -> usize {
+    messages.iter().take_while(|m| is_summary(m)).count()
+}
+
+/// The end of the range to compact, `messages[start..cut]`, keeping about the newest `keep`.
+/// The cut never lands on a tool result, so a call and its results stay together. It moves back
+/// first (keeping more), and forward only when moving back would leave nothing to compact.
+fn compact_cut(messages: &[ChatMessage], start: usize, keep: usize) -> Option<usize> {
+    let len = messages.len();
+    if len <= start + keep {
+        return None;
+    }
+    let ideal = len - keep;
+    let at_result = |i: usize| i < len && messages[i].role == MessageRole::Tool;
+    let mut back = ideal;
+    while back > start && at_result(back) {
+        back -= 1;
+    }
+    if back > start + 1 {
+        return Some(back);
+    }
+    let mut forward = ideal;
+    while forward < len && at_result(forward) {
+        forward += 1;
+    }
+    (forward > start && forward < len).then_some(forward)
+}
+
+/// The messages as the summarizer reads them, tool calls and their arguments included.
+fn render_for_summary(messages: &[ChatMessage]) -> String {
+    let mut out = String::new();
+    for m in messages {
+        let role = format!("{:?}", m.role).to_lowercase();
+        out.push_str(&format!("[{role}] {}\n", m.content));
+        for call in &m.tool_calls {
+            let args = call.arguments.to_string();
+            let args: String = args.chars().take(TOOL_ARGS_CHARS).collect();
+            out.push_str(&format!("  -> called {}({args})\n", call.name));
+        }
+    }
+    out
+}
+
 /// Build a summary-request ChatRequest from a slice of messages.
 fn build_summary_request(model: &str, messages: &[ChatMessage]) -> ChatRequest {
     let turns_count = messages.len();
-    let history = messages
-        .iter()
-        .map(|m| format!("[{}] {}", format!("{:?}", m.role).to_lowercase(), m.content))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let history = render_for_summary(messages);
     let prompt = format!(
-        "You are summarizing a conversation to preserve context after compaction. \
+        "You are summarizing part of a conversation to preserve context after compaction. \
+         Earlier summaries stay in place, so summarize only these messages. \
          Use this exact format:\n\n\
          ## Conversation Summary\n\
          **Turns summarized:** {turns_count}\n\n\
          ### User Goal\n\
          One sentence describing what the user is trying to accomplish.\n\n\
          ### What Was Done\n\
-         - Bullet points of completed actions, decisions made, and key outputs\n\
-         - Include specific file paths, function names, variable names, and config values\n\
-         - Note any errors encountered and how they were resolved\n\n\
+         - Bullet points of completed actions, decisions made (with the reason), and key outputs\n\
+         - Keep exact file paths with line numbers, function names, commands, error text and config values\n\
+         - Note any errors encountered and how they were resolved, and approaches that failed and why\n\n\
          ### Current State\n\
          What is the system/code/task state right now? What was the last thing discussed?\n\n\
          ### Pending / Next Steps\n\
-         - What remains to be done\n\
+         - What remains to be done, including everything the user asked for that is not done yet\n\
          - Any open questions or blockers\n\n\
          ### Key Context\n\
          - Important constraints, preferences, or decisions that must not be forgotten\n\
          - Specific values: model names, ports, paths, credentials references, versions\n\n\
          Keep the summary under 800 tokens. Every token should carry information. \
-         No pleasantries or meta-commentary.\n\n\
+         No pleasantries or meta-commentary. Never copy secrets.\n\n\
          ---\n\n\
          Conversation to summarize:\n\n{history}",
     );
@@ -56,6 +115,17 @@ fn build_summary_request(model: &str, messages: &[ChatMessage]) -> ChatRequest {
     }
 }
 
+fn summary_message(content: String) -> ChatMessage {
+    ChatMessage {
+        image_parts: Vec::new(),
+        role: MessageRole::User,
+        content,
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+        reasoning_content: None,
+    }
+}
+
 impl AgentSession {
     /// Estimate total tokens in the conversation (O(1) via cached per-message counts).
     pub(super) fn estimate_tokens(&self) -> usize {
@@ -64,58 +134,71 @@ impl AgentSession {
             + self.message_tokens.iter().sum::<usize>()
     }
 
+    /// Keeps the full text of messages about to leave live history, when this session knows its
+    /// vault, and returns the note that points at it.
+    fn spill_note(&self, messages: &[ChatMessage]) -> String {
+        let Some(vault) = &self.vault_path else {
+            return String::new();
+        };
+        match hq_tools::spill::write(
+            vault,
+            &self.session_id,
+            "compacted",
+            &render_for_summary(messages),
+        ) {
+            Ok(r) => format!(" Full text kept as {r}; tool_output_read(\"{r}\") returns it."),
+            Err(e) => {
+                debug!(error = %e, "compact: could not spill the compacted messages");
+                String::new()
+            }
+        }
+    }
+
     /// Compact the message history when context is getting full.
     ///
-    /// Keeps the last 10 messages and summarizes older ones via an LLM call.
-    /// On failure, falls back to simple truncation.
+    /// Keeps the newest messages and summarizes the ones between the earlier summaries and them,
+    /// so an earlier summary is never summarized again. The cut never separates a tool call from
+    /// its results. The compacted messages' full text is kept on disk (`hq_tools::spill`). If the
+    /// summary call fails, small batches go back as they were; larger ones become a note that
+    /// names where their full text is.
     pub async fn compact(&mut self) {
-        let keep_count = 10;
-        if self.messages.len() <= keep_count {
+        let start = summaries_end(&self.messages);
+        let Some(mut cut) = compact_cut(&self.messages, start, KEEP_RECENT) else {
             return;
-        }
+        };
 
         let precomputed = {
             let mut lock = self.precomputed.lock().await;
             lock.take()
         };
+        let precomputed = precomputed.filter(|p| {
+            p.generation == self.compaction_generation
+                && p.start == start
+                && p.covers_up_to > start
+                && p.covers_up_to <= cut
+        });
 
         let old_len = self.messages.len();
+        if let Some(p) = &precomputed {
+            cut = p.covers_up_to;
+        }
+        let mut older: Vec<ChatMessage> = self.messages.drain(start..cut).collect();
+        self.message_tokens.drain(start..cut);
+        self.compaction_generation += 1;
+        let kept = self.spill_note(&older);
 
         if let Some(summary) = precomputed {
-            let drain_to = summary.covers_up_to.min(old_len - keep_count);
-            let drained: Vec<_> = self.messages.drain(..drain_to).collect();
-            self.message_tokens.drain(..drain_to);
             self.insert_message(
-                0,
-                ChatMessage {
-                    image_parts: Vec::new(),
-                    role: MessageRole::User,
-                    content: format!(
-                        "[CONTEXT SUMMARY - {} earlier messages compacted (preemptive)]\n{}",
-                        drained.len(),
-                        summary.text,
-                    ),
-                    tool_calls: Vec::new(),
-                    tool_call_id: None,
-                    reasoning_content: None,
-                },
+                start,
+                summary_message(format!(
+                    "{SUMMARY_PREFIX} - {} earlier messages compacted (preemptive).{kept}]\n{}",
+                    older.len(),
+                    summary.text,
+                )),
             );
-            let new_len = self.messages.len();
-            self.emit(SessionEvent::Compaction {
-                old_messages: old_len,
-                new_messages: new_len,
-            });
-            info!(
-                old = old_len,
-                new = new_len,
-                "compacted via preemptive summary (instant)"
-            );
+            self.finish_compaction(old_len, "compacted via preemptive summary (instant)");
             return;
         }
-
-        let drain_count = old_len - keep_count;
-        let mut older: Vec<ChatMessage> = self.messages.drain(..drain_count).collect();
-        self.message_tokens.drain(..drain_count);
 
         // Deterministic pre-pass (no LLM): shrink oversized tool-result
         // messages before reaching for a summarization call. Mirrors
@@ -146,36 +229,16 @@ impl AgentSession {
         // would be — skip the LLM round-trip entirely and fold it back in
         // as-is.
         if pruned_total <= crate::context::compactor::DETERMINISTIC_SKIP_THRESHOLD {
-            let joined = older
-                .iter()
-                .map(|m| format!("[{}] {}", format!("{:?}", m.role).to_lowercase(), m.content))
-                .collect::<Vec<_>>()
-                .join("\n");
+            let joined = render_for_summary(&older);
             self.insert_message(
-                0,
-                ChatMessage {
-                    image_parts: Vec::new(),
-                    role: MessageRole::User,
-                    content: format!(
-                        "[CONTEXT SUMMARY - {} earlier messages compacted (deterministic, no LLM)]\n{}",
-                        older.len(),
-                        joined
-                    ),
-                    tool_calls: Vec::new(),
-                    tool_call_id: None,
-                    reasoning_content: None,
-                },
+                start,
+                summary_message(format!(
+                    "{SUMMARY_PREFIX} - {} earlier messages compacted (deterministic, no LLM).{kept}]\n{}",
+                    older.len(),
+                    joined
+                )),
             );
-            let new_len = self.messages.len();
-            self.emit(SessionEvent::Compaction {
-                old_messages: old_len,
-                new_messages: new_len,
-            });
-            info!(
-                old = old_len,
-                new = new_len,
-                "compacted via deterministic pruning (no LLM call)"
-            );
+            self.finish_compaction(old_len, "compacted via deterministic pruning (no LLM call)");
             return;
         }
 
@@ -187,40 +250,52 @@ impl AgentSession {
         {
             Ok(response) => {
                 self.insert_message(
-                    0,
-                    ChatMessage {
-                        image_parts: Vec::new(),
-                        role: MessageRole::User,
-                        content: format!(
-                            "[CONTEXT SUMMARY - {} earlier messages compacted]\n{}",
-                            older.len(),
-                            response.message.content
-                        ),
-                        tool_calls: Vec::new(),
-                        tool_call_id: None,
-                        reasoning_content: None,
-                    },
+                    start,
+                    summary_message(format!(
+                        "{SUMMARY_PREFIX} - {} earlier messages compacted.{kept}]\n{}",
+                        older.len(),
+                        response.message.content
+                    )),
                 );
-                let new_len = self.messages.len();
-                self.emit(SessionEvent::Compaction {
-                    old_messages: old_len,
-                    new_messages: new_len,
-                });
-                info!(
-                    old = old_len,
-                    new = new_len,
-                    "compacted via LLM summarization"
+                self.finish_compaction(old_len, "compacted via LLM summarization");
+            }
+            Err(e) if pruned_total <= RESTORE_ON_FAILURE_TOKENS => {
+                // Pruning alone made room: put the messages back rather than lose them.
+                for (i, m) in older.into_iter().enumerate() {
+                    self.insert_message(start + i, m);
+                }
+                self.finish_compaction(
+                    old_len,
+                    "compaction summary failed; kept the pruned messages",
                 );
+                warn!(error = %e, "compaction summary failed, kept the messages with tool output pruned");
             }
             Err(e) => {
-                let new_len = self.messages.len();
-                self.emit(SessionEvent::Compaction {
-                    old_messages: old_len,
-                    new_messages: new_len,
-                });
-                warn!(error = %e, old = old_len, new = new_len, "compaction summary failed, fell back to truncation");
+                let gist = hq_core::tokens::truncate_with_strategy(
+                    &render_for_summary(&older),
+                    crate::context::compactor::DETERMINISTIC_SKIP_THRESHOLD * 2,
+                    hq_core::tokens::TruncationStrategy::MiddleOut,
+                );
+                self.insert_message(
+                    start,
+                    summary_message(format!(
+                        "{SUMMARY_PREFIX} - {} earlier messages could not be summarized and are shown cut.{kept}]\n{gist}",
+                        older.len(),
+                    )),
+                );
+                self.finish_compaction(old_len, "compaction summary failed; kept a cut copy");
+                warn!(error = %e, "compaction summary failed, kept a cut copy and the spilled full text");
             }
         }
+    }
+
+    fn finish_compaction(&mut self, old_len: usize, how: &'static str) {
+        let new_len = self.messages.len();
+        self.emit(SessionEvent::Compaction {
+            old_messages: old_len,
+            new_messages: new_len,
+        });
+        info!(old = old_len, new = new_len, "{how}");
     }
 
     /// Check if compaction or preemptive summarization is needed, and act.
@@ -251,16 +326,19 @@ impl AgentSession {
         compacted
     }
 
-    /// Spawn a background task to precompute a summary for instant use at next compaction.
+    /// Spawn a background task to precompute a summary for instant use at next compaction. It
+    /// summarizes the same range `compact` would cut now; `compact` uses it only if no other
+    /// compaction moved the messages in between.
     pub(super) fn spawn_preemptive_summarizer(&mut self) {
-        let keep_count = 10;
-        if self.messages.len() <= keep_count + 5 {
+        let start = summaries_end(&self.messages);
+        let Some(covers_up_to) = compact_cut(&self.messages, start, KEEP_RECENT) else {
+            return;
+        };
+        if covers_up_to < start + 5 {
             return;
         }
-
-        let snapshot_end = self.messages.len() - keep_count;
-        let snapshot: Vec<ChatMessage> = self.messages[..snapshot_end].to_vec();
-        let covers_up_to = snapshot_end;
+        let snapshot: Vec<ChatMessage> = self.messages[start..covers_up_to].to_vec();
+        let generation = self.compaction_generation;
 
         let provider = self.provider.clone();
         let model = self.config.model.clone();
@@ -284,7 +362,9 @@ impl AgentSession {
                     let mut lock = precomputed.lock().await;
                     *lock = Some(PrecomputedSummary {
                         text: response.message.content,
+                        start,
                         covers_up_to,
+                        generation,
                     });
                     info!(covers_up_to, "preemptive summary ready");
                 }
@@ -297,8 +377,9 @@ impl AgentSession {
 
     /// Apply microcompact truncation to an oversized tool result.
     ///
-    /// Delegates to `hq_core::microcompact::microcompact` for deduplication,
-    /// head+tail, and disk spill.
+    /// Delegates to `hq_core::microcompact::microcompact` for deduplication and head+tail, and
+    /// keeps the full output on disk (`hq_tools::spill`) when the session knows its vault, so the
+    /// agent can read what was cut.
     pub(super) fn microcompact_result(&self, tool_name: &str, result_text: String) -> String {
         use hq_core::microcompact::{MicrocompactStrategy, microcompact as canonical_microcompact};
 
@@ -316,6 +397,18 @@ impl AgentSession {
             "microcompact: truncated tool result"
         );
 
-        mc.text
+        let Some(vault) = &self.vault_path else {
+            return mc.text;
+        };
+        match hq_tools::spill::write(vault, &self.session_id, tool_name, &result_text) {
+            Ok(r) => format!(
+                "{}\n\n[Output cut to fit; the full {} tokens are kept as {r}. tool_output_read(\"{r}\") reads any part of it.]",
+                mc.text, mc.original_tokens
+            ),
+            Err(e) => {
+                debug!(error = %e, "microcompact: could not spill the full output");
+                mc.text
+            }
+        }
     }
 }

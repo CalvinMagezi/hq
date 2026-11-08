@@ -760,11 +760,43 @@ pub fn build_packet(
     }
 }
 
+/// A chat message cited as evidence (`chat:<thread>/<message>`, written by a fold), read as a
+/// note so a packet can carry what the owner actually said. `None` for any other path, or when
+/// the message is gone.
+fn chat_source(db: Option<&Database>, path: &str) -> Option<Note> {
+    if !hq_db::chat::is_evidence_ref(path) {
+        return None;
+    }
+    let message = db?
+        .with_conn(|c| hq_db::chat::read_evidence(c, path))
+        .ok()??;
+    let modified_at = DateTime::parse_from_rfc3339(&message.created_at)
+        .map(|t| t.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    Some(Note {
+        title: format!("chat message from the {}", message.role),
+        content: message.content,
+        path: path.to_string(),
+        frontmatter: Default::default(),
+        note_type: None,
+        tags: Vec::new(),
+        pinned: false,
+        source: None,
+        embedding_status: None,
+        created_at: Some(message.created_at),
+        updated_at: None,
+        modified_at,
+    })
+}
+
 fn read_or_locate(
     vault: &VaultClient,
     db: Option<&Database>,
     cand: &mut Candidate,
 ) -> std::result::Result<Note, PacketGap> {
+    if let Some(note) = chat_source(db, &cand.path) {
+        return Ok(note);
+    }
     if let Ok(note) = vault.read_note(&cand.path) {
         return Ok(note);
     }
@@ -958,6 +990,16 @@ pub fn verify_citations(
     packet: &ContextPacket,
     vault: &VaultClient,
 ) -> CitationReport {
+    verify_citations_in(output, packet, vault, None)
+}
+
+/// [`verify_citations`] that can also re-read cited chat messages, given the database.
+pub fn verify_citations_in(
+    output: &str,
+    packet: &ContextPacket,
+    vault: &VaultClient,
+    db: Option<&Database>,
+) -> CitationReport {
     let re = regex::Regex::new(r"\[(S\d+)\]").expect("valid citation regex");
     let mut cited: Vec<String> = re.captures_iter(output).map(|c| c[1].to_string()).collect();
     cited.sort();
@@ -971,10 +1013,8 @@ pub fn verify_citations(
             report.unknown.push(id);
             continue;
         };
-        let unchanged = vault
-            .read_note(&entry.path)
-            .map(|n| hash_content(&n.content) == entry.content_hash)
-            .unwrap_or(false);
+        let reread = chat_source(db, &entry.path).or_else(|| vault.read_note(&entry.path).ok());
+        let unchanged = reread.is_some_and(|n| hash_content(&n.content) == entry.content_hash);
         if unchanged {
             report.verified.push(id);
         } else {

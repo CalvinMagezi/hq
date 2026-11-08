@@ -303,6 +303,7 @@ fn enumerate(
 
 /// Re-read the note behind one edge. `Err` carries the reason it was dropped.
 fn verify_edge(
+    db: &Database,
     vault: &VaultClient,
     edge: &RawEdge,
     from: &NodeInfo,
@@ -311,6 +312,9 @@ fn verify_edge(
     let Some(evidence) = &edge.evidence_path else {
         return Err("edge has no supporting note".to_string());
     };
+    if hq_db::chat::is_evidence_ref(evidence) {
+        return verify_chat_edge(db, evidence, from, to);
+    }
     let note = vault
         .read_note(evidence)
         .map_err(|_| format!("supporting note {evidence} is missing or unreadable"))?;
@@ -331,6 +335,29 @@ fn verify_edge(
     }
     if body.contains(&from.name.to_lowercase()) && body.contains(&to.name.to_lowercase()) {
         Ok((EdgeStatus::Verified, modified, Vec::new()))
+    } else {
+        Err(format!(
+            "{evidence} no longer mentions both {} and {}",
+            from.name, to.name
+        ))
+    }
+}
+
+/// An edge whose evidence is one chat message (written from a fold summary): verified while
+/// that message still exists and still names both ends, dropped once it was deleted or edited.
+fn verify_chat_edge(
+    db: &Database,
+    evidence: &str,
+    from: &NodeInfo,
+    to: &NodeInfo,
+) -> std::result::Result<(EdgeStatus, String, Vec<String>), String> {
+    let message = db
+        .with_conn(|c| hq_db::chat::read_evidence(c, evidence))
+        .map_err(|e| format!("supporting message {evidence} is unreadable: {e}"))?
+        .ok_or_else(|| format!("supporting message {evidence} is gone"))?;
+    let body = message.content.to_lowercase();
+    if body.contains(&from.name.to_lowercase()) && body.contains(&to.name.to_lowercase()) {
+        Ok((EdgeStatus::Verified, message.created_at, Vec::new()))
     } else {
         Err(format!(
             "{evidence} no longer mentions both {} and {}",
@@ -435,7 +462,7 @@ fn build_path(
         } else {
             (&infos[i], &infos[i + 1])
         };
-        match verify_edge(vault, raw, from, to) {
+        match verify_edge(db, vault, raw, from, to) {
             Ok((status, modified, sources)) => edges.push(PathEdge {
                 from: from.name.clone(),
                 to: to.name.clone(),

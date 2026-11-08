@@ -6,6 +6,7 @@ mod bridge;
 mod budgets;
 mod collaboration;
 pub mod company;
+mod context_fold;
 mod copilot_usage;
 mod decisions;
 mod disk_watchdog;
@@ -48,6 +49,7 @@ pub use bridge::{
 pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
 pub use collaboration::*;
 pub use company::{CompanyConfig, CompanyIdentity, ConnectorBinding, ListenerDef, company_by_id};
+pub use context_fold::ContextFoldConfig;
 pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, openrouter_primary};
 pub use decisions::{
     DecisionMode, DecisionRoute, DecisionSite, DecisionsConfig, SITE_MEMORY_TURN, SITE_NOTIFY_GATE,
@@ -292,6 +294,11 @@ pub struct HqConfig {
     #[serde(default)]
     pub vault_watch: VaultWatchConfig,
 
+    /// How long chat threads keep their history: fold blocks over older messages instead of a
+    /// hard cut. See `docs/plans/context-fold.md`.
+    #[serde(default)]
+    pub context_fold: ContextFoldConfig,
+
     /// Retention for the LLM spend ledger.
     #[serde(default)]
     pub usage_ledger: UsageLedgerConfig,
@@ -520,6 +527,7 @@ impl Default for HqConfig {
             disk_watchdog: DiskWatchdogConfig::default(),
             backup: BackupConfig::default(),
             vault_watch: VaultWatchConfig::default(),
+            context_fold: ContextFoldConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
             mcp_connector: McpConnectorConfig::default(),
             web_push: WebPushConfig::default(),

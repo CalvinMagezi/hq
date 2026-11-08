@@ -155,6 +155,10 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
                 "notify_owner".into(),
                 // A watch fires later as an unattended owner turn.
                 "watch_create".into(),
+                // The owner's own chats and tool output, across every thread.
+                "session_search".into(),
+                "history_restore".into(),
+                "tool_output_read".into(),
             ],
             allow_tools: vec![],
         }),
@@ -355,6 +359,13 @@ mod tests {
             "a guest never schedules an unattended turn"
         );
         assert!(names.contains(&"vault_search".into()));
+    }
+
+    #[test]
+    fn telegram_guest_cannot_read_the_owners_chats() {
+        let profile = default_profile_for_agent("telegram_guest").unwrap();
+        let t = tools(&["session_search", "history_restore", "tool_output_read"]);
+        assert!(filter(t, Preset::Named(profile)).is_empty());
     }
 
     #[test]

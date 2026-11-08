@@ -87,6 +87,21 @@ pub fn get_thread(conn: &Connection, thread_id: &str) -> Result<Option<ChatThrea
     Ok(result)
 }
 
+/// The thread a chat platform conversation is mirrored into, if it has one.
+pub fn find_platform_thread(
+    conn: &Connection,
+    platform: &str,
+    external_id: &str,
+) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT thread_id FROM chat_threads WHERE platform = ?1 AND external_id = ?2",
+        params![platform, external_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 /// Find the thread bound to a given platform + external chat/channel/contact id, or
 /// create one if none exists yet. Idempotent: repeated calls for the same
 /// `(platform, external_id)` always return the same thread.
@@ -327,6 +342,8 @@ pub fn delete_messages_from(conn: &Connection, thread_id: &str, message_id: &str
     let Some((created, rowid)) = message_position(conn, thread_id, message_id)? else {
         return Ok(0);
     };
+    // Fold blocks that summarize a deleted message would put it back in the model's view.
+    crate::thread_folds::drop_reaching(conn, thread_id, message_id)?;
     let deleted = conn.execute(
         "DELETE FROM chat_messages WHERE thread_id = ?1 AND (created_at, rowid) >= (?2, ?3)",
         params![thread_id, created, rowid],
@@ -344,6 +361,46 @@ pub fn delete_messages_from(conn: &Connection, thread_id: &str, message_id: &str
         params![preview, thread_id],
     )?;
     Ok(deleted)
+}
+
+/// The evidence form a graph relation uses to point at one chat message:
+/// `chat:<thread_id>/<message_id>`.
+pub fn evidence_ref(thread_id: &str, message_id: &str) -> String {
+    format!("chat:{thread_id}/{message_id}")
+}
+
+/// Whether `evidence` has the `chat:<thread_id>/<message_id>` shape (ids of hex and dashes).
+pub fn is_evidence_ref(evidence: &str) -> bool {
+    parse_evidence_ref(evidence).is_some()
+}
+
+fn parse_evidence_ref(evidence: &str) -> Option<(&str, &str)> {
+    let (thread, message) = evidence.trim().strip_prefix("chat:")?.split_once('/')?;
+    let ok = |s: &str| s.len() >= 8 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    (ok(thread) && ok(message)).then_some((thread, message))
+}
+
+/// The chat message a `chat:` evidence ref points at, if it still exists.
+pub fn read_evidence(conn: &Connection, evidence: &str) -> Result<Option<ChatMessage>> {
+    let Some((thread, message)) = parse_evidence_ref(evidence) else {
+        return Ok(None);
+    };
+    conn.query_row(
+        "SELECT message_id, thread_id, role, content, created_at FROM chat_messages
+          WHERE thread_id = ?1 AND message_id = ?2",
+        params![thread, message],
+        |row| {
+            Ok(ChatMessage {
+                message_id: row.get(0)?,
+                thread_id: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 /// Whether any chat message, in any thread (archived ones too), contains `needle`.
