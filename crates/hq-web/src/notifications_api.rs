@@ -210,8 +210,10 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
     };
     let dedup_key = row.get::<_, Option<String>>(18)?;
     let notice = is_notice(dedup_key.as_deref());
+    // Only HQ's own sign-in item is shown as one: another source with the same key is not.
     let sign_in = dedup_key
         .as_deref()
+        .filter(|_| source_task == crate::device_auth::DEVICE_SIGN_IN_SOURCE)
         .and_then(|k| k.strip_prefix(crate::device_auth::SIGN_IN_ITEM_PREFIX))
         .map(|device_id| serde_json::json!({ "device_id": device_id }));
     let actions: &[&str] = match (state == NotificationState::Pending, needs_answer) {
@@ -806,6 +808,46 @@ mod tests {
         assert_eq!(dialog["loses"], true);
         assert_eq!(dialog["verb"], "delete");
         assert!(items[0].metadata.approval.is_none());
+    }
+
+    /// Only HQ's own sign-in item is shown as a new sign-in; an item from another source with the
+    /// same kind of key is an ordinary one, so it cannot offer "Sign it out" for a real device.
+    #[test]
+    fn only_hqs_own_sign_in_item_reads_as_one() {
+        let db = hq_db::Database::open_memory().unwrap();
+        let item = |source: &str| {
+            hq_core::types::ValueItem::new(
+                source,
+                hq_core::types::ValueKind::ActionNeeded,
+                "A new sign-in to your HQ",
+                "b",
+            )
+            .with_dedup_key(format!("{}dev1", crate::device_auth::SIGN_IN_ITEM_PREFIX))
+        };
+        let real = item(crate::device_auth::DEVICE_SIGN_IN_SOURCE);
+        let forged = item(hq_tools::notify::NOTIFY_SOURCE);
+        hq_db::value_items::insert(&db, &real).unwrap();
+        hq_db::value_items::insert(&db, &forged).unwrap();
+        let items = scan_value_items(&db, Some("pending")).unwrap();
+        let sign_in = |id: &str| {
+            items
+                .iter()
+                .find(|n| n.id == format!("val_{id}"))
+                .unwrap()
+                .metadata
+                .sign_in
+                .clone()
+        };
+        assert_eq!(
+            sign_in(&real.id),
+            Some(serde_json::json!({ "device_id": "dev1" }))
+        );
+        assert_eq!(sign_in(&forged.id), None);
+        assert!(
+            hq_tools::notify::RESERVED_DEDUP_PREFIXES
+                .contains(&crate::device_auth::SIGN_IN_ITEM_PREFIX),
+            "notify_owner refuses this key"
+        );
     }
 
     #[tokio::test]

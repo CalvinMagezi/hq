@@ -23,13 +23,17 @@ pub(crate) const KEEP_PATH: &str = "/api/auth/devices/{id}/keep";
 fn new_devices(db: &hq_db::Database) -> std::collections::HashSet<String> {
     let found = db.with_conn(|c| {
         let mut stmt = c.prepare(
-            "SELECT dedup_key FROM value_items WHERE dedup_key LIKE ?1 \
+            "SELECT dedup_key FROM value_items WHERE dedup_key LIKE ?1 AND source_task = ?2 \
              AND state IN ('pending', 'delivered', 'routed')",
         )?;
         let keys = stmt
-            .query_map([format!("{}%", super::SIGN_IN_ITEM_PREFIX)], |r| {
-                r.get::<_, String>(0)
-            })?
+            .query_map(
+                [
+                    format!("{}%", super::SIGN_IN_ITEM_PREFIX),
+                    DEVICE_SIGN_IN_SOURCE.to_string(),
+                ],
+                |r| r.get::<_, String>(0),
+            )?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(keys)
     });
