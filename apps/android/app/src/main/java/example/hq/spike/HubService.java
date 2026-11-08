@@ -95,11 +95,28 @@ public class HubService extends Service {
         recoverToken(c, false);
     }
 
-    /** [force] is for a deliberate sign-out of everything: the app caused the 401, so the five minute guard against a loop does not apply. */
+    /**
+     * [force] is for a deliberate sign-out of everything: the app caused the 401, so the five minute guard against a loop does not apply.
+     * Any other 401 counts only once the server that sent it has proved it is this phone's hq: another app holding the port could
+     * answer 401 to get a new token minted and sent to it too. Blocks on the network; never call it on the main thread.
+     */
     public static void recoverToken(Context c, boolean force) {
         long now = SystemClock.elapsedRealtime();
         long last = lastRecovery.get();
-        if (!force && (now - last < RECOVER_MIN_GAP_MS || !lastRecovery.compareAndSet(last, now))) return;
+        if (!force && now - last < RECOVER_MIN_GAP_MS) return;
+        if (!force) {
+            boolean proven;
+            try {
+                proven = ServerProof.proveNow(ServerProof.localBase(), token(c));
+            } catch (RuntimeException e) {
+                proven = false;
+            }
+            if (!proven) {
+                Log.w(TAG, "a 401 came from a server that did not prove it is hq; the token is kept");
+                return;
+            }
+            if (!lastRecovery.compareAndSet(last, now)) return;
+        }
         if (force) lastRecovery.set(now);
         try {
             SecretStore.replaceWebToken(c);
@@ -292,6 +309,11 @@ public class HubService extends Service {
         filter.addAction(Intent.ACTION_USER_PRESENT);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(lockReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(lockReceiver, filter);
+    }
+
+    /** The hq child this process started last, or null; a proof of the server is kept for one child only (ServerProof). */
+    static Process hqChild() {
+        return hqProc;
     }
 
     /** True while hq's child process lives. */

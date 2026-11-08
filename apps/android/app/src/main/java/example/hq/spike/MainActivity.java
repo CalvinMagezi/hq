@@ -12,9 +12,6 @@ import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
 
 public class MainActivity extends Activity {
     private static final String BASE = "http://127.0.0.1:" + HubService.PORT;
@@ -70,21 +67,24 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
-    /** hq is restarted with a replaced token; the page is loaded again only once hq accepts that token, since the old process may still be answering. */
+    /**
+     * Loads page p signed in, but only from a server that has just proved it is this phone's hq (ServerProof): the page
+     * reads the token from its address, and another app may be answering on the port while hq is not. Off the main thread.
+     */
+    private boolean loadIfProven(String p) {
+        String token = HubService.token(this);
+        if (!ServerProof.proveNow(BASE, token)) return false;
+        String url = BASE + p + "#token=" + token;
+        ui.post(() -> web.loadUrl(url));
+        return true;
+    }
+
+    /** hq is restarted with a replaced token; the page is loaded again only once hq proves it holds that token, since the old process may still be answering. */
     private void reloadWhenNewTokenWorks() {
         for (int i = 0; i < REAUTH_POLLS; i++) {
             try {
-                String token = HubService.token(this);
-                HttpURLConnection c = Loopback.open(new URL(BASE + "/api/notifications?limit=1"));
-                c.setConnectTimeout(500);
-                c.setReadTimeout(500);
-                c.setRequestProperty("Authorization", "Bearer " + token);
-                if (c.getResponseCode() == 200) {
-                    String url = BASE + path + "#token=" + token;
-                    ui.post(() -> web.loadUrl(url));
-                    return;
-                }
-            } catch (IOException | IllegalStateException e) {
+                if (loadIfProven(path)) return;
+            } catch (IllegalStateException e) {
                 // hq is restarting
             }
             try { Thread.sleep(REAUTH_POLL_MS); } catch (InterruptedException ignored) { return; }
@@ -95,32 +95,26 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        try {
-            web.loadUrl(BASE + HubConfig.safePath(intent.getStringExtra(EXTRA_PATH)) + "#token=" + HubService.token(this));
-        } catch (IllegalStateException e) {
-            Log.e(HubService.TAG, "cannot open the web token: " + e.getMessage());
-        }
+        String p = HubConfig.safePath(intent.getStringExtra(EXTRA_PATH));
+        new Thread(() -> {
+            try {
+                if (!loadIfProven(p)) Log.e(HubService.TAG, "hq did not prove itself; the page was not opened");
+            } catch (IllegalStateException e) {
+                Log.e(HubService.TAG, "cannot open the web token: " + e.getMessage());
+            }
+        }, "load").start();
     }
 
     private void waitHealthThenLoad() {
         for (int i = 0; i < HEALTH_POLLS; i++) {
             try {
-                HttpURLConnection c = Loopback.open(new URL(BASE + "/health"));
-                c.setConnectTimeout(500);
-                c.setReadTimeout(500);
-                if (c.getResponseCode() == 200) {
-                    String url = BASE + path + "#token=" + HubService.token(this);
-                    ui.post(() -> web.loadUrl(url));
-                    return;
-                }
-            } catch (IOException e) {
-                // not up yet
+                if (loadIfProven(path)) return;
             } catch (IllegalStateException e) {
                 Log.e(HubService.TAG, "cannot open the web token: " + e.getMessage());
                 return;
             }
             try { Thread.sleep(HEALTH_POLL_MS); } catch (InterruptedException ignored) { }
         }
-        Log.e(HubService.TAG, "health never answered");
+        Log.e(HubService.TAG, "hq never proved itself");
     }
 }

@@ -132,7 +132,13 @@ class AnswerReceiver : BroadcastReceiver() {
         }
     }
 
+    /** The phone's own hq gets the token only once it has proved it is hq (ServerProof); until then the answer fails as unreachable. */
+    private fun requireProven(target: Hq) {
+        if (!ServerProof.ensure(target.base, target.token)) throw java.net.ConnectException("hq has not shown it is the phone's HQ")
+    }
+
     private fun get(path: String, target: Hq, deadline: Long): String {
+        requireProven(target)
         val h = Loopback.open(URL(target.base + path))
         try {
             h.connectTimeout = minOf(CONNECT_MS, left(deadline))
@@ -148,6 +154,7 @@ class AnswerReceiver : BroadcastReceiver() {
     }
 
     private fun post(path: String, body: JSONObject, target: Hq, deadline: Long, afterWrite: () -> Unit = {}) {
+        requireProven(target)
         val h = Loopback.open(URL(target.base + path))
         try {
             h.requestMethod = "POST"
@@ -168,6 +175,7 @@ class AnswerReceiver : BroadcastReceiver() {
 
     /** A POST whose status is the answer: 409 means the dialog was answered elsewhere or moved on, not a failure. */
     private fun postStatus(path: String, body: JSONObject, target: Hq, deadline: Long): Int {
+        requireProven(target)
         val h = Loopback.open(URL(target.base + path))
         try {
             h.requestMethod = "POST"

@@ -209,12 +209,23 @@ final class Alerts {
 
     /** Unread items, newest first, keyed by id. */
     private static Map<String, JSONObject> fetch(Context c) throws IOException, JSONException {
-        HttpURLConnection h = Loopback.open(new URL("http://127.0.0.1:" + HubService.PORT + "/api/notifications?state=pending&limit=30"));
+        String token = HubService.token(c);
+        // Nothing goes out with the token until hq runs and has proved it holds the port (ServerProof): before that, at boot or
+        // while it restarts, another app could be answering on it.
+        if (!HubService.hqAlive() || !ServerProof.ensure(ServerProof.localBase(), token)) throw new IOException("hq is not up yet");
+        HttpURLConnection h = Loopback.open(new URL(ServerProof.localBase() + "/api/notifications?state=pending&limit=30"));
         h.setConnectTimeout(TIMEOUT_MS);
         h.setReadTimeout(TIMEOUT_MS);
-        h.setRequestProperty("Authorization", "Bearer " + HubService.token(c));
-        if (h.getResponseCode() == 401) HubService.recoverToken(c);
-        if (h.getResponseCode() != 200) throw new IOException("status " + h.getResponseCode());
+        h.setRequestProperty("Authorization", "Bearer " + token);
+        int status;
+        try {
+            status = h.getResponseCode();
+        } catch (IOException e) {
+            ServerProof.forget();
+            throw e;
+        }
+        if (status == 401) HubService.recoverToken(c);
+        if (status != 200) throw new IOException("status " + status);
         return itemsOf(read(h.getInputStream()), "");
     }
 

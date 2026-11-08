@@ -64,11 +64,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import example.hq.spike.HubService
+import example.hq.spike.ServerProof
 import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqServices
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.shell.consumeTouches
@@ -149,6 +152,8 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit, onStartHq: () -> Unit = {}
         loading[0] = scope.launch {
             if (!waitForHq(client, authed = newToken, giveUpMs = if (patient) PATIENT_MS else QUICK_MS)) { failed = true; progress = 0; return@launch }
             val token = try { HubService.token(context) } catch (e: IllegalStateException) { failed = true; return@launch }
+            // The page reads the token from its origin's storage, so it is written only once the server there has just proved it is this phone's hq.
+            if (!withContext(Dispatchers.IO) { ServerProof.proveNow(WebHost.ORIGIN, token) }) { failed = true; progress = 0; return@launch }
             state.script = WebHost.tokenScript(token)
             state.hopping = true
             web.loadDataWithBaseURL(WebHost.ORIGIN + "/", "<html></html>", "text/html", "utf-8", null)
