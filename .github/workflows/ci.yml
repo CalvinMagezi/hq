@@ -264,6 +264,8 @@ jobs:
       - name: Unit tests
         working-directory: packages/agent-hq
         run: npm test
+      - name: Claude plugin hooks keep private markers
+        run: bash packages/claude-plugin/test/hooks-test.sh
       - name: Install the latest stable release for real
         run: |
           node packages/agent-hq/bin/agent-hq.js --prefix "$RUNNER_TEMP/bin"
