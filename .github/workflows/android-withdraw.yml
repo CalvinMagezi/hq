@@ -63,8 +63,15 @@ jobs:
           mkdir withdraw
           gh release download channel-stable --dir withdraw --pattern android-channel.json --pattern android-channel.json.minisig
           minisign -V -p release/minisign.pub -m withdraw/android-channel.json -x withdraw/android-channel.json.minisig -q
+          # A valid signature is not enough: an older signed manifest put back in place of the
+          # current one would lose later withdrawals once signed again. Its seq must not be below
+          # the highest seq this channel has published (android-stable-seq-* tags, see the script).
+          cur_seq=$(jq -r .seq withdraw/android-channel.json)
+          bash scripts/release/android-seq.sh check --repo "$GH_REPO" --seq "$cur_seq"
           # seq is the signing time, so this file outranks the one it replaces on every phone.
-          jq --argjson code "$CODE" --argjson seq "$(date -u +%s)" --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          new_seq=$(date -u +%s)
+          [ "$new_seq" -gt "$cur_seq" ] || { echo "the clock is behind the current manifest's seq $cur_seq" >&2; exit 1; }
+          jq --argjson code "$CODE" --argjson seq "$new_seq" --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --argjson stop "$STOP" \
             '.withdrawn = (((.withdrawn // []) + [$code]) | unique) | .seq = $seq | .issued_at = $issued
              | if $stop then .rollout = 0 else . end' \
@@ -74,3 +81,5 @@ jobs:
           bash scripts/release/sign.sh withdraw/android-channel.json
           minisign -V -p release/minisign.pub -m withdraw/android-channel.json -x withdraw/android-channel.json.minisig -q
           gh release upload channel-stable withdraw/android-channel.json withdraw/android-channel.json.minisig --clobber
+          # Raise the floor only once the file is published, so a failed upload never strands it.
+          bash scripts/release/android-seq.sh record --repo "$GH_REPO" --seq "$new_seq" --sha "$GITHUB_SHA"

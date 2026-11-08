@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import example.hq.spike.Loopback
+import example.hq.spike.ServerProof
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -47,6 +48,21 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         .apply { if (callSeconds > 0) callTimeout(callSeconds, TimeUnit.SECONDS) }
         // A carrier APN proxy cannot reach this phone's loopback (see Loopback).
         .apply { Loopback.proxyFor(java.net.URL(base))?.let { proxy(it) } }
+        // No request carries the token to the phone's own hq until the server there has proved it holds that token
+        // (ServerProof): another app could be listening on the port while hq is not.
+        .addInterceptor(okhttp3.Interceptor { chain ->
+            val request = chain.request()
+            val auth = request.header("Authorization")
+            if (auth != null && auth.startsWith(BEARER) && !ServerProof.ensure(base, auth.removePrefix(BEARER))) {
+                throw HqUnavailable("hq has not shown it is the phone's HQ yet")
+            }
+            try {
+                chain.proceed(request)
+            } catch (e: java.net.ConnectException) {
+                ServerProof.forget()
+                throw e
+            }
+        })
         .build()
 
     suspend fun healthy(): Boolean = withContext(Dispatchers.IO) {
@@ -711,6 +727,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val HTTP_CONFLICT = 409
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_UNAUTHORIZED = 401
+        private const val BEARER = "Bearer "
         private const val CONNECT_SECONDS = 3L
         private const val READ_SECONDS = 20L
         private const val START_READ_SECONDS = 150L

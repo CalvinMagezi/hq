@@ -6,8 +6,9 @@ import android.os.Bundle
 import example.hq.spike.ui.shell.Links
 
 /**
- * Takes an hq:// link from outside the app and hands it to the shell. The shell is closed to other apps, so this is the only door:
- * it passes on the link text and nothing else, and the shell reads it as a place to show, never as something to do.
+ * Takes an hq:// link from outside the app and hands it to the shell. It passes on the link text and nothing else. The shell is
+ * the launcher, so other apps can start it too, but from them it takes only the same link, read as a place to show, never as
+ * something to do: its design-check extras work only in a debuggable build, and a chat draft comes only from the capture sheet.
  */
 class LinkActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 use super::injection::{injection_denial, without_default_drive};
 use super::paths::{PATH_TOOLS, path_args_for_tool, path_values};
 use super::taint::{TaintTracker, is_untrusted_source};
+use super::tainted_calls::{tainted_reason, unasked_denial};
 use super::{DenialNotifier, DenialTracker, RepeatCallTracker};
 use crate::coding::text_result;
 use crate::tools::AgentTool;
@@ -19,6 +20,9 @@ pub(super) struct GovernedTool {
     pub(super) inner: Box<dyn AgentTool>,
     pub(super) allowed_paths: Vec<PathBuf>,
     pub(super) denied_paths: Vec<PathBuf>,
+    /// The vault's canonical root, when this session has one: its `_data` is closed to every
+    /// file argument and its loaded folders to writes (`vault_denial`).
+    pub(super) vault_root: Option<PathBuf>,
     pub(super) permission_mode: PermissionMode,
     pub(super) denial_tracker: DenialTracker,
     pub(super) repeat_call_tracker: RepeatCallTracker,
@@ -47,12 +51,9 @@ impl GovernedTool {
             return false;
         }
 
-        let target = Path::new(path);
-
-        // Attempt to canonicalize; fall back to the raw path
-        let resolved = target
-            .canonicalize()
-            .unwrap_or_else(|_| target.to_path_buf());
+        // Exact for files that do not exist yet too: `..` and linked parents are resolved, never
+        // compared as written.
+        let resolved = super::paths::resolve_for_check(Path::new(path));
 
         if self
             .denied_paths
@@ -65,6 +66,38 @@ impl GovernedTool {
         self.allowed_paths
             .iter()
             .any(|allowed| resolved.starts_with(allowed))
+    }
+
+    /// The vault's own machinery, whatever the tool: `_data` (the database every credential is
+    /// checked against, and the keys beside it) for any file argument, and the folders HQ loads
+    /// into its sessions for the file-writing tools, which have managed paths of their own.
+    pub(super) fn vault_denial(&self, args: &Value) -> Option<String> {
+        let vault = self.vault_root.as_deref()?;
+        let tool = self.inner.name();
+        let mut paths = Vec::new();
+        super::paths::nested_path_args(args, &mut paths);
+        let writes = super::paths::WRITE_TOOLS.contains(&tool);
+        let loaded = super::paths::vault_loaded_folders();
+        for raw in paths {
+            let resolved = super::paths::resolve_for_check(Path::new(&raw));
+            let Some(top) = super::paths::vault_top_folder(vault, &resolved) else {
+                continue;
+            };
+            if top == hq_vault::rel_path::DATA_FOLDER {
+                return Some(format!(
+                    "Access denied: '{raw}' is in the vault's _data folder, which holds HQ's \
+                     database and keys. No tool reads or writes it directly."
+                ));
+            }
+            if writes && loaded.contains(&top.as_str()) {
+                return Some(format!(
+                    "Access denied: '{raw}' is in the vault's {top} folder, which HQ loads into \
+                     its own sessions. Change it through its own tool (skill_manage, \
+                     slash_command_manage, agent_send_message) instead."
+                ));
+            }
+        }
+        None
     }
 
     /// Surface a hard denial through `denial_notifier`, if attached, at most
@@ -245,9 +278,17 @@ impl GovernedTool {
             self.notify_denial(&denial);
             return Ok(text_result(denial));
         }
+        if let Some(denial) = self.vault_denial(&args) {
+            debug!(tool = tool_name, denial = %denial, "BypassPermissions — vault path still denied");
+            self.notify_denial(&denial);
+            return Ok(text_result(denial));
+        }
         if let Some(denial) = injection_denial(tool_name, &args, &self.taint) {
             warn!(tool = tool_name, denial = %denial, "BypassPermissions: injection policy still denies");
             self.notify_denial(&denial);
+            return Ok(text_result(denial));
+        }
+        if let Some(denial) = self.unasked_denial(&args) {
             return Ok(text_result(denial));
         }
         debug!(
@@ -297,14 +338,36 @@ impl GovernedTool {
         None
     }
 
-    /// In `PermissionMode::Default`, a call that needs the owner runs only once they approve
-    /// exactly it. `Some` carries what the model gets instead.
-    async fn owner_decision(&self, args: &Value) -> Option<String> {
-        let approval = self.owner_approval.as_ref()?;
+    fn needs_owner(&self, args: &Value) -> bool {
+        !self.inner.is_read_only()
+            && super::needs_owner(self.inner.name(), self.inner.category(), args)
+    }
+
+    /// In a tainted session with no approval store, what may not run because nobody can be
+    /// asked; counted, and put in the owner's inbox as what was left for them.
+    fn unasked_denial(&self, args: &Value) -> Option<String> {
+        if self.owner_approval.is_some() {
+            return None;
+        }
         let tool_name = self.inner.name();
-        let asks = matches!(self.permission_mode, PermissionMode::Default)
-            && !self.inner.is_read_only()
-            && super::needs_owner(tool_name, self.inner.category(), args);
+        let denial = unasked_denial(tool_name, args, &self.taint, self.needs_owner(args))?;
+        self.record_denial("denial threshold exceeded under the injection policy");
+        warn!(tool = tool_name, denial = %denial, "tainted session with nobody to ask");
+        self.notify_denial(&denial);
+        Some(denial)
+    }
+
+    /// In `PermissionMode::Default`, a call that needs the owner runs only once they approve
+    /// exactly it; so does, in any mode but bypass, a call a tainted session needs the owner for
+    /// (`tainted_reason`). `Some` carries what the model gets instead.
+    async fn owner_decision(&self, args: &Value) -> Option<String> {
+        let Some(approval) = self.owner_approval.as_ref() else {
+            return self.unasked_denial(args);
+        };
+        let tool_name = self.inner.name();
+        let asks = (matches!(self.permission_mode, PermissionMode::Default)
+            && self.needs_owner(args))
+            || tainted_reason(tool_name, args, &self.taint).is_some();
         if !asks {
             return None;
         }
@@ -325,6 +388,14 @@ impl GovernedTool {
 
         if let Some(denied) = self.permission_mode_denial(&args) {
             return Ok(denied);
+        }
+
+        // HQ's own vault machinery, for every tool that names a file (any mode).
+        if let Some(denial) = self.vault_denial(&args) {
+            self.record_denial("denial threshold exceeded: vault folder");
+            debug!(tool = tool_name, denial = %denial, "vault path denied by governance");
+            self.notify_denial(&denial);
+            return Ok(text_result(denial));
         }
 
         // Check path restrictions for filesystem tools.

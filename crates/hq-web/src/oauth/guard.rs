@@ -144,20 +144,50 @@ async fn confirmation(
     if !gated {
         return None;
     }
+    // A handoff of a stored task types the task's text: the approval shows it and is bound to it.
+    let Some(stored) = stored_text(state, call) else {
+        return Some(lookup_failed());
+    };
     let prefix = format!("connector:{}:", grant.grant_id);
-    let key = format!("{prefix}{}:{}", call.tool, call.digest);
+    let digest = hq_tools::approval_note::bound_digest(&call.digest, stored.as_deref());
+    let key = format!("{prefix}{}:{digest}", call.tool);
     match gate(&state.db, &key) {
         None => return Some(lookup_failed()),
-        Some(Gate::Run) => return None,
+        Some(Gate::Run) => return unchanged(state, call, stored.as_deref()),
         Some(Gate::Declined) => return Some(declined()),
         Some(Gate::Ask) => {
-            if let Err(stop) = ask_owner(state, grant, call, &key, &prefix) {
+            if let Err(stop) = ask_owner(state, grant, call, &key, &prefix, stored.as_deref()) {
                 return Some(stop);
             }
         }
         Some(Gate::Wait) => {}
     }
-    wait_for_owner(&state.db, &key, &call.tool).await
+    match wait_for_owner(&state.db, &key, &call.tool).await {
+        None => unchanged(state, call, stored.as_deref()),
+        stop => stop,
+    }
+}
+
+/// What the call acts on beyond its arguments, as stored now. `None` when it cannot be read.
+fn stored_text(state: &WsState, call: &Call) -> Option<Option<String>> {
+    hq_tools::approval_note::stored_text(&state.db, &call.tool, &call.args).ok()
+}
+
+/// An approval covers the stored text the owner saw; a call whose text changed does not run.
+fn unchanged(state: &WsState, call: &Call, approved: Option<&str>) -> Option<Stop> {
+    match stored_text(state, call) {
+        Some(now) if now.as_deref() == approved => None,
+        Some(_) => Some(Stop {
+            outcome: "refused",
+            is_error: true,
+            text: format!(
+                "The task this {} call works on changed after the owner approved it, so nothing \
+                 ran. Call again to ask the owner about the task as it is now.",
+                call.tool
+            ),
+        }),
+        None => Some(lookup_failed()),
+    }
 }
 
 /// Where the approval for one exact call stands, spending it when it is there to spend.
@@ -245,6 +275,7 @@ fn ask_owner(
     call: &Call,
     key: &str,
     prefix: &str,
+    stored: Option<&str>,
 ) -> Result<(), Stop> {
     let waiting =
         value_items::count_waiting_with_prefix(&state.db, prefix).map_err(|_| lookup_failed())?;
@@ -259,7 +290,8 @@ fn ask_owner(
         });
     }
     let shown = serde_json::to_string_pretty(&call.args).unwrap_or_default();
-    if shown.chars().count() > MAX_APPROVAL_ARGS_CHARS {
+    let stored_chars = stored.map_or(0, |s| s.chars().count());
+    if shown.chars().count() + stored_chars > MAX_APPROVAL_ARGS_CHARS {
         return Err(Stop {
             outcome: "refused",
             is_error: true,
@@ -271,8 +303,10 @@ fn ask_owner(
         });
     }
     let note = hq_tools::approval_note::for_call(&call.tool, &call.args)
+        .into_iter()
+        .chain(stored.map(hq_tools::approval_note::stored_note))
         .map(|n| format!("{n}\n\n"))
-        .unwrap_or_default();
+        .collect::<String>();
     let mut item = ValueItem::new(
         SOURCE,
         ValueKind::ActionNeeded,

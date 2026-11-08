@@ -11,7 +11,8 @@ options:
   --channel <name>   release channel: stable (default) or main
   --prefix <dir>     where to put the hq binary (default ${defaultPrefix()})
   --repo <owner/repo> release repository (default ${DEFAULT_REPO})
-  --from-source      build with cargo instead of downloading a binary
+  --from-source      build with cargo instead of downloading a binary (the commit the
+                     signed release of --channel names)
   -h, --help         show this help
 
 The download is verified against the project's minisign key before it is installed.`;
@@ -45,7 +46,7 @@ async function main() {
   }
   if (values["from-source"] || !hasPrebuilt()) {
     if (!values["from-source"]) console.log("No prebuilt binary for this platform; building from source.");
-    installFromSource({ repo: values.repo });
+    await installFromSource({ repo: values.repo, channel: values.channel });
   } else {
     await installPrebuilt({ repo: values.repo, channel: values.channel, prefix: values.prefix });
     const advice = pathAdvice(values.prefix);

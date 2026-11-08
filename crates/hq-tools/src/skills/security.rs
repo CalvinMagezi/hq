@@ -1,4 +1,5 @@
-//! Security flags for skill content and which categories block adoption.
+//! Security flags for skill content: which categories block adoption, and which
+//! keep a machine-written change in `_proposed/` until the owner reads it.
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -16,14 +17,23 @@ const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "[::1]", "0.0.0.0"];
 pub(super) const NETWORK_EGRESS: &str = "network egress";
 pub(super) const OPAQUE_PAYLOAD: &str = "opaque payload";
 const INSTRUCTION_OVERRIDE: &str = "instruction override";
+pub(super) const CREDENTIAL_ACCESS: &str = "credential access";
+pub(super) const RECIPIENT_ADDRESS: &str = "recipient address";
 /// Flag categories no machine-written text may carry into a live skill.
 const BLOCKING_CATEGORIES: &[&str] = &[INSTRUCTION_OVERRIDE, OPAQUE_PAYLOAD];
+/// Flag categories a machine-written change may carry only once the owner has read it: the
+/// shape of a skill that sends data somewhere (a network command or outside URL, credentials,
+/// an address to mail). Staged, never live on the reviewer's word.
+const HOLDING_CATEGORIES: &[&str] = &[NETWORK_EGRESS, CREDENTIAL_ACCESS, RECIPIENT_ADDRESS];
 
 static SECURITY_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     [
-        (NETWORK_EGRESS, r"(?i)\b(curl|wget)\b"),
         (
-            "credential access",
+            NETWORK_EGRESS,
+            r"(?i)\b(curl|wget|nc|ncat|netcat|socat|scp|sftp|rsync|telnet|sendmail|invoke-webrequest)\b",
+        ),
+        (
+            CREDENTIAL_ACCESS,
             r"(?i)\b(keyring|keychain|api[ _-]?keys?|secrets?|passwords?|passwd|tokens?|credentials?)\b|\[REDACTED\]",
         ),
         (
@@ -33,6 +43,10 @@ static SECURITY_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|
         (
             INSTRUCTION_OVERRIDE,
             r"(?i)\bignore\s+((all|any|the|previous|prior|earlier|above)\s+)+instructions\b|\bdisregard\b|\byou\s+are\s+now\b",
+        ),
+        (
+            RECIPIENT_ADDRESS,
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",
         ),
     ]
     .into_iter()
@@ -75,8 +89,8 @@ fn shell_lines(content: &str) -> impl Iterator<Item = &str> {
 }
 
 /// What in a machine-written skill is worth recording. Categories in
-/// [`BLOCKING_CATEGORIES`] keep the change from going live; the rest are
-/// audited only.
+/// [`BLOCKING_CATEGORIES`] refuse the change, those in [`HOLDING_CATEGORIES`]
+/// stage it for the owner; the rest are audited only.
 pub fn security_flags(content: &str) -> Vec<String> {
     let mut flags = Vec::new();
     for (category, pattern) in SECURITY_PATTERNS.iter() {
@@ -111,7 +125,16 @@ pub fn security_flags(content: &str) -> Vec<String> {
 
 /// Whether any flag from [`security_flags`] is in a category that must never go live.
 pub fn blocks_adoption(flags: &[String]) -> bool {
+    any_in(flags, BLOCKING_CATEGORIES)
+}
+
+/// Whether any flag from [`security_flags`] keeps a machine-written change for the owner.
+pub fn holds_for_review(flags: &[String]) -> bool {
+    any_in(flags, HOLDING_CATEGORIES)
+}
+
+fn any_in(flags: &[String], categories: &[&str]) -> bool {
     flags
         .iter()
-        .any(|f| BLOCKING_CATEGORIES.iter().any(|c| f.starts_with(c)))
+        .any(|f| categories.iter().any(|c| f.starts_with(c)))
 }

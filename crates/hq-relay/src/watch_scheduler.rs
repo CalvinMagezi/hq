@@ -350,6 +350,8 @@ async fn run_watch_firing<K: ChatKey>(
             // so nothing in it asks. That is why only the owner can create a watch and why
             // `dispatch_watch_firing` checks the chat is still the owner's before every firing.
             owner_approval: None,
+            // So once a firing reads outside text, what would need the owner is left for them.
+            unattended: true,
             ..turn.hooks(
                 &config,
                 (surface.identity)(key),

@@ -81,8 +81,14 @@ const PROJECT_READONLY: &[&str] = &[
 /// The open profile's one guard on writes: what the operator's own tools run
 /// from later, outside the sandbox, and so what an agent could plant code in to
 /// get past the wall around HQ's directory. Nothing an agent needs for
-/// development lives here. Paths that do not exist are skipped under bubblewrap.
+/// development lives here. Files that do not exist are skipped under bubblewrap;
+/// the directories are made before the launch so their rule applies (see
+/// `make_missing`). The `hq` binary in the two places HQ's installers put it is
+/// here too: HQ's daemon and host run it outside the sandbox. HQ adds its own
+/// further paths through [`HqPaths`].
 const OPEN_READONLY_HOME_FILES: &[&str] = &[
+    ".local/bin/hq",
+    "bin/hq",
     ".bashrc",
     ".bash_profile",
     ".bash_login",
@@ -193,22 +199,39 @@ const PROXY_ENV_NAMES: &[&str] = &["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "
 /// The vault folder that holds HQ's database (sign-in tokens, approvals, paired
 /// devices) and its keys (TLS, web push).
 const VAULT_PRIVATE_DIRS: &[&str] = &["_data"];
-/// Vault folders HQ reads back into its own sessions as instructions or history:
-/// identity and profiles, chat threads, agent definitions, skills, pinned maps
-/// and plans, and the memory index. An agent may read them but not change them.
-const VAULT_READONLY_DIRS: &[&str] = &[
+/// Vault folders HQ reads back into its own sessions as instructions, messages or
+/// history: identity and profiles, chat threads, agent definitions (`Agents`, and
+/// `_agents` that `hq agents` lists), skills, slash commands, agent mailboxes (a
+/// file in `_mailboxes/relay` is acted on as a request), pinned maps and plans,
+/// and the memory index. An agent may read them but not change them. Every folder
+/// in `hq_vault::rel_path::INSTRUCTION_FOLDERS` and `PRIVATE_FOLDERS` is here or
+/// hidden (`_data`); a test in `hq-cli` keeps it that way.
+pub const VAULT_READONLY_DIRS: &[&str] = &[
     "_system",
     "_threads",
     "_agents",
+    "Agents",
     "skills",
     "Skills",
     "_skills",
+    "_commands",
+    "_mailboxes",
     "_moc",
     "_plans",
     "_embeddings",
 ];
+/// The skills folder's spellings, in the order `hq_core::skills_dir` tries them: the
+/// first that exists is the one HQ loads.
+const VAULT_SKILLS_DIRS: &[&str] = &["skills", "Skills", "_skills"];
 /// Beside the config file: its backups start with its name; env files hold keys.
 const ENV_FILE_SUFFIX: &str = ".env";
+/// The env files HQ's own service units load from beside the config
+/// (`deploy/hq.service` and its drop-ins). They are masked whether or not they
+/// exist, so an agent cannot create one for the service to load on its next start.
+const UNIT_ENV_FILES: &[&str] = &["mcp.env", "openrouter.env", "gws.env", "gh.env"];
+/// The mode of a protected directory or env file the host makes before a launch.
+const MADE_DIR_MODE: u32 = 0o700;
+const MADE_FILE_MODE: u32 = 0o600;
 
 /// What HQ keeps on this machine outside `~/.hq` that no agent may use as HQ:
 /// the vault's database folder, the config file in force with its backups and the
@@ -223,19 +246,39 @@ pub struct HqPaths {
     pub masked: Vec<PathBuf>,
     /// Directories an agent may read but not write.
     pub readonly: Vec<PathBuf>,
+    /// Files an agent may read but not write, whether or not they exist yet: the
+    /// binaries HQ runs from and the MCP client configs HQ writes, which run
+    /// commands outside the sandbox later.
+    pub readonly_files: Vec<PathBuf>,
+    /// The built web UI HQ serves, read-only unless it lies in the agent's own
+    /// project (a checkout the agent is building).
+    pub served: Vec<PathBuf>,
+    /// The env files HQ's service units load (`UNIT_ENV_FILES`) beside each config
+    /// file, masked whether or not they exist.
+    pub env_files: Vec<PathBuf>,
+    /// The vault these are for, whose missing protected folders the host makes
+    /// before a launch under bubblewrap.
+    pub vault: Option<PathBuf>,
 }
 
 impl HqPaths {
     /// The paths for a vault and the HQ config files in force (the file HQ reads,
     /// the one it writes, the approval key). Each config file is masked with its
-    /// backups and the `*.env` files in its directory.
+    /// backups and the `*.env` files in its directory, and the env files the
+    /// service units load there are masked even before they exist.
     pub fn new(vault: Option<&Path>, config_files: &[PathBuf]) -> Self {
         let mut masked = Vec::new();
+        let mut env_files: Vec<PathBuf> = Vec::new();
         for file in config_files {
             masked.push(file.clone());
             let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
                 continue;
             };
+            for unit_file in UNIT_ENV_FILES.iter().map(|f| dir.join(f)) {
+                if !env_files.contains(&unit_file) {
+                    env_files.push(unit_file);
+                }
+            }
             let name = name.to_string_lossy().into_owned();
             let Ok(entries) = std::fs::read_dir(dir) else {
                 continue;
@@ -256,7 +299,55 @@ impl HqPaths {
             readonly: vault
                 .map(|v| under(v, VAULT_READONLY_DIRS))
                 .unwrap_or_default(),
+            readonly_files: Vec::new(),
+            served: Vec::new(),
+            env_files,
+            vault: vault.map(Path::to_path_buf),
         }
+    }
+
+    /// Adds files no agent may write (see `readonly_files`).
+    pub fn with_readonly_files(mut self, files: impl IntoIterator<Item = PathBuf>) -> Self {
+        self.readonly_files.extend(files);
+        self
+    }
+
+    /// Adds the web UI directories HQ serves (see `served`).
+    pub fn with_served(mut self, dirs: impl IntoIterator<Item = PathBuf>) -> Self {
+        self.served.extend(dirs);
+        self
+    }
+
+    /// The vault folders to make before a bubblewrap launch, so the read-only bind
+    /// has something to land on. Of the skills folder's spellings only `skills` is
+    /// made, and only when no other spelling exists: making it beside a `Skills`
+    /// folder HQ already loads would switch HQ to the empty one. That case is
+    /// reported instead, since an agent could make `skills` itself.
+    fn vault_dirs_to_make(&self) -> Vec<PathBuf> {
+        let Some(vault) = self.vault.as_deref().filter(|v| v.is_dir()) else {
+            return Vec::new();
+        };
+        let mut out: Vec<PathBuf> = VAULT_READONLY_DIRS
+            .iter()
+            .filter(|d| !VAULT_SKILLS_DIRS.contains(d))
+            .map(|d| vault.join(d))
+            .collect();
+        let canonical = vault.join(VAULT_SKILLS_DIRS[0]);
+        if !canonical.is_dir() {
+            match VAULT_SKILLS_DIRS[1..]
+                .iter()
+                .map(|d| vault.join(d))
+                .find(|d| d.is_dir())
+            {
+                Some(legacy) => eprintln!(
+                    "hq host: the vault keeps its skills in {}, so an agent under bubblewrap could create {} and HQ would load that instead; rename the folder to `skills`",
+                    legacy.display(),
+                    canonical.display()
+                ),
+                None => out.push(canonical),
+            }
+        }
+        out
     }
 }
 
@@ -503,6 +594,33 @@ struct Wall {
     hq_hidden: Vec<PathBuf>,
     hq_masked: Vec<PathBuf>,
     hq_readonly: Vec<PathBuf>,
+    /// HQ's binaries and the MCP client configs it writes, and the web UI it serves
+    /// (left out when it lies in the project).
+    hq_readonly_files: Vec<PathBuf>,
+    hq_served: Vec<PathBuf>,
+}
+
+/// Each path at its real place, whether or not it exists yet (Seatbelt denies a path
+/// that does not exist, so a rule on one is not wasted): resolved when it exists,
+/// else its nearest existing directory resolved with the rest of the path after it.
+/// A path with a `..` in its missing part is dropped.
+fn real_places(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = paths.into_iter().filter_map(|p| real_place(&p)).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn real_place(path: &Path) -> Option<PathBuf> {
+    let mut missing = Vec::new();
+    let mut at = path;
+    loop {
+        if let Ok(real) = at.canonicalize() {
+            return Some(missing.iter().rev().fold(real, |p, name| p.join(name)));
+        }
+        missing.push(at.file_name()?);
+        at = at.parent()?;
+    }
 }
 
 fn under(base: &Path, names: &[&str]) -> Vec<PathBuf> {
@@ -610,15 +728,26 @@ fn wall(spec: &SandboxSpec, t: &Target, bridge: Option<&Bridge>) -> Result<Wall,
     // HQ's paths outside `~/.hq`, whatever the profile or the credential setting.
     // One already inside a hidden directory needs nothing more.
     let walled: Vec<PathBuf> = hidden.iter().map(|h| h.dir.clone()).collect();
-    let outside_walls = |paths: &[PathBuf]| -> Vec<PathBuf> {
-        canonical(paths.iter().cloned())
+    let outside = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
+        paths
             .into_iter()
             .filter(|p| !walled.iter().any(|w| p.starts_with(w)))
             .collect()
     };
-    let hq_hidden = outside_walls(&t.hq.hidden);
-    let hq_masked = outside_walls(&t.hq.masked);
-    let hq_readonly = outside_walls(&t.hq.readonly);
+    let hq_hidden = outside(canonical(t.hq.hidden.iter().cloned()));
+    // The rest are kept where they do not exist yet: Seatbelt denies them anyway,
+    // and before a bubblewrap launch the directories and env files are made (see
+    // `make_missing`), while a missing file is skipped there.
+    let hq_masked = outside(real_places(
+        t.hq.masked.iter().chain(&t.hq.env_files).cloned(),
+    ));
+    let hq_readonly = outside(real_places(t.hq.readonly.iter().cloned()));
+    let hq_readonly_files = outside(real_places(t.hq.readonly_files.iter().cloned()));
+    // The UI of a checkout the agent is building is the agent's to rebuild.
+    let hq_served: Vec<PathBuf> = outside(real_places(t.hq.served.iter().cloned()))
+        .into_iter()
+        .filter(|d| !d.starts_with(&project))
+        .collect();
     hidden.extend(hq_hidden.iter().map(|dir| HiddenDir {
         dir: dir.clone(),
         allow: Vec::new(),
@@ -649,6 +778,8 @@ fn wall(spec: &SandboxSpec, t: &Target, bridge: Option<&Bridge>) -> Result<Wall,
         hq_hidden,
         hq_masked,
         hq_readonly,
+        hq_readonly_files,
+        hq_served,
     })
 }
 
@@ -695,6 +826,8 @@ fn strict_policy(
         hq_hidden,
         hq_masked,
         hq_readonly,
+        hq_readonly_files,
+        hq_served,
     } = wall;
     let private_tmp = if bwrap {
         canonical(PRIVATE_TMP_ROOTS.iter().map(PathBuf::from))
@@ -765,6 +898,7 @@ fn strict_policy(
     // ones to writes, and both keep their parents where they are.
     let hq_dirs: Vec<PathBuf> = hq_readonly
         .iter()
+        .chain(&hq_served)
         .cloned()
         .chain(hq_hidden.iter().filter(|_| !bwrap).cloned())
         .collect();
@@ -772,7 +906,9 @@ fn strict_policy(
         hq_hidden
             .iter()
             .chain(&hq_readonly)
+            .chain(&hq_served)
             .chain(&hq_masked)
+            .chain(&hq_readonly_files)
             .map(PathBuf::as_path),
         home,
     );
@@ -795,7 +931,13 @@ fn strict_policy(
         open_filesystem: false,
         writable,
         writable_files: Vec::new(),
-        readonly_files: keep(claude_files.into_iter().chain(project_files).collect()),
+        readonly_files: keep(
+            claude_files
+                .into_iter()
+                .chain(project_files)
+                .chain(hq_readonly_files)
+                .collect(),
+        ),
         readonly_subpaths: keep(
             claude_dirs
                 .into_iter()
@@ -865,6 +1007,8 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
         claude_files,
         claude_dirs,
         hq_readonly,
+        hq_readonly_files,
+        hq_served,
         run_dir,
         ..
     } = wall;
@@ -879,6 +1023,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
     };
     let mut files = claude_files;
     files.extend(under(home, OPEN_READONLY_HOME_FILES));
+    files.extend(hq_readonly_files);
     // The default account's trust file lies beside its directory, not in it: its own
     // to read but not write, and another account's to neither.
     let mut masked_files = masked_files;
@@ -892,6 +1037,7 @@ fn open_policy(t: &Target, wall: Wall) -> AgentSandbox {
     dirs.extend(under(home, OPEN_READONLY_HOME_DIRS));
     dirs.extend(revealed);
     dirs.extend(hq_readonly);
+    dirs.extend(hq_served);
     if !bwrap {
         // Seatbelt hides a path by refusing reads of it, so with every write allowed
         // the hidden directories must be closed to writes too. Under bubblewrap a
@@ -999,6 +1145,82 @@ fn pinned_parents<'a>(protected: impl Iterator<Item = &'a Path>, home: &Path) ->
     out.sort();
     out.dedup();
     out
+}
+
+/// Under bubblewrap a protected path that does not exist gets no rule (a bind needs
+/// something to land on), so an agent could create it and fill it: a user systemd
+/// unit or an autostart entry that runs at the next login, a git config, a vault
+/// folder HQ loads. Before a bubblewrap launch each such directory is made, mode
+/// 0700, so the read-only bind applies. Files are not made, except the env files
+/// HQ's service units load beside the config, which are made empty: an empty env
+/// file sets nothing, whereas an empty shell startup file or MCP config would
+/// change what the user's tools do. Seatbelt denies a path whether or not it
+/// exists, so nothing is made on macOS.
+fn make_missing(
+    profile: Profile,
+    home: &Path,
+    claude: Option<&ClaudeConfig>,
+    cwd: &Path,
+    hq: &HqPaths,
+) {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let macos = cfg!(target_os = "macos");
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if profile == Profile::Open {
+        dirs.extend(
+            under(home, OPEN_READONLY_HOME_DIRS)
+                .into_iter()
+                .filter(|d| macos || !d.starts_with(home.join("Library"))),
+        );
+    }
+    if let Some(claude) = claude {
+        dirs.extend(under(&claude.dir, CLAUDE_DIR_READONLY_DIRS));
+    }
+    dirs.extend(hq.vault_dirs_to_make());
+    let project = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+    dirs.extend(
+        hq.served
+            .iter()
+            .filter(|d| !d.starts_with(&project) && !d.starts_with(cwd))
+            .cloned(),
+    );
+    // What the host cannot make, the agent (the same user) cannot make either.
+    let report = |what: &Path, e: std::io::Error| {
+        if !matches!(
+            e.kind(),
+            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+        ) {
+            eprintln!(
+                "hq host: could not make {} to protect it: {e}",
+                what.display()
+            );
+        }
+    };
+    for dir in dirs.iter().filter(|d| !d.exists()) {
+        if let Err(e) = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(MADE_DIR_MODE)
+            .create(dir)
+        {
+            report(dir, e);
+        }
+    }
+    let hq_home = home.join(HQ_HOME_DIR);
+    for file in hq
+        .env_files
+        .iter()
+        .filter(|f| !f.exists() && !f.starts_with(&hq_home) && f.parent().is_some_and(Path::is_dir))
+    {
+        if let Err(e) = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(MADE_FILE_MODE)
+            .open(file)
+            && e.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            report(file, e);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1156,6 +1378,10 @@ pub(crate) fn confine(
             return Err(HostError::Io("HOME is not set".into()));
         }
     };
+    let bwrap = matches!(backend, Backend::Bwrap(_));
+    if bwrap {
+        make_missing(spec.profile, &home_path, claude.as_ref(), cwd, hq);
+    }
     let wrapped = claude
         .ok_or_else(|| HostError::Io("HOME is not set".into()))
         .and_then(|claude| {
@@ -1166,7 +1392,7 @@ pub(crate) fn confine(
                 claude: &claude,
                 home: &home_path,
                 kind,
-                bwrap: matches!(backend, Backend::Bwrap(_)),
+                bwrap,
                 hq,
             };
             policy(spec, &target, port, bridge.as_ref())
@@ -1326,8 +1552,13 @@ mod tests {
             vault.join("_data"),
             vault.join("_system"),
             vault.join("skills/demo"),
+            vault.join("Agents"),
             vault.join("Notebooks"),
             config_dir.clone(),
+            home.join(".local/bin"),
+            root.join("realbin"),
+            root.join("ui"),
+            project.join("ui"),
             home.join(".hq"),
             home.join(".ssh"),
             home.join(".aws"),
@@ -1373,10 +1604,21 @@ mod tests {
             (config_dir.join("config.yaml.bak"), SECRET),
             (config_dir.join("mcp.env"), SECRET),
             (config_dir.join("README"), "PUBLIC"),
+            (vault.join("Agents/coder.md"), "AGENT"),
+            (home.join(".local/bin/hq"), "HQ-BINARY"),
+            (root.join("realbin/hq"), "HQ-BINARY"),
+            (root.join("ui/index.html"), "UI"),
+            (project.join("ui/index.html"), "UI"),
         ] {
             std::fs::write(path, text).unwrap();
         }
-        let hq = HqPaths::new(Some(&vault), &[config_dir.join("config.yaml")]);
+        // The installed binary reached through a linked directory, as `/usr/local/bin`
+        // can be: bubblewrap cannot mount through the link, so the rule must land on
+        // the real file.
+        std::os::unix::fs::symlink(root.join("realbin"), root.join("linkbin")).unwrap();
+        let hq = HqPaths::new(Some(&vault), &[config_dir.join("config.yaml")])
+            .with_readonly_files([root.join("linkbin/hq"), root.join("nobin/hq")])
+            .with_served([root.join("ui"), project.join("ui")]);
         Fixture {
             _tmp: tmp,
             root,
@@ -1487,6 +1729,7 @@ mod tests {
                 ".gitconfig",
                 ".claude.json",
                 ".claude/settings.json",
+                ".local/bin/hq",
             ] {
                 assert!(
                     s.readonly_files.contains(&f.home.join(file)),
@@ -1540,12 +1783,34 @@ mod tests {
                     );
                 }
                 assert!(!s.masked_files.contains(&f.config_dir.join("README")));
-                for dir in ["_system", "skills"] {
+                // A unit's env file that does not exist yet: Seatbelt denies it as it
+                // is; bubblewrap needs it made first (`make_missing`).
+                assert_eq!(
+                    s.masked_files.contains(&f.config_dir.join("gh.env")),
+                    !bwrap,
+                    "{profile:?}"
+                );
+                for dir in ["_system", "skills", "Agents"] {
                     assert!(
                         s.readonly_subpaths.contains(&f.vault.join(dir)),
                         "{dir} read-only under {profile:?}"
                     );
                 }
+                for dir in ["_commands", "_mailboxes", "_agents"] {
+                    assert_eq!(
+                        s.readonly_subpaths.contains(&f.vault.join(dir)),
+                        !bwrap,
+                        "{dir} (missing) under {profile:?}"
+                    );
+                }
+                // The installed binary, at its real place and never through the link.
+                assert!(s.readonly_files.contains(&f.root.join("realbin/hq")));
+                assert!(!s.readonly_files.contains(&f.root.join("linkbin/hq")));
+                assert_eq!(s.readonly_files.contains(&f.root.join("nobin/hq")), !bwrap);
+                assert!(s.pinned_dirs.contains(&f.root.join("realbin")));
+                // The served UI, except a copy inside the agent's own project.
+                assert!(s.readonly_subpaths.contains(&f.root.join("ui")));
+                assert!(!s.readonly_subpaths.contains(&f.project.join("ui")));
                 assert!(
                     !s.readonly_subpaths.contains(&f.vault.join("Notebooks")),
                     "notes stay writable"
@@ -1571,6 +1836,77 @@ mod tests {
             ]
         );
         assert_eq!(HqPaths::new(None, &[]), HqPaths::default());
+        // The units' env files are named whether or not they exist.
+        for name in UNIT_ENV_FILES {
+            assert!(f.hq.env_files.contains(&f.config_dir.join(name)), "{name}");
+        }
+    }
+
+    #[test]
+    fn missing_protected_directories_and_unit_env_files_are_made_before_a_launch() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = fixture();
+        let claude = f.claude();
+        let outside = f.root.join("share/agent-hq/web/dist");
+        let inside = f.project.join("web/dist");
+        let hq = f.hq.clone().with_served([outside.clone(), inside.clone()]);
+        make_missing(Profile::Open, &f.home, Some(&claude), &f.project, &hq);
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        for dir in [
+            f.home.join(".config/systemd/user"),
+            f.home.join(".config/autostart"),
+            f.home.join(".claude/hooks"),
+            f.vault.join("_commands"),
+            f.vault.join("_mailboxes"),
+            f.vault.join("_agents"),
+            f.vault.join("_threads"),
+            outside.clone(),
+        ] {
+            assert!(dir.is_dir(), "{} made", dir.display());
+            assert_eq!(mode(&dir), 0o700, "{}", dir.display());
+        }
+        assert!(!inside.exists(), "a build inside the project is left alone");
+        if !cfg!(target_os = "macos") {
+            assert!(!f.home.join("Library").exists());
+        }
+        // Files are not made, except the units' env files, which are made empty.
+        for file in [".bashrc", ".profile", ".zshenv"] {
+            assert!(!f.home.join(file).exists(), "{file} made");
+        }
+        assert!(!f.home.join("bin/hq").exists());
+        let gh = f.config_dir.join("gh.env");
+        assert_eq!(std::fs::read_to_string(&gh).unwrap(), "");
+        assert_eq!(mode(&gh), 0o600);
+        assert_eq!(
+            std::fs::read_to_string(f.config_dir.join("mcp.env")).unwrap(),
+            SECRET,
+            "an existing env file is untouched"
+        );
+        // Made once, then left as they are.
+        make_missing(Profile::Open, &f.home, Some(&claude), &f.project, &hq);
+        assert_eq!(std::fs::read_to_string(&gh).unwrap(), "");
+        // The strict profile cannot write HOME, so it needs no login-item directories.
+        let g = fixture();
+        make_missing(Profile::Strict, &g.home, None, &g.project, &g.hq);
+        assert!(!g.home.join(".config/systemd").exists());
+        assert!(g.vault.join("_commands").is_dir());
+    }
+
+    #[test]
+    fn only_the_skills_spelling_hq_would_load_is_made() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join("vault");
+        std::fs::create_dir(&vault).unwrap();
+        let paths = HqPaths::new(Some(&vault), &[]);
+        let made = paths.vault_dirs_to_make();
+        assert!(made.contains(&vault.join("skills")));
+        assert!(!made.contains(&vault.join("Skills")) && !made.contains(&vault.join("_skills")));
+        // A vault that loads a legacy spelling would switch to an empty `skills`.
+        std::fs::create_dir(vault.join("_skills")).unwrap();
+        assert!(!paths.vault_dirs_to_make().contains(&vault.join("skills")));
+        // No vault, nothing made.
+        let gone = HqPaths::new(Some(&tmp.path().join("missing")), &[]);
+        assert!(gone.vault_dirs_to_make().is_empty());
     }
 
     #[test]
@@ -1638,10 +1974,11 @@ mod tests {
         )
         .unwrap();
         assert!(!s.open_filesystem);
+        let hq_files = [f.root.join("realbin"), f.root.join("nobin")];
         assert!(
-            s.pinned_dirs
-                .iter()
-                .all(|d| d.starts_with(&f.vault) || f.config_dir.starts_with(d)),
+            s.pinned_dirs.iter().all(|d| d.starts_with(&f.vault)
+                || f.config_dir.starts_with(d)
+                || hq_files.contains(d)),
             "only HQ's own paths are pinned: {:?}",
             s.pinned_dirs
         );
@@ -1824,6 +2161,9 @@ mod tests {
         let f = fixture();
         let claude = f.claude();
         let bwrap = matches!(backend, Backend::Bwrap(_));
+        if bwrap {
+            make_missing(Profile::Open, &f.home, Some(&claude), &f.project, &f.hq);
+        }
         let s = policy(
             &spec_with(Profile::Open),
             &f.target(&claude, bwrap),
@@ -1856,6 +2196,15 @@ mod tests {
              t write_hook 'echo x > {project}/.git/hooks/pre-commit'; t write_git_config 'echo x >> {project}/.git/config'; \
              t write_mcp 'echo x > {project}/.mcp.json'; \
              t write_hq 'echo x > {home}/.hq/new'; t write_run 'echo x > {run}/new'; \
+             t write_hq_bin 'echo x > {home}/.local/bin/hq'; t write_linked_bin 'echo x > {root}/linkbin/hq'; \
+             t write_ui 'echo x > {root}/ui/index.html'; t write_project_ui 'echo x > {project}/ui/index.html'; \
+             t write_agents 'echo x > {vault}/Agents/x.md'; t write_commands 'echo x > {vault}/_commands/x.md'; \
+             t write_relay 'mkdir -p {vault}/_mailboxes/relay && echo x > {vault}/_mailboxes/relay/m.md'; \
+             t write_unit 'mkdir -p {home}/.config/systemd/user && echo x > {home}/.config/systemd/user/x.service'; \
+             t write_autostart 'mkdir -p {home}/.config/autostart && echo x > {home}/.config/autostart/x.desktop'; \
+             t unit_env 'echo X=1 > {cfg}/gh.env'; t write_local_bin 'echo x > {home}/.local/bin/tool'; \
+             mv {home}/.local/bin {home}/.local/bin.moved 2>/dev/null; mkdir -p {home}/.local/bin; \
+             t planted_hq_bin 'echo PLANTED > {home}/.local/bin/hq'; \
              mv {home}/.claude {home}/.claude.moved 2>/dev/null; mkdir -p {home}/.claude; \
              t planted_settings 'echo PLANTED > {home}/.claude/settings.json'; \
              mv {home}/.config {home}/.config.moved 2>/dev/null; t moved_gh 'sees {home}/.config.moved/gh/hosts.yml'; \
@@ -1929,6 +2278,18 @@ mod tests {
             ("env_file", false),
             ("write_config", false),
             ("read_beside_config", true),
+            ("write_hq_bin", false),
+            ("write_linked_bin", false),
+            ("write_ui", false),
+            ("write_project_ui", true),
+            ("write_agents", false),
+            ("write_commands", false),
+            ("write_relay", false),
+            ("write_unit", false),
+            ("write_autostart", false),
+            ("unit_env", false),
+            ("write_local_bin", true),
+            ("planted_hq_bin", false),
         ] {
             let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
             assert!(out.contains(&want), "expected {want}; got:\n{out}");
@@ -1963,6 +2324,20 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(f.config_dir.join("config.yaml")).unwrap(),
             SECRET
+        );
+        for bin in [f.home.join(".local/bin/hq"), f.root.join("realbin/hq")] {
+            assert_eq!(std::fs::read_to_string(&bin).unwrap(), "HQ-BINARY");
+        }
+        for planted in [
+            f.vault.join("_commands/x.md"),
+            f.vault.join("_mailboxes/relay/m.md"),
+            f.home.join(".config/systemd/user/x.service"),
+        ] {
+            assert!(!planted.exists(), "{} was planted", planted.display());
+        }
+        assert!(
+            std::fs::read_to_string(f.config_dir.join("gh.env")).is_ok_and(|t| t.is_empty())
+                || !f.config_dir.join("gh.env").exists()
         );
     }
 

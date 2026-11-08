@@ -96,6 +96,31 @@ fn default_prompt(task: &t::Task, acceptance: &str) -> String {
     prompt
 }
 
+/// The prompt a `harness_session_handoff` call with `args` would type that its arguments do not
+/// spell out: the stored task's text, when the call writes no `prompt` of its own and works on a
+/// task already filed (`task_id`, or an `external_id` an earlier call used). `None` when the
+/// arguments carry everything the agent will be told. An approval of the call is bound to this
+/// text, so an edit to the task after the owner approved needs a new approval.
+pub fn stored_prompt(conn: &rusqlite::Connection, args: &Value) -> Result<Option<String>> {
+    let arg = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default();
+    if non_blank(arg("prompt")).is_some() {
+        return Ok(None);
+    }
+    let acceptance = [arg("acceptance"), arg("done_criteria")]
+        .into_iter()
+        .find(|a| non_blank(a).is_some())
+        .unwrap_or_default();
+    let task = if let Some(id) = non_blank(arg("task_id")) {
+        t::get_task(conn, id)?
+    } else if let Some(external) = non_blank(arg("external_id")) {
+        let space = non_blank(arg("space_id")).unwrap_or(DEFAULT_SPACE);
+        t::find_by_external_id(conn, space, external)?
+    } else {
+        None
+    };
+    Ok(task.map(|task| default_prompt(&task, acceptance)))
+}
+
 fn links(thread: Option<&str>, task_id: &str) -> Value {
     json!({
         "chat": thread.map(|t| format!("/chat/{t}")),

@@ -56,7 +56,8 @@ pub(crate) const HOME_SECRET_PATHS: &[&str] = &[
 const PRIVATE_KEY_PREFIXES: &[&str] = &["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"];
 
 /// Extensions of files that usually carry keys or certificates.
-const KEY_EXTENSIONS: &[&str] = &["pem", "key", "p12", "pfx", "keystore", "jks"];
+// `p8` is PKCS#8, the form HQ keeps its Web Push signing key in.
+const KEY_EXTENSIONS: &[&str] = &["pem", "key", "p8", "p12", "pfx", "keystore", "jks"];
 
 /// `.env.<suffix>` templates that hold placeholders, not secrets.
 const ENV_TEMPLATE_SUFFIXES: &[&str] = &["example", "sample", "template", "dist", "defaults"];
@@ -152,7 +153,8 @@ fn is_always_secret_location(path: &Path) -> bool {
 }
 
 /// Backups of the HQ config (`config.yaml.bak-*`) and `*.env` files next to
-/// it hold the same keys; on the VPS these are `/opt/hq/*.env`.
+/// it hold the same keys. A server installed with `deploy/install.sh` keeps its env files in
+/// root-only `/etc/hq` instead; older installs still have them beside `/opt/hq/config.yaml`.
 fn is_hq_config_sibling(path: &Path) -> bool {
     let config = hq_core::config::HqConfig::config_read_path();
     let (Some(config_dir), Some(config_name)) = (config.parent(), config.file_name()) else {
@@ -368,6 +370,11 @@ mod tests {
         let roots = always_denied_roots_with(&protected);
         assert!(roots.contains(&link));
         assert!(roots.contains(&key.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn a_pkcs8_key_file_is_a_key() {
+        assert!(tier("/srv/vault/_data/web_push_vapid.p8").is_some());
     }
 
     #[test]

@@ -264,6 +264,8 @@ jobs:
       - name: Unit tests
         working-directory: packages/agent-hq
         run: npm test
+      - name: Claude plugin hooks keep private markers
+        run: bash packages/claude-plugin/test/hooks-test.sh
       - name: Install the latest stable release for real
         run: |
           node packages/agent-hq/bin/agent-hq.js --prefix "$RUNNER_TEMP/bin"
@@ -324,6 +326,10 @@ jobs:
         run: bash scripts/personal-data-scan.sh
       - name: Retired names stay retired
         run: bash scripts/retired-names-check.sh
+      - name: Every embedded release key is release/minisign.pub
+        run: bash scripts/check-release-keys.sh
+      - name: Android stable seq floor (fake gh)
+        run: bash scripts/release/android-seq-test.sh
 
   # The private denylist is a repository secret, which fork pull requests never
   # receive, so it only runs on pushes to main. Pull requests get the baseline above.

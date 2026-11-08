@@ -119,6 +119,18 @@ mod tests {
             true
         }
 
+        fn add_http(&self, name: &str, url: &str, _key: &str) -> Result<Run> {
+            self.calls
+                .borrow_mut()
+                .push(["mcp", "add", name, url].map(String::from).to_vec());
+            *self.added.borrow_mut() = true;
+            Ok(Run {
+                ok: true,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        }
+
         fn run(&self, args: &[String], _cwd: &Path) -> Result<Run> {
             self.calls.borrow_mut().push(args.to_vec());
             let mut out = Run {
@@ -134,7 +146,6 @@ mod tests {
                     )
                 }
                 "get" => out.ok = false,
-                "add" => *self.added.borrow_mut() = true,
                 _ => *self.added.borrow_mut() = false,
             }
             Ok(out)

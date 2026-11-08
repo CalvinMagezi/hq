@@ -790,6 +790,8 @@ impl ChatTurn {
             pinned_model: self.ask.as_ref().and_then(|a| a.model.clone()),
             role: hooks_role,
             owner_approval: (!automated).then(|| self.owner_approval(&config)).flatten(),
+            unattended: automated,
+            prompt_by_hq: automated,
             identity: Some(match self.tid.as_deref() {
                 Some(t) => hq_core::identity::RequestIdentity::from_web_thread(
                     t,

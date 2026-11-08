@@ -289,7 +289,7 @@ export const en = {
   sign_out_device_act: "Sign out device",
   sign_out_device_done: "{device} is signed out.",
   sign_out_all_title: "Sign out everywhere?",
-  sign_out_all_body: "Every other device is signed out. This one stays signed in.",
+  sign_out_all_body: "Every other device is signed out. This one stays signed in. Machines paired with HQ keep their access until you revoke them.",
   sign_out_all_keep: "Keep everyone signed in",
   sign_out_all_act: "Sign out everywhere",
   disconnect_app_title: "Disconnect {app}?",

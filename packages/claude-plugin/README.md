@@ -34,7 +34,7 @@ Claude Code asks for two values:
 | `hq-vault` | Search before writing, update existing notes, keep knowledge in the vault. |
 | `hq-status` | Run `/agent-hq:hq-status` for a summary of health, hosts, agents and tasks. |
 
-The nudge and the reminder need `python3`; without it they do nothing. They keep small marker files in the system temp directory under `agent-hq-plugin/`.
+The nudge and the reminder need `python3`; without it they do nothing. They keep small marker files in `agent-hq-plugin/` under `$XDG_RUNTIME_DIR`, or under `~/.cache` when that is not set, in a directory only you can open; a marker is never written through a symlink.
 
 `skills/hq-tasks/SKILL.md` is a copy of `crates/hq-cli/assets/skills/hq-tasks/SKILL.md`. A Rust test fails if they differ.
 

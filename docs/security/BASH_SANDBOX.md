@@ -44,8 +44,8 @@ the host.
 
    Both backends make these files unreadable:
    - the HQ config file (`HQ_CONFIG_PATH`, or `~/.hq/config.yaml`), its
-     `config.yaml*` backups, and `*.env` files next to it (on the VPS,
-     `/opt/hq/*.env`);
+     `config.yaml*` backups, and `*.env` files next to it (a server keeps its
+     env files in `/etc/hq`, root-only, out of the service user's reach);
    - `~/.hq/config.yaml`, `web.token`, `wallet.enc`, `seed.enc` and `secret.key`;
    - the backup key file named by `backup.key_file`, which opens backups that
      may hold the config (`docs/BACKUP.md`);
@@ -62,6 +62,21 @@ the host.
    treats a socket connect as network, not as a file read. The agent's own
    file tools are refused the same paths (`governance::secrets`), and a test
    fails if a path the sandbox masks is ever missing from that list.
+
+   The session's vault gets the same treatment for HQ's own machinery. Its
+   `_data` folder is hidden: every HQ credential check is a lookup in
+   `_data/vault.db`, so a shell that could write it could add a sign-in, a
+   device key or a pairing, and the Web Push and connector TLS keys live
+   beside it. The folders HQ loads into its own sessions (`_system`,
+   `_threads`, `skills`, `_commands`, `Agents`, `_mailboxes` and their older
+   spellings) are read-only; each has a managed write path with its own
+   approval. Missing ones are created first, since a read-only bind needs
+   something to bind, except `skills` beside a legacy `Skills`. The file tools
+   refuse `_data` for any file argument and the loaded folders for writes,
+   comparing the top folder with case folded (`GovernedTool::vault_denial`).
+   The installed `hq` binary (`~/bin/hq`, `~/.local/bin/hq`, the running
+   executable) and the web UI HQ serves from disk are read-only too: HQ runs
+   them again outside every sandbox.
 
    The mask list is short on purpose. `~/.config/gh`, the gws config dir and
    `~/.herenow` stay readable because `gh`, `gws` and here.now's

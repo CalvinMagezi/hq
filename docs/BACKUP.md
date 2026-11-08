@@ -101,6 +101,23 @@ choice. HQ does not upload them.
   tokens, so it is off by default and is restored only to a path you name with `--config-out`.
 - A manifest listing every file with its size and SHA-256.
 
+Some keys live in the vault, so every backup holds them even without `--include-config`. Anyone
+who can open a backup has them, which is why it is encrypted and why its key or passphrase needs
+the same care as the server:
+
+- the Web Push signing key (`_data/web_push_vapid.p8`), which lets its holder send notifications
+  to every browser and phone subscribed to this HQ, and the subscriptions themselves (each
+  browser's push address and its encryption secrets, in the database);
+- the claude.ai connector's TLS state (`_data/connector_tls/`): the certificate's private key and
+  the ACME account key that can order or revoke certificates for its name;
+- on a machine paired to a hub, the per-device MCP key the hub gave it (`bridge_setup.mcp_key` in
+  the database), which opens the hub's `/mcp` with the owner's full scope through the
+  paired-devices door. Revoke the pairing (`hq bridge revoke`) if a backup is lost.
+
+Web sign-in tokens, the connector's grants and a hub's device keys are stored only as hashes, and
+the approval signing key and the bridge's own key live outside the vault (beside the config, and
+in `~/.hq/bridge`), so a backup holds none of them in usable form.
+
 Left out, and listed in the report and the manifest: symbolic links, files that are not plain
 files, files or folders this user cannot read, files that are removed or replaced while the
 backup runs, and any path a restore would refuse (more than 63 folders deep, or over 4096 bytes).

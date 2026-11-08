@@ -34,14 +34,20 @@ firewall rule locks out SSH. Steps 3 and 4 below are the manual alternative to
    then `systemctl enable --now hq`. Coding agents run on a machine that has
    Claude Code or another agent installed, through HQ's built-in host: to use
    a laptop over Tailscale, run `hq host join` there and follow
-   `docs/AGENT_HOST.md`. `hq.service` also reads `/opt/hq/openrouter.env`
-   and `/opt/hq/gws.env` when they exist (chmod 600), so provider keys can stay
-   out of `config.yaml`; neither is required to start.
+   `docs/AGENT_HOST.md`. `hq.service` also reads `/etc/hq/openrouter.env`
+   and `/etc/hq/gws.env` when they exist, so provider keys can stay out of
+   `config.yaml`; neither is required to start. Every env file the unit loads
+   lives in `/etc/hq`, owned by root with mode 0600. Never put one in `/opt/hq`:
+   the `hq` user owns that folder, so anything HQ runs could create a file there
+   for the next restart to load. `deploy/install.sh` moves env files an older
+   install left in `/opt/hq` and refuses to go on if one there differs from its
+   `/etc/hq` copy.
 4. Optional: GitHub access for `gh` and git over HTTPS. Create a fine-grained
    personal access token limited to the repositories HQ should push to (Contents
    and Pull requests: read and write), then on the server:
    ```
-   (umask 077; printf 'GH_TOKEN=%s\n' '<token>' > /opt/hq/gh.env)
+   install -d -m 0755 -o root -g root /etc/hq
+   (umask 077; printf 'GH_TOKEN=%s\n' '<token>' > /etc/hq/gh.env)
    systemctl daemon-reload && systemctl restart hq
    ```
    The unit reads the file at start (the leading `-` makes it optional). To let plain `git push` use the token, run once
@@ -159,6 +165,24 @@ ssh <ssh-host> 'mkdir -p /opt/hq/web/dist && rsync -a --delete /root/hq-src/apps
 
 List every origin the UI is served from in `web_allowed_origins` (see
 [`docs/security/WEB_AUTH.md`](../docs/security/WEB_AUTH.md)).
+
+Sign-in must be on before the UI is published: with no web token every device on
+the tailnet would be the owner, so HQ refuses `/api` and `/ws` requests that came
+through a proxy until one is set. `deploy/install.sh` generates `HQ_WEB_AUTH_TOKEN`
+and `AGENTHQ_API_KEY` in `/etc/hq/mcp.env` (root only, loaded by the
+`hq.service.d/mcp-key.conf` drop-in) when they are not set anywhere else, and prints
+the command for a sign-in link. On the manual path, create that file and drop-in
+yourself:
+
+```
+install -d -m 0755 -o root -g root /etc/hq /etc/systemd/system/hq.service.d
+(umask 077; printf 'AGENTHQ_API_KEY=%s\nHQ_WEB_AUTH_TOKEN=%s\n' \
+  "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > /etc/hq/mcp.env)
+printf '[Service]\nEnvironmentFile=/etc/hq/mcp.env\n' > /etc/systemd/system/hq.service.d/mcp-key.conf
+systemctl daemon-reload && systemctl restart hq
+HQ_WEB_AUTH_TOKEN="$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' /etc/hq/mcp.env)" runuser -u hq -- \
+  env HQ_CONFIG_PATH=/opt/hq/config.yaml HQ_VAULT_PATH=/opt/hq/.vault /usr/local/bin/hq web link
+```
 
 ## Vault
 

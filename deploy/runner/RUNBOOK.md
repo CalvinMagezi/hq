@@ -14,7 +14,7 @@ Releases are built and signed by GitHub Actions on **GitHub-hosted ephemeral run
 
 No workflow caches anything (no cache action), so nothing a pull request wrote can be restored in a release job. A cache written by a PR could not be restored on `main` anyway, because caches are scoped to the ref that wrote them.
 
-Releases are immutable. `X.Y.Z-main.<run number>` is created once as a draft with every asset attached, then published, and the channel pointer is updated last. A re-run of the same run number fails clearly; start a new run. If a failed run leaves a draft release, delete the draft by hand. Only the `channel-*` pointer releases are replaced in place, and they carry a signed `issued_at` and a strictly increasing `seq` (run number times 1000 plus attempt) so an updater can refuse a replayed older pointer.
+Releases are immutable. `X.Y.Z-main.<run number>` is created once as a draft with every asset attached, then published, and the channel pointer is updated last. A re-run of the same run number fails clearly; start a new run. If a failed run leaves a draft release, delete the draft by hand. Only the `channel-*` pointer releases are replaced in place, and they carry a signed `issued_at` and a strictly increasing `seq` (run number times 1000 plus attempt) so an updater can refuse a replayed older pointer. The stable Android manifest (`android-channel.json` on `channel-stable`) is re-signed by `promote` and `android-withdraw`, so each of them first checks that the manifest it found is not older than the newest one the channel published: every run that publishes it also creates a git tag `android-stable-seq-<seq>`, and a manifest whose `seq` is below the highest such tag (or a missing manifest once a tag exists) is refused (`scripts/release/android-seq.sh`). Release assets can be replaced by any token with `contents: write`; those tags cannot be moved or deleted once the ruleset below is in place, so they are the record the check trusts.
 
 Expected time on a 4 vCPU hosted runner (an estimate, not measured): `test` 30 to 50 minutes cold, `build` 35 to 60 minutes cold (thin LTO, one codegen unit, about 700 crates), `sign` under 5 minutes. `test` and `build` run in parallel. Every job has `timeout-minutes: 120`. Measure the first real run and adjust.
 
@@ -41,18 +41,26 @@ Settings, Environments, `release`:
 - "Prevent self-review" on if there is more than one maintainer. Do not allow administrators to bypass protection rules.
 - Environment secrets `MINISIGN_KEY` and `MINISIGN_PASSWORD` (omit the password only if the key has none).
 
+Settings, Environments, `desktop-release` (the Apple signing and notary secrets, used only by the `sign` job of `desktop-release.yml`):
+- Deployment branches and tags: **Selected branches and tags**, the branch `main` and the tag pattern `desktop-v*`. Nothing else.
+- Required reviewers: recommended, as for `release`. Same self-review and no-bypass settings.
+- Environment secrets `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, optional `APPLE_SIGNING_IDENTITY`, and for notarization `APPLE_API_ISSUER`, `APPLE_API_KEY` and `APPLE_API_KEY_P8` (`docs/DESKTOP.md`).
+- The workflow checks the same thing itself before any secret is used: the `sign` job runs only for `main` or a `desktop-vX.Y.Z` tag, and refuses a commit that is not on `main`. The environment rule is still needed, because a workflow edited on another branch would not carry those checks.
+
 Settings, Rules, Rulesets (target branch `main`, enforcement Active, no bypass list for admins):
-- Require a pull request with at least one approving review, dismiss stale approvals, require review from Code Owners (`.github/CODEOWNERS` lists `.github/`, `scripts/release/`, `release/`, `deploy/runner/`, the scan scripts and configs).
+- Require a pull request with at least one approving review, dismiss stale approvals, require review from Code Owners (`.github/CODEOWNERS` lists `.github/`, `scripts/release/`, `release/`, `deploy/runner/`, the scan scripts and configs, every copy of the release key and the code that checks it (`packages/agent-hq/lib/`, `apps/site/public/install.sh` and `install.ps1`, `scripts/check-release-keys.sh`, `scripts/check-site-install-scripts.sh`), and `packages/claude-plugin/`). CI's personal-data job runs `scripts/check-release-keys.sh`, which fails when any embedded minisign key differs from `release/minisign.pub`.
 - Require status checks: the `ci.yml` jobs.
 - Block force pushes and deletions. Require signed commits if all maintainers can sign.
 - A second ruleset (or a path restriction in the first) that blocks changes to `.github/workflows/**` except through the reviewed pull request path above, so a workflow edit cannot land without code-owner approval.
 - Tag ruleset: restrict creating and deleting `v*` and `channel-*` tags to the release workflow's actor.
+- Tag ruleset for `android-stable-seq-*`: block updates and deletions with no bypass list, so the recorded floor only rises. Creation stays open to the workflows (they create one per published manifest). A bogus tag with a higher number makes `promote` and `android-withdraw` refuse to sign until a maintainer lifts the ruleset and deletes it; it cannot make them sign an older manifest.
+- Tag ruleset for `desktop-v*`: only maintainers may create these tags (a bypass list of the maintainer role, nobody else), and nobody may update (move) or delete one. Pushing such a tag starts a signed desktop build, and the environment rule above admits any `desktop-v*` tag, so this ruleset is what keeps that a maintainer's decision.
 
 Account security: two-factor authentication for every account with write or admin access, and fine-grained or no personal access tokens.
 
 ## Workflow notes
 
-The `release` and `promote` workflows refuse any ref but `main`, use `workflow_dispatch` (plus an optional `push` to `main` trigger for `release.yml`, commented out by default), and never use `pull_request*` triggers. `release` and `promote` use separate concurrency groups.
+The `release` and `promote` workflows refuse any ref but `main`, use `workflow_dispatch` (plus an optional `push` to `main` trigger for `release.yml`, commented out by default), and never use `pull_request*` triggers. `release` and `promote` use separate concurrency groups. `desktop-release` signs only from `main` or a `desktop-v*` tag whose commit is on `main`; `windows-lite` signs and attaches only from `main` or after a Release run.
 
 ## Signing key (owner, on your own machine)
 

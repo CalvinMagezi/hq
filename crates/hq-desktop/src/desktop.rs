@@ -223,6 +223,15 @@ pub fn upstream_addr(config: &HqConfig) -> Result<SocketAddr> {
     Ok(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), config.ws_port))
 }
 
+/// The window's address at `path`: with the `#token=` sign-in only for an upstream that `proven`
+/// holds `token`.
+fn window_url(origin: &str, path: &str, token: Option<&str>, proven: bool) -> String {
+    match token.filter(|_| proven) {
+        Some(token) => format!("{origin}{path}#token={token}"),
+        None => format!("{origin}{path}"),
+    }
+}
+
 fn relay_mode(text: &str) -> Result<RelayMode> {
     match text {
         crate::settings::RELAY_NONE => Ok(RelayMode::Disabled),
@@ -836,7 +845,11 @@ impl Desktop {
 
     /// The address of the main window: the proxy, with this machine's web token in the fragment so
     /// its own HQ signs itself in. The fragment never goes to the proxy or HQ; it stays in the
-    /// window. A paired hub has its own token, so the person signs in to it once in the window.
+    /// window, where the page that loads reads it. So it is added only when the server behind the
+    /// proxy has just proved it holds that token (`host::proves_hq`): another program can listen
+    /// on HQ's port while HQ is not running. Otherwise the window opens without it and the person
+    /// signs in there. A paired hub has its own token, so the person signs in to it once in the
+    /// window.
     pub async fn main_window_url(&self) -> Result<String> {
         self.main_window_url_at("/").await
     }
@@ -853,10 +866,17 @@ impl Desktop {
             .web_auth_token
             .as_deref()
             .filter(|t| !t.trim().is_empty() && self.config.bridge.hub_web_listen().is_none());
-        Ok(match local_token {
-            Some(token) => format!("{origin}{path}#token={token}"),
-            None => format!("{origin}{path}"),
-        })
+        let proven = match local_token {
+            Some(token) => host::proves_hq(self.upstream, token).await,
+            None => false,
+        };
+        if local_token.is_some() && !proven {
+            tracing::warn!(
+                upstream = %self.upstream,
+                "the server on HQ's port did not prove it is HQ; opening the window without a sign-in"
+            );
+        }
+        Ok(window_url(&origin, &path, local_token, proven))
     }
 
     /// Runs once when the app opens: starts the host only if the person's setting says so.
@@ -1146,6 +1166,51 @@ mod tests {
         assert!(desktop.proxy.lock().await.is_none());
         let url = desktop.main_window_url_at("/helpers/a1").await.unwrap();
         assert!(url.ends_with("/helpers/a1"));
+    }
+
+    #[test]
+    fn the_sign_in_goes_only_to_a_proven_upstream() {
+        let origin = "http://127.0.0.1:1";
+        assert_eq!(
+            window_url(origin, "/", Some("t"), true),
+            "http://127.0.0.1:1/#token=t"
+        );
+        assert_eq!(
+            window_url(origin, "/", Some("t"), false),
+            "http://127.0.0.1:1/"
+        );
+        assert_eq!(window_url(origin, "/x", None, true), "http://127.0.0.1:1/x");
+    }
+
+    /// Another program on HQ's port while HQ is down gets no sign-in from the window.
+    #[tokio::test]
+    async fn the_window_signs_in_only_to_an_hq_that_proves_it_holds_the_token() {
+        let token = "example-web-token";
+        for (stranger, signed_in) in [(None, true), (Some(r#"{"hq_id":"x"}"#), false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let upstream = crate::host::tests_support_fake_hello(token, stranger).await;
+            let desktop = Desktop::open(DesktopInit {
+                dir: dir.path().join("desktop"),
+                bridge_key: dir.path().join("bridge").join("bridge.key"),
+                config: HqConfig {
+                    web_bind: "127.0.0.1".into(),
+                    ws_port: upstream.port(),
+                    web_auth_token: Some(token.into()),
+                    ..HqConfig::default()
+                },
+                app_dir: None,
+                home: None,
+                path_var: None,
+                login_shell: None,
+            })
+            .unwrap();
+            let mut settings = desktop.settings();
+            settings.proxy_port = crate::host::tests_support_unused_port();
+            desktop.save_settings(settings).unwrap();
+            let url = desktop.main_window_url().await.unwrap();
+            assert_eq!(url.contains("#token="), signed_in, "{url}");
+            assert_eq!(url.contains(token), signed_in, "{url}");
+        }
     }
 
     #[tokio::test]

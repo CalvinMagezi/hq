@@ -12,16 +12,30 @@ use std::sync::Arc;
 /// a bearer token to whatever answers on a port.
 pub const HEALTH_SERVICE: &str = "agent-hq";
 
-pub(crate) async fn health_handler(State(state): State<Arc<WsState>>) -> axum::response::Response {
+/// `/health`. On a request a proxy forwarded (anyone `tailscale serve` or Caddy lets in) it says
+/// only that HQ is up and that it is HQ, never which build: the updater and the installers poll
+/// loopback, where the build details stay. `service` stays so `hq chat --server` can tell HQ
+/// from another program before it sends a token.
+pub(crate) async fn health_handler(
+    State(state): State<Arc<WsState>>,
+    headers: axum::http::HeaderMap,
+) -> axum::response::Response {
     let db_path = state.vault_path.join("_data").join("vault.db");
+    let public = crate::auth::forwarded(&headers);
     if !db_path.exists() {
+        let body = if public {
+            serde_json::json!({ "status": "unavailable" })
+        } else {
+            serde_json::json!({ "status": "unavailable", "reason": "vault db missing" })
+        };
         return (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({
-                "status": "unavailable",
-                "reason": "vault db missing",
-            })),
+            axum::Json(body),
         )
+            .into_response();
+    }
+    if public {
+        return axum::Json(serde_json::json!({ "status": "ok", "service": HEALTH_SERVICE }))
             .into_response();
     }
     axum::Json(serde_json::json!({

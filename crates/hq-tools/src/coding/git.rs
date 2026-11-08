@@ -2,6 +2,57 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+/// Git in `dir` (the process's own directory when `None`), with every program a repository can
+/// name pinned off: these tools run outside any sandbox, in repositories an agent may have
+/// written, so a hook, fsmonitor, filter or signing program set there would run with HQ's reach.
+fn git_in(dir: Option<&std::path::Path>) -> Result<tokio::process::Command> {
+    let dir = match dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    hardened(&dir, false).ok_or_else(|| {
+        anyhow::anyhow!(
+            "refusing to run git in {}: its configuration could not be read",
+            dir.display()
+        )
+    })
+}
+
+/// [`git_in`] for a push, refused when the repository's own config names a program a push runs.
+fn git_push_in(dir: Option<&std::path::Path>) -> Result<tokio::process::Command> {
+    let dir = match dir {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    hardened(&dir, true).ok_or_else(|| {
+        anyhow::anyhow!(
+            "refusing to push from {}: its .git/config names a program a push would run \
+             (an ssh command, proxy, askpass or credential helper). Push it yourself.",
+            dir.display()
+        )
+    })
+}
+
+/// The hardened command where the host's builder exists (unix: the editions that run coding
+/// agents). Lite on Windows has no coding-agent host, so no sandbox boundary to keep, and runs
+/// plain `git` in `dir`.
+#[cfg(unix)]
+fn hardened(dir: &std::path::Path, push: bool) -> Option<tokio::process::Command> {
+    let cmd = if push {
+        hq_host::hardened_git_for_push(dir)
+    } else {
+        hq_host::hardened_git(dir)
+    };
+    cmd.map(tokio::process::Command::from)
+}
+
+#[cfg(not(unix))]
+fn hardened(dir: &std::path::Path, _push: bool) -> Option<tokio::process::Command> {
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.arg("-C").arg(dir);
+    Some(cmd)
+}
+
 use crate::registry::HqTool;
 
 use super::{MAX_OUTPUT_BYTES, truncate_output};
@@ -62,10 +113,7 @@ impl HqTool for GitCommitTool {
         let stage_all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
 
         if stage_all {
-            let out = tokio::process::Command::new("git")
-                .args(["add", "-A"])
-                .output()
-                .await?;
+            let out = git_in(None)?.args(["add", "-A"]).output().await?;
             if !out.status.success() {
                 return Ok(
                     json!({"error": format!("git add -A failed: {}", String::from_utf8_lossy(&out.stderr))}),
@@ -73,10 +121,7 @@ impl HqTool for GitCommitTool {
             }
         } else if let Some(files) = &files {
             for file in files {
-                let out = tokio::process::Command::new("git")
-                    .args(["add", "--", file])
-                    .output()
-                    .await?;
+                let out = git_in(None)?.args(["add", "--", file]).output().await?;
                 if !out.status.success() {
                     return Ok(
                         json!({"error": format!("git add {} failed: {}", file, String::from_utf8_lossy(&out.stderr))}),
@@ -85,7 +130,7 @@ impl HqTool for GitCommitTool {
             }
         }
 
-        let out = tokio::process::Command::new("git")
+        let out = git_in(None)?
             .args(["commit", "-m", message])
             .output()
             .await?;
@@ -187,13 +232,7 @@ fn diff_path_refusal(file: &str) -> Option<String> {
 /// `git diff` in `cwd` (the process's own directory when `None`). Refuses to run outside a work
 /// tree, where git would compare any two files instead.
 async fn diff_in(cwd: Option<&std::path::Path>, args: &Value) -> Result<Value> {
-    let git = || {
-        let mut cmd = tokio::process::Command::new("git");
-        if let Some(dir) = cwd {
-            cmd.current_dir(dir);
-        }
-        cmd
-    };
+    let git = || git_in(cwd);
     let mut files = Vec::new();
     if let Some(list) = args.get("files").and_then(|v| v.as_array()) {
         for f in list.iter().filter_map(Value::as_str) {
@@ -203,7 +242,7 @@ async fn diff_in(cwd: Option<&std::path::Path>, args: &Value) -> Result<Value> {
             files.push(f.to_string());
         }
     }
-    let inside = git()
+    let inside = git()?
         .args(["rev-parse", "--is-inside-work-tree"])
         .output()
         .await?;
@@ -211,7 +250,7 @@ async fn diff_in(cwd: Option<&std::path::Path>, args: &Value) -> Result<Value> {
         return Ok(json!({ "error": "git_diff runs only inside a git work tree" }));
     }
 
-    let mut cmd = git();
+    let mut cmd = git()?;
     // No external diff program and no textconv filter: both run a command named by config.
     cmd.arg("diff")
         .arg("--color=never")
@@ -256,9 +295,14 @@ async fn diff_in(cwd: Option<&std::path::Path>, args: &Value) -> Result<Value> {
 pub async fn uncommitted_diff(cwd: &std::path::Path) -> Result<String> {
     let mut out = String::new();
 
-    let tracked = tokio::process::Command::new("git")
-        .current_dir(cwd)
-        .args(["diff", "HEAD", "--color=never"])
+    let tracked = git_in(Some(cwd))?
+        .args([
+            "diff",
+            "HEAD",
+            "--color=never",
+            "--no-ext-diff",
+            "--no-textconv",
+        ])
         .output()
         .await?;
     // A repo with no commits yet has no HEAD to diff against; that is not an
@@ -268,8 +312,7 @@ pub async fn uncommitted_diff(cwd: &std::path::Path) -> Result<String> {
         out.push_str(&String::from_utf8_lossy(&tracked.stdout));
     }
 
-    let untracked = tokio::process::Command::new("git")
-        .current_dir(cwd)
+    let untracked = git_in(Some(cwd))?
         .args(["ls-files", "--others", "--exclude-standard"])
         .output()
         .await?;
@@ -282,9 +325,16 @@ pub async fn uncommitted_diff(cwd: &std::path::Path) -> Result<String> {
             // `git diff --no-index` exits 1 when the two sides differ, which
             // is the expected outcome for every untracked file, so the status
             // is not checked here — only stdout matters.
-            let diff = tokio::process::Command::new("git")
-                .current_dir(cwd)
-                .args(["diff", "--no-index", "--color=never", "/dev/null", file])
+            let diff = git_in(Some(cwd))?
+                .args([
+                    "diff",
+                    "--no-index",
+                    "--color=never",
+                    "--no-ext-diff",
+                    "--no-textconv",
+                    "/dev/null",
+                    file,
+                ])
                 .output()
                 .await?;
             out.push_str(&String::from_utf8_lossy(&diff.stdout));
@@ -325,15 +375,12 @@ impl HqTool for GitStatusTool {
     }
 
     async fn execute(&self, _args: Value) -> Result<Value> {
-        let branch = tokio::process::Command::new("git")
+        let branch = git_in(None)?
             .args(["branch", "--show-current"])
             .output()
             .await?;
-        let status = tokio::process::Command::new("git")
-            .args(["status", "--short"])
-            .output()
-            .await?;
-        let log = tokio::process::Command::new("git")
+        let status = git_in(None)?.args(["status", "--short"]).output().await?;
+        let log = git_in(None)?
             .args(["log", "--oneline", "-5"])
             .output()
             .await?;
@@ -397,7 +444,7 @@ impl HqTool for GitLogTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let mut cmd = tokio::process::Command::new("git");
+        let mut cmd = git_in(None)?;
         cmd.arg("log").arg(format!("-{}", count));
 
         if oneline {
@@ -483,7 +530,7 @@ impl HqTool for GitPrTool {
         let push = args.get("push").and_then(|v| v.as_bool()).unwrap_or(true);
 
         if push {
-            let out = tokio::process::Command::new("git")
+            let out = git_push_in(None)?
                 .args(["push", "-u", "origin", "HEAD"])
                 .output()
                 .await?;

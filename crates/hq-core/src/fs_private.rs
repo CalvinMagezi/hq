@@ -46,6 +46,54 @@ pub fn write_private(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> 
     file.write_all(contents.as_ref())
 }
 
+/// Takes group and other permissions off `path` when this user owns it: `0700` for a folder,
+/// `0600` for a file, keeping the owner's own bits. A missing path, a link, or one another user
+/// owns is left alone (`Ok(false)`); `Ok(true)` when the mode changed. A no-op off unix.
+pub fn make_private(path: &Path) -> io::Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let meta = match std::fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        // SAFETY: geteuid has no preconditions.
+        if meta.file_type().is_symlink() || meta.uid() != unsafe { libc::geteuid() } {
+            return Ok(false);
+        }
+        let mode = meta.permissions().mode() & 0o7777;
+        if mode & 0o077 == 0 {
+            return Ok(false);
+        }
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & 0o700))?;
+        Ok(true)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(false)
+    }
+}
+
+/// Creates `path` as an empty mode 0600 file if nothing is there, so a program that then opens
+/// it (SQLite, which gives its WAL and shared-memory files the database's mode) never makes it
+/// readable by others. An existing file is left as it is.
+pub fn create_private_file(path: &Path) -> io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(PRIVATE_FILE_MODE);
+    }
+    match options.open(path) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 /// Copies `from` to `to` as mode 0600 (a plain `fs::copy` keeps the source mode).
 pub fn copy_private(from: &Path, to: &Path) -> io::Result<u64> {
     let data = std::fs::read(from)?;
@@ -184,6 +232,43 @@ mod tests {
         copy_private(&src, &dst).unwrap();
         assert_eq!(mode(&dst), 0o600);
         assert_eq!(std::fs::read_to_string(&dst).unwrap(), "secret");
+    }
+
+    #[test]
+    fn make_private_takes_off_group_and_other_bits_and_leaves_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("vault");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let file = folder.join("vault.db");
+        std::fs::write(&file, b"").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(make_private(&folder).unwrap());
+        assert!(make_private(&file).unwrap());
+        assert_eq!(mode(&folder), 0o700);
+        assert_eq!(mode(&file), 0o600);
+        assert!(!make_private(&file).unwrap(), "already private");
+        assert!(!make_private(&folder.join("missing")).unwrap());
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&file, &link).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!make_private(&link).unwrap(), "a link is not followed");
+        assert_eq!(mode(&file), 0o644);
+    }
+
+    #[test]
+    fn a_private_file_is_made_once_and_never_loosened() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("vault.db");
+        create_private_file(&file).unwrap();
+        assert_eq!(mode(&file), 0o600);
+        std::fs::write(&file, b"data").unwrap();
+        create_private_file(&file).unwrap();
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            b"data",
+            "an existing file is kept"
+        );
     }
 
     #[test]

@@ -103,8 +103,18 @@ async fn replace_key_at(
     Ok(json!({"ok": true, "provider": provider}))
 }
 
+/// The provider's name as the owner reads it.
+fn provider_name(provider: SetupProvider) -> &'static str {
+    match provider {
+        SetupProvider::OpenRouter => "OpenRouter",
+        SetupProvider::Anthropic => "Anthropic",
+        SetupProvider::Google => "Google",
+    }
+}
+
 pub(crate) async fn replace_handler(
     State(state): State<Arc<WsState>>,
+    credential: Option<axum::Extension<crate::auth::WebCredential>>,
     Json(body): Json<ReplaceBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     if !state.web_auth_enabled() {
@@ -120,6 +130,14 @@ pub(crate) async fn replace_handler(
     )
     .await?;
     state.announce_change(crate::CHANGE_SETTINGS);
+    state.notify_owner_of_change(
+        credential.as_deref(),
+        "A model provider key was changed",
+        &format!(
+            "HQ now uses a new {} key. Chats and tasks are billed to whoever owns it.",
+            provider_name(body.provider)
+        ),
+    );
     Ok(Json(saved))
 }
 

@@ -1,6 +1,8 @@
 # Pinned notes
 
-A note is pinned when its frontmatter has `pinned: true`. Pinned notes show at
+A note is pinned when its frontmatter has `pinned: true` (or `yes`). The words
+anywhere else in the file, in the body, a quoted mail or a code block, do not
+pin it. Pinned notes show at
 the top of the vault in the web app (up to 50), and up to 10 of them are loaded
 into the context of every HQ chat turn, wrapped as vault data
 (`hq_vault::system::get_system_context_keeping`, the context engine's
@@ -22,7 +24,10 @@ accepted is a **suggestion**.
   accepted, so the pin is a suggestion again until the owner keeps it.
 - `reviewed` does not count: agents may set it on each other's work.
 - A version nobody recorded (edited outside HQ's tools, or pinned before this
-  rule) stays trusted.
+  rule) stays trusted, except under `Notebooks/Memories/`. Only HQ's memory
+  consolidator writes there, from text it read and summarised, so a pin on a
+  version nobody recorded, or one recorded as a system write, is a suggestion
+  until the owner keeps it.
 
 ## Pinning from an agent
 

@@ -138,8 +138,13 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
 
     let timeout = config.github_copilot.timeout_secs.clamp(10, 60);
     // An empty directory, so the CLI has no project files, instructions or git state to send.
-    let probe_dir = std::env::temp_dir().join(format!("hq-copilot-probe-{}", std::process::id()));
-    std::fs::create_dir_all(&probe_dir).context("creating the probe directory")?;
+    // A fresh one with a random name (0700): a predictable path in the shared temp folder could
+    // be made beforehand by another user, with files of their choosing in it.
+    let probe = tempfile::Builder::new()
+        .prefix("hq-copilot-probe-")
+        .tempdir()
+        .context("creating the probe directory")?;
+    let probe_dir = probe.path().to_path_buf();
     let pick = pick_first_usable(&preference, |m| {
         let binary = binary.clone();
         let probe_dir = probe_dir.clone();
@@ -168,7 +173,7 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
         }
     })
     .await;
-    let _ = std::fs::remove_dir(&probe_dir);
+    drop(probe);
 
     match pick {
         Pick::Chosen { model, skipped } => {

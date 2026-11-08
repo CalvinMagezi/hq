@@ -98,7 +98,8 @@ class CaptureActivity : ComponentActivity() {
     private fun save(draft: CaptureDraft, andOpen: Boolean) {
         CapturePrefs.rememberMode(this, draft.mode)
         if (draft.mode == CaptureMode.Chat) {
-            startActivity(Intent(this, ShellActivity::class.java).putExtra(Links.EXTRA, "hq://chat").putExtra(EXTRA_DRAFT, CaptureWords.chatDraft(draft.title, draft.body)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            handedDraft = CaptureWords.chatDraft(draft.title, draft.body)
+            startActivity(Intent(this, ShellActivity::class.java).putExtra(Links.EXTRA, "hq://chat").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
             finish()
             return
         }
@@ -144,7 +145,15 @@ class CaptureActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_MODE = "mode"
-        const val EXTRA_DRAFT = "draft"
+
+        /**
+         * The chat draft handed to the shell, kept in this process rather than in an extra: the shell is the launcher, so any app
+         * can start it with extras, and a draft from one could sit in the message box unseen.
+         */
+        @Volatile private var handedDraft: String? = null
+
+        /** The draft the capture sheet handed over, once; null when none did. */
+        fun takeDraft(): String? = synchronized(this) { handedDraft.also { handedDraft = null } }
     }
 }
 

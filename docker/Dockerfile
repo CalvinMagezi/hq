@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 #
 # Official HQ image. Nothing is compiled here: the image is assembled from the
 # signed, already verified release artifacts, which the publish workflow (and
@@ -13,7 +13,14 @@
 #     --build-arg REVISION=<release git sha> --build-arg SOURCE_REVISION=<sha of docker/> <context dir>
 #
 # Ubuntu 22.04 matches the glibc 2.35 floor the release binaries are built for.
-FROM ubuntu:22.04
+#
+# The frontend (first line) and the base image are pinned by digest, the multi-arch index digest, so
+# a retagged image cannot change what the publish job (which holds packages: write) builds on. The
+# digest does not follow Ubuntu's security rebuilds by itself: bump both when you release, with the
+# index digest the registry reports for the tag, for example
+#   docker buildx imagetools inspect ubuntu:22.04 --format '{{.Manifest.Digest}}'
+#   docker buildx imagetools inspect docker/dockerfile:1.7 --format '{{.Manifest.Digest}}'
+FROM ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11
 
 ARG TARGETARCH
 ARG VERSION=unknown

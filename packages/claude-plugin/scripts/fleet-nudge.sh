@@ -7,9 +7,31 @@ command -v python3 >/dev/null 2>&1 || exit 0
 [ -t 0 ] && exit 0
 
 python3 -c '
-import json, os, sys, tempfile
+import json, os, stat, sys
 
 NUDGED_TYPES = {"scout", "Explore"}
+
+
+# Markers live in a directory only this user can open ($XDG_RUNTIME_DIR, else ~/.cache), never
+# the shared temp directory, where another user could plant a symlink at a marker path.
+def marker_dir():
+    base = os.environ.get("XDG_RUNTIME_DIR") or ""
+    if not (os.path.isabs(base) and os.path.isdir(base)):
+        base = os.path.join(os.path.expanduser("~"), ".cache")
+    d = os.path.join(base, "agent-hq-plugin")
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        st = os.lstat(d)
+        if not stat.S_ISDIR(st.st_mode):
+            return None
+        if hasattr(os, "getuid"):
+            if st.st_uid != os.getuid():
+                return None
+            if st.st_mode & 0o077:
+                os.chmod(d, 0o700)
+    except OSError:
+        return None
+    return d
 
 try:
     data = json.load(sys.stdin)
@@ -23,12 +45,15 @@ if (data.get("tool_input") or {}).get("subagent_type") not in NUDGED_TYPES:
 session = "".join(c for c in str(data.get("session_id", "")) if c.isalnum() or c == "-")
 if not session:
     sys.exit(0)
-marks = os.path.join(tempfile.gettempdir(), "agent-hq-plugin")
-os.makedirs(marks, exist_ok=True)
-mark = os.path.join(marks, session + ".fleet-nudged")
-if os.path.exists(mark):
+marks = marker_dir()
+if not marks:
     sys.exit(0)
-open(mark, "w").close()
+# Created exclusively and never through a symlink: anything already at the path, or a failure to
+# create it, means this session was nudged already or cannot be, so the launch goes through.
+try:
+    os.close(os.open(os.path.join(marks, session + ".fleet-nudged"), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600))
+except OSError:
+    sys.exit(0)
 
 how = "harness_session_spawn with a task_id"
 if os.environ.get("HQ_SESSION_ID"):

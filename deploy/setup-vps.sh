@@ -25,7 +25,7 @@ fi
 
 echo "=== Installing GitHub CLI ==="
 # HQ shells out to `gh` for `git_pr` and the coding tools. Authentication is
-# a token in /opt/hq/gh.env; see deploy/README.md, "GitHub access".
+# a token in /etc/hq/gh.env (root-only); see deploy/README.md, "GitHub access".
 mkdir -p /etc/apt/keyrings && chmod 755 /etc/apt/keyrings
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
 chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
@@ -89,9 +89,10 @@ chown hq:hq /opt/hq/config.yaml
 echo "=== VPS provisioning complete ==="
 echo "Next steps:"
 echo "  1. Clone the repo on this host and run deploy/install.sh (see deploy/README.md,"
-echo "     'Pull-based updates'). It installs the hq binary, units and updater."
-echo "     Building from source instead: copy the binary to /usr/local/bin/hq and"
-echo "     install deploy/hq.service by hand."
+echo "     'Pull-based updates'). It installs the hq binary, units and updater, and turns"
+echo "     sign-in on (a web token in /etc/hq/mcp.env) and prints how to get a sign-in link."
+echo "     Building from source instead: copy the binary to /usr/local/bin/hq, install"
+echo "     deploy/hq.service by hand and set a web token (deploy/README.md, Web UI)."
 echo "  2. Run: tailscale up"
 echo "  3. Publish the web UI to your tailnet: tailscale serve --bg --https=8443 http://127.0.0.1:4749"
 echo "     then open the HTTPS address that Tailscale prints on port 8443 (see deploy/README.md, Tailscale)."

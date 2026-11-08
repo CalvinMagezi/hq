@@ -125,6 +125,23 @@ impl ManageConnection for SqliteConnectionManager {
     }
 }
 
+/// Tightens the database file and, when it sits in a vault's `_data`, that folder and the vault.
+/// A database anywhere else leaves its folder alone (it may be a shared one, such as `/tmp`).
+/// Best effort: a path another user owns is left as it is.
+fn make_private(db_path: &Path) {
+    let data = db_path
+        .parent()
+        .filter(|p| p.file_name().is_some_and(|n| n == "_data"));
+    let vault = data
+        .and_then(Path::parent)
+        .filter(|p| !p.as_os_str().is_empty());
+    for path in [Some(db_path), data, vault].into_iter().flatten() {
+        if let Err(e) = hq_core::fs_private::make_private(path) {
+            warn!(path = %path.display(), "could not make it private: {e}");
+        }
+    }
+}
+
 /// Thread-safe SQLite database wrapper backed by an r2d2 connection pool.
 ///
 /// WAL mode allows true parallel reads; the pool hands out independent
@@ -136,11 +153,16 @@ pub struct Database {
 }
 
 impl Database {
-    /// Open (or create) the database at the given path.
+    /// Open (or create) the database at the given path. On unix the database, its WAL and
+    /// shared-memory files are this user's alone (0600), folders this creates are 0700, and a
+    /// vault's `_data` and the vault itself are tightened to 0700 when looser. The notes and
+    /// every token HQ keeps are in there.
     pub fn open(db_path: &Path) -> Result<Self> {
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
+        if let Some(parent) = db_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            hq_core::fs_private::create_private_dir_all(parent)?;
         }
+        hq_core::fs_private::create_private_file(db_path)?;
+        make_private(db_path);
 
         let manager = SqliteConnectionManager::file(db_path);
         let pool = Pool::builder()
@@ -164,6 +186,15 @@ impl Database {
                 }
             })
         })?;
+
+        // WAL mode made these files just now, or an older build made them with a looser mode.
+        for suffix in ["-wal", "-shm"] {
+            let mut side = db_path.as_os_str().to_owned();
+            side.push(suffix);
+            if let Err(e) = hq_core::fs_private::make_private(Path::new(&side)) {
+                warn!(path = ?side, "could not make the database file private: {e}");
+            }
+        }
 
         info!(path = %db_path.display(), "database opened (pooled, max_size=8)");
         Ok(Self { pool })
@@ -214,6 +245,78 @@ impl std::fmt::Debug for Database {
         f.debug_struct("Database")
             .field("pool_size", &self.pool.max_size())
             .finish()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod private_files_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(p: &Path) -> u32 {
+        std::fs::metadata(p).unwrap().permissions().mode() & 0o7777
+    }
+
+    /// Mutation: `open` goes back to `create_dir_all` and lets SQLite create the file. The vault
+    /// then comes out 0755 and the database 0644 under a usual umask.
+    #[test]
+    fn a_new_vault_database_is_this_users_alone() {
+        let home = tempfile::TempDir::new().unwrap();
+        std::fs::set_permissions(home.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let vault = home.path().join("vault");
+        let db_path = vault.join("_data").join("vault.db");
+        let db = Database::open(&db_path).unwrap();
+        db.with_conn(|c| {
+            Ok(c.execute_batch("CREATE TABLE t (a INTEGER); INSERT INTO t VALUES (1);")?)
+        })
+        .unwrap();
+        assert_eq!(mode(&vault), 0o700);
+        assert_eq!(mode(&vault.join("_data")), 0o700);
+        assert_eq!(mode(&db_path), 0o600);
+        for side in ["vault.db-wal", "vault.db-shm"] {
+            let side = vault.join("_data").join(side);
+            if side.exists() {
+                assert_eq!(mode(&side), 0o600, "{}", side.display());
+            }
+        }
+        assert_eq!(
+            mode(home.path()),
+            0o755,
+            "the folder above the vault is not touched"
+        );
+    }
+
+    #[test]
+    fn an_existing_loose_vault_is_tightened_on_open() {
+        let home = tempfile::TempDir::new().unwrap();
+        let vault = home.path().join("vault");
+        let data = vault.join("_data");
+        std::fs::create_dir_all(&data).unwrap();
+        let db_path = data.join("vault.db");
+        drop(Database::open(&db_path).unwrap());
+        for (path, loose) in [(&vault, 0o755), (&data, 0o755), (&db_path, 0o644)] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(loose)).unwrap();
+        }
+        let wal = data.join("vault.db-wal");
+        std::fs::write(&wal, b"").unwrap();
+        std::fs::set_permissions(&wal, std::fs::Permissions::from_mode(0o644)).unwrap();
+        drop(Database::open(&db_path).unwrap());
+        assert_eq!(mode(&vault), 0o700);
+        assert_eq!(mode(&data), 0o700);
+        assert_eq!(mode(&db_path), 0o600);
+        if wal.exists() {
+            assert_eq!(mode(&wal), 0o600);
+        }
+    }
+
+    #[test]
+    fn a_database_outside_a_vault_leaves_its_folder_alone() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let db_path = dir.path().join("other.db");
+        drop(Database::open(&db_path).unwrap());
+        assert_eq!(mode(dir.path()), 0o755);
+        assert_eq!(mode(&db_path), 0o600);
     }
 }
 

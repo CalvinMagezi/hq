@@ -31,6 +31,9 @@ object NotesCopy {
     private const val COUNT_EVERY = 50
     private const val PENDING = "safe-copy.pending"
     private const val LAST_COPY = "safe-copy.last"
+    /** HQ's own keys in the vault's data folder (crates/hq-web/src/tls/store.rs, web_push/vapid.rs); data_extraction_rules.xml leaves them out too. */
+    private const val CONNECTOR_TLS = "_data/connector_tls"
+    private const val WEB_PUSH_KEY = "_data/web_push_vapid.p8"
 
     private val PACKED = setOf("png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "avif", "pdf", "zip", "gz", "mp3", "m4a", "aac", "ogg", "opus", "mp4", "mov", "webm", "mkv", "7z", "docx", "xlsx", "pptx")
     private val NAME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HHmm")
@@ -56,13 +59,17 @@ object NotesCopy {
     /** The file name offered to the picker, from the spec's pattern. */
     fun fileName(time: LocalDateTime): String = "HQ notes ${NAME_FORMAT.format(time)}.zip"
 
-    /** True for what never goes in: logs, HQ's lock files, backups, restore work folders, the config and the bridge key. */
+    /**
+     * True for what never goes in: logs, HQ's lock files, backups, restore work folders, the config, the bridge key, and the keys HQ keeps in
+     * its data folder (the claude.ai connector's TLS keys and the web push signing key).
+     */
     fun excluded(relative: String, isDirectory: Boolean): Boolean {
         val name = relative.substringAfterLast('/')
-        if (isDirectory) return name.startsWith(".hq-restore-") || name == ".hq" || name == "_logs"
+        if (isDirectory) return name.startsWith(".hq-restore-") || name == ".hq" || name == "_logs" || relative.equals(CONNECTOR_TLS, ignoreCase = true)
         val lower = name.lowercase()
         return lower.endsWith(".log") || lower.endsWith(".lock") || lower.endsWith(".lck") || lower.endsWith(".pid") || lower.endsWith(".hqbak") ||
-            name == "LOCK" || name.startsWith(".hq-restore-") || name == "bridge.key" || (relative == "config.yaml")
+            name == "LOCK" || name.startsWith(".hq-restore-") || name == "bridge.key" || (relative == "config.yaml") ||
+            relative.equals(WEB_PUSH_KEY, ignoreCase = true)
     }
 
     /**

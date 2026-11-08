@@ -99,6 +99,9 @@ async fn run_turn<K: ChatKey>(
     let hooks = hq_agent::native_hq::NativeHqHooks {
         identity: Some((surface.identity)(key)),
         turn_id: Some(f.turn_id.clone()),
+        // HQ wrote this prompt and nobody is in the chat to approve anything the turn does.
+        unattended: true,
+        prompt_by_hq: true,
         ..Default::default()
     };
     let result = hq_agent::native_hq::run_native_hq(

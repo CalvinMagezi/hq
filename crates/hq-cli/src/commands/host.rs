@@ -124,18 +124,75 @@ struct Caps {
 /// server's `/opt/hq/config.yaml`; the configured vault, else the server's): the
 /// vault's database and instruction folders, the config file in force with the
 /// file writers use, and the approval key beside it. Every sandboxed agent is
-/// walled off from them.
+/// walled off from them. Kept read-only too: what HQ and the user's own tools run
+/// later, outside the sandbox (the `hq` binary, the self-update install paths, the
+/// MCP client configs `hq mcp install` writes) and the web UI HQ serves.
 fn hq_paths() -> HqPaths {
     use hq_core::config::HqConfig;
-    let vault = HqConfig::load()
-        .map(|c| c.vault_path)
-        .unwrap_or_else(|_| HqConfig::default().vault_path);
+    let config = HqConfig::load().unwrap_or_else(|_| HqConfig::default());
+    let vault = config.vault_path.clone();
+    if !vault.is_dir() {
+        eprintln!(
+            "hq host: ERROR the vault {} does not exist, so agents are not kept out of the vault HQ really uses; set HQ_VAULT_PATH (or vault_path in the config) for the host as for HQ, and restart the host",
+            vault.display()
+        );
+    }
     let config_files = [
         HqConfig::config_read_path(),
         HqConfig::config_file_path(),
         hq_core::approval_key::key_path(),
     ];
     HqPaths::new(Some(&vault), &config_files)
+        .with_readonly_files(running_binary())
+        .with_readonly_files(config.self_update.install_paths.iter().cloned())
+        .with_readonly_files(mcp_client_configs())
+        .with_served(super::start::served_static_dirs(&config))
+}
+
+/// The binary this host runs from: where it really is, and the path it was started
+/// as (a link such as `/usr/local/bin/hq` to `~/bin/hq`, or a bare `hq` found on
+/// `PATH`).
+fn running_binary() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = std::env::current_exe().into_iter().collect();
+    let Some(started) = std::env::args_os().next().map(PathBuf::from) else {
+        return out;
+    };
+    if started.components().count() > 1 {
+        out.extend(std::path::absolute(&started).ok());
+    } else if let Some(path) = std::env::var_os("PATH") {
+        out.extend(
+            std::env::split_paths(&path)
+                .filter(|d| d.is_absolute())
+                .map(|d| d.join(&started))
+                .find(|p| p.is_file()),
+        );
+    }
+    out
+}
+
+/// The per-user MCP client configs: every file `hq mcp install` writes, old
+/// locations included, and Codex's `config.toml`. Each names commands its client
+/// runs later, outside any sandbox. Claude Code's own files are left to the host,
+/// which protects them per account.
+fn mcp_client_configs() -> Vec<PathBuf> {
+    use super::cursor_mcp_config::{GLOBAL_CLIENTS, global_targets};
+    let mut out: Vec<PathBuf> = GLOBAL_CLIENTS
+        .iter()
+        .filter(|c| **c != "claude-code")
+        .filter_map(|c| global_targets(c).ok())
+        .flatten()
+        .map(|t| t.path)
+        .collect();
+    let codex_homes = dirs::home_dir()
+        .map(|h| h.join(".codex"))
+        .into_iter()
+        .chain(
+            std::env::var_os("CODEX_HOME")
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute()),
+        );
+    out.extend(codex_homes.map(|d| d.join("config.toml")));
+    out
 }
 
 async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> {
@@ -702,5 +759,41 @@ mod tests {
         let reply: serde_json::Value =
             serde_json::from_str(&gate_reply(dir.path(), r#"["host.status","{}"]"#)).unwrap();
         assert_eq!(reply["error"]["code"], "unreachable");
+    }
+}
+
+#[cfg(test)]
+mod wall_tests {
+    use super::*;
+
+    #[test]
+    fn the_mcp_client_configs_hq_writes_are_kept_from_agents() {
+        let home = dirs::home_dir().unwrap();
+        let files = mcp_client_configs();
+        for file in [
+            ".cursor/mcp.json",
+            ".codex/config.toml",
+            ".copilot/mcp.json",
+        ] {
+            assert!(files.contains(&home.join(file)), "{file}: {files:?}");
+        }
+        if let Some(desktop) = hq_core::paths::claude_desktop_config_path() {
+            assert!(files.contains(&desktop), "{files:?}");
+        }
+        assert!(
+            files.iter().any(|f| f.ends_with("Code/User/mcp.json")),
+            "{files:?}"
+        );
+        // Claude Code's are the host's to protect, per account.
+        assert!(!files.contains(&home.join(".claude.json")));
+    }
+
+    #[test]
+    fn the_running_binary_is_named_where_it_really_is() {
+        let exe = std::env::current_exe().unwrap();
+        assert!(running_binary().contains(&exe));
+        let paths = hq_paths();
+        assert!(paths.readonly_files.contains(&exe));
+        assert!(paths.vault.is_some());
     }
 }

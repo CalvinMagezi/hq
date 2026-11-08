@@ -24,7 +24,7 @@
         <key>HOME</key>
         <string>__HOME__</string>
         <key>PATH</key>
-        <string>__HOME__/.local/bin:__HOME__/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin:__HOME__/.local/bin:__HOME__/bin</string>
         <!-- No API keys here: the daemon reads them from ~/.hq/config.yaml (mode 600). A key in
              this plaintext file would also outrank the config and hide key changes made from
              the web UI. -->

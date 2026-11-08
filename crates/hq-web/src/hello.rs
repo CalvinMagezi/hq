@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde_json::{Value, json};
@@ -87,6 +87,44 @@ fn body(hq_id: &str, edition: &str, starting: Option<&StartProgress>) -> Value {
     })
 }
 
+/// `?proof=<nonce>`: a client that holds the web token asks HQ to show it holds the same one
+/// (`hq_core::server_proof`). The token itself never leaves.
+#[derive(Debug, Default, serde::Deserialize)]
+pub(crate) struct HelloQuery {
+    proof: Option<String>,
+}
+
+/// The hello body, with the answer to a proof nonce when one was asked for and a web token is
+/// set. Without a token there is nothing to prove, so no answer; a bad nonce is a 400. The answer
+/// does not depend on whether the owner signed the token out: a client recovering from that
+/// sign-out must still be able to tell HQ from a stranger on the port.
+fn hello_response(
+    hq_id: &str,
+    edition: &str,
+    starting: Option<&StartProgress>,
+    web_token: Option<&str>,
+    query: &HelloQuery,
+) -> axum::response::Response {
+    let mut v = body(hq_id, edition, starting);
+    if let Some(nonce) = query.proof.as_deref() {
+        let nonce = match hq_core::server_proof::decode_nonce(nonce) {
+            Ok(n) => n,
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    axum::Json(json!({ "error": e.to_string() })),
+                )
+                    .into_response();
+            }
+        };
+        if let Some(token) = web_token.filter(|t| !t.trim().is_empty()) {
+            v[hq_core::server_proof::PARAM] =
+                Value::String(hq_core::server_proof::answer(token, &nonce));
+        }
+    }
+    axum::Json(v).into_response()
+}
+
 const SECS_PER_MINUTE: i32 = 60;
 
 /// HQ's own time zone as an IANA name, so a page can say "07:00 Nairobi time" for a time HQ
@@ -105,18 +143,32 @@ fn edition(profile: hq_core::config::Profile) -> String {
 }
 
 /// `GET /api/hello` once HQ is up.
-pub(crate) async fn hello_handler(State(state): State<Arc<WsState>>) -> axum::response::Response {
+pub(crate) async fn hello_handler(
+    State(state): State<Arc<WsState>>,
+    Query(query): Query<HelloQuery>,
+) -> axum::response::Response {
     match hq_id(&state.vault_path) {
-        Ok(id) => axum::Json(body(&id, &edition(state.profile()), None)).into_response(),
+        Ok(id) => hello_response(
+            &id,
+            &edition(state.profile()),
+            None,
+            state.configured_web_token(),
+            &query,
+        ),
         Err(e) => crate::error::ApiError::internal(e).into_response(),
     }
 }
 
 /// The web port while HQ opens: `/api/hello` says how far it got, the rest of `/api` waits.
-fn starting_router(id: String, edition: String, progress: Arc<StartProgress>) -> Router {
-    let hello = move || {
-        let v = body(&id, &edition, Some(&progress));
-        async move { axum::Json(v) }
+fn starting_router(
+    id: String,
+    edition: String,
+    progress: Arc<StartProgress>,
+    web_token: Option<String>,
+) -> Router {
+    let hello = move |Query(query): Query<HelloQuery>| {
+        let res = hello_response(&id, &edition, Some(&progress), web_token.as_deref(), &query);
+        async move { res }
     };
     Router::new()
         .route(HELLO_PATH, axum::routing::get(hello))
@@ -135,9 +187,20 @@ pub struct StartingServer {
 }
 
 impl StartingServer {
-    pub fn new(vault_path: &Path, profile: hq_core::config::Profile) -> Result<Self> {
+    /// `web_token` is the token the full server will take, so a client can check the port is HQ
+    /// before it sends that token (`?proof=`), while HQ is still starting.
+    pub fn new(
+        vault_path: &Path,
+        profile: hq_core::config::Profile,
+        web_token: Option<&str>,
+    ) -> Result<Self> {
         let progress = Arc::new(StartProgress::default());
-        let first = starting_router(hq_id(vault_path)?, edition(profile), progress.clone());
+        let first = starting_router(
+            hq_id(vault_path)?,
+            edition(profile),
+            progress.clone(),
+            web_token.map(str::to_string),
+        );
         Ok(Self {
             current: Arc::new(RwLock::new(first)),
             progress,
@@ -195,6 +258,48 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn while_starting_hello_proves_the_token_and_refuses_bad_nonces() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let token = "example-web-token";
+        let server =
+            StartingServer::new(dir.path(), hq_core::config::Profile::Full, Some(token)).unwrap();
+        let app = server.router();
+        let nonce = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+        let (status, v) = get(&app, &format!("{HELLO_PATH}?proof={nonce}")).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["proof"], "s887Mn5Ba7kWekr_rkJlZl5zEYzF3_5f3jGwuiy_PXk");
+        assert!(!v.to_string().contains(token), "the token never leaves");
+
+        let (_, plain) = get(&app, HELLO_PATH).await;
+        assert!(plain.get("proof").is_none(), "no nonce, no answer");
+
+        let long = "A".repeat(200);
+        for bad in [
+            "",
+            "short",
+            "AAAA%2B%2B%2B%2BAAAAAAAAAAAAAAAAAA",
+            long.as_str(),
+        ] {
+            let (status, v) = get(&app, &format!("{HELLO_PATH}?proof={bad}")).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+            assert!(v.get("proof").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn without_a_web_token_there_is_no_answer() {
+        let dir = tempfile::TempDir::new().unwrap();
+        for token in [None, Some("  ")] {
+            let server =
+                StartingServer::new(dir.path(), hq_core::config::Profile::Full, token).unwrap();
+            let nonce = hq_core::server_proof::new_nonce();
+            let (status, v) = get(&server.router(), &format!("{HELLO_PATH}?proof={nonce}")).await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(v.get("proof").is_none(), "{token:?}");
+        }
+    }
+
     #[test]
     fn the_install_id_is_made_once_and_kept() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -212,7 +317,7 @@ mod tests {
     #[tokio::test]
     async fn while_starting_hello_reports_the_step_and_the_rest_waits_then_hands_over() {
         let dir = tempfile::TempDir::new().unwrap();
-        let server = StartingServer::new(dir.path(), hq_core::config::Profile::Full).unwrap();
+        let server = StartingServer::new(dir.path(), hq_core::config::Profile::Full, None).unwrap();
         let app = server.router();
         server.progress.at(1);
         let (status, v) = get(&app, HELLO_PATH).await;

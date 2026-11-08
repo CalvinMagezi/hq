@@ -61,7 +61,9 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context) {
  * An assistant must name a recognition service, and some phones then make it the default speech recogniser. So
  * this one really recognises, with the same on-device model, and other apps' dictation keeps working and stays on
  * the phone. Android lets only callers that hold the microphone permission in (RecognitionService checks it); they
- * get their own words back and nothing else. While the voice sheet holds the microphone they get "busy".
+ * get their own words back and nothing else. While the voice sheet holds the microphone they get "busy". It is turned on only
+ * from Android 12 (res/values-v31/bools.xml): before that Android did not check that the caller may use the microphone at that
+ * moment, so an app in the background could have listened through this one.
  */
 class OnDeviceRecognitionService : RecognitionService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)

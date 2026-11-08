@@ -99,6 +99,28 @@ detect_platform() {
 detect_platform
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
+
+# This script and the root updater (`hq update`) run $BIN as root, so it must be a plain file in a
+# folder only root can change. `scripts/install-hq.sh --link` (a laptop's setup) makes it a link
+# to a file the user owns, which root must never run.
+check_root_binary() {
+    local dir owner mode
+    dir="$(dirname "$BIN")"
+    if [ -d "$dir" ]; then
+        owner="$(stat -c %u "$dir")"
+        mode="$(stat -c %a "$dir")"
+        [ "$owner" = 0 ] && [ $((8#$mode & 8#022)) -eq 0 ] \
+            || die "$dir must belong to root and not be writable by group or others (it is uid $owner, mode $mode)"
+    fi
+    [ -e "$BIN" ] || [ -L "$BIN" ] || return 0
+    [ ! -L "$BIN" ] || die "$BIN is a symbolic link (to $(readlink "$BIN")), and root would run whatever it points at. Remove it (this script then installs a root-owned copy) and re-run"
+    [ -f "$BIN" ] || die "$BIN is not a regular file"
+    owner="$(stat -c %u "$BIN")"
+    mode="$(stat -c %a "$BIN")"
+    [ "$owner" = 0 ] || die "$BIN belongs to uid $owner, not root, and root would run it. Run chown root:root $BIN (or remove it) and re-run"
+    [ $((8#$mode & 8#022)) -eq 0 ] || die "$BIN can be written by group or others (mode $mode). Run chmod 755 $BIN and re-run"
+}
+check_root_binary
 [ -n "$REPO" ] && [ -n "$PUBKEY_FILE" ] || usage
 printf '%s' "$REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || die "--repo must look like <owner>/<repo>"
 printf '%s' "$CHANNEL" | grep -Eq '^[A-Za-z0-9_.-]+$' || die "--channel must be a plain name"
@@ -197,6 +219,102 @@ ensure_user_and_dirs() {
     chown root:root "$CONF_DIR" "$LIB_DIR" "$STATE_DIR" /usr/local/share/hq "$WEB_DIR" "$WEB_DIR/dist"
     chmod 755 "$CONF_DIR" "$LIB_DIR" /usr/local/share/hq "$WEB_DIR"
     chmod 700 "$STATE_DIR"
+}
+
+# The env files hq.service loads. They live in root-owned $CONF_DIR, never in $HQ_HOME, which the
+# hq user owns: there, HQ's own agents could create one for the next restart to load.
+ENV_NAMES="openrouter gws gh mcp"
+
+# Older units read openrouter.env, gws.env and gh.env from $HQ_HOME. Moves each one to
+# $CONF_DIR (root:root, mode 0600) and leaves none behind. The copy is made with `cp -P` into a
+# root-only directory, so a link the hq user swapped in is copied as a link and refused, never
+# followed.
+migrate_env_files() {
+    local name old new stage staged
+    stage="$(mktemp -d "$CONF_DIR/.env-migrate.XXXXXX")"
+    for name in $ENV_NAMES; do
+        old="$HQ_HOME/$name.env"
+        new="$CONF_DIR/$name.env"
+        [ -e "$old" ] || [ -L "$old" ] || continue
+        staged="$stage/$name.env"
+        cp -P -- "$old" "$staged"
+        if [ -L "$staged" ] || [ ! -f "$staged" ]; then
+            rm -rf "$stage"
+            die "$old is not a plain file, so it may not be yours. Look at it, put the values you need in $new (root:root, mode 0600), delete $old and re-run"
+        fi
+        if [ ! -e "$new" ]; then
+            install -m 0600 -o root -g root "$staged" "$new"
+            log "moved $old to $new"
+        elif ! cmp -s "$staged" "$new"; then
+            rm -rf "$stage"
+            die "$old and $new both exist and differ. hq.service now reads only $new: copy what you need into it, delete $old and re-run"
+        fi
+        rm -f -- "$old"
+    done
+    rm -rf "$stage"
+    for name in $ENV_NAMES; do
+        new="$CONF_DIR/$name.env"
+        [ -f "$new" ] || continue
+        chown root:root "$new"
+        chmod 0600 "$new"
+    done
+}
+
+rand_hex() { # 32 random bytes as hex
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+    else
+        od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+    fi
+}
+
+# The web token and the MCP key, generated here when not already set, in the file and drop-in the
+# Hetzner bootstrap uses. With no web token, every device that reaches the web port (a whole
+# tailnet, once `tailscale serve` publishes it) is the owner. Neither value is ever printed.
+SECRETS_ADDED=""
+# Whether NAME is already given to hq.service: in an env file here, or in the unit or a drop-in.
+secret_already_set() {
+    grep -Eqs "^[[:space:]]*$1=.+" "$CONF_DIR"/*.env \
+        || grep -Eqs "^[[:space:]]*Environment=\"?$1=.+" "$UNIT_DIR/hq.service" "$UNIT_DIR"/hq.service.d/*.conf
+}
+ensure_server_secrets() {
+    local env="$CONF_DIR/mcp.env"
+    if [ ! -f "$env" ]; then
+        (umask 077; : > "$env")
+    fi
+    chown root:root "$env"
+    chmod 0600 "$env"
+    if ! secret_already_set AGENTHQ_API_KEY; then
+        printf 'AGENTHQ_API_KEY=%s\n' "$(rand_hex)" >> "$env"
+        SECRETS_ADDED="AGENTHQ_API_KEY"
+    fi
+    # A token in config.yaml is the owner's already; an env value would replace it.
+    if ! secret_already_set HQ_WEB_AUTH_TOKEN \
+        && ! grep -Eqs '^web_auth_token:[[:space:]]*["'\'']?[^"'\''[:space:]#]' "$HQ_HOME/config.yaml"; then
+        printf 'HQ_WEB_AUTH_TOKEN=%s\n' "$(rand_hex)" >> "$env"
+        SECRETS_ADDED="${SECRETS_ADDED:+$SECRETS_ADDED and }HQ_WEB_AUTH_TOKEN"
+    fi
+    [ -z "$SECRETS_ADDED" ] || log "generated $SECRETS_ADDED in $env"
+    mkdir -p "$UNIT_DIR/hq.service.d"
+    write_if_changed "$UNIT_DIR/hq.service.d/mcp-key.conf" 0644 <<DROPIN
+[Service]
+EnvironmentFile=$env
+DROPIN
+}
+
+# How the owner gets in once a web token is set. The token stays in the root-only file.
+print_sign_in_help() {
+    [ -n "$SECRETS_ADDED" ] || return 0
+    cat <<HELP
+==> Sign-in is on. A web token and an MCP key were generated in $CONF_DIR/mcp.env (root only).
+    For a sign-in link to open on your own device, run as root:
+      HQ_WEB_AUTH_TOKEN="\$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' $CONF_DIR/mcp.env)" runuser -u $HQ_USER -- \\
+        env HQ_CONFIG_PATH=$HQ_HOME/config.yaml HQ_VAULT_PATH=$HQ_HOME/.vault $BIN web link
+    Treat the link like a password. MCP clients use AGENTHQ_API_KEY from the same file.
+HELP
+    if systemctl is-active --quiet hq.service; then
+        echo "    hq.service is running without them: run 'systemctl restart hq' to turn sign-in on." >&2
+    fi
 }
 
 write_if_changed() { # dest mode content-from-stdin
@@ -300,7 +418,37 @@ install_units() {
 [Service]
 Environment=HQ_WEB_STATIC_DIR=$WEB_DIR/dist
 DROPIN
+    # An hq.service kept from an older install still lists /opt/hq/*.env. The empty line resets
+    # that list, so only the root-owned files below (and mcp.env, from mcp-key.conf) are loaded.
+    write_if_changed "$UNIT_DIR/hq.service.d/10-env-files.conf" 0644 <<DROPIN
+[Service]
+EnvironmentFile=
+EnvironmentFile=-$CONF_DIR/openrouter.env
+EnvironmentFile=-$CONF_DIR/gws.env
+EnvironmentFile=-$CONF_DIR/gh.env
+DROPIN
+    check_dropins_env_files
     systemctl daemon-reload
+}
+
+# A drop-in of the operator's own that loads an env file from $HQ_HOME would undo the move.
+check_dropins_env_files() {
+    local f line path
+    # The reset also drops any other file a kept hq.service lists; say so rather than lose it quietly.
+    while IFS= read -r line; do
+        path="${line#*=}"
+        path="${path#-}"
+        case "$path" in
+            ""|"$CONF_DIR/openrouter.env"|"$CONF_DIR/gws.env"|"$CONF_DIR/gh.env"|"$HQ_HOME"/*) ;;
+            *) echo "note: $UNIT_DIR/hq.service lists EnvironmentFile=$path, which hq.service.d/10-env-files.conf now drops. Add it to a drop-in of your own under hq.service.d if HQ needs it." >&2 ;;
+        esac
+    done < <(grep -E '^[[:space:]]*EnvironmentFile=' "$UNIT_DIR/hq.service" 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    for f in "$UNIT_DIR"/hq.service.d/*.conf; do
+        [ -f "$f" ] || continue
+        if grep -Eq "^[[:space:]]*EnvironmentFile=-?$HQ_HOME/" "$f"; then
+            die "$f loads an env file from $HQ_HOME, which the hq user can write. Move that file to $CONF_DIR (root:root, mode 0600), point $f at it and re-run"
+        fi
+    done
 }
 
 fetch() { curl --proto "$CURL_PROTO" --proto-redir "=https" --tlsv1.2 -fsSL --max-time 600 -o "$2" "$1"; }
@@ -378,6 +526,8 @@ enable_timer() {
 ensure_packages
 ensure_sandbox
 ensure_user_and_dirs
+migrate_env_files
+ensure_server_secrets
 install_config
 install_units
 seed_web
@@ -396,4 +546,5 @@ if [ "$START" -eq 1 ] && [ "$FRESH_BOOTSTRAP" -eq 1 ]; then
     fi
 fi
 enable_timer
+print_sign_in_help
 log "done. Status: $BIN update --check ; systemctl list-timers hq-update.timer"

@@ -7,7 +7,10 @@
 //! database. Both are the owner's files: nothing here runs unless a person asked, and `remove`
 //! deletes only the entries `add` writes, found by name and by their exact URL or command.
 //!
-//! The `claude` program is reached through [`Runner`], so tests never start a real one.
+//! The `claude` program is reached through [`Runner`], so tests never start a real one. The key is
+//! never on a command line, where every user of the computer could read it while `claude` runs:
+//! [`SystemRunner`] writes the Claude Code entry into its user config itself, and uses `claude`
+//! only to look entries up and take them out.
 
 use std::ffi::OsStr;
 use std::io::{Read, Write};
@@ -25,6 +28,9 @@ pub const DEFAULT_SERVER_NAME: &str = "hq";
 const NAME_PREFIX: &str = "hq-";
 const CLAUDE_PROGRAM: &str = "claude";
 const KEY_HEADER: &str = "x-api-key";
+/// Claude Code's user config: user-scope MCP servers live under `mcpServers` in it.
+const CODE_CONFIG_FILE: &str = ".claude.json";
+const CLAUDE_CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 const DESKTOP_DIR: &str = "Claude";
 const DESKTOP_FILE: &str = "claude_desktop_config.json";
 const SERVERS_KEY: &str = "mcpServers";
@@ -131,22 +137,51 @@ pub struct Run {
 /// The seam to the `claude` program.
 pub trait Runner {
     fn available(&self) -> bool;
-    /// Runs `claude` with `args` in the folder `cwd`.
+    /// Runs `claude` with `args` in the folder `cwd`. Never given a secret.
     fn run(&self, args: &[String], cwd: &Path) -> Result<Run>;
+    /// Adds a user-scope HTTP server `name` at `url` that sends `key` in the `x-api-key` header,
+    /// without putting the key on any command line.
+    fn add_http(&self, name: &str, url: &str, key: &str) -> Result<Run>;
 }
 
-/// Runs `claude` from `PATH`, or from where its installers put it.
+/// Runs `claude` from `PATH`, or from where its installers put it, and writes Claude Code's user
+/// config (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`) for an add.
 pub struct SystemRunner {
     program: Option<PathBuf>,
+    code_config: Option<PathBuf>,
 }
 
 impl SystemRunner {
     pub fn new() -> Self {
-        let extra = install_dirs(dirs::home_dir().as_deref());
+        let home = dirs::home_dir();
+        let extra = install_dirs(home.as_deref());
+        let code_dir = std::env::var_os(CLAUDE_CONFIG_DIR_ENV)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or(home);
         Self {
             program: find_on_path(CLAUDE_PROGRAM, std::env::var_os("PATH").as_deref(), &extra),
+            code_config: code_dir.map(|d| d.join(CODE_CONFIG_FILE)),
         }
     }
+}
+
+/// Claude Code's user-scope entry for an HTTP server that sends the key in a header.
+fn code_entry(url: &str, key: &str) -> Value {
+    json!({ "type": "http", "url": url, "headers": { KEY_HEADER: key } })
+}
+
+/// Puts `name` into the user-scope servers of Claude Code's config at `path`, keeping everything
+/// else in it, through the same backup and atomic replace as Claude Desktop's config.
+fn add_to_code_config(path: &Path, name: &str, url: &str, key: &str) -> Result<()> {
+    let mut root = read_config(path)?;
+    servers_mut(&mut root)?.insert(name.to_string(), code_entry(url, key));
+    write_config(path, &root)?;
+    // It holds the key now: the user's alone, whatever mode it had.
+    let written = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    hq_core::fs_private::make_private(&written)
+        .with_context(|| format!("making {} private", written.display()))?;
+    Ok(())
 }
 
 impl Default for SystemRunner {
@@ -213,6 +248,19 @@ fn collect(rx: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -> String {
 impl Runner for SystemRunner {
     fn available(&self) -> bool {
         self.program.is_some()
+    }
+
+    fn add_http(&self, name: &str, url: &str, key: &str) -> Result<Run> {
+        let path = self
+            .code_config
+            .as_ref()
+            .ok_or_else(|| anyhow!("no home folder to find Claude Code's config in"))?;
+        add_to_code_config(path, name, url, key)?;
+        Ok(Run {
+            ok: true,
+            stdout: String::new(),
+            stderr: String::new(),
+        })
     }
 
     fn run(&self, args: &[String], cwd: &Path) -> Result<Run> {
@@ -394,11 +442,11 @@ fn code_run(c: &Code, action: Action) -> Result<Part> {
         (Action::Add, Some(o), _) => {
             let key = hub_key(c.hub)?;
             c.claude(&remove_args(&o.name))?;
-            c.claude(&add_args(&o.name, &c.hub.url, key))?;
+            c.add(&o.name, key)?;
             Ok(Part::Added(o.name))
         }
         (Action::Add, None, Some(name)) => {
-            c.claude(&add_args(&name, &c.hub.url, hub_key(c.hub)?))?;
+            c.add(&name, hub_key(c.hub)?)?;
             Ok(Part::Added(name))
         }
         (Action::Add, None, None) => bail!(
@@ -463,6 +511,18 @@ impl Code<'_> {
 
     fn claude(&self, args: &[String]) -> Result<()> {
         let out = self.run(args)?;
+        self.check(out)
+    }
+
+    fn add(&self, name: &str, key: &str) -> Result<()> {
+        let out = self
+            .runner
+            .add_http(name, &self.hub.url, key)
+            .map_err(|e| anyhow!(self.hub.scrub(&format!("{e:#}"))))?;
+        self.check(out)
+    }
+
+    fn check(&self, out: Run) -> Result<()> {
         if out.ok {
             return Ok(());
         }
@@ -482,23 +542,6 @@ fn remove_args(name: &str) -> Vec<String> {
     ["mcp", "remove", "--scope", "user", name]
         .map(String::from)
         .to_vec()
-}
-
-fn add_args(name: &str, url: &str, key: &str) -> Vec<String> {
-    let mut args: Vec<String> = [
-        "mcp",
-        "add",
-        "--scope",
-        "user",
-        "--transport",
-        "http",
-        name,
-        url,
-    ]
-    .map(String::from)
-    .to_vec();
-    args.extend(["--header".to_string(), format!("{KEY_HEADER}: {key}")]);
-    args
 }
 
 fn desktop_part(t: &Targets, hub: &Hub, action: Action) -> Part {
@@ -692,6 +735,28 @@ mod tests {
             !self.missing
         }
 
+        /// Recorded as `mcp add <name> <url>`: the key is never part of a call.
+        fn add_http(&self, name: &str, url: &str, key: &str) -> Result<Run> {
+            self.calls
+                .borrow_mut()
+                .push(["mcp", "add", name, url].map(String::from).to_vec());
+            if let Some(why) = &self.fail_with {
+                return Err(anyhow!("{why}"));
+            }
+            let done = |ok, stderr: String| {
+                Ok(Run {
+                    ok,
+                    stdout: String::new(),
+                    stderr,
+                })
+            };
+            if let Some(says) = &self.add_says {
+                return done(false, says.clone());
+            }
+            self.knows(name, url, key);
+            done(true, String::new())
+        }
+
         fn run(&self, args: &[String], cwd: &Path) -> Result<Run> {
             self.calls.borrow_mut().push(args.to_vec());
             let empty = std::fs::read_dir(cwd).is_ok_and(|mut d| d.next().is_none());
@@ -713,15 +778,6 @@ mod tests {
                     ),
                     None => done(false, String::new(), String::new()),
                 },
-                "add" if self.add_says.is_some() => {
-                    done(false, String::new(), self.add_says.clone().unwrap())
-                }
-                "add" => {
-                    self.servers
-                        .borrow_mut()
-                        .insert(arg(6).into(), (arg(7).into(), arg(9).into()));
-                    done(true, String::new(), String::new())
-                }
                 "remove" => {
                     self.servers.borrow_mut().remove(arg(4));
                     done(true, String::new(), String::new())
@@ -749,25 +805,66 @@ mod tests {
         let report = add(&targets(&fake, None), &phone());
         assert_eq!(report.code, Part::Added("hq".into()));
         let added = fake.calls.borrow().last().unwrap().clone();
+        assert_eq!(added, ["mcp", "add", "hq", "http://127.0.0.1:47410/mcp"]);
         assert_eq!(
-            added,
-            [
-                "mcp",
-                "add",
-                "--scope",
-                "user",
-                "--transport",
-                "http",
-                "hq",
-                "http://127.0.0.1:47410/mcp",
-                "--header",
-                &format!("x-api-key: {KEY}"),
-            ]
+            fake.servers.borrow()["hq"].1,
+            format!("x-api-key: {KEY}"),
+            "the key went in, by the runner's own write"
+        );
+        assert!(
+            !fake
+                .calls
+                .borrow()
+                .iter()
+                .flatten()
+                .any(|a| a.contains(KEY)),
+            "the key is never part of a `claude` command line"
         );
         // Again: nothing more is run, it is already there.
         let again = add(&targets(&fake, None), &phone());
         assert_eq!(again.code, Part::Present("hq".into()));
         assert!(fake.calls.borrow().iter().filter(|c| c[1] == "add").count() == 1);
+    }
+
+    /// Mutation: `SystemRunner::add_http` goes back to `claude mcp add --header`. Nothing is
+    /// written to the config file then, and the key is on `claude`'s command line.
+    #[test]
+    fn the_system_runner_writes_claude_codes_config_and_keeps_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CODE_CONFIG_FILE);
+        std::fs::write(
+            &path,
+            r#"{"numStartups": 3, "mcpServers": {"other": {"type": "stdio", "command": "x"}}}"#,
+        )
+        .unwrap();
+        let runner = SystemRunner {
+            program: None,
+            code_config: Some(path.clone()),
+        };
+        assert!(
+            runner
+                .add_http("hq", "http://127.0.0.1:47410/mcp", KEY)
+                .unwrap()
+                .ok
+        );
+        let root = read(&path);
+        assert_eq!(root["numStartups"], 3);
+        assert_eq!(root["mcpServers"]["other"]["command"], "x");
+        assert_eq!(
+            root["mcpServers"]["hq"],
+            json!({ "type": "http", "url": "http://127.0.0.1:47410/mcp", "headers": { "x-api-key": KEY } })
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let fresh = dir.path().join("fresh.json");
+            add_to_code_config(&fresh, "hq", "http://127.0.0.1:47410/mcp", KEY).unwrap();
+            let mode = std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o600,
+                "a new config holding the key is the user's alone"
+            );
+        }
     }
 
     #[test]
@@ -916,6 +1013,7 @@ mod tests {
         const BIG: usize = 512 * 1024;
         let runner = SystemRunner {
             program: Some(PathBuf::from("/bin/sh")),
+            code_config: None,
         };
         let cwd = tempfile::tempdir().unwrap();
         let script = format!("head -c {BIG} /dev/zero; head -c {BIG} /dev/zero >&2; pwd -P >&2");

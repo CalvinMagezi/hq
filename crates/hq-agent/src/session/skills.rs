@@ -60,10 +60,18 @@ impl AgentSession {
         let session_id = self.session_id.clone();
         let messages = self.messages.clone();
         let db = self.telemetry_db.clone();
+        // Taken now: anything the turn read from outside is already in the transcript.
+        let tainted = self.taint.as_ref().is_none_or(|t| t.is_tainted());
         tokio::spawn(async move {
-            match crate::skill_review::run(&vault_path, &session_id, &messages, db.as_deref(), full)
-                .await
-            {
+            let run = crate::skill_review::run(
+                &vault_path,
+                &session_id,
+                &messages,
+                db.as_deref(),
+                full,
+                tainted,
+            );
+            match run.await {
                 Ok(applied) => {
                     for a in applied {
                         tracing::info!(skill = %a.name, change = ?a.change, held = a.held, "skill review changed a skill");

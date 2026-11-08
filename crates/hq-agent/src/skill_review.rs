@@ -1,8 +1,12 @@
 //! Post-session skill review. One LLM call reads the session and the skills
-//! loaded recently, then patches, extends or creates skills directly and the
-//! operator gets one FYI in the web inbox. Modelled on Hermes's review agent:
-//! skills improve on use with no approval step; every change is archived and
-//! audited, and `hq skills revert` undoes any of them.
+//! loaded recently, then patches, extends or creates skills and the operator
+//! gets one FYI in the web inbox. A small change to a skill it already manages,
+//! from a session that read nothing from outside, goes live with no approval
+//! step; every change is archived and audited, and `hq skills revert` undoes
+//! any of them. Everything else waits in `_proposed/` for the owner: a new
+//! skill, any change after the session read text an outsider could have
+//! written (the transcript the reviewer reads then carries it), and text that
+//! names a network command, credentials or an email address.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,8 +20,8 @@ use hq_db::skill_invocations::{InvocationTrigger, RecentSkill, Used};
 use hq_tools::skill_audit::{AuditEntry, Disposition, append_audit, audit_history};
 use hq_tools::skill_edit::{SkillEdit, edited_text, is_managed, write_live};
 use hq_tools::skills::{
-    SkillDefinition, SkillProvenance, blocks_adoption, hint_problem, list_skills, parse_skill,
-    render_skill, security_flags, write_proposal_text,
+    SkillDefinition, SkillProvenance, blocks_adoption, hint_problem, holds_for_review, list_skills,
+    parse_skill, render_skill, security_flags, write_proposal_text,
 };
 use serde::Deserialize;
 
@@ -54,6 +58,11 @@ const MAX_LOADED_SKILL_CHARS: usize = 6_000;
 const MAX_SKILL_CHARS: usize = 8_000;
 const MAX_DESCRIPTION_CHARS: usize = 120;
 const MAX_NAME_CHARS: usize = 64;
+/// Why a change waits for the owner, as flags on the audit line and the notice.
+const HELD_TAINTED: &str =
+    "held: the session read content from outside (web, mail, documents, notes or other agents)";
+const HELD_NEW: &str = "held: a new skill waits for the owner";
+const HELD_FLAGGED: &str = "held: names a network command, credentials or an email address";
 
 const SYSTEM: &str = "You maintain an AI agent's skill library: markdown procedures the agent \
 loads before similar tasks. Skills improve through use, and you are how. Read the session and the \
@@ -139,8 +148,8 @@ pub struct Applied {
     pub name: String,
     pub change: Change,
     pub reason: String,
-    /// Staged in `_proposed/`: `governance.skills_write_approval` is on, or the change broke one
-    /// of the skill's regression fixtures (named in `flags`).
+    /// Staged in `_proposed/`: `governance.skills_write_approval` is on, or one of the reasons
+    /// in `flags` (a new skill, a tainted session, held content, a broken regression fixture).
     pub held: bool,
     pub flags: Vec<String>,
 }
@@ -186,13 +195,15 @@ pub fn outcome_score(result: &SessionResult) -> Option<f64> {
 
 /// Build the router-backed LLM and run the review. `full` is [`due`]; without
 /// it the review runs only when a skill was loaded recently and the light-path
-/// gap has passed. Errors are the caller's to log.
+/// gap has passed. `tainted` says the session read untrusted content, which
+/// stages every change. Errors are the caller's to log.
 pub async fn run(
     vault_path: &Path,
     session_id: &str,
     messages: &[ChatMessage],
     db: Option<&hq_db::Database>,
     full: bool,
+    tainted: bool,
 ) -> Result<Vec<Applied>> {
     let loaded = db
         .and_then(|db| {
@@ -215,6 +226,7 @@ pub async fn run(
         vault_path,
         session_id,
         write_approval,
+        tainted,
     };
     review.run(messages, &loaded, db, &llm).await
 }
@@ -223,6 +235,8 @@ struct Review<'a> {
     vault_path: &'a Path,
     session_id: &'a str,
     write_approval: bool,
+    /// The session read text an outsider could have written; nothing it teaches goes live.
+    tainted: bool,
 }
 
 impl Review<'_> {
@@ -320,7 +334,7 @@ impl Review<'_> {
         let flags = self.screen(name, added, &reason)?;
         let edited = edited_text(&skills_dir, name, edit)?;
         let (held, fixture_flags) =
-            self.commit(name, &edited.text, edited.version, &reason, &flags)?;
+            self.commit(name, &edited.text, edited.version, &reason, &flags, false)?;
         let mut flags = flags;
         flags.extend(fixture_flags);
         Ok(Applied {
@@ -360,7 +374,8 @@ impl Review<'_> {
             skill.hints.join("\n")
         );
         let flags = self.screen(name, &added, &reason)?;
-        let (held, fixture_flags) = self.commit(name, &render_skill(&skill), 1, &reason, &flags)?;
+        let (held, fixture_flags) =
+            self.commit(name, &render_skill(&skill), 1, &reason, &flags, true)?;
         let mut flags = flags;
         flags.extend(fixture_flags);
         Ok(Applied {
@@ -382,6 +397,19 @@ impl Review<'_> {
         bail!("skill {name:?} change rejected: {}", flags.join("; "))
     }
 
+    /// Why this change may not go live by itself, beyond the owner's own switch.
+    fn hold_reasons(&self, created: bool, flags: &[String]) -> Vec<String> {
+        [
+            (self.tainted, HELD_TAINTED),
+            (created, HELD_NEW),
+            (holds_for_review(flags), HELD_FLAGGED),
+        ]
+        .into_iter()
+        .filter(|(applies, _)| *applies)
+        .map(|(_, why)| why.to_string())
+        .collect()
+    }
+
     fn commit(
         &self,
         name: &str,
@@ -389,12 +417,15 @@ impl Review<'_> {
         version: u32,
         reason: &str,
         flags: &[String],
+        created: bool,
     ) -> Result<(bool, Vec<String>)> {
         let skills_dir = self.skills_dir();
         // A change has to pass the skill's regression fixtures before it goes live. One that
         // does not is held in `_proposed/` for the owner, with what it broke on the audit line.
         let failures = hq_tools::skills::candidate_failures(&skills_dir, name, text);
-        let held = self.write_approval || !failures.is_empty();
+        let mut extra = self.hold_reasons(created, flags);
+        extra.extend(failures.iter().map(|f| format!("fixture: {f}")));
+        let held = self.write_approval || !extra.is_empty();
         if held {
             write_proposal_text(&skills_dir, name, text)?;
         } else {
@@ -405,11 +436,10 @@ impl Review<'_> {
         } else {
             Disposition::Adopted
         };
-        let fixture_flags: Vec<String> = failures.iter().map(|f| format!("fixture: {f}")).collect();
         let mut all = flags.to_vec();
-        all.extend(fixture_flags.iter().cloned());
+        all.extend(extra.iter().cloned());
         self.audit(name, version, text, disposition, reason, &all)?;
-        Ok((held, fixture_flags))
+        Ok((held, extra))
     }
 
     fn audit(
@@ -675,8 +705,8 @@ fn notify(vault_path: &Path, applied: &[Applied]) {
         .collect();
     if held {
         body.push(
-            "Held because governance.skills_write_approval is on or a regression fixture failed \
-             (see Flags): `hq skills approve|reject <name>`."
+            "Held for you: the reasons are under Flags, or governance.skills_write_approval is \
+             on. Approve or reject with `hq skills approve|reject <name>`."
                 .to_string(),
         );
     }

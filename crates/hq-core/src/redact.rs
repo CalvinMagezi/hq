@@ -38,14 +38,20 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
         // GitHub fine-grained personal access tokens.
         r"github_pat_[A-Za-z0-9_]{22,}",
-        // HQ's own web device tokens (`hq_db::web_auth`). Kept last: the Bearer index above is fixed.
-        r"hqw_[0-9a-f]{64}",
+        // HQ's own secrets, a prefix and 64 hex: web device tokens (`hqw_`), paired devices' MCP
+        // keys (`hqd_`), launched agents' session tokens (`hqs_`), the connector's access, refresh
+        // and code values (`hqo_`, `hqr_`, `hqc_`) and task lease tokens (`hql_`). After the
+        // Bearer pattern, whose index is fixed.
+        r"\bhq[cdlorsw]_[0-9a-f]{64}",
         // Stripe secret keys, Google API keys, Slack tokens, and a private key header whose block
         // was cut short (the full-block pattern above needs both ends).
         r"\b[sr]k_live_[A-Za-z0-9]{16,}",
         r"\bAIza[0-9A-Za-z_-]{35}",
         r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+        // Telegram bot tokens, `<bot id>:<35 characters>`, also inside `api.telegram.org/bot<token>/`
+        // (so no word boundary in front).
+        r"[0-9]{8,10}:[A-Za-z0-9_-]{35}",
     ]
     .iter()
     .map(|p| Regex::new(p).expect("static secret pattern must compile"))
@@ -276,6 +282,44 @@ mod tests {
         );
         assert!(looks_like_credential(&format!("sent {token}")));
         assert_eq!(redact_secrets("hqw_short"), "hqw_short");
+    }
+
+    #[test]
+    fn redacts_every_hq_secret_prefix() {
+        let hex = "0123456789abcdef".repeat(4);
+        for prefix in ["hqd_", "hqo_", "hqr_", "hqs_", "hqc_", "hql_", "hqw_"] {
+            let secret = format!("{prefix}{hex}");
+            assert_eq!(
+                redact_secrets(&format!("key={secret};")),
+                "key=[REDACTED];",
+                "{prefix}"
+            );
+            assert!(looks_like_credential(&format!("sent {secret}")), "{prefix}");
+        }
+        // A different prefix, or one with a short body, is just a word.
+        let other = format!("hqx_{hex}");
+        assert_eq!(redact_secrets(&other), other);
+        assert!(!looks_like_credential("the hqd_ prefix marks device keys"));
+    }
+
+    #[test]
+    fn redacts_telegram_bot_tokens_bare_and_in_the_api_url() {
+        let token = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawA";
+        let url = format!("https://api.telegram.org/bot{token}/getFile?file_id=x");
+        assert_eq!(
+            redact_secrets(&url),
+            "https://api.telegram.org/bot[REDACTED]/getFile?file_id=x"
+        );
+        assert_eq!(
+            redact_secrets(&format!("token {token}")),
+            "token [REDACTED]"
+        );
+        assert!(looks_like_credential(token));
+        // A clock time or a port is not one.
+        assert_eq!(
+            redact_secrets("at 12:30:45 on :8443"),
+            "at 12:30:45 on :8443"
+        );
     }
 
     #[test]

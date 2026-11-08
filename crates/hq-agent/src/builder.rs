@@ -251,6 +251,10 @@ pub struct SessionBuilder {
     tool_deny_prefixes: Vec<String>,
     /// Why the session counts as having read untrusted text before its first tool call.
     untrusted_input: Option<String>,
+    /// Nobody is there to approve a call; see [`Self::unattended`].
+    unattended: bool,
+    /// Text the owner wrote themselves; see [`Self::owner_words`].
+    owner_words: Vec<String>,
     /// A declared backend (or its model) the session's own turns run on, instead of the chain.
     pinned_model: Option<String>,
     /// Set once the session is pinned: its children then run on its provider, never on the
@@ -293,6 +297,8 @@ impl SessionBuilder {
             session_profile: SessionProfile::Standard,
             tool_deny_prefixes: Vec::new(),
             untrusted_input: None,
+            unattended: false,
+            owner_words: Vec::new(),
             pinned_model: None,
             pinned: false,
             role: SessionRole::default(),
@@ -494,6 +500,20 @@ impl SessionBuilder {
         self
     }
 
+    /// Mark a turn nobody is there to approve (a watch firing, a turn the web driver or a
+    /// follow-up started). Once it reads outside text, it runs nothing that needs the owner.
+    pub fn unattended(mut self, unattended: bool) -> Self {
+        self.unattended = unattended;
+        self
+    }
+
+    /// Text the owner wrote themselves (their messages, a watch they created). Hosts named in
+    /// it stay reachable from `web_fetch` after the session reads outside text.
+    pub fn owner_words(mut self, words: impl IntoIterator<Item = String>) -> Self {
+        self.owner_words.extend(words);
+        self
+    }
+
     pub fn session_profile(mut self, profile: SessionProfile) -> Self {
         self.session_profile = profile;
         self
@@ -584,6 +604,12 @@ impl SessionBuilder {
         if let Some(source) = &self.untrusted_input {
             taint.mark(source);
         }
+        if self.unattended {
+            taint.set_unattended();
+        }
+        for words in &self.owner_words {
+            taint.note_owner_words(words);
+        }
         tools.extend(self.subagent_tools(
             &backends.provider,
             &vault_path,
@@ -597,8 +623,13 @@ impl SessionBuilder {
         let session_id = uuid::Uuid::new_v4().to_string();
         tools.extend(self.skill_tools(&vault_path, shared_db.clone(), &session_id));
         tools.extend(std::mem::take(&mut self.extra_tools));
-        let (governed_registry, preset) =
-            self.govern_tools(tools, &vault_path, &allowed_paths, &session_config, taint);
+        let (governed_registry, preset) = self.govern_tools(
+            tools,
+            &vault_path,
+            &allowed_paths,
+            &session_config,
+            taint.clone(),
+        );
         let tool_count = governed_registry.len();
 
         // Derived here, before the registry moves into `AgentSession::new`.
@@ -637,6 +668,7 @@ impl SessionBuilder {
             session_config.clone(),
         );
         session.session_id = session_id;
+        session.set_taint(taint);
         if self.role == SessionRole::Orchestrator {
             session.set_role_denial(Arc::new(crate::session::role_denial::RoleDenial::new(
                 ORCHESTRATOR_REMOVED_TOOLS,

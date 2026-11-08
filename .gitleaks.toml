@@ -4,3 +4,18 @@ title = "agent-hq gitleaks config"
 
 [extend]
 useDefault = true
+
+# HQ's own secrets: a prefix and 64 hex characters (`hq_db::web_auth`, `bridge_setup`,
+# `session_tokens`, `mcp_connector`, `tasks::leases`). The redactor knows the same shapes
+# (`hq_core::redact`). Telegram bot tokens are covered by the default `telegram-bot-api-token`.
+[[rules]]
+id = "hq-secret"
+description = "Agent-HQ token or key (hqw_, hqd_, hqs_, hqo_, hqr_, hqc_, hql_)"
+regex = '''\b(hq[cdlorsw]_[0-9a-f]{64})\b'''
+secretGroup = 1
+keywords = ["hqw_", "hqd_", "hqs_", "hqo_", "hqr_", "hqc_", "hql_"]
+
+[[rules.allowlists]]
+description = "Test fixtures: the counting pattern and all zeros are not real keys"
+regexTarget = "secret"
+regexes = ['''^hq[a-z]_(?:0123456789abcdef){4}$''', '''^hq[a-z]_0{64}$''']

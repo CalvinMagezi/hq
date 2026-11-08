@@ -690,3 +690,30 @@ async fn keep_signed_in_and_sign_out_this_browser() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+/// Signing out everywhere leaves paired machines and their MCP keys alone, and says so: in the
+/// reply and in the owner's notice, by name.
+#[tokio::test]
+async fn sign_out_everywhere_names_the_paired_machines_it_left_alone() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    let key = crate::mcp_http::paired_device_key(&state.db, "aa11");
+    let (status, body) = rotate(&app, TOKEN).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["paired_machines_kept"], json!(["laptop"]));
+    assert!(
+        hq_db::bridge_setup::device_key_live(&state.db, &key).unwrap(),
+        "the reply says the key was kept, so it must be"
+    );
+    let notices =
+        hq_db::value_items::list_by_state(&state.db, hq_core::types::ValueState::Pending).unwrap();
+    let notice = notices
+        .iter()
+        .find(|n| n.title == "HQ signed out every device")
+        .expect("the sign-out notice");
+    assert!(
+        notice.body.contains("laptop") && notice.body.contains("not signed out"),
+        "{}",
+        notice.body
+    );
+}

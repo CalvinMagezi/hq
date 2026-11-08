@@ -97,9 +97,12 @@ the user can edit and anyone who can run `hq` on that machine can start a full s
 remote key is enforced on the server. The stdio entry also carries `HQ_VAULT_PATH`, your vault's
 path on that machine.
 
-Generate a key with `openssl rand -hex 32` and keep it in a root-readable env
-file loaded by the service (the sample unit layout uses `/opt/hq/mcp.env`, loaded by the
-`hq.service.d/mcp-key.conf` drop-in).
+Generate a key with `openssl rand -hex 32` and keep it in a root-only env file
+loaded by the service: `deploy/install.sh` writes `/etc/hq/mcp.env` (root:root, mode 0600,
+in a root-owned directory) with a generated key and web token when they are not set, loaded
+by the `hq.service.d/mcp-key.conf` drop-in. Never keep a service env file in `/opt/hq`: the
+service user owns that folder, so anything HQ runs could create one for the next restart to
+load.
 
 `tools/list` returns the two gateway tools (`hq_discover`, `hq_call`) for every
 key, never the registry. What differs by scope is the rest: `hq_discover` lists
@@ -114,14 +117,25 @@ an HTTP router for the full, handoff and Spark keys, and a missing key.
 the directory HQ creates for it are owner-only (0600 and 0700) on unix, and an
 existing looser config is tightened the next time HQ saves it. Backups made by
 earlier versions keep their old mode: run `chmod 600 ~/.hq/config.yaml*`. HQ
-does not write `.env` files; create service env files such as `/opt/hq/mcp.env`
-with mode 0600 owned by the service user.
+does not write `.env` files; create service env files such as `/etc/hq/mcp.env`
+owned by root with mode 0600, in a directory only root can write (systemd reads them as
+root before it starts the service).
 
 ## Web token: headers only
 
 `web_auth_token` (env `HQ_WEB_AUTH_TOKEN`) guards `/ws` and `/api/*`, together with
 the device tokens described below. Both are accepted only as `Authorization: Bearer`. URL tokens (`?token=`) are refused,
 because URLs end up in browser history, proxy logs and `Referer` headers.
+
+With no web token and no device token, sign-in is off and every caller is the owner.
+That is meant for one machine's own browser, so `/ws` and `/api/*` then refuse (`403`,
+with a message saying to set a web token) any request that carries a reverse proxy's
+headers (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-IP`,
+`Tailscale-User-Login`). `tailscale serve` and Caddy add them, so publishing a server
+with sign-in off no longer makes every device on the tailnet its owner.
+`deploy/install.sh` generates `HQ_WEB_AUTH_TOKEN` and `AGENTHQ_API_KEY` in
+`/etc/hq/mcp.env` when neither the env files, the unit nor `config.yaml` sets them, and
+prints how to get a sign-in link (`hq web link`).
 
 - **Chat socket.** Browsers cannot set headers on a WebSocket, so the PWA calls
   `POST /api/ws-ticket` with the header and opens `/ws?ticket=<ticket>`. A
@@ -143,7 +157,8 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   browser keys its saved copy by the id before it signs in. Nothing in it is content or a
   credential, but anyone who can reach the port learns roughly where the host's clock is set. While HQ opens,
   every other route on the port answers 503 `{"starting": true}`
-  (`crates/hq-web/src/hello.rs`).
+  (`crates/hq-web/src/hello.rs`). It can also prove the server holds the web token;
+  see "Proving the server is HQ" below.
 - **Session-changing requests.** `send`, `adopt`, `stop`, `resume`, `rename`,
   `archive`, `drive`, `goal`, `unwatch` and `answer` under `/api/harness-sessions/`,
   and answering an Inbox item (`/api/notifications/{id}/answer` and `/action`), must
@@ -193,6 +208,56 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   before the first redirect and the banner trades it. On the new device the
   banner trades the code at `POST /api/auth/exchange` for a device token of its
   own. Details below.
+
+### Proving the server is HQ
+
+Any program on a machine can listen on a free loopback port. While HQ is not holding its web
+port (it is starting, restarting, or crashed), another app on the phone, or another program on
+the desktop, can bind `127.0.0.1:<ws_port>` and wait for a client to send it the owner's token.
+A client that already holds the configured web token checks the server first, without sending
+the token:
+
+1. The client makes a fresh random nonce of 32 bytes (16 to 64 are accepted) and asks
+   `GET /api/hello?proof=<nonce>`, the nonce in base64url without padding.
+2. HQ answers with the usual hello body plus
+   `"proof": base64url(HMAC-SHA256(key, "hq-server-proof/1" || nonce))`, where `key` is the
+   configured web token's UTF-8 bytes and `"hq-server-proof/1"` is those 17 ASCII bytes. No
+   padding on the output either.
+3. The client computes the same value with the token it holds and compares. Only a server
+   that knows the token can answer, and a new nonce each time means no answer can be replayed.
+
+The early start page answers it too, so a client can check the port while HQ is still opening.
+HQ answers only when a web token is configured (with none, there is nothing a client could
+leak), and whether or not the owner signed that token out, so a client recovering from "Sign
+out everywhere" can still tell HQ from a stranger before it acts on the 401. A nonce that is
+not base64url without padding, or not 16 to 64 bytes, gets a 400 and no answer; the length is
+checked before decoding. The route is not rate limited: one HMAC per request costs no more than
+the rest of the hello. Nothing else in HQ is signed with the web token, so the answer is good
+for nothing but this. Device tokens are not covered; the clients that check are the ones that
+hold the configured token (the Android app and the desktop app).
+
+Test vector (`crates/hq-core/src/server_proof.rs`): token `example-web-token`, nonce bytes
+`0x00..0x1f` (`AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8`), proof
+`s887Mn5Ba7kWekr_rkJlZl5zEYzF3_5f3jGwuiy_PXk`.
+
+What each client does with it:
+
+- **Android app** (`example.hq.spike.ServerProof`). Before the first Bearer request to the
+  phone's HQ after hq starts or restarts, or after a request to it failed to connect, it runs the
+  check, and sends nothing with the token until it passes. A proof holds for the hq child it
+  was made against; a new child (a restart, a crash, a new token) needs a new one. A 401 replaces
+  the token (`HubService.recoverToken`) only once the server that sent it has proved itself
+  afresh, so a stranger's 401 cannot make the app mint a new token and send that too. The alert
+  poller waits until hq has started and the check passes. On the phone, `hq start all` ends with
+  an error when it cannot bind the web port instead of running on without a web server, so the
+  app restarts it and shows it did not start.
+- **Desktop app** (`crates/hq-desktop`). The main window's `#token=` link goes only to an
+  upstream that passed the check just before; otherwise the window opens without it and the
+  person signs in there.
+
+The check covers the moment it is made. A web page that holds the token (the web app in the
+phone's web view or the desktop window) keeps sending it to the port on later requests, and the
+web app does not run the check itself yet.
 
 ### `/api/auth/exchange`, the one unauthenticated `/api` route
 
@@ -295,7 +360,9 @@ token, so a non-loopback bind still needs one at startup.
   watches), revokes every claude.ai connector grant and closes the connector's
   approval window (`mcp_connector::revoke_all`), drops every Web Push subscription,
   and only then notifies the owner without the token, so no stranger's browser is
-  pushed the notice. The PWA stores the new token and reloads; its own push
+  pushed the notice. It does not touch machines paired over the bridge: each keeps its
+  pairing and its MCP key until `hq bridge revoke`. The reply
+  (`paired_machines_kept`) and the notice name them. The PWA stores the new token and reloads; its own push
   subscription is sent again on that load, and Claude has to be connected again.
 
 **The configured token after a sign-out everywhere.** It is refused from then on.
@@ -451,6 +518,11 @@ origin it is served from is missing from this list.
   so set `web_auth_token` on shared machines.
 - The token lives in the PWA's local storage, so script injection into the PWA
   would expose it. Vault HTML is sanitised with DOMPurify before rendering.
+- Any valid token can connect a Telegram or Discord bot, issue a code that pairs a new
+  chat app owner (with "Pair a different account", after removing the current one) and
+  replace a model provider's key. None of these asks for the sign-in again. Each puts a
+  notice in the owner's inbox (source `settings-change`, which web push carries) naming
+  the device that did it, so the owner can sign it out and undo the change.
 - Any valid token can sign every other device out, the owner's included. That
   holder could already drive the whole agent; the owner gets back in with `/login`
   or a new operator link and signs out everywhere again.

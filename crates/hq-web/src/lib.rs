@@ -159,6 +159,34 @@ impl WsState {
         }
     }
 
+    /// Tells the owner a sign-in changed who controls HQ or what it pays with (a chat app's bot
+    /// or owner, a model provider's key), naming the device that did it. A stolen device token
+    /// can make these changes; the notice is how the owner hears of them.
+    pub(crate) fn notify_owner_of_change(
+        &self,
+        credential: Option<&auth::WebCredential>,
+        title: &str,
+        what: &str,
+    ) {
+        let who = match credential {
+            Some(auth::WebCredential::Device(id)) => {
+                hq_db::web_auth::list(&self.db, chrono::Utc::now().timestamp())
+                    .ok()
+                    .and_then(|all| all.into_iter().find(|d| &d.id == id))
+                    .map(|d| format!("the device \"{}\"", d.label))
+                    .unwrap_or_else(|| "a signed-in device".to_string())
+            }
+            Some(auth::WebCredential::Configured) => "the original login link".to_string(),
+            None => "this server".to_string(),
+        };
+        let body = format!(
+            "{what} This was done from {who} at {} UTC. If it was not you, sign that device out \
+             in Settings, Devices (or sign out everywhere) and undo the change.",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M")
+        );
+        self.notify_owner(SETTINGS_CHANGE_SOURCE, title, &body);
+    }
+
     /// The edition this server runs as. Lite is decided by the config the server was started
     /// with; a server with no readable config is the full profile.
     pub fn profile(&self) -> hq_core::config::Profile {
@@ -260,6 +288,9 @@ pub(crate) const CHANGE_NOTES: &str = "notes";
 pub(crate) const CHANGE_HELPERS: &str = "helpers";
 pub(crate) const CHANGE_BUDGET: &str = "budget";
 pub(crate) const CHANGE_SETTINGS: &str = "settings";
+
+/// Inbox source of the notices [`WsState::notify_owner_of_change`] puts there.
+pub(crate) const SETTINGS_CHANGE_SOURCE: &str = "settings-change";
 
 /// Create the web router — vault-focused endpoints only.
 pub fn create_router(state: Arc<WsState>) -> Router {
@@ -788,6 +819,136 @@ mod web_auth_router_tests {
         app.clone().oneshot(request).await.unwrap().status()
     }
 
+    /// With sign-in off, a request from this machine is the owner's, and one a proxy forwarded
+    /// (`tailscale serve` adds `Tailscale-User-Login`, Caddy `X-Forwarded-For`) is refused with
+    /// a reason. Mutation: drop the `forwarded` check in `web_auth_middleware`; the tailnet
+    /// request then gets the owner's API.
+    #[tokio::test]
+    async fn sign_in_off_serves_this_machine_and_refuses_a_proxy() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let local = Request::get("/api/spaces").body(Body::empty()).unwrap();
+        assert_ne!(status(&app, local).await, StatusCode::FORBIDDEN);
+        for (name, value) in [
+            ("tailscale-user-login", "someone@example.com"),
+            ("x-forwarded-for", "100.64.0.7"),
+            ("forwarded", "for=100.64.0.7"),
+        ] {
+            let proxied = Request::get("/api/spaces")
+                .header(name, value)
+                .body(Body::empty())
+                .unwrap();
+            let res = app.clone().oneshot(proxied).await.unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{name}");
+            let body = axum::body::to_bytes(res.into_body(), 1 << 16)
+                .await
+                .unwrap();
+            assert!(
+                String::from_utf8_lossy(&body).contains("Set a web token"),
+                "{name}"
+            );
+        }
+        let ws = Request::get("/ws")
+            .header("x-forwarded-for", "100.64.0.7")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status(&app, ws).await, StatusCode::FORBIDDEN);
+        // /health and the web app itself stay reachable, so the page can say what is wrong.
+        let health = Request::get("/health")
+            .header("x-forwarded-for", "100.64.0.7")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status(&app, health).await, StatusCode::OK);
+    }
+
+    async fn body_json(app: &Router, request: Request<Body>) -> serde_json::Value {
+        let res = app.clone().oneshot(request).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), 1 << 16)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    /// Loopback (the updater, the installers) sees the build; a proxied caller sees only that
+    /// HQ is up, and a refused `/mcp` call does not learn whether any key is configured.
+    #[tokio::test]
+    async fn a_proxied_caller_learns_no_build_details_or_key_setup() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let health = |proxied: bool| {
+            let req = Request::get("/health");
+            let req = if proxied {
+                req.header("x-forwarded-for", "100.64.0.7")
+            } else {
+                req
+            };
+            req.body(Body::empty()).unwrap()
+        };
+        let local = body_json(&app, health(false)).await;
+        assert_eq!(local["status"], "ok");
+        assert!(local.get("git_sha").is_some() && local.get("version").is_some());
+        let public = body_json(&app, health(true)).await;
+        assert_eq!(
+            public,
+            serde_json::json!({ "status": "ok", "service": HEALTH_SERVICE })
+        );
+
+        let mcp = |proxied: bool| {
+            let req = Request::post("/mcp")
+                .header("host", "127.0.0.1:5678")
+                .header("content-type", "application/json");
+            let req = if proxied {
+                req.header("x-forwarded-for", "100.64.0.7")
+            } else {
+                req
+            };
+            req.body(Body::from(
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            ))
+            .unwrap()
+        };
+        let local = body_json(&app, mcp(false)).await;
+        assert!(
+            local["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("AGENTHQ_API_KEY"),
+            "{local}"
+        );
+        let public = body_json(&app, mcp(true)).await;
+        assert_eq!(public["error"]["message"], "Unauthorized", "{public}");
+    }
+
+    /// A change a stolen sign-in could make lands in the owner's inbox naming the device.
+    #[test]
+    fn a_settings_change_notice_names_the_device_that_made_it() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let state = WsState::new(vault.path().to_path_buf(), None);
+        let minted = hq_db::web_auth::mint(&state.db, "Work laptop", 0, None).unwrap();
+        let device = auth::WebCredential::Device(minted.id);
+        state.notify_owner_of_change(Some(&device), "A key was changed", "HQ uses a new key.");
+        state.notify_owner_of_change(
+            Some(&auth::WebCredential::Configured),
+            "A bot was connected",
+            "HQ answers as a bot.",
+        );
+        let items =
+            hq_db::value_items::list_by_state(&state.db, hq_core::types::ValueState::Pending)
+                .unwrap();
+        let body = |title: &str| {
+            items
+                .iter()
+                .find(|i| i.title == title && i.source_task == SETTINGS_CHANGE_SOURCE)
+                .map(|i| i.body.clone())
+                .unwrap()
+        };
+        let key = body("A key was changed");
+        assert!(key.starts_with("HQ uses a new key."), "{key}");
+        assert!(key.contains("\"Work laptop\""), "{key}");
+        assert!(key.contains("sign that device out"), "{key}");
+        assert!(body("A bot was connected").contains("the original login link"));
+    }
+
     /// The guard sits inside CORS and in front of every /api route, but never
     /// in front of /health, which the deploy rollback check polls.
     #[tokio::test]
@@ -991,6 +1152,30 @@ mod web_auth_router_tests {
                 "{refused}"
             );
         }
+    }
+
+    /// A client holding the web token can check, signed out and without sending it, that the
+    /// server on the port holds the same token.
+    #[tokio::test]
+    async fn hello_proves_it_holds_the_web_token_without_a_sign_in() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let token = "t".repeat(32);
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.web_auth_token = Some(token.clone());
+        let app = create_router(Arc::new(state));
+        let nonce = hq_core::server_proof::new_nonce();
+        let hello = local("GET", &format!("{}?proof={nonce}", hello::HELLO_PATH))
+            .body(Body::empty())
+            .unwrap();
+        let v = json_of(&app, hello).await;
+        let proof = v["proof"].as_str().expect("an answer");
+        assert!(hq_core::server_proof::verify(&token, &nonce, proof));
+        assert!(!v.to_string().contains(&token), "the token never leaves");
+
+        let bad = local("GET", &format!("{}?proof=short", hello::HELLO_PATH))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status(&app, bad).await, StatusCode::BAD_REQUEST);
     }
 
     /// Session-changing requests also need a header no other page can add without a failed

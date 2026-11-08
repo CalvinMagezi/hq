@@ -10,6 +10,8 @@ mod note_repair;
 pub mod tasks_fast;
 pub mod tasks_periodic;
 pub mod tasks_slow;
+#[cfg(target_os = "linux")]
+mod unit_env_check;
 
 use anyhow::{Context, Result};
 use hq_agent::shutdown::ShutdownSignal;
@@ -382,6 +384,9 @@ fn run_startup_hooks(config: &HqConfig, vault_path: &Path, db: &Database) {
     ensure_dir(&vault_path.join("_system"));
 
     note_repair::repair_nested_frontmatter_once(vault_path, db);
+
+    #[cfg(target_os = "linux")]
+    unit_env_check::check(db);
 
     // Merge-safe: never clobbers higher-confidence user or learner values.
     if let Err(e) = hq_daemon::notif_gate::seed_default_notif_traits(vault_path) {

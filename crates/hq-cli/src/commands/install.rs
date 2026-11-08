@@ -98,12 +98,23 @@ fn resolve_vault_path(vault_override: Option<String>) -> PathBuf {
 
 fn scaffold_dirs(vault_path: &Path) -> Result<()> {
     println!("  Step 2: Scaffolding vault");
+    // The vault holds the notes and, in `_data`, every token HQ keeps: this user's alone
+    // (0700), made so when new and tightened when an older install left them open.
+    hq_core::fs_private::create_private_dir_all(vault_path)?;
     let mut dirs_created = 0;
     for dir in VAULT_DIRS {
         let full = vault_path.join(dir);
         if !full.exists() {
-            std::fs::create_dir_all(&full)?;
+            hq_core::fs_private::create_private_dir_all(&full)?;
             dirs_created += 1;
+        }
+    }
+    for private in [vault_path.to_path_buf(), vault_path.join("_data")] {
+        if let Err(e) = hq_core::fs_private::make_private(&private) {
+            eprintln!(
+                "    note: could not make {} private: {e}",
+                private.display()
+            );
         }
     }
     println!(
@@ -457,6 +468,24 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600, "{name}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_vault_and_its_data_folder_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let home = tempfile::tempdir().unwrap();
+        let vault = home.path().join("vault");
+        scaffold_dirs(&vault).unwrap();
+        assert_eq!(mode(&vault), 0o700);
+        assert_eq!(mode(&vault.join("_data")), 0o700);
+        std::fs::set_permissions(&vault, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(vault.join("_data"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        scaffold_dirs(&vault).unwrap();
+        assert_eq!(mode(&vault), 0o700, "an existing loose vault is tightened");
+        assert_eq!(mode(&vault.join("_data")), 0o700);
     }
 
     #[test]

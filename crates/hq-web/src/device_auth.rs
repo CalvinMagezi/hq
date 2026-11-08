@@ -303,8 +303,8 @@ pub(crate) fn settle_sign_in_item(db: &hq_db::Database, device_id: &str) {
     let settled = db.with_conn(|c| {
         Ok(c.execute(
             "UPDATE value_items SET state='dismissed', engagement='dismissed', engaged_at=datetime('now') \
-             WHERE dedup_key = ?1 AND state IN ('pending', 'delivered', 'routed')",
-            [key],
+             WHERE dedup_key = ?1 AND source_task = ?2 AND state IN ('pending', 'delivered', 'routed')",
+            [key.as_str(), DEVICE_SIGN_IN_SOURCE],
         )?)
     });
     if let Err(e) = settled {

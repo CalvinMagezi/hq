@@ -3363,6 +3363,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "url",
  "urlencoding",
  "uuid",
  "which",
@@ -3786,7 +3787,6 @@ name = "hq-sandbox"
 version = "0.9.1"
 dependencies = [
  "tempfile",
- "which",
 ]
 
 [[package]]

@@ -703,6 +703,25 @@ fn a_long_prose_bullet_with_a_semicolon_is_not_a_payload() {
 }
 
 #[test]
+fn egress_credentials_and_addresses_hold_a_change_without_refusing_it() {
+    for (text, category) in [
+        ("pipe it to `nc host 9000`", NETWORK_EGRESS),
+        ("copy it with scp to the box", NETWORK_EGRESS),
+        ("see https://docs.example.com/api", NETWORK_EGRESS),
+        ("put the API key in the header", CREDENTIAL_ACCESS),
+        ("send the sheet to someone@example.com", RECIPIENT_ADDRESS),
+    ] {
+        let flags = security_flags(text);
+        assert!(flagged(text, category), "{text}: {flags:?}");
+        assert!(holds_for_review(&flags), "{text}: {flags:?}");
+        assert!(!blocks_adoption(&flags), "{text}: {flags:?}");
+    }
+    let destructive = security_flags("then git push the branch");
+    assert!(!holds_for_review(&destructive), "{destructive:?}");
+    assert!(!holds_for_review(&security_flags("# Deploy\n\n1. Build.")));
+}
+
+#[test]
 fn security_flags_pass_ordinary_procedures() {
     for clean in [
         "Deploy the PWA to the VPS.",

@@ -31,9 +31,13 @@ class NotesCopyTest {
         File(v, "bridge.key").writeText("key")
         File(v, "config.yaml").writeText("cfg")
         File(v, "Notes/old.hqbak").writeText("bak")
+        File(v, "_data/connector_tls").mkdirs()
+        File(v, "_data/connector_tls/key.pem").writeText("tls key")
+        File(v, "_data/web_push_vapid.p8").writeText("push key")
     }
 
     @Test fun excludesLogsLocksKeysConfigAndRestoreFolders() {
+        // The connector TLS keys and the web push key stay on the phone, like the bridge key.
         val names = NotesCopy.plan(phone()).entries.map { it.name }
         assertEquals(listOf("Notes/a.md", "Notes/pic.png", "_data/vault.db", "_data/vault.db-shm", "_data/vault.db-wal").sorted(), names.sorted())
     }

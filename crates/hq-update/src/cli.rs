@@ -1,6 +1,8 @@
 //! `hq update` wiring: config, trusted key, real ports, exit codes.
 
-use crate::config::{DEFAULT_CONF_PATH, DEFAULT_PUBKEY_PATH, UpdateConfig, resolve_public_key};
+use crate::config::{
+    DEFAULT_CONF_PATH, DEFAULT_PUBKEY_PATH, UpdateConfig, resolve_public_key, unsafe_binary_for,
+};
 use crate::engine::{ApplyOptions, Engine, Outcome};
 use crate::error::{Result, UpdateError};
 use crate::manifest::parse_version;
@@ -166,6 +168,20 @@ fn unmanaged_hint(exe: Option<&Path>, in_container: bool) -> String {
     format!("this install is not set up for the signed updater (no update config found). {how}")
 }
 
+/// As root, the updater runs, backs up and restores `bin_path`, and is itself `running`: neither
+/// may be a file another user can change, or a rollback would put that user's file back in place
+/// for root to run.
+fn refuse_untrusted_binaries(bin_path: &Path, running: Option<&Path>, root_uid: u32) -> Result<()> {
+    for path in std::iter::once(bin_path).chain(running) {
+        if let Some(why) = unsafe_binary_for(path, root_uid) {
+            return Err(UpdateError::Other(anyhow::anyhow!(
+                "refusing to update as root: {why}. See docs/UPDATE_SYSTEM.md"
+            )));
+        }
+    }
+    Ok(())
+}
+
 async fn run_inner(args: &CliArgs, ident: &BuildIdentity) -> Result<i32> {
     let conf_path = args
         .conf
@@ -184,6 +200,10 @@ async fn run_inner(args: &CliArgs, ident: &BuildIdentity) -> Result<i32> {
     if let Some(channel) = &args.channel {
         cfg.channel = channel.clone();
         cfg.validate()?;
+    }
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        refuse_untrusted_binaries(&cfg.bin_path, std::env::current_exe().ok().as_deref(), 0)?;
     }
 
     let key_text = resolve_public_key(
@@ -287,8 +307,27 @@ pub async fn run(args: CliArgs, ident: BuildIdentity) -> i32 {
 
 #[cfg(test)]
 mod unmanaged_hint_tests {
-    use super::unmanaged_hint;
+    use super::{refuse_untrusted_binaries, unmanaged_hint};
     use std::path::Path;
+
+    #[test]
+    fn root_refuses_a_linked_target_or_a_linked_running_binary() {
+        // SAFETY: geteuid has no preconditions.
+        let me = unsafe { libc::geteuid() };
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("hq-real");
+        std::fs::write(&real, b"x").unwrap();
+        let link = dir.path().join("hq");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(refuse_untrusted_binaries(&real, None, me).is_ok());
+        assert!(refuse_untrusted_binaries(&real, Some(&real), me).is_ok());
+        let err = refuse_untrusted_binaries(&link, Some(&real), me).unwrap_err();
+        assert!(
+            err.to_string().contains("refusing to update as root"),
+            "{err}"
+        );
+        assert!(refuse_untrusted_binaries(&real, Some(&link), me).is_err());
+    }
 
     #[test]
     fn names_the_right_upgrade_path_per_install_channel() {

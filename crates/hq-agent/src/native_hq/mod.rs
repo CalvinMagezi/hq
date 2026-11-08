@@ -105,6 +105,12 @@ pub struct NativeHqHooks {
     pub deny_tool_prefixes: Vec<String>,
     /// Start the turn tainted, naming why (see `SessionBuilder::untrusted_input`).
     pub untrusted_input: Option<String>,
+    /// Nobody is there to approve a call: a watch firing, a turn the web driver or a follow-up
+    /// started (see `SessionBuilder::unattended`).
+    pub unattended: bool,
+    /// HQ wrote this turn's prompt (a driver or follow-up turn), so hosts it names are not the
+    /// owner's. Otherwise the prompt and the user messages in `history` are the owner's words.
+    pub prompt_by_hq: bool,
     /// Run the turn on this declared backend or model (see `SessionBuilder::pinned_model`).
     pub pinned_model: Option<String>,
     /// Orchestrator sessions plan and delegate; the default keeps today's behavior.
@@ -227,7 +233,15 @@ fn native_builder(
     }
     if let Some(source) = &hooks.untrusted_input {
         base_builder = base_builder.untrusted_input(source.clone());
+    } else if !hooks.prompt_by_hq {
+        let earlier = hooks
+            .history
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .map(|m| m.content.clone());
+        base_builder = base_builder.owner_words(earlier.chain([prompt.to_string()]));
     }
+    base_builder = base_builder.unattended(hooks.unattended);
     if let Some(model) = &hooks.pinned_model {
         base_builder = base_builder.pinned_model(model.clone());
     }

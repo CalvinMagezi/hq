@@ -34,7 +34,7 @@ On top of that the agent gets what HQ passes in the spawn request:
 2. Leave the sandbox on (`agent_host.sandbox.mode: process`, the default). It also hides your
    credentials directories (`~/.ssh`, `~/.aws`, `~/.config/gh` and others), other Claude
    profiles, `~/.hq`, the host's own token files, the vault's `_data` folder and HQ's config
-   file with the `*.env` files beside it (`/opt/hq/mcp.env` on a server), which the
+   file with the `*.env` files beside it (a server keeps its env files in `/etc/hq`, root-only, so the service user cannot read them at all), which the
    environment allowlist cannot do.
    Under the default `open` profile that is all it hides, and `hide_credentials: false` takes the
    credentials directories off the list; anything an agent can read it can send anywhere, since

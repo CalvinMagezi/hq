@@ -104,7 +104,11 @@ any more; the proxy's routes and checks are unchanged.
 - **For a local HQ, the token reaches the HQ window in the URL fragment** (`/#token=…`); a paired
   hub gets no token from the app. It is built in process: it never
   passes through argv, the environment, a log, or the proxy (a fragment is not sent). HQ's web app
-  moves it into the window's local storage and removes it from the address bar.
+  moves it into the window's local storage and removes it from the address bar. The fragment is
+  added only when the server on HQ's port has just proved it holds that token, without the token
+  being sent (`host::proves_hq`, "Proving the server is HQ" in `docs/security/WEB_AUTH.md`):
+  another program can listen on the port while HQ is not running, and the page it served would
+  read the fragment. Without the proof the window opens signed out.
 - **The control window never receives the web token, the bridge key or the expected pairing
   digits**; they stay in Rust. It does show the pairing link, which is meant to be shown and is
   single use.

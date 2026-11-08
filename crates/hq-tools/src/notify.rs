@@ -22,6 +22,10 @@ const MAX_TITLE_CHARS: usize = 120;
 const MAX_BODY_CHARS: usize = 2000;
 const MAX_LINK_CHARS: usize = 512;
 const MAX_DEDUP_CHARS: usize = 200;
+/// Dedup keys HQ's own items use and the inbox reads meaning from: a new device's sign-in item is
+/// `device-sign-in:<device id>` (`hq_web::device_auth`), shown with It was me and Sign it out.
+/// An agent's notification may not take one, so it cannot pass as that card.
+pub const RESERVED_DEDUP_PREFIXES: &[&str] = &["device-sign-in:"];
 
 pub fn create_notify_tools(
     db: Arc<Database>,
@@ -84,6 +88,15 @@ fn parse(args: &Value) -> Result<Notice> {
         .is_some_and(|k| k.chars().count() > MAX_DEDUP_CHARS)
     {
         bail!("dedup_key is longer than {MAX_DEDUP_CHARS} characters");
+    }
+    if let Some(key) = &dedup_key {
+        let lower = key.to_ascii_lowercase();
+        if let Some(prefix) = RESERVED_DEDUP_PREFIXES
+            .iter()
+            .find(|p| lower.starts_with(*p))
+        {
+            bail!("dedup_key may not start with {prefix:?}, which HQ keeps for its own items");
+        }
     }
     Ok(Notice {
         title: title.to_string(),
@@ -285,6 +298,24 @@ mod tests {
             tool.execute(json!({"title": "t", "body": long}))
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_dedup_key_hq_keeps_for_its_own_items_is_refused() {
+        let (tool, db) = tool(5);
+        for key in ["device-sign-in:abc", "Device-Sign-In:abc"] {
+            let err = tool
+                .execute(json!({"title": "A new sign-in to your HQ", "dedup_key": key}))
+                .await
+                .unwrap_err();
+            assert!(err.to_string().contains("device-sign-in:"), "{err}");
+        }
+        assert!(inbox(&db).is_empty());
+        assert!(
+            tool.execute(json!({"title": "t", "dedup_key": "device-sign-in-report"}))
+                .await
+                .is_ok()
         );
     }
 

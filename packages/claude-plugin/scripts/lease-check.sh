@@ -6,10 +6,33 @@ command -v python3 >/dev/null 2>&1 || exit 0
 [ -t 0 ] && exit 0
 
 python3 -c '
-import json, os, sys, tempfile
+import json, os, stat, sys
 
 CLAIMS = {"task_claim", "task_next"}
 RELEASES = {"task_release"}
+NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+# Markers live in a directory only this user can open ($XDG_RUNTIME_DIR, else ~/.cache), never
+# the shared temp directory, where another user could plant a symlink at a marker path.
+def marker_dir():
+    base = os.environ.get("XDG_RUNTIME_DIR") or ""
+    if not (os.path.isabs(base) and os.path.isdir(base)):
+        base = os.path.join(os.path.expanduser("~"), ".cache")
+    d = os.path.join(base, "agent-hq-plugin")
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        st = os.lstat(d)
+        if not stat.S_ISDIR(st.st_mode):
+            return None
+        if hasattr(os, "getuid"):
+            if st.st_uid != os.getuid():
+                return None
+            if st.st_mode & 0o077:
+                os.chmod(d, 0o700)
+    except OSError:
+        return None
+    return d
 
 try:
     data = json.load(sys.stdin)
@@ -52,18 +75,24 @@ with open(path, encoding="utf-8", errors="replace") as transcript:
 
 if claims <= releases:
     sys.exit(0)
-marks = os.path.join(tempfile.gettempdir(), "agent-hq-plugin")
-os.makedirs(marks, exist_ok=True)
+marks = marker_dir()
+if not marks:
+    sys.exit(0)
 mark = os.path.join(marks, session + ".lease-checked")
 seen = f"{claims}:{releases}"
 try:
-    with open(mark) as f:
+    with os.fdopen(os.open(mark, os.O_RDONLY | NOFOLLOW)) as f:
         if f.read() == seen:
             sys.exit(0)
 except OSError:
     pass
-with open(mark, "w") as f:
-    f.write(seen)
+# A marker that cannot be written (a symlink in its place, a full disk) means no reminder, rather
+# than one on every stop.
+try:
+    with os.fdopen(os.open(mark, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | NOFOLLOW, 0o600), "w") as f:
+        f.write(seen)
+except OSError:
+    sys.exit(0)
 
 reason = (
     "This session claimed an HQ task and has not released it. If the work is done or paused, call task_release "

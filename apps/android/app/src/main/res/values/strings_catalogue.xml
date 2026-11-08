@@ -800,7 +800,7 @@
     <string name="sign_out_device_act">Sign out device</string>
     <string name="sign_out_device_done">%1$s is signed out.</string>
     <string name="sign_out_all_title">Sign out everywhere\?</string>
-    <string name="sign_out_all_body">Every other device is signed out. This one stays signed in.</string>
+    <string name="sign_out_all_body">Every other device is signed out. This one stays signed in. Machines paired with HQ keep their access until you revoke them.</string>
     <string name="sign_out_all_keep">Keep everyone signed in</string>
     <string name="sign_out_all_act">Sign out everywhere</string>
     <string name="sign_out_all_done">Signed out everywhere. HQ is restarting.</string>

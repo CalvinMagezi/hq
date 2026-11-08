@@ -37,7 +37,14 @@ class MovingPhonesTest {
         assertFalse(cloud.contains("<include"))
         listOf("root", "file", "database", "sharedpref", "external").forEach { assertTrue(cloud.contains("<exclude domain=\"$it\" path=\".\"/>")) }
         assertEquals(listOf("<include domain=\"file\" path=\"hqhome/.vault\"/>"), Regex("<include[^>]*/>").findAll(transfer).map { it.value }.toList())
-        assertFalse(transfer.contains("<exclude"))
+        // Only the keys HQ keeps inside the vault stay behind.
+        assertEquals(
+            listOf(
+                "<exclude domain=\"file\" path=\"hqhome/.vault/_data/connector_tls\"/>",
+                "<exclude domain=\"file\" path=\"hqhome/.vault/_data/web_push_vapid.p8\"/>",
+            ),
+            Regex("<exclude[^>]*/>").findAll(transfer).map { it.value }.toList(),
+        )
     }
 
     @Test fun theManifestPointsAtTheRulesAndKeepsAllowBackupOff() {

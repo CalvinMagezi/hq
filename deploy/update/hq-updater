@@ -12,4 +12,12 @@ if [ ! -x "$HQ_BIN" ]; then
     echo "hq-updater: $HQ_BIN is missing; run deploy/install.sh" >&2
     exit 1
 fi
+# This runs as root: never run a link (`install-hq.sh --link` points this path at a file in a
+# user's home) or a file anyone but root can change.
+if [ -L "$HQ_BIN" ] || [ ! -f "$HQ_BIN" ] \
+    || [ "$(stat -c %u "$HQ_BIN")" != 0 ] || [ "$(stat -c %u "${HQ_BIN%/*}")" != 0 ] \
+    || [ -n "$(find "$HQ_BIN" "${HQ_BIN%/*}" -maxdepth 0 -perm /022 2>/dev/null)" ]; then
+    echo "hq-updater: refusing to run $HQ_BIN as root: it must be a plain file owned by root, in a folder owned by root, and writable by nobody else. See docs/UPDATE_SYSTEM.md" >&2
+    exit 1
+fi
 exec "$HQ_BIN" update --apply "$@"

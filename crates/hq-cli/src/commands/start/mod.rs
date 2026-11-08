@@ -16,7 +16,7 @@ use tracing::info;
 pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
     // The web port answers "Starting HQ" from the first moment, before the slow steps below.
     let early = if component == "all" {
-        bind_web_early(config).await
+        bind_web_early(config).await?
     } else {
         None
     };
@@ -239,24 +239,56 @@ fn web_addr(bind: &str, port: u16) -> std::net::SocketAddr {
         .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], port)))
 }
 
+/// Whether HQ is useless without its web port, so a port it cannot bind ends the process. On the
+/// phone the app is the only way in, and another app may hold the port while HQ is down: running
+/// on without a web server would leave that app answering in HQ's place, unnoticed. Ending makes
+/// the app's supervisor see the failure, report it and try again.
+fn web_port_required(config: &HqConfig) -> bool {
+    cfg!(target_os = "android") || config.profile.is_mobile()
+}
+
+/// Exit status of a start that ended because the web port could not be bound.
+const WEB_BIND_FAILED_EXIT: i32 = 3;
+
 /// Binds the web port before the vault and database open, answering `/api/hello` with the start
-/// step and every other route with "starting". `None` leaves the port to [`spawn_web_server`].
-async fn bind_web_early(config: &HqConfig) -> Option<hq_web::hello::StartingServer> {
-    hq_web::auth::check_web_bind(&config.web_bind, config.web_auth_token.as_deref()).ok()?;
-    let server = hq_web::hello::StartingServer::new(&config.vault_path, config.profile)
-        .inspect_err(|e| tracing::warn!("ws: no early start page: {e:#}"))
-        .ok()?;
-    let listener = tokio::net::TcpListener::bind(web_addr(&config.web_bind, config.ws_port))
-        .await
-        .inspect_err(|e| tracing::error!(port = config.ws_port, "ws: failed to bind port: {e}"))
-        .ok()?;
+/// step and every other route with "starting". `None` leaves the port to [`spawn_web_server`];
+/// an error means the port is required ([`web_port_required`]) and could not be bound.
+async fn bind_web_early(config: &HqConfig) -> Result<Option<hq_web::hello::StartingServer>> {
+    if hq_web::auth::check_web_bind(&config.web_bind, config.web_auth_token.as_deref()).is_err() {
+        return Ok(None);
+    }
+    let Some(server) = hq_web::hello::StartingServer::new(
+        &config.vault_path,
+        config.profile,
+        config.web_auth_token.as_deref(),
+    )
+    .inspect_err(|e| tracing::warn!("ws: no early start page: {e:#}"))
+    .ok() else {
+        return Ok(None);
+    };
+    let listener =
+        match tokio::net::TcpListener::bind(web_addr(&config.web_bind, config.ws_port)).await {
+            Ok(listener) => listener,
+            Err(e) if web_port_required(config) => {
+                return Err(e).with_context(|| {
+                    format!(
+                        "could not listen on the web port {}; not starting without it",
+                        config.ws_port
+                    )
+                });
+            }
+            Err(e) => {
+                tracing::error!(port = config.ws_port, "ws: failed to bind port: {e}");
+                return Ok(None);
+            }
+        };
     let app = server.router();
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             tracing::error!("ws server error: {e}");
         }
     });
-    Some(server)
+    Ok(Some(server))
 }
 
 /// The WebSocket and web UI server. An open non-loopback bind skips only this
@@ -292,9 +324,10 @@ fn spawn_web_server(
         return;
     }
     let (bind, port) = (config.web_bind.clone(), config.ws_port);
+    let required = web_port_required(config);
     tokio::spawn(async move {
         info!(port, "ws: starting server");
-        serve_web(state, &bind, port).await;
+        serve_web(state, &bind, port, required).await;
     });
 }
 
@@ -347,12 +380,17 @@ pub(crate) fn build_web_state(
     state
 }
 
-async fn serve_web(state: Arc<hq_web::WsState>, bind: &str, port: u16) {
+async fn serve_web(state: Arc<hq_web::WsState>, bind: &str, port: u16, required: bool) {
     let app = hq_web::create_router(state);
     let listener = match tokio::net::TcpListener::bind(web_addr(bind, port)).await {
         Ok(listener) => listener,
         Err(e) => {
             tracing::error!(port, "ws: failed to bind port: {e}");
+            if required {
+                // See `web_port_required`: no HQ on the phone runs on without its web port.
+                eprintln!("Could not listen on the web port {port}: {e}. Stopping.");
+                std::process::exit(WEB_BIND_FAILED_EXIT);
+            }
             return;
         }
     };
@@ -417,20 +455,59 @@ async fn start_telegram(
 /// Where the web UI is looked for when `web_static_dir` is unset. The first candidate with an
 /// `index.html` wins; with none, the first is returned so the "no web UI build" warning names it.
 pub(crate) fn default_static_dir(repo_root: &std::path::Path) -> std::path::PathBuf {
-    let mut candidates = vec![
-        repo_root.join("web").join("dist"),
+    first_with_index(static_dir_candidates(
+        repo_root,
+        dirs::home_dir().as_deref(),
+    ))
+}
+
+/// The web UI directories HQ would serve from, in the order it tries them: `web_static_dir`
+/// alone when it is set, else the candidates up to and including the one with an
+/// `index.html` (all of them when none has one). A coding agent must not be able to write any
+/// of them, since a build placed in one ahead of the real UI would be served in its place; the
+/// host keeps them read-only to its agents.
+pub(crate) fn served_static_dirs(config: &HqConfig) -> Vec<std::path::PathBuf> {
+    if let Some(dir) = &config.web_static_dir {
+        return vec![dir.clone()];
+    }
+    let repo_root = config.vault_path.parent().unwrap_or(&config.vault_path);
+    let candidates = static_dir_candidates(repo_root, dirs::home_dir().as_deref());
+    match candidates
+        .iter()
+        .position(|c| c.join("index.html").exists())
+    {
+        Some(served) => candidates[..=served].to_vec(),
+        None => candidates,
+    }
+}
+
+/// The places `default_static_dir` looks, in order. `home` is the user's home directory.
+fn static_dir_candidates(
+    repo_root: &std::path::Path,
+    home: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    // With the vault in its default place (`~/.vault`) the "repository" is the home directory
+    // itself, where these two would be folders any program the user runs (a coding agent
+    // among them) could create ahead of the installed UI.
+    if home != Some(repo_root) {
+        candidates.push(repo_root.join("web").join("dist"));
         // A source checkout after `bun run build` (what `hq web --build` runs).
-        repo_root
-            .join("apps")
-            .join("hq-web")
-            .join("dist")
-            .join("client"),
-    ];
-    // A portable install keeps the web files next to the program: `hq.exe` and `web\`. They are
-    // plain files, so a policy that restricts which programs run does not touch them.
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
+        candidates.push(
+            repo_root
+                .join("apps")
+                .join("hq-web")
+                .join("dist")
+                .join("client"),
+        );
+    }
+    // A portable Windows install keeps the web files next to the program: `hq.exe` and `web\`.
+    // They are plain files, so a policy that restricts which programs run does not touch them.
+    // Elsewhere the program sits in a bin directory (`~/.local/bin`) that other tools write.
+    if cfg!(windows)
+        && let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
     {
         candidates.push(dir.join("web"));
     }
@@ -444,7 +521,7 @@ pub(crate) fn default_static_dir(repo_root: &std::path::Path) -> std::path::Path
         candidates.push(dir.join("agent-hq").join("web").join("dist"));
     }
     candidates.push(std::path::PathBuf::from("/usr/local/share/hq/web/dist"));
-    first_with_index(candidates)
+    candidates
 }
 
 fn first_with_index(candidates: Vec<std::path::PathBuf>) -> std::path::PathBuf {
@@ -456,8 +533,111 @@ fn first_with_index(candidates: Vec<std::path::PathBuf>) -> std::path::PathBuf {
 }
 
 #[cfg(test)]
+mod web_port_tests {
+    use super::*;
+
+    fn config_on(
+        vault: &std::path::Path,
+        port: u16,
+        profile: hq_core::config::Profile,
+    ) -> HqConfig {
+        HqConfig {
+            vault_path: vault.to_path_buf(),
+            web_auth_token: Some("example-web-token".into()),
+            web_bind: "127.0.0.1".into(),
+            ws_port: port,
+            profile,
+            ..Default::default()
+        }
+    }
+
+    /// Another program on the port: the phone's HQ ends, so its supervisor sees it; elsewhere
+    /// HQ starts without the early page and reports the port later.
+    #[tokio::test]
+    async fn a_taken_web_port_ends_the_phone_start_only() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = squatter.local_addr().unwrap().port();
+
+        let mobile = config_on(vault.path(), port, hq_core::config::Profile::Mobile);
+        assert!(web_port_required(&mobile));
+        let err = bind_web_early(&mobile).await.err().expect("refused");
+        assert!(err.to_string().contains(&port.to_string()), "{err:#}");
+
+        let full = config_on(vault.path(), port, hq_core::config::Profile::Full);
+        assert_eq!(web_port_required(&full), cfg!(target_os = "android"));
+        if !web_port_required(&full) {
+            assert!(bind_web_early(&full).await.unwrap().is_none());
+        }
+        drop(squatter);
+    }
+
+    #[tokio::test]
+    async fn a_free_web_port_is_held_from_the_start() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let port = {
+            let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            free.local_addr().unwrap().port()
+        };
+        let mobile = config_on(vault.path(), port, hq_core::config::Profile::Mobile);
+        assert!(bind_web_early(&mobile).await.unwrap().is_some());
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", port)).is_err(),
+            "HQ holds the port"
+        );
+    }
+}
+
+#[cfg(test)]
 mod static_dir_tests {
-    use super::first_with_index;
+    use super::{first_with_index, static_dir_candidates};
+    use std::path::Path;
+
+    #[test]
+    fn the_ui_is_never_looked_for_beside_the_program_or_in_the_home_directory() {
+        let home = Path::new("/home/example");
+        let at_home = static_dir_candidates(home, Some(home));
+        assert!(
+            at_home
+                .iter()
+                .all(|c| !c.starts_with(home.join("web")) && !c.starts_with(home.join("apps"))),
+            "{at_home:?}"
+        );
+        let exe_dir = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("web");
+        assert_eq!(at_home.contains(&exe_dir), cfg!(windows));
+        // A checkout or a server directory beside the vault is still looked in first.
+        let checkout = Path::new("/srv/example/hq");
+        let there = static_dir_candidates(checkout, Some(home));
+        assert_eq!(there[0], checkout.join("web/dist"));
+        assert_eq!(there[1], checkout.join("apps/hq-web/dist/client"));
+        assert_eq!(
+            there.last().unwrap(),
+            Path::new("/usr/local/share/hq/web/dist")
+        );
+    }
+
+    #[test]
+    fn the_served_dirs_are_the_configured_one_or_every_candidate_up_to_the_served_one() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("hq");
+        std::fs::create_dir_all(root.join("apps/hq-web/dist/client")).unwrap();
+        std::fs::write(root.join("apps/hq-web/dist/client/index.html"), "x").unwrap();
+        let mut config = hq_core::config::HqConfig {
+            vault_path: root.join(".vault"),
+            web_static_dir: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::served_static_dirs(&config),
+            vec![root.join("web/dist"), root.join("apps/hq-web/dist/client")]
+        );
+        config.web_static_dir = Some(root.join("ui"));
+        assert_eq!(super::served_static_dirs(&config), vec![root.join("ui")]);
+    }
 
     #[test]
     fn picks_the_first_candidate_that_has_an_index() {

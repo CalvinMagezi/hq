@@ -4861,3 +4861,63 @@ fn a_session_id_always_gets_the_same_port_in_range() {
     }
     assert_ne!(launch::session_port(a), launch::session_port(b));
 }
+
+#[tokio::test]
+async fn a_tainted_turn_types_only_into_a_session_its_own_chat_watches() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        for id in ["hs-mine", "hs-other", "hs-loose"] {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id,
+                    harness: "pi",
+                    label: "",
+                    cwd: "/t",
+                    mission_id: None,
+                    placement: Placement {
+                        host: "local",
+                        agent_name: id,
+                        workspace_id: "w1",
+                        pane_id: "w1:p1",
+                    },
+                    purpose: None,
+                },
+            )?;
+        }
+        registry::watch_from_chat(c, "hs-mine", "th-1", false)?;
+        registry::watch_from_chat(c, "hs-other", "th-2", false)?;
+        Ok(())
+    })
+    .unwrap();
+    let tools = tools::create_harness_session_tools(db.clone(), Some(chat(false)), None);
+    let args = |target: &str| json!({"session_id": target, "text": "push it", "seq": 1, "option": 1, UNTRUSTED_TURN_ARG: true});
+    for name in ["harness_session_send", "harness_session_answer"] {
+        let tool = tools.iter().find(|t| t.name() == name).unwrap();
+        for target in ["hs-other", "hs-loose"] {
+            let err = tool.execute(args(target)).await.unwrap_err();
+            assert!(
+                err.to_string().contains("read content from outside"),
+                "{name} {target}: {err}"
+            );
+        }
+        // Its own chat's session gets past the ownership check (and fails later, on the host).
+        if let Err(e) = tool.execute(args("hs-mine")).await {
+            assert!(
+                !e.to_string().contains("read content from outside"),
+                "{name}: {e}"
+            );
+        }
+    }
+    // With no web chat (a relay, an MCP client) a tainted turn types into nothing.
+    let relay = tools::create_harness_session_tools(db.clone(), None, None);
+    let send = relay
+        .iter()
+        .find(|t| t.name() == "harness_session_send")
+        .unwrap();
+    let err = send.execute(args("hs-mine")).await.unwrap_err();
+    assert!(
+        err.to_string().contains("read content from outside"),
+        "{err}"
+    );
+}

@@ -250,9 +250,9 @@ fn collect_pinned(
                 collect_pinned(&path, vault_root, out, limit, keep)?;
             }
         } else if path.extension().is_some_and(|ext| ext == "md") {
-            // Quick check for pinned frontmatter without full parse
+            // The parsed frontmatter decides, never the words somewhere in the file.
             if let Ok(content) = std::fs::read_to_string(&path)
-                && (content.contains("pinned: true") || content.contains("pinned: yes"))
+                && is_pinned(&content)
                 && let Ok(rel) = path.strip_prefix(vault_root)
             {
                 let rel_str = rel.to_string_lossy().to_string();
@@ -267,6 +267,24 @@ fn collect_pinned(
     }
 
     Ok(())
+}
+
+/// Whether the note's own frontmatter says `pinned: true` (or `yes`). Text that merely contains
+/// the words, in the body, a quoted mail or a code block, does not pin it.
+fn is_pinned(raw: &str) -> bool {
+    if !raw.contains("pinned") {
+        return false;
+    }
+    let Ok((fm, _)) = crate::frontmatter::parse(raw) else {
+        return false;
+    };
+    match fm.get("pinned") {
+        Some(serde_yaml::Value::Bool(b)) => *b,
+        Some(serde_yaml::Value::String(s)) => {
+            s.eq_ignore_ascii_case("yes") || s.eq_ignore_ascii_case("true")
+        }
+        _ => false,
+    }
 }
 
 /// Parse a markdown table (key-value) from CONFIG.md.
@@ -320,6 +338,29 @@ mod tests {
         let (pinned, report) = get_pinned_notes_report(dir.path(), &|_, _| true).unwrap();
         assert_eq!(pinned.len(), 1);
         assert!(report.scanned.contains(&"_system".to_string()));
+    }
+
+    #[test]
+    fn only_the_frontmatter_pins_a_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let notebooks = dir.path().join("Notebooks");
+        std::fs::create_dir_all(&notebooks).unwrap();
+        for (name, raw) in [
+            (
+                "body.md",
+                "---\ntitle: Mail\n---\n\nThe sender wrote:\npinned: true\n",
+            ),
+            ("fence.md", "# Example\n\n```yaml\npinned: true\n```\n"),
+            ("off.md", "---\npinned: false\n---\n\nnotes"),
+            ("yes.md", "---\npinned: yes\n---\n\nkept"),
+            ("real.md", "---\ntitle: Real\npinned: true\n---\n\nkept"),
+        ] {
+            std::fs::write(notebooks.join(name), raw).unwrap();
+        }
+        let (pinned, _) = get_pinned_notes_report(dir.path(), &|_, _| true).unwrap();
+        let mut paths: Vec<&str> = pinned.iter().map(|n| n.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, ["Notebooks/real.md", "Notebooks/yes.md"]);
     }
 
     #[test]

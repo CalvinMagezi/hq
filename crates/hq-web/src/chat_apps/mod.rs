@@ -17,6 +17,7 @@ mod verify;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::Extension;
 use axum::Json;
 use axum::extract::{Path as UrlPath, State};
 use axum::response::IntoResponse;
@@ -26,6 +27,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::WsState;
+use crate::auth::WebCredential;
 use crate::error::ApiError;
 use verify::Verified;
 
@@ -48,6 +50,14 @@ impl Platform {
         match self {
             Platform::Telegram => "telegram",
             Platform::Discord => "discord",
+        }
+    }
+
+    /// The app's name as the owner reads it.
+    fn title(self) -> &'static str {
+        match self {
+            Platform::Telegram => "Telegram",
+            Platform::Discord => "Discord",
         }
     }
 
@@ -303,6 +313,7 @@ pub(crate) async fn verify_handler(
 pub(crate) async fn save_handler(
     State(state): State<Arc<WsState>>,
     UrlPath(raw): UrlPath<String>,
+    credential: Option<Extension<WebCredential>>,
     Json(body): Json<TokenBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let platform = Platform::from_path(&raw)?;
@@ -320,6 +331,16 @@ pub(crate) async fn save_handler(
         .map_err(|e| ApiError::internal(format!("could not save the config: {e}")))?;
     records::store_identity(&state.vault_path, platform, &token, &v);
     state.announce_change(crate::CHANGE_SETTINGS);
+    state.notify_owner_of_change(
+        credential.as_deref(),
+        &format!("A {} bot was connected to HQ", platform.title()),
+        &format!(
+            "HQ now answers as the {} bot @{}. Whoever pairs with that bot becomes the owner \
+             there.",
+            platform.title(),
+            v.username
+        ),
+    );
     let mut reply = verified_json(&v);
     reply["can_restart"] = json!(restart_json(&state).0);
     Ok(Json(reply))
@@ -397,6 +418,26 @@ fn issue_pairing_code(
     Ok(code)
 }
 
+/// The owner's notice for a pairing code: the code makes its holder the owner on that app, and
+/// with `replaced` the account that was the owner is gone already.
+fn pair_notice(platform: Platform, replaced: bool) -> (String, String) {
+    let app = platform.title();
+    if replaced {
+        (
+            format!("Your {app} account was unpaired from HQ"),
+            format!(
+                "The {app} account paired as HQ's owner was removed, and a code to pair a \
+                 different one was made. Whoever uses that code becomes the owner on {app}."
+            ),
+        )
+    } else {
+        (
+            format!("A code to pair a {app} owner was made"),
+            format!("Whoever uses it in the next few minutes becomes HQ's owner on {app}."),
+        )
+    }
+}
+
 /// The bot's Telegram username for the `t.me` link: remembered, or asked for once.
 async fn telegram_username(vault: &Path, token: &str) -> Option<String> {
     if let Some(id) = records::load_identity(vault, Platform::Telegram, token) {
@@ -412,6 +453,7 @@ async fn telegram_username(vault: &Path, token: &str) -> Option<String> {
 pub(crate) async fn pair_handler(
     State(state): State<Arc<WsState>>,
     UrlPath(raw): UrlPath<String>,
+    credential: Option<Extension<WebCredential>>,
     Json(body): Json<PairBody>,
 ) -> Result<impl IntoResponse, ApiError> {
     let platform = Platform::from_path(&raw)?;
@@ -421,6 +463,7 @@ pub(crate) async fn pair_handler(
         return Err(ApiError::Conflict(NOT_CONNECTED.into()));
     };
     let now = pairing::now_secs();
+    let had_owner = owner_file_exists(platform, &state.vault_path);
     let code = issue_pairing_code(
         platform,
         &loaded.relay,
@@ -428,6 +471,8 @@ pub(crate) async fn pair_handler(
         body.replace,
         now,
     )?;
+    let (title, what) = pair_notice(platform, had_owner);
+    state.notify_owner_of_change(credential.as_deref(), &title, &what);
     let deep_link = match platform {
         Platform::Telegram => telegram_username(&state.vault_path, &token)
             .await

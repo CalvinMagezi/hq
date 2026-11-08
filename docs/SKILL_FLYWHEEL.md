@@ -81,6 +81,26 @@ here and fail in a session.
 - Approving a held change is your decision to override: update the fixtures if they are out
   of date, or `validate` will keep reporting the failure.
 
+## What the review may change by itself
+
+The post-session review reads the last part of the session, tool results included, so a page,
+mail or note the session read reaches the model that writes the skill. What it proposes goes
+live without you only when all of these hold:
+
+- it patches or adds hints to a skill the review already manages (one it wrote that you
+  approved, or one you adopted with `hq skills adopt`);
+- the session read nothing an outsider could have written: no web page, mail, document,
+  vault note or other agent's output (the same rule that taints a session, see
+  `docs/security/PROMPT_INJECTION.md`);
+- the added text names no network command (`curl`, `wget`, `nc`, `scp`, `rsync` and the like)
+  or outside URL, no credentials (keys, tokens, passwords) and no email address;
+- it passes the skill's fixtures, and `governance.skills_write_approval` is off.
+
+Everything else is held in `skills/_proposed/` for `hq skills approve` or `hq skills reject`,
+with the reasons on the audit line and in the notice. A new skill is always held. Text that
+tries to override instructions or carries an encoded payload is refused outright and never
+staged.
+
 ## Evidence reports and proposals
 
 `hq skills evidence [name] [--days N] [--json]` reads the invocation records (after settling the

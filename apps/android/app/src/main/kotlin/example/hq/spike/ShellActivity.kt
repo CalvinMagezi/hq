@@ -110,8 +110,9 @@ import example.hq.spike.ui.theme.HqTheme
 /**
  * The native shell and the launcher screen. The WebView app (MainActivity) stays as a fallback that only
  * adb opens: `adb shell am start -n example.hq.spike/.MainActivity` (never with -S: that force-stops the
- * app and hq with it). Extras for checking against the design:
+ * app and hq with it). Extras for checking against the design, read only in a debuggable build:
  * `--es place notes`, `--ei badge 3`, `--es fixture empty|streaming|chats|offline|failed`.
+ * This is the launcher, so any app can start it: a link extra is read only as a place to show, like LinkActivity's.
  */
 class ShellActivity : ComponentActivity() {
     private val chat: ChatViewModel by viewModels()
@@ -223,7 +224,7 @@ class ShellActivity : ComponentActivity() {
         countNoticeTap(intent)
         val link = linkOf(intent) ?: return
         // Shared text is kept even when the pages cannot be closed: it joins the chat's draft, and nothing typed there is lost.
-        val shared = intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)
+        val shared = example.hq.spike.capture.CaptureActivity.takeDraft()
         shared?.let(chat::addToDraft)
         if (hasUnsavedWork()) {
             Toast.makeText(this, if (shared != null) SHARED_KEPT else UNSAVED_WORK, Toast.LENGTH_LONG).show()
@@ -237,7 +238,7 @@ class ShellActivity : ComponentActivity() {
     /** The link an intent carries (an hq:// link, from a notification, a widget or another app), or the place a debug start names. */
     private fun linkOf(intent: Intent): LinkTarget? {
         intent.getStringExtra(Links.EXTRA)?.let { return Links.parse(it) }
-        return intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } }?.let { LinkTarget(it) }
+        return debugExtra(intent, "place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } }?.let { LinkTarget(it) }
     }
 
     /** Shows what a link names, over the place it belongs to. Waiting for what is not loaded yet is the view model's job. */
@@ -332,6 +333,11 @@ class ShellActivity : ComponentActivity() {
 
     private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
 
+    /** The design-check extras (place, badge, fixture, balance) work only in a debuggable build: the shell is the launcher, so any app can start it with extras. */
+    private fun debuggable(): Boolean = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    private fun debugExtra(intent: Intent, name: String): String? = if (debuggable()) intent.getStringExtra(name) else null
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         web?.let { outState.putString(STATE_WEB, it.slug) }
@@ -340,7 +346,7 @@ class ShellActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Two launches in a row that never drew a frame: this one goes to the screen that saves the notes.
-        if (intent.getStringExtra("fixture") == null && example.hq.spike.safe.CrashMarker.begin(filesDir)) {
+        if (debugExtra(intent, "fixture") == null && example.hq.spike.safe.CrashMarker.begin(filesDir)) {
             example.hq.spike.safe.SafeModeActivity.open(this)
             finish()
             return
@@ -348,22 +354,22 @@ class ShellActivity : ComponentActivity() {
         window.decorView.post { example.hq.spike.safe.CrashMarker.drawn(filesDir) }
         // A rotation keeps the web page open; it loads again from its start.
         web = WebPage.fromSlug(savedInstanceState?.getString(STATE_WEB))
-        if (intent.getStringExtra("fixture") == null) firstRunStep = decideFirstRun()
+        if (debugExtra(intent, "fixture") == null) firstRunStep = decideFirstRun()
         HqServices.ensureHubRunning(this)
         notifFacts = NotifAccess.read(this)
-        if (intent.getStringExtra("fixture") == null && savedInstanceState == null) decideUpgrader()
+        if (debugExtra(intent, "fixture") == null && savedInstanceState == null) decideUpgrader()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        val start = placeOf(intent) ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else if (intent.getStringExtra("fixture")?.startsWith("i-") == true) Place.Inbox else if (intent.getStringExtra("fixture")?.startsWith("t-") == true) Place.Tasks else if (intent.getStringExtra("fixture")?.startsWith("h-") == true) Place.Helpers else Place.Chat
-        val badge = intent.getIntExtra("badge", 0)
-        val fixtureName = intent.getStringExtra("fixture")
+        val start = placeOf(intent) ?: if (debugExtra(intent, "fixture")?.startsWith("n-") == true) Place.Notes else if (debugExtra(intent, "fixture")?.startsWith("i-") == true) Place.Inbox else if (debugExtra(intent, "fixture")?.startsWith("t-") == true) Place.Tasks else if (debugExtra(intent, "fixture")?.startsWith("h-") == true) Place.Helpers else Place.Chat
+        val badge = if (debuggable()) intent.getIntExtra("badge", 0) else 0
+        val fixtureName = debugExtra(intent, "fixture")
         // A rotation or a restore runs onCreate again with the launch intent; the link was applied the first time.
         if (savedInstanceState == null) {
             countNoticeTap(intent)
             linkOf(intent)?.let(::applyLink)
-            intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)?.let(chat.actions.onDraft)
+            example.hq.spike.capture.CaptureActivity.takeDraft()?.let(chat.actions.onDraft)
         }
         if (fixtureName == "a-alerts") sampleAlerts()
         val notesFixture = notesFixture(fixtureName)
@@ -377,7 +383,7 @@ class ShellActivity : ComponentActivity() {
         tasksFixture?.let(tasks::freeze)
         helpersFixture?.let(helpers::freeze)
         settingsFixture?.let(settings::freeze)
-        intent.getStringExtra("balance")?.let { usage.freeze(balanceFixture(it)) }
+        debugExtra(intent, "balance")?.let { usage.freeze(balanceFixture(it)) }
         if (notesFixture != null) notes.freeze(notesFixture) else fixture?.let(chat::freeze)
         setContent {
             val status by services.status.collectAsStateWithLifecycle()

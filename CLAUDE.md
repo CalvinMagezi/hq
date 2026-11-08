@@ -226,7 +226,9 @@ sudo ./scripts/install-hq.sh --link   # ONCE per machine, then never sudo again
 `~/bin/hq`. That path is hardcoded in the launchd plist, the MCP configs, and
 three Rust sources (`mcp.rs`, `cursor_mcp_config.rs`, `self_update.rs`), so the
 symlink keeps every one of them working while making the actual write
-unprivileged.
+unprivileged. It is for a developer's own machine only: the root updater and
+`deploy/install.sh` refuse a linked or user-owned `/usr/local/bin/hq`, since root
+would then run a file the user can change.
 
 Do not compare `--version` to check for staleness: it does not bump between
 builds. `--check` compares content hashes, and the installer verifies that the
@@ -249,7 +251,8 @@ can reach 100 GB or more in weeks.
 - `/mcp` refuses every call unless `AGENTHQ_API_KEY` (or the read-only
   `AGENTHQ_SPARK_API_KEY`) is set. `HQ_MCP_DEV_NO_AUTH=1` opens it only on a
   loopback bind for requests no proxy forwarded. On a server the key lives in an
-  env file such as `/opt/hq/mcp.env`, loaded by a systemd drop-in.
+  root-only env file, `/etc/hq/mcp.env`, loaded by a systemd drop-in (never in
+  `/opt/hq`, which the service user owns).
 - The web token is accepted only as a Bearer header. The chat socket opens with a
   single-use ticket from `POST /api/ws-ticket`; URL tokens are refused.
 - `web_allowed_origins` lists every origin the PWA is served from. Without it, an
