@@ -2152,6 +2152,11 @@
     <string name="assist_mic_not_asked">Not asked yet</string>
     <string name="assist_mic_off">Off in Android</string>
     <string name="assist_mic_taps">Tap Permissions, then Microphone, then Allow only while using the app.</string>
+    <string name="assist_mic_allow">Allow microphone</string>
+    <string name="assist_mic_blocked">Android will not ask again. Open App info, then tap Permissions, then Microphone, then Allow only while using the app.</string>
+    <string name="assist_open_app_info">Open App info</string>
+    <string name="assist_now_set">HQ is now your phone\'s assistant. Hold Home on any screen to ask.</string>
+    <string name="assist_not_set_yet">HQ is not the assistant yet. In Android\'s list, choose AgentHQ, then tap OK.</string>
     <string name="assist_fact_model">Speech model</string>
     <string name="assist_model_on">On this phone · %1$s</string>
     <string name="assist_model_missing">Not downloaded · %1$s</string>
