@@ -36,8 +36,12 @@ token() {
   cat "$TOKEN_FILE"
 }
 
+# The header reaches curl on its standard input (`-H @-`; printf is a shell builtin), never on a
+# command line, where every user of this machine could read the token while curl runs.
 get() {
-  curl -sSf -H "Authorization: Bearer $(token)" "$URL$1" | pretty
+  local tok
+  tok="$(token)"
+  printf 'Authorization: Bearer %s\n' "$tok" | curl -sSf -H @- "$URL$1" | pretty
 }
 
 [ "$#" -gt 0 ] || usage

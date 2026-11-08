@@ -464,12 +464,15 @@ in Claude"). The rules, and the tests that hold them:
 | C6 | A revoked hub | Leaves its key in Claude's config | `hq bridge revoke` and the desktop app remove the entries before the revoke, while the setup row still names the hub. The key is dead after the revoke anyway; the removal only keeps Claude's config from listing a server that fails | `revoking_a_hub_removes_its_claude_entries_first` |
 | C7 | The desktop app | Starts a program of the page's choosing | No. The two commands take only a hub name from the list, a window can call them only through `capabilities/control.json`, and the program written into Claude Desktop's config is the located `hq`, refused when it is not an absolute path | `claude_desktop_needs_an_absolute_program_path`, `shell_config.rs` |
 
-The per-device key is passed on `claude`'s command line for the moment it runs, readable by the same
-user or root on macOS and by any local user on Linux without `hidepid`; the entry then sits in
-Claude Code's user config.
+The per-device key is never on a command line: HQ writes the Claude Code entry into its user config
+(`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`) itself, with the same daily backup and
+atomic replace as Claude Desktop's config, and leaves the file mode 0600. `claude` is run only to
+look entries up and to remove them, with nothing secret in its arguments
+(`the_system_runner_writes_claude_codes_config_and_keeps_the_rest`,
+`claude_code_is_added_at_user_scope_with_the_key_in_a_header`).
 
-Residual risk: the key now also lives in Claude Code's `~/.claude.json`, a file HQ does not own or
-protect. Anyone who can read it has the owner's `/mcp` through this machine until the device is
+Residual risk: the key lives in Claude Code's `~/.claude.json`, a file Claude Code rewrites and HQ
+does not otherwise own or protect. Anyone who can read it has the owner's `/mcp` through this machine until the device is
 revoked, which is the same reach as U6 and U9.
 
 ## 17. A machine lends its model to its hub (`hq/share/1`)

@@ -235,8 +235,10 @@ After `hq bridge pair` or `hq bridge join` has set the machine up, the command a
 terminal (`[Y/n]`) and otherwise prints `hq claude add <hub>`. The desktop app has the same thing
 under Claude, "Use HQ in Claude", with an Add or Remove button per hub.
 
-- **Claude Code** gets `claude mcp add --scope user --transport http hq http://127.0.0.1:<port>/mcp
-  --header "x-api-key: <key>"`, so the key sits in Claude Code's own user config. The name is `hq`,
+- **Claude Code** gets a user-scope HTTP server at `http://127.0.0.1:<port>/mcp` with an
+  `x-api-key: <key>` header, written by HQ straight into Claude Code's user config (`~/.claude.json`,
+  or the one in `CLAUDE_CONFIG_DIR`) so the key is never on a command line. The file is left
+  mode 0600. The name is `hq`,
   or `hq-<hub>` when `hq` is taken by something else. An entry counts as ours only when its URL
   is the forward's address. Without `claude` on `PATH` this part is skipped.
 - **Claude Desktop** gets `mcpServers.hq` in `claude_desktop_config.json`, set to this computer's
