@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Cloud backup takes nothing. A phone-to-phone copy takes the vault folder only; keys, settings, the bridge key and the run mode stay behind. -->
+<!-- Cloud backup takes nothing. A phone-to-phone copy takes the vault folder only; keys, settings, the bridge key and the run mode stay behind,
+     and so do the keys HQ keeps inside the vault: the claude.ai connector's TLS keys and the web push signing key. -->
 <data-extraction-rules>
   <cloud-backup>
     <exclude domain="root" path="."/>
@@ -10,5 +11,7 @@
   </cloud-backup>
   <device-transfer>
     <include domain="file" path="hqhome/.vault"/>
+    <exclude domain="file" path="hqhome/.vault/_data/connector_tls"/>
+    <exclude domain="file" path="hqhome/.vault/_data/web_push_vapid.p8"/>
   </device-transfer>
 </data-extraction-rules>
