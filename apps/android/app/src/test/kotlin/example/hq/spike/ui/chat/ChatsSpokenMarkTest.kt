@@ -3,8 +3,11 @@ package example.hq.spike.ui.chat
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import example.hq.spike.ui.theme.HqTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,5 +34,14 @@ class ChatsSpokenMarkTest {
         val state = ChatUiState(chatsOpen = true, chats = listOf(row("b", "Report", "old", running = true)))
         rule.setContent { HqTheme { ChatsSheet(state, ChatActions()) } }
         rule.onNodeWithText("Working").assertIsDisplayed()
+    }
+
+    @Test fun everyChatShowsAnArchiveButtonThatArchivesThatChat() {
+        var archived: String? = null
+        val state = ChatUiState(chatsOpen = true, chats = listOf(row("a", "Dinner plans", "x"), row("b", "Report", "y")))
+        rule.setContent { HqTheme { ChatsSheet(state, ChatActions(onArchive = { archived = it })) } }
+        rule.onNodeWithContentDescription("Archive Dinner plans").assertIsDisplayed()
+        rule.onNodeWithContentDescription("Archive Report").performClick()
+        assertEquals("b", archived)
     }
 }

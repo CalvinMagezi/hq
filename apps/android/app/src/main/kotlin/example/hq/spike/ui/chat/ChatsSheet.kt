@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -134,7 +136,7 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
         Row(
             Modifier.padding(horizontal = 8.dp).fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
                 .background(if (selected) Mts.Surface200 else Mts.Surface100).clickable(role = Role.Button) { actions.onOpenChat(row.id) }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.size(40.dp).background(if (selected) Mts.Surface100 else Mts.Surface200, CircleShape), contentAlignment = Alignment.Center) {
@@ -146,6 +148,20 @@ private fun ChatRowItem(row: ChatRow, selected: Boolean, actions: ChatActions) {
                 if (subtitle.isNotEmpty()) Text(subtitle, style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (row.unread) Box(Modifier.size(10.dp).background(Mts.BrandBlue, CircleShape))
+            ArchiveButton(row.title) { actions.onArchive(row.id) }
         }
     }
+}
+
+/**
+ * Archive, in sight on every row. Swiping a row left does the same, but people did not find the swipe,
+ * so the button is what tells them chats can be put away. Undo follows either way.
+ */
+@Composable
+private fun ArchiveButton(title: String, onClick: () -> Unit) {
+    val label = stringResource(R.string.chat_row_archive_named, title)
+    Box(
+        Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClick).semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) { Icon(HqIcons.Archive, null, Modifier.size(20.dp), tint = Mts.InkMuted) }
 }

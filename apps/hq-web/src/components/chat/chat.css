@@ -5,6 +5,8 @@
 .hq-chatrow:hover .a-row,.hq-chatrow:focus-within .a-row{background:var(--surface-100)}
 .hq-chatrow:hover .a-row-trail,.hq-chatrow:focus-within .a-row-trail{visibility:hidden}
 .hq-chatrow .a-row[aria-current="page"]{background:var(--surface-200)}
+/* A touch screen has no hover, so the archive button stays in sight beside the time instead of hiding until hovered. */
+@media (hover:none){.hq-chatrow .a-row{padding-right:64px}.hq-chatrow .hq-chatrow-archive{display:inline-flex;right:12px;background:transparent;color:var(--ink-muted)}.hq-chatrow:hover .a-row-trail,.hq-chatrow:focus-within .a-row-trail{visibility:visible}}
 .hq-chat-list{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
 .hq-chat-list-find{padding:8px 16px 4px}
 .hq-chat-list-rows{flex:1 1 auto;overflow:auto;padding-bottom:16px}
