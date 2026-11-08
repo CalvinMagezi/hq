@@ -1,5 +1,6 @@
 package example.hq.spike.ui.chat
 
+import example.hq.spike.R
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.StoredMessage
 import example.hq.spike.data.ToolStep
@@ -51,7 +52,7 @@ class ChatReducerTest {
     fun aReplyStreamsThroughStepsAndEndsAsOneMessage() {
         var s = ChatReducer.apply(ChatUiState(threadId = "t1"), ChatEvent.TurnStart("t1", null, saved), emptySet())
         s = ChatReducer.apply(s, ChatEvent.ToolStarted("t1", ToolStep("c1", "task_list", "{}", null, null)), emptySet())
-        assertEquals("Checked your tasks...", s.live?.headline)
+        assertEquals(StepLine(R.string.step_tasks_checked), s.live?.headline)
         s = ChatReducer.apply(s, ChatEvent.ToolFinished("t1", "c1", "2 tasks"), emptySet())
         s = ChatReducer.apply(s, ChatEvent.Text("t1", "Two "), emptySet())
         s = ChatReducer.apply(s, ChatEvent.Text("t1", "tasks."), emptySet())
@@ -88,10 +89,52 @@ class ChatReducerTest {
         assertEquals(listOf("u1", "r1", "u3"), out.messages.map { it.id })
     }
 
+    private fun step(name: String, args: String? = null) = ToolStep("c", name, args, null, null)
+
     @Test
-    fun toolWordsAreThePlainOnes() {
-        assertEquals("Read \"Mobile-First-Roadmap\"", ToolWords.running(ToolStep("c", "vault_read", "{\"path\":\"Notebooks/Projects/Mobile-First-Roadmap.md\"}", null, null)))
-        assertEquals("Did a step", ToolWords.running(ToolStep("c", "something_new", null, null, null)))
+    fun toolWordsNameWhatAStepTouched() {
+        assertEquals(StepLine(R.string.step_note_read_named, "Mobile-First-Roadmap"), ToolWords.line(step("vault_read", "{\"path\":\"Notebooks/Projects/Mobile-First-Roadmap.md\"}")))
+        assertEquals(StepLine(R.string.step_web_search_for, "UK public holidays"), ToolWords.line(step("web_search", "{\"query\":\"UK public holidays\"}")))
+        assertEquals(StepLine(R.string.step_web_fetch_site, "timeanddate.com"), ToolWords.line(step("web_fetch", "{\"url\":\"https://www.timeanddate.com/holidays/uk/\"}")))
+        assertEquals(StepLine(R.string.step_task_added_named, "Call the bank"), ToolWords.line(step("task_create", "{\"title\":\"Call the bank\"}")))
+    }
+
+    @Test
+    fun toolWordsWithoutANameStillSayWhatKindOfThing() {
+        assertEquals(StepLine(R.string.step_web_search), ToolWords.line(step("web_search")))
+        assertEquals(StepLine(R.string.step_web_fetch), ToolWords.line(step("web_fetch", "{\"url\":\"not a url\"}")))
+        assertEquals(StepLine(R.string.step_tasks_checked), ToolWords.line(step("task_list", "{}")))
+        assertEquals(StepLine(R.string.step_command_ran), ToolWords.line(step("bash", "not json")))
+    }
+
+    @Test
+    fun anUnknownToolFallsBackByFamilyThenItsOwnNameNeverDidAStep() {
+        assertEquals(StepLine(R.string.step_notes_worked), ToolWords.line(step("vault_something_new")))
+        assertEquals(StepLine(R.string.step_helper_checked), ToolWords.line(step("harness_session_peek")))
+        assertEquals(StepLine(R.string.step_used, "system clock"), ToolWords.line(step("system_clock")))
+    }
+
+    @Test
+    fun theGatewayCallIsReadAsTheToolItCalls() {
+        val call = step("hq_call", "{\"tool\":\"web_search\",\"args\":{\"query\":\"rain in Kampala\"}}")
+        assertEquals(StepLine(R.string.step_web_search_for, "rain in Kampala"), ToolWords.line(call))
+    }
+
+    @Test
+    fun longNamesAreCutToFitAPhone() {
+        val arg = ToolWords.line(step("web_search", "{\"query\":\"${"a".repeat(200)}\"}")).arg!!
+        assertTrue(arg.length <= 60 && arg.endsWith("…"))
+    }
+
+    @Test
+    fun aRunOfTheSameLineIsSaidOnce() {
+        val lines = ToolWords.lines(
+            listOf(step("task_list"), step("task_list"), step("web_search", "{\"query\":\"a\"}"), step("web_search", "{\"query\":\"b\"}"), step("task_list")),
+        )
+        assertEquals(
+            listOf(StepLine(R.string.step_tasks_checked), StepLine(R.string.step_web_search_for, "a"), StepLine(R.string.step_web_search_for, "b"), StepLine(R.string.step_tasks_checked)),
+            lines,
+        )
     }
 
     @Test

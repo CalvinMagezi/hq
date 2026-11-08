@@ -114,7 +114,8 @@ private fun OfferButton(label: String, fill: androidx.compose.ui.graphics.Color,
 @Composable
 private fun ToolLine(tools: List<ToolStep>) {
     var open by remember { mutableStateOf(false) }
-    val count = androidx.compose.ui.res.pluralStringResource(R.plurals.chat_steps, tools.size, tools.size)
+    val lines = remember(tools) { ToolWords.lines(tools) }
+    val count = androidx.compose.ui.res.pluralStringResource(R.plurals.chat_steps, lines.size, lines.size)
     Column(Modifier.padding(top = 8.dp)) {
         Row(
             Modifier.fillMaxWidth().minimumInteractiveComponentSize().clickable { open = !open }
@@ -124,9 +125,13 @@ private fun ToolLine(tools: List<ToolStep>) {
             Text("What I did · $count", style = HqType.ToolLine, color = Mts.InkMuted)
             Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp).rotate(if (open) 180f else 0f), tint = Mts.InkMuted)
         }
-        if (open) tools.forEach { Step(ToolWords.running(it), done = true) }
+        if (open) lines.forEach { Step(it.text(), done = true) }
     }
 }
+
+/** A step's sentence, with the note, page or search it named. */
+@Composable
+private fun StepLine.text(): String = if (arg != null) stringResource(res, arg) else stringResource(res)
 
 @Composable
 private fun Step(label: String, done: Boolean) {
@@ -146,12 +151,12 @@ fun Spinner(size: Int, color: androidx.compose.ui.graphics.Color = Mts.BrandBlue
 fun LiveReplyBubble(live: LiveReply, blocks: BlockActions) = ReplyFrame {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Spinner(18)
-        Text(live.headline, style = HqType.BodySmBold, color = Mts.Ink)
+        Text(live.headline?.text() ?: stringResource(R.string.chat_working), style = HqType.BodySmBold, color = Mts.Ink)
     }
     if (live.steps.isNotEmpty()) {
         Column(
             Modifier.padding(top = 8.dp).drawBehind { drawRect(Mts.Hairline, size = Size(2.dp.toPx(), size.height)) }.padding(start = 6.dp),
-        ) { live.steps.forEach { Step(it.label, it.done) } }
+        ) { live.steps.forEach { Step(it.line.text(), it.done) } }
     }
     if (live.text.isNotBlank()) ReplyBody(live.text, blocks, Modifier.padding(top = 8.dp), streaming = true)
 }

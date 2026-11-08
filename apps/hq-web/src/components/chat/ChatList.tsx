@@ -93,7 +93,7 @@ interface RowProps {
   onArchive: (threadId: string) => void
 }
 
-/** One chat in the list: its title and last line, the time or "Working", unread, and archive on hover. */
+/** One chat in the list: its title and last line, the time or "Working", unread, and archive (on hover, or always on a touch screen). */
 export function ChatRow({ thread: th, active, working, spoken, onOpen, onArchive }: RowProps) {
   const unread = !active && th.unreadCount !== 0
   const line = [spoken ? t('chat_spoken') : null, th.lastMessagePreview].filter(Boolean).join(' · ')

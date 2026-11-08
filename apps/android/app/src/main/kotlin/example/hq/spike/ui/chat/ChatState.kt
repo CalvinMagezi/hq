@@ -41,12 +41,13 @@ data class UiMessage(
 
 data class LiveStep(val step: ToolStep, val done: Boolean) {
     val id: String get() = step.id
-    val label: String get() = ToolWords.running(step)
+    val line: StepLine get() = ToolWords.line(step)
 }
 
 /** The reply that is being written right now. */
 data class LiveReply(val text: String = "", val steps: List<LiveStep> = emptyList()) {
-    val headline: String get() = steps.lastOrNull { !it.done }?.let { "${it.label}..." } ?: "Working..."
+    /** The step running now, said in the headline; null while HQ is only thinking. */
+    val headline: StepLine? get() = steps.lastOrNull { !it.done }?.line
 }
 
 enum class Group(val label: String) { Today("Today"), Yesterday("Yesterday"), Week("Previous 7 days"), Older("Older") }
@@ -238,24 +239,6 @@ object ChatReducer {
         is ChatEvent.TurnEnd -> threadId
         is ChatEvent.Failed -> threadId
         else -> null
-    }
-}
-
-/** The plain words the design uses for what a reply did, instead of tool names. */
-object ToolWords {
-    fun running(step: ToolStep): String = when (step.name) {
-        "task_list" -> "Checked your tasks"
-        "task_create" -> "Added a task"
-        "vault_read" -> noteTitle(step.args)?.let { "Read \"$it\"" } ?: "Read a note"
-        "vault_search" -> "Searched your notes"
-        "vault_write_note" -> "Saved a note"
-        "bash", "run_command" -> "Worked on your computer"
-        else -> "Did a step"
-    }
-
-    private fun noteTitle(args: String?): String? {
-        val path = Regex("\"path\"\\s*:\\s*\"([^\"]+)\"").find(args ?: "")?.groupValues?.get(1) ?: return null
-        return path.substringAfterLast('/').removeSuffix(".md")
     }
 }
 
