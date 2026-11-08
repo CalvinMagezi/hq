@@ -788,6 +788,106 @@ mod web_auth_router_tests {
         app.clone().oneshot(request).await.unwrap().status()
     }
 
+    /// With sign-in off, a request from this machine is the owner's, and one a proxy forwarded
+    /// (`tailscale serve` adds `Tailscale-User-Login`, Caddy `X-Forwarded-For`) is refused with
+    /// a reason. Mutation: drop the `forwarded` check in `web_auth_middleware`; the tailnet
+    /// request then gets the owner's API.
+    #[tokio::test]
+    async fn sign_in_off_serves_this_machine_and_refuses_a_proxy() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let local = Request::get("/api/spaces").body(Body::empty()).unwrap();
+        assert_ne!(status(&app, local).await, StatusCode::FORBIDDEN);
+        for (name, value) in [
+            ("tailscale-user-login", "someone@example.com"),
+            ("x-forwarded-for", "100.64.0.7"),
+            ("forwarded", "for=100.64.0.7"),
+        ] {
+            let proxied = Request::get("/api/spaces")
+                .header(name, value)
+                .body(Body::empty())
+                .unwrap();
+            let res = app.clone().oneshot(proxied).await.unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{name}");
+            let body = axum::body::to_bytes(res.into_body(), 1 << 16)
+                .await
+                .unwrap();
+            assert!(
+                String::from_utf8_lossy(&body).contains("Set a web token"),
+                "{name}"
+            );
+        }
+        let ws = Request::get("/ws")
+            .header("x-forwarded-for", "100.64.0.7")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status(&app, ws).await, StatusCode::FORBIDDEN);
+        // /health and the web app itself stay reachable, so the page can say what is wrong.
+        let health = Request::get("/health")
+            .header("x-forwarded-for", "100.64.0.7")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status(&app, health).await, StatusCode::OK);
+    }
+
+    async fn body_json(app: &Router, request: Request<Body>) -> serde_json::Value {
+        let res = app.clone().oneshot(request).await.unwrap();
+        let body = axum::body::to_bytes(res.into_body(), 1 << 16)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    /// Loopback (the updater, the installers) sees the build; a proxied caller sees only that
+    /// HQ is up, and a refused `/mcp` call does not learn whether any key is configured.
+    #[tokio::test]
+    async fn a_proxied_caller_learns_no_build_details_or_key_setup() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let health = |proxied: bool| {
+            let req = Request::get("/health");
+            let req = if proxied {
+                req.header("x-forwarded-for", "100.64.0.7")
+            } else {
+                req
+            };
+            req.body(Body::empty()).unwrap()
+        };
+        let local = body_json(&app, health(false)).await;
+        assert_eq!(local["status"], "ok");
+        assert!(local.get("git_sha").is_some() && local.get("version").is_some());
+        let public = body_json(&app, health(true)).await;
+        assert_eq!(
+            public,
+            serde_json::json!({ "status": "ok", "service": HEALTH_SERVICE })
+        );
+
+        let mcp = |proxied: bool| {
+            let req = Request::post("/mcp")
+                .header("host", "127.0.0.1:5678")
+                .header("content-type", "application/json");
+            let req = if proxied {
+                req.header("x-forwarded-for", "100.64.0.7")
+            } else {
+                req
+            };
+            req.body(Body::from(
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+            ))
+            .unwrap()
+        };
+        let local = body_json(&app, mcp(false)).await;
+        assert!(
+            local["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("AGENTHQ_API_KEY"),
+            "{local}"
+        );
+        let public = body_json(&app, mcp(true)).await;
+        assert_eq!(public["error"]["message"], "Unauthorized", "{public}");
+    }
+
     /// The guard sits inside CORS and in front of every /api route, but never
     /// in front of /health, which the deploy rollback check polls.
     #[tokio::test]

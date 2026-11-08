@@ -175,7 +175,8 @@ pub fn default_daemon_url(config: &HqConfig) -> Option<String> {
 
 /// Whether an HQ web server answers `/health` at `http_base`. The `service`
 /// field is required so a bearer token is never sent to some other program that
-/// happens to answer `{"status":"ok"}` on the port.
+/// happens to answer `{"status":"ok"}` on the port. The version is not: HQ leaves it out
+/// for a request that came through a proxy, as `--server https://...` does.
 pub async fn detect_daemon(http_base: &str) -> bool {
     let mut builder = reqwest::Client::builder().timeout(DETECT_TIMEOUT);
     // A loopback probe must not go through an environment proxy.
@@ -195,9 +196,7 @@ pub async fn detect_daemon(http_base: &str) -> bool {
     let Ok(body) = resp.json::<Value>().await else {
         return false;
     };
-    body["status"] == "ok"
-        && body["service"] == hq_web::HEALTH_SERVICE
-        && body["version"].is_string()
+    body["status"] == "ok" && body["service"] == hq_web::HEALTH_SERVICE
 }
 
 fn env_token() -> Option<String> {

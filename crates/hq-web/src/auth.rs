@@ -381,8 +381,15 @@ impl crate::WsState {
     }
 }
 
-/// Axum middleware enforcing the web sign-in on guarded paths. A no-op when no web token is
-/// configured and no device token exists (loopback-only deployments).
+/// Why a guarded path is refused when sign-in is off and a proxy forwarded the request: with no
+/// web token every caller is the owner, which is only safe when the callers are this machine's.
+pub(crate) const SIGN_IN_OFF_BEHIND_PROXY: &str = "Sign-in is off on this HQ, so it answers only \
+     requests from this machine, and this one came through a proxy. Set a web token on the \
+     server (web_auth_token in config.yaml, or HQ_WEB_AUTH_TOKEN) and restart HQ.";
+
+/// Axum middleware enforcing the web sign-in on guarded paths. With no web token configured and
+/// no device token (loopback-only deployments) it lets requests from this machine through, and
+/// refuses any a reverse proxy forwarded (`tailscale serve` or Caddy publishing the port).
 pub(crate) async fn web_auth_middleware(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::WsState>>,
     mut request: axum::extract::Request,
@@ -408,6 +415,10 @@ pub(crate) async fn web_auth_middleware(
         }
     };
     if !enabled {
+        if forwarded(request.headers()) {
+            return crate::error::ApiError::Forbidden(SIGN_IN_OFF_BEHIND_PROXY.into())
+                .into_response();
+        }
         return next.run(request).await;
     }
     if let Some(credential) = credential {

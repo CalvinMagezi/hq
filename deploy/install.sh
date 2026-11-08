@@ -260,6 +260,63 @@ migrate_env_files() {
     done
 }
 
+rand_hex() { # 32 random bytes as hex
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32
+    else
+        od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+    fi
+}
+
+# The web token and the MCP key, generated here when not already set, in the file and drop-in the
+# Hetzner bootstrap uses. With no web token, every device that reaches the web port (a whole
+# tailnet, once `tailscale serve` publishes it) is the owner. Neither value is ever printed.
+SECRETS_ADDED=""
+# Whether NAME is already given to hq.service: in an env file here, or in the unit or a drop-in.
+secret_already_set() {
+    grep -Eqs "^[[:space:]]*$1=.+" "$CONF_DIR"/*.env \
+        || grep -Eqs "^[[:space:]]*Environment=\"?$1=.+" "$UNIT_DIR/hq.service" "$UNIT_DIR"/hq.service.d/*.conf
+}
+ensure_server_secrets() {
+    local env="$CONF_DIR/mcp.env"
+    if [ ! -f "$env" ]; then
+        (umask 077; : > "$env")
+    fi
+    chown root:root "$env"
+    chmod 0600 "$env"
+    if ! secret_already_set AGENTHQ_API_KEY; then
+        printf 'AGENTHQ_API_KEY=%s\n' "$(rand_hex)" >> "$env"
+        SECRETS_ADDED="AGENTHQ_API_KEY"
+    fi
+    # A token in config.yaml is the owner's already; an env value would replace it.
+    if ! secret_already_set HQ_WEB_AUTH_TOKEN \
+        && ! grep -Eqs '^web_auth_token:[[:space:]]*["'\'']?[^"'\''[:space:]#]' "$HQ_HOME/config.yaml"; then
+        printf 'HQ_WEB_AUTH_TOKEN=%s\n' "$(rand_hex)" >> "$env"
+        SECRETS_ADDED="${SECRETS_ADDED:+$SECRETS_ADDED and }HQ_WEB_AUTH_TOKEN"
+    fi
+    [ -z "$SECRETS_ADDED" ] || log "generated $SECRETS_ADDED in $env"
+    mkdir -p "$UNIT_DIR/hq.service.d"
+    write_if_changed "$UNIT_DIR/hq.service.d/mcp-key.conf" 0644 <<DROPIN
+[Service]
+EnvironmentFile=$env
+DROPIN
+}
+
+# How the owner gets in once a web token is set. The token stays in the root-only file.
+print_sign_in_help() {
+    [ -n "$SECRETS_ADDED" ] || return 0
+    cat <<HELP
+==> Sign-in is on. A web token and an MCP key were generated in $CONF_DIR/mcp.env (root only).
+    For a sign-in link to open on your own device, run as root:
+      HQ_WEB_AUTH_TOKEN="\$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' $CONF_DIR/mcp.env)" runuser -u $HQ_USER -- \\
+        env HQ_CONFIG_PATH=$HQ_HOME/config.yaml HQ_VAULT_PATH=$HQ_HOME/.vault $BIN web link
+    Treat the link like a password. MCP clients use AGENTHQ_API_KEY from the same file.
+HELP
+    if systemctl is-active --quiet hq.service; then
+        echo "    hq.service is running without them: run 'systemctl restart hq' to turn sign-in on." >&2
+    fi
+}
+
 write_if_changed() { # dest mode content-from-stdin
     local dest="$1" mode="$2" new
     new="$(mktemp)"
@@ -470,6 +527,7 @@ ensure_packages
 ensure_sandbox
 ensure_user_and_dirs
 migrate_env_files
+ensure_server_secrets
 install_config
 install_units
 seed_web
@@ -488,4 +546,5 @@ if [ "$START" -eq 1 ] && [ "$FRESH_BOOTSTRAP" -eq 1 ]; then
     fi
 fi
 enable_timer
+print_sign_in_help
 log "done. Status: $BIN update --check ; systemctl list-timers hq-update.timer"

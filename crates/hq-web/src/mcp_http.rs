@@ -167,7 +167,8 @@ async fn handle_mcp(
         _ => None,
     };
     if identity.is_none() && session.is_none() && grant.is_none() {
-        if keys.none_configured() {
+        // Whether a key is set at all is this machine's business, not a remote caller's.
+        if keys.none_configured() && !crate::auth::forwarded(headers) {
             tracing::warn!("mcp_http: refused, no AGENTHQ_API_KEY configured");
             return Err(rpc_err(
                 id,

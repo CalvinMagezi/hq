@@ -127,6 +127,16 @@ root before it starts the service).
 the device tokens described below. Both are accepted only as `Authorization: Bearer`. URL tokens (`?token=`) are refused,
 because URLs end up in browser history, proxy logs and `Referer` headers.
 
+With no web token and no device token, sign-in is off and every caller is the owner.
+That is meant for one machine's own browser, so `/ws` and `/api/*` then refuse (`403`,
+with a message saying to set a web token) any request that carries a reverse proxy's
+headers (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Real-IP`,
+`Tailscale-User-Login`). `tailscale serve` and Caddy add them, so publishing a server
+with sign-in off no longer makes every device on the tailnet its owner.
+`deploy/install.sh` generates `HQ_WEB_AUTH_TOKEN` and `AGENTHQ_API_KEY` in
+`/etc/hq/mcp.env` when neither the env files, the unit nor `config.yaml` sets them, and
+prints how to get a sign-in link (`hq web link`).
+
 - **Chat socket.** Browsers cannot set headers on a WebSocket, so the PWA calls
   `POST /api/ws-ticket` with the header and opens `/ws?ticket=<ticket>`. A
   ticket works once, expires after 30 seconds, and opens `/ws` only; at most 256

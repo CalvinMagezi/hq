@@ -166,6 +166,24 @@ ssh <ssh-host> 'mkdir -p /opt/hq/web/dist && rsync -a --delete /root/hq-src/apps
 List every origin the UI is served from in `web_allowed_origins` (see
 [`docs/security/WEB_AUTH.md`](../docs/security/WEB_AUTH.md)).
 
+Sign-in must be on before the UI is published: with no web token every device on
+the tailnet would be the owner, so HQ refuses `/api` and `/ws` requests that came
+through a proxy until one is set. `deploy/install.sh` generates `HQ_WEB_AUTH_TOKEN`
+and `AGENTHQ_API_KEY` in `/etc/hq/mcp.env` (root only, loaded by the
+`hq.service.d/mcp-key.conf` drop-in) when they are not set anywhere else, and prints
+the command for a sign-in link. On the manual path, create that file and drop-in
+yourself:
+
+```
+install -d -m 0755 -o root -g root /etc/hq /etc/systemd/system/hq.service.d
+(umask 077; printf 'AGENTHQ_API_KEY=%s\nHQ_WEB_AUTH_TOKEN=%s\n' \
+  "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > /etc/hq/mcp.env)
+printf '[Service]\nEnvironmentFile=/etc/hq/mcp.env\n' > /etc/systemd/system/hq.service.d/mcp-key.conf
+systemctl daemon-reload && systemctl restart hq
+HQ_WEB_AUTH_TOKEN="$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' /etc/hq/mcp.env)" runuser -u hq -- \
+  env HQ_CONFIG_PATH=/opt/hq/config.yaml HQ_VAULT_PATH=/opt/hq/.vault /usr/local/bin/hq web link
+```
+
 ## Vault
 
 The server vault (`/opt/hq/.vault`) is the primary copy. There is no sync
