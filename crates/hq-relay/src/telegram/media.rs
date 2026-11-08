@@ -115,7 +115,8 @@ async fn download_file(
         .map_err(|_| anyhow::anyhow!("download file failed (id: {file_id})"))?
         .bytes()
         .await
-        .map_err(|e| anyhow::anyhow!("read file bytes: {e}"))?;
+        // The URL carries the bot token, and reqwest's errors print it.
+        .map_err(|e| anyhow::anyhow!("read file bytes: {}", e.without_url()))?;
 
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
