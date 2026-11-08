@@ -34,14 +34,20 @@ firewall rule locks out SSH. Steps 3 and 4 below are the manual alternative to
    then `systemctl enable --now hq`. Coding agents run on a machine that has
    Claude Code or another agent installed, through HQ's built-in host: to use
    a laptop over Tailscale, run `hq host join` there and follow
-   `docs/AGENT_HOST.md`. `hq.service` also reads `/opt/hq/openrouter.env`
-   and `/opt/hq/gws.env` when they exist (chmod 600), so provider keys can stay
-   out of `config.yaml`; neither is required to start.
+   `docs/AGENT_HOST.md`. `hq.service` also reads `/etc/hq/openrouter.env`
+   and `/etc/hq/gws.env` when they exist, so provider keys can stay out of
+   `config.yaml`; neither is required to start. Every env file the unit loads
+   lives in `/etc/hq`, owned by root with mode 0600. Never put one in `/opt/hq`:
+   the `hq` user owns that folder, so anything HQ runs could create a file there
+   for the next restart to load. `deploy/install.sh` moves env files an older
+   install left in `/opt/hq` and refuses to go on if one there differs from its
+   `/etc/hq` copy.
 4. Optional: GitHub access for `gh` and git over HTTPS. Create a fine-grained
    personal access token limited to the repositories HQ should push to (Contents
    and Pull requests: read and write), then on the server:
    ```
-   (umask 077; printf 'GH_TOKEN=%s\n' '<token>' > /opt/hq/gh.env)
+   install -d -m 0755 -o root -g root /etc/hq
+   (umask 077; printf 'GH_TOKEN=%s\n' '<token>' > /etc/hq/gh.env)
    systemctl daemon-reload && systemctl restart hq
    ```
    The unit reads the file at start (the leading `-` makes it optional). To let plain `git push` use the token, run once

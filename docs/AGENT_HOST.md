@@ -281,9 +281,10 @@ What it cannot do:
   vault's `_data` folder (the database with sign-in tokens, owner approvals and paired
   devices, and the TLS and web push keys); and the config file in force (`HQ_CONFIG_PATH`,
   `~/.hq/config.yaml` or `/opt/hq/config.yaml`) with its backups and every `*.env` file beside
-  it (such as `/opt/hq/mcp.env`). The env files HQ's service units load from there
-  (`mcp.env`, `openrouter.env`, `gws.env`, `gh.env`) are masked even when you have none, so an
-  agent cannot create one for the service to load at its next start; under bubblewrap the
+  it. A server installed with `deploy/install.sh` keeps its env files in `/etc/hq`, root-only,
+  out of every agent's reach. The env files older service units loaded from beside the config
+  (`mcp.env`, `openrouter.env`, `gws.env`, `gh.env`) are still masked even when you have none, so
+  an agent cannot create one for such a unit to load at its next start; under bubblewrap the
   host makes each missing one, empty and private, so the mask has a file to land on. The host
   resolves the vault and config the way HQ does on its own machine when `hq host serve`
   starts, so restart the host after moving either. `hq host install` writes `HQ_VAULT_PATH`

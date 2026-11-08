@@ -97,9 +97,12 @@ the user can edit and anyone who can run `hq` on that machine can start a full s
 remote key is enforced on the server. The stdio entry also carries `HQ_VAULT_PATH`, your vault's
 path on that machine.
 
-Generate a key with `openssl rand -hex 32` and keep it in a root-readable env
-file loaded by the service (the sample unit layout uses `/opt/hq/mcp.env`, loaded by the
-`hq.service.d/mcp-key.conf` drop-in).
+Generate a key with `openssl rand -hex 32` and keep it in a root-only env file
+loaded by the service: `deploy/install.sh` writes `/etc/hq/mcp.env` (root:root, mode 0600,
+in a root-owned directory) with a generated key and web token when they are not set, loaded
+by the `hq.service.d/mcp-key.conf` drop-in. Never keep a service env file in `/opt/hq`: the
+service user owns that folder, so anything HQ runs could create one for the next restart to
+load.
 
 `tools/list` returns the two gateway tools (`hq_discover`, `hq_call`) for every
 key, never the registry. What differs by scope is the rest: `hq_discover` lists
@@ -114,8 +117,9 @@ an HTTP router for the full, handoff and Spark keys, and a missing key.
 the directory HQ creates for it are owner-only (0600 and 0700) on unix, and an
 existing looser config is tightened the next time HQ saves it. Backups made by
 earlier versions keep their old mode: run `chmod 600 ~/.hq/config.yaml*`. HQ
-does not write `.env` files; create service env files such as `/opt/hq/mcp.env`
-with mode 0600 owned by the service user.
+does not write `.env` files; create service env files such as `/etc/hq/mcp.env`
+owned by root with mode 0600, in a directory only root can write (systemd reads them as
+root before it starts the service).
 
 ## Web token: headers only
 

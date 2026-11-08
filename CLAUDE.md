@@ -248,7 +248,8 @@ can reach 100 GB or more in weeks.
 - `/mcp` refuses every call unless `AGENTHQ_API_KEY` (or the read-only
   `AGENTHQ_SPARK_API_KEY`) is set. `HQ_MCP_DEV_NO_AUTH=1` opens it only on a
   loopback bind for requests no proxy forwarded. On a server the key lives in an
-  env file such as `/opt/hq/mcp.env`, loaded by a systemd drop-in.
+  root-only env file, `/etc/hq/mcp.env`, loaded by a systemd drop-in (never in
+  `/opt/hq`, which the service user owns).
 - The web token is accepted only as a Bearer header. The chat socket opens with a
   single-use ticket from `POST /api/ws-ticket`; URL tokens are refused.
 - `web_allowed_origins` lists every origin the PWA is served from. Without it, an

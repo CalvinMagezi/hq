@@ -17,8 +17,8 @@ normal and the `BypassPermissions` paths.
      `~/.config/gh/hosts.yml`, `~/.docker/config.json`, `~/.kube/config`,
      `~/.netrc`, `~/.git-credentials`, `~/.herenow/credentials`;
    - `~/.hq/{config.yaml,wallet.enc,seed.enc,secret.key}`, the active HQ
-     config (`HQ_CONFIG_PATH`), its backups and `*.env` beside it (on the
-     VPS, `/opt/hq/*.env`);
+     config (`HQ_CONFIG_PATH`), its backups and `*.env` beside it (a server
+     keeps its env files in `/etc/hq`, root-only, out of the service user's reach);
    - OpenSSH private keys by name (`id_rsa*`, `id_ed25519*` and similar,
      but not `.pub`) anywhere, and any `/proc/*/environ`.
 

@@ -199,6 +199,45 @@ ensure_user_and_dirs() {
     chmod 700 "$STATE_DIR"
 }
 
+# The env files hq.service loads. They live in root-owned $CONF_DIR, never in $HQ_HOME, which the
+# hq user owns: there, HQ's own agents could create one for the next restart to load.
+ENV_NAMES="openrouter gws gh mcp"
+
+# Older units read openrouter.env, gws.env and gh.env from $HQ_HOME. Moves each one to
+# $CONF_DIR (root:root, mode 0600) and leaves none behind. The copy is made with `cp -P` into a
+# root-only directory, so a link the hq user swapped in is copied as a link and refused, never
+# followed.
+migrate_env_files() {
+    local name old new stage staged
+    stage="$(mktemp -d "$CONF_DIR/.env-migrate.XXXXXX")"
+    for name in $ENV_NAMES; do
+        old="$HQ_HOME/$name.env"
+        new="$CONF_DIR/$name.env"
+        [ -e "$old" ] || [ -L "$old" ] || continue
+        staged="$stage/$name.env"
+        cp -P -- "$old" "$staged"
+        if [ -L "$staged" ] || [ ! -f "$staged" ]; then
+            rm -rf "$stage"
+            die "$old is not a plain file, so it may not be yours. Look at it, put the values you need in $new (root:root, mode 0600), delete $old and re-run"
+        fi
+        if [ ! -e "$new" ]; then
+            install -m 0600 -o root -g root "$staged" "$new"
+            log "moved $old to $new"
+        elif ! cmp -s "$staged" "$new"; then
+            rm -rf "$stage"
+            die "$old and $new both exist and differ. hq.service now reads only $new: copy what you need into it, delete $old and re-run"
+        fi
+        rm -f -- "$old"
+    done
+    rm -rf "$stage"
+    for name in $ENV_NAMES; do
+        new="$CONF_DIR/$name.env"
+        [ -f "$new" ] || continue
+        chown root:root "$new"
+        chmod 0600 "$new"
+    done
+}
+
 write_if_changed() { # dest mode content-from-stdin
     local dest="$1" mode="$2" new
     new="$(mktemp)"
@@ -300,7 +339,37 @@ install_units() {
 [Service]
 Environment=HQ_WEB_STATIC_DIR=$WEB_DIR/dist
 DROPIN
+    # An hq.service kept from an older install still lists /opt/hq/*.env. The empty line resets
+    # that list, so only the root-owned files below (and mcp.env, from mcp-key.conf) are loaded.
+    write_if_changed "$UNIT_DIR/hq.service.d/10-env-files.conf" 0644 <<DROPIN
+[Service]
+EnvironmentFile=
+EnvironmentFile=-$CONF_DIR/openrouter.env
+EnvironmentFile=-$CONF_DIR/gws.env
+EnvironmentFile=-$CONF_DIR/gh.env
+DROPIN
+    check_dropins_env_files
     systemctl daemon-reload
+}
+
+# A drop-in of the operator's own that loads an env file from $HQ_HOME would undo the move.
+check_dropins_env_files() {
+    local f line path
+    # The reset also drops any other file a kept hq.service lists; say so rather than lose it quietly.
+    while IFS= read -r line; do
+        path="${line#*=}"
+        path="${path#-}"
+        case "$path" in
+            ""|"$CONF_DIR/openrouter.env"|"$CONF_DIR/gws.env"|"$CONF_DIR/gh.env"|"$HQ_HOME"/*) ;;
+            *) echo "note: $UNIT_DIR/hq.service lists EnvironmentFile=$path, which hq.service.d/10-env-files.conf now drops. Add it to a drop-in of your own under hq.service.d if HQ needs it." >&2 ;;
+        esac
+    done < <(grep -E '^[[:space:]]*EnvironmentFile=' "$UNIT_DIR/hq.service" 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    for f in "$UNIT_DIR"/hq.service.d/*.conf; do
+        [ -f "$f" ] || continue
+        if grep -Eq "^[[:space:]]*EnvironmentFile=-?$HQ_HOME/" "$f"; then
+            die "$f loads an env file from $HQ_HOME, which the hq user can write. Move that file to $CONF_DIR (root:root, mode 0600), point $f at it and re-run"
+        fi
+    done
 }
 
 fetch() { curl --proto "$CURL_PROTO" --proto-redir "=https" --tlsv1.2 -fsSL --max-time 600 -o "$2" "$1"; }
@@ -378,6 +447,7 @@ enable_timer() {
 ensure_packages
 ensure_sandbox
 ensure_user_and_dirs
+migrate_env_files
 install_config
 install_units
 seed_web

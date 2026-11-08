@@ -25,7 +25,7 @@ fi
 
 echo "=== Installing GitHub CLI ==="
 # HQ shells out to `gh` for `git_pr` and the coding tools. Authentication is
-# a token in /opt/hq/gh.env; see deploy/README.md, "GitHub access".
+# a token in /etc/hq/gh.env (root-only); see deploy/README.md, "GitHub access".
 mkdir -p /etc/apt/keyrings && chmod 755 /etc/apt/keyrings
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
 chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg

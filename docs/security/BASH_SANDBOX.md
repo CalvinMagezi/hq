@@ -44,8 +44,8 @@ the host.
 
    Both backends make these files unreadable:
    - the HQ config file (`HQ_CONFIG_PATH`, or `~/.hq/config.yaml`), its
-     `config.yaml*` backups, and `*.env` files next to it (on the VPS,
-     `/opt/hq/*.env`);
+     `config.yaml*` backups, and `*.env` files next to it (a server keeps its
+     env files in `/etc/hq`, root-only, out of the service user's reach);
    - `~/.hq/config.yaml`, `web.token`, `wallet.enc`, `seed.enc` and `secret.key`;
    - the backup key file named by `backup.key_file`, which opens backups that
      may hold the config (`docs/BACKUP.md`);
