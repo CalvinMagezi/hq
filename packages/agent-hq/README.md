@@ -6,7 +6,7 @@ Installs [HQ](https://github.com/CalvinMagezi/hq), a local-first AI agent hub (a
 npx agent-hq-cli
 ```
 
-On Linux (x86_64 or aarch64) and macOS on Apple Silicon it downloads the latest stable release, verifies the minisign signature and SHA-256 checksum against the project's public key, and installs `hq` into `~/.local/bin`. On other platforms, such as Intel Macs, it builds from source with `cargo` (install Rust from https://rustup.rs first). If the chosen release was published before your platform had a binary, try `--channel main` or `--from-source`.
+On Linux (x86_64 or aarch64) and macOS on Apple Silicon it downloads the latest stable release, verifies the minisign signature and SHA-256 checksum against the project's public key, and installs `hq` into `~/.local/bin`. On other platforms, such as Intel Macs, it builds from source with `cargo` (install Rust from https://rustup.rs first). A source build is pinned too: it checks the signed release of the chosen channel the same way and builds exactly the commit that release names, not the tip of `main`. If the chosen release was published before your platform had a binary, try `--channel main` or `--from-source`.
 
 Options: `--channel stable|main`, `--prefix <dir>`, `--from-source`, `--repo owner/name`.
 

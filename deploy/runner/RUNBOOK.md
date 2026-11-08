@@ -42,7 +42,7 @@ Settings, Environments, `release`:
 - Environment secrets `MINISIGN_KEY` and `MINISIGN_PASSWORD` (omit the password only if the key has none).
 
 Settings, Rules, Rulesets (target branch `main`, enforcement Active, no bypass list for admins):
-- Require a pull request with at least one approving review, dismiss stale approvals, require review from Code Owners (`.github/CODEOWNERS` lists `.github/`, `scripts/release/`, `release/`, `deploy/runner/`, the scan scripts and configs).
+- Require a pull request with at least one approving review, dismiss stale approvals, require review from Code Owners (`.github/CODEOWNERS` lists `.github/`, `scripts/release/`, `release/`, `deploy/runner/`, the scan scripts and configs, every copy of the release key and the code that checks it (`packages/agent-hq/lib/`, `apps/site/public/install.sh` and `install.ps1`, `scripts/check-release-keys.sh`, `scripts/check-site-install-scripts.sh`), and `packages/claude-plugin/`). CI's personal-data job runs `scripts/check-release-keys.sh`, which fails when any embedded minisign key differs from `release/minisign.pub`.
 - Require status checks: the `ci.yml` jobs.
 - Block force pushes and deletions. Require signed commits if all maintainers can sign.
 - A second ruleset (or a path restriction in the first) that blocks changes to `.github/workflows/**` except through the reviewed pull request path above, so a workflow edit cannot land without code-owner approval.

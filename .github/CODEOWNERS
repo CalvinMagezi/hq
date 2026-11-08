@@ -8,3 +8,11 @@
 /.gitleaksignore @CalvinMagezi
 /.gitleaks.toml @CalvinMagezi
 /deny.toml @CalvinMagezi
+# Copies of the release key and the code that checks signatures with it.
+/packages/agent-hq/lib/ @CalvinMagezi
+/apps/site/public/install.sh @CalvinMagezi
+/apps/site/public/install.ps1 @CalvinMagezi
+/scripts/check-release-keys.sh @CalvinMagezi
+/scripts/check-site-install-scripts.sh @CalvinMagezi
+# Hooks that run on every user's machine inside Claude Code.
+/packages/claude-plugin/ @CalvinMagezi

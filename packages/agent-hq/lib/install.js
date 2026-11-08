@@ -64,16 +64,23 @@ export async function installPrebuilt({ repo = DEFAULT_REPO, channel = "stable",
   return { ...release, path: destination.file };
 }
 
-export function installFromSource({ repo = DEFAULT_REPO, version, log = console.log } = {}) {
-  const cargo = spawnSync("cargo", ["--version"], { encoding: "utf8" });
+// Builds the commit the signed channel pointer names, never the branch head: the pointer and its
+// manifest are verified against the release key first, and cargo gets that manifest's git_sha.
+export async function installFromSource({ repo = DEFAULT_REPO, channel = "stable", log = console.log, resolve = resolveRelease, run = spawnSync } = {}) {
+  const cargo = run("cargo", ["--version"], { encoding: "utf8" });
   if (cargo.status !== 0) {
     throw new Error("No prebuilt binary for this platform and Rust is not installed. Install Rust from https://rustup.rs, then run this again.");
   }
-  const args = ["install", "--locked", "--git", `https://github.com/${repo}.git`, "hq-cli"];
-  if (version) args.push("--tag", `v${version}`);
+  log(`Looking up the ${channel} release of ${repo}...`);
+  const release = await resolve({ repo, channel, platform: null });
+  const rev = String(release.gitSha ?? "");
+  if (!/^[0-9a-f]{40}$/.test(rev)) throw new Error(`the signed ${channel} release does not name a full commit (got "${rev}")`);
+  log(`Verified signature for ${release.version} (${rev.slice(0, 7)}).`);
+  const args = ["install", "--locked", "--git", `https://github.com/${repo}.git`, "--rev", rev, "hq-cli"];
   log(`Building from source with: cargo ${args.join(" ")}`);
-  const result = spawnSync("cargo", args, { stdio: "inherit" });
+  const result = run("cargo", args, { stdio: "inherit" });
   if (result.status !== 0) throw new Error("cargo install failed");
+  return { ...release, rev };
 }
 
 export function pathAdvice(prefix) {

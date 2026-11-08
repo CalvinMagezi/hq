@@ -196,3 +196,43 @@ test("extractBinary keeps the old install and mentions glibc and musl when the b
   assert.match(readText(dest.file, "utf8"), /0\.9\.0 \(old\)/);
   assert.equal(existsSync(join(dest.dir, ".hq.new")), false);
 });
+
+import { installFromSource } from "../lib/install.js";
+
+function fakeCargo() {
+  const calls = [];
+  const run = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    return { status: 0, stdout: "cargo 1.0.0" };
+  };
+  return { calls, run };
+}
+
+test("installFromSource builds the commit the signed release names, never the branch head", async () => {
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  const { calls, run } = fakeCargo();
+  const seen = [];
+  const resolve = async (opts) => {
+    seen.push(opts);
+    return { version: "1.2.3", gitSha: sha };
+  };
+  const out = await installFromSource({ repo: "owner/repo", channel: "stable", resolve, run, log: () => {} });
+  assert.equal(out.rev, sha);
+  assert.deepEqual(seen, [{ repo: "owner/repo", channel: "stable", platform: null }]);
+  assert.deepEqual(calls.at(-1), ["cargo", "install", "--locked", "--git", "https://github.com/owner/repo.git", "--rev", sha, "hq-cli"]);
+  assert.ok(!calls.flat().includes("--branch"));
+});
+
+test("installFromSource refuses a release without a full commit, and builds nothing when verification fails", async () => {
+  for (const gitSha of [undefined, "main", "abc1234", "0123456789ABCDEF0123456789ABCDEF01234567"]) {
+    const { calls, run } = fakeCargo();
+    await assert.rejects(installFromSource({ resolve: async () => ({ version: "1", gitSha }), run, log: () => {} }), /full commit/);
+    assert.equal(calls.length, 1, "only cargo --version ran");
+  }
+  const { calls, run } = fakeCargo();
+  const failing = async () => {
+    throw new Error("channel pointer signature does not verify");
+  };
+  await assert.rejects(installFromSource({ resolve: failing, run, log: () => {} }), /does not verify/);
+  assert.equal(calls.length, 1);
+});
