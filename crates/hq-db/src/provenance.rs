@@ -284,17 +284,31 @@ pub fn current(conn: &Connection, path: &str, content_hash: &str) -> Result<Opti
     Ok(by_version(conn, path, content_hash)?.filter(|p| !p.redacted))
 }
 
+/// Folders only HQ's own background work writes (the memory consolidator's insight notes),
+/// from text it read and summarised. A pin there is never the owner's unless they accepted it.
+const MACHINE_WRITTEN_DIRS: &[&str] = &["Notebooks/Memories/"];
+/// Who a pin under [`MACHINE_WRITTEN_DIRS`] counts as suggested by when no record names anyone.
+pub const UNRECORDED_MACHINE_WRITER: &str = "memory consolidator";
+
+fn machine_written(path: &str) -> bool {
+    let path = path.trim_start_matches("./");
+    MACHINE_WRITTEN_DIRS.iter().any(|d| path.starts_with(d))
+}
+
 /// Who suggested a pin on this version of a note, when the version came from an
 /// agent and the owner has not accepted it: such a pin is shown to the owner but not
-/// trusted. `Reviewed` does not count, since agents may set it. `None` for the
-/// owner's own writes, accepted versions, and versions nobody recorded (edited
-/// outside HQ's tools).
+/// trusted. `Reviewed` does not count, since agents may set it. Under a folder only HQ's
+/// background work writes (`Notebooks/Memories/`), a system write or a version nobody
+/// recorded counts as a suggestion too. `None` for the owner's own writes, accepted
+/// versions, and elsewhere versions nobody recorded (edited outside HQ's tools).
 pub fn pin_suggested_by(conn: &Connection, path: &str, raw: &str) -> Result<Option<String>> {
     let hash = crate::search::content_hash(raw);
+    let machine = machine_written(path);
     let Some(p) = current(conn, path, &hash)? else {
-        return Ok(None);
+        return Ok(machine.then(|| UNRECORDED_MACHINE_WRITER.to_string()));
     };
-    let from_agent = matches!(p.source_kind, SourceKind::Agent | SourceKind::Generated);
+    let from_agent = matches!(p.source_kind, SourceKind::Agent | SourceKind::Generated)
+        || (machine && matches!(p.source_kind, SourceKind::System | SourceKind::Unknown));
     let accepted = p.review_state == ReviewState::Accepted;
     Ok((from_agent && !accepted).then_some(p.actor_id))
 }
@@ -565,6 +579,36 @@ mod tests {
             pin_suggested_by(&conn, "n.md", edited).unwrap().as_deref(),
             Some("hs-2"),
             "another agent's review does not vouch for a pin"
+        );
+    }
+
+    #[test]
+    fn a_pin_in_the_consolidators_folder_is_a_suggestion_unless_the_owner_accepted_it() {
+        let conn = db();
+        let path = "Notebooks/Memories/2026-11-01-10-00-00-insight.md";
+        let raw = "---\ntags: [\"x\"]\npinned: true\n---\nx";
+        assert_eq!(
+            pin_suggested_by(&conn, path, raw).unwrap().as_deref(),
+            Some(UNRECORDED_MACHINE_WRITER),
+            "nobody recorded the consolidator's write"
+        );
+        let system = Attribution {
+            actor_id: Some("memory"),
+            source_kind: Some(SourceKind::System),
+            session_id: None,
+            task_id: None,
+        };
+        let rec = record(&conn, path, &crate::search::content_hash(raw), &system).unwrap();
+        assert_eq!(
+            pin_suggested_by(&conn, path, raw).unwrap().as_deref(),
+            Some("memory")
+        );
+        set_review_state(&conn, rec.id, ReviewState::Accepted, "owner", None).unwrap();
+        assert_eq!(pin_suggested_by(&conn, path, raw).unwrap(), None);
+        assert_eq!(
+            pin_suggested_by(&conn, "Notebooks/Projects/p.md", raw).unwrap(),
+            None,
+            "elsewhere an unrecorded version is still the owner's"
         );
     }
 
