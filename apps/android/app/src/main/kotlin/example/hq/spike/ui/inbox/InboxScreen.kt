@@ -138,6 +138,25 @@ private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard
     }
 }
 
+/** A new sign-in's line: which device, when, and what to do if it was not you. */
+@Composable
+private fun signInBody(card: InboxCard): String {
+    val device = card.deviceLabel ?: stringResource(R.string.new_signin_unknown)
+    val clock = InboxWords.clock(card.createdAt)
+    val time = if (InboxWords.sameDay(card.createdAt)) stringResource(R.string.new_signin_today, clock)
+        else stringResource(R.string.new_signin_day, clock, InboxWords.dayLabel(card.createdAt))
+    return stringResource(R.string.new_signin_body, device, time) + " " + stringResource(R.string.new_signin_advice)
+}
+
+/** The red question before a new sign-in's device is signed out. */
+@Composable
+fun SignOutAsk(ui: InboxUi, actions: InboxActions) {
+    val card = ui.askSignOut ?: return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val name = card.deviceLabel ?: stringResource(R.string.new_signin_unknown)
+    example.hq.spike.ui.shell.ConfirmDialog(example.hq.spike.ui.shell.ConfirmCopy.signOutDevice(context, name), { actions.onAskSignOut(null) }, actions.onSignOutConfirm, busy = ui.signingOut, error = ui.signOutError)
+}
+
 @Composable
 private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
     val shape = RoundedCornerShape(16.dp)
@@ -155,7 +174,7 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
             }
         }
         card.quote?.let { QuoteLine(it, card.createdAt) }
-        Text(card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
+        Text(if (card.kind == CardKind.SignIn) signInBody(card) else card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
         (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber) }
         AnswerRow(card, answer, offline, actions, onTakeLook)
     }
@@ -165,7 +184,11 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
 private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier, onDetailsPage: Boolean = false) {
     val sending = answer == Answer.Sending
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval)) {
+        if (card.kind == CardKind.SignIn) {
+            // It was me answers it; Sign it out asks first, then signs the device out, which answers it too.
+            example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.it_was_me), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
+            DangerButton(stringResource(R.string.sign_it_out), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAskSignOut(card) }
+        } else if (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval)) {
             TextButton(stringResource(R.string.inbox_decline), enabled = !sending && !offline) { actions.onNotNow(card) }
             val label = if (card.allowLabel == "Allow") "Allow once" else card.allowLabel
             if (NoticeWords.losing(card)) DangerButton(if (sending) stringResource(R.string.approval_answering) else card.verb?.let { stringResource(R.string.approval_allow_verb, it) } ?: stringResource(R.string.inbox_allow), Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
@@ -363,7 +386,7 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
                 }
                 Text(stringResource(R.string.approval_in_words), style = HqType.BodySmBold, color = Mts.Ink)
             }
-            Text(card.fullBody.ifEmpty { card.body }, style = HqType.Body, color = Mts.InkMuted)
+            Text(if (card.kind == CardKind.SignIn) signInBody(card) else card.fullBody.ifEmpty { card.body }, style = HqType.Body, color = Mts.InkMuted)
             if (card.canAllow || card.kind == CardKind.Approval) {
                 Outcome(HqIcons.Check, Mts.BrandBlue, "If you allow it", "HQ records your yes. What asked then goes ahead.")
                 Outcome(HqIcons.Pause, Mts.InkMuted, "If you say not now", "Nothing is done.")

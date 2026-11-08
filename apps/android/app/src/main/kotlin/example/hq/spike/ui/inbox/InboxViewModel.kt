@@ -53,6 +53,10 @@ data class InboxUi(
     val banner: InboxBanner? = null,
     /** An approval that was just allowed: the page that says what happens next and offers Keep going. */
     val allowed: Allowed? = null,
+    /** A new sign-in the owner asked to sign out: the red question shows until they answer it. */
+    val askSignOut: InboxCard? = null,
+    val signingOut: Boolean = false,
+    val signOutError: String? = null,
 ) {
     val shownNeeds: List<InboxCard> get() = needs.filter { it.id !in cleared }
     val shownUpdates: List<InboxCard> get() = updates.filter { it.id !in cleared }
@@ -74,6 +78,8 @@ class InboxActions(
     var onServerOpen: () -> Unit = {},
     val onKeepGoing: (Allowed) -> Unit = {},
     val onAllowedDone: () -> Unit = {},
+    val onAskSignOut: (InboxCard?) -> Unit = {},
+    val onSignOutConfirm: () -> Unit = {},
 )
 
 class InboxViewModel(app: Application) : AndroidViewModel(app) {
@@ -90,6 +96,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
         onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
         onKeepGoing = ::keepGoing, onAllowedDone = { _state.update { it.copy(allowed = null) } },
+        onAskSignOut = { c -> _state.update { it.copy(askSignOut = c, signOutError = null) } }, onSignOutConfirm = ::signOut,
     )
 
     init {
@@ -135,8 +142,36 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         }
         val history = try { client.notifications("history", HISTORY_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
-        val lists = inboxLists(pending.items, history?.items.orEmpty())
+        val lists = inboxLists(pending.items, history?.items.orEmpty()).let { l -> InboxLists(withDeviceNames(l.needs), l.updates, l.done) }
         _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
+    }
+
+    /** Names each new sign-in's device from HQ's device list; one it cannot read keeps the plain "A new device". */
+    private suspend fun withDeviceNames(needs: List<InboxCard>): List<InboxCard> {
+        if (needs.none { it.kind == CardKind.SignIn }) return needs
+        val labels = try {
+            val list = client.json("/api/auth/devices").optJSONArray("devices")
+            (0 until (list?.length() ?: 0)).associate { i -> list!!.getJSONObject(i).let { d -> d.optString("id") to d.optString("label") } }
+        } catch (e: HqUnavailable) { emptyMap() }
+        return needs.map { c -> if (c.kind == CardKind.SignIn) c.copy(deviceLabel = labels[c.signInDevice]?.ifBlank { null }) else c }
+    }
+
+    /** Signs the new sign-in's device out after the red question; HQ settles its inbox item when the device goes. */
+    private fun signOut() {
+        val card = _state.value.askSignOut ?: return
+        val device = card.signInDevice ?: return
+        if (_state.value.signingOut) return
+        _state.update { it.copy(signingOut = true, signOutError = null) }
+        viewModelScope.launch {
+            val ctx = getApplication<Application>()
+            val name = card.deviceLabel ?: ctx.getString(R.string.new_signin_unknown)
+            val failed = try { client.deleteAt("/api/auth/devices/${java.net.URLEncoder.encode(device, "UTF-8")}"); false } catch (e: HqUnavailable) { e.status != HTTP_NOT_FOUND }
+            _state.update {
+                if (failed) it.copy(signingOut = false, signOutError = ctx.getString(R.string.fail_sign_out_no_reply, name))
+                else it.copy(signingOut = false, askSignOut = null, details = null, line = InboxLine(ctx.getString(R.string.sign_out_device_done, name)))
+            }
+            refresh()
+        }
     }
 
     /** One follow-up in the same chat, marked spoken: HQ stopped to wait for the OK and this asks it to finish. */
@@ -232,6 +267,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         const val POLL_MS = 20_000L
         const val HISTORY_LIMIT = 200
         const val PENDING_LIMIT = 500
+        const val HTTP_NOT_FOUND = 404
         /** More lines than the Helpers poll reads, so the check never shares its cached read. */
         const val CHECK_LINES = 81
     }
@@ -239,7 +275,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
 
 class InboxLists(val needs: List<InboxCard>, val updates: List<InboxCard>, val done: List<DoneEntry>)
 
-private val NEEDS_ORDER = listOf(CardKind.HelperAsks, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
+private val NEEDS_ORDER = listOf(CardKind.SignIn, CardKind.HelperAsks, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
 
 /** What the three tabs show for what the server holds: things that need the owner, updates, and what the owner already decided. */
 fun inboxLists(pending: List<example.hq.spike.data.HqClient.InboxItem>, history: List<example.hq.spike.data.HqClient.InboxItem>): InboxLists {

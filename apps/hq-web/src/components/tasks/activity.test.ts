@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ageLabel, authorLabel, freshnessLines, gapTitle, panelKind, parseStamp, reviewBadge, reviewSummary, unattributedCount } from './activity'
+import { ageLabel, authorLabel, gapLine, lastActivityLine, panelKind, parseStamp, reviewBadge, reviewSummary, unattributedCount } from './activity'
 import type { ActivityNote } from '~/lib/taskActivityApi'
 
 const NOW = Date.parse('2026-10-15T12:00:00Z')
@@ -81,11 +81,17 @@ test('review counts read in a fixed order and leave zeroes out', () => {
   expect(reviewSummary({})).toBe('no reviews recorded')
 })
 
-test('a gap kind has a plain title and an unknown kind is shown as it came', () => {
-  expect(gapTitle({ kind: 'note_unattributed' })).toBe('Author unknown')
-  expect(gapTitle({ kind: 'some_new_gap' })).toBe('some new gap')
+test('a gap reads as one plain sentence, and anything unknown keeps the server words', () => {
+  expect(gapLine({ kind: 'note_unattributed', subject: 'Notebooks/a.md', detail: 'raw' })).toBe('Nobody is on record as writing Notebooks/a.md.')
+  expect(gapLine({ kind: 'in_progress_without_a_holder', subject: 'WRK-1', detail: 'raw' })).toBe('It says In progress, but no helper is working on it.')
+  // A note gap with no note named, or a kind this app does not know, keeps the server's own words.
+  expect(gapLine({ kind: 'note_missing', detail: 'the file is gone' })).toBe('the file is gone')
+  expect(gapLine({ kind: 'some_new_gap', detail: 'something new' })).toBe('something new')
 })
 
-test('a source with nothing is named as having nothing, not given a time', () => {
-  expect(freshnessLines({ task: '2026-10-15 11:00:00', notes: null }, NOW)).toEqual(['task: 1 h ago', 'notes: nothing yet'])
+test('the closing line names the newest activity and never lists internal sources', () => {
+  expect(lastActivityLine({ task: '2026-10-15 11:00:00', notes: '2026-10-15T11:30:00+00:00', leases: null }, NOW)).toBe(
+    'Last activity 30 min ago. Editing a note is not progress: the status comes from the task.',
+  )
+  expect(lastActivityLine({ task: null, notes: null }, NOW)).toBe('Editing a note is not progress: the status comes from the task.')
 })

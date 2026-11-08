@@ -81,4 +81,26 @@ class InboxBannerTest {
         assert(decline.right <= allow.left)
         assertEquals(0, rule.onAllNodesWithText("Allow once").fetchSemanticsNodes().size)
     }
+
+    @Test fun aNewSignInOffersItWasMeAndARedSignItOutThatAsksFirst() {
+        val signIn = InboxCard("s1", CardKind.SignIn, "A new sign-in to your HQ", "", "", java.time.Instant.now().toString(), CardIcon.Info, null, false, "", null, "", "pending", signInDevice = "dev-7", deviceLabel = "Firefox on Linux")
+        val asked = mutableListOf<InboxCard?>()
+        var allowed = 0
+        show(InboxUi(loaded = true, needs = listOf(signIn)), InboxActions(onAllow = { allowed++ }, onAskSignOut = { asked += it }))
+        rule.onNodeWithText("Firefox on Linux signed in", substring = true).assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithText("Allow once").fetchSemanticsNodes().size)
+        rule.onNodeWithText("It was me").performClick()
+        assertEquals(1, allowed)
+        rule.onNodeWithText("Sign it out").performClick()
+        assertEquals(listOf<InboxCard?>(signIn), asked)
+    }
+
+    @Test fun signingOutAsksTheRedQuestionNamingTheDevice() {
+        val signIn = InboxCard("s1", CardKind.SignIn, "A new sign-in to your HQ", "", "", java.time.Instant.now().toString(), CardIcon.Info, null, false, "", null, "", "pending", signInDevice = "dev-7", deviceLabel = "Firefox on Linux")
+        var confirmed = 0
+        rule.setContent { HqTheme { SignOutAsk(InboxUi(loaded = true, askSignOut = signIn), InboxActions(onSignOutConfirm = { confirmed++ })) } }
+        rule.onNodeWithText("Sign out \"Firefox on Linux\"?").assertIsDisplayed()
+        rule.onNodeWithText("Sign out device").performClick()
+        assertEquals(1, confirmed)
+    }
 }

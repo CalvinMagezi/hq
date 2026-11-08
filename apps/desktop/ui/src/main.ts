@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { t, tn, type StringKey } from '../../../hq-web/src/strings'
 import { agoText, clock as clockOf, describe, sizeText, stopIsRisky, type Report } from './thisComputer'
+import { forwardNote, forwardTitle, offeredWords } from './services'
 import { ACTION_KEY, afterTry, grouped, minutesLeft, nothingFound, rowAction, rowLine, shortHome, stateLabel, tone as stateTone, type HelperView } from './helpers'
 
 interface Settings {
@@ -629,12 +630,12 @@ function renderForwards(state: Pairing) {
   const list = $('forwards')
   list.replaceChildren()
   for (const name of state.services) {
-    if (name === 'host') list.append(sharedRow(t('dev_shared_helpers'), t('dev_shared_helpers_note'), t('dev_shared_tag')))
-    else list.append(sharedRow(name, '', t('dev_shared_tag')))
+    const words = offeredWords(name)
+    list.append(sharedRow(words.title, words.note, t('dev_shared_tag')))
   }
   for (const f of state.forwards) {
-    if (f.running_elsewhere) list.append(sharedRow(f.service, t('dev_port_taken_note'), t('dev_port_taken_tag'), true))
-    else list.append(sharedRow(t('dev_shared_web'), t('dev_shared_web_note'), t('dev_shared_tag')))
+    if (f.running_elsewhere) list.append(sharedRow(forwardTitle(f.service), t('dev_port_taken_note'), t('dev_port_taken_tag'), true))
+    else list.append(sharedRow(forwardTitle(f.service), forwardNote(f.service), t('dev_shared_tag')))
   }
   $('forwards-block').hidden = false
   if (list.children.length === 0) list.append(el('p', t('dev_nothing_shared'), 'hub-why'))
