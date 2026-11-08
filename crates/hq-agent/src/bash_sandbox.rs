@@ -78,6 +78,8 @@ pub struct BashSettings {
     /// Leave only scratch space writable: no HOME, cwd or extra roots. Used by
     /// sessions that may look at the machine but never change it.
     pub read_only: bool,
+    /// The session's vault: its `_data` is hidden and the folders HQ loads are read-only.
+    pub vault: Option<PathBuf>,
 }
 
 impl Default for BashSettings {
@@ -94,7 +96,14 @@ impl BashSettings {
             network: config.network,
             writable_paths,
             read_only: false,
+            vault: None,
         }
+    }
+
+    /// The vault whose machinery this shell must not reach (see [`VaultLayout`]).
+    pub fn with_vault(mut self, vault: &Path) -> Self {
+        self.vault = Some(vault.to_path_buf());
+        self
     }
 
     /// Investigation-only shell: always sandboxed (a missing backend refuses
@@ -144,14 +153,22 @@ impl SandboxContext {
         }
         writable.push(std::env::temp_dir());
         writable.extend(SCRATCH_ROOTS.iter().map(PathBuf::from));
-        let hidden = outermost(existing_canonical(hidden_dirs(home.as_deref())));
+        let vault = settings.vault.as_deref().map(VaultLayout::prepare);
+        let mut hidden = hidden_dirs(home.as_deref());
+        let mut readonly = readonly_dirs(home.as_deref());
+        if let Some(vault) = &vault {
+            hidden.push(vault.data.clone());
+            readonly.extend(vault.loaded.iter().cloned());
+        }
+        readonly.extend(web_ui_dirs(home.as_deref()));
+        let hidden = outermost(existing_canonical(hidden));
         Self {
             read_only: settings.read_only,
             cwd,
             writable: existing_canonical(writable),
             masked_files: existing_canonical(masked_files(home.as_deref())),
             readonly_files: existing_canonical(readonly_files(home.as_deref())),
-            readonly_dirs: existing_canonical(readonly_dirs(home.as_deref())),
+            readonly_dirs: existing_canonical(readonly),
             hidden_dirs: hidden.clone(),
             hidden_sockets: sockets_under(&hidden),
             network: settings.network,
@@ -188,6 +205,10 @@ fn readonly_files(home: Option<&Path>) -> Vec<PathBuf> {
     };
     files.push(home.join(HQ_GATE_AUTHORIZED_KEYS));
     files.push(home.join(DEFAULT_INSTALL_PATH));
+    // Where the installers put `hq`, and the binary this process is: HQ runs it again outside
+    // every sandbox, so a write here is code that outlives this one.
+    files.push(home.join(LOCAL_INSTALL_PATH));
+    files.extend(std::env::current_exe().ok());
     if let Ok(entries) = std::fs::read_dir(home.join(".ssh")) {
         files.extend(
             entries
@@ -197,6 +218,71 @@ fn readonly_files(home: Option<&Path>) -> Vec<PathBuf> {
         );
     }
     files
+}
+
+/// Where the installers put `hq` besides `~/bin/hq` (install.sh and npx default to this).
+const LOCAL_INSTALL_PATH: &str = ".local/bin/hq";
+
+/// The vault folders a shell must leave alone. `_data` (the database every credential is checked
+/// against, and keys) is hidden; the folders HQ loads into its own sessions are read-only.
+pub struct VaultLayout {
+    pub data: PathBuf,
+    pub loaded: Vec<PathBuf>,
+}
+
+/// Every spelling HQ loads from, existing or not (the comparison in governance folds case).
+const VAULT_LOADED_DIRS: &[&str] = &[
+    "_system",
+    "_threads",
+    "skills",
+    "Skills",
+    "_skills",
+    "_commands",
+    "Agents",
+    "agents",
+    "_agents",
+    "_mailboxes",
+];
+
+impl VaultLayout {
+    /// The layout for `vault`, creating the loaded folders a shell could otherwise create and
+    /// fill (a read-only bind needs something to bind). `skills` is made only when no spelling of
+    /// it exists, since `hq_core::skills_dir` prefers `skills` over a legacy `Skills`.
+    pub fn prepare(vault: &Path) -> Self {
+        if vault.join("_system").is_dir() {
+            for dir in ["_commands", "_mailboxes", "Agents"] {
+                let _ = std::fs::create_dir_all(vault.join(dir));
+            }
+            if !["skills", "Skills", "_skills"]
+                .iter()
+                .any(|d| vault.join(d).is_dir())
+            {
+                let _ = std::fs::create_dir_all(vault.join("skills"));
+            }
+        }
+        Self {
+            data: vault.join(hq_vault::rel_path::DATA_FOLDER),
+            loaded: VAULT_LOADED_DIRS.iter().map(|d| vault.join(d)).collect(),
+        }
+    }
+}
+
+/// The web UI HQ serves from disk: its script runs at HQ's origin with the owner's sign-in.
+fn web_ui_dirs(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(data) = std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()) {
+        dirs.push(PathBuf::from(data).join("agent-hq").join("web"));
+    }
+    if let Some(home) = home {
+        dirs.push(home.join(".local/share/agent-hq/web"));
+    }
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+    {
+        dirs.push(exe_dir.join("web"));
+    }
+    dirs
 }
 
 /// [`HQ_HIDDEN_DIRS`] under HOME, plus the host's directory wherever `HQ_HOST_DIR` moved it.

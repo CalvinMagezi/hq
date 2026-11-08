@@ -141,6 +141,7 @@ pub type DenialNotifier = Arc<dyn Fn(&str, &str) + Send + Sync>;
 pub struct ToolGuardian {
     allowed_paths: Vec<PathBuf>,
     denied_paths: Vec<PathBuf>,
+    vault_root: Option<PathBuf>,
     profile: SecurityProfile,
     permission_mode: PermissionMode,
     denial_tracker: DenialTracker,
@@ -221,6 +222,7 @@ impl ToolGuardian {
         Self {
             allowed_paths: expand_with_canonical_forms(roots),
             denied_paths: expand_with_canonical_forms(sensitive_denied_paths()),
+            vault_root: None,
             profile,
             permission_mode,
             denial_tracker: DenialTracker::new(),
@@ -233,6 +235,12 @@ impl ToolGuardian {
             allow_defer: true,
             taint: TaintTracker::new(),
         }
+    }
+
+    /// Name the session's vault, so its `_data` and the folders HQ loads stay closed to raw file
+    /// tools (see `GovernedTool::vault_denial`).
+    pub fn protect_vault(&mut self, vault: &std::path::Path) {
+        self.vault_root = Some(vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf()));
     }
 
     /// Share a taint tracker, so a sub-agent's session and its parent see
@@ -289,6 +297,7 @@ impl ToolGuardian {
             inner: tool,
             allowed_paths: self.allowed_paths.clone(),
             denied_paths: self.denied_paths.clone(),
+            vault_root: self.vault_root.clone(),
             permission_mode: self.permission_mode.clone(),
             denial_tracker: self.denial_tracker.clone(),
             repeat_call_tracker: self.repeat_call_tracker.clone(),

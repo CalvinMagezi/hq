@@ -140,6 +140,7 @@ fn test_empty_paths_denies_everything() {
         inner: Box::new(DummyTool),
         allowed_paths: vec![],
         denied_paths: vec![],
+        vault_root: None,
         permission_mode: PermissionMode::Default,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -161,6 +162,7 @@ async fn test_bypass_permissions_skips_path_check() {
         inner: Box::new(DummyTool),
         allowed_paths: vec![],
         denied_paths: vec![],
+        vault_root: None,
         permission_mode: PermissionMode::BypassPermissions,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -187,6 +189,7 @@ async fn test_dont_ask_denies_non_readonly_tool() {
         inner: Box::new(DummyTool), // is_read_only() returns false
         allowed_paths: vec![PathBuf::from("/tmp")],
         denied_paths: vec![],
+        vault_root: None,
         permission_mode: PermissionMode::DontAsk,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -248,6 +251,7 @@ fn test_symlinked_allowed_path_resolves_existing_files() {
         inner: Box::new(DummyTool),
         allowed_paths: expand_with_canonical_forms(vec![link.clone()]),
         denied_paths: vec![],
+        vault_root: None,
         permission_mode: PermissionMode::Default,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -285,6 +289,7 @@ fn test_denied_path_wins_over_broader_allowed_root() {
         inner: Box::new(DummyTool),
         allowed_paths: expand_with_canonical_forms(vec![tmp.clone()]),
         denied_paths: expand_with_canonical_forms(vec![ssh_dir]),
+        vault_root: None,
         permission_mode: PermissionMode::Default,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -318,6 +323,7 @@ async fn test_denial_notifier_fires_once_per_distinct_reason() {
         inner: Box::new(DummyTool), // is_read_only() returns false
         allowed_paths: vec![PathBuf::from("/tmp")],
         denied_paths: vec![],
+        vault_root: None,
         permission_mode: PermissionMode::DontAsk,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -405,6 +411,7 @@ fn governed_slow_tool(sleep_ms: u64, declared_timeout_ms: Option<u64>) -> Govern
         }),
         allowed_paths: vec![PathBuf::from("/tmp")],
         denied_paths: vec![],
+        vault_root: None,
         permission_mode: PermissionMode::BypassPermissions,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -611,6 +618,7 @@ fn governed_named(name: &'static str, allowed: PathBuf, mode: PermissionMode) ->
         inner: Box::new(NamedTool(name)),
         allowed_paths: vec![allowed],
         denied_paths: vec![],
+        vault_root: None,
         permission_mode: mode,
         denial_tracker: DenialTracker::new(),
         repeat_call_tracker: RepeatCallTracker::new(),
@@ -674,4 +682,93 @@ async fn every_file_tool_is_held_to_the_allowed_directories() {
         let args = serde_json::json!({"pattern": "x", "path": root.to_str().unwrap()});
         assert!(!denied(&grep.execute("t", args).await.unwrap()));
     }
+}
+
+fn governed_in_vault(name: &'static str, vault: &std::path::Path) -> GovernedTool {
+    let mut tool = governed_named(name, vault.to_path_buf(), PermissionMode::AcceptEdits);
+    tool.vault_root = Some(vault.canonicalize().unwrap());
+    tool
+}
+
+fn refused(result: &ToolResult) -> bool {
+    result
+        .content
+        .first()
+        .is_some_and(|c| c.text.starts_with("Access denied"))
+}
+
+/// The database every credential is checked against, and the keys beside it, are out of reach of
+/// every tool that names a file; the folders HQ loads are closed to the file-writing tools.
+#[tokio::test]
+async fn the_vaults_machinery_is_closed_to_raw_file_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().canonicalize().unwrap();
+    for d in ["_data", "_system", "Agents", "skills/x", "Notebooks"] {
+        std::fs::create_dir_all(vault.join(d)).unwrap();
+    }
+    std::fs::write(vault.join("_data/vault.db"), "db").unwrap();
+    let v = |rel: &str| vault.join(rel).to_string_lossy().into_owned();
+
+    for tool in ["read_file", "write_file", "convert_to_markdown"] {
+        let t = governed_in_vault(tool, &vault);
+        for args in [
+            serde_json::json!({"file_path": v("_data/vault.db")}),
+            serde_json::json!({"input_path": v("_data/web_push_vapid.p8")}),
+            serde_json::json!({"file_path": v("Notebooks/../_data/vault.db")}),
+        ] {
+            assert!(
+                refused(&t.execute("t", args.clone()).await.unwrap()),
+                "{tool} {args}"
+            );
+        }
+    }
+
+    let write = governed_in_vault("write_file", &vault);
+    for rel in [
+        "_system/SOUL.md",
+        "SKILLS/x/SKILL.md",
+        "skills/new/SKILL.md",
+        "agents/coder.md",
+        "_commands/go.md",
+        "_mailboxes/relay/m.md",
+    ] {
+        let args = serde_json::json!({"file_path": v(rel), "content": "x"});
+        assert!(refused(&write.execute("t", args).await.unwrap()), "{rel}");
+    }
+    let batch = governed_in_vault("file_edit_batch", &vault);
+    let args = serde_json::json!({"edits": [{"file_path": v("Agents/a.md"), "old_string": "a", "new_string": "b"}]});
+    assert!(refused(&batch.execute("t", args).await.unwrap()));
+
+    // Reading a skill and writing an ordinary note stay open.
+    let read = governed_in_vault("read_file", &vault);
+    let args = serde_json::json!({"file_path": v("skills/x/SKILL.md")});
+    assert!(!refused(&read.execute("t", args).await.unwrap()));
+    let args = serde_json::json!({"file_path": v("Notebooks/n.md"), "content": "x"});
+    assert!(!refused(&write.execute("t", args).await.unwrap()));
+}
+
+/// A file that does not exist yet used to be checked by its raw spelling, so `..` and a linked
+/// parent reached a denied root.
+#[cfg(unix)]
+#[test]
+fn a_path_that_does_not_exist_yet_is_checked_where_it_really_lands() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("secret")).unwrap();
+    std::os::unix::fs::symlink(root.join("secret"), root.join("link")).unwrap();
+    let mut tool = governed_named("write_file", root.clone(), PermissionMode::AcceptEdits);
+    tool.denied_paths = vec![root.join("secret")];
+    for raw in [
+        root.join("missing/../secret/new.txt"),
+        root.join("link/new.txt"),
+        root.join("link/deeper/new.txt"),
+    ] {
+        assert!(
+            !tool.is_path_allowed(raw.to_str().unwrap()),
+            "{}",
+            raw.display()
+        );
+    }
+    assert!(tool.is_path_allowed(root.join("missing/ok.txt").to_str().unwrap()));
+    assert!(tool.is_path_allowed(root.join("a/../b/ok.txt").to_str().unwrap()));
 }

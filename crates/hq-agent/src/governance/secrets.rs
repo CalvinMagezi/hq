@@ -56,7 +56,8 @@ pub(crate) const HOME_SECRET_PATHS: &[&str] = &[
 const PRIVATE_KEY_PREFIXES: &[&str] = &["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"];
 
 /// Extensions of files that usually carry keys or certificates.
-const KEY_EXTENSIONS: &[&str] = &["pem", "key", "p12", "pfx", "keystore", "jks"];
+// `p8` is PKCS#8, the form HQ keeps its Web Push signing key in.
+const KEY_EXTENSIONS: &[&str] = &["pem", "key", "p8", "p12", "pfx", "keystore", "jks"];
 
 /// `.env.<suffix>` templates that hold placeholders, not secrets.
 const ENV_TEMPLATE_SUFFIXES: &[&str] = &["example", "sample", "template", "dist", "defaults"];
@@ -368,6 +369,11 @@ mod tests {
         let roots = always_denied_roots_with(&protected);
         assert!(roots.contains(&link));
         assert!(roots.contains(&key.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn a_pkcs8_key_file_is_a_key() {
+        assert!(tier("/srv/vault/_data/web_push_vapid.p8").is_some());
     }
 
     #[test]

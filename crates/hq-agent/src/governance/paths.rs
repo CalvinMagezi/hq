@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 /// Tools that interact with the filesystem and need path checks.
 pub(super) const PATH_TOOLS: &[&str] = &[
@@ -99,4 +99,93 @@ pub(super) fn path_values<'a>(tool_name: &str, args: &'a serde_json::Value) -> V
         );
     }
     paths
+}
+
+/// Tools that change a file's contents. The vault's instruction folders are closed to them.
+pub(super) const WRITE_TOOLS: &[&str] = &[
+    "write_file",
+    "edit_file",
+    "file_edit_batch",
+    "rollback_file",
+];
+
+/// The vault folders HQ loads back into its own sessions (identity, threads, skills, slash
+/// commands, agent definitions, agent mailboxes). Each has a managed write path with its own
+/// approval and checks; a raw file tool writing here would plant instructions or forge a message.
+pub(super) fn vault_loaded_folders() -> Vec<&'static str> {
+    let mut folders: Vec<&'static str> = hq_vault::rel_path::PRIVATE_FOLDERS
+        .iter()
+        .chain(hq_vault::rel_path::INSTRUCTION_FOLDERS)
+        .copied()
+        .collect();
+    // Spellings HQ also loads from: `Agents` is the live agents directory, `Skills` and
+    // `_agents` are older layouts. The comparison folds case, so these only document intent.
+    folders.extend(["_agents"]);
+    folders
+}
+
+/// Where `path` really points, for a policy check: the deepest ancestor that exists is resolved
+/// through every symlink, and the rest is appended with `.` and `..` applied lexically. Parts that
+/// do not exist cannot be links, so this is exact, unlike falling back to the raw path, which let
+/// `<allowed>/../secret` or a linked parent through for a file that does not exist yet.
+pub(super) fn resolve_for_check(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("/"))
+            .join(path)
+    };
+    let components: Vec<Component> = absolute.components().collect();
+    for split in (0..=components.len()).rev() {
+        let head: PathBuf = components[..split].iter().collect();
+        let Ok(mut resolved) = head.canonicalize() else {
+            continue;
+        };
+        for part in &components[split..] {
+            match part {
+                Component::ParentDir => {
+                    resolved.pop();
+                }
+                Component::Normal(name) => resolved.push(name),
+                _ => {}
+            }
+        }
+        return resolved;
+    }
+    absolute
+}
+
+/// The top folder of `resolved` inside `vault_root`, folded for comparison, or None outside it.
+pub(super) fn vault_top_folder(vault_root: &Path, resolved: &Path) -> Option<String> {
+    let rel = resolved.strip_prefix(vault_root).ok()?;
+    let rel = rel.to_string_lossy();
+    // An unparseable remainder cannot name a folder the loader would read; treat it as none.
+    hq_vault::rel_path::RelPath::parse(&rel).ok()?.top()
+}
+
+/// Every string under an argument key that names files, at any depth (batch edits nest them).
+pub(super) fn nested_path_args(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, v) in map {
+                if SECRET_CHECKED_ARG_KEYS.contains(&key.as_str()) {
+                    match v {
+                        serde_json::Value::String(s) => out.push(s.clone()),
+                        serde_json::Value::Array(items) => {
+                            out.extend(items.iter().filter_map(|i| i.as_str().map(str::to_string)))
+                        }
+                        _ => {}
+                    }
+                }
+                nested_path_args(v, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                nested_path_args(item, out);
+            }
+        }
+        _ => {}
+    }
 }

@@ -59,12 +59,14 @@ impl SessionBuilder {
     /// `governance.bash` resolved against this session's writable roots.
     pub(super) fn bash_settings(&self, vault_path: &Path) -> crate::bash_sandbox::BashSettings {
         if self.role == SessionRole::Orchestrator {
-            return crate::bash_sandbox::BashSettings::read_only(&self.config.governance.bash);
+            return crate::bash_sandbox::BashSettings::read_only(&self.config.governance.bash)
+                .with_vault(vault_path);
         }
         crate::bash_sandbox::BashSettings::from_config(
             &self.config.governance.bash,
             self.allowed_paths(vault_path),
         )
+        .with_vault(vault_path)
     }
 
     /// Drops what the session's role may not use. An orchestrator keeps a
@@ -466,6 +468,7 @@ impl SessionBuilder {
             self.permission_mode.clone(),
         );
         guardian.set_denial_notifier(inbox_denial_notifier(vault_path.to_path_buf()));
+        guardian.protect_vault(vault_path);
         guardian.set_owner_approval(self.owner_approval.clone());
         guardian.set_taint(taint);
 

@@ -43,6 +43,7 @@ fn unsandboxed(passthrough: &[&str]) -> BashSettings {
         network: true,
         writable_paths: Vec::new(),
         read_only: false,
+        vault: None,
     }
 }
 
@@ -279,6 +280,7 @@ async fn required_sandbox_runs_real_commands_with_spaced_paths() {
         network: true,
         writable_paths: vec![spaced.clone()],
         read_only: false,
+        vault: None,
     };
     let target = spaced.join("note.txt");
     let command = format!("echo hi > '{0}' && cat '{0}'", target.display());
@@ -814,4 +816,101 @@ async fn seatbelt_keeps_a_command_off_the_hosts_socket_and_token() {
 #[ignore = "needs bubblewrap with unprivileged user namespaces; run with `cargo test -p hq-agent bwrap -- --ignored`"]
 async fn bwrap_keeps_a_command_off_the_hosts_socket_and_token() {
     assert_control_plane_unreachable(available_backend().expect("bwrap installed and working"));
+}
+
+#[test]
+fn a_vault_gets_its_data_hidden_and_its_loaded_folders_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(vault.join("_system")).unwrap();
+    std::fs::create_dir_all(vault.join("_data")).unwrap();
+    let layout = VaultLayout::prepare(&vault);
+    assert_eq!(layout.data, vault.join("_data"));
+    // Missing folders a shell could otherwise create and fill are made first.
+    for d in ["_commands", "_mailboxes", "Agents", "skills"] {
+        assert!(vault.join(d).is_dir(), "{d} not created");
+        assert!(layout.loaded.contains(&vault.join(d)), "{d} not protected");
+    }
+    let settings = BashSettings {
+        vault: Some(vault.clone()),
+        ..unsandboxed(&[])
+    };
+    let ctx = SandboxContext::for_process(&settings);
+    assert!(
+        ctx.hidden_dirs.contains(&vault.join("_data")),
+        "{:?}",
+        ctx.hidden_dirs
+    );
+    assert!(ctx.readonly_dirs.contains(&vault.join("_system")));
+}
+
+/// `hq_core::skills_dir` prefers `skills`, so an empty one made beside a legacy `Skills` would
+/// hide every skill.
+#[test]
+fn a_legacy_skills_folder_is_not_shadowed() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path();
+    std::fs::create_dir_all(vault.join("_system")).unwrap();
+    std::fs::create_dir_all(vault.join("Skills")).unwrap();
+    VaultLayout::prepare(vault);
+    let names: Vec<String> = std::fs::read_dir(vault)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(!names.iter().any(|n| n == "skills"), "{names:?}");
+}
+
+/// Not a vault (no `_system`): nothing is created in someone's directory.
+#[test]
+fn a_directory_that_is_not_a_vault_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    VaultLayout::prepare(dir.path());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "needs bubblewrap with unprivileged user namespaces; run with `cargo test -p hq-agent bwrap -- --ignored`"]
+async fn bwrap_keeps_a_command_off_the_vaults_database_and_loaded_folders() {
+    let backend = available_backend().expect("bwrap installed and working");
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().canonicalize().unwrap();
+    for d in ["_system", "_data", "Notebooks"] {
+        std::fs::create_dir_all(vault.join(d)).unwrap();
+    }
+    std::fs::write(vault.join("_data/vault.db"), "credential-rows").unwrap();
+    let layout = VaultLayout::prepare(&vault);
+    let ctx = SandboxContext {
+        cwd: vault.clone(),
+        writable: vec![vault.clone()],
+        masked_files: Vec::new(),
+        readonly_files: Vec::new(),
+        readonly_dirs: existing_canonical(layout.loaded.clone()),
+        hidden_sockets: Vec::new(),
+        hidden_dirs: existing_canonical(vec![layout.data.clone()]),
+        network: false,
+        read_only: false,
+    };
+    let Launch::Wrapped { program, args } = wrap(
+        backend,
+        &ctx,
+        "cat _data/vault.db; \
+        echo planted > _system/SOUL.md && echo wrote_system; \
+        echo planted > _commands/go.md && echo wrote_commands; \
+        echo note > Notebooks/n.md && echo wrote_note; echo done",
+    ) else {
+        panic!("expected a wrapped launch");
+    };
+    let out = std::process::Command::new(program)
+        .args(args)
+        .current_dir(&vault)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.contains("done") && out.contains("wrote_note"), "{out}");
+    assert!(!out.contains("credential-rows"), "read the database: {out}");
+    assert!(
+        !out.contains("wrote_system") && !out.contains("wrote_commands"),
+        "{out}"
+    );
 }
