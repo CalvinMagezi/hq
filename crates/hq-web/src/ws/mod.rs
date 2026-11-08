@@ -450,7 +450,7 @@ fn open_thread(
     });
     let history = tid
         .as_deref()
-        .map(|t| thread_history(db, t))
+        .map(|t| thread_history(db, t, &fold_config(state)))
         .unwrap_or_default();
 
     let Some(t) = tid.as_deref() else {
@@ -527,21 +527,24 @@ fn stored_text(req: &ChatRequest) -> String {
         .to_string()
 }
 
-/// The last messages of a thread, as the model sees them.
-fn thread_history(db: &hq_db::Database, thread_id: &str) -> Vec<AgentMsg> {
-    db.with_conn(|conn| hq_db::chat::get_messages_page(conn, thread_id, 20, None))
-        .unwrap_or_default()
-        .into_iter()
-        .map(|stored| {
-            let (m, meta) = (stored.message, stored.meta);
-            let text = chat_uploads::history_text(&m.content);
-            let content = match (m.role.as_str(), ask::mcp_caller(meta.as_ref())) {
-                ("user", Some(caller)) => ask::untrusted_question(&caller, &text),
-                _ => text,
-            };
-            (m, content)
-        })
-        .map(|(m, content)| AgentMsg {
+/// A thread's history as the model sees it: its fold blocks (`hq_agent::fold`), then the
+/// messages after the newest block. With folding off, the newest messages only.
+fn thread_history(
+    db: &hq_db::Database,
+    thread_id: &str,
+    fold: &hq_core::config::ContextFoldConfig,
+) -> Vec<AgentMsg> {
+    let view = hq_agent::fold::load_view(db, thread_id, fold)
+        .inspect_err(|e| tracing::warn!(thread_id, "could not load chat history: {e:#}"))
+        .unwrap_or_default();
+    let tail = view.tail.into_iter().map(|stored| {
+        let (m, meta) = (stored.message, stored.meta);
+        let text = chat_uploads::history_text(&m.content);
+        let content = match (m.role.as_str(), ask::mcp_caller(meta.as_ref())) {
+            ("user", Some(caller)) => ask::untrusted_question(&caller, &text),
+            _ => text,
+        };
+        AgentMsg {
             image_parts: Vec::new(),
             role: if m.role == "user" {
                 MessageRole::User
@@ -552,8 +555,21 @@ fn thread_history(db: &hq_db::Database, thread_id: &str) -> Vec<AgentMsg> {
             tool_calls: Vec::new(),
             tool_call_id: None,
             reasoning_content: None,
-        })
+        }
+    });
+    hq_agent::fold::block_messages(&view.blocks)
+        .into_iter()
+        .chain(tail)
         .collect()
+}
+
+/// The fold settings for a turn, read fresh so an edit applies without a restart.
+fn fold_config(state: &WsState) -> hq_core::config::ContextFoldConfig {
+    hq_core::config::HqConfig::load()
+        .ok()
+        .map(|c| c.context_fold)
+        .or_else(|| state.hq_config.as_ref().map(|c| c.context_fold.clone()))
+        .unwrap_or_default()
 }
 
 /// Starts a reply the user did not type: the session driver's turn in a chat
@@ -586,7 +602,7 @@ pub(crate) async fn start_driver_turn(
     let Some(config) = load_config(state, &tid) else {
         return DriverStart::Busy;
     };
-    let history = thread_history(&state.db, thread_id);
+    let history = thread_history(&state.db, thread_id, &config.context_fold);
     let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::with_driver(driver)));
     state.broadcast(&json!({"type": "turn_start", "thread_id": thread_id}).to_string());
     let turn = ChatTurn {
@@ -763,7 +779,14 @@ impl ChatTurn {
                 .chain(driver_turn.then(|| CONFIG_TOOL.to_string()))
                 .collect(),
             permission_preset: self.ask.as_ref().and_then(ask::AskTurn::permission_preset),
-            untrusted_input: self.ask.as_ref().and_then(ask::AskTurn::untrusted_source),
+            untrusted_input: self
+                .ask
+                .as_ref()
+                .and_then(ask::AskTurn::untrusted_source)
+                .or_else(|| {
+                    let thread = self.tid.as_deref()?;
+                    hq_agent::fold::tainted_source(&self.db, thread)
+                }),
             pinned_model: self.ask.as_ref().and_then(|a| a.model.clone()),
             role: hooks_role,
             owner_approval: (!automated).then(|| self.owner_approval(&config)).flatten(),
@@ -817,6 +840,16 @@ impl ChatTurn {
             failure.as_deref(),
         )
         .await;
+        // After the reply is saved and the chat freed: fold older history if the thread grew
+        // past its tail target. It never holds up this reply.
+        if let Some(t) = &self.tid {
+            hq_agent::fold::spawn_fold(
+                self.db.clone(),
+                t.clone(),
+                config.context_fold.clone(),
+                hq_agent::fold::OWNER_SPEAKER.to_string(),
+            );
+        }
     }
 
     /// Picks the one offer for this reply, on the device, and puts it in the reply's meta.
@@ -1101,7 +1134,7 @@ mod tests {
                 Ok(t.thread_id)
             })
             .unwrap();
-        let history = thread_history(&state.db, &tid);
+        let history = thread_history(&state.db, &tid, &Default::default());
         assert_eq!(history.len(), 2);
         assert!(
             history

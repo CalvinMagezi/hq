@@ -533,6 +533,50 @@ async fn standard_profile_registers_task_tools() {
     }
 }
 
+/// Fold blocks tell the model to call `history_restore` and spill notes `tool_output_read`; they
+/// were reachable only over MCP, so a chat could never act on its own history.
+#[tokio::test]
+async fn standard_profile_registers_history_tools() {
+    let standard = build_measurement_session(SessionProfile::Standard).await;
+    let names = standard.tool_names().await;
+    for required in ["session_search", "history_restore", "tool_output_read"] {
+        assert!(names.iter().any(|n| n == required), "missing {required}");
+    }
+}
+
+/// The history tools read every thread, so a family guest in Discord never gets them.
+#[test]
+fn only_the_owners_sessions_read_the_owners_chats() {
+    let config = HqConfig::default();
+    // Discord defaults to deny; the relay widens the scope only for a verified owner.
+    let mut owner = hq_core::identity::RequestIdentity::from_discord(7);
+    owner.scope = hq_core::privacy::DisclosureScope::Unrestricted;
+    let mut guest = owner.clone();
+    guest.family_guest = Some(hq_core::identity::FamilyGuestInfo {
+        name: "Sam".into(),
+        origin_channel_id: 7,
+        owner_name: "owner".into(),
+        allowed_harnesses: Vec::new(),
+    });
+    assert!(SessionBuilder::from_config(&config).reads_owner_history());
+    assert!(
+        SessionBuilder::from_config(&config)
+            .with_identity(owner)
+            .reads_owner_history()
+    );
+    assert!(
+        !SessionBuilder::from_config(&config)
+            .with_identity(guest)
+            .reads_owner_history()
+    );
+    assert!(
+        !SessionBuilder::from_config(&config)
+            .with_identity(hq_core::identity::RequestIdentity::from_discord(7))
+            .reads_owner_history(),
+        "an unverified Discord audience is restricted"
+    );
+}
+
 /// Governance wraps every tool, so a metadata method it fails to forward
 /// collapses to the trait default for the entire registry. `should_defer`
 /// was permanently false, which made `deferred_catalog()` always empty and
@@ -950,4 +994,28 @@ async fn the_models_prompt_does_not_change_with_what_the_person_used() {
         offer_block(fresh.system_prompt().unwrap_or_default()),
         offer_block(seasoned.system_prompt().unwrap_or_default())
     );
+}
+
+#[test]
+fn memories_and_concept_matches_leave_the_system_prompt_for_the_turn_note() {
+    use crate::context::block::ContextBlock;
+    use hq_core::types::MessageRole;
+    let block = |id: &str, role, text: &str| {
+        let mut b = ContextBlock::new(role, text);
+        b.metadata.id = id.to_string();
+        b
+    };
+    let blocks = vec![
+        block("search_0", MessageRole::System, "concept page match"),
+        block("system_soul", MessageRole::System, "who HQ is"),
+        block("harness_instructions", MessageRole::System, "tools"),
+        block("pinned_0", MessageRole::System, "a pinned note"),
+        block("long_term_memory", MessageRole::System, "recent memories"),
+        block("thread_0", MessageRole::User, "an old line"),
+    ];
+    let (stable, volatile) = super::prompt::split_volatile(&blocks);
+    assert!(stable.contains("who HQ is") && stable.contains("a pinned note"));
+    assert!(!stable.contains("recent memories") && !stable.contains("concept page match"));
+    assert!(volatile.contains("recent memories") && volatile.contains("concept page match"));
+    assert!(!volatile.contains("an old line") && !stable.contains("an old line"));
 }

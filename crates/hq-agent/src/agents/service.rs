@@ -462,8 +462,12 @@ impl AgentService {
         };
         let mut outcome = finish_outcome(outcome, &resolution.model);
         if let Some(packet) = packet.as_ref().filter(|_| outcome.status.is_success()) {
-            outcome.evidence_check =
-                child_context::check_citations(&self.vault_path, &outcome.output, packet);
+            outcome.evidence_check = child_context::check_citations(
+                &self.vault_path,
+                self.db.as_deref(),
+                &outcome.output,
+                packet,
+            );
         }
         run_ctx.ledger.settle(&mut outcome);
 

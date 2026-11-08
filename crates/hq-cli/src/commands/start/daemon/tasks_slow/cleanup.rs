@@ -67,6 +67,17 @@ pub async fn run_vault_cleanup(vault_path: &Path, db: &Database) -> Result<()> {
             Err(e) => tracing::warn!(%e, "vault-cleanup: trash purge failed"),
         }
 
+        // Full tool outputs and compacted turns kept for tool_output_read, past their retention.
+        let spill_age =
+            std::time::Duration::from_secs(hq_tools::spill::SPILL_RETENTION_DAYS * 86_400);
+        match hq_tools::spill::prune(vault_path, spill_age) {
+            0 => {}
+            n => actions.push(format!(
+                "Removed {n} spilled tool output(s) older than {} days",
+                hq_tools::spill::SPILL_RETENTION_DAYS
+            )),
+        }
+
         // Who wrote a note is kept for a while after the note is deleted, then dropped.
         match db.with_conn(|conn| hq_db::provenance::purge_deleted(conn, DELETED_PROVENANCE_DAYS)) {
             Ok(0) => {}

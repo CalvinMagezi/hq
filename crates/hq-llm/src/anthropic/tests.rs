@@ -655,3 +655,42 @@ fn prompt_caching_marks_the_last_tool_and_the_request_only_on_anthropics_own_api
     assert!(body.get("cache_control").is_none());
     assert!(body["tools"][1].get("cache_control").is_none());
 }
+
+/// The turn-context note changes every turn, so a breakpoint at the request's end is never a
+/// prefix of the next request. One on the block before the note lets the next turn read the
+/// whole conversation so far.
+#[test]
+fn prompt_caching_marks_the_end_of_the_history_before_the_turn_note() {
+    let note = format!("{}\nrecent memories", hq_core::types::TURN_CONTEXT_HEADER);
+    let req = ChatRequest {
+        model: "anthropic/claude-haiku-5.5".to_string(),
+        messages: vec![
+            msg(MessageRole::System, "soul"),
+            msg(MessageRole::User, "first question"),
+            msg(MessageRole::Assistant, "first answer"),
+            msg(MessageRole::User, &note),
+            msg(MessageRole::User, "second question"),
+        ],
+        tools: Vec::new(),
+        temperature: None,
+        max_tokens: None,
+    };
+    let body = AnthropicProvider::new("k").body_for(&req, true);
+    let messages = body["messages"].as_array().unwrap();
+    let ephemeral = json!({"type": "ephemeral"});
+    assert_eq!(messages[1]["content"][0]["cache_control"], ephemeral);
+    let last = messages[2]["content"].as_array().unwrap();
+    assert!(last.iter().all(|b| b.get("cache_control").is_none()));
+
+    // No note, or nothing before it: only the tool and automatic breakpoints.
+    let first_turn = ChatRequest {
+        messages: vec![msg(MessageRole::User, &note), msg(MessageRole::User, "hi")],
+        ..req
+    };
+    let body = AnthropicProvider::new("k").body_for(&first_turn, true);
+    assert!(
+        body["messages"][0]["content"][0]
+            .get("cache_control")
+            .is_none()
+    );
+}

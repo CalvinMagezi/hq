@@ -147,7 +147,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
         .map(Arc::new)
         .or_else(|| state.hq_config.clone())
         .ok_or_else(|| anyhow!("HQ's config could not be read"))?;
-    let history = thread_history(&state.db, req.thread_id);
+    let history = thread_history(&state.db, req.thread_id, &config.context_fold);
     let meta = json!({"source": {
         "kind": "mcp",
         "caller": req.caller,
@@ -806,7 +806,7 @@ mod tests {
     fn later_turns_see_an_mcp_question_marked_as_untrusted() {
         let state = state();
         let (thread, _) = mixed_thread(&state);
-        let history = super::super::thread_history(&state.db, &thread);
+        let history = super::super::thread_history(&state.db, &thread, &Default::default());
         assert!(
             history[0]
                 .content

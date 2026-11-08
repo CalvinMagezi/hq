@@ -127,8 +127,12 @@ impl Default for SelfHealingConfig {
 /// A pre-computed summary ready for instant compaction.
 pub(super) struct PrecomputedSummary {
     pub text: String,
-    /// Number of messages from the front that this summary covers.
+    /// The summary covers `messages[start..covers_up_to]`.
+    pub start: usize,
     pub covers_up_to: usize,
+    /// `compaction_generation` when the snapshot was taken. A compaction since then moved the
+    /// messages, so the indices no longer name the same range and the summary is discarded.
+    pub generation: u64,
 }
 
 /// Helper for accumulating streaming tool call deltas.
@@ -205,8 +209,14 @@ pub struct AgentSession {
     pub(super) tool_call_count: u32,
     pub(super) tool_count: usize,
     pub(super) precomputed: Arc<Mutex<Option<PrecomputedSummary>>>,
+    /// Bumped by every compaction, so a background summary of an older layout is not applied.
+    pub(super) compaction_generation: u64,
     pub(super) preemptive_handle: Option<tokio::task::JoinHandle<()>>,
     pub(super) post_turn_callback: Option<PostTurnCallback>,
+    /// Context gathered for this turn only (recent memories, matching concept pages), sent as
+    /// a note just before the next user message instead of inside the system prompt, so the
+    /// system prompt and history stay byte-identical from turn to turn and stay cached.
+    pub(super) turn_context: Option<String>,
     pub last_resolved_model: Option<String>,
     pub session_id: String,
     pub(super) telemetry_db: Option<Arc<hq_db::Database>>,
@@ -284,8 +294,10 @@ impl AgentSession {
             tool_call_count: 0,
             tool_count,
             precomputed: Arc::new(Mutex::new(None)),
+            compaction_generation: 0,
             preemptive_handle: None,
             post_turn_callback: None,
+            turn_context: None,
             last_resolved_model: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             telemetry_db: None,
@@ -459,6 +471,16 @@ impl AgentSession {
 
     pub fn set_post_turn_callback(&mut self, callback: PostTurnCallback) {
         self.post_turn_callback = Some(callback);
+    }
+
+    /// Context for the next prompt only; see the `turn_context` field.
+    pub fn set_turn_context(&mut self, context: String) {
+        self.turn_context = (!context.trim().is_empty()).then_some(context);
+    }
+
+    /// The context the next prompt will carry, if any.
+    pub fn turn_context(&self) -> Option<&str> {
+        self.turn_context.as_deref()
     }
 
     pub fn set_system_prompt(&mut self, prompt: String) {

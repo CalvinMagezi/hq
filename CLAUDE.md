@@ -171,6 +171,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | MCP server | `crates/hq-mcp/src/server.rs` |
 | Asking HQ from an MCP client (`hq_ask`, `hq_ask_result`) | `crates/hq-tools/src/ask.rs` (tools and the `AskRunner` seam), `crates/hq-web/src/ws/ask.rs` (runner, read-only enforcement via the permission preset), `crates/hq-db/src/ask_requests.rs`, `docs/MCP_ASK.md` |
 | Daemon scheduler | `crates/hq-cli/src/commands/start/daemon/mod.rs` |
+| Context fold (long chats as append-only summary blocks over `chat_messages` plus a raw tail, `context_fold:` config), chat history search and restore, the in-turn compactor and tool-output spill | `crates/hq-agent/src/fold/` (`mod.rs` view, cut, fold and distill, relations; `rules.rs` the summary rules), `crates/hq-db/src/thread_folds.rs` and `chat_search.rs` (`sql/115_thread_folds.sql`, `sql/116_chat_search.sql`), `thread_history` in `crates/hq-web/src/ws/mod.rs`, `fold_blocks` in `crates/hq-relay/src/native_run.rs`, `crates/hq-tools/src/session_search.rs` (`session_search`, `history_restore`), `crates/hq-tools/src/spill.rs` (`tool_output_read`), `crates/hq-agent/src/session/context.rs`, `crates/hq-agent/tests/fold_recall.rs` and `fold_graph.rs`, `docs/plans/context-fold.md` |
 | Context engine | `crates/hq-agent/src/context/engine.rs` |
 | Vault client | `crates/hq-vault/src/client.rs` |
 | Search (FTS5 + semantic) | `crates/hq-db/src/search/` |

@@ -251,6 +251,15 @@ impl SessionBuilder {
         tools
     }
 
+    /// Whether this session may search and restore the owner's chats: no identity (CLI, daemon) or
+    /// the owner's own, unrestricted and not a family guest.
+    pub(super) fn reads_owner_history(&self) -> bool {
+        self.identity.as_ref().is_none_or(|id| {
+            id.family_guest.is_none()
+                && matches!(id.scope, hq_core::privacy::DisclosureScope::Unrestricted)
+        })
+    }
+
     /// Self-update, host harness sessions, background turns and native
     /// tasks, which all need the shared database.
     fn db_backed_tools(
@@ -258,7 +267,21 @@ impl SessionBuilder {
         vault_path: &Path,
         db: &Arc<hq_db::Database>,
     ) -> Vec<Box<dyn hq_tools::HqTool>> {
-        let mut tools = Vec::new();
+        let mut tools: Vec<Box<dyn hq_tools::HqTool>> = Vec::new();
+
+        // Fold blocks and spill notes name these tools. They read every thread, so only the
+        // owner's own sessions get them, never a family guest or a restricted audience.
+        if self.reads_owner_history() {
+            tools.push(Box::new(hq_tools::session_search::SessionSearchTool::new(
+                db.clone(),
+            )));
+            tools.push(Box::new(hq_tools::session_search::HistoryRestoreTool::new(
+                db.clone(),
+            )));
+            tools.push(Box::new(hq_tools::spill::ToolOutputReadTool::new(
+                vault_path.to_path_buf(),
+            )));
+        }
 
         // Self-update lifecycle — branch + test + reinstall of HQ's own binary
         if self.config.self_update.enabled {
@@ -557,6 +580,9 @@ const MOBILE_EAGER_TOOLS: &[&str] = &[
     "notify_owner",
     "report_progress",
     "background_turn_status",
+    // Every fold block names history_restore, so the model calls it without a search first.
+    "session_search",
+    "history_restore",
     "hq",
 ];
 

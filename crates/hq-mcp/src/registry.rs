@@ -71,6 +71,9 @@ pub fn create_default_registry(
         vault_path.clone(),
     )));
     tools.push(Box::new(session_search::SessionSearchTool::new(db.clone())));
+    tools.push(Box::new(session_search::HistoryRestoreTool::new(
+        db.clone(),
+    )));
     tools.push(Box::new(agents::ListAgentsTool::new(agents_dir.clone())));
     tools.push(Box::new(agents::LoadAgentTool::new(agents_dir)));
     #[cfg(feature = "gws")]

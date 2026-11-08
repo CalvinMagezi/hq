@@ -170,10 +170,19 @@ pub(crate) fn parse_messages_response(json: &serde_json::Value) -> Result<ChatMe
 }
 
 /// Mark the prompt for caching: an explicit breakpoint after the tool list, which is large and the
-/// same on every request, and Anthropic's automatic breakpoint, which follows the conversation as
-/// it grows so each tool round trip reads the previous request's prefix.
+/// same on every request; one at the end of the stable history, just before the per-turn context
+/// note, so the next turn reads the whole conversation so far; and Anthropic's automatic
+/// breakpoint, which follows the conversation as it grows so each tool round trip reads the
+/// previous request's prefix.
 pub(crate) fn add_prompt_caching(body: &mut serde_json::Value) {
     let ephemeral = serde_json::json!({"type": "ephemeral"});
+    if let Some(block) = body
+        .get_mut("messages")
+        .and_then(|m| m.as_array_mut())
+        .and_then(|messages| block_before_turn_context(messages))
+    {
+        block.insert("cache_control".to_string(), ephemeral.clone());
+    }
     if let Some(last_tool) = body
         .get_mut("tools")
         .and_then(|t| t.as_array_mut())
@@ -185,6 +194,37 @@ pub(crate) fn add_prompt_caching(body: &mut serde_json::Value) {
     if let Some(obj) = body.as_object_mut() {
         obj.insert("cache_control".to_string(), ephemeral);
     }
+}
+
+/// The content block just before the newest turn-context note, if the note has one before it.
+fn block_before_turn_context(
+    messages: &mut [serde_json::Value],
+) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
+    let is_note = |b: &serde_json::Value| {
+        b.get("text")
+            .and_then(|t| t.as_str())
+            .is_some_and(|t| t.starts_with(hq_core::types::TURN_CONTEXT_HEADER))
+    };
+    let blocks = || {
+        messages.iter().flat_map(|m| {
+            m.get("content")
+                .and_then(|c| c.as_array())
+                .into_iter()
+                .flatten()
+        })
+    };
+    let note = blocks().enumerate().filter(|(_, b)| is_note(b)).last()?.0;
+    let before = note.checked_sub(1)?;
+    messages
+        .iter_mut()
+        .flat_map(|m| {
+            m.get_mut("content")
+                .and_then(|c| c.as_array_mut())
+                .into_iter()
+                .flatten()
+        })
+        .nth(before)
+        .and_then(|b| b.as_object_mut())
 }
 
 /// Extract normalized `(input, output, cache_read, cache_write)` token counts
