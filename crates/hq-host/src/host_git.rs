@@ -423,17 +423,30 @@ mod tests {
         ran(&marker, "diff", &mut all);
         git(&["add", "-A"]);
         ran(&marker, "add", &mut all);
+        // Unsigned first, so the commit itself must succeed: hooks and filters stay off.
         git(&[
             "-c",
             "user.name=t",
             "-c",
             "user.email=t@example.com",
+            "-c",
+            "commit.gpgSign=false",
             "commit",
             "-q",
             "-m",
             "x",
         ]);
         ran(&marker, "commit", &mut all);
+        // Signed: the repository's gpg.program is replaced by the standard one, which may have no
+        // key on this machine and fail. Only that the repository's program never ran matters.
+        fs::write(repo.join("a.txt"), "again\n").unwrap();
+        let _ = hardened(&repo)
+            .expect("hardened git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+            .args(["commit", "-q", "-a", "-m", "signed"])
+            .output()
+            .unwrap();
+        ran(&marker, "signed commit", &mut all);
         assert!(
             all.is_empty(),
             "ran repository commands:\n{}",

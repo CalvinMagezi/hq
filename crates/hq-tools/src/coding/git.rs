@@ -10,14 +10,12 @@ fn git_in(dir: Option<&std::path::Path>) -> Result<tokio::process::Command> {
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
-    hq_host::hardened_git(&dir)
-        .map(tokio::process::Command::from)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "refusing to run git in {}: its configuration could not be read",
-                dir.display()
-            )
-        })
+    hardened(&dir, false).ok_or_else(|| {
+        anyhow::anyhow!(
+            "refusing to run git in {}: its configuration could not be read",
+            dir.display()
+        )
+    })
 }
 
 /// [`git_in`] for a push, refused when the repository's own config names a program a push runs.
@@ -26,15 +24,33 @@ fn git_push_in(dir: Option<&std::path::Path>) -> Result<tokio::process::Command>
         Some(d) => d.to_path_buf(),
         None => std::env::current_dir()?,
     };
-    hq_host::hardened_git_for_push(&dir)
-        .map(tokio::process::Command::from)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "refusing to push from {}: its .git/config names a program a push would run \
+    hardened(&dir, true).ok_or_else(|| {
+        anyhow::anyhow!(
+            "refusing to push from {}: its .git/config names a program a push would run \
              (an ssh command, proxy, askpass or credential helper). Push it yourself.",
-                dir.display()
-            )
-        })
+            dir.display()
+        )
+    })
+}
+
+/// The hardened command where the host's builder exists (unix: the editions that run coding
+/// agents). Lite on Windows has no coding-agent host, so no sandbox boundary to keep, and runs
+/// plain `git` in `dir`.
+#[cfg(unix)]
+fn hardened(dir: &std::path::Path, push: bool) -> Option<tokio::process::Command> {
+    let cmd = if push {
+        hq_host::hardened_git_for_push(dir)
+    } else {
+        hq_host::hardened_git(dir)
+    };
+    cmd.map(tokio::process::Command::from)
+}
+
+#[cfg(not(unix))]
+fn hardened(dir: &std::path::Path, _push: bool) -> Option<tokio::process::Command> {
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.arg("-C").arg(dir);
+    Some(cmd)
 }
 
 use crate::registry::HqTool;
