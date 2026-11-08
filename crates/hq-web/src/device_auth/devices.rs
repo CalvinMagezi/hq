@@ -243,15 +243,45 @@ pub(crate) async fn rotate_handler(State(state): State<Arc<WsState>>) -> Respons
     end_other_access(&state, at.timestamp());
     settle_every_sign_in_item(&state.db);
     tracing::info!(device = %minted.id, "web: signed out everywhere");
+    let paired = paired_machines(&state.db);
     state.notify_owner(
         DEVICE_SIGN_IN_SOURCE,
         "HQ signed out every device",
         &format!(
             "Every device and the original login link were signed out of HQ at {} UTC. Only \
              the device that asked stays signed in. If it was not you, send /login to your HQ \
-             bot or ask whoever runs your server for a new link, then sign out everywhere again.",
-            at.format("%Y-%m-%d %H:%M")
+             bot or ask whoever runs your server for a new link, then sign out everywhere again.\
+             {}",
+            at.format("%Y-%m-%d %H:%M"),
+            untouched_note(&paired)
         ),
     );
-    no_store(StatusCode::OK, json!({ "token": minted.token }))
+    no_store(
+        StatusCode::OK,
+        json!({ "token": minted.token, "paired_machines_kept": paired }),
+    )
+}
+
+/// The machines paired over the bridge, by name. Signing out everywhere does not touch them:
+/// each keeps its pairing and the MCP key it got at setup until it is revoked on its own.
+fn paired_machines(db: &hq_db::Database) -> Vec<String> {
+    match hq_db::bridge::list(db, false) {
+        Ok(peers) => peers.into_iter().map(|p| p.label).collect(),
+        Err(e) => {
+            tracing::warn!("web: could not list paired machines: {e:#}");
+            Vec::new()
+        }
+    }
+}
+
+/// What signing out everywhere left as it was, said plainly in the owner's notice.
+fn untouched_note(paired: &[String]) -> String {
+    if paired.is_empty() {
+        return String::new();
+    }
+    format!(
+        " Paired machines were not signed out and keep their access to HQ, MCP key included: {}. \
+         To cut one off, run `hq bridge peers` on this server, then `hq bridge revoke <id>`.",
+        paired.join(", ")
+    )
 }

@@ -15,6 +15,12 @@ use std::{net::SocketAddr, sync::Arc};
 /// if it is turned on after the door opened.
 const FORWARDED_VALUE: &str = "by=hq-paired-devices";
 
+/// Set on every request this door lets in, as a request extension: something only code in this
+/// process can add, never a header a client could send to the main listener. `/mcp` takes a
+/// paired device's own key only on a request that carries it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ThroughPairedDoor;
+
 /// Wraps `router` for the paired-devices door: the connector's OAuth and discovery paths are not
 /// found, and `/mcp` needs one of `keys` or a session token before any handler runs.
 pub(crate) fn guard(router: Router, keys: McpKeys, state: Arc<WsState>) -> Router {
@@ -36,6 +42,7 @@ pub(crate) fn guard(router: Router, keys: McpKeys, state: Arc<WsState>) -> Route
                     axum::http::header::FORWARDED,
                     axum::http::HeaderValue::from_static(FORWARDED_VALUE),
                 );
+                req.extensions_mut().insert(ThroughPairedDoor);
                 next.run(req).await
             }
         },
@@ -235,6 +242,19 @@ mod tests {
             call(addr, "GET", "/mcp/extra", &[("x-api-key", &key)]).await,
             404
         );
+        // The main listener (what `tailscale serve` or a public proxy reaches) takes no device
+        // key, and no header a client sends stands in for the door's mark.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let main = listener.local_addr().unwrap();
+        let router = w.router.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+        for extra in [None, Some(("forwarded", FORWARDED_VALUE))] {
+            let mut headers = vec![("x-api-key", key.as_str())];
+            headers.extend(extra);
+            assert_eq!(call(main, "POST", "/mcp", &headers).await, 401, "{extra:?}");
+        }
         hq_db::bridge::revoke(&w.state.db, "aa11").unwrap();
         assert_eq!(
             call(addr, "POST", "/mcp", &[("x-api-key", &key)]).await,

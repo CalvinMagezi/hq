@@ -33,12 +33,27 @@ pub(crate) fn rpc_err(id: Value, code: i64, message: impl Into<String>) -> Json<
 pub(crate) async fn mcp_handler(
     headers: axum::http::HeaderMap,
     State(state): State<Arc<WsState>>,
+    door: Option<axum::Extension<crate::devices_door::ThroughPairedDoor>>,
     Json(body): Json<Value>,
 ) -> axum::response::Response {
     let keys = McpKeys::from_env();
     let switch_on = std::env::var(crate::auth::MCP_DEV_NO_AUTH_ENV).is_ok_and(|v| v == "1");
     let dev_open = crate::auth::mcp_dev_open(&headers, switch_on, state.web_bind_is_loopback);
-    respond(&state, &headers, body, &keys, dev_open).await
+    let caller = Door {
+        dev_open,
+        paired_devices: door.is_some(),
+    };
+    respond(&state, &headers, body, &keys, caller).await
+}
+
+/// How a request reached `/mcp`, as only this process can tell.
+#[derive(Clone, Copy, Default)]
+struct Door {
+    /// The loopback-only development switch applies.
+    dev_open: bool,
+    /// It came through the paired-devices door (`bridge.web_listen`), the only place a paired
+    /// device's own key is worth anything.
+    paired_devices: bool,
 }
 
 async fn respond(
@@ -46,10 +61,10 @@ async fn respond(
     headers: &axum::http::HeaderMap,
     body: Value,
     keys: &McpKeys,
-    dev_open: bool,
+    door: Door,
 ) -> axum::response::Response {
     let is_notification = body.get("id").is_none();
-    match handle_mcp(state, headers, body, keys, dev_open).await {
+    match handle_mcp(state, headers, body, keys, door).await {
         Ok(reply) => answer(is_notification, reply),
         Err(refusal) => unauthorized(state, headers, refusal),
     }
@@ -141,21 +156,25 @@ async fn handle_mcp(
     headers: &axum::http::HeaderMap,
     body: Value,
     keys: &McpKeys,
-    dev_open: bool,
+    door: Door,
 ) -> Result<Json<Value>, Json<Value>> {
     let id = body.get("id").cloned().unwrap_or(Value::Null);
     let secret = crate::auth::presented_secret(headers);
     // A paired device's own key (minted at pairing) has the owner's full scope, whether or not
-    // any key is configured in the environment.
+    // any key is configured in the environment, but only through the paired-devices door: on the
+    // main listener (`tailscale serve`, Caddy, the public connector) it is nothing.
     let identity = crate::auth::resolve_identity(
         headers,
         keys.full.as_deref(),
         keys.spark.as_deref(),
         keys.handoff.as_deref(),
         keys.tasks.as_deref(),
-        dev_open,
+        door.dev_open,
     )
-    .or_else(|| device_key_for_secret(state, secret).then_some(crate::auth::ApiIdentity::Full));
+    .or_else(|| {
+        (door.paired_devices && device_key_for_secret(state, secret))
+            .then_some(crate::auth::ApiIdentity::Full)
+    });
     // A launched agent's own token, when none of the configured keys matched.
     let session = match identity {
         Some(_) => None,
@@ -524,7 +543,7 @@ mod tests {
             axum::routing::post(
                 move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
                     let (state, keys) = (state.clone(), keys.clone());
-                    async move { respond(&state, &headers, body, &keys, false).await }
+                    async move { respond(&state, &headers, body, &keys, Door::default()).await }
                 },
             ),
         )
@@ -822,7 +841,7 @@ mod tests {
             axum::routing::post(
                 move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
                     let (state, keys) = (state.clone(), keys.clone());
-                    async move { respond(&state, &headers, body, &keys, false).await }
+                    async move { respond(&state, &headers, body, &keys, Door::default()).await }
                 },
             ),
         );
@@ -874,7 +893,8 @@ mod tests {
         }
     }
 
-    /// A paired device's key, on a server with no key in its environment (a phone).
+    /// A paired device's key, on a server with no key in its environment (a phone): full scope
+    /// through the paired-devices door, nothing on the main listener.
     #[tokio::test]
     async fn a_paired_devices_key_has_full_scope_and_dies_with_the_pairing() {
         let mut registry = ToolRegistry::new();
@@ -885,16 +905,28 @@ mod tests {
         );
         let key = paired_device_key(&state.db, "aa11");
         let keys = Arc::new(McpKeys::default());
-        let app = axum::Router::new().route(
-            "/mcp",
-            axum::routing::post({
-                let state = state.clone();
-                move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
-                    let (state, keys) = (state.clone(), keys.clone());
-                    async move { respond(&state, &headers, body, &keys, false).await }
-                }
-            }),
-        );
+        let route = |paired_devices: bool| {
+            let (state, keys) = (state.clone(), keys.clone());
+            axum::Router::new().route(
+                "/mcp",
+                axum::routing::post(
+                    move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
+                        let (state, keys) = (state.clone(), keys.clone());
+                        let door = Door {
+                            dev_open: false,
+                            paired_devices,
+                        };
+                        async move { respond(&state, &headers, body, &keys, door).await }
+                    },
+                ),
+            )
+        };
+        // Mutation: drop `door.paired_devices` from the device key check. The main listener
+        // then gives a stolen device key the owner's full scope.
+        let main = route(false);
+        let res = rpc(&main, Some(&key), call("config_manage")).await;
+        assert_eq!(res["error"]["code"], -32001, "main listener: {res}");
+        let app = route(true);
         let res = rpc(&app, Some(&key), call("config_manage")).await;
         assert!(!call_failed(&res), "full scope runs config_manage: {res}");
         let forged = hq_db::bridge_setup::new_device_key();

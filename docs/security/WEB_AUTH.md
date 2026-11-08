@@ -360,7 +360,9 @@ token, so a non-loopback bind still needs one at startup.
   watches), revokes every claude.ai connector grant and closes the connector's
   approval window (`mcp_connector::revoke_all`), drops every Web Push subscription,
   and only then notifies the owner without the token, so no stranger's browser is
-  pushed the notice. The PWA stores the new token and reloads; its own push
+  pushed the notice. It does not touch machines paired over the bridge: each keeps its
+  pairing and its MCP key until `hq bridge revoke`. The reply
+  (`paired_machines_kept`) and the notice name them. The PWA stores the new token and reloads; its own push
   subscription is sent again on that load, and Claude has to be connected again.
 
 **The configured token after a sign-out everywhere.** It is refused from then on.
