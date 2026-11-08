@@ -109,15 +109,23 @@ jobs:
           # A new file from the verified one, signed again: promote sets its own rollout and a higher
           # seq, so a phone can tell it from the release's and never takes an older one back.
           [[ "$ROLLOUT" =~ ^[0-9]+$ ]] && [ "$ROLLOUT" -le 100 ] || { echo "rollout is 0 to 100" >&2; exit 1; }
-          # Versions withdrawn on the stable channel stay withdrawn: carry its signed list over.
+          # Versions withdrawn on the stable channel stay withdrawn: carry its signed list over. The
+          # list is only as good as the manifest it comes from, so that manifest must be the newest
+          # this channel published: its seq may not be below the android-stable-seq-* floor
+          # (scripts/release/android-seq.sh), and with a floor recorded it may not be missing.
           withdrawn='[]'
+          cur_seq=0
           mkdir -p promote-android/current
           if gh release view channel-stable --json assets --jq '.assets[].name' | grep -qx android-channel.json; then
             gh release download channel-stable --dir promote-android/current --pattern android-channel.json --pattern android-channel.json.minisig
             minisign -V -p release/minisign.pub -m promote-android/current/android-channel.json -x promote-android/current/android-channel.json.minisig -q
+            cur_seq=$(jq -r .seq promote-android/current/android-channel.json)
             withdrawn=$(jq -c '.withdrawn // []' promote-android/current/android-channel.json)
           fi
-          jq --argjson seq "$(date -u +%s)" --argjson rollout "$ROLLOUT" --argjson kept "$withdrawn" \
+          bash scripts/release/android-seq.sh check --repo "$GH_REPO" --seq "$cur_seq"
+          new_seq=$(date -u +%s)
+          [ "$new_seq" -gt "$cur_seq" ] || { echo "the clock is behind the current manifest's seq $cur_seq" >&2; exit 1; }
+          jq --argjson seq "$new_seq" --argjson rollout "$ROLLOUT" --argjson kept "$withdrawn" \
             --arg issued "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             '.seq = $seq | .rollout = $rollout | .issued_at = $issued | .withdrawn = (((.withdrawn // []) + $kept) | unique)' \
             promote-android/android-channel.json > promote-android/android-channel.next.json
@@ -126,4 +134,6 @@ jobs:
           minisign -V -p release/minisign.pub -m promote-android/android-channel.json -x promote-android/android-channel.json.minisig -q
           gh release upload channel-stable promote-android/android-channel.json promote-android/android-channel.json.minisig \
             promote-android/agent-hq-android.apk promote-android/agent-hq-android.apk.sha256 --clobber
+          # Raise the floor only once the file is published, so a failed upload never strands it.
+          bash scripts/release/android-seq.sh record --repo "$GH_REPO" --seq "$new_seq" --sha "$GITHUB_SHA"
           gh release edit channel-stable --latest
