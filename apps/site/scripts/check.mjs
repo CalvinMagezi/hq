@@ -208,13 +208,31 @@ if (existsSync(join(DIST, 'sitemap.xml'))) {
   }
 }
 
-// The install script embeds the release public key; it must match the repository's key file.
+// The install scripts are the trust root of a first install (and of `hq update --apply` on
+// Windows), so what Pages serves must be byte for byte the copy reviewed in public/, and each must
+// embed the repository's release key and no other key-shaped string.
 {
   const keyFile = join(import.meta.dirname, '..', '..', '..', 'release', 'minisign.pub');
-  const repoKey = readFileSync(keyFile, 'utf8').split('\n').filter((l) => l && !l.startsWith('untrusted comment:'))[0];
-  const script = readFileSync(join(import.meta.dirname, '..', 'public', 'install.sh'), 'utf8');
-  const embedded = script.match(/^PUBKEY_LINE="([^"]+)"/m)?.[1];
-  if (embedded !== repoKey) fail('install.sh', 'embedded public key does not match release/minisign.pub');
+  const repoKey = readFileSync(keyFile, 'utf8').split('\n').filter((l) => l && !l.startsWith('untrusted comment:'))[0]?.trim();
+  if (!repoKey) fail('release/minisign.pub', 'no key line');
+  const KEY_SHAPED = /RW[QRST][A-Za-z0-9+/]{53}(?![A-Za-z0-9+/=])/g;
+  const embeddedKey = {
+    'install.sh': (text) => text.match(/^PUBKEY_LINE="([^"]+)"/m)?.[1],
+    'install.ps1': (text) => text.match(/^\$script:HqSigningKey = '([^']+)'/m)?.[1],
+  };
+  for (const [name, embedded] of Object.entries(embeddedKey)) {
+    const reviewed = join(import.meta.dirname, '..', 'public', name);
+    const served = join(DIST, name);
+    if (!existsSync(reviewed) || !existsSync(served)) {
+      fail(name, 'missing from public/ or dist/');
+      continue;
+    }
+    if (!readFileSync(reviewed).equals(readFileSync(served))) fail(name, 'dist/ copy differs from public/ (something in the build changed it)');
+    const text = readFileSync(served, 'utf8');
+    if (embedded(text) !== repoKey) fail(name, 'embedded public key does not match release/minisign.pub');
+    const keys = [...new Set(text.match(KEY_SHAPED) ?? [])];
+    if (keys.length !== 1 || keys[0] !== repoKey) fail(name, `key-shaped strings other than the release key: ${keys.filter((k) => k !== repoKey).join(', ') || 'none found'}`);
+  }
 }
 
 if (errors.length) {
