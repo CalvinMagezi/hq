@@ -28,31 +28,86 @@ fn present(key: &Option<String>) -> bool {
 
 /// A provider the Settings page can change: `id` is what the replace endpoint takes, and
 /// `source` says where the key in force comes from (`env` cannot be changed from the web).
+/// A key in a conventional variable such as `OPENROUTER_API_KEY` (how the phone app hands HQ the
+/// keys it seals) is in use, so it counts as configured even though config.yaml has none.
 fn editable_key(
     name: &str,
     provider: SetupProvider,
     key: &Option<String>,
     env_set: &dyn Fn(&str) -> bool,
 ) -> Value {
-    let source = if provider_keys::env_lock(provider, env_set).is_some() {
+    let lock = provider_keys::env_lock(provider, env_set);
+    let source = if lock.is_some() {
         Some("env")
     } else {
         present(key).then_some("config")
     };
-    json!({"name": name, "id": provider, "configured": present(key), "source": source})
+    // An `HQ_` override reaches `key` through the config merge; an empty one leaves it unset.
+    let from_env = lock.is_some_and(|n| !n.starts_with("HQ_"));
+    json!({"name": name, "id": provider, "configured": present(key) || from_env, "source": source})
+}
+
+/// A key HQ reads but the Settings page cannot change, set in config.yaml or in the variable
+/// the router reads for it.
+fn fixed_key(
+    name: &str,
+    key: &Option<String>,
+    env: Option<&str>,
+    env_set: &dyn Fn(&str) -> bool,
+) -> Value {
+    if env.is_some_and(env_set) {
+        json!({"name": name, "configured": true, "source": "env"})
+    } else {
+        json!({"name": name, "configured": present(key)})
+    }
 }
 
 fn key_presence(config: &HqConfig, env_set: &dyn Fn(&str) -> bool) -> Value {
     json!([
-        editable_key("OpenRouter", SetupProvider::OpenRouter, &config.openrouter_api_key, env_set),
-        editable_key("Anthropic", SetupProvider::Anthropic, &config.anthropic_api_key, env_set),
-        editable_key("Google AI", SetupProvider::Google, &config.google_ai_api_key, env_set),
-        {"name": "DeepSeek", "configured": present(&config.deepseek_api_key)},
-        {"name": "OpenAI", "configured": present(&config.openai_api_key)},
-        {"name": "Groq", "configured": present(&config.groq_api_key)},
-        {"name": "Cerebras", "configured": present(&config.cerebras_api_key)},
-        {"name": "Kimi Code", "configured": present(&config.kimi_code_api_key)},
-        {"name": "Brave Search", "configured": present(&config.brave_api_key)},
+        editable_key(
+            "OpenRouter",
+            SetupProvider::OpenRouter,
+            &config.openrouter_api_key,
+            env_set
+        ),
+        editable_key(
+            "Anthropic",
+            SetupProvider::Anthropic,
+            &config.anthropic_api_key,
+            env_set
+        ),
+        editable_key(
+            "Google AI",
+            SetupProvider::Google,
+            &config.google_ai_api_key,
+            env_set
+        ),
+        fixed_key(
+            "DeepSeek",
+            &config.deepseek_api_key,
+            Some("DEEPSEEK_API_KEY"),
+            env_set
+        ),
+        fixed_key(
+            "OpenAI",
+            &config.openai_api_key,
+            Some("OPENAI_API_KEY"),
+            env_set
+        ),
+        fixed_key("Groq", &config.groq_api_key, Some("GROQ_API_KEY"), env_set),
+        fixed_key(
+            "Cerebras",
+            &config.cerebras_api_key,
+            Some("CEREBRAS_API_KEY"),
+            env_set
+        ),
+        fixed_key(
+            "Kimi Code",
+            &config.kimi_code_api_key,
+            Some("KIMI_CODE_API_KEY"),
+            env_set
+        ),
+        fixed_key("Brave Search", &config.brave_api_key, None, env_set),
     ])
 }
 
@@ -226,6 +281,35 @@ mod tests {
         assert_eq!(row("Anthropic")["source"], json!("env"));
         assert_eq!(row("Google AI")["source"], Value::Null);
         assert!(row("Groq").get("source").is_none());
+    }
+
+    /// The phone app seals a key and passes it as `OPENROUTER_API_KEY`; config.yaml has none.
+    /// Settings said "Not set" for a key every turn was using.
+    #[test]
+    fn a_key_only_in_the_environment_counts_as_set() {
+        let env = |n: &str| n == "OPENROUTER_API_KEY" || n == "DEEPSEEK_API_KEY";
+        let view = settings_view(&HqConfig::default(), &env);
+        let row = |name: &str| {
+            view["provider_keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|k| k["name"] == name)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(row("OpenRouter")["configured"], json!(true));
+        assert_eq!(row("OpenRouter")["source"], json!("env"));
+        assert_eq!(row("DeepSeek")["configured"], json!(true));
+        assert_eq!(row("DeepSeek")["source"], json!("env"));
+        assert_eq!(row("Anthropic")["configured"], json!(false));
+        assert_eq!(row("Groq")["configured"], json!(false));
+        // An empty `HQ_` override pins the source but holds no key.
+        let empty_override = |n: &str| n == "HQ_OPENROUTER_API_KEY";
+        let view = settings_view(&HqConfig::default(), &empty_override);
+        let or = &view["provider_keys"][0];
+        assert_eq!(or["configured"], json!(false));
+        assert_eq!(or["source"], json!("env"));
     }
 
     #[test]

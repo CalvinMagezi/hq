@@ -642,3 +642,46 @@ fn task_and_search_peers_resolve_among_the_merged_remotes() {
     assert_eq!(cfg.task_peer_in(&all).unwrap().unwrap().name, "tablet");
     assert_eq!(cfg.web_search_peer_in(&all).unwrap().name, "tablet");
 }
+
+mod phone_keys_tests {
+    use crate::config::{HqConfig, Profile};
+    use crate::setup_provider::CHEAP_OPENROUTER_MODEL;
+
+    fn openrouter_only(name: &str) -> Option<String> {
+        (name == "OPENROUTER_API_KEY").then(|| "sk-or-test".to_string())
+    }
+
+    fn on(profile: Profile, model: &str) -> HqConfig {
+        HqConfig {
+            profile,
+            default_model: model.to_string(),
+            ..HqConfig::default()
+        }
+    }
+
+    /// The phone app seals an OpenRouter key and never writes config.yaml, so the stock alias
+    /// has to follow the key at load, or every turn asks for `relay`.
+    #[test]
+    fn on_a_phone_the_stock_default_follows_a_sealed_key() {
+        let mut phone = on(Profile::Mobile, "relay");
+        phone.follow_phone_keys(openrouter_only);
+        assert_eq!(phone.default_model, CHEAP_OPENROUTER_MODEL);
+    }
+
+    #[test]
+    fn a_chosen_model_a_keyless_phone_and_other_editions_are_left_alone() {
+        let mut chosen = on(Profile::Mobile, "anthropic/claude-opus-5.5");
+        chosen.follow_phone_keys(openrouter_only);
+        assert_eq!(chosen.default_model, "anthropic/claude-opus-5.5");
+
+        let mut keyless = on(Profile::Mobile, "relay");
+        keyless.follow_phone_keys(|_| None);
+        assert_eq!(keyless.default_model, "relay");
+
+        for profile in [Profile::Full, Profile::Lite] {
+            let mut other = on(profile, "relay");
+            other.follow_phone_keys(openrouter_only);
+            assert_eq!(other.default_model, "relay", "{profile:?}");
+        }
+    }
+}
