@@ -62,6 +62,15 @@ class NoticePostingTest {
         assertEquals(NoticeWords.Words("HQ answered", "Tap to read."), NoticeWords.answered(c))
     }
 
+    @Test fun aNewSignInInTheShadeIsNeverAllowedFromThereAndSaysWhatItIs() {
+        val o = org.json.JSONObject("""{"id":"val_s","kind":"action_needed","title":"A new sign-in to your HQ","description":"x","state":"pending","metadata":{"sign_in":{"device_id":"dev-7"},"extra":{"source_task":"device_sign_in"}},"actions":["approve","reject"]}""")
+        val card = InboxWords.card(AlertPoster.itemOf(o))
+        assertEquals(CardKind.SignIn, card.kind)
+        val n = AlertPoster.build(c, card, details = true, quiet = false)
+        assertEquals(listOf("Open"), buttons(n))
+        assertEquals("A new sign-in to your HQ", n.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+    }
+
     @Test fun detailKeepsTheGeneralTitleAndNeverTheItemsOwn() {
         val d = NoticeWords.detail(c, approval)
         assertEquals("A task needs your OK", d.title)

@@ -132,6 +132,7 @@ object AlertPoster {
             o.getString("id"), o.optString("kind", ""), o.optString("title", ""), o.optString("description", ""), o.optString("state", ""),
             o.optString("created_at", ""), meta?.optString("link")?.ifBlank { null }, extra?.optString("source_task")?.ifBlank { null }, extra?.optString("val_kind")?.ifBlank { null },
             (0 until (acts?.length() ?: 0)).map { acts!!.getString(it) }, example.hq.spike.data.alertDialog(meta),
+            signInDevice = example.hq.spike.data.signInDevice(meta),
         )
     }
 

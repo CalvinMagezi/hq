@@ -1,6 +1,6 @@
 import { parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
-import { t } from '~/strings'
+import { t, type StringKey } from '~/strings'
 import type {
   ActivityGap,
   ActivityNote,
@@ -89,20 +89,27 @@ export function authorLabel(note: Pick<ActivityNote, 'attribution' | 'actor' | '
 
 export const ATTRIBUTION_GAP_ATTRIBUTIONS: readonly NoteAttribution[] = ['unattributed', 'no_record', 'changed_outside_tools']
 
-const GAP_TITLES: Record<string, string> = {
-  note_unattributed: 'Author unknown',
-  note_changed_outside_tools: 'Edited outside HQ',
-  note_missing: 'Linked note is gone',
-  note_without_session: 'No session recorded',
-  note_from_another_task: 'Written under another task',
-  session_not_registered: 'Session not in the registry',
-  in_progress_without_a_holder: 'Nobody holds it',
-  notes_not_listed: 'More notes than shown',
+const GAP_LINES: Record<string, StringKey> = {
+  note_unattributed: 'act_gap_note_unattributed',
+  note_changed_outside_tools: 'act_gap_note_changed_outside_tools',
+  note_missing: 'act_gap_note_missing',
+  note_without_session: 'act_gap_note_without_session',
+  note_from_another_task: 'act_gap_note_from_another_task',
+  session_not_registered: 'act_gap_session_not_registered',
+  in_progress_without_a_holder: 'act_gap_in_progress_without_a_holder',
+  notes_not_listed: 'act_gap_notes_not_listed',
 }
 
-/** A short title for a gap kind; an unknown kind is shown as it came. */
-export function gapTitle(gap: Pick<ActivityGap, 'kind'>): string {
-  return GAP_TITLES[gap.kind] ?? gap.kind.replaceAll('_', ' ')
+/** Gaps about the task itself, whose sentence names nothing else. */
+const NO_SUBJECT_GAPS: readonly string[] = ['in_progress_without_a_holder', 'notes_not_listed']
+
+/** One plain sentence for a gap, in the owner's words; the server's own detail is for tools, not people. */
+export function gapLine(gap: Pick<ActivityGap, 'kind' | 'subject' | 'detail'>): string {
+  const key = GAP_LINES[gap.kind]
+  const needsSubject = !NO_SUBJECT_GAPS.includes(gap.kind)
+  if (!key || (needsSubject && !gap.subject)) return gap.detail
+  const subject = gap.subject ?? ''
+  return t(key, { note: subject, subject })
 }
 
 /**
@@ -132,9 +139,14 @@ export function reviewSummary(counts: Partial<Record<ReviewState, number>>): str
   return parts.length > 0 ? parts.join(', ') : 'no reviews recorded'
 }
 
-/** The freshest source times, labelled, for the "as of" line. Sources with nothing are named, not dated. */
-export function freshnessLines(freshness: Record<string, string | null>, nowMs: number = Date.now()): string[] {
-  return Object.entries(freshness).map(([source, at]) => `${source}: ${at ? ageLabel(at, nowMs) : 'nothing yet'}`)
+/** The closing line: when anything last happened, and that a note edit is not progress. */
+export function lastActivityLine(freshness: Record<string, string | null>, nowMs: number = Date.now()): string {
+  const newest = Object.values(freshness)
+    .filter((at): at is string => !!at)
+    .map((at) => ({ at, ms: parseStamp(at).getTime() }))
+    .filter((x) => !Number.isNaN(x.ms))
+    .sort((x, y) => y.ms - x.ms)[0]
+  return newest ? t('act_last', { ago: ageLabel(newest.at, nowMs) }) : t('act_quiet')
 }
 
 /** Whether an initiative has anything the briefing can say beyond its task list. */

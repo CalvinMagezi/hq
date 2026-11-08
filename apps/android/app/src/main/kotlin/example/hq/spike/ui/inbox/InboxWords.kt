@@ -12,7 +12,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
-enum class CardKind { HelperAsks, TaskReview, Approval, HelperStuck, Update }
+enum class CardKind { HelperAsks, TaskReview, Approval, HelperStuck, Update, SignIn }
 
 enum class CardIcon { Sparkle, Info, Pause, Check, Task, Warning }
 
@@ -49,6 +49,9 @@ data class InboxCard(
     val quote: String? = null,
     /** The chat an approval came from, so Keep going can answer in it. */
     val threadId: String? = null,
+    /** For a new sign-in: the device that signed in, and its name when HQ's device list has it. */
+    val signInDevice: String? = null,
+    val deviceLabel: String? = null,
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
@@ -64,6 +67,8 @@ object InboxWords {
         val helper = HELPER_TITLE.matchEntire(item.title.trim())
         val session = SESSION.find(item.description)
         return when {
+            // A new sign-in is answered It was me or Sign it out, never Allow: its words come from the catalogue on screen.
+            item.signInDevice != null -> InboxCard(item.id, CardKind.SignIn, Plain.strip(item.title.trim()), "", "", item.createdAt, CardIcon.Info, null, false, "", item.link, askedBy(item, null), item.state, signInDevice = item.signInDevice)
             helper != null -> helperCard(item, helper.groupValues[1], helper.groupValues[2], session?.groupValues?.get(1), session?.groupValues?.get(2))
             item.kind == "action_needed" && item.sourceTask == TASK_REVIEW_SOURCE -> {
                 // Saying yes here only clears the notice, so it is not offered as "Allow": the owner is asked to look at the task.

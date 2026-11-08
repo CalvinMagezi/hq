@@ -19,6 +19,8 @@ object NoticeWords {
     fun general(c: Context, card: InboxCard): Words = when {
         card.kind == CardKind.Update -> Words(c.getString(R.string.notice_update_title), c.getString(R.string.notice_update_body))
         card.kind == CardKind.HelperStuck -> Words(c.getString(R.string.notice_helper_stuck_title), c.getString(R.string.notice_stuck_body))
+        // A new sign-in is never a task needing an OK, and it is answered in the app, not from the shade.
+        card.kind == CardKind.SignIn -> Words(c.getString(R.string.new_signin_title), c.getString(R.string.new_signin_advice))
         ServerHq.isServer(card.id) -> Words(c.getString(R.string.notice_server_ok_title), c.getString(R.string.notice_open_to_see_body))
         card.kind == CardKind.HelperAsks -> Words(c.getString(R.string.notice_helper_ok_title, helper(card)), c.getString(R.string.notice_open_to_see_body))
         else -> Words(c.getString(R.string.notice_task_ok_title), c.getString(R.string.notice_open_to_see_body))

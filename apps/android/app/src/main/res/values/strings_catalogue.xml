@@ -1458,6 +1458,11 @@
     <string name="dev_shared_title">Shared with paired devices</string>
     <string name="dev_shared_helpers">Helpers on this computer</string>
     <string name="dev_shared_helpers_note">Your phone\'s HQ can start helpers here</string>
+    <string name="dev_shared_model">This computer\'s model</string>
+    <string name="dev_shared_model_note">Your phone\'s HQ can think with it while this computer is on</string>
+    <string name="dev_shared_web_here">This computer\'s HQ</string>
+    <string name="dev_shared_web_here_note">Paired devices can open HQ on this computer</string>
+    <string name="dev_shared_custom_note">Set in config.yaml</string>
     <string name="dev_shared_tag">Shared</string>
     <string name="dev_shared_web">Your phone\'s web pages</string>
     <string name="dev_shared_web_note">HQ Hub opened this. The HQ window uses it.</string>
@@ -3539,4 +3544,20 @@
     <string name="tasks_lists_title">Lists</string>
     <string name="tasks_all_tasks">All tasks</string>
     <string name="tasks_new_list">New list</string>
+    <string name="act_none">Nothing recorded on this task yet.</string>
+    <string name="act_unattributed_only">Notes are linked to this task, but none says who wrote it. HQ does not guess.</string>
+    <string name="act_worth_a_look">Worth a look (%1$s)</string>
+    <string name="act_gap_note_unattributed">Nobody is on record as writing %1$s.</string>
+    <string name="act_gap_note_changed_outside_tools">%1$s was changed outside HQ, so who wrote it is not known.</string>
+    <string name="act_gap_note_missing">%1$s is linked here, but the file is gone.</string>
+    <string name="act_gap_note_without_session">%1$s has no helper on record as writing it.</string>
+    <string name="act_gap_note_from_another_task">%1$s was written while working on another task.</string>
+    <string name="act_gap_session_not_registered">A helper linked here is not one HQ knows: %1$s.</string>
+    <string name="act_gap_in_progress_without_a_holder">It says In progress, but no helper is working on it.</string>
+    <string name="act_gap_notes_not_listed">More notes are linked than are shown here.</string>
+    <string name="act_last">Last activity %1$s. Editing a note is not progress: the status comes from the task.</string>
+    <string name="act_quiet">Editing a note is not progress: the status comes from the task.</string>
+    <string name="act_held_by">Working on it</string>
+    <string name="act_holder_last">last checked in %1$s</string>
+    <string name="act_session_unknown">%1$s: not a helper HQ knows</string>
 </resources>
