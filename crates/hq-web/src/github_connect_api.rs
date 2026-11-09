@@ -4,17 +4,22 @@
 
 use std::sync::Arc;
 
-use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::{HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use hq_core::config::HqConfig;
 use hq_tools::github::app::{
-    AppClient, Flows, INSTALLED_PATH, PAGE_HEADERS, Page, RETURN_PATH, START_PATH, message_page,
-    start_page,
+    AppClient, Flows, INSTALLED_PATH, PAGE_HEADERS, Page, RETURN_PATH, START_PATH, Standing,
+    TokenRefused, message_page, standing, start_page,
 };
 use serde::Deserialize;
+use serde_json::{Value, json};
 use tokio::sync::Notify;
+
+use crate::WsState;
+use crate::error::ApiError;
 
 /// One server's connection attempts and the address GitHub sends the browser back to.
 pub struct BrowserFlow {
@@ -110,6 +115,115 @@ async fn installed(State(flow): State<Arc<BrowserFlow>>) -> Response {
             "You can close this page and go back to HQ.",
         ),
     )
+}
+
+/// The flow for this server, or `None` when no HTTP client could be built. The address is
+/// always loopback: on a phone that is HQ's own server, reached by the browser beside it.
+pub(crate) fn flow_for(state: &WsState) -> Option<Arc<BrowserFlow>> {
+    let port = state
+        .hq_config
+        .as_deref()
+        .map_or_else(|| HqConfig::default().ws_port, |c| c.ws_port);
+    let client = AppClient::standard().ok()?;
+    Some(Arc::new(BrowserFlow::new(
+        client,
+        format!("http://127.0.0.1:{port}"),
+    )))
+}
+
+/// Behind the web credential, which is the owner's: `/mcp` and its keys never reach these.
+pub(crate) fn owner_routes<S>(flow: Arc<BrowserFlow>) -> Router<S> {
+    Router::new()
+        .route("/api/github", get(status))
+        .route("/api/github/connect", post(connect))
+        .route("/api/github/disconnect", post(disconnect))
+        .route("/api/github/repos/scan", post(scan))
+        .route("/api/github/repos/confirm", post(confirm))
+        .with_state(flow)
+}
+
+fn not_a_refusal(error: anyhow::Error) -> Result<(), ApiError> {
+    if error.downcast_ref::<TokenRefused>().is_some() {
+        return Ok(());
+    }
+    Err(ApiError::internal(format!("GitHub check failed: {error}")))
+}
+
+/// Where the connection stands. Finds the installation after the person pressed Install, and
+/// reads the repositories the first time there are any, so the phone only has to ask.
+async fn status(State(flow): State<Arc<BrowserFlow>>) -> Result<Json<Value>, ApiError> {
+    let client = &flow.client;
+    let waiting = client
+        .store()
+        .load()
+        .is_some_and(|r| r.installation_id.is_none() && !r.needs_reconnect);
+    if waiting && let Err(e) = client.refresh_installation().await {
+        not_a_refusal(e)?;
+    }
+    let installed = standing(client.store().load().as_ref()) == Standing::Connected;
+    if installed
+        && client.repositories().is_empty()
+        && let Err(e) = client.scan_repositories().await
+    {
+        not_a_refusal(e)?;
+    }
+    Ok(Json(status_body(client)))
+}
+
+fn status_body(client: &AppClient) -> Value {
+    let record = client.store().load();
+    json!({
+        "standing": standing(record.as_ref()),
+        "owner": record.as_ref().map(|r| r.owner_login.clone()),
+        "slug": record.as_ref().map(|r| r.slug.clone()),
+        "repository_selection": record.as_ref().and_then(|r| r.repository_selection.clone()),
+        "install_url": record.as_ref().map(|r| r.install_url()),
+        "settings_url": record.as_ref().map(|r| r.settings_url()),
+        "repos": repo_rows(client),
+    })
+}
+
+fn repo_rows(client: &AppClient) -> Vec<Value> {
+    client
+        .repositories()
+        .iter()
+        .map(|r| json!({"flagged": r.flagged(), "picked": r.picked(), "report": r}))
+        .collect()
+}
+
+async fn connect(State(flow): State<Arc<BrowserFlow>>) -> Json<Value> {
+    Json(json!({"url": flow.begin()}))
+}
+
+async fn disconnect(State(flow): State<Arc<BrowserFlow>>) -> Result<Json<Value>, ApiError> {
+    let settings_url = flow
+        .client
+        .disconnect()
+        .map_err(|e| ApiError::internal(format!("could not remove the key: {e}")))?;
+    Ok(Json(json!({"settings_url": settings_url})))
+}
+
+async fn scan(State(flow): State<Arc<BrowserFlow>>) -> Result<Json<Value>, ApiError> {
+    if let Err(e) = flow.client.scan_repositories().await {
+        not_a_refusal(e)?;
+    }
+    Ok(Json(status_body(&flow.client)))
+}
+
+#[derive(Deserialize)]
+struct ConfirmBody {
+    repo: String,
+}
+
+async fn confirm(
+    State(flow): State<Arc<BrowserFlow>>,
+    Json(body): Json<ConfirmBody>,
+) -> Result<Json<Value>, ApiError> {
+    let known = flow
+        .client
+        .confirm_repository(&body.repo)
+        .map_err(|e| ApiError::internal(format!("could not save that: {e}")))?;
+    Ok(Json(json!({"confirmed": known})))
 }
 
 #[cfg(test)]

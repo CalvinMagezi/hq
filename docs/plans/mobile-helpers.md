@@ -150,6 +150,13 @@ Deviations from the plan above, decided while building G1:
 - **On a server, `hq github connect` needs an SSH port forward.** The start page is on the server's
   loopback too, so a printed link alone cannot reach it. With the forward the return works as on a
   laptop; pasting the return address remains for a browser that refuses the redirect.
+- **One token is not tied to a repository:** listing what the person picked needs a token before
+  HQ knows the names. It carries `metadata: read` only, so it can read names and nothing else.
+  Every other token covers one repository.
+- **A repository HQ could not fully read counts as flagged,** and one added on GitHub after the
+  last scan is read before any work starts on it. A confirmation lapses if a new secret or preview
+  host appears. With "All repositories" chosen, this is what keeps a new repository from being
+  worked on unseen.
 - **`hq github` is not part of Lite,** which reaches no other service. On Windows the key is never
   written, because there are no owner-only file modes to protect it; WSL2 works.
 

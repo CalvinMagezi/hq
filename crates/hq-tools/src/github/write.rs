@@ -113,6 +113,7 @@ impl HqTool for GithubWriteTool {
         let Some(record) = record else {
             return self.run(request, env_token()?).await;
         };
+        app.ensure_picked(&request.repo).await?;
         let token = app.token(&request.repo, Step::Publish).await?;
         request.author = Some(record.author());
         self.run(request, token.secret().to_string()).await

@@ -292,7 +292,11 @@ impl Store {
         std::fs::read_to_string(self.root.join(KEY_FILE)).context("the GitHub App key is missing")
     }
 
-    fn write_private(&self, name: &str, bytes: &[u8]) -> Result<()> {
+    pub(super) fn read_file(&self, name: &str) -> Option<Vec<u8>> {
+        std::fs::read(self.root.join(name)).ok()
+    }
+
+    pub(super) fn write_private(&self, name: &str, bytes: &[u8]) -> Result<()> {
         let tmp = self
             .root
             .join(format!("{name}.{}.tmp", random_hex(STATE_BYTES)));
@@ -313,7 +317,7 @@ impl Store {
 
     /// Removes the key first: a record without a key is only a stale label.
     pub fn delete(&self) -> Result<()> {
-        for name in [KEY_FILE, RECORD_FILE] {
+        for name in [KEY_FILE, RECORD_FILE, super::repos::SCAN_FILE] {
             match std::fs::remove_file(self.root.join(name)) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
                 _ => {}
@@ -438,6 +442,8 @@ pub enum TokenRefused {
     NotInstalled,
     #[error("HQ's GitHub App does not cover {0}")]
     NotCovered(String),
+    #[error("{0} may expose secrets to a pull request. Confirm it in Connect GitHub first")]
+    NeedsConfirmation(String),
 }
 
 /// GitHub's App API, with the App key. Sends only to the base it was built with, and follows no
@@ -598,16 +604,37 @@ impl AppClient {
     /// A token for one repository and one step, valid for an hour. `Ok` values never leave
     /// memory: callers send them only to GitHub.
     pub async fn token(&self, repo: &str, step: Step) -> Result<AppToken> {
-        let mut record = self.connected()?;
-        if record.installation_id.is_none() {
-            record = self.refresh_installation().await?;
-        }
-        let id = record.installation_id.ok_or(TokenRefused::NotInstalled)?;
+        let record = self.installed().await?;
         let (owner, name) = repo.split_once('/').context("expected owner/name")?;
         if !owner.eq_ignore_ascii_case(&record.owner_login) {
             return Err(TokenRefused::NotCovered(repo.to_string()).into());
         }
         let body = json!({"repositories": [name], "permissions": step.permissions()});
+        self.mint(record, body, repo).await
+    }
+
+    /// The one token not tied to a repository, because the list of them is what it fetches. It
+    /// can read names and nothing else.
+    pub(super) async fn listing_token(&self) -> Result<AppToken> {
+        let record = self.installed().await?;
+        let body = json!({"permissions": {"metadata": "read"}});
+        self.mint(record, body, "the installation").await
+    }
+
+    async fn installed(&self) -> Result<AppRecord> {
+        let record = self.connected()?;
+        match record.installation_id {
+            Some(_) => Ok(record),
+            None => self.refresh_installation().await,
+        }
+    }
+
+    pub(super) fn http(&self) -> (&reqwest::Client, &str) {
+        (&self.client, &self.base)
+    }
+
+    async fn mint(&self, mut record: AppRecord, body: Value, target: &str) -> Result<AppToken> {
+        let id = record.installation_id.ok_or(TokenRefused::NotInstalled)?;
         let path = format!("app/installations/{id}/access_tokens");
         let (status, value) = self.as_app(Method::POST, &path, Some(body)).await?;
         match status {
@@ -621,7 +648,7 @@ impl AppClient {
                 self.store.save_record(&record)?;
                 Err(TokenRefused::NotInstalled.into())
             }
-            422 => Err(TokenRefused::NotCovered(repo.to_string()).into()),
+            422 => Err(TokenRefused::NotCovered(target.to_string()).into()),
             other => bail!("GitHub would not give a token ({other})"),
         }
     }

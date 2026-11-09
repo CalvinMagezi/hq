@@ -449,6 +449,14 @@ const APP_TOKEN: &str = "ghs_test_installation_token";
 
 fn connect_app(f: &Fixture, needs_reconnect: bool) {
     let store = Store::at(f.root.path().join("records"));
+    let scanned = json!([{"repo": REPO, "private": true, "default_branch": "main",
+        "protected": false, "has_ci": true, "secrets": [], "previews": [], "unchecked": false}]);
+    store
+        .write_private(
+            crate::github::repos::SCAN_FILE,
+            scanned.to_string().as_bytes(),
+        )
+        .unwrap();
     store
         .save_key(include_str!("testdata/test_app_key.pem"))
         .unwrap();

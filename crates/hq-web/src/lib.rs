@@ -713,6 +713,12 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         // OAuth clients probe here after a 401; a disabled connector must not answer with the shell.
         .route("/.well-known/{*rest}", axum::routing::any(not_found_json))
         .route("/mcp", axum::routing::post(mcp_http::mcp_handler));
+    let router = match github_connect_api::flow_for(&state) {
+        Some(flow) => router
+            .merge(github_connect_api::browser_routes(flow.clone()))
+            .merge(github_connect_api::owner_routes(flow)),
+        None => router,
+    };
 
     let app = router
         // Hashed build chunks: a missing one must 404, not come back as the HTML shell.
