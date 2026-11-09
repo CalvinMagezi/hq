@@ -579,8 +579,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** Makes a new note and returns its vault path; the title only names the file. */
-    suspend fun createNote(folder: String, title: String, content: String, clientId: String? = null): String =
-        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).apply { clientId?.let { put("client_id", it) } }.toString().toRequestBody("application/json".toMediaType())).build()) {
+    suspend fun createNote(folder: String, title: String, content: String, clientId: String? = null, enrichUrl: String? = null): String =
+        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).apply { clientId?.let { put("client_id", it) }; enrichUrl?.let { put("enrich_url", it) } }.toString().toRequestBody("application/json".toMediaType())).build()) {
             JSONObject(it).getString("path")
         }
 

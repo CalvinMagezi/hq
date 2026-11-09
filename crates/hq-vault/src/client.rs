@@ -122,6 +122,17 @@ impl VaultClient {
         crate::reorg::restore_note(&self.vault_path, trash_rel)
     }
 
+    /// Set frontmatter keys and put `prefix` above the body of `raw`, in one atomic write.
+    pub fn prepend_to_note(
+        &self,
+        rel_path: &str,
+        raw: &str,
+        set: HashMap<String, serde_yaml::Value>,
+        prefix: &str,
+    ) -> Result<()> {
+        crate::reorg::prepend_to_note(&self.vault_path, rel_path, raw, set, prefix)
+    }
+
     /// Set and/or remove frontmatter keys on a note, preserving the body.
     pub fn update_frontmatter(
         &self,

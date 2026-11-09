@@ -46,7 +46,7 @@ data class ServerFacts(val address: String? = null, val signedOut: Boolean = fal
 internal const val SERVER_BUSY = "server-hq"
 
 /** What Capture and the widgets are set to, and what is saved on the phone but not yet sent. */
-data class CaptureFacts(val shareOpens: String = "note", val showTitles: Boolean = false, val waiting: List<example.hq.spike.capture.Queued> = emptyList())
+data class CaptureFacts(val shareOpens: String = "note", val showTitles: Boolean = false, val waiting: List<example.hq.spike.capture.Queued> = emptyList(), val smartLinks: Boolean = true)
 
 /** The phone pages under Settings (Keep running, Notifications): only what Android can say, and where it cannot, saying so. */
 object PhoneWords {

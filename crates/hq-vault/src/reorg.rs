@@ -385,6 +385,23 @@ pub(crate) fn restore_note(vault_path: &Path, trash_rel: &str) -> Result<Restore
     })
 }
 
+/// Set frontmatter keys and put `prefix` above the body of `raw`, in one atomic write, so a
+/// failure leaves the note as it was.
+pub(crate) fn prepend_to_note(
+    vault_path: &Path,
+    rel: &str,
+    raw: &str,
+    set: HashMap<String, serde_yaml::Value>,
+    prefix: &str,
+) -> Result<()> {
+    let rel = &guard_rel_path(rel)?;
+    require_md(rel)?;
+    let (mut fm, body) = crate::frontmatter::parse(raw)?;
+    fm.extend(set);
+    let out = crate::frontmatter::serialize(&fm, &format!("{prefix}{body}"))?;
+    crate::notes::write_atomic(&vault_path.join(rel), out.as_bytes())
+}
+
 /// Set and/or remove frontmatter keys on a note, preserving the body.
 pub(crate) fn update_frontmatter(
     vault_path: &Path,
@@ -672,6 +689,22 @@ mod tests {
         .unwrap();
         assert!(read_trashed(tmp.path(), &planted).is_err());
         assert!(restore_note(tmp.path(), &planted).is_err());
+    }
+
+    #[test]
+    fn prepend_writes_body_and_keys_together_and_refuses_protected_folders() {
+        let tmp = setup();
+        write(tmp.path(), "Notebooks/n.md", "---\nkept: 1\n---\nbody");
+        let raw = std::fs::read_to_string(tmp.path().join("Notebooks/n.md")).unwrap();
+        let set = HashMap::from([("source_url".to_string(), "https://example.com".into())]);
+        prepend_to_note(tmp.path(), "Notebooks/n.md", &raw, set.clone(), "top\n\n").unwrap();
+        let out = std::fs::read_to_string(tmp.path().join("Notebooks/n.md")).unwrap();
+        assert!(
+            out.contains("kept: 1") && out.contains("source_url"),
+            "{out}"
+        );
+        assert!(out.contains("top\n\nbody"), "{out}");
+        assert!(prepend_to_note(tmp.path(), "skills/x.md", "", set, "t").is_err());
     }
 
     #[test]

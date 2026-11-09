@@ -177,6 +177,7 @@ class SettingsActions(
     val onKeyClose: () -> Unit = {},
     val onKeySave: (String) -> Unit = {},
     val onShowTitles: (Boolean) -> Unit = {},
+    val onSmartLinks: (Boolean) -> Unit = {},
     val onAddWidget: (Int) -> Unit = {},
     val onSendNow: (String) -> Unit = {},
     val onDiscard: (String) -> Unit = {},
@@ -246,6 +247,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onKeySave = ::saveKey,
         onShareOpens = { v -> CapturePrefs.setShareOpens(ctx(), v); _state.update { it.copy(capture = it.capture.copy(shareOpens = v)) } },
         onShowTitles = { on -> CapturePrefs.setShowTitles(ctx(), on); Widgets.renderAll(ctx()); _state.update { it.copy(capture = it.capture.copy(showTitles = on)) } },
+        onSmartLinks = { on -> CapturePrefs.setSmartLinks(ctx(), on); _state.update { it.copy(capture = it.capture.copy(smartLinks = on)) } },
         onAddWidget = ::addWidget, onSendNow = ::sendNow, onDiscard = ::discard,
         onDetails = { on -> AlertPoster.setShowDetails(ctx(), on); _state.update { it.copy(notif = it.notif.copy(showDetails = on)) } },
         onUpgraderNoteSeen = { AlertPoster.clearUpgraderNote(ctx()) },
@@ -704,7 +706,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(line = ctx().getString(R.string.copy_details_copied)) }
     }
 
-    private fun captureFacts() = CaptureFacts(CapturePrefs.shareOpens(ctx()), CapturePrefs.showTitles(ctx()), Outbox.of(ctx()).all())
+    private fun captureFacts() = CaptureFacts(CapturePrefs.shareOpens(ctx()), CapturePrefs.showTitles(ctx()), Outbox.of(ctx()).all(), CapturePrefs.smartLinks(ctx()))
 
     private val widgetKinds = listOf<Class<*>>(CaptureWidget::class.java, NeedsYouWidget::class.java, TasksWidget::class.java)
 

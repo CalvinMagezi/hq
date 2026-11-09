@@ -246,6 +246,19 @@ pub async fn web_fetch(url: &str, max_chars: usize) -> Result<FetchedPage> {
     Ok(page.truncate_to(max_chars))
 }
 
+/// Like [`web_fetch`], but never through the third-party render fallback: a link the owner shared
+/// from another app can be private, and it should go nowhere but the site it names.
+pub async fn web_fetch_direct(url: &str, max_chars: usize) -> Result<FetchedPage> {
+    let url = upgrade_url(url);
+    validate_url(&url)?;
+    let fetcher = Fetcher {
+        client: &FETCH_CLIENT,
+        timeout: FETCH_TIMEOUT,
+        jina_base: "",
+    };
+    Ok(fetcher.fetch(&url).await?.truncate_to(max_chars))
+}
+
 /// Where an uncached fetch goes. Tests point it at local servers.
 pub(super) struct Fetcher<'a> {
     pub(super) client: &'a Client,
