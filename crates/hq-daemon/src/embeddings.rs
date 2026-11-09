@@ -578,6 +578,12 @@ mod tests {
         assert!(rig.vector("Notebooks/b.md").is_some());
     }
 
+    #[test]
+    fn by_default_a_configured_provider_key_does_not_send_notes_to_that_provider() {
+        let (_, model) = embedder_for(EmbeddingProvider::default(), Some("key"));
+        assert_eq!(model, hq_memory::LOCAL_EMBEDDING_MODEL);
+    }
+
     #[tokio::test]
     async fn the_wrapper_reports_how_many_notes_it_embedded() {
         // process_embeddings is the scheduled task's entry point; with nothing pending it must

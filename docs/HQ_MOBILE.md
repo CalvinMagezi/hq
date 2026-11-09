@@ -15,7 +15,7 @@ for people who pay for every megabyte. An Android build runs as this profile by 
 | Agent shell inside an OS sandbox | yes | no | no (a phone has no sandbox backend, so the shell is refused) |
 | Git tools, the binary self-updater | yes | no | no |
 | Starts only with the egress it lists | no | yes | no |
-| Embeds note text for semantic search | yes | no | only with the data saver off |
+| Embeds note text for semantic search | yes | no | yes, on the device (with `remote`, only with the data saver off) |
 
 Lite stays the edition for a machine you do not control. Mobile does not make Lite's promise of
 no outbound traffic: a phone instance is allowed to talk to its model provider and its relays.
@@ -41,13 +41,15 @@ Full cannot be chosen on an Android build: a config left at `profile: full` runs
 
 With `data_saver: true`:
 
-- No note text is sent to an embedding provider. The keyword (full-text) index still follows every
-  edit, so search keeps working.
-- The scheduler skips `memory-consolidation`, `inbox-triage` and `email-poll`, the timers that
-  call a model or a mail API without being asked.
+- No note text is sent to an embedding provider. With the default local embedder, notes are still
+  embedded on the phone: the only data it uses is one model download of about 31 MB. With
+  `daemon.embedding_provider: remote`, notes are not embedded and only the keyword (full-text)
+  index follows each edit.
+- The scheduler skips `memory-consolidation` and `email-poll`, the timers that call a model or a
+  mail API without being asked. It skips `inbox-triage` too under `remote`; with the local embedder
+  that task asks no model and keeps running.
 
-Turn it off (`data_saver: false`) on Wi-Fi or an unmetered plan to get semantic search and those
-timers back. A phone app that knows the connection type can set `HQ_MOBILE__DATA_SAVER` before it
+Turn it off (`data_saver: false`) on Wi-Fi or an unmetered plan to get those timers back. A phone app that knows the connection type can set `HQ_MOBILE__DATA_SAVER` before it
 starts HQ.
 
 ## What Mobile removes from Full

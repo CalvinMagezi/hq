@@ -113,6 +113,12 @@ impl HqConfig {
             Profile::Full => true,
         }
     }
+
+    /// Whether this instance embeds with the on-device model. Search and folds ask here, so an
+    /// instance that embeds nothing, such as Lite, never fetches that model for a query.
+    pub fn embeds_locally(&self) -> bool {
+        self.daemon.embedding_provider == super::EmbeddingProvider::Local && self.embeds_notes()
+    }
 }
 
 /// Settings that only apply under `profile: lite`.
@@ -867,10 +873,14 @@ mod tests {
 
     #[test]
     fn note_text_is_embedded_only_when_nothing_asks_to_keep_it_local() {
-        let with = |profile: Profile, data_saver: bool| HqConfig {
-            profile,
-            mobile: MobileConfig { data_saver },
-            ..HqConfig::default()
+        let with = |profile: Profile, data_saver: bool| {
+            let mut config = HqConfig {
+                profile,
+                mobile: MobileConfig { data_saver },
+                ..HqConfig::default()
+            };
+            config.daemon.embedding_provider = super::super::EmbeddingProvider::Remote;
+            config
         };
         assert!(with(Profile::Full, true).embeds_notes());
         assert!(with(Profile::Full, false).embeds_notes());
@@ -888,6 +898,41 @@ mod tests {
         let mut lite_local = with(Profile::Lite, false);
         lite_local.daemon.embedding_provider = super::super::EmbeddingProvider::Local;
         assert!(!lite_local.embeds_notes());
+    }
+
+    #[test]
+    fn note_text_stays_on_the_device_unless_the_owner_asks_otherwise() {
+        use super::super::{DaemonConfig, EmbeddingProvider};
+
+        let unset: DaemonConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(unset.embedding_provider, EmbeddingProvider::Local);
+        assert_eq!(
+            HqConfig::default().daemon.embedding_provider,
+            EmbeddingProvider::Local
+        );
+
+        let asked: DaemonConfig =
+            serde_json::from_str(r#"{"embedding_provider": "remote"}"#).unwrap();
+        assert_eq!(asked.embedding_provider, EmbeddingProvider::Remote);
+
+        let phone = HqConfig {
+            profile: Profile::Mobile,
+            ..HqConfig::default()
+        };
+        assert!(phone.mobile.data_saver && phone.embeds_locally());
+    }
+
+    #[test]
+    fn an_instance_that_embeds_nothing_never_needs_the_local_model() {
+        let lite = HqConfig {
+            profile: Profile::Lite,
+            ..HqConfig::default()
+        };
+        assert!(!lite.embeds_locally());
+
+        let mut remote = HqConfig::default();
+        remote.daemon.embedding_provider = super::super::EmbeddingProvider::Remote;
+        assert!(!remote.embeds_locally());
     }
 
     #[test]

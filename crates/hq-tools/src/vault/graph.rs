@@ -57,11 +57,11 @@ impl VaultSearchTool {
     }
 }
 
-/// The on-device embedder when the owner chose local embeddings. A remote one is never used for
+/// The on-device embedder when this instance embeds locally. A remote one is never used for
 /// queries: it would turn every search into a paid network call.
 pub fn configured_query_embedder() -> Option<(QueryEmbedder, String)> {
     let config = hq_core::config::HqConfig::load().ok()?;
-    if config.daemon.embedding_provider != hq_core::config::EmbeddingProvider::Local {
+    if !config.embeds_locally() {
         return None;
     }
     let embedder: QueryEmbedder =
