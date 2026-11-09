@@ -353,6 +353,7 @@ pub(super) fn task_schema() -> Value {
             "items": { "type": "string" },
             "description": "Files this task will edit. If non-empty and `backend` names a known leaf/text-only harness (e.g. groq, cerebras), dispatch is rejected up front with a clear error instead of silently returning an unapplied diff."
         },
+        "allowed_paths": { "type": "array", "items": { "type": "string" }, "description": "Absolute folders this child may touch, narrowing what you may touch yourself. Enforced on its file tools, unlike an instruction in the goal." },
         "success_criteria": { "type": "array", "items": { "type": "string" }, "description": "What must be true for the deliverable to count as done. Recorded with the run; a clean exit is still reported as unverified until you review it." },
         "required_tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names the child must have. If it will not have one, the child is blocked before it starts instead of reporting success without the deliverable." },
         "task_id": { "type": "string", "description": "HQ task this child's work belongs to, recorded on its run." },
@@ -363,6 +364,30 @@ pub(super) fn task_schema() -> Value {
             "description": "Vault context this child needs, retrieved when it starts and handed over as a bounded, source-linked packet. The child sees nothing else from the vault or from this conversation. Keys: why, refs (note paths), queries, graph_seeds, source_prefixes, time_sensitive, max_age_days, budget_chars, max_sources, task_id (build the need from that HQ task: its record, the notes it links and the notes written under it). The child is told to cite sources as [S1] and end with Sources used and Gaps lists, and its citations are checked."
         }
     })
+}
+
+/// The model writes these. An empty list means "unrestricted" to the guardian, and `..` passes
+/// the service's prefix check, so both are refused here.
+fn parse_allowed_paths(value: &Value, index: usize) -> Result<Vec<std::path::PathBuf>> {
+    let items = value
+        .as_array()
+        .filter(|items| !items.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("task {index}: allowed_paths must list at least one folder")
+        })?;
+    items
+        .iter()
+        .map(|item| {
+            let path = std::path::PathBuf::from(item.as_str().unwrap_or_default());
+            let climbs = path
+                .components()
+                .any(|part| part == std::path::Component::ParentDir);
+            if !path.is_absolute() || climbs {
+                anyhow::bail!("task {index}: allowed_paths must be absolute, with no '..'");
+            }
+            Ok(path)
+        })
+        .collect()
 }
 
 /// Parse a JSON task object into a [`ChildRequest`], tolerating both the new
@@ -435,6 +460,9 @@ pub(super) fn parse_child_request(value: &Value, index: usize) -> Result<ChildRe
                 .collect()
         })
         .unwrap_or_default();
+    if let Some(paths) = value.get("allowed_paths") {
+        req.allowed_paths = Some(parse_allowed_paths(paths, index)?);
+    }
     req.success_criteria = value
         .get("success_criteria")
         .and_then(|v| v.as_array())
@@ -655,6 +683,30 @@ impl std::fmt::Display for ChildRunSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_child_can_be_confined_to_a_folder() {
+        let value = json!({"goal": "edit", "allowed_paths": ["/tmp/clones/o/r"]});
+        let req = parse_child_request(&value, 0).unwrap();
+        assert_eq!(
+            req.allowed_paths,
+            Some(vec![std::path::PathBuf::from("/tmp/clones/o/r")])
+        );
+    }
+
+    #[test]
+    fn paths_that_would_widen_a_child_are_refused() {
+        for bad in [
+            json!([]),
+            json!(["relative/dir"]),
+            json!(["/tmp/a/../../etc"]),
+            json!([7]),
+            json!("/tmp"),
+        ] {
+            let value = json!({"goal": "edit", "allowed_paths": bad});
+            assert!(parse_child_request(&value, 0).is_err(), "{value}");
+        }
+    }
 
     /// FR-056: `spawn_subagents`'s schema no longer advertises `max_turns`,
     /// and even if a caller sends it anyway, `parse_child_request` has no
