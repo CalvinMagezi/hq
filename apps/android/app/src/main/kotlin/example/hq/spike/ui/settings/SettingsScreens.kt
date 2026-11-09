@@ -1069,6 +1069,15 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
                 }
             }
         }
+        Group {
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_summarize_links), style = HqType.BodyBold, color = Mts.Ink)
+                    Text(stringResource(R.string.settings_summarize_links_note), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                Switch(checked = c.smartLinks, onCheckedChange = actions.onSmartLinks, colors = SwitchDefaults.colors(checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen))
+            }
+        }
         Label(stringResource(R.string.settings_label_widgets))
         Group {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

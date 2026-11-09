@@ -32,6 +32,7 @@ pub mod harness_session;
 pub mod harness_usage;
 pub mod harness_usage_collect;
 pub mod imagegen;
+pub mod link_capture;
 pub mod model_control;
 pub mod notify;
 pub mod prose_lint;

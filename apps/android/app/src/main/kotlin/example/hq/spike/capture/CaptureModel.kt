@@ -13,6 +13,7 @@ object CapturePrefs {
     private const val SHARE_OPENS = "share_opens"
     private const val LAST_MODE = "last_mode"
     private const val SHOW_TITLES = "show_titles"
+    private const val SMART_LINKS = "smart_links"
     const val LAST = "last"
 
     private fun prefs(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -24,6 +25,9 @@ object CapturePrefs {
     fun lastMode(c: Context): CaptureMode = modeOf(prefs(c).getString(LAST_MODE, null)) ?: CaptureMode.Note
     fun showTitles(c: Context): Boolean = prefs(c).getBoolean(SHOW_TITLES, false)
     fun setShowTitles(c: Context, on: Boolean) { prefs(c).edit().putBoolean(SHOW_TITLES, on).apply() }
+    /** Whether a link shared into a note is read and summarised. The page text goes to the owner's AI provider. */
+    fun smartLinks(c: Context): Boolean = prefs(c).getBoolean(SMART_LINKS, true)
+    fun setSmartLinks(c: Context, on: Boolean) { prefs(c).edit().putBoolean(SMART_LINKS, on).apply() }
 
     fun modeOf(name: String?): CaptureMode? = CaptureMode.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }
 
@@ -85,5 +89,6 @@ object CaptureWords {
         return b
     }
 
-    fun noteBody(folder: String, title: String, body: String): JSONObject = JSONObject().put("folder", folder).put("title", noteTitle(title, body)).put("content", body)
+    fun noteBody(folder: String, title: String, body: String, enrichUrl: String? = null): JSONObject =
+        JSONObject().put("folder", folder).put("title", noteTitle(title, body)).put("content", body).apply { enrichUrl?.let { put("enrich_url", it) } }
 }

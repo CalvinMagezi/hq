@@ -597,6 +597,8 @@
     <string name="settings_add">Add</string>
     <string name="settings_off_the_widget_shows">Off: the widget shows a count only. Titles can be read on a locked screen.</string>
     <string name="settings_show_titles_in_needs">Show titles in Needs you</string>
+    <string name="settings_summarize_links">Summarize links you share</string>
+    <string name="settings_summarize_links_note">HQ reads the page and adds a short summary and proposed tags to the note. The page text goes to your AI provider.</string>
     <string name="settings_where_do_i_find">Where do I find my key\?</string>
     <string name="settings_your_key">Your key</string>
     <string name="settings_if_your_hq_runs">If your HQ runs on a server, sign this phone in to it. Its questions then arrive here with the same buttons. Get a one-time code from Settings, Devices on that HQ.</string>

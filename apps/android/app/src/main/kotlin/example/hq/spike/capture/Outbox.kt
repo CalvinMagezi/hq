@@ -103,7 +103,7 @@ object OutboxSender {
 
     /** The send for an item already claimed with [hold]; the claim ends with it. */
     suspend fun sendHeld(client: HqClient, q: Queued): Sent = try {
-        if (q.isNote) Sent.Done(client.createNote(q.payload.getString("folder"), q.payload.getString("title"), q.payload.optString("content"), clientId = q.id))
+        if (q.isNote) Sent.Done(client.createNote(q.payload.getString("folder"), q.payload.getString("title"), q.payload.optString("content"), clientId = q.id, enrichUrl = q.payload.optString("enrich_url").ifEmpty { null }))
         else { client.createTask(JSONObject(q.payload.toString()).put("client_id", q.id)); Sent.Done(null) }
     } catch (e: HqUnavailable) {
         when {

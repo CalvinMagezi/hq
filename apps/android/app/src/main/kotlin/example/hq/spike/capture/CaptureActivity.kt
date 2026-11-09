@@ -105,7 +105,8 @@ class CaptureActivity : ComponentActivity() {
         }
         val id = "capture-" + UUID.randomUUID()
         val q = if (draft.mode == CaptureMode.Note) {
-            val body = CaptureWords.noteBody(draft.folder, draft.title, draft.body)
+            val enrich = if (intent.action == Intent.ACTION_SEND && CapturePrefs.smartLinks(this)) CaptureWords.link(draft.body) else null
+            val body = CaptureWords.noteBody(draft.folder, draft.title, draft.body, enrich)
             Queued(id, Queued.KIND_NOTE, body.getString("title"), body, System.currentTimeMillis())
         } else {
             Queued(id, Queued.KIND_TASK, draft.title.trim(), CaptureWords.taskBody(id, draft.title, draft.body, draft.priority, draft.due, CaptureWords.assignees(draft.assignTo)), System.currentTimeMillis())
