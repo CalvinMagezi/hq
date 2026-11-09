@@ -5,7 +5,7 @@
 //! Which peer may open the protocol (paired ones, and not the edge) is decided by the gate in
 //! `bridge.rs`; the security notes are in `docs/security/PAIRING.md`, section 14.
 
-use crate::bridge::{Dialer, Live, LiveGuard, peer_revoked_us, refusal, refused};
+use crate::bridge::{Dialer, Live, LiveGuard, refusal, refused};
 use crate::door::{DEFAULT_MAX_STREAMS, DoorTarget, Local, RECHECK, check_target, connect};
 use anyhow::{Context, Result, anyhow, bail};
 use hq_db::Database;
@@ -210,9 +210,9 @@ impl ProtocolHandler for ServiceProtocol {
                 }
             }
         }
-        if peer_revoked_us(conn.close_reason().as_ref()) {
-            self.revoker.learned(&id).await;
-        }
+        self.revoker
+            .connection_ended(&id, conn.close_reason().as_ref(), SVC_ALPN)
+            .await;
         Ok(())
     }
 }
