@@ -406,6 +406,9 @@ object HelperWords {
     })
 
     const val EDGE_PREFIX = "edge:"
+
+    /** A model budget as a person reads it, the same on every phone language. */
+    fun dollars(amount: Double): String = String.format(java.util.Locale.US, "\$%.2f", amount)
     private const val EDGE_AGENT = "HQ"
 
     /** The order on the list: waiting for the owner first, then working, then the rest, newest first within each. */

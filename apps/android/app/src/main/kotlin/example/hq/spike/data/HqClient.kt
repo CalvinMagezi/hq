@@ -454,7 +454,22 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     )
 
     /** Whether the edge worker takes tasks, the tag that queues one, the repositories it may change, and its newest runs. */
-    data class EdgeWorker(val enabled: Boolean, val tag: String, val repos: List<String>, val runs: List<EdgeRun>)
+    data class EdgeWorker(val enabled: Boolean, val tag: String, val repos: List<String>, val runs: List<EdgeRun>, val taskBudgetUsd: Double = 0.0)
+
+    /** One repository the person's GitHub App can reach, as HQ read it. */
+    data class GithubRepo(val repo: String, val flagged: Boolean, val picked: Boolean, val secrets: List<String>, val previews: List<String>, val hasCi: Boolean, val protected: Boolean)
+
+    /** Where the GitHub connection stands: `not_connected`, `needs_install`, `connected` or `reconnect`. */
+    data class GithubLink(val standing: String, val owner: String?, val selection: String?, val installUrl: String?, val settingsUrl: String?, val firstTaskConfirmed: Boolean, val repos: List<GithubRepo>)
+
+    suspend fun github(): GithubLink = send(authed("/api/github").build()) { text ->
+        val o = JSONObject(text)
+        val repos = o.optJSONArray("repos").objects().map { row ->
+            val r = row.optJSONObject("report") ?: JSONObject()
+            GithubRepo(r.optString("repo"), row.optBoolean("flagged"), row.optBoolean("picked"), r.optJSONArray("secrets").strings(), r.optJSONArray("previews").strings(), r.optBoolean("has_ci"), r.optBoolean("protected"))
+        }
+        GithubLink(o.optString("standing"), o.optStringOrNull("owner"), o.optStringOrNull("repository_selection"), o.optStringOrNull("install_url"), o.optStringOrNull("settings_url"), o.optBoolean("first_task_confirmed"), repos)
+    }
 
     suspend fun edgeWorker(): EdgeWorker = send(authed("/api/edge-worker").build()) { text ->
         val o = JSONObject(text)
@@ -465,7 +480,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                 r.optString("task_id"), t?.optStringOrNull("display_id"), t?.optStringOrNull("title"), t?.optStringOrNull("status"),
             )
         }
-        EdgeWorker(o.optBoolean("enabled"), o.optString("tag", "edge-task"), o.optJSONArray("repos").strings(), runs)
+        EdgeWorker(o.optBoolean("enabled"), o.optString("tag", "edge-task"), o.optJSONArray("repos").strings(), runs, o.optDouble("task_budget_usd", 0.0))
     }
 
     /** Every helper, newest first, including stopped ones. */

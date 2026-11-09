@@ -10,6 +10,7 @@ import example.hq.spike.data.HqClient.HelperHost
 import example.hq.spike.data.HqClient.HelperRow
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
+import org.json.JSONObject
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import kotlinx.coroutines.Job
@@ -72,6 +73,10 @@ data class HelpersUi(
     val finishedOpen: Boolean = false,
     val open: HelperOpen? = null,
     val start: StartForm? = null,
+    val githubOpen: Boolean = false,
+    val github: HqClient.GithubLink? = null,
+    val githubError: String? = null,
+    val taskBudgetUsd: Double = 0.0,
     val line: HelperLine? = null,
     val now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC),
     /** The catalogue reader the cards' words come from; the view model sets it and the screen sets it for fixtures. */
@@ -124,6 +129,14 @@ class HelpersActions(
     val onRefreshHosts: () -> Unit = {},
     val onStartSubmit: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
+    val onGithubOpen: () -> Unit = {},
+    val onGithubClose: () -> Unit = {},
+    val onGithubRefresh: () -> Unit = {},
+    val onGithubConnect: () -> Unit = {},
+    val onGithubInstall: () -> Unit = {},
+    val onGithubConfirm: (String) -> Unit = {},
+    val onGithubFirstTask: () -> Unit = {},
+    val onGithubDisconnect: () -> Unit = {},
 )
 
 class HelpersViewModel(app: Application) : AndroidViewModel(app) {
@@ -173,7 +186,36 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onRefreshHosts = ::loadHosts,
         onStartSubmit = ::submitStart,
         onDismissLine = { _state.update { it.copy(line = null) } },
+        onGithubOpen = { _state.update { it.copy(githubOpen = true, githubError = null) }; refreshGithub() },
+        onGithubClose = { _state.update { it.copy(githubOpen = false) } },
+        onGithubRefresh = ::refreshGithub,
+        onGithubConnect = { githubCall { openGithub(client.postJson("/api/github/connect").optString("url")) } },
+        onGithubInstall = { _state.value.github?.installUrl?.let(::openGithub) },
+        onGithubConfirm = { repo -> githubCall { client.postJson("/api/github/repos/confirm", JSONObject().put("repo", repo)) } },
+        onGithubFirstTask = { githubCall { client.postJson("/api/github/first-task") } },
+        onGithubDisconnect = { githubCall { openGithub(client.postJson("/api/github/disconnect").optString("settings_url")) } },
     )
+
+    private fun refreshGithub() = githubCall { }
+
+    /** Does `work`, then asks HQ where the connection stands, so the sheet always shows what is true. */
+    private fun githubCall(work: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                work()
+                val link = client.github()
+                val budget = client.edgeWorker().taskBudgetUsd
+                _state.update { it.copy(github = link, taskBudgetUsd = budget, githubError = null) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(githubError = w().s(R.string.github_failed)) }
+            }
+        }
+    }
+
+    private fun openGithub(url: String) {
+        if (url.isBlank() || openCustomTab(getApplication(), url)) return
+        _state.update { it.copy(githubError = w().s(R.string.github_no_browser)) }
+    }
 
     init {
         viewModelScope.launch {

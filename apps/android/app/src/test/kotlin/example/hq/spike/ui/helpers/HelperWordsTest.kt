@@ -490,4 +490,9 @@ class HelperWordsTest {
         assertEquals("2 h ago", done.time)
         assertEquals(HelperState.Stopped, HelperWords.edgeCard(w, run("failed"), now).state)
     }
+
+    @Test
+    fun `a budget reads as dollars in every language`() {
+        assertEquals("\$0.50", HelperWords.dollars(0.5))
+    }
 }

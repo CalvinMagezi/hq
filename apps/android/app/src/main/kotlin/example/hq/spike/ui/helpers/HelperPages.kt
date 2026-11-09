@@ -82,6 +82,7 @@ fun HelperOverlays(shownUi: HelpersUi, actions: HelpersActions) {
         if (open.menu) MenuSheet(card, actions)
     }
     ui.start?.let { StartSheet(it, actions) }
+    if (ui.githubOpen) GithubSheet(ui, actions)
 }
 
 @Composable
@@ -347,6 +348,7 @@ private fun StartSheet(form: StartForm, actions: HelpersActions) {
                 Text(stringResource(R.string.helpers_start_a_helper), style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
                 IconAction(HqIcons.Close, stringResource(R.string.close), iconSize = 24.dp, onClick = actions.onStartClose)
             }
+            CodeFromThisPhoneRow(actions)
             val shape = RoundedCornerShape(12.dp)
             Column(Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(Mts.Surface000).border(2.dp, Mts.BrandBlue, shape).padding(horizontal = 16.dp, vertical = 10.dp)) {
                 Text(stringResource(R.string.helpers_what_should_it_do), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
