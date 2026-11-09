@@ -35,3 +35,18 @@ export const githubApi = {
   confirm: (repo: string) => hqJson<{ confirmed: boolean }>('/api/github/repos/confirm', 'POST', { repo }),
   firstTask: () => hqJson<{ confirmed: boolean }>('/api/github/first-task', 'POST'),
 }
+
+export type GithubRun = (work?: () => Promise<void>) => Promise<void>
+
+const TITLE_CHARS = 80
+const WORKER_TAG = 'edge-task'
+
+/** A job as a task the worker takes: the repository stands alone on its own line, where the worker looks for it. */
+export function githubTask(repo: string, job: string) {
+  const text = job.trim()
+  return {
+    title: text.split('\n')[0].slice(0, TITLE_CHARS),
+    description: `Repository: ${repo}\n\n${text}\n\nDone when CI passes.`,
+    tags: [WORKER_TAG],
+  }
+}

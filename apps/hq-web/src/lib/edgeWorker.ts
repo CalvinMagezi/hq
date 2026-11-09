@@ -19,10 +19,12 @@ export interface EdgeWorkerReport {
   tag?: string
   repos?: string[]
   runs: EdgeRun[]
+  task_budget_usd?: number
 }
 
 export const edgeWorkerApi = {
   runs: async (): Promise<EdgeRun[]> => (await hqJson<EdgeWorkerReport>('/api/edge-worker')).runs ?? [],
+  taskBudget: async (): Promise<number> => (await hqJson<EdgeWorkerReport>('/api/edge-worker')).task_budget_usd ?? 0,
 }
 
 export type OwnState = 'working' | 'finished' | 'stopped'

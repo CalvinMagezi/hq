@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ErrorText } from '~/components/sessions/ErrorText'
-import { githubApi, type GithubLink, type GithubRepo } from '~/lib/github'
+import { edgeWorkerApi } from '~/lib/edgeWorker'
+import { githubApi, githubTask, type GithubLink, type GithubRepo, type GithubRun } from '~/lib/github'
+import { createTaskClient } from '~/lib/tasksApi'
 import { t } from '~/strings'
+
+const BUDGET_DECIMALS = 2
 
 const open = (url: string | null | undefined) => {
   if (url) window.open(url, '_blank', 'noopener')
@@ -28,12 +32,66 @@ function Repo({ repo, onAllow }: { repo: GithubRepo; onAllow: () => void }) {
   )
 }
 
+/** Giving HQ its work next to the connection. Pressing Start, with the budget in view, is the first-task yes. */
+function JobForm({ link, run }: { link: GithubLink; run: GithubRun }) {
+  const picked = link.repos.filter((r) => r.picked).map((r) => r.report.repo)
+  const [chosen, setChosen] = useState('')
+  const [job, setJob] = useState('')
+  const [started, setStarted] = useState(false)
+  const [budget, setBudget] = useState(0)
+
+  useEffect(() => {
+    edgeWorkerApi.taskBudget().then(setBudget, () => undefined)
+  }, [])
+
+  if (picked.length === 0) return link.repos.length > 0 ? <p className="a-body-sm">{t('github_no_picked')}</p> : null
+
+  const repo = picked.includes(chosen) ? chosen : picked.length === 1 ? picked[0] : ''
+  const start = () =>
+    run(async () => {
+      if (!link.first_task_confirmed) await githubApi.firstTask()
+      await createTaskClient(githubTask(repo, job))
+      setJob('')
+      setStarted(true)
+    })
+
+  return (
+    <>
+      <b className="a-body-b">{t('github_job_title')}</b>
+      {picked.length > 1 && (
+        <select aria-label={t('github_pick_repo')} className="a-input" value={repo} onChange={(e) => setChosen(e.target.value)}>
+          <option value="">{t('github_pick_repo')}</option>
+          {picked.map((name) => (
+            <option key={name}>{name}</option>
+          ))}
+        </select>
+      )}
+      <textarea
+        aria-label={t('github_job_hint')}
+        className="a-input"
+        rows={3}
+        placeholder={t('github_job_example')}
+        value={job}
+        onChange={(e) => {
+          setJob(e.target.value)
+          setStarted(false)
+        }}
+      />
+      <p className="a-body-sm">{t('github_budget_each', { budget: `$${budget.toFixed(BUDGET_DECIMALS)}` })}</p>
+      <button type="button" className="a-btn secondary compact" disabled={!repo || !job.trim()} onClick={start}>
+        {t('github_start')}
+      </button>
+      {started && <p className="a-body-sm">{t('github_started')}</p>}
+    </>
+  )
+}
+
 /** The way into HQ Coder on the web, in the same words and steps as the phone's sheet. */
 export function GithubConnect() {
   const [link, setLink] = useState<GithubLink | null>(null)
   const [failed, setFailed] = useState(false)
 
-  const run = useCallback(async (work?: () => Promise<void>) => {
+  const run = useCallback<GithubRun>(async (work) => {
     try {
       await work?.()
       setLink(await githubApi.status())
@@ -93,11 +151,7 @@ export function GithubConnect() {
               <Repo key={repo.report.repo} repo={repo} onAllow={() => run(async () => void (await githubApi.confirm(repo.report.repo)))} />
             ))}
           </ul>
-          {!link.first_task_confirmed && (
-            <button type="button" className="a-btn secondary compact" onClick={() => run(async () => void (await githubApi.firstTask()))}>
-              {t('github_first_task')}
-            </button>
-          )}
+          <JobForm link={link} run={run} />
         </>
       )}
       {link && link.standing !== 'not_connected' && (

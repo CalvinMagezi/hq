@@ -77,6 +77,11 @@ data class HelpersUi(
     val github: HqClient.GithubLink? = null,
     val githubError: String? = null,
     val taskBudgetUsd: Double = 0.0,
+    val githubRepo: String? = null,
+    val githubJob: String = "",
+    val githubStarted: Boolean = false,
+    /** This phone's HQ runs in standby, which takes no queued work. */
+    val hqPaused: Boolean = false,
     val line: HelperLine? = null,
     val now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC),
     /** The catalogue reader the cards' words come from; the view model sets it and the screen sets it for fixtures. */
@@ -135,8 +140,11 @@ class HelpersActions(
     val onGithubConnect: () -> Unit = {},
     val onGithubInstall: () -> Unit = {},
     val onGithubConfirm: (String) -> Unit = {},
-    val onGithubFirstTask: () -> Unit = {},
     val onGithubDisconnect: () -> Unit = {},
+    val onGithubRepo: (String) -> Unit = {},
+    val onGithubJob: (String) -> Unit = {},
+    val onGithubStart: () -> Unit = {},
+    val onGithubTurnOn: () -> Unit = {},
 )
 
 class HelpersViewModel(app: Application) : AndroidViewModel(app) {
@@ -192,9 +200,45 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onGithubConnect = { githubCall { openGithub(client.postJson("/api/github/connect").optString("url")) } },
         onGithubInstall = { _state.value.github?.installUrl?.let(::openGithub) },
         onGithubConfirm = { repo -> githubCall { client.postJson("/api/github/repos/confirm", JSONObject().put("repo", repo)) } },
-        onGithubFirstTask = { githubCall { client.postJson("/api/github/first-task") } },
         onGithubDisconnect = { githubCall { openGithub(client.postJson("/api/github/disconnect").optString("settings_url")) } },
+        onGithubRepo = { r -> _state.update { it.copy(githubRepo = r) } },
+        onGithubJob = { j -> _state.update { it.copy(githubJob = j, githubStarted = false, githubError = null) } },
+        onGithubStart = ::startGithubJob,
+        onGithubTurnOn = ::turnOnHq,
     )
+
+    private fun startGithubJob() {
+        val s = _state.value
+        val link = s.github ?: return
+        val repo = HelperWords.chosenRepo(s.githubRepo, link.repos.filter { it.picked }.map { it.repo }) ?: return
+        val job = s.githubJob.trim()
+        if (job.isEmpty()) return
+        githubCall {
+            // Pressing Start with the budget in view is the owner's yes to the first task.
+            if (!link.firstTaskConfirmed) client.postJson("/api/github/first-task")
+            client.createTask(HelperWords.githubTask(repo, job))
+            _state.update { it.copy(githubJob = "", githubStarted = true) }
+        }
+    }
+
+    private fun turnOnHq() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                example.hq.spike.HubService.switchMode(getApplication(), true)
+                _state.update { it.copy(hqPaused = false) }
+            } catch (e: java.io.IOException) {
+                _state.update { it.copy(githubError = w().s(R.string.github_failed)) }
+            }
+        }
+    }
+
+    /** On a phone that runs its own HQ, standby means no daemon and so no queued work. */
+    private fun hqPaused(): Boolean {
+        val c = getApplication<Application>()
+        if (example.hq.spike.ServerHq.current(c) != null) return false
+        val mode = java.io.File(c.filesDir, "mode")
+        return try { mode.readText().trim() != "active" } catch (e: java.io.IOException) { true }
+    }
 
     private fun refreshGithub() = githubCall { }
 
@@ -205,7 +249,8 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 work()
                 val link = client.github()
                 val budget = client.edgeWorker().taskBudgetUsd
-                _state.update { it.copy(github = link, taskBudgetUsd = budget, githubError = null) }
+                val paused = hqPaused()
+                _state.update { it.copy(github = link, taskBudgetUsd = budget, hqPaused = paused, githubError = null) }
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(githubError = w().s(R.string.github_failed)) }
             }

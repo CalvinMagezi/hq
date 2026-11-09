@@ -166,6 +166,7 @@ class ShellActivity : ComponentActivity() {
     private fun rereadNotifications() {
         notifFacts = NotifAccess.read(this)
         inbox.actions.onServerOpen = { settings.actions.onOpen(); settings.actions.onPage(SettingsPage.Notifications) }
+        settings.actions.onCodeFromPhone = { requested = Place.Helpers; helpers.actions.onGithubOpen() }
         inbox.refreshBanner()
     }
 

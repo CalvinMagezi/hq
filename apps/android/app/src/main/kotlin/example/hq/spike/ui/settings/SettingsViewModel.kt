@@ -143,6 +143,8 @@ class SettingsActions(
     val onPage: (SettingsPage) -> Unit = {},
     val onTab: (SettingsWords.SafetyTab) -> Unit = {},
     val onPhoneRow: (String) -> Unit = {},
+    /** Set by the shell: opens HQ Coder on the Helpers page. */
+    var onCodeFromPhone: () -> Unit = {},
     val onCopyDiagnostics: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
     val onMode: (Boolean) -> Unit = {},
@@ -777,6 +779,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun phoneRow(key: String) {
+        if (key == CODE_FROM_PHONE_ROW) {
+            _state.update { it.copy(open = false) }
+            actions.onCodeFromPhone()
+            return
+        }
         val c = ctx()
         val intent = when (key) {
             "battery" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)

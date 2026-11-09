@@ -31,6 +31,9 @@ data class SettingsSnapshot(
 
 enum class SettingsPage { Home, Safety, Keys, Messaging, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp, StoredKeys, Technical, Noticed, Update, Speech, Assistant }
 
+/** The Settings row that opens HQ Coder on the Helpers page. */
+const val CODE_FROM_PHONE_ROW = "github"
+
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
 data class HomeGroup(val title: String, val rows: List<HomeRow>, val note: String? = null, val lead: String? = null)
@@ -140,6 +143,7 @@ object SettingsWords {
                 HomeRow(SettingsPage.Keys, "key", w.s(R.string.row_ai_keys), keysStatus(w, snap.settings, snap.providers)),
                 HomeRow(SettingsPage.Messaging, "chat", w.s(R.string.row_messaging), messagingStatus(w, snap.chatApps)),
                 HomeRow(SettingsPage.Devices, "phone", w.s(R.string.devices_title), devicesStatus(w, snap.devices)),
+                HomeRow(null, CODE_FROM_PHONE_ROW, w.s(R.string.github_title), w.s(R.string.github_row_body)),
             ) + listOfNotNull(server),
             note = claudeViaLaptop(w),
             lead = strip,

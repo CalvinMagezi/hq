@@ -19,7 +19,7 @@ export interface SettingsRowDef {
   id: string
   label: StringKey
   /** Null for a row that acts instead of opening a page (Sign out this browser). */
-  path: SettingsPath | null
+  path: SettingsPath | '/helpers' | null
 }
 
 export interface SettingsGroupDef {
@@ -56,6 +56,7 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
         { id: 'keys', label: 'row_ai_keys', path: '/settings/keys' },
         { id: 'messaging', label: 'row_messaging', path: '/settings/messaging' },
         { id: 'devices', label: 'row_other_devices', path: '/settings/devices' },
+        { id: 'code', label: 'github_title', path: '/helpers' },
       ],
     },
     {
@@ -71,7 +72,7 @@ export function settingsGroups({ lite, hub }: WhereHqRuns): SettingsGroupDef[] {
   ]
   if (!lite) return groups
   return groups
-    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || LITE_PATHS.includes(r.path)) }))
+    .map((g) => ({ ...g, rows: g.rows.filter((r) => r.path === null || LITE_PATHS.includes(r.path as SettingsPath)) }))
     .filter((g) => g.rows.length > 0)
 }
 

@@ -16,12 +16,14 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -83,16 +85,17 @@ internal fun GithubSheet(ui: HelpersUi, actions: HelpersActions) {
             }
             Text(stringResource(R.string.github_what_it_does), style = HqType.BodySm, color = Mts.InkMuted)
             ui.githubError?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
-            GithubBody(ui.github, ui.taskBudgetUsd, actions)
+            GithubBody(ui, actions)
         }
     }
 }
 
 @Composable
-private fun GithubBody(link: HqClient.GithubLink?, budget: Double, actions: HelpersActions) {
+private fun GithubBody(ui: HelpersUi, actions: HelpersActions) {
+    val link = ui.github
     when (link?.standing) {
         null -> Text(stringResource(R.string.github_looking), style = HqType.BodySm, color = Mts.InkMuted)
-        STANDING_CONNECTED -> Connected(link, budget, actions)
+        STANDING_CONNECTED -> Connected(link, ui, actions)
         STANDING_NEEDS_INSTALL -> {
             Text(stringResource(R.string.github_install_body), style = HqType.Body, color = Mts.Ink)
             Text(stringResource(R.string.github_choose_select), style = HqType.BodySm, color = Mts.Amber)
@@ -114,16 +117,49 @@ private fun GithubBody(link: HqClient.GithubLink?, budget: Double, actions: Help
 }
 
 @Composable
-private fun Connected(link: HqClient.GithubLink, budget: Double, actions: HelpersActions) {
+private fun Connected(link: HqClient.GithubLink, ui: HelpersUi, actions: HelpersActions) {
     Text(stringResource(R.string.github_connected_as, link.owner.orEmpty()), style = HqType.BodyBold, color = Mts.Ink)
     if (link.selection == SELECTION_ALL) Text(stringResource(R.string.github_all_repos), style = HqType.BodySm, color = Mts.Amber)
     if (link.repos.isEmpty()) Text(stringResource(R.string.github_no_repos), style = HqType.BodySm, color = Mts.InkMuted)
     link.repos.forEach { RepoRow(it, actions) }
-    if (!link.firstTaskConfirmed) {
-        Text(stringResource(R.string.github_first_task_body, HelperWords.dollars(budget)), style = HqType.BodySm, color = Mts.Ink)
-        PrimaryButton(stringResource(R.string.github_first_task), Modifier.fillMaxWidth(), onClick = actions.onGithubFirstTask)
+    if (ui.hqPaused) {
+        Text(stringResource(R.string.github_paused), style = HqType.BodySm, color = Mts.Amber)
+        PrimaryButton(stringResource(R.string.github_turn_on), Modifier.fillMaxWidth(), onClick = actions.onGithubTurnOn)
     }
+    JobForm(link, ui, actions)
     Disconnect(actions)
+}
+
+/** Giving HQ its work here, so someone who just connected has one obvious next step. Pressing Start is the first-task yes. */
+@Composable
+private fun JobForm(link: HqClient.GithubLink, ui: HelpersUi, actions: HelpersActions) {
+    val picked = link.repos.filter { it.picked }.map { it.repo }
+    if (picked.isEmpty()) {
+        if (link.repos.isNotEmpty()) Text(stringResource(R.string.github_no_picked), style = HqType.BodySm, color = Mts.InkMuted)
+        return
+    }
+    val shape = RoundedCornerShape(12.dp)
+    val chosen = HelperWords.chosenRepo(ui.githubRepo, picked)
+    Text(stringResource(R.string.github_job_title), style = HqType.BodyBold, color = Mts.Ink)
+    if (picked.size > 1) {
+        Text(stringResource(R.string.github_pick_repo), style = HqType.BodySm, color = Mts.InkMuted)
+        picked.forEach { repo ->
+            Text(
+                repo, style = HqType.BodySmBold, color = Mts.Ink,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface100)
+                    .border(1.dp, if (repo == chosen) Mts.BrandGreen else Mts.Line, shape)
+                    .clickable(role = Role.RadioButton) { actions.onGithubRepo(repo) }.padding(horizontal = 16.dp, vertical = 14.dp),
+            )
+        }
+    }
+    Column(Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(Mts.Surface000).border(2.dp, Mts.BrandBlue, shape).padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Text(stringResource(R.string.github_job_hint), style = HqType.Caption, color = Mts.InkMuted)
+        BasicTextField(ui.githubJob, actions.onGithubJob, Modifier.fillMaxWidth(), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
+    }
+    Text(stringResource(R.string.github_job_example), style = HqType.BodySm, color = Mts.InkMuted)
+    Text(stringResource(R.string.github_budget_each, HelperWords.dollars(ui.taskBudgetUsd)), style = HqType.BodySm, color = Mts.InkMuted)
+    PrimaryButton(stringResource(R.string.github_start), Modifier.fillMaxWidth(), enabled = ui.githubJob.isNotBlank() && chosen != null, onClick = actions.onGithubStart)
+    if (ui.githubStarted) Text(stringResource(R.string.github_started), style = HqType.BodySm, color = Mts.Ink)
 }
 
 @Composable
