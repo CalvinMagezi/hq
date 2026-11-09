@@ -736,11 +736,13 @@ mod tests {
         std::fs::create_dir_all(&private).unwrap();
         std::fs::write(private.join("secret.md"), "private").unwrap();
         std::fs::create_dir_all(state.vault_path.join("Notebooks")).unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink(
             private.join("secret.md"),
             state.vault_path.join("Notebooks/link.md"),
         )
         .unwrap();
+        #[cfg(unix)]
         assert!(note_for_helper(&state, "Notebooks/link.md").is_err());
         let long = "x".repeat(MAX_NOTE_CHARS + 10);
         std::fs::write(state.vault_path.join("Notebooks/plan.md"), &long).unwrap();
