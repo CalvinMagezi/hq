@@ -6,7 +6,8 @@
 //! the running install, so a person is only ever shown what works here, or what one step away
 //! would make work.
 //!
-//! No model is involved anywhere in this module.
+//! No language model is involved anywhere in this module. `next_step` ranks invented examples
+//! with the on-device embedder.
 //!
 //! Which capabilities the person has used is adoption data, and it stays on the device: it orders
 //! the chips the owner's own apps show and fills the weekly digest in their inbox, and nothing
@@ -15,6 +16,7 @@
 //! `docs/security/ADOPTION_DATA.md`.
 
 pub mod adoption;
+pub mod next_step;
 pub mod offers;
 
 use std::collections::HashSet;

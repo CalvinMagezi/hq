@@ -140,7 +140,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   (`GET /api/adoption`, `GET /api/offers/replay`, `crates/hq-web/src/adoption_api.rs`) with a device token.
   A reply in the web or phone chat may carry one offer (`chat_messages.meta.offer`, chosen on the
   device by `offers::for_turn`, answered through `POST /api/offers/answer`,
-  `crates/hq-web/src/offers_api.rs`, kept in `hq_db::offers`); the model never sees it. The
+  `crates/hq-web/src/offers_api.rs`, kept in `hq_db::offers`); the model never sees it. When no rule fires and the turn worked on a task, `hq_tools::capabilities::next_step` may offer one next step by comparing the task with invented examples (`assets/next_step_examples.jsonl`) through the on-device embedder; no language model takes part. The
   `due-reminders` daemon task reminds about tasks made in chat. A new catalog tool must be registered (`crates/hq-mcp/tests/capability_catalog.rs`).
   Plan: `docs/plans/simple-hq.md`. Off with `daemon.adoption_digest: false`.
 - **Tool failure digest**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/tool_failure_digest.rs`

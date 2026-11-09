@@ -456,11 +456,17 @@ impl Pacing {
     pub fn from_last_shown(last: &HashMap<String, i64>) -> Self {
         let mut p = Self::default();
         for (kind, at) in last {
+            p.last_any = Some(p.last_any.map_or(*at, |t| t.max(*at)));
             if let Some(d) = Detector::parse(kind) {
                 p.shown(d, *at);
             }
         }
         p
+    }
+
+    /// Whether enough time has passed since any offer of any kind.
+    pub fn any_allows(&self, at: i64) -> bool {
+        self.off || self.last_any.is_none_or(|t| at - t >= ANY_OFFER_GAP_SECS)
     }
 }
 
@@ -525,7 +531,7 @@ pub struct TurnInput<'a> {
     pub today: NaiveDate,
 }
 
-fn line_for(says: &str) -> String {
+pub(super) fn line_for(says: &str) -> String {
     let mut chars = says.chars();
     let lowered: String = chars
         .next()
@@ -581,7 +587,9 @@ pub fn for_turn(conn: &Connection, input: &TurnInput) -> Result<Option<TurnOffer
 /// How a report names a kind of offer: its capability in the catalog's words.
 pub fn offer_says(kind: &str) -> String {
     Detector::parse(kind)
-        .and_then(|d| super::catalog().iter().find(|c| c.id == d.capability()))
+        .map(Detector::capability)
+        .or_else(|| super::next_step::capability_of(kind))
+        .and_then(|id| super::catalog().iter().find(|c| c.id == id))
         .map(|c| c.says.clone())
         .unwrap_or_else(|| kind.to_string())
 }
