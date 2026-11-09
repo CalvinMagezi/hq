@@ -21,7 +21,12 @@ fn arg_dry_run(args: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn reindex_moved_note(db: Option<&Arc<Database>>, vault: &VaultClient, from: &str, to: &str) {
+pub(crate) fn reindex_moved_note(
+    db: Option<&Arc<Database>>,
+    vault: &VaultClient,
+    from: &str,
+    to: &str,
+) {
     let Some(db) = db else { return };
     let from = from.to_string();
     let to = to.to_string();
