@@ -101,4 +101,14 @@ class UpdateLogicTest {
             UpdateLogic.repo = was
         }
     }
+
+    @Test fun openingTheAppAsksAgainOnlyOnceTheLastAnswerIsSixHoursOld() {
+        val hour = 60L * 60 * 1000
+        // The hub makes the first check; opening the app does not race it.
+        assertFalse(UpdateLogic.foregroundDue(0, 1000))
+        assertFalse(UpdateLogic.foregroundDue(1000, 1000 + 6 * hour - 1))
+        assertTrue(UpdateLogic.foregroundDue(1000, 1000 + 6 * hour))
+        // A clock set back counts as old, as the daily check does.
+        assertTrue(UpdateLogic.foregroundDue(1000, 500))
+    }
 }

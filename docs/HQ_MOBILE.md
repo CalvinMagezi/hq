@@ -104,8 +104,10 @@ file manager you used. Check the signing certificate with `apksigner verify --pr
 must be the one in `apps/android/README.md` and `docs/security/RELEASE_CHECKLIST.md`.
 
 After that the app updates itself: Settings, Backup and about, "Check for updates" (and once a day while
-the hub service runs) reads the signed `android-channel.json` of the stable channel, or of every main build
-if you turn on "Follow every build of main". The signature is checked by the `hq` inside the app against the
+the hub service runs, and on opening the app once the last check is six hours old) reads the signed
+`android-channel.json` of the stable channel, or of every main build if you turn on "Follow every build of
+main". A version that is ready shows as a line under the top bar on every screen, "AgentHQ 1.4.2 is ready to
+install", with Update and Not now (seven days, or until a newer version), as well as on the Settings card. The signature is checked by the `hq` inside the app against the
 release key, the APK against the hash in that signed file, and Android against the app's own signing key.
 You still confirm each install. How it is built and signed: `apps/android/README.md`.
 

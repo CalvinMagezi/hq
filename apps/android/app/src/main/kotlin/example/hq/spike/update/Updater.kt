@@ -155,8 +155,11 @@ object Updater {
         }
     }
 
-    /** Fetches and verifies the channel manifest and settles [state]. Blocking; call it off the main thread. */
-    fun check(context: Context) {
+    /**
+     * Fetches and verifies the channel manifest and settles [state]. Blocking; call it off the main thread. A [quiet]
+     * check (one the owner did not ask for) leaves the state as it was when it fails, so no error appears unasked.
+     */
+    fun check(context: Context, quiet: Boolean = false) {
         app = context.applicationContext
         if (!UpdateLogic.enabled()) { set(context, UpdateState.Off); return }
         val before = flow.value
@@ -168,10 +171,10 @@ object Updater {
             settle(context, verdict, before)
         } catch (e: UpdateException) {
             Log.w(TAG, "check refused: ${e.message}")
-            set(context, failedCheck(before))
+            set(context, if (quiet) before else failedCheck(before))
         } catch (e: IOException) {
             Log.w(TAG, "check failed: ${e.javaClass.simpleName}")
-            set(context, failedCheck(before))
+            set(context, if (quiet) before else failedCheck(before))
         }
     }
 
@@ -407,14 +410,20 @@ object Updater {
         refreshDot()
     }
 
-    /** Coming back to the app: an install permission given in Android's settings starts the saved download by itself. */
+    /**
+     * Coming back to the app: an install permission given in Android's settings starts the saved download by itself.
+     * Otherwise an old answer is renewed quietly, so a new version shows on the line under the bar without opening Settings.
+     */
     fun onForeground(context: Context) {
         app = context.applicationContext
         val s = flow.value
-        val m = (s as? UpdateState.Problem)?.takeIf { it.kind == ProblemKind.NotAllowed }?.manifest ?: return
-        if (prefs(context).getLong(KEY_PENDING, 0) != m.versionCode || !canInstall(context)) return
-        lineFlow.value = Line(R.string.upd_back_allowed)
-        install(context, m)
+        val m = (s as? UpdateState.Problem)?.takeIf { it.kind == ProblemKind.NotAllowed }?.manifest
+        if (m != null && prefs(context).getLong(KEY_PENDING, 0) == m.versionCode && canInstall(context)) {
+            lineFlow.value = Line(R.string.upd_back_allowed)
+            install(context, m)
+            return
+        }
+        if (UpdateLogic.enabled() && UpdateLogic.foregroundDue(prefs(context).getLong(KEY_LAST_CHECK, 0), System.currentTimeMillis())) check(context, quiet = true)
     }
 
     fun facts(context: Context): Facts {
