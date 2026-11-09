@@ -2,6 +2,17 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 
 // Within this many pixels of the end still counts as "at the bottom" (momentum scrolling overshoots).
 const AT_BOTTOM_SLACK_PX = 80
+// A wheel, finger or key moved the list this recently, so a move up is the reader's own.
+const INTENT_MS = 400
+const SCROLL_KEYS = new Set(['ArrowUp', 'PageUp', 'Home'])
+
+/**
+ * Whether the view stops following. Only the reader moving up lets go: WebKit reports scrolls late,
+ * so a position from before content grew also looks like a move up.
+ */
+export function letsGo(near: boolean, top: number, lastTop: number, readerMoved: boolean): boolean {
+  return !near && top < lastTop && readerMoved
+}
 
 interface StickToBottom {
   /** The user is at (or near) the newest message, or the view is still following it. */
@@ -46,18 +57,46 @@ export function useStickToBottom(
     const el = scrollRef.current
     if (!el) return
     let lastTop = el.scrollTop
+    let movedAt = 0
+    let dragging = false
+    const moved = () => {
+      movedAt = performance.now()
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) moved()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key)) moved()
+    }
+    // A press on the scroller itself, not on anything inside it, is its scrollbar.
+    const onPress = (e: PointerEvent) => {
+      if (e.target === el) dragging = true
+    }
+    const onRelease = () => {
+      dragging = false
+    }
     const onScroll = () => {
       const near = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_SLACK_PX
-      // Only moving up lets go. Scroll anchoring moves down when content above
-      // grows (markdown rendering in), and that must not stop the follow.
       if (near) stickRef.current = true
-      else if (el.scrollTop < lastTop) stickRef.current = false
+      else if (letsGo(near, el.scrollTop, lastTop, dragging || performance.now() - movedAt < INTENT_MS)) stickRef.current = false
       lastTop = el.scrollTop
       setAtBottom(near || stickRef.current)
       if (near) setHasUnseen(false)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
-    return () => el.removeEventListener('scroll', onScroll)
+    el.addEventListener('wheel', onWheel, { passive: true })
+    el.addEventListener('touchmove', moved, { passive: true })
+    el.addEventListener('keydown', onKey)
+    el.addEventListener('pointerdown', onPress)
+    window.addEventListener('pointerup', onRelease)
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('touchmove', moved)
+      el.removeEventListener('keydown', onKey)
+      el.removeEventListener('pointerdown', onPress)
+      window.removeEventListener('pointerup', onRelease)
+    }
   }, [scrollRef])
 
   useEffect(() => {

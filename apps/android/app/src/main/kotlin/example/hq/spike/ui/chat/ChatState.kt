@@ -180,6 +180,12 @@ data class Notice(val text: String, val action: String? = null)
 
 /** Applies one server event to the open chat. Pure, so the rules can be tested without a phone. */
 object ChatReducer {
+    /** The server's newest page in place, keeping older pages already loaded when they join up, so a reload never moves someone reading them. */
+    fun mergeLatest(current: List<UiMessage>, latest: List<UiMessage>, pageWasFull: Boolean): List<UiMessage> {
+        val join = if (pageWasFull && latest.isNotEmpty()) current.indexOfFirst { it.id == latest.first().id } else -1
+        return if (join > 0) current.take(join) + latest else latest
+    }
+
     fun apply(state: ChatUiState, event: ChatEvent, pendingClientIds: Set<String>): ChatUiState = when (event) {
         is ChatEvent.TurnStart -> turnStart(state, event, pendingClientIds)
         is ChatEvent.Titled -> if (event.threadId == state.threadId) state.copy(title = event.title) else state
