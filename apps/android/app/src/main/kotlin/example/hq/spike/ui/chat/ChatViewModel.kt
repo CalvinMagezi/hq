@@ -338,7 +338,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (it.threadId != id) return@update it
             // Sends the server has not acknowledged yet stay at the end.
             val unsaved = it.messages.filter { m -> m.id.startsWith("local-") && shown.none { s -> s.id == m.id } }
-            it.copy(messages = shown + unsaved, hasOlder = page.size >= HqClient.MESSAGE_PAGE)
+            val full = page.size >= HqClient.MESSAGE_PAGE
+            val merged = ChatReducer.mergeLatest(it.messages, shown, full)
+            it.copy(messages = merged + unsaved, hasOlder = if (merged.size > shown.size) it.hasOlder else full)
         }
     }
 

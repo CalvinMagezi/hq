@@ -82,7 +82,7 @@ export function ChatView({ active, threadId }: Props) {
   const input = draft.text
   const drop = useFileDrop(addFiles)
 
-  const focusInput = () => setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS)
+  const focusInput = () => setTimeout(() => inputRef.current?.focus({ preventScroll: true }), FOCUS_DELAY_MS)
 
   useEffect(() => {
     if (!active) return

@@ -154,4 +154,18 @@ class ChatReducerTest {
         assertEquals(Group.Today, ChatTime.group("2026-10-21T01:00:00.123456+00:00", now, ZoneOffset.UTC))
         assertEquals("3m ago", ChatTime.age("2026-10-21T11:56:59.5+00:00", now))
     }
+
+    private fun said(id: String) = UiMessage(id, Speaker.Reply, id, emptyList())
+
+    @Test fun `a reload keeps the older pages it joins up with`() {
+        val current = listOf(said("a"), said("b"), said("c"), said("d"))
+        val latest = listOf(said("c"), said("d"), said("e"))
+        assertEquals(listOf("a", "b", "c", "d", "e"), ChatReducer.mergeLatest(current, latest, pageWasFull = true).map { it.id })
+    }
+
+    @Test fun `a page that does not join up, or holds everything, replaces what was there`() {
+        val current = listOf(said("a"), said("b"))
+        assertEquals(listOf("x", "y"), ChatReducer.mergeLatest(current, listOf(said("x"), said("y")), pageWasFull = true).map { it.id })
+        assertEquals(listOf("b"), ChatReducer.mergeLatest(current, listOf(said("b")), pageWasFull = false).map { it.id })
+    }
 }
