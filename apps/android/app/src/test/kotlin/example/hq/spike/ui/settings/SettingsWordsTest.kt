@@ -221,7 +221,7 @@ class SettingsWordsTest {
     @Test fun homeHasTheBoardsGroupsInOrder() {
         val groups = SettingsWords.home(testWords(), SettingsSnapshot(settings = settings), now)
         assertEquals(listOf("This phone", "Your accounts", "How HQ behaves", "Your data"), groups.map { it.title })
-        assertEquals(listOf("AI service and keys", "Messaging apps", "Other devices"), groups[1].rows.map { it.title })
+        assertEquals(listOf("AI service and keys", "Messaging apps", "Other devices", "Code from this phone"), groups[1].rows.map { it.title })
         assertEquals(SettingsWords.claudeViaLaptop(testWords()), groups[1].note)
         assertEquals("Read only", groups[2].rows.single().status)
         assertNull(groups[0].rows.firstOrNull())

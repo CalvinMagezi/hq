@@ -21,6 +21,9 @@ pub async fn run_edge_worker_dispatch(db: &Database, config: &HqConfig) -> Resul
         Outcome::Busy(task) => {
             tracing::debug!(%task, "edge-worker-dispatch: the worker is busy")
         }
+        Outcome::AwaitingConfirmation(task) => {
+            tracing::debug!(%task, "edge-worker-dispatch: waiting for the owner's first yes")
+        }
         Outcome::Off | Outcome::Idle => {}
     }
     Ok(())

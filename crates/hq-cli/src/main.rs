@@ -645,6 +645,10 @@ enum Commands {
     #[command(subcommand)]
     Connector(ConnectorAction),
 
+    /// Connect your own GitHub App so HQ Coder can work on your repositories
+    #[command(subcommand)]
+    Github(commands::github::GithubAction),
+
     /// Show what the structured-decision gates did (counts, scores, cost, what was hidden)
     Decisions {
         /// How many days back to summarize
@@ -1004,7 +1008,8 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Host { .. }
         | Commands::SelfApply { .. }
         | Commands::Agents { .. }
-        | Commands::Models { .. } => LiteRule::NotInLite,
+        | Commands::Models { .. }
+        | Commands::Github(_) => LiteRule::NotInLite,
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Bridge(_) | Commands::Claude(_) => LiteRule::NotInLite,
         Commands::Install { .. }
@@ -1326,6 +1331,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Skills(action) => commands::skills::run(config, action).await,
         Commands::Queue(action) => commands::queue::run(config, action).await,
         Commands::Connector(action) => commands::connector::run(config, action),
+        Commands::Github(action) => commands::github::run(action).await,
         #[cfg(all(unix, feature = "bridge"))]
         Commands::Bridge(action) => commands::bridge::run(config, action).await,
         #[cfg(all(unix, feature = "bridge"))]

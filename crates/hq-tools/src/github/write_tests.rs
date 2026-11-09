@@ -433,7 +433,11 @@ async fn github(head: Option<(&str, &str)>, patch_status: u16) -> MockServer {
         .await;
     Mock::given(method("GET"))
         .and(path(format!("/repos/{REPO}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"default_branch": "main"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({"full_name": REPO, "private": true, "default_branch": "main"}),
+            ),
+        )
         .mount(&server)
         .await;
     Mock::given(method("POST"))
@@ -443,6 +447,138 @@ async fn github(head: Option<(&str, &str)>, patch_status: u16) -> MockServer {
         .mount(&server)
         .await;
     server
+}
+
+const APP_TOKEN: &str = "ghs_test_installation_token";
+
+fn connect_app(f: &Fixture, needs_reconnect: bool) {
+    let store = Store::at(f.root.path().join("records"));
+    let scanned = json!([{"repo": REPO, "private": true, "default_branch": "main",
+        "protected": false, "has_ci": true, "secrets": [], "previews": [], "unchecked": false}]);
+    store
+        .write_private(
+            crate::github::repos::SCAN_FILE,
+            scanned.to_string().as_bytes(),
+        )
+        .unwrap();
+    store
+        .save_key(include_str!("testdata/test_app_key.pem"))
+        .unwrap();
+    store
+        .save_record(&crate::github::app::AppRecord {
+            app_id: 1,
+            client_id: "Iv-test".into(),
+            slug: "hq-coder-abc".into(),
+            owner_login: "o".into(),
+            owner_id: 42,
+            owner_name: Some("Test Person".into()),
+            installation_id: Some(9),
+            repository_selection: Some("selected".into()),
+            needs_reconnect,
+            first_task_confirmed: true,
+        })
+        .unwrap();
+}
+
+async fn mount_app_token(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/app/installations/9/access_tokens"))
+        .and(body_partial_json(
+            json!({"permissions": {"contents": "read"}}),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({"token": "ghs_test_read"})))
+        .mount(server)
+        .await;
+    let wanted = json!({"repositories": ["r"],
+                        "permissions": {"contents": "write", "pull_requests": "write"}});
+    Mock::given(method("POST"))
+        .and(path("/app/installations/9/access_tokens"))
+        .and(body_partial_json(wanted))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({"token": APP_TOKEN})))
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+fn app_tool(f: &Fixture, server: &MockServer, repos: Vec<String>) -> GithubWriteTool {
+    GithubWriteTool::for_test(
+        repos,
+        format!("{}/", server.uri()),
+        f.root.path().join("clones"),
+        f.root.path().join("records"),
+    )
+}
+
+#[tokio::test]
+async fn a_connected_app_pushes_with_its_own_token_and_credits_the_person() {
+    let f = Fixture::new();
+    connect_app(&f, false);
+    fs::write(f.dest.join("edit.txt"), b"different").unwrap();
+    let server = github(None, 200).await;
+    mount_app_token(&server).await;
+
+    let reply = app_tool(&f, &server, Vec::new())
+        .execute(args("fix", "Fix it"))
+        .await
+        .unwrap();
+
+    assert_eq!(reply["pull_request"], PR_URL);
+    let commit = &bodies(&server, "POST", "git/commits").await[0];
+    assert_eq!(
+        commit["author"],
+        json!({"name": "Test Person", "email": "42+o@users.noreply.github.com"})
+    );
+    let expected = format!("Bearer {APP_TOKEN}");
+    let requests = server.received_requests().await.unwrap();
+    // Reads run on their own read-only token; only what changes the repository carries this one.
+    let writes = requests
+        .iter()
+        .filter(|r| r.url.path().starts_with("/repos/") && r.method.as_str() != "GET");
+    for request in writes {
+        assert_eq!(request.headers["authorization"], expected.as_str());
+    }
+}
+
+#[tokio::test]
+async fn the_config_list_still_narrows_a_connected_app() {
+    let f = Fixture::new();
+    connect_app(&f, false);
+    let server = MockServer::start().await;
+    let err = app_tool(&f, &server, vec!["o/other".to_string()])
+        .execute(args("fix", "m"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("is not one"), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_dead_app_says_reconnect_without_asking_github() {
+    let f = Fixture::new();
+    connect_app(&f, true);
+    let server = MockServer::start().await;
+    let err = app_tool(&f, &server, Vec::new())
+        .execute(args("fix", "m"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("Reconnect GitHub"), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_workflow_change_is_refused_under_the_app_too() {
+    let f = Fixture::new();
+    connect_app(&f, false);
+    fs::create_dir_all(f.dest.join(".github/workflows")).unwrap();
+    fs::write(f.dest.join(".github/workflows/ci.yml"), b"on: push").unwrap();
+    let server = github(None, 200).await;
+    mount_app_token(&server).await;
+    let err = app_tool(&f, &server, Vec::new())
+        .execute(args("fix", "m"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains(".github"), "{err}");
+    assert!(bodies(&server, "POST", "git/commits").await.is_empty());
 }
 
 async fn bodies(server: &MockServer, verb: &str, at: &str) -> Vec<Value> {

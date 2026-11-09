@@ -21,11 +21,15 @@ search and edit tools in `libhq.so`, so the worker costs no new binary. The mode
 | S1 | `github_clone` without git or gh: the default branch's tarball, unpacked as untrusted input, with a base record beside the checkout | `crates/hq-tools/src/github/tarball.rs` |
 | S6 | `grep` without ripgrep | `crates/hq-agent/src/coding/search_fallback.rs` |
 | S2 | `github_write`: the checkout's changes as an `hq/` branch and a pull request | `crates/hq-tools/src/github/write.rs`, `changes.rs` |
-| S3 | A worker preset (file and search tools, `github_clone`, `github_write`, no shell) and a first live run against a small repository with fast CI | to come |
+| S3 | A worker preset (file and search tools, `github_clone`, `github_write`, no shell) and a first live run against a small repository with fast CI | preset done (`WORKER_TOOLS` in `crates/hq-agent/src/builder.rs`; the worker's own turn has no file tools either, and its coding child gets file tools and no shell). Live run on a phone: `mobile-helpers.md` |
 
 ## `github_write`: what it may do
 
-- **Off by default.** It refuses every call until the owner lists repositories in
+Since HQ Coder (`docs/plans/mobile-helpers.md`), a connected GitHub App comes first: its token covers
+the one repository, its installation is the allowlist, and `github_write.repos` only narrows it. A
+child sub-agent can now be confined with `allowed_paths`.
+
+- **Off by default.** Without an App, it refuses every call until the owner lists repositories in
   `github_write.repos`. `config_manage` refuses that key. Agents cannot write the config file
   either, because the governance layer denies the active config path to every file tool.
 - **Its own token.** It reads only `HQ_GITHUB_WRITE_TOKEN`, never the read-only `GH_TOKEN` or
@@ -93,7 +97,8 @@ shell does not have.
 
 ## Working tasks without being asked
 
-With `github_write.dispatch_tasks: true`, the daemon task `edge-worker-dispatch` (every two
+`github_write.dispatch_tasks` is on by default, and is armed only by a connected App or a listed
+repository. The daemon task `edge-worker-dispatch` (every two
 minutes, in the Full and Mobile editions; Lite does not run it. A phone's data saver, on by
 default, leaves it running: an idle tick is a database query, and `dispatch_tasks` is already
 the owner's choice to spend on queued work) picks up open tasks tagged `edge-task` by itself, so a task filed from the phone, the web app

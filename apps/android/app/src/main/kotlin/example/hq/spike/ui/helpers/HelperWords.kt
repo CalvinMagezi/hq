@@ -406,6 +406,20 @@ object HelperWords {
     })
 
     const val EDGE_PREFIX = "edge:"
+
+    /** The repository a job is for: the one chosen, or the only one there is. */
+    fun chosenRepo(chosen: String?, picked: List<String>): String? = chosen?.takeIf { it in picked } ?: picked.singleOrNull()
+
+    /** A job as a task the worker takes: the repository stands alone on its own line, where the worker looks for it. */
+    fun githubTask(repo: String, job: String, tag: String = "edge-task"): org.json.JSONObject = org.json.JSONObject()
+        .put("title", job.trim().lineSequence().first().take(GITHUB_TITLE_CHARS))
+        .put("description", "Repository: $repo\n\n${job.trim()}\n\nDone when CI passes.")
+        .put("tags", org.json.JSONArray().put(tag))
+
+    private const val GITHUB_TITLE_CHARS = 80
+
+    /** A model budget as a person reads it, the same on every phone language. */
+    fun dollars(amount: Double): String = String.format(java.util.Locale.US, "\$%.2f", amount)
     private const val EDGE_AGENT = "HQ"
 
     /** The order on the list: waiting for the owner first, then working, then the rest, newest first within each. */

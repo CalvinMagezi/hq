@@ -373,6 +373,16 @@ mod tests {
     }
 
     #[test]
+    fn the_github_app_key_and_record_are_denied_to_every_file_tool() {
+        use hq_tools::github::app::{KEY_FILE, RECORD_FILE};
+        let roots = always_denied_roots();
+        for name in [KEY_FILE, RECORD_FILE] {
+            let file = hq_tools::github::records_root().join(name);
+            assert!(roots.iter().any(|r| file.starts_with(r)), "{file:?}");
+        }
+    }
+
+    #[test]
     fn a_pkcs8_key_file_is_a_key() {
         assert!(tier("/srv/vault/_data/web_push_vapid.p8").is_some());
     }

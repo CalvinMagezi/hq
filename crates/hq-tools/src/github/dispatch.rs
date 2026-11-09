@@ -12,6 +12,8 @@ use hq_db::ask_requests as asks;
 use hq_db::tasks as t;
 use serde_json::json;
 
+use super::app::{AppClient, Standing, standing};
+
 /// Tasks carrying this tag are the worker's queue. Its own tag, so tasks that are merely about
 /// the worker are never taken for work by it. Scoped connections may not set it
 /// ([`refuse_queue_write`]).
@@ -43,15 +45,59 @@ pub enum Outcome {
     Idle,
     /// HQ was asked to work `task`; the reply runs in the chat thread of `ask_id`.
     Started { task: String, ask_id: String },
+    /// `task` is next, but the owner has not yet agreed to the first run after connecting.
+    AwaitingConfirmation(String),
+}
+
+/// One tick, against the App on this device.
+pub async fn dispatch(
+    db: Arc<Database>,
+    config: &HqConfig,
+    runner: crate::ask::RunnerCell,
+) -> Result<Outcome> {
+    let app = AppClient::standard()?;
+    dispatch_with(db, config, runner, &app).await
+}
+
+/// The repositories the worker may take tasks for. With an App: those the person picked and
+/// that need no confirmation, narrowed by config. A connection that stopped working allows
+/// none, rather than falling back to the config list. Without an App: the config list.
+pub fn allowed_repos(config: &HqConfig, app: &AppClient) -> Vec<String> {
+    let narrow = &config.github_write.repos;
+    let Some(record) = app.store().load() else {
+        return narrow.clone();
+    };
+    if standing(Some(&record)) != Standing::Connected {
+        return Vec::new();
+    }
+    app.repositories()
+        .into_iter()
+        .filter(|r| r.picked())
+        .map(|r| r.repo)
+        .filter(|r| narrow.is_empty() || narrow.iter().any(|n| n.eq_ignore_ascii_case(r)))
+        .collect()
+}
+
+/// Whether a queued task would be taken now.
+pub fn armed(config: &HqConfig, app: &AppClient) -> bool {
+    enabled(config) && !allowed_repos(config, app).is_empty()
+}
+
+/// Connecting is consent to the App, not yet to spending on queued work.
+fn awaiting_first_confirmation(app: &AppClient) -> bool {
+    app.store()
+        .load()
+        .is_some_and(|record| !record.first_task_confirmed)
 }
 
 /// One tick: start work on the next task when nothing else is running. Tasks the worker
 /// dropped are parked as blocked, with a note in the owner's inbox, so none holds the queue.
 /// `runner` is where the reply runs, the web server's chat ([`crate::ask::shared_runner_cell`]).
-pub async fn dispatch(
+pub async fn dispatch_with(
     db: Arc<Database>,
     config: &HqConfig,
     runner: crate::ask::RunnerCell,
+    app: &AppClient,
 ) -> Result<Outcome> {
     // Without a web server in this process there is no chat to run the work in.
     let can_ask = runner.get().is_some();
@@ -79,8 +125,14 @@ pub async fn dispatch(
             }
         }
     }
-    let repos = config.github_write.repos.clone();
+    let repos = allowed_repos(config, app);
     let candidates = db.with_conn(move |c| candidates(c, &repos))?;
+    if let Some(first) = candidates.first()
+        && awaiting_first_confirmation(app)
+    {
+        ask_for_first_confirmation(&db, first, config.github_write.task_budget_usd);
+        return Ok(Outcome::AwaitingConfirmation(first.display_id.clone()));
+    }
     for task in candidates {
         let key = ask_key(&task);
         let earlier = db.with_conn(move |c| asks::get_by_external(c, ASK_SCOPE, &key))?;
@@ -97,7 +149,8 @@ pub async fn dispatch(
             continue;
         }
         let model = config.github_write.dispatch_model.as_deref();
-        let ask_id = ask_to_work(db.clone(), runner, &task, model).await?;
+        let budget = config.github_write.task_budget_usd;
+        let ask_id = ask_to_work(db.clone(), runner, &task, model, budget).await?;
         return Ok(Outcome::Started {
             task: task.display_id,
             ask_id,
@@ -202,6 +255,7 @@ async fn ask_to_work(
     runner: crate::ask::RunnerCell,
     task: &t::Task,
     model: Option<&str>,
+    budget_usd: f64,
 ) -> Result<String> {
     let tools = crate::ask::create_ask_tools_with(db, runner, None);
     let ask = tools
@@ -222,6 +276,8 @@ async fn ask_to_work(
         // Anyone the owner lets file tasks may have written the task and its comments.
         "untrusted": true,
         "model": model,
+        "budget_usd": budget_usd,
+        "worker_preset": true,
     });
     let reply = ask.execute(args).await?;
     let ask_id = reply
@@ -302,6 +358,23 @@ fn model_is_declared(config: &HqConfig, model: &str) -> bool {
         .iter()
         .filter(|b| b.enabled)
         .any(|b| b.name == model || b.model.as_deref() == Some(model))
+}
+
+fn ask_for_first_confirmation(db: &Database, task: &t::Task, budget_usd: f64) {
+    let item = ValueItem::new(
+        INBOX_SOURCE,
+        ValueKind::ActionNeeded,
+        "HQ Coder is ready for its first task",
+        format!(
+            "{} is waiting. HQ will spend up to ${budget_usd:.2} of model credits on it and open a \
+             pull request. Start it from Code from this phone.",
+            task.title
+        ),
+    )
+    .with_dedup_key(format!("{INBOX_SOURCE}-first-task"));
+    if let Err(e) = hq_db::value_items::emit(db, &item) {
+        tracing::warn!(error = %e, "edge-worker-dispatch: inbox item failed");
+    }
 }
 
 fn warn_misconfigured(db: &Database, model: &str) {

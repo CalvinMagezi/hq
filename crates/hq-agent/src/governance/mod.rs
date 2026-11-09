@@ -197,6 +197,27 @@ impl ToolGuardian {
         profile: SecurityProfile,
         permission_mode: PermissionMode,
     ) -> Self {
+        let mut roots = allowed_paths;
+        // This machine is single-tenant (RFC-001 §7): there is no second
+        // user to sandbox hq away from, so the allowlist's job is to keep
+        // raw file tools off credential material, not to confine hq to a
+        // project directory. Every caller-supplied root plus $HOME goes in;
+        // sensitive_denied_paths() below carves out what never should.
+        if !roots.is_empty()
+            && let Some(home) = dirs::home_dir()
+        {
+            roots.push(home);
+        }
+        Self::confined(roots, profile, permission_mode)
+    }
+
+    /// Exactly these folders and not `$HOME`, for a child that reads untrusted text and was told
+    /// to stay in one place. Panics as [`Self::new`] does.
+    pub fn confined(
+        allowed_paths: Vec<PathBuf>,
+        profile: SecurityProfile,
+        permission_mode: PermissionMode,
+    ) -> Self {
         assert!(
             !allowed_paths.is_empty(),
             "ToolGuardian requires at least one allowed path. \
@@ -210,18 +231,8 @@ impl ToolGuardian {
             MIN_SECURITY_FLOOR
         );
 
-        // This machine is single-tenant (RFC-001 §7): there is no second
-        // user to sandbox hq away from, so the allowlist's job is to keep
-        // raw file tools off credential material, not to confine hq to a
-        // project directory. Every caller-supplied root plus $HOME goes in;
-        // sensitive_denied_paths() below carves out what never should.
-        let mut roots = allowed_paths;
-        if let Some(home) = dirs::home_dir() {
-            roots.push(home);
-        }
-
         Self {
-            allowed_paths: expand_with_canonical_forms(roots),
+            allowed_paths: expand_with_canonical_forms(allowed_paths),
             denied_paths: expand_with_canonical_forms(sensitive_denied_paths()),
             vault_root: None,
             profile,

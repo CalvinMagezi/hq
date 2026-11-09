@@ -12,6 +12,7 @@ use regex::Regex;
 use reqwest::Method;
 use serde_json::{Value, json};
 
+use super::app::{AppClient, Step, Store};
 use super::changes::{Change, changes};
 use super::tarball::{Base, load_base};
 use super::{API_HOST_URL, InFlight, USER_AGENT, clone_root, records_root, repo, text};
@@ -73,8 +74,8 @@ impl HqTool for GithubWriteTool {
 
     fn description(&self) -> &str {
         "Publish the changes made in a github_clone checkout (one fetched without git) as a branch \
-         named hq/<branch> and open a pull request for review. Only repositories the owner listed \
-         in github_write.repos; never another branch, never a merge, never .github/. Files and \
+         named hq/<branch> and open a pull request for review. Only repositories the owner picked \
+         for HQ's GitHub App or listed in github_write.repos; never another branch, never a merge, never .github/. Files and \
          text that look like credentials are refused. Push again to the same branch to add a fix \
          after CI fails."
     }
@@ -99,13 +100,31 @@ impl HqTool for GithubWriteTool {
     }
 
     async fn execute(&self, args: Value) -> Result<Value> {
-        let request = Request::parse(&args, &self.repos)?;
-        let token = std::env::var(TOKEN_ENV)
-            .ok()
-            .filter(|t| !t.trim().is_empty())
-            .with_context(|| format!("github_write needs a token in {TOKEN_ENV}"))?;
-        self.run(request, token).await
+        let app = AppClient::new(Store::at(self.records.clone()), &self.api_base)?;
+        let record = app.store().load();
+        // GitHub refuses a token for a repository the person did not pick, so the installation
+        // is the allowlist unless the owner narrowed it in config.
+        let installation_decides = record.is_some() && self.repos.is_empty();
+        let allowed = match installation_decides {
+            true => vec![repo(&args)?],
+            false => self.repos.clone(),
+        };
+        let mut request = Request::parse(&args, &allowed)?;
+        let Some(record) = record else {
+            return self.run(request, env_token()?).await;
+        };
+        app.ensure_picked(&request.repo).await?;
+        let token = app.token(&request.repo, Step::Publish).await?;
+        request.author = Some(record.author());
+        self.run(request, token.secret().to_string()).await
     }
+}
+
+fn env_token() -> Result<String> {
+    std::env::var(TOKEN_ENV)
+        .ok()
+        .filter(|t| !t.trim().is_empty())
+        .with_context(|| format!("github_write needs a connected GitHub App or {TOKEN_ENV}"))
 }
 
 impl GithubWriteTool {
@@ -151,6 +170,8 @@ struct Request {
     title: String,
     body: String,
     open_pr: bool,
+    /// The person the commit is credited to, when the App opens the pull request.
+    author: Option<Value>,
 }
 
 impl Request {
@@ -175,6 +196,7 @@ impl Request {
             body: text(args, "body").unwrap_or_default().to_string(),
             open_pr: args.get("open_pr").and_then(Value::as_bool).unwrap_or(true),
             message,
+            author: None,
         };
         let limits = [
             ("message", &request.message, MAX_MESSAGE_CHARS),
@@ -381,7 +403,10 @@ async fn publish(
         return Ok(None);
     }
     let parent = head.clone().unwrap_or_else(|| base.commit.clone());
-    let body = json!({"message": req.message, "tree": new_tree, "parents": [parent]});
+    let mut body = json!({"message": req.message, "tree": new_tree, "parents": [parent]});
+    if let Some(author) = &req.author {
+        body["author"] = author.clone();
+    }
     let commit = api
         .need(Method::POST, "git/commits", Some(body), &[201])
         .await?;

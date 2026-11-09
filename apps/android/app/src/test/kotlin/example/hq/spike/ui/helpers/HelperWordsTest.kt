@@ -490,4 +490,23 @@ class HelperWordsTest {
         assertEquals("2 h ago", done.time)
         assertEquals(HelperState.Stopped, HelperWords.edgeCard(w, run("failed"), now).state)
     }
+
+    @Test
+    fun `a budget reads as dollars in every language`() {
+        assertEquals("\$0.50", HelperWords.dollars(0.5))
+    }
+
+    @Test fun `a job names its repository as a word of its own, and its first line is the title`() {
+        val task = HelperWords.githubTask("o/r", "  add a switch\nto settings  ")
+        assertEquals("add a switch", task.getString("title"))
+        assertTrue(task.getString("description").startsWith("Repository: o/r\n"))
+        assertEquals("edge-task", task.getJSONArray("tags").getString(0))
+    }
+
+    @Test fun `the only allowed repository is chosen for you, a stale choice is not`() {
+        assertEquals("o/r", HelperWords.chosenRepo(null, listOf("o/r")))
+        assertEquals("o/r", HelperWords.chosenRepo("gone/x", listOf("o/r")))
+        assertNull(HelperWords.chosenRepo(null, listOf("o/r", "o/s")))
+        assertEquals("o/s", HelperWords.chosenRepo("o/s", listOf("o/r", "o/s")))
+    }
 }

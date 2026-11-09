@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { Archive, Bell, ChevronRight, Clock, Folder, Gauge, KeyRound, LogOut, MessageSquare, Monitor, ShieldCheck, Smartphone, BarChart3, type LucideIcon } from 'lucide-react'
+import { Archive, Bell, ChevronRight, Clock, Code, Folder, Gauge, KeyRound, LogOut, MessageSquare, Monitor, ShieldCheck, Smartphone, BarChart3, type LucideIcon } from 'lucide-react'
 import { settingsGroups, type WhereHqRuns } from '~/lib/settingsGroups'
 import { t } from '~/strings'
 
@@ -12,6 +12,7 @@ const ROW_ICONS: Record<string, LucideIcon> = {
   keys: KeyRound,
   messaging: MessageSquare,
   devices: Smartphone,
+  code: Code,
   spending: Gauge,
   safety: ShieldCheck,
   folders: Folder,

@@ -445,7 +445,8 @@ impl SessionBuilder {
                 .with_permission_mode(self.permission_mode.clone())
                 .with_owner_approval(self.owner_approval.clone())
                 .with_role(self.role)
-                .with_taint(taint.clone()),
+                .with_taint(taint.clone())
+                .confined_to(self.worker_checkouts.clone()),
             );
 
             let child_ctx = crate::agents::ChildExecContext {
@@ -511,6 +512,7 @@ impl SessionBuilder {
                     .iter()
                     .any(|p| t.name().starts_with(p.as_str()))
             })
+            .filter(|t| self.worker_checkouts.is_none() || super::WORKER_TOOLS.contains(&t.name()))
             .collect::<Vec<_>>();
         let tools = self.apply_role(tools);
         let mobile = self.config.profile.is_mobile();

@@ -778,6 +778,7 @@ impl ChatTurn {
                 .chain(session_driver.then(|| DRIVER_DENIED_TOOL.to_string()))
                 .chain(driver_turn.then(|| CONFIG_TOOL.to_string()))
                 .collect(),
+            worker_preset: self.ask.as_ref().is_some_and(|a| a.worker_preset),
             permission_preset: self.ask.as_ref().and_then(ask::AskTurn::permission_preset),
             untrusted_input: self
                 .ask

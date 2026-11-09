@@ -32,8 +32,10 @@ pub struct Shipped {
     pub applies: fn(&HqConfig) -> bool,
 }
 
-fn has_write_repos(config: &HqConfig) -> bool {
-    !config.github_write.repos.is_empty()
+/// The set is decided once at start, and GitHub can be connected any time after, so the worker
+/// is always offered. Whether it acts is `dispatch::allowed_repos`.
+fn every_install(_: &HqConfig) -> bool {
+    true
 }
 
 /// Every built-in skill. A test checks this list against `assets/skills/`.
@@ -43,7 +45,7 @@ pub const BUILTIN_SKILLS: &[Shipped] = &[Shipped {
         SKILL_FILE,
         include_str!("../../assets/skills/edge-coding-worker/SKILL.md"),
     )],
-    applies: has_write_repos,
+    applies: every_install,
 }];
 
 /// The active built-ins, set once from the config the process loaded. `None` until

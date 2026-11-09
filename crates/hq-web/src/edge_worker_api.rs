@@ -3,6 +3,7 @@
 
 use axum::{Json, extract::State, response::IntoResponse};
 use hq_core::config::HqConfig;
+use hq_tools::github::app::AppClient;
 use hq_tools::github::dispatch;
 use serde_json::json;
 use std::sync::Arc;
@@ -24,10 +25,13 @@ pub(crate) async fn edge_worker_handler(
         .db
         .with_conn(|c| dispatch::recent_runs(c, RUNS_SHOWN))
         .map_err(|e| ApiError::internal(format!("edge worker runs failed: {e}")))?;
+    let app = AppClient::standard()
+        .map_err(|e| ApiError::internal(format!("GitHub client failed: {e}")))?;
     Ok(Json(json!({
-        "enabled": dispatch::enabled(&config),
+        "enabled": dispatch::armed(&config, &app),
         "tag": dispatch::DISPATCH_TAG,
-        "repos": config.github_write.repos,
+        "repos": dispatch::allowed_repos(&config, &app),
+        "task_budget_usd": config.github_write.task_budget_usd,
         "runs": runs,
     })))
 }

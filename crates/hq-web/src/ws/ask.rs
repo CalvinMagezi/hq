@@ -46,6 +46,7 @@ pub(super) struct AskTurn {
     pub(super) scope: AskScope,
     pub(super) untrusted: bool,
     pub(super) model: Option<String>,
+    pub(super) worker_preset: bool,
 }
 
 impl AskTurn {
@@ -137,6 +138,19 @@ pub(super) fn settle_finished(
 
 /// Posts the question as a user message and starts HQ's reply. Any error means
 /// nothing was posted and no reply runs.
+/// A reply's own cap, which can only be lower than the owner's.
+fn with_budget(
+    config: Arc<hq_core::config::HqConfig>,
+    budget_usd: Option<f64>,
+) -> Arc<hq_core::config::HqConfig> {
+    let Some(budget) = budget_usd else {
+        return config;
+    };
+    let mut lowered = (*config).clone();
+    lowered.budget.session_cap_usd = lowered.budget.session_cap_usd.min(budget);
+    Arc::new(lowered)
+}
+
 async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<String> {
     let mut turns = state.active_chat_turns.write().await;
     if turns.contains_key(req.thread_id) {
@@ -147,6 +161,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
         .map(Arc::new)
         .or_else(|| state.hq_config.clone())
         .ok_or_else(|| anyhow!("HQ's config could not be read"))?;
+    let config = with_budget(config, req.budget_usd);
     let history = thread_history(&state.db, req.thread_id, &config.context_fold);
     let meta = json!({"source": {
         "kind": "mcp",
@@ -180,6 +195,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
             scope: req.scope,
             untrusted: req.untrusted,
             model: req.model.map(str::to_string),
+            worker_preset: req.worker_preset,
         }),
         spoken: None,
         offer: None,
@@ -339,6 +355,7 @@ mod tests {
                 scope: AskScope::Full,
                 untrusted: false,
                 model: None,
+                worker_preset: false,
             }),
             spoken: None,
             offer: None,
@@ -365,6 +382,7 @@ mod tests {
             scope,
             untrusted: false,
             model: None,
+            worker_preset: false,
         };
         let denied = turn(AskScope::Connector, AskMode::ReadOnly).denied_tool_prefixes();
         let blocks = |tool: &str| denied.iter().any(|p| tool.starts_with(p.as_str()));
@@ -405,6 +423,7 @@ mod tests {
             scope: AskScope::Full,
             untrusted,
             model: None,
+            worker_preset: false,
         };
         assert_eq!(
             turn(true).untrusted_source().as_deref(),
@@ -426,6 +445,7 @@ mod tests {
             scope: AskScope::Full,
             untrusted: false,
             model: None,
+            worker_preset: false,
         };
         assert_eq!(
             read_only.permission_preset(),
@@ -582,6 +602,8 @@ mod tests {
                 scope: AskScope::Full,
                 untrusted: false,
                 model: None,
+                budget_usd: None,
+                worker_preset: false,
                 caller: "claude-code",
             })
             .await
@@ -653,6 +675,8 @@ mod tests {
                 scope: AskScope::Full,
                 untrusted: false,
                 model: None,
+                budget_usd: None,
+                worker_preset: false,
                 caller: "c",
             })
             .await

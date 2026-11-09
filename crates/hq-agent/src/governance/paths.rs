@@ -1,4 +1,7 @@
+use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
+
+const DEFAULT_SEARCH_ROOT: &str = ".";
 
 /// Tools that interact with the filesystem and need path checks.
 pub(super) const PATH_TOOLS: &[&str] = &[
@@ -84,18 +87,36 @@ pub(super) fn path_args_for_tool(tool_name: &str) -> &[&str] {
 
 /// Every path a call names: the tool's top-level path keys, plus each `edits[].file_path` of a
 /// batch edit. A path the allowlist never sees is a path it never refuses.
-pub(super) fn path_values<'a>(tool_name: &str, args: &'a serde_json::Value) -> Vec<&'a str> {
-    let mut paths: Vec<&str> = path_args_for_tool(tool_name)
+pub(super) fn path_values<'a>(tool_name: &str, args: &'a serde_json::Value) -> Vec<Cow<'a, str>> {
+    let mut paths: Vec<Cow<'a, str>> = path_args_for_tool(tool_name)
         .iter()
         .filter_map(|key| args.get(*key).and_then(|v| v.as_str()))
+        .map(Cow::Borrowed)
         .collect();
+    let named = args.get("path").and_then(|v| v.as_str());
+    // These tools search the working directory when the call names no folder.
+    if matches!(tool_name, "find_files" | "list_dir" | "grep") && named.is_none() {
+        paths.push(Cow::Borrowed(DEFAULT_SEARCH_ROOT));
+    }
+    // The glob can leave `path` by being absolute or by climbing out with `..`.
+    if tool_name == "find_files"
+        && let Some(pattern) = args.get("pattern").and_then(|v| v.as_str())
+    {
+        let base = named.unwrap_or(DEFAULT_SEARCH_ROOT);
+        paths.push(if pattern.starts_with('/') {
+            Cow::Borrowed(pattern)
+        } else {
+            Cow::Owned(format!("{base}/{pattern}"))
+        });
+    }
     if tool_name == "file_edit_batch"
         && let Some(edits) = args.get("edits").and_then(|v| v.as_array())
     {
         paths.extend(
             edits
                 .iter()
-                .filter_map(|edit| edit.get("file_path").and_then(|v| v.as_str())),
+                .filter_map(|edit| edit.get("file_path").and_then(|v| v.as_str()))
+                .map(Cow::Borrowed),
         );
     }
     paths

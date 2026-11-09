@@ -69,6 +69,30 @@ pub enum SessionRole {
 /// Tools an orchestrator session never gets. They change files, git history or
 /// HQ's own config; that work goes to a coding session or child agent instead.
 /// Chosen by effect: every tool that writes outside the vault and task stores.
+/// All the unattended coding worker's own turn may call. It reads text anyone may have written, so
+/// this is a list of what it needs and not of what to take away: a new tool stays out by default.
+pub const WORKER_TOOLS: &[&str] = &[
+    "load_skill",
+    "task_get",
+    "task_claim",
+    "task_heartbeat",
+    "task_release",
+    "task_comment_add",
+    "task_comment_list",
+    "github_clone",
+    "github_read",
+    "github_write",
+    "spawn_subagents",
+    "subagent_run_status",
+    "subagent_run_result",
+    "subagent_run_list",
+    "watch_create",
+    "watch_list",
+    "watch_cancel",
+    "report_progress",
+    "notify_owner",
+];
+
 pub const ORCHESTRATOR_REMOVED_TOOLS: &[&str] = &[
     "edit_file",
     "write_file",
@@ -249,6 +273,8 @@ pub struct SessionBuilder {
     session_profile: SessionProfile,
     /// Tools whose name starts with one of these are left out of the session.
     tool_deny_prefixes: Vec<String>,
+    /// Set for an unattended coding worker: the folder its sub-agents are confined to.
+    worker_checkouts: Option<PathBuf>,
     /// Why the session counts as having read untrusted text before its first tool call.
     untrusted_input: Option<String>,
     /// Nobody is there to approve a call; see [`Self::unattended`].
@@ -296,6 +322,7 @@ impl SessionBuilder {
             exclude_own_interface_thread: false,
             session_profile: SessionProfile::Standard,
             tool_deny_prefixes: Vec::new(),
+            worker_checkouts: None,
             untrusted_input: None,
             unattended: false,
             owner_words: Vec::new(),
@@ -483,6 +510,13 @@ impl SessionBuilder {
     /// the profile or policy would otherwise allow.
     pub fn deny_tool_prefixes(mut self, prefixes: Vec<String>) -> Self {
         self.tool_deny_prefixes = prefixes;
+        self
+    }
+
+    /// The unattended coding worker: its own turn has only [`WORKER_TOOLS`], and every sub-agent
+    /// it starts is confined to `checkouts`, with file tools and no shell.
+    pub fn worker_preset(mut self, checkouts: PathBuf) -> Self {
+        self.worker_checkouts = Some(checkouts);
         self
     }
 

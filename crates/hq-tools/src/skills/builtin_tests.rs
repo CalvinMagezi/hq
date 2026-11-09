@@ -83,10 +83,11 @@ fn every_shipped_skill_is_valid_clean_and_marked_as_hq_s() {
 }
 
 #[test]
-fn a_built_in_is_active_only_when_it_applies_and_is_not_turned_off() {
-    assert!(
-        active_for(&config_with(&[], &[])).is_empty(),
-        "no write repos, no worker skill"
+fn a_built_in_is_active_unless_it_is_turned_off() {
+    assert_eq!(
+        active_for(&config_with(&[], &[])),
+        [NAME],
+        "GitHub can be connected after start, with no repos listed"
     );
     assert_eq!(active_for(&config_with(&["o/r"], &[])), [NAME]);
     assert!(active_for(&config_with(&["o/r"], &["EDGE-CODING-WORKER"])).is_empty());
