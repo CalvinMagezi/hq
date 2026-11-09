@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, Trash2 } from 'lucide-react'
 import { togglePinNote, type NoteTreeNode, type PinnedNote, type RecentFile, type VaultSignals } from '~/lib/vaultApi'
 import { noteTreeQuery, pinnedNotesQuery, vaultSignalsQuery } from '~/lib/queries'
 import { sectionState, type SectionState } from '~/lib/homeSections'
@@ -32,16 +32,19 @@ interface NotesHomeViewProps {
     onRetryRecent: () => void
     /** Extra cards above the sections (the first-run checklist, the briefing). */
     intro?: React.ReactNode
+    /** The way to the Trash, passed in because it needs the router. */
+    trashLink?: React.ReactNode
 }
 
 /** Notes home: find, the folders to open, what is pinned, what changed lately. */
-export function NotesHomeView({ pinned, recent, folders, onKeepPin, onNotNow, onRetryPinned, onRetryRecent, intro }: NotesHomeViewProps) {
+export function NotesHomeView({ pinned, recent, folders, onKeepPin, onNotNow, onRetryPinned, onRetryRecent, intro, trashLink }: NotesHomeViewProps) {
     return (
         <Panes
             detailLabel={t('notes_your_notes')}
             detail={
                 <>
                     <PaneHead title={t('notes_your_notes')}>
+                        {trashLink}
                         <button type="button" className="a-btn compact" onClick={openNewNote} title={t('notes_new_note_key')}>
                             <Plus className="a-ic" aria-hidden="true" />
                             {t('notes_new_note')}
@@ -96,6 +99,12 @@ function VaultHome() {
             onNotNow={(path) => void togglePinNote(path, false).then(() => pinnedQuery.refetch())}
             onRetryPinned={() => pinnedQuery.refetch()}
             onRetryRecent={() => signalsQuery.refetch()}
+            trashLink={
+                <Link to="/notes/trash" className="a-btn compact secondary">
+                    <Trash2 className="a-ic" aria-hidden="true" />
+                    {t('notes_trash')}
+                </Link>
+            }
             intro={
                 <>
                     <BriefingCard variant="home" />

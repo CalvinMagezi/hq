@@ -28,6 +28,32 @@ const PROTECTED_FOLDERS: &[&str] = &[
     "_mailboxes",
 ];
 
+/// How long a deleted note stays in the trash before the daemon purges its day folder.
+pub const TRASH_RETENTION_DAYS: i64 = 30;
+const TRASH_DIR: &str = "_trash";
+const TRASH_DAY_FORMAT: &str = "%Y-%m-%d";
+/// The trash also holds repair backups (`_trash/<day>/nested-frontmatter/`); those are not notes
+/// the owner deleted, so the Trash shows and restores only what came out of `Notebooks/`.
+const TRASHED_NOTES_ROOT: &str = "Notebooks";
+const MAX_TRASH_LISTED: usize = 1000;
+
+/// A deleted note as the Trash shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct TrashedNote {
+    pub trash_path: String,
+    pub original_path: String,
+    pub trashed_on: String,
+    pub days_left: i64,
+}
+
+/// Where a note lived before it was deleted, and where a restore put it. They differ when
+/// something else has taken the old name.
+#[derive(Debug, Clone, Serialize)]
+pub struct RestoredNote {
+    pub original_path: String,
+    pub path: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MoveReport {
     pub from: String,
@@ -169,8 +195,8 @@ pub(crate) fn trash_note(vault_path: &Path, rel: &str, dry_run: bool) -> Result<
     if !src.is_file() {
         bail!("note '{rel}' does not exist");
     }
-    let date = chrono::Local::now().format("%Y-%m-%d");
-    let dest_rel = format!("_trash/{date}/{rel}");
+    let date = chrono::Local::now().format(TRASH_DAY_FORMAT);
+    let dest_rel = format!("{TRASH_DIR}/{date}/{rel}");
     if dry_run {
         return Ok(dest_rel);
     }
@@ -190,6 +216,173 @@ pub(crate) fn trash_note(vault_path: &Path, rel: &str, dry_run: bool) -> Result<
     }
     std::fs::rename(&src, &final_dst)?;
     Ok(final_rel)
+}
+
+/// The notes in the trash, newest day first.
+pub(crate) fn list_trash(vault_path: &Path) -> Result<Vec<TrashedNote>> {
+    let Ok(days) = std::fs::read_dir(vault_path.join(TRASH_DIR)) else {
+        return Ok(Vec::new());
+    };
+    let today = chrono::Local::now().date_naive();
+    let mut notes = Vec::new();
+    for day in days.filter_map(|e| e.ok()) {
+        let name = day.file_name().to_string_lossy().into_owned();
+        let Ok(date) = chrono::NaiveDate::parse_from_str(&name, TRASH_DAY_FORMAT) else {
+            continue;
+        };
+        let day_dir = day.path();
+        let days_left = (date + chrono::Duration::days(TRASH_RETENTION_DAYS) - today).num_days();
+        for inner in notes_under(&day_dir, TRASHED_NOTES_ROOT) {
+            notes.push(TrashedNote {
+                trash_path: format!("{TRASH_DIR}/{name}/{inner}"),
+                original_path: original_of(&day_dir, &inner),
+                trashed_on: name.clone(),
+                days_left: days_left.max(0),
+            });
+        }
+    }
+    notes.sort_by(|a, b| {
+        b.trashed_on
+            .cmp(&a.trashed_on)
+            .then_with(|| a.original_path.cmp(&b.original_path))
+    });
+    notes.truncate(MAX_TRASH_LISTED);
+    Ok(notes)
+}
+
+/// Paths of the `.md` files below `base/sub`, relative to `base`. Symlinks are not followed.
+fn notes_under(base: &Path, sub: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![base.join(sub)];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(|e| e.ok()) {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_dir() {
+                stack.push(path);
+            } else if kind.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Ok(rel) = path.strip_prefix(base)
+            {
+                found.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    found
+}
+
+/// Where a trashed file came from. `trash_note` numbers a copy only when the plain name is taken
+/// that day, so a number with no plain sibling is part of the note's real name. Once the plain
+/// copy is restored, a numbered one comes back with its number, which loses nothing.
+fn original_of(day_dir: &Path, inner: &str) -> String {
+    let plain = inner
+        .strip_suffix(".md")
+        .and_then(|s| s.rsplit_once('.'))
+        .filter(|(_, n)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        .map(|(base, _)| format!("{base}.md"));
+    match plain {
+        Some(plain) if day_dir.join(&plain).exists() => plain,
+        _ => inner.to_string(),
+    }
+}
+
+/// A checked trash path: its one spelling and the part below the day folder. Refuses anything
+/// that is not a real file under `_trash/<day>/Notebooks/`, so a link planted in the trash
+/// cannot be read or restored.
+fn checked_trash_path(vault_path: &Path, rel: &str) -> Result<(String, String, String)> {
+    let normalized = RelPath::parse(rel)?.normalized();
+    let mut parts = normalized.splitn(3, '/');
+    let (Some(TRASH_DIR), Some(day), Some(inner)) = (parts.next(), parts.next(), parts.next())
+    else {
+        bail!("'{rel}' is not a note in the trash");
+    };
+    if chrono::NaiveDate::parse_from_str(day, TRASH_DAY_FORMAT).is_err()
+        || !inner.starts_with(&format!("{TRASHED_NOTES_ROOT}/"))
+    {
+        bail!("'{rel}' is not a note in the trash");
+    }
+    require_md(inner)?;
+    let src = vault_path.join(&normalized);
+    if !std::fs::symlink_metadata(&src)?.is_file() {
+        bail!("'{rel}' is not a note in the trash");
+    }
+    let trash_root = vault_path.join(TRASH_DIR).canonicalize()?;
+    if !src.canonicalize()?.starts_with(&trash_root) {
+        bail!("'{rel}' is not a note in the trash");
+    }
+    let (day, inner) = (day.to_string(), inner.to_string());
+    Ok((normalized, day, inner))
+}
+
+/// The text of a note in the trash.
+pub(crate) fn read_trashed(vault_path: &Path, trash_rel: &str) -> Result<String> {
+    let (normalized, _, _) = checked_trash_path(vault_path, trash_rel)?;
+    Ok(std::fs::read_to_string(vault_path.join(normalized))?)
+}
+
+/// Refuses a destination whose real folder is outside the vault or in a protected one, however
+/// a symlink inside the vault spells it.
+fn require_safe_parent(vault_path: &Path, dest: &Path) -> Result<()> {
+    let root = vault_path.canonicalize()?;
+    let mut probe = dest
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("the destination has no folder"))?;
+    while !probe.exists() {
+        probe = probe
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("the destination has no folder"))?;
+    }
+    let real = probe.canonicalize()?;
+    let inside = real
+        .strip_prefix(&root)
+        .map_err(|_| anyhow::anyhow!("the destination is outside the vault"))?;
+    let top = inside
+        .components()
+        .next()
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase());
+    if top.is_some_and(|t| PROTECTED_FOLDERS.iter().any(|p| p.to_lowercase() == t)) {
+        bail!("the destination is in a protected folder");
+    }
+    Ok(())
+}
+
+/// `rel`, or the first "<name> (restored).md" that is free, so a restore never replaces a note.
+fn free_restore_path(vault_path: &Path, rel: &str) -> String {
+    let taken = |p: &str| std::fs::symlink_metadata(vault_path.join(p)).is_ok();
+    if !taken(rel) {
+        return rel.to_string();
+    }
+    let base = rel.trim_end_matches(".md");
+    let mut candidate = format!("{base} (restored).md");
+    let mut n = 2;
+    while taken(&candidate) {
+        candidate = format!("{base} (restored {n}).md");
+        n += 1;
+    }
+    candidate
+}
+
+/// Put a trashed note back where it was.
+pub(crate) fn restore_note(vault_path: &Path, trash_rel: &str) -> Result<RestoredNote> {
+    let (normalized, day, inner) = checked_trash_path(vault_path, trash_rel)?;
+    let day_dir = vault_path.join(TRASH_DIR).join(day);
+    let original = guard_rel_path(&original_of(&day_dir, &inner))?;
+    let dest_rel = free_restore_path(vault_path, &original);
+    let dest = vault_path.join(&dest_rel);
+    require_safe_parent(vault_path, &dest)?;
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(vault_path.join(normalized), &dest)?;
+    Ok(RestoredNote {
+        original_path: original,
+        path: dest_rel,
+    })
 }
 
 /// Set and/or remove frontmatter keys on a note, preserving the body.
@@ -256,6 +449,12 @@ pub fn purge_trash(vault_path: &Path, retention_days: i64) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write(vault: &Path, rel: &str, text: &str) {
+        let path = vault.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
 
     fn setup() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
@@ -372,6 +571,107 @@ mod tests {
         assert_eq!(report.from, "Notebooks/Projects/Beta.md");
         assert_eq!(report.to, "Notebooks/Beta.md");
         assert!(tmp.path().join("Notebooks/Beta.md").is_file());
+    }
+
+    #[test]
+    fn restore_brings_a_note_back_and_never_replaces_one() {
+        let tmp = setup();
+        let trash = trash_note(tmp.path(), "Notebooks/Projects/Beta.md", false).unwrap();
+        let listed = list_trash(tmp.path()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].original_path, "Notebooks/Projects/Beta.md");
+        assert_eq!(listed[0].trash_path, trash);
+        assert_eq!(listed[0].days_left, TRASH_RETENTION_DAYS);
+        assert!(read_trashed(tmp.path(), &trash).is_ok());
+
+        write(
+            tmp.path(),
+            "Notebooks/Projects/Beta.md",
+            "a new note took the name",
+        );
+        let back = restore_note(tmp.path(), &trash).unwrap();
+        assert_eq!(back.path, "Notebooks/Projects/Beta (restored).md");
+        assert_eq!(back.original_path, "Notebooks/Projects/Beta.md");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("Notebooks/Projects/Beta.md")).unwrap(),
+            "a new note took the name"
+        );
+        assert!(list_trash(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_numbered_copy_restores_under_its_plain_name_and_a_real_number_stays() {
+        let tmp = setup();
+        trash_note(tmp.path(), "Notebooks/Projects/Beta.md", false).unwrap();
+        write(tmp.path(), "Notebooks/Projects/Beta.md", "second");
+        let numbered = trash_note(tmp.path(), "Notebooks/Projects/Beta.md", false).unwrap();
+        assert!(numbered.ends_with("Beta.1.md"));
+        write(tmp.path(), "Notebooks/v2.1.md", "real number");
+        let real = trash_note(tmp.path(), "Notebooks/v2.1.md", false).unwrap();
+
+        assert_eq!(
+            restore_note(tmp.path(), &numbered).unwrap().path,
+            "Notebooks/Projects/Beta.md"
+        );
+        assert_eq!(
+            restore_note(tmp.path(), &real).unwrap().path,
+            "Notebooks/v2.1.md"
+        );
+    }
+
+    #[test]
+    fn restore_refuses_anything_but_a_real_note_from_notebooks_in_the_trash() {
+        let tmp = setup();
+        let day = chrono::Local::now().format(TRASH_DAY_FORMAT).to_string();
+        write(tmp.path(), &format!("_trash/{day}/skills/evil.md"), "x");
+        write(
+            tmp.path(),
+            &format!("_trash/{day}/nested-frontmatter/Notebooks/a.md"),
+            "x",
+        );
+        write(tmp.path(), "Notebooks/live.md", "x");
+        for bad in [
+            "Notebooks/live.md".to_string(),
+            format!("_trash/{day}/skills/evil.md"),
+            format!("_trash/{day}/nested-frontmatter/Notebooks/a.md"),
+            format!("_trash/{day}/../../Notebooks/live.md"),
+            "_trash/not-a-day/Notebooks/live.md".to_string(),
+            "/etc/hosts".to_string(),
+            "../outside.md".to_string(),
+            format!("_trash/{day}/Notebooks/missing.md"),
+        ] {
+            assert!(restore_note(tmp.path(), &bad).is_err(), "restore {bad}");
+            assert!(read_trashed(tmp.path(), &bad).is_err(), "read {bad}");
+        }
+        assert!(list_trash(tmp.path()).unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_will_not_follow_a_link_into_a_protected_folder_or_out_of_the_trash() {
+        let tmp = setup();
+        let day = chrono::Local::now().format(TRASH_DAY_FORMAT).to_string();
+        std::fs::create_dir_all(tmp.path().join("skills")).unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("skills"), tmp.path().join("Notebooks/link"))
+            .unwrap();
+        write(
+            tmp.path(),
+            &format!("_trash/{day}/Notebooks/link/evil.md"),
+            "x",
+        );
+        let trash = format!("_trash/{day}/Notebooks/link/evil.md");
+        assert!(restore_note(tmp.path(), &trash).is_err());
+        assert!(!tmp.path().join("skills/evil.md").exists());
+
+        write(tmp.path(), "Notebooks/secret.md", "x");
+        let planted = format!("_trash/{day}/Notebooks/planted.md");
+        std::os::unix::fs::symlink(
+            tmp.path().join("Notebooks/secret.md"),
+            tmp.path().join(&planted),
+        )
+        .unwrap();
+        assert!(read_trashed(tmp.path(), &planted).is_err());
+        assert!(restore_note(tmp.path(), &planted).is_err());
     }
 
     #[test]

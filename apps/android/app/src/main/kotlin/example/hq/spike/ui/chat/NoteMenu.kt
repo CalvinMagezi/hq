@@ -66,6 +66,7 @@ class NoteMenuActions(
     val onAsk: () -> Unit = {},
     val onExport: () -> Unit = {},
     val onNotice: (String) -> Unit = {},
+    val onDelete: (() -> Unit)? = null,
 )
 
 class ExportActions(
@@ -75,7 +76,7 @@ class ExportActions(
     val onNotice: (String) -> Unit = {},
 )
 
-/** Everything you can do with the open note, in one place: pin, ask HQ, share, export, copy. Rename, move and delete wait for server routes. */
+/** Everything you can do with the open note, in one place: pin, ask HQ, share, export, copy. Rename and move wait for server routes. */
 @Composable
 fun NoteMenuSheet(sheet: NoteSheet, actions: NoteMenuActions) {
     val copy = rememberCopier()
@@ -93,6 +94,7 @@ fun NoteMenuSheet(sheet: NoteSheet, actions: NoteMenuActions) {
             ActionRow(HqIcons.Download, "Export as…", "PDF, Word, a picture and more", { actions.onClose(); actions.onExport() }, minHeight = ROW_HEIGHT)
             ActionRow(HqIcons.Copy, "Copy path", null, { copy(sheet.path); actions.onClose(); actions.onNotice("Copied the note path") }, minHeight = ROW_HEIGHT)
             ActionRow(HqIcons.Copy, "Copy note text", null, { copy(NoteText.withoutFrontmatter(sheet.body)); actions.onClose(); actions.onNotice("Copied") }, minHeight = ROW_HEIGHT)
+            actions.onDelete?.let { ActionRow(HqIcons.Trash, stringResource(R.string.notes_delete), null, { actions.onClose(); it() }, minHeight = ROW_HEIGHT) }
         }
     }
 }

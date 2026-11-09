@@ -39,6 +39,7 @@ import { Route as SettingsDevicesRouteImport } from './routes/settings/devices'
 import { Route as SettingsDataRouteImport } from './routes/settings/data'
 import { Route as SettingsBrowserRouteImport } from './routes/settings/browser'
 import { Route as SettingsBackupRouteImport } from './routes/settings/backup'
+import { Route as NotesTrashRouteImport } from './routes/notes/trash'
 import { Route as NotesSplatRouteImport } from './routes/notes/$'
 import { Route as InboxIdRouteImport } from './routes/inbox/$id'
 import { Route as HelpersIdRouteImport } from './routes/helpers/$id'
@@ -195,6 +196,11 @@ const SettingsBackupRoute = SettingsBackupRouteImport.update({
   path: '/backup',
   getParentRoute: () => SettingsRoute,
 } as any)
+const NotesTrashRoute = NotesTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => NotesRoute,
+} as any)
 const NotesSplatRoute = NotesSplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -240,6 +246,7 @@ export interface FileRoutesByFullPath {
   '/helpers/$id': typeof HelpersIdRoute
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
+  '/notes/trash': typeof NotesTrashRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/data': typeof SettingsDataRoute
@@ -275,6 +282,7 @@ export interface FileRoutesByTo {
   '/helpers/$id': typeof HelpersIdRoute
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
+  '/notes/trash': typeof NotesTrashRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/data': typeof SettingsDataRoute
@@ -313,6 +321,7 @@ export interface FileRoutesById {
   '/helpers/$id': typeof HelpersIdRoute
   '/inbox/$id': typeof InboxIdRoute
   '/notes/$': typeof NotesSplatRoute
+  '/notes/trash': typeof NotesTrashRoute
   '/settings/backup': typeof SettingsBackupRoute
   '/settings/browser': typeof SettingsBrowserRoute
   '/settings/data': typeof SettingsDataRoute
@@ -352,6 +361,7 @@ export interface FileRouteTypes {
     | '/helpers/$id'
     | '/inbox/$id'
     | '/notes/$'
+    | '/notes/trash'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/data'
@@ -387,6 +397,7 @@ export interface FileRouteTypes {
     | '/helpers/$id'
     | '/inbox/$id'
     | '/notes/$'
+    | '/notes/trash'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/data'
@@ -424,6 +435,7 @@ export interface FileRouteTypes {
     | '/helpers/$id'
     | '/inbox/$id'
     | '/notes/$'
+    | '/notes/trash'
     | '/settings/backup'
     | '/settings/browser'
     | '/settings/data'
@@ -672,6 +684,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsBackupRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/notes/trash': {
+      id: '/notes/trash'
+      path: '/trash'
+      fullPath: '/notes/trash'
+      preLoaderRoute: typeof NotesTrashRouteImport
+      parentRoute: typeof NotesRoute
+    }
     '/notes/$': {
       id: '/notes/$'
       path: '/$'
@@ -743,12 +762,14 @@ const InboxRouteWithChildren = InboxRoute._addFileChildren(InboxRouteChildren)
 
 interface NotesRouteChildren {
   NotesSplatRoute: typeof NotesSplatRoute
+  NotesTrashRoute: typeof NotesTrashRoute
   NotesIndexRoute: typeof NotesIndexRoute
   NotesNIdRoute: typeof NotesNIdRoute
 }
 
 const NotesRouteChildren: NotesRouteChildren = {
   NotesSplatRoute: NotesSplatRoute,
+  NotesTrashRoute: NotesTrashRoute,
   NotesIndexRoute: NotesIndexRoute,
   NotesNIdRoute: NotesNIdRoute,
 }

@@ -179,6 +179,31 @@ export function togglePinNote(path: string, pinned: boolean): Promise<{ success:
   return hqJson('/api/pin', 'POST', { path, pin: pinned })
 }
 
+/** A deleted note waiting in the Trash. */
+export interface TrashedNote {
+  trash_path: string
+  original_path: string
+  trashed_on: string
+  days_left: number
+}
+
+/** Moves the note to the Trash; `trash_path` is what Undo restores from. */
+export function deleteNote(path: string): Promise<{ success: boolean; trash_path: string }> {
+  return hqJson(`/api/note?path=${encodeURIComponent(path)}`, 'DELETE')
+}
+
+export function listTrash(): Promise<{ items: TrashedNote[]; retention_days: number }> {
+  return hqJson('/api/note/trash')
+}
+
+export function readTrashed(trashPath: string): Promise<{ content: string }> {
+  return hqJson(`/api/note/trash/read?path=${encodeURIComponent(trashPath)}`)
+}
+
+export function restoreNote(trashPath: string): Promise<{ success: boolean; path: string }> {
+  return hqJson('/api/note/trash/restore', 'POST', { trash_path: trashPath })
+}
+
 /** `clientId` makes a retried create land on the same note instead of a second one. */
 export function createNote(title: string, content: string, folder?: string, clientId?: string): Promise<{ success: boolean; path: string }> {
   return hqJson('/api/note/create', 'POST', { title, content, folder, client_id: clientId })

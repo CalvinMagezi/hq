@@ -47,6 +47,27 @@ fn remove_from_index(db: Option<&Arc<Database>>, path: &str) {
     });
 }
 
+/// Moves a note to the trash and drops it from search and provenance. The tool and the apps
+/// both delete through here, so a delete means the same thing from either.
+pub async fn trash_and_forget(
+    vault: Arc<VaultClient>,
+    db: Option<Arc<Database>>,
+    path: &str,
+) -> Result<String> {
+    let client = vault.clone();
+    let p = path.to_string();
+    let trashed_to = tokio::task::spawn_blocking(move || client.trash_note(&p, false)).await??;
+    // `trash_note` accepted the path, so it parses.
+    let path = hq_vault::rel_path::RelPath::parse(path)
+        .map(|p| p.normalized())
+        .unwrap_or_else(|_| path.to_string());
+    remove_from_index(db.as_ref(), &path);
+    if let Some(db) = db {
+        crate::provenance::Recorder::new(db, vault.vault_path().to_path_buf()).after_delete(&path);
+    }
+    Ok(trashed_to)
+}
+
 pub struct VaultMoveTool {
     vault: Arc<VaultClient>,
     db: Option<Arc<Database>>,
@@ -159,22 +180,14 @@ impl HqTool for VaultDeleteTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let path = arg_str(&args, "path");
         let dry_run = arg_dry_run(&args);
-        let vault = self.vault.clone();
-        let p = path.clone();
-        let trashed_to =
-            tokio::task::spawn_blocking(move || vault.trash_note(&p, dry_run)).await??;
         if !dry_run {
-            // `trash_note` accepted the path, so it parses.
-            let path = hq_vault::rel_path::RelPath::parse(&path)
-                .map(|p| p.normalized())
-                .unwrap_or(path);
-            remove_from_index(self.db.as_ref(), &path);
-            if let Some(db) = self.db.as_ref() {
-                crate::provenance::Recorder::new(db.clone(), self.vault.vault_path().to_path_buf())
-                    .after_delete(&path);
-            }
+            let trashed_to = trash_and_forget(self.vault.clone(), self.db.clone(), &path).await?;
+            return Ok(json!({ "trashed_to": trashed_to, "dry_run": false }));
         }
-        Ok(json!({ "trashed_to": trashed_to, "dry_run": dry_run }))
+        let vault = self.vault.clone();
+        let trashed_to =
+            tokio::task::spawn_blocking(move || vault.trash_note(&path, true)).await??;
+        Ok(json!({ "trashed_to": trashed_to, "dry_run": true }))
     }
 }
 
