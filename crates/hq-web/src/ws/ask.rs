@@ -467,7 +467,7 @@ mod tests {
         ] {
             assert_eq!(
                 turn(scope, mode).denied_tool_prefixes(),
-                vec!["config_manage".to_string()]
+                vec!["config_manage".to_string(), "hq_coder".to_string()]
             );
         }
     }
