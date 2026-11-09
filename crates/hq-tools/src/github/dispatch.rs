@@ -216,9 +216,10 @@ pub async fn dispatch_with(
                 continue;
             }
         };
+        let ask_id = ask_to_work(db.clone(), runner, &task, model.as_deref(), job, attempt).await?;
+        // After the start, so a start that failed does not use up a try.
         let task_id = task.id.clone();
         db.with_conn(move |c| coder_jobs::begin_attempt(c, &task_id))?;
-        let ask_id = ask_to_work(db.clone(), runner, &task, model.as_deref(), job, attempt).await?;
         return Ok(Outcome::Started {
             task: task.display_id,
             ask_id,
@@ -284,6 +285,9 @@ async fn open_job(
     })?;
     if let Some(why) = db.with_conn(|c| no_more_tries(c, task, &job))? {
         return Ok(Err(why));
+    }
+    if job.attempts >= MAX_ATTEMPTS {
+        return Ok(Err(out_of_tries(&job)));
     }
     if let Some(why) = stop_words(&job) {
         return Ok(Err(why));

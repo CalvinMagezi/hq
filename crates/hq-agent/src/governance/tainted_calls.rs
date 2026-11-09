@@ -34,6 +34,9 @@ pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> 
     }
     match tool {
         "harness_session_send" => Some("would type into a running coding agent".into()),
+        hq_tools::github::coder::CODER_TOOL if coder_write(args) => {
+            Some("would start or steer a coding job".into())
+        }
         "web_fetch" => fetch_reason(args.get("url").and_then(Value::as_str)?, taint),
         "web_search" => {
             let query = args.get("query").and_then(Value::as_str)?;
@@ -43,6 +46,14 @@ pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> 
         }
         _ => None,
     }
+}
+
+fn coder_write(args: &Value) -> bool {
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    !hq_tools::github::coder::READ_ACTIONS.contains(&action)
 }
 
 fn data_bytes(url: &url::Url) -> usize {
@@ -94,7 +105,9 @@ pub(super) fn unasked_denial(
     needs_owner: bool,
 ) -> Option<String> {
     let source = taint.source()?;
-    let why = if NO_ASK_DENIED_TOOLS.contains(&tool) {
+    let hands_work_over = NO_ASK_DENIED_TOOLS.contains(&tool)
+        || (tool == hq_tools::github::coder::CODER_TOOL && coder_write(args));
+    let why = if hands_work_over {
         Some("would hand work to another agent".to_string())
     } else if taint.is_unattended() {
         tainted_reason(tool, args, taint)
@@ -153,6 +166,17 @@ mod tests {
         let long = format!("https://docs.example.com/x?d={}", "a".repeat(250));
         assert!(reason(&long).unwrap().contains("bytes of path and query"));
         assert!(reason("not a url").is_some());
+    }
+
+    #[test]
+    fn a_tainted_session_needs_the_owner_to_start_a_job_but_not_to_read_one() {
+        let taint = tainted();
+        let start = json!({"action": "start", "repo": "o/r", "job": "x"});
+        assert!(tainted_reason("hq_coder", &start, &taint).is_some());
+        assert!(unasked_denial("hq_coder", &start, &taint, true).is_some());
+        let list = json!({"action": "list"});
+        assert_eq!(tainted_reason("hq_coder", &list, &taint), None);
+        assert_eq!(unasked_denial("hq_coder", &list, &taint, false), None);
     }
 
     #[test]

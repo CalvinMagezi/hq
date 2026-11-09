@@ -163,6 +163,21 @@ pub fn reset(
     Ok(())
 }
 
+/// New limits for a job, leaving where it stands alone.
+pub fn set_limits(
+    conn: &Connection,
+    task_id: &str,
+    budget_usd: Option<f64>,
+    credit_cap: Option<f64>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE coder_jobs SET budget_usd = COALESCE(?1, budget_usd),
+           credit_cap = COALESCE(?2, credit_cap), updated_at = ?3 WHERE task_id = ?4",
+        params![budget_usd, credit_cap, Utc::now().to_rfc3339(), task_id],
+    )?;
+    Ok(())
+}
+
 /// Newest first.
 pub fn recent(conn: &Connection, limit: usize) -> Result<Vec<Job>> {
     let mut stmt = conn.prepare(&format!(

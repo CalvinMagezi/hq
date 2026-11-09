@@ -337,17 +337,18 @@ impl SessionBuilder {
                 .and_then(|id| id.web_thread())
                 .map(str::to_string);
             let vault = Arc::new(vault);
-            tools.push(if self.worker_checkouts.is_some() {
-                Box::new(hq_tools::github::coder::CoderContextTool::new(
+            if self.worker_checkouts.is_some() {
+                tools.push(Box::new(hq_tools::github::coder::CoderContextTool::new(
                     db.clone(),
                     vault.clone(),
-                ))
-            } else {
-                Box::new(hq_tools::github::coder::HqCoderTool::new(
+                )));
+            } else if self.owner_approval.is_some() && self.reads_owner_history() {
+                // Only a chat the owner drives, where a job can wait for their approval.
+                tools.push(Box::new(hq_tools::github::coder::HqCoderTool::new(
                     db.clone(),
                     origin_thread.clone(),
-                ))
-            });
+                )));
+            }
             let task_tools = hq_tools::tasks::create_task_tools_from_config(
                 vault_path.to_path_buf(),
                 vault,

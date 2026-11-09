@@ -89,6 +89,16 @@ fn strings(args: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Only an ordinary note may reach a worker: a path inside the vault, outside HQ's own folders.
+fn check_note(raw: &str) -> Result<()> {
+    let path = hq_vault::rel_path::RelPath::parse(raw)?;
+    let top = path.top().unwrap_or_default();
+    if top.starts_with('_') || top.starts_with('.') {
+        bail!("{raw} is not a note a coding job may read");
+    }
+    Ok(())
+}
+
 fn task_of(conn: &rusqlite::Connection, reference: &str) -> Result<t::Task> {
     t::get_task(conn, reference)?.with_context(|| format!("task {reference} not found"))
 }
@@ -178,6 +188,9 @@ impl HqCoderTool {
         }
         let wanted = settings(args, &config)?;
         let notes = strings(args, "notes");
+        for note in &notes {
+            check_note(note)?;
+        }
         self.refuse_public_notes(&repo, &notes, args).await?;
         let existing = strings(args, "tasks");
         let job = text(args, "job");
@@ -282,11 +295,25 @@ impl HqCoderTool {
         Ok(json!({ "stopped": task.display_id }))
     }
 
+    /// Changes what a job may spend. A job already stopped still needs `retry`.
+    fn budget(&self, args: &Value) -> Result<Value> {
+        let config = HqConfig::load()?;
+        let wanted = settings(args, &config)?;
+        let (task, _) = self.job_of(args)?;
+        self.db.with_conn(|c| {
+            coder_jobs::set_limits(c, &task.id, wanted.budget_usd, wanted.credit_cap)
+        })?;
+        Ok(json!({ "updated": task.display_id }))
+    }
+
     /// Back in the queue with its tries restored, optionally with more to spend.
     fn again(&self, args: &Value, feedback: Option<&str>) -> Result<Value> {
         let config = HqConfig::load()?;
         let wanted = settings(args, &config)?;
         let (task, job) = self.job_of(args)?;
+        if dispatch::running_thread(&self.db, &task.id)?.is_some() {
+            bail!("{} is still running; stop it first", task.display_id);
+        }
         self.db.with_conn(|c| {
             enqueue(c, task.clone(), &job.repo)?;
             coder_jobs::reset(c, &task.id, wanted.budget_usd, wanted.credit_cap)?;
@@ -368,7 +395,8 @@ impl HqTool for HqCoderTool {
             "list" => self.list(),
             "steer" => self.note(&args, words()?),
             "stop" => self.stop(&args).await,
-            "retry" | "budget" => self.again(&args, None),
+            "retry" => self.again(&args, None),
+            "budget" => self.budget(&args),
             "feedback" => self.again(&args, Some(words()?)),
             other => bail!("unknown action `{other}`"),
         }
@@ -384,6 +412,17 @@ pub struct CoderContextTool {
 impl CoderContextTool {
     pub fn new(db: Arc<Database>, vault: Arc<VaultClient>) -> Self {
         Self { db, vault }
+    }
+
+    /// Checked again here: a link may have come from elsewhere, and a link inside the vault can
+    /// point out of it.
+    fn is_ordinary_note(&self, reference: &str) -> bool {
+        if check_note(reference).is_err() {
+            return false;
+        }
+        let root = self.vault.vault_path().canonicalize();
+        let target = self.vault.vault_path().join(reference).canonicalize();
+        matches!((root, target), (Ok(root), Ok(target)) if target.starts_with(&root))
     }
 }
 
@@ -421,7 +460,7 @@ impl HqTool for CoderContextTool {
         })?;
         let notes: Vec<Value> = links
             .iter()
-            .filter(|l| l.kind == t::LINK_VAULT_NOTE)
+            .filter(|l| l.kind == t::LINK_VAULT_NOTE && self.is_ordinary_note(&l.reference))
             .take(MAX_NOTES)
             .filter_map(|l| {
                 let note = self.vault.read_note(&l.reference).ok()?;
@@ -431,6 +470,17 @@ impl HqTool for CoderContextTool {
             .collect();
         Ok(json!({ "notes": notes }))
     }
+}
+
+/// Used by [`dispatch`]: the reply running a job right now, if any.
+pub(super) fn pending_thread(
+    conn: &rusqlite::Connection,
+    prefix: &str,
+    scope: &str,
+) -> Result<Option<String>> {
+    Ok(asks::latest_by_external_prefix(conn, scope, prefix)?
+        .filter(|a| a.status == asks::STATUS_PENDING)
+        .map(|a| a.thread_id))
 }
 
 #[cfg(test)]
@@ -500,6 +550,19 @@ mod tests {
         assert_eq!(status["job"]["repo"], "o/r");
     }
 
+    #[test]
+    fn a_note_must_be_an_ordinary_path_in_the_vault() {
+        assert!(check_note("Notebooks/plan.md").is_ok());
+        for bad in [
+            "../secret.md",
+            "/etc/hosts",
+            "_data/vault.db",
+            ".git/config",
+        ] {
+            assert!(check_note(bad).is_err(), "{bad}");
+        }
+    }
+
     #[tokio::test]
     async fn a_scoped_connection_cannot_use_it() {
         let tool = HqCoderTool::new(db(), None);
@@ -512,11 +575,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("linked.md"), "linked text").unwrap();
         std::fs::write(dir.path().join("private.md"), "private text").unwrap();
+        std::fs::create_dir(dir.path().join("_data")).unwrap();
+        std::fs::write(dir.path().join("_data/keys.md"), "private text").unwrap();
         let vault = Arc::new(VaultClient::new(dir.path().to_path_buf()).unwrap());
         let db = db();
         db.with_conn(|c| {
-            t::add_task_link(c, "tk-1", t::LINK_VAULT_NOTE, "linked.md", "", None, ACTOR)
-                .map(|_| ())
+            for note in ["linked.md", "_data/keys.md"] {
+                t::add_task_link(c, "tk-1", t::LINK_VAULT_NOTE, note, "", None, ACTOR)?;
+            }
+            Ok(())
         })
         .unwrap();
         let tool = CoderContextTool::new(db, vault);
@@ -525,15 +592,4 @@ mod tests {
         assert!(text.contains("linked text"));
         assert!(!text.contains("private text"));
     }
-}
-
-/// Used by [`dispatch`]: the reply running a job right now, if any.
-pub(super) fn pending_thread(
-    conn: &rusqlite::Connection,
-    prefix: &str,
-    scope: &str,
-) -> Result<Option<String>> {
-    Ok(asks::latest_by_external_prefix(conn, scope, prefix)?
-        .filter(|a| a.status == asks::STATUS_PENDING)
-        .map(|a| a.thread_id))
 }

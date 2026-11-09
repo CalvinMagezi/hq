@@ -25,7 +25,7 @@ const MAX_DEDUP_CHARS: usize = 200;
 /// Dedup keys HQ's own items use and the inbox reads meaning from: a new device's sign-in item is
 /// `device-sign-in:<device id>` (`hq_web::device_auth`), shown with It was me and Sign it out.
 /// An agent's notification may not take one, so it cannot pass as that card.
-pub const RESERVED_DEDUP_PREFIXES: &[&str] = &["device-sign-in:"];
+pub const RESERVED_DEDUP_PREFIXES: &[&str] = &["device-sign-in:", "edge-worker-dispatch"];
 
 pub fn create_notify_tools(
     db: Arc<Database>,

@@ -387,7 +387,7 @@ fn refuse_unanswered_dialog(
     val_id: &str,
     action: &str,
 ) -> Result<(), ApiError> {
-    if !matches!(action, "approve" | "engage" | "reject") {
+    if !matches!(action, "approve" | "engage" | "reject" | ALLOW_SITE_ACTION) {
         return Ok(());
     }
     let open = hq_db::dialog_alerts::get(db, val_id)
@@ -516,7 +516,10 @@ pub(crate) async fn notification_action_handler(
         return e.into_response();
     }
     use hq_db::value_items::Answered;
-    match record_action(&state.db, val_id, engagement) {
+    let answer = record_action(&state.db, val_id, engagement);
+    // A repeat of an answer already given must not count as another approval.
+    let first_answer = matches!(answer, Ok(Answered::Recorded));
+    match answer {
         Err(e) => {
             warn!(id = %id, action = %body.action, error = %e, "notification action failed");
             return ApiError::internal(e).into_response();
@@ -527,12 +530,14 @@ pub(crate) async fn notification_action_handler(
         }
         Ok(Answered::Recorded | Answered::AlreadySo) => {}
     }
-    let whole_site = body.action == ALLOW_SITE_ACTION;
-    if let Err(e) = note_site_answer(&state.db, val_id, engagement, whole_site) {
-        warn!(id = %id, error = %e, "recording a site's approval failed");
-    }
-    if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
-        warn!(id = %id, error = %e, "recording the first coding task's yes failed");
+    if first_answer {
+        let whole_site = body.action == ALLOW_SITE_ACTION;
+        if let Err(e) = note_site_answer(&state.db, val_id, engagement, whole_site) {
+            warn!(id = %id, error = %e, "recording a site's approval failed");
+        }
+        if let Err(e) = note_first_task_answer(&state.db, val_id, engagement) {
+            warn!(id = %id, error = %e, "recording the first coding task's yes failed");
+        }
     }
     info!(id = %id, action = %body.action, new_state = engagement, "notification action executed");
     state.broadcast(
