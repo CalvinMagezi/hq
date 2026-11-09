@@ -167,8 +167,10 @@ computer. Connect GitHub makes the person's own private GitHub App in a Custom T
 `<hq dir>/github/` on the phone (mode 0600, outside the vault), and nobody else, the HQ project
 included, holds a way in. HQ fetches the repository, a sub-agent edits it, GitHub's CI tests the `hq/`
 branch and the person reviews and merges. A repository whose workflows use secrets, or that has a
-preview host, waits for the owner's confirmation, and the first task after connecting waits for
-their yes. Plan and phone results: [plans/mobile-helpers.md](plans/mobile-helpers.md).
+preview host, waits for the owner's confirmation. The same sheet, also under Settings, takes the job:
+pick a repository, say what should change and press Start, with the task's budget in view. Pressing
+Start is the owner's yes to the first task. Plan and phone results:
+[plans/mobile-helpers.md](plans/mobile-helpers.md).
 
 ## The bridge on the phone
 

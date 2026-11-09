@@ -195,7 +195,10 @@ Disconnect's advice to delete the App has that cost; a person who wants the hist
 and delete only its key.
 
 Not run on a phone, because the model key had expired by then: `allowed_paths` on the coding child,
-and the per-task budget ending a turn. Both have unit tests.
+the per-task budget ending a turn, and a task under the worker preset. All three have unit tests.
+
+After that run the sheet gained the job form, so nobody has to write a tagged task by hand; pressing
+Start, with the budget shown, replaces the separate "Allow the first task" button.
 
 Not measured: mobile data on a metered network (the phone was on Wi-Fi), Samsung Internet, and a
 full `-Phq.caddy` build (a placeholder was packaged, since Caddy stays off without a Caddyfile).
