@@ -45,6 +45,8 @@ data class HelperCard(
     val generic: Boolean = false,
     /** The folder it ran in, to tell two nameless helpers apart. */
     val folder: String = "",
+    /** For HQ's own work: the repository, what it has spent and what it runs on. */
+    val job: HqClient.EdgeJob? = null,
 ) {
     /** HQ's own work on this phone, which is told apart from a coding helper. */
     val own: Boolean get() = id.startsWith(HelperWords.EDGE_PREFIX)
@@ -394,8 +396,16 @@ object HelperWords {
             else -> w.s(R.string.helpers_edge_stopped, task)
         }
         val time = if (state == HelperState.Working) span(w, run.startedAt, now).orEmpty() else ago(w, run.finishedAt ?: run.startedAt, now)
-        return HelperCard(EDGE_PREFIX + run.askId, run.title ?: task, EDGE_AGENT, w.s(R.string.helpers_this_phone), state, line, time, null, "")
+        return HelperCard(EDGE_PREFIX + run.askId, run.title ?: task, EDGE_AGENT, w.s(R.string.helpers_this_phone), state, line, time, null, "", job = run.job)
     }
+
+    /** "o/r · $0.02 of $0.50 · copilot · try 2": what a coding job is on and has used. */
+    fun jobLine(w: Words, job: HqClient.EdgeJob): String = listOfNotNull(
+        job.repo.ifBlank { null },
+        w.s(R.string.coder_job_spend, dollars(job.spentUsd), dollars(job.budgetUsd)),
+        job.model,
+        w.s(R.string.coder_job_try, job.attempts).takeIf { job.attempts > 1 },
+    ).joinToString(" · ")
 
     private fun taskStatusWords(w: Words, status: String) = w.s(when (status) {
         "ready_for_review" -> R.string.helpers_task_ready_review

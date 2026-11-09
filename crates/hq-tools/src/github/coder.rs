@@ -328,7 +328,9 @@ impl HqTool for HqCoderTool {
          budget_usd, credit_cap (Copilot credits), model (an enabled backend). status and list read jobs. \
          steer leaves the worker a note. stop ends a job. retry queues a stopped job again. feedback \
          sends a finished job back with what to change. budget changes what a job may spend. The worker \
-         opens a pull request; only the person merges."
+         opens a pull request; only the person merges. For a new repository: the person creates it with a \
+         README and picks it for the App; scaffold it with github_clone and github_write, and write any \
+         .github/ workflow out for the person to add, since HQ cannot push those."
     }
 
     fn parameters(&self) -> Value {

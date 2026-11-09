@@ -129,6 +129,7 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
     val waiting = c.state == HelperState.NeedsOk
     Column(
         Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (waiting) Mts.Amber else Mts.Hairline, shape)
+            .then(if (c.own) Modifier.drawBehind { drawRect(Mts.BrandIndigo, size = Size(OWN_RULE.toPx(), size.height)) } else Modifier)
             .clickable(role = Role.Button, onClickLabel = stringResource(R.string.inbox_open_helper)) { actions.onOpen(c.id) }.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -138,6 +139,7 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
         }
         Text(listOf(stringResource(R.string.helpers_agent_where, c.agent, c.where), c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted)
         Text(c.line, style = HqType.BodySm, color = Mts.Ink)
+        c.job?.let { Text(HelperWords.jobLine(example.hq.spike.ui.shell.rememberWords(), it), style = HqType.BodySm, color = Mts.InkMuted) }
         if (c.state == HelperState.Working) WorkingBar()
         if (waiting && c.ask != null && HelperWords.canAnswerInline(c.ask)) {
             if (c.ask.kind == AskKind.Command) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Mts.Surface000).padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -169,6 +171,7 @@ private fun WorkingBar() {
     )
 }
 
+private val OWN_RULE = 3.dp
 private const val SWEEP_MS = 1_600
 private const val SWEEP_SHARE = 0.4f
 

@@ -81,9 +81,9 @@ persistent background sub-agents.
 
 Actions: `start`, `status`, `list`, `steer`, `stop`, `retry`, `feedback`, `budget`.
 
-- `start` takes a repository, a job or existing task ids, vault notes, budget, model, and an
-  optional branch to continue. It links the notes and starts now. A task list runs in order, one at
-  a time, using the existing `blocked_by`.
+- `start` takes a repository, a job or existing task ids, vault notes, budget, credit cap and model.
+  It links the notes and starts now. A task list runs in order, one at a time, using the existing
+  `blocked_by`.
 - `steer` is a comment returned by the next `task_heartbeat`, so it lands at the worker's next
   milestone. Mid-call interruption is not worth the machinery.
 - `stop` cancels the running turn. How is to be confirmed in the slice; no ask cancel exists yet.
@@ -96,9 +96,8 @@ Actions: `start`, `status`, `list`, `steer`, `stop`, `retry`, `feedback`, `budge
   without `gh`.
 - Chat keeps `github_clone` and `github_write` behind owner approval, as today.
 - Scaffolding: GitHub needs the repository to exist with one commit, and an App cannot be assumed
-  to create one under a personal account. So HQ gives the person the new-repository link and the
-  App's repository picker, then scaffolds on an `hq/` branch, then `hq_coder start` continues that
-  branch.
+  to create one under a personal account. So the person creates it with a README and picks it for
+  the App, chat scaffolds on an `hq/` branch, and once that is merged `hq_coder start` takes over.
 - The `.github/` block stays. HQ writes the workflow file and hands it to the person to add.
 
 ### 6. Helpers

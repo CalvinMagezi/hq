@@ -14,7 +14,8 @@ import { globalSessionsApi, workbenchApi, type HarnessSession, type WorkbenchHos
 import { useHQStore } from '~/store/hqStore'
 import { needsYouCount, workingCount } from '~/lib/workbench'
 import { GROUP_WORDS, HELPER_CHIPS, chipCounts, chipWords, finishedToArchive, groupHelpers, taskBanner, type HelperChip } from '~/lib/helperView'
-import { edgeWorkerApi, ownCardId, ownTitle, ownWords, type EdgeRun } from '~/lib/edgeWorker'
+import { edgeWorkerApi, ownCardId, type EdgeRun } from '~/lib/edgeWorker'
+import { OwnRunCard } from '~/components/sessions/OwnRunCard'
 import { toastUndo } from '~/lib/toast'
 import { useThreadStore } from '~/store/threadStore'
 import { tn } from '~/strings'
@@ -354,7 +355,7 @@ function AgentList({ away, offWhy, list, hosts, selectedId, showArchived, onShow
             </ul>
           </section>
         ))}
-        {chip === 'all' && showOwn && <OwnWork runs={ownRuns} />}
+        {chip === 'all' && showOwn && <OwnWork runs={ownRuns} onChanged={() => void own.refresh()} />}
       </div>
       <button type="button" disabled={away !== null} title={offWhy ?? undefined} onClick={onNew} className="a-fab">
         <Plus className="a-ic" aria-hidden="true" />
@@ -364,8 +365,8 @@ function AgentList({ away, offWhy, list, hosts, selectedId, showArchived, onShow
   )
 }
 
-/** What HQ itself is doing for tasks. A card opens its chat; there is no Stop, no Rename and no screen. */
-function OwnWork({ runs }: { runs: EdgeRun[] }) {
+/** What HQ itself is doing for tasks, with the owner's controls on each job. */
+function OwnWork({ runs, onChanged }: { runs: EdgeRun[]; onChanged: () => void }) {
   const navigate = useNavigate()
   return (
     <section aria-label={t('helpers_own_work')} data-group="own">
@@ -374,20 +375,15 @@ function OwnWork({ runs }: { runs: EdgeRun[] }) {
       <ul className="flex flex-col gap-3 px-4">
         {runs.map((run) => (
           <li key={ownCardId(run)}>
-            <button
-              type="button"
-              disabled={!run.thread_id}
-              onClick={() => {
+            <OwnRunCard
+              run={run}
+              onChanged={onChanged}
+              onOpenChat={() => {
                 if (!run.thread_id) return
                 useThreadStore.getState().setActiveThread(run.thread_id)
                 void navigate({ to: '/chat' })
               }}
-              aria-label={`${ownTitle(run)}, ${ownWords(run)}. ${t('helpers_own_open_chat')}`}
-              className="a-card w-full text-left"
-            >
-              <b className="a-body-b truncate">{ownTitle(run)}</b>
-              <span className="a-body-sm a-muted">{ownWords(run)}</span>
-            </button>
+            />
           </li>
         ))}
       </ul>

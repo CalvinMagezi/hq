@@ -83,6 +83,7 @@ fun HelperOverlays(shownUi: HelpersUi, actions: HelpersActions) {
     }
     ui.start?.let { StartSheet(it, actions) }
     if (ui.githubOpen) GithubSheet(ui, actions)
+    ui.edgeRuns.firstOrNull { it.askId == ui.openJob }?.let { CoderJobSheet(it, ui, actions) }
 }
 
 @Composable

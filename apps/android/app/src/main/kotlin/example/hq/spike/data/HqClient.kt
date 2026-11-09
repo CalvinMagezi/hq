@@ -451,7 +451,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val displayId: String?,
         val title: String?,
         val taskStatus: String?,
+        val job: EdgeJob? = null,
+        val prUrl: String? = null,
+        val notes: List<String> = emptyList(),
     )
+
+    /** What a coding job may spend and has spent, and where it runs. */
+    data class EdgeJob(val repo: String, val attempts: Int, val budgetUsd: Double, val spentUsd: Double, val model: String?)
 
     /** Whether the edge worker takes tasks, the tag that queues one, the repositories it may change, and its newest runs. */
     data class EdgeWorker(val enabled: Boolean, val tag: String, val repos: List<String>, val runs: List<EdgeRun>, val taskBudgetUsd: Double = 0.0)
@@ -478,6 +484,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             EdgeRun(
                 r.optString("ask_id"), r.optString("thread_id"), r.optString("status"), r.optString("started_at"), r.optStringOrNull("finished_at"),
                 r.optString("task_id"), t?.optStringOrNull("display_id"), t?.optStringOrNull("title"), t?.optStringOrNull("status"),
+                r.optJSONObject("job")?.let { j -> EdgeJob(j.optString("repo"), j.optInt("attempts"), j.optDouble("budget_usd", 0.0), j.optDouble("spent_usd", 0.0), j.optStringOrNull("model")) },
+                r.optStringOrNull("pr_url"), r.optJSONArray("notes").strings(),
             )
         }
         EdgeWorker(o.optBoolean("enabled"), o.optString("tag", "edge-task"), o.optJSONArray("repos").strings(), runs, o.optDouble("task_budget_usd", 0.0))
