@@ -220,7 +220,7 @@ impl GovernedTool {
     fn check_paths(&self, args: &Value) -> Option<String> {
         let tool_name = self.inner.name();
         for path_val in path_values(tool_name, args) {
-            if !self.is_path_allowed(path_val) {
+            if !self.is_path_allowed(&path_val) {
                 return Some(format!(
                     "Access denied: path '{}' is outside allowed directories. \
                          Allowed: {:?}",

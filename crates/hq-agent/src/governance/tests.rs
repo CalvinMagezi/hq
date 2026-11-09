@@ -69,6 +69,57 @@ fn test_guardian_rejects_minimal_profile() {
     );
 }
 
+struct SearchStub(&'static str);
+
+#[async_trait::async_trait]
+impl crate::tools::AgentTool for SearchStub {
+    fn name(&self) -> &str {
+        self.0
+    }
+    fn description(&self) -> &str {
+        "stub"
+    }
+    fn parameters(&self) -> Value {
+        serde_json::json!({})
+    }
+    async fn execute(&self, _id: &str, _args: Value) -> Result<ToolResult> {
+        panic!("the guardian let a search leave the confined folder")
+    }
+}
+
+#[tokio::test]
+async fn a_confined_search_cannot_leave_its_folder() {
+    let root = "/tmp/hq-confined-checkout";
+    let cases = [
+        ("grep", serde_json::json!({"pattern": "token"})),
+        ("find_files", serde_json::json!({"pattern": "*.pem"})),
+        ("list_dir", serde_json::json!({})),
+        (
+            "find_files",
+            serde_json::json!({"pattern": "/etc/*", "path": root}),
+        ),
+        (
+            "find_files",
+            serde_json::json!({"pattern": "../../etc/*", "path": root}),
+        ),
+    ];
+    for (tool, args) in cases {
+        let guardian = ToolGuardian::confined(
+            vec![PathBuf::from(root)],
+            SecurityProfile::Guarded,
+            PermissionMode::BypassPermissions,
+        );
+        let registry =
+            guardian.build_registry(vec![Box::new(SearchStub(tool))], LiveUserTurn::unattended());
+        let wrapped = registry.get(tool).expect("the tool is registered");
+        let result = wrapped
+            .execute("1", args)
+            .await
+            .expect("a denial, not an error");
+        assert!(format!("{result:?}").contains("Access denied"), "{tool}");
+    }
+}
+
 #[test]
 #[should_panic(expected = "requires at least one allowed path")]
 fn test_guardian_rejects_empty_paths() {
