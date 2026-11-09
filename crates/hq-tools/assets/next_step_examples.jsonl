@@ -1,0 +1,707 @@
+{"t":"Task: Send logo revision to Oakhollow Bakery by Friday\nState: to_do\nNote: Client wants the new mark in three colours and a reversed version. Due Friday, so keep it on the due-date list.","c":"track-todo"}
+{"t":"Task: Renew domain for portfolio site\nState: to_do\nNote: Expires on the 14th of next month. Don't let it lapse.","c":"track-todo"}
+{"t":"Task: Pay studio rent\nState: to_do\nNote: Due on the 1st each month.","c":"track-todo"}
+{"t":"Task: Book dentist for the 22nd\nState: to_do\nNote: Need to rearrange client calls that morning.","c":"track-todo"}
+{"t":"Task: Deliver brochure proofs to Pellmar Print\nState: to_do\nNote: Printer needs them by Tuesday to hold the press slot.","c":"track-todo"}
+{"t":"Task: Submit quarterly tax estimate\nState: to_do\nNote: Deadline is the 15th. Accountant needs the sales summary first.","c":"track-todo"}
+{"t":"Task: Turn the workshop notes into a checklist\nState: to_do\nNote: Pasted the agenda from Tuesday's call; it has about twelve items separated by line breaks.","c":"tasks-from-list"}
+{"t":"Task: Split the moodboard shopping list into tasks\nState: to_do\nNote: Long list of fonts, paper swatches and frames, one item per line, to be turned into separate tasks.","c":"tasks-from-list"}
+{"t":"Task: Break down the packaging brief\nState: in_progress\nNote: The client sent a bulleted brief with eight deliverables. I want each one as its own task.","c":"tasks-from-list"}
+{"t":"Task: Sort the copy edits list\nState: to_do\nNote: Editor's list of 20 changes was pasted as one block of text.","c":"tasks-from-list"}
+{"t":"Task: Digitise the sketch from the client meeting\nState: to_do\nNote: Photo of a whiteboard sketch with rough layout notes and handwritten colour codes.","c":"read-photo"}
+{"t":"Task: Get text from the scanned contract page\nState: to_do\nNote: Scan of page 3 of the licence agreement. I need the clauses on usage rights as text.","c":"read-photo"}
+{"t":"Task: Transcribe the handwritten feedback card\nState: to_do\nNote: Client wrote notes on a printed card at the exhibition. Photo is in my camera roll.","c":"read-photo"}
+{"t":"Task: Copy the colour codes off the swatch photo\nState: to_do\nNote: Photo of a fan deck with printed hex values; some are small and blurry.","c":"read-photo"}
+{"t":"Task: Read the paper invoice from the printer\nState: blocked\nNote: Only a photo exists. I need the line items and totals entered into the books.","c":"read-photo"}
+{"t":"Task: Pull the signage dimensions from the site plan image\nState: to_do\nNote: Scanned plan from the landlord with measurements written in pencil.","c":"read-photo"}
+{"t":"Task: Convert the supplier price list PDF into notes\nState: to_do\nNote: Forty-page PDF from the paper merchant. I need to search it for weights and prices.","c":"file-to-note"}
+{"t":"Task: Make the Excel budget searchable\nState: to_do\nNote: Workbook with three tabs for each project. I want to look up line items quickly.","c":"file-to-note"}
+{"t":"Task: Index the Word style guide\nState: in_progress\nNote: Client's 60-page style guide is a .docx. I keep scrolling to find colour rules.","c":"file-to-note"}
+{"t":"Task: Get the old brand guidelines into my notes\nState: to_do\nNote: PDF from a previous agency. Some sections I need to quote back to the client.","c":"file-to-note"}
+{"t":"Task: Search the archived invoices spreadsheet\nState: to_do\nNote: Two years of invoices in one xlsx. Need to find every job for a given client.","c":"file-to-note"}
+{"t":"Task: Turn the case study draft into a PDF\nState: to_do\nNote: Written in my notes app. Client wants a printable PDF to approve.","c":"note-to-file"}
+{"t":"Task: Export the terms and conditions as a Word file\nState: to_do\nNote: Text is in a note. The client's lawyer wants an editable .docx.","c":"note-to-file"}
+{"t":"Task: Send the project brief to the printer as PDF\nState: to_do\nNote: Printer asked for a PDF version of my brief note with the specs.","c":"note-to-file"}
+{"t":"Task: Print the kickoff questionnaire\nState: to_do\nNote: Drafted in notes. Need a printed copy to bring to the meeting on Thursday.","c":"note-to-file"}
+{"t":"Task: Make a Word version of the proposal\nState: in_progress\nNote: Proposal is in a note. Client wants to mark it up with tracked changes.","c":"note-to-file"}
+{"t":"Task: Call Priya from Lumen Print about the rush job\nState: to_do\nNote: Priya Dahl at the press is the contact. Last time she mentioned they change the bleed spec.","c":"remember-people"}
+{"t":"Task: Note Mateo's preferences before the next pitch\nState: to_do\nNote: Mateo Ruiz at Harbour Coffee hates serif fonts and wants a call before any email.","c":"remember-people"}
+{"t":"Task: Keep track of client birthdays\nState: to_do\nNote: Several clients mentioned their birthdays in passing. I'd like to send small cards.","c":"remember-people"}
+{"t":"Task: Remember which client pays late\nState: to_do\nNote: Anna Kessler at Fenwick Studio always pays about three weeks after the due date.","c":"remember-people"}
+{"t":"Task: Log the contact details for the new illustrator\nState: to_do\nNote: Met Jun Ottley at a meetup. Wants to collaborate on a children's book cover.","c":"remember-people"}
+{"t":"Task: Find the trend report for organic packaging\nState: to_do\nNote: Client wants sources on sustainable packaging trends from the last year.","c":"look-up"}
+{"t":"Task: Check the Pantone code for the new green\nState: to_do\nNote: Client gave a name for the green but not the code. Need the nearest match.","c":"look-up"}
+{"t":"Task: Confirm the licence terms for the stock font\nState: to_do\nNote: Font foundry's website lists different terms for logos versus print. Need the current ones.","c":"look-up"}
+{"t":"Task: Find local print shops that do foil stamping\nState: to_do\nNote: Client's budget is tight. Looking for options within two hours' drive.","c":"look-up"}
+{"t":"Task: Check the ISO size for the poster format\nState: to_do\nNote: Want to confirm A2 bleed dimensions before sending the file.","c":"look-up"}
+{"t":"Task: Reply to the printer's question about paper weight\nState: to_do\nNote: Printer's email asks which GSM we want. Their options are in an earlier thread.","c":"email"}
+{"t":"Task: Answer Hollis's email about invoice timing\nState: to_do\nNote: Client emailed asking when the second instalment is due. Draft a reply for me to check.","c":"email"}
+{"t":"Task: Sort the unread emails from clients\nState: to_do\nNote: Around forty unread messages. Some are feedback, some are scheduling.","c":"email"}
+{"t":"Task: Respond to the venue's contract email\nState: blocked\nNote: Venue sent a contract email and wants a reply by end of day. Waiting on a signature.","c":"email"}
+{"t":"Task: Draft a polite follow-up to the late client\nState: to_do\nNote: Invoice is three weeks overdue. Email has to be friendly but firm.","c":"email"}
+{"t":"Task: Clear the feedback thread from the agency\nState: in_progress\nNote: Long email chain with comments on the homepage. Need a summary and replies.","c":"email"}
+{"t":"Task: Group the rebrand work into a project\nState: in_progress\nNote: Rebrand has logo, website, and print pieces. I want to see how each is going.","c":"projects"}
+{"t":"Task: Set up a project for the festival campaign\nState: to_do\nNote: Six deliverables across three weeks. I want a status view for each.","c":"projects"}
+{"t":"Task: See how the packaging line is progressing\nState: in_progress\nNote: Five SKUs in different stages. Need to see which ones are stuck.","c":"projects"}
+{"t":"Task: Organise the wedding stationery work\nState: to_do\nNote: Invitations, menus, place cards and signage for one couple. Group them together.","c":"projects"}
+{"t":"Task: Check progress on the annual report design\nState: in_progress\nNote: Spread by spread, some approved and some waiting for copy. Want to see the overall status.","c":"projects"}
+{"t":"Task: Run the batch resize on the product photos\nState: to_do\nNote: About 400 images need resizing for the store. Too slow to do by hand on my laptop.","c":"helpers"}
+{"t":"Task: Export all 120 icons in three sizes\nState: to_do\nNote: Icon set is in my design file. Export would take hours on my machine.","c":"helpers"}
+{"t":"Task: Render the animated logo intro overnight\nState: to_do\nNote: Longer render on the big desktop machine. I'd like it started and checked later.","c":"helpers"}
+{"t":"Task: Rename and sort the archive of old files\nState: to_do\nNote: Years of mixed files on the office machine. Needs a systematic rename and sort.","c":"helpers"}
+{"t":"Task: Generate colour proofs for all catalogue pages\nState: to_do\nNote: Two hundred pages to proof on the workstation. Will take all weekend.","c":"helpers"}
+{"t":"Task: Book the dentist cleaning\nState: complete\nNote: Done last week. Confirmation email filed.","c":null}
+{"t":"Task: Mail my cheque to the bank\nState: complete\nNote: Posted on Monday. Nothing else to do.","c":null}
+{"t":"Task: Water the studio plants\nState: to_do\nNote: Weekly routine. Ferns are by the window.","c":null}
+{"t":"Task: Tidy the paper stock cupboard\nState: to_do\nNote: Sort the swatch books by weight. Quick job on a slow afternoon.","c":null}
+{"t":"Task: Draft the mood board for the spa rebrand\nState: in_progress\nNote: Pulling images and colour palettes into one board. I'm doing it myself in the design app.","c":null}
+{"t":"Task: Adjust kerning on the headline\nState: to_do\nNote: Small typographic fix on the main heading in the poster layout.","c":null}
+{"t":"Task: Choose the photo for the homepage hero\nState: to_do\nNote: Narrowed to three photos. Client will pick on Wednesday.","c":null}
+{"t":"Task: Review the photo edit on the portrait\nState: to_do\nNote: Brightening and colour correction on the studio portrait. I'll check it on the calibrated screen.","c":null}
+{"t":"Task: Email list cleanup done\nState: complete\nNote: Removed bounced addresses from the newsletter list yesterday. Nothing left to do.","c":null}
+{"t":"Task: Pick a new email signature design\nState: to_do\nNote: Want something minimal with the logo and phone number line. Pure design decision.","c":null}
+{"t":"Task: Photograph the finished mural for the portfolio\nState: to_do\nNote: Shoot the wall in soft morning light. Equipment is already packed.","c":null}
+{"t":"Task: Make a to-do list for the Friday studio clean\nState: to_do\nNote: Dust the shelves, empty the bins, wipe the monitors. Just a personal reminder.","c":null}
+{"t":"Task: Read the printer's shipping confirmation\nState: complete\nNote: Boxes arrived Tuesday. Confirmation already checked.","c":null}
+{"t":"Task: Scan the sketchbook for the archive\nState: to_do\nNote: Flatbed scan of pages for the portfolio. I'll rename the files afterwards myself.","c":null}
+{"t":"Task: Update the typeface on the business cards\nState: to_do\nNote: Switch the name to the new heading font. Simple change in the layout file.","c":null}
+{"t":"Task: Practise the pitch deck presentation\nState: to_do\nNote: Run through the slides twice before Thursday's meeting with the board.","c":null}
+{"t":"Task: Refresh the list of favourite fonts\nState: to_do\nNote: Personal reference of fonts I like. No client need right now.","c":null}
+{"t":"Task: Chat with Ruth about her tea shop logo\nState: to_do\nNote: Casual catch-up coffee next week. Her shop has been open a year now.","c":null}
+{"t":"Task: Check the portfolio site loads on mobile\nState: to_do\nNote: Quick test on my phone and tablet before sharing the link.","c":null}
+{"t":"Task: Photograph the packaging for the case study\nState: blocked\nNote: Waiting for the finished boxes from the printer. Shoot once they arrive.","c":null}
+{"t":"Task: Watch the typography course lesson\nState: to_do\nNote: Lesson 4 on grid systems. Personal learning, no deadline.","c":null}
+{"t":"Task: Order new pens and markers\nState: to_do\nNote: Running low on fineliners. Usual supplier, usual order.","c":null}
+{"t":"Task: Delete old draft folders\nState: to_do\nNote: Folders from 2019 I no longer need. Remove them from the external drive.","c":null}
+{"t":"Task: Collect the framed prints from the gallery\nState: to_do\nNote: Pick up on Saturday. Gallery is open until six.","c":null}
+{"t":"Task: Note down the bus times for the shoot\nState: to_do\nNote: Routes to the location studio. Just for the day of the shoot.","c":null}
+{"t":"Task: Sign the invoice I already sent\nState: complete\nNote: Client confirmed payment last week. Task closed.","c":null}
+{"t":"Task: Review the list of conference speakers\nState: to_do\nNote: Just curious who is presenting. No action needed from me.","c":null}
+{"t":"Task: Print name badges for the workshop\nState: to_do\nNote: Twelve badges, already laid out in the design file. Printing at the office printer.","c":null}
+{"t":"Task: Upload final images to the client's shared folder\nState: complete\nNote: Uploaded yesterday. Client confirmed receipt.","c":null}
+{"t":"Task: Decide the colour for the sticker sheet\nState: to_do\nNote: Two options on my screen. Pick one by lunch.","c":null}
+{"t":"Task: Clean the Wacom tablet\nState: to_do\nNote: Nib is worn, so I'll replace it while I'm at it.","c":null}
+{"t":"Task: Plan the layout for the zine cover\nState: in_progress\nNote: Sketching three thumbnails on paper before moving to the screen.","c":null}
+{"t":"Task: Check the printer ink levels\nState: to_do\nNote: Printer display shows low cyan. Just swap the cartridge.","c":null}
+{"t":"Task: Water and read the Friday newsletter list\nState: to_do\nNote: Newsletter goes out Friday. Read the draft over once.","c":null}
+{"t":"Task: Renew parking permit\nState: to_do\nNote: Permit expires on the 14th of next month. Renewal form is already downloaded.","c":"track-todo"}
+{"t":"Task: Pay quarterly water bill\nState: to_do\nNote: Due on the 28th. No reminder set yet.","c":"track-todo"}
+{"t":"Task: Book dentist cleanings for both kids\nState: to_do\nNote: Slots are released on Friday; need to grab one before then.","c":"track-todo"}
+{"t":"Task: Return library books\nState: to_do\nNote: Due back Thursday. Fines start the day after.","c":"track-todo"}
+{"t":"Task: Submit school trip permission slip\nState: to_do\nNote: Teacher needs it signed by Monday morning.","c":"track-todo"}
+{"t":"Task: Change furnace filter\nState: to_do\nNote: Last changed in March. Should be swapped again around June.","c":"track-todo"}
+{"t":"Task: Sunday shopping list for the week\nState: to_do\nNote: Pasted 14 items from the family chat: oat milk, bin liners, rice, lemons and so on.","c":"tasks-from-list"}
+{"t":"Task: Holiday packing checklist\nState: in_progress\nNote: Sister sent a 30-line checklist. Want each line as its own task with a place to tick it off.","c":"tasks-from-list"}
+{"t":"Task: Back-to-school shopping\nState: to_do\nNote: List from the school has uniform, stationery and shoes all mixed together. Want them split into separate tasks by store.","c":"tasks-from-list"}
+{"t":"Task: Garden weekend jobs\nState: to_do\nNote: Pasted list of eight jobs from Dad: mow, prune hedge, clear gutters, and so on.","c":"tasks-from-list"}
+{"t":"Task: Chore rota for the household\nState: to_do\nNote: Rota was pasted from the family chat as one block. Each chore should be its own item.","c":"tasks-from-list"}
+{"t":"Task: Moving-house checklist\nState: to_do\nNote: Checklist from the moving company has about 40 lines, all in one text block I copied.","c":"tasks-from-list"}
+{"t":"Task: Grandma's apple cake recipe card\nState: to_do\nNote: Recipe is handwritten on a card. I only have a phone photo of it.","c":"read-photo"}
+{"t":"Task: Gas meter reading\nState: to_do\nNote: Took a photo of the meter dial on Sunday. Need the numbers for the online form.","c":"read-photo"}
+{"t":"Task: School newsletter with term dates\nState: to_do\nNote: Printed newsletter was scanned to a PDF image. The term dates are buried in it.","c":"read-photo"}
+{"t":"Task: Vaccine card for the new school\nState: to_do\nNote: Only a photo of the paper card exists. The school wants the dates typed out.","c":"read-photo"}
+{"t":"Task: Dishwasher warranty details\nState: to_do\nNote: Warranty card is a photo taken at the back of the appliance. Serial number is in there somewhere.","c":"read-photo"}
+{"t":"Task: Plumber's invoice from last month\nState: blocked\nNote: Photo of the paper invoice from the plumber. Can't tell the amount or the job reference.","c":"read-photo"}
+{"t":"Task: Find boiler reset code\nState: to_do\nNote: Boiler manual is an 80-page PDF on the laptop. Need the reset code from the troubleshooting section.","c":"file-to-note"}
+{"t":"Task: Check lease notice clause\nState: to_do\nNote: Lease is a Word file. Need to find how many days' notice the landlord must give.","c":"file-to-note"}
+{"t":"Task: Look up 2023 household budget\nState: to_do\nNote: Budget is an Excel workbook with twelve tabs. Want to search it for the electricity line.","c":"file-to-note"}
+{"t":"Task: Uniform policy from school handbook\nState: to_do\nNote: Handbook is a long PDF. Only need the section on jumper colours.","c":"file-to-note"}
+{"t":"Task: Kids' sports schedule\nState: to_do\nNote: Season schedule is an Excel sheet. Want to find all the Saturday fixtures quickly.","c":"file-to-note"}
+{"t":"Task: Find the warranty terms in the contract PDF\nState: in_progress\nNote: Contract for the new sofa is a PDF. Looking for the warranty length in the terms.","c":"file-to-note"}
+{"t":"Task: Print emergency contacts for babysitter\nState: to_do\nNote: Contact sheet lives in my notes app. Needs to go on the fridge as a printed page.","c":"note-to-file"}
+{"t":"Task: Send childcare form to the school office\nState: to_do\nNote: Form was written up as a note. Office only accepts Word documents.","c":"note-to-file"}
+{"t":"Task: House rules for the new cleaner\nState: to_do\nNote: Rules are in a note. Want to send her a PDF so she can save it.","c":"note-to-file"}
+{"t":"Task: Grocery budget for bank meeting\nState: to_do\nNote: Written as a note. Bank wants a Word file before the appointment on Wednesday.","c":"note-to-file"}
+{"t":"Task: Packing inventory for the movers\nState: to_do\nNote: Inventory is a note with 60 items. Movers need a printed copy at the door.","c":"note-to-file"}
+{"t":"Task: Print the family pancake recipe\nState: to_do\nNote: Recipe note is ready. Want a PDF to print for the cookbook project.","c":"note-to-file"}
+{"t":"Task: Plumber Dev's visit preferences\nState: to_do\nNote: Dev prefers Tuesday mornings and wants the key left with the neighbour.","c":"remember-people"}
+{"t":"Task: Babysitter Lena's preferences\nState: to_do\nNote: Lena wants no screens after 6 and bedtime at 7:30 for the youngest.","c":"remember-people"}
+{"t":"Task: Neighbour Ruth's family details\nState: to_do\nNote: Ruth's son is starting university and her dog is called Pim. Want to keep these for next time we talk.","c":"remember-people"}
+{"t":"Task: Reading group teacher details\nState: to_do\nNote: Mr. Hale runs the Tuesday reading group. Want to remember which class he teaches for pickup.","c":"remember-people"}
+{"t":"Task: Vet receptionist Ana\nState: to_do\nNote: Ana prefers text messages over calls and is the contact for the cat's medication refills.","c":"remember-people"}
+{"t":"Task: Grandparents' dietary needs for the holiday\nState: to_do\nNote: Grandad can't have nuts and Grandma avoids dairy. Need to keep this in mind for the menu.","c":"remember-people"}
+{"t":"Task: Check utility rebate for old fridge\nState: to_do\nNote: Not sure if the appliance recycling rebate still runs this year.","c":"look-up"}
+{"t":"Task: Recycling days for new postcode\nState: to_do\nNote: Moved last week. Don't know which day the bins go out on this street.","c":"look-up"}
+{"t":"Task: Wool blanket wash temperature\nState: to_do\nNote: Care label is missing. Need to confirm the safe wash setting for pure wool.","c":"look-up"}
+{"t":"Task: School holiday dates this year\nState: to_do\nNote: Heard the October break may have moved. Need to confirm the official calendar.","c":"look-up"}
+{"t":"Task: Saturday bus timetable\nState: to_do\nNote: Route 14 changed its weekend times. Need the new departure for the match.","c":"look-up"}
+{"t":"Task: Replacement part for dishwasher model\nState: to_do\nNote: Model number is on the sticker. Need to find the compatible door seal online.","c":"look-up"}
+{"t":"Task: Reply to landlord about shower leak\nState: to_do\nNote: Landlord emailed asking for an update by Friday. Need to confirm when the plumber came.","c":"email"}
+{"t":"Task: Sort school emails\nState: to_do\nNote: Inbox has about 60 unread messages from the school. Want them sorted into folders by year group.","c":"email"}
+{"t":"Task: Insurance claim status\nState: in_progress\nNote: Insurer emailed last week asking for the receipts. Need to answer and ask for a timeline.","c":"email"}
+{"t":"Task: PTA emails to review\nState: to_do\nNote: Forty unread PTA emails piled up during the trip. Need to flag the ones about the fundraiser.","c":"email"}
+{"t":"Task: Cousin's wedding RSVP\nState: to_do\nNote: Cousin emailed asking for a yes or no and number of guests by the 20th.","c":"email"}
+{"t":"Task: Thank the neighbour who fed the cat\nState: to_do\nNote: Neighbour looked after Mochi for ten days. Want a short note of thanks sent back by email.","c":"email"}
+{"t":"Task: Kitchen renovation\nState: in_progress\nNote: Five contractor quotes received, three still outstanding. Materials, permits and demolition each have their own steps.","c":"projects"}
+{"t":"Task: Garden shed build\nState: in_progress\nNote: Nine steps in total, four done. Foundation and roof remain, with the roof waiting on delivery.","c":"projects"}
+{"t":"Task: Home office move\nState: to_do\nNote: Several workstreams: desk delivery, internet install, cable runs and the new shelving.","c":"projects"}
+{"t":"Task: Spring clean across the house\nState: in_progress\nNote: Kitchen and hall done, bedrooms and garage still to go. Want to see how each room is coming along.","c":"projects"}
+{"t":"Task: 40th anniversary party planning\nState: to_do\nNote: Venue, catering, invitations and music are all happening at once across different people.","c":"projects"}
+{"t":"Task: Summer holiday preparations\nState: in_progress\nNote: Flights are booked. Car service, pet sitter and travel insurance are still open.","c":"projects"}
+{"t":"Task: Sort 4,000 family photos by year\nState: in_progress\nNote: Photos are spread across the home computer and an old external drive. Will take many hours to rename and sort.","c":"helpers"}
+{"t":"Task: Clean up old videos on the family laptop\nState: to_do\nNote: Around 200 video clips from 2015 to 2019. Needs deduplicating and renaming across several folders.","c":"helpers"}
+{"t":"Task: Set up home backup on the Mac mini\nState: to_do\nNote: Full backup of all family computers needs to be configured and tested. It's a long job to run overnight.","c":"helpers"}
+{"t":"Task: Compare insurance policies from twelve years\nState: to_do\nNote: Twelve policy PDFs sit in the desktop folder. Need a comparison of premiums and excess across all of them.","c":"helpers"}
+{"t":"Task: Remove duplicate files on the family iMac\nState: to_do\nNote: Duplicates are scattered across Downloads, Documents and an old backup folder.","c":"helpers"}
+{"t":"Task: Tidy the Downloads folder on the desktop PC\nState: to_do\nNote: Thousands of files from the last five years. Needs sorting into folders by type on that machine.","c":"helpers"}
+{"t":"Task: Buy milk and bread\nState: to_do\nNote: Corner shop on the way home.","c":null}
+{"t":"Task: Call dentist to confirm Thursday\nState: to_do\nNote: Appointment is already booked. Just confirming the time.","c":null}
+{"t":"Task: Pay electricity bill\nState: complete\nNote: Paid by bank transfer on Monday.","c":null}
+{"t":"Task: Update school email address on the form\nState: complete\nNote: Typed the new address into the form and handed it in.","c":null}
+{"t":"Task: Take passport photo at the pharmacy\nState: to_do\nNote: Booth is inside the pharmacy near the till. Need two copies.","c":null}
+{"t":"Task: Pick up gifts from the list on the fridge\nState: to_do\nNote: Gift list is short: two books and a board game. Shop is open until nine.","c":null}
+{"t":"Task: Water the plants\nState: to_do\nNote: Ferns and the lemon tree need water tonight.","c":null}
+{"t":"Task: Put laundry in the dryer\nState: in_progress\nNote: Washer finished; load is in the dryer on the cotton setting.","c":null}
+{"t":"Task: Fix squeaky hinge on the pantry door\nState: to_do\nNote: A drop of oil should do it.","c":null}
+{"t":"Task: Order school shoes online\nState: to_do\nNote: Size 2 for the youngest, same brand as last year.","c":null}
+{"t":"Task: Read bedtime story\nState: to_do\nNote: Book is the one about the lighthouse keeper.","c":null}
+{"t":"Task: Put holiday photos into the album\nState: complete\nNote: Finished last weekend, album is on the shelf in the living room.","c":null}
+{"t":"Task: Send birthday card to Aunt Maren\nState: to_do\nNote: Card is already bought. Just needs a stamp and a postbox.","c":null}
+{"t":"Task: Replace bathroom tap\nState: blocked\nNote: Waiting on the replacement cartridge to arrive from the supplier.","c":null}
+{"t":"Task: Defrost the freezer\nState: to_do\nNote: Towels down, bowls ready for the ice. Usually takes an afternoon.","c":null}
+{"t":"Task: Pick up dry cleaning\nState: to_do\nNote: Ticket is in the blue wallet. Ready since Tuesday.","c":null}
+{"t":"Task: Check tyre pressure before the trip\nState: to_do\nNote: Car is parked outside. Use the gauge in the glovebox.","c":null}
+{"t":"Task: Renew library card\nState: complete\nNote: Renewed at the desk on Saturday for another year.","c":null}
+{"t":"Task: Schedule lawn mower service\nState: to_do\nNote: Last service was two years ago. Shop has a standard booking form.","c":null}
+{"t":"Task: Write a chore list for the weekend\nState: to_do\nNote: Just a short handwritten list on the kitchen whiteboard: bins, hoover, wipe the fridge.","c":null}
+{"t":"Task: Hang the wedding photo in the hall\nState: to_do\nNote: Frame is already on the hook. Only needs a level check.","c":null}
+{"t":"Task: Post the birthday package to cousin\nState: to_do\nNote: Box is taped and labelled. Post office on Market Street.","c":null}
+{"t":"Task: Clean out the fridge\nState: to_do\nNote: Check dates on the condiments and toss anything expired.","c":null}
+{"t":"Task: Return cracked casserole dish to shop\nState: to_do\nNote: Receipt is in the drawer. Shop is open Saturdays.","c":null}
+{"t":"Task: Call Grandma on Sunday\nState: to_do\nNote: Regular Sunday call. Keep it short.","c":null}
+{"t":"Task: Restock the first-aid kit\nState: to_do\nNote: Plasters and gauze are running low. Pharmacy is nearby.","c":null}
+{"t":"Task: Walk the dog around the block\nState: complete\nNote: Done this morning before breakfast.","c":null}
+{"t":"Task: Take bins out Tuesday\nState: to_do\nNote: Recycling goes out too. Bins are by the side gate.","c":null}
+{"t":"Task: Parent evening sign-up sheets\nState: to_do\nNote: Collect them back before the 14th. I keep forgetting who is still outstanding.","c":"track-todo"}
+{"t":"Task: Submit Year 10 coursework grades\nState: to_do\nNote: Due to the exams office on the 22nd. Three separate deadlines hang off this.","c":"track-todo"}
+{"t":"Task: Book Room 12 for mock exams\nState: to_do\nNote: Needs booking before Monday, along with two other rooms with dates I keep mixing up.","c":"track-todo"}
+{"t":"Task: Renew first aid certificate\nState: to_do\nNote: Expires at end of term. I also need to remember the training date.","c":"track-todo"}
+{"t":"Task: Trip permission form reminder\nState: in_progress\nNote: Reminder dates for the museum trip: Tuesday, then the Thursday before.","c":"track-todo"}
+{"t":"Task: Friday prep from staff meeting\nState: to_do\nNote: I pasted the list from the staff meeting: seven separate jobs in one line.","c":"tasks-from-list"}
+{"t":"Task: Field trip kit checklist\nState: to_do\nNote: Pasted a list of 12 items, and each one needs its own tick.","c":"tasks-from-list"}
+{"t":"Task: Report comments checklist\nState: to_do\nNote: Turn the pasted comment list into separate tasks, one per student.","c":"tasks-from-list"}
+{"t":"Task: Department action points\nState: to_do\nNote: The minutes list nine actions. I want each one as its own task with an owner.","c":"tasks-from-list"}
+{"t":"Task: Classroom supply order\nState: in_progress\nNote: Pasted the order list with 15 lines. Need them split into tasks to tick off as they arrive.","c":"tasks-from-list"}
+{"t":"Task: Open evening jobs\nState: to_do\nNote: Head of year sent a rough list of jobs for the open evening. Needs breaking down.","c":"tasks-from-list"}
+{"t":"Task: Copy whiteboard notes from period 3\nState: to_do\nNote: I have a photo of the whiteboard, but the bottom half is too blurry to read by eye.","c":"read-photo"}
+{"t":"Task: Student reading log scan\nState: to_do\nNote: Scanned page of a student's handwritten reading log. I need the text out of it for the report.","c":"read-photo"}
+{"t":"Task: Seating plan from photo\nState: to_do\nNote: Took a photo of the seating plan on the old board. Need the names typed out.","c":"read-photo"}
+{"t":"Task: Worksheet questions from textbook photo\nState: to_do\nNote: Phone photo of a textbook page. I want the questions typed out so I can edit them.","c":"read-photo"}
+{"t":"Task: Returned permission slips\nState: in_progress\nNote: Scanned the returned slips. Need the names and signatures read off the scan.","c":"read-photo"}
+{"t":"Task: Old exam paper scan from 1998\nState: to_do\nNote: Scanned paper with no searchable text. Need the words recovered for the archive.","c":"read-photo"}
+{"t":"Task: Find unit dates in curriculum guide\nState: to_do\nNote: The curriculum guide is a 60-page PDF. I need to search it for unit dates.","c":"file-to-note"}
+{"t":"Task: Schemes of work across units\nState: to_do\nNote: Schemes are in a Word document. I want to search across all the units quickly.","c":"file-to-note"}
+{"t":"Task: Mark book export for Year 9\nState: to_do\nNote: Mark book export is an Excel file. I want the grades searchable in my notes.","c":"file-to-note"}
+{"t":"Task: Exam board spec weightings\nState: to_do\nNote: The spec is a PDF and I keep scrolling for the assessment weightings.","c":"file-to-note"}
+{"t":"Task: Behaviour policy reference\nState: to_do\nNote: It's a Word document. I want to search it during staff meetings.","c":"file-to-note"}
+{"t":"Task: School calendar PDF lookup\nState: to_do\nNote: The term calendar is a PDF. I want to search it for half-term and INSET days.","c":"file-to-note"}
+{"t":"Task: Print cover letter for the trip\nState: to_do\nNote: The draft letter is in my notes and needs printing for 30 families.","c":"note-to-file"}
+{"t":"Task: Reference letter for university\nState: to_do\nNote: The reference is written in my notes. The university portal needs a Word file.","c":"note-to-file"}
+{"t":"Task: Revision guide PDF for Year 11\nState: to_do\nNote: The revision guide is in my notes. Students need a PDF by Monday.","c":"note-to-file"}
+{"t":"Task: Printable worksheet from notes\nState: to_do\nNote: The worksheet is typed in my notes. I want a printable Word doc.","c":"note-to-file"}
+{"t":"Task: Parent newsletter to send\nState: in_progress\nNote: Newsletter draft is in my notes. It needs to go out as a PDF attachment.","c":"note-to-file"}
+{"t":"Task: Moderation rubric for printing\nState: to_do\nNote: The marking rubric is a note. It needs printing for the moderation meeting.","c":"note-to-file"}
+{"t":"Task: Aiden's reading support plan\nState: to_do\nNote: The new reading plan has several adjustments. I need to remember which ones apply to him.","c":"remember-people"}
+{"t":"Task: Mrs. Dhillon's contact preference\nState: to_do\nNote: She prefers texts, not calls. I need this remembered before parent conferences.","c":"remember-people"}
+{"t":"Task: Mentoring Priya next week\nState: to_do\nNote: I'm starting as her mentor. I need to remember her interests and the class she teaches.","c":"remember-people"}
+{"t":"Task: Mr. Brandt's report format\nState: to_do\nNote: He wants reports in Word, not PDF. I need to remember that before term end.","c":"remember-people"}
+{"t":"Task: Pickup contacts for students\nState: in_progress\nNote: Keep track of who each student's guardians are for pickups, since they change often.","c":"remember-people"}
+{"t":"Task: Ms. Ruiz cover arrangement\nState: to_do\nNote: Ms. Ruiz covers my Tuesday period. Remember her notice preference for swaps.","c":"remember-people"}
+{"t":"Task: Check changes to national curriculum\nState: to_do\nNote: Need to see what changed in the national curriculum for next year.","c":"look-up"}
+{"t":"Task: Cheap physics demo kit\nState: to_do\nNote: Looking for a supplier with a cheaper kit for the magnetism demonstrations.","c":"look-up"}
+{"t":"Task: Updated exam board mark scheme\nState: to_do\nNote: The board published an updated mark scheme. I need to find where they posted it.","c":"look-up"}
+{"t":"Task: Pronounce a student's name\nState: to_do\nNote: Her name is Vietnamese and I'm unsure of the tones. Need to check before the register.","c":"look-up"}
+{"t":"Task: Year 9 historical fiction reading list\nState: to_do\nNote: Need suggestions for historical fiction at reading age for Year 9.","c":"look-up"}
+{"t":"Task: Museum group visit prices\nState: to_do\nNote: Check the local museum's group visit prices before the trip is confirmed.","c":"look-up"}
+{"t":"Task: Parent emails since the weekend\nState: to_do\nNote: Thirty-four unread emails from parents. They need sorting and replies drafted.","c":"email"}
+{"t":"Task: Reply to exams office about entries\nState: to_do\nNote: The exams office emailed about entries. Please draft a reply for me to check.","c":"email"}
+{"t":"Task: Parent complaint about grades\nState: to_do\nNote: A parent emailed about their child's grade. I need a draft reply to check before sending.","c":"email"}
+{"t":"Task: Inbox before leave\nState: to_do\nNote: Two hundred emails are waiting before I go on leave on Friday.","c":"email"}
+{"t":"Task: Coach company confirmation\nState: to_do\nNote: The coach company emailed asking me to confirm numbers for the trip.","c":"email"}
+{"t":"Task: Late submission extension request\nState: to_do\nNote: A student emailed asking for an extension. I need a draft reply.","c":"email"}
+{"t":"Task: Year 9 science fair\nState: in_progress\nNote: Four groups, three parents helping. Plan is slipping and I can't see how each group is doing.","c":"projects"}
+{"t":"Task: Library refurbishment committee\nState: in_progress\nNote: Several workstreams running at once with no clear view of where each one stands.","c":"projects"}
+{"t":"Task: Literacy pilot progress\nState: in_progress\nNote: The pilot runs across three classes. I need progress shown for each class.","c":"projects"}
+{"t":"Task: Scheme of work rewrite\nState: in_progress\nNote: The department is rewriting six units. Tracking each one is getting messy.","c":"projects"}
+{"t":"Task: Eco club garden build\nState: blocked\nNote: The build has several phases. I want to see which ones are behind.","c":"projects"}
+{"t":"Task: Reading buddies scheme\nState: in_progress\nNote: Scheme runs across Years 3 to 6. It's unclear where each year group has got to.","c":"projects"}
+{"t":"Task: Compile four years of exam results\nState: to_do\nNote: The data is spread across folders on my desktop and laptop. Doing it by hand would take days.","c":"helpers"}
+{"t":"Task: Reorganise 800 scanned worksheets\nState: to_do\nNote: They're in folders on my home computer. It's a long job to sort them.","c":"helpers"}
+{"t":"Task: Build quiz banks from old files\nState: to_do\nNote: Thirty quiz banks can be built from existing files on my desktop.","c":"helpers"}
+{"t":"Task: Move slides to new template\nState: to_do\nNote: All lesson slides on the shared drive need the new template. They're on my work PC.","c":"helpers"}
+{"t":"Task: Rename 400 trip photos\nState: to_do\nNote: The photos are on my laptop. They need batch renaming by class and date.","c":"helpers"}
+{"t":"Task: Check reading levels across files\nState: to_do\nNote: Reading levels are recorded in files across the office PC. Need every student checked.","c":"helpers"}
+{"t":"Task: Mark Year 7 homework\nState: to_do","c":null}
+{"t":"Task: Send room change email to Mr. Patel\nState: to_do\nNote: The reply is already drafted. I just need to click send.","c":null}
+{"t":"Task: Choose a photo for the yearbook page\nState: to_do\nNote: Pick one from the trip album. Any good shot will do.","c":null}
+{"t":"Task: Write books on the reading corner board\nState: to_do\nNote: Copy out this term's book list onto the board before Monday.","c":null}
+{"t":"Task: Submit coursework grades\nState: complete\nNote: Sent to the exams office last Friday.","c":null}
+{"t":"Task: Email parents about the trip\nState: complete\nNote: Sent to all families on Monday morning.","c":null}
+{"t":"Task: Swap lunch duty with Mr. Hale\nState: to_do\nNote: We agreed in the corridor. Just need to update the rota sheet.","c":null}
+{"t":"Task: Photocopy 30 worksheets\nState: to_do\nNote: Standard copy for Thursday's lesson.","c":null}
+{"t":"Task: Laminate classroom signs\nState: to_do\nNote: Five signs for the corridor displays.","c":null}
+{"t":"Task: Set up Year 8 seating plan\nState: to_do\nNote: Arrange by reading group, then print the plan.","c":null}
+{"t":"Task: Call parent about attendance\nState: to_do\nNote: Number is in the student file. Short call about late arrivals.","c":null}
+{"t":"Task: Sort stationery cupboard\nState: to_do\nNote: Put the pens and glue sticks back in their boxes.","c":null}
+{"t":"Task: Read Year 10 essays\nState: in_progress\nNote: Halfway through the second set. Marking comes after.","c":null}
+{"t":"Task: Cover lesson plan for Thursday\nState: to_do\nNote: Colleague is away. Need a simple reading task for period 2.","c":null}
+{"t":"Task: Order new whiteboard markers\nState: complete\nNote: Delivered and put in the stock cupboard.","c":null}
+{"t":"Task: Check lunch menu for allergy notes\nState: to_do\nNote: Quick look at the kitchen's weekly menu before Wednesday.","c":null}
+{"t":"Task: Draft staff meeting agenda\nState: in_progress\nNote: Three items so far. Will finish before the Monday briefing.","c":null}
+{"t":"Task: Dentist appointment\nState: to_do\nNote: Moved from Tuesday to Thursday afternoon.","c":null}
+{"t":"Task: Grade multiple choice quiz\nState: to_do\nNote: Answer key is on the front page of the quiz.","c":null}
+{"t":"Task: Try a no-email Friday\nState: to_do\nNote: Just checking messages once at lunch and once after school.","c":null}
+{"t":"Task: Plan a lesson on camera obscura\nState: to_do\nNote: Year 8 science. Need a demo using a shoebox and a pinhole.","c":null}
+{"t":"Task: Collect printed certificates from office\nState: to_do\nNote: Certificates for the Year 6 awards assembly.","c":null}
+{"t":"Task: File team meeting notes\nState: complete\nNote: Saved in the department folder.","c":null}
+{"t":"Task: Fix the broken window blind\nState: blocked\nNote: Waiting for the caretaker to bring the new cord.","c":null}
+{"t":"Task: Tidy reading list display\nState: to_do\nNote: Replace the faded posters in the corridor display case.","c":null}
+{"t":"Task: Book sports hall for Thursday\nState: to_do\nNote: Needed for the Year 7 dodgeball session.","c":null}
+{"t":"Task: Choose a project for the display board\nState: to_do\nNote: Pick the best Year 5 project from last term for the hall wall.","c":null}
+{"t":"Task: Call the caretaker about heating\nState: blocked\nNote: Classroom is cold. Waiting on a reply about the boiler.","c":null}
+{"t":"Task: Write Year 5 report comments\nState: complete\nNote: All thirty comments finished and submitted.","c":null}
+{"t":"Task: Set up a due-date list for spring planting\nState: to_do\nNote: Seeding, transplanting, and fertilizer runs all need dates. Hana wants each job to show the day it is due.","c":"track-todo"}
+{"t":"Task: Track the fence repair deadlines\nState: in_progress\nNote: Four sections of fence need mending before the cattle move on the 14th. Some sections are due earlier.","c":"track-todo"}
+{"t":"Task: Keep a list of vet visits with due days\nState: to_do\nNote: Booster shots and hoof trims are on different cycles for the goats and the two horses.","c":"track-todo"}
+{"t":"Task: Plan the week's jobs by day\nState: to_do\nNote: Milking, moving hens, and hauling compost all have to fall on specific days.","c":"track-todo"}
+{"t":"Task: Remember which pens need mucking out by Thursday\nState: to_do\nNote: Pens 2 and 5 are due Thursday. The rest can wait until the weekend.","c":"track-todo"}
+{"t":"Task: Track invoice payment due dates\nState: blocked\nNote: Three feed bills are open and each has a different due day. Nothing is paid yet.","c":"track-todo"}
+{"t":"Task: Turn the pasted feed order into tasks\nState: to_do\nNote: Pasted list: order 40 lb layer pellets; call about the water trough heater; pick up mineral blocks; book the farrier.","c":"tasks-from-list"}
+{"t":"Task: Split the pasted supplies list into jobs\nState: to_do\nNote: Ruth pasted a long list from the hardware store email, with fence staples, twine, and two gate hinges all on one line.","c":"tasks-from-list"}
+{"t":"Task: Break up the seed order list\nState: to_do\nNote: Pasted seed list has 14 varieties in one block. Each one needs its own sowing task.","c":"tasks-from-list"}
+{"t":"Task: Make tasks from the vet's pasted instructions\nState: in_progress\nNote: The vet emailed a list of post-surgery steps for the sow. It is pasted into the note as one block.","c":"tasks-from-list"}
+{"t":"Task: Split the pasted chore list for the new hand\nState: to_do\nNote: Joel's first-week chores were pasted from a text message as one long run-on list.","c":"tasks-from-list"}
+{"t":"Task: Turn the pasted market checklist into tasks\nState: to_do\nNote: Checklist for the Saturday stall: tables, cash box, egg cartons, price signs, and the card reader.","c":"tasks-from-list"}
+{"t":"Task: Read the handwritten feed receipt photo\nState: to_do\nNote: Photo of a receipt from the mill. The total and the bag count are hard to make out.","c":"read-photo"}
+{"t":"Task: Get text from the scanned seed packet\nState: to_do\nNote: Only a photo of the back of the packet exists. Planting depth and spacing are needed for the bed plan.","c":"read-photo"}
+{"t":"Task: Read the water test results from the photo\nState: blocked\nNote: The lab sent a photo of a printed sheet. The pH and nitrate lines are not legible to me.","c":"read-photo"}
+{"t":"Task: Transcribe the old ledger page photo\nState: to_do\nNote: A snapshot of a 1990s ledger page shows the herd records for the spring calves.","c":"read-photo"}
+{"t":"Task: Read the tag numbers from the cattle chute photo\nState: to_do\nNote: Photo taken at the sale barn. Tags are small and partly covered by mud.","c":"read-photo"}
+{"t":"Task: Make the seed catalog PDF searchable\nState: to_do\nNote: The 80-page seed catalog is a PDF. Finding the tomato varieties means scrolling through every page.","c":"file-to-note"}
+{"t":"Task: Put the vaccination spreadsheet into searchable notes\nState: to_do\nNote: The herd vaccination record is an Excel file. Dates and animal IDs need to be easy to search.","c":"file-to-note"}
+{"t":"Task: Search the old Word manual for the tractor part\nState: in_progress\nNote: The tractor manual is a Word file. Ruth wants to find the hydraulic section fast.","c":"file-to-note"}
+{"t":"Task: Turn the grain contract PDF into a searchable note\nState: to_do\nNote: The contract with the grain buyer is 12 pages long. Delivery clauses are the part we need to find.","c":"file-to-note"}
+{"t":"Task: Make the soil test PDF searchable\nState: to_do\nNote: Results came as a PDF from the extension office. Want to search for phosphorus levels from past years.","c":"file-to-note"}
+{"t":"Task: Search the bank statements spreadsheet\nState: to_do\nNote: The yearly bank export is an Excel file. Want to find every feed payment quickly.","c":"file-to-note"}
+{"t":"Task: Print the hay delivery note for the driver\nState: to_do\nNote: The driver needs a PDF copy of the hay order note, with the delivery address and the bale count.","c":"note-to-file"}
+{"t":"Task: Turn the lambing notes into a Word file\nState: to_do\nNote: Notes for the lambing season are in the app. The vet wants a printed Word version for the records.","c":"note-to-file"}
+{"t":"Task: Make a printable chore chart\nState: to_do\nNote: The weekly chore note needs to go on the barn wall. A printable version is needed.","c":"note-to-file"}
+{"t":"Task: Send the market price list as a PDF\nState: to_do\nNote: The price list note is ready. The stall vendor wants a PDF to send by email.","c":"note-to-file"}
+{"t":"Task: Export the field plan note for the agronomist\nState: to_do\nNote: The field rotation plan is written in notes. The agronomist asked for a Word file to mark up.","c":"note-to-file"}
+{"t":"Task: Print the feed ration sheet\nState: to_do\nNote: The ration note for the layers needs to be printed and taped inside the feed room door.","c":"note-to-file"}
+{"t":"Task: Remember that Mrs. Okafor takes eggs on Tuesdays\nState: to_do\nNote: She runs the bakery in town. She prefers large brown eggs, and she should be called before the delivery.","c":"remember-people"}
+{"t":"Task: Save the feed mill rep's details\nState: to_do\nNote: Dev Marlow at the mill changes his delivery schedule often. His preferred call time is afternoon.","c":"remember-people"}
+{"t":"Task: Note what the new neighbor asked about the creek\nState: to_do\nNote: Priya, who bought the next parcel, wants a fence along the creek. She mentioned she likes to be contacted by text.","c":"remember-people"}
+{"t":"Task: Keep track of the vet's preferences\nState: to_do\nNote: Dr. Ines Bauer prefers morning visits and wants photos of the sick animal before she arrives.","c":"remember-people"}
+{"t":"Task: Remember the cattle buyer's terms\nState: to_do\nNote: Tomas Reyes pays on delivery and only takes calves with ear tags. He asked for a call before each pickup.","c":"remember-people"}
+{"t":"Task: Note the farm sitter's details\nState: to_do\nNote: Nadia is covering two weekends. She doesn't drive the big truck and needs the gate code by text.","c":"remember-people"}
+{"t":"Task: Look up the withdrawal period for the dewormer\nState: to_do\nNote: Lily's goat is due for dewormer, and the label is worn. Need to know how long before the milk is safe.","c":"look-up"}
+{"t":"Task: Find the correct spacing for leeks\nState: to_do\nNote: Planning the new bed and unsure of the spacing for leeks versus onions.","c":"look-up"}
+{"t":"Task: Check the rainfall total for the county last July\nState: to_do\nNote: The insurance form needs the official rainfall figure for July of last year.","c":"look-up"}
+{"t":"Task: Find the local hay price index\nState: to_do\nNote: Want to compare this year's hay prices with the regional average before the order.","c":"look-up"}
+{"t":"Task: Look up the regulations for selling raw milk\nState: to_do\nNote: Hana wants to start a small raw milk sale. She needs the current state rules before listing it at the stall.","c":"look-up"}
+{"t":"Task: Check the symptoms of bloat in cattle\nState: to_do\nNote: One calf looked swollen this morning. Need to confirm the signs and what to do first.","c":"look-up"}
+{"t":"Task: Reply to the seed company's three unread emails\nState: to_do\nNote: Three emails from the seed company need answers about shipping dates and substitutions. Drafts are needed for Ruth to check.","c":"email"}
+{"t":"Task: Sort the co-op inbox and draft answers\nState: to_do\nNote: Forty messages from the co-op are unsorted. Some are invoices, some are event invites, and some need replies.","c":"email"}
+{"t":"Task: Answer the buyer's question about organic certification\nState: in_progress\nNote: The buyer emailed asking for our certification papers. A reply needs to be drafted before Friday.","c":"email"}
+{"t":"Task: Draft replies to the farm stand customers\nState: to_do\nNote: Customers have emailed about Saturday hours. A few replies are needed and Ruth wants to check them first.","c":"email"}
+{"t":"Task: Sort the vendor invoices in email\nState: to_do\nNote: Invoices from the feed store, the vet, and the fuel supplier are mixed in with newsletters and spam.","c":"email"}
+{"t":"Task: Reply to the extension office's questions\nState: blocked\nNote: The extension agent asked two questions about the cover crop trial. We need a draft reply Ruth can check.","c":"email"}
+{"t":"Task: See how the fence rebuild is going\nState: in_progress\nNote: The fence rebuild has four phases across the north pasture. Want to check which phases are behind.","c":"projects"}
+{"t":"Task: Track the orchard replanting project\nState: in_progress\nNote: Replanting 60 apple trees is split into site prep, planting, and irrigation. Progress is unclear across them.","c":"projects"}
+{"t":"Task: Group the barn renovation work into a project\nState: to_do\nNote: Roof, stalls, and lighting are all part of one barn renovation. Several contractors are involved.","c":"projects"}
+{"t":"Task: Check how the pond dredging is going\nState: in_progress\nNote: The dredging has three crews and a budget. Want to see whether it is on schedule.","c":"projects"}
+{"t":"Task: Organize the greenhouse build into a project\nState: to_do\nNote: The greenhouse build has materials, permits, and a foundation pour. Tasks are scattered across notes.","c":"projects"}
+{"t":"Task: Review the new well project status\nState: in_progress\nNote: Drilling, pump install, and pressure testing are the stages. Ruth wants a status view across them.","c":"projects"}
+{"t":"Task: Have a helper sort the ledger files on the laptop\nState: to_do\nNote: Three years of bookkeeping files are on the office laptop. A helper could go through them and build a summary.","c":"helpers"}
+{"t":"Task: Get a helper to clean up the photo archive\nState: to_do\nNote: Thousands of farm photos are on the desktop in messy folders. A helper could organize them overnight.","c":"helpers"}
+{"t":"Task: Send a helper to update the herd records on the desktop\nState: to_do\nNote: The herd software on the barn computer needs its records reconciled with the paper logs.","c":"helpers"}
+{"t":"Task: Have a helper compile the tax documents\nState: to_do\nNote: All receipts for last year are scanned on the home computer. Someone needs to gather them into one folder by category.","c":"helpers"}
+{"t":"Task: Let a helper rename the crop photos on the drive\nState: to_do\nNote: The camera files on the external drive are named by number. A helper could rename them by field and date.","c":"helpers"}
+{"t":"Task: Assign a helper to check the sales spreadsheets\nState: blocked\nNote: Two sales spreadsheets on the shop computer disagree on totals. A helper could work through them on that machine.","c":"helpers"}
+{"t":"Task: Order a new bag of chicken feed\nState: to_do\nNote: The layers are down to two days of feed. Pick up at the mill.","c":null}
+{"t":"Task: Mend the gate hinge in the north pasture\nState: complete\nNote: Hinge replaced on Tuesday. Gate swings smoothly now.","c":null}
+{"t":"Task: Take a photo of the new calf for the family album\nState: complete\nNote: Photo was taken and shared with the kids. Nothing more to do.","c":null}
+{"t":"Task: Refill the water trough\nState: to_do\nNote: Trough in the south paddock runs low on hot afternoons. Refill each morning.","c":null}
+{"t":"Task: Mow the lane before the market\nState: to_do\nNote: The lane to the stall gets overgrown fast. Mow on Thursday.","c":null}
+{"t":"Task: Clean out the chicken coop\nState: in_progress\nNote: Half the coop is done. Finish the nesting boxes and lay fresh straw.","c":null}
+{"t":"Task: Check the tire pressure on the feed truck\nState: to_do\nNote: Routine check before the weekly feed run. Gauge is in the truck.","c":null}
+{"t":"Task: Put the eggs in the cooler for the stand\nState: to_do\nNote: Gather the eggs before noon and keep them chilled until Saturday.","c":null}
+{"t":"Task: Hang the email list of stall hours on the gate\nState: complete\nNote: Printed the hours from the list of regulars and taped them up. Done.","c":null}
+{"t":"Task: Mark the photo spot for the open house\nState: to_do\nNote: Pick the best place by the orchard gate for the family photo at the open house.","c":null}
+{"t":"Task: Sharpen the mower blades\nState: to_do\nNote: Blades were dull last week. Sharpen them before the next cut on the hay field.","c":null}
+{"t":"Task: Pick up the kids from the farm school\nState: to_do\nNote: Bus drops at the gate at 3:15 on Wednesday. Be there on time.","c":null}
+{"t":"Task: Restack the hay bales in the loft\nState: complete\nNote: Bales were restacked and the loft swept. Nothing left to do.","c":null}
+{"t":"Task: Give the goats their hoof trim\nState: blocked\nNote: Waiting for the farrier to free up. Goats are fine for now.","c":null}
+{"t":"Task: Fix the leaking hose by the greenhouse\nState: to_do\nNote: Small drip near the spigot. Replace the washer this weekend.","c":null}
+{"t":"Task: Weed the carrot bed\nState: in_progress\nNote: Two rows done. The last three rows are still full of grass.","c":null}
+{"t":"Task: Count the bags of seed potatoes in the shed\nState: to_do\nNote: Quick count of the sacks in the shed before the planting list is written.","c":null}
+{"t":"Task: Sweep the milk room floor\nState: complete\nNote: Floor swept and drain cleared after the morning milking.","c":null}
+{"t":"Task: Call the neighbor about the dog's escape\nState: complete\nNote: Spoke with the neighbor and the dog is home safe. Matter closed.","c":null}
+{"t":"Task: Fill the grain bin before the frost\nState: to_do\nNote: Top off the bin with corn before the cold snap next week.","c":null}
+{"t":"Task: Brush down the pony before the fair\nState: to_do\nNote: Grooming routine for the show. Mane and tail need a thorough brush.","c":null}
+{"t":"Task: Keep the list of chores on the fridge up to date\nState: to_do\nNote: The paper chore list on the fridge is smudged. Rewrite it neatly on Sunday.","c":null}
+{"t":"Task: Renew staging SSL certificate\nState: to_do\nNote: The cert expires on the 14th, and the wiki says to renew it a week early.","c":"track-todo"}
+{"t":"Task: Submit timesheet by Friday\nState: to_do\nNote: Finance locks the timesheet portal at 5pm Friday.","c":"track-todo"}
+{"t":"Task: Pay hosting bill before the 3rd\nState: to_do\nNote: Invoice from the cloud host; late payment suspends the staging servers.","c":"track-todo"}
+{"t":"Task: Set up on-call rota for next month\nState: in_progress\nNote: Two people have confirmed. Still need dates for the last week.","c":"track-todo"}
+{"t":"Task: Update privacy policy text by March 30\nState: blocked\nNote: Waiting on legal to send the revised wording.","c":"track-todo"}
+{"t":"Task: Publish API changelog before release day\nState: to_do\nNote: Release is set for the 22nd; changelog has to go out the day before.","c":"track-todo"}
+{"t":"Task: Turn retro notes into tasks\nState: to_do\nNote: Pasted list has 9 action items from Tuesday's retro, all in one block of text.","c":"tasks-from-list"}
+{"t":"Task: Split release checklist into tasks\nState: to_do\nNote: The checklist has 14 steps crammed into one paragraph.","c":"tasks-from-list"}
+{"t":"Task: Break down onboarding list for new hire\nState: to_do\nNote: Manager pasted a list of 12 setup items in an email body.","c":"tasks-from-list"}
+{"t":"Task: Make tasks from the customer bug list\nState: in_progress\nNote: Eight bugs are pasted in. Three are already turned into tasks.","c":"tasks-from-list"}
+{"t":"Task: Create tasks from the migration steps\nState: to_do\nNote: Dev pasted the steps from the migration doc as one long list.","c":"tasks-from-list"}
+{"t":"Task: Split the QA sign-off list into items\nState: to_do\nNote: Pasted 20 sign-off points from the test lead.","c":"tasks-from-list"}
+{"t":"Task: Transcribe whiteboard from architecture session\nState: to_do\nNote: Photo of the whiteboard taken after the session; handwriting is faint in the corners.","c":"read-photo"}
+{"t":"Task: Get text from scanned sign-in sheet\nState: to_do\nNote: Scanned page from the offsite. Need the names and dates typed out.","c":"read-photo"}
+{"t":"Task: Read error code from rack label photo\nState: to_do\nNote: Photo of the server rack label is blurry; the error code is hard to make out.","c":"read-photo"}
+{"t":"Task: Copy serial numbers from router photos\nState: to_do\nNote: Five photos of router labels from the office closet.","c":"read-photo"}
+{"t":"Task: Extract text from paper design sketch\nState: in_progress\nNote: Photographed the sketch from the design review; need the annotations as text.","c":"read-photo"}
+{"t":"Task: Pull amounts from receipt photo for expense claim\nState: to_do\nNote: Receipt from the conference lunch was only photographed, not typed.","c":"read-photo"}
+{"t":"Task: Make vendor contract PDF searchable\nState: to_do\nNote: Need to find the termination clause quickly during the renewal call.","c":"file-to-note"}
+{"t":"Task: Import 2019 API spec PDF into notes\nState: to_do\nNote: Old spec is only available as a PDF and we keep searching for endpoint names.","c":"file-to-note"}
+{"t":"Task: Turn onboarding Word doc into a searchable note\nState: to_do\nNote: The onboarding guide is a Word file in the shared drive.","c":"file-to-note"}
+{"t":"Task: Make incident log spreadsheet searchable\nState: to_do\nNote: Excel file with two years of incidents; I need to search by service name.","c":"file-to-note"}
+{"t":"Task: Get design spec into notes\nState: in_progress\nNote: Word design spec is 40 pages; I have only read the first section.","c":"file-to-note"}
+{"t":"Task: Index the research PDFs for the auth project\nState: to_do\nNote: Six PDFs on token rotation; I keep re-opening them to find quotes.","c":"file-to-note"}
+{"t":"Task: Send handover note to contractor as PDF\nState: to_do\nNote: Contractor starts Monday and only accepts PDF attachments.","c":"note-to-file"}
+{"t":"Task: Print offline runbook for the data center\nState: to_do\nNote: The runbook lives in notes; the data center has no reliable Wi-Fi.","c":"note-to-file"}
+{"t":"Task: Export architecture decision record as Word for legal\nState: to_do\nNote: Legal wants a .docx copy of ADR-14 for the vendor file.","c":"note-to-file"}
+{"t":"Task: Make security checklist into PDF for auditor\nState: to_do\nNote: Auditor visits Thursday and wants the checklist as a PDF.","c":"note-to-file"}
+{"t":"Task: Turn board update notes into a Word doc\nState: to_do\nNote: Board pack goes out Wednesday; the notes are in a draft note.","c":"note-to-file"}
+{"t":"Task: Print on-call phone tree\nState: to_do\nNote: The phone tree note needs to be on paper taped in the server room.","c":"note-to-file"}
+{"t":"Task: Note Priya prefers Slack over email for QA\nState: to_do\nNote: She mentioned it in standup; I keep emailing her and getting slow replies.","c":"remember-people"}
+{"t":"Task: Remember Tomas is vendor contact for the CDN\nState: to_do\nNote: He changed roles last month. The contact details are in his signature.","c":"remember-people"}
+{"t":"Task: Record client Mrs. Lin's weekly demo preference\nState: to_do\nNote: She wants a Monday demo and a written summary afterwards.","c":"remember-people"}
+{"t":"Task: Log Dana's timezone and role on platform team\nState: to_do\nNote: Dana joined last week and is in Lisbon; the team keeps scheduling badly.","c":"remember-people"}
+{"t":"Task: Keep Omar's dietary needs for the offsite\nState: to_do\nNote: He mentioned them in a chat; the caterer needs them by Friday.","c":"remember-people"}
+{"t":"Task: Remember Ruth's preferred contact for security audit\nState: to_do\nNote: Ruth is the external auditor; she prefers phone calls before 11am.","c":"remember-people"}
+{"t":"Task: Check if the font license allows commercial use\nState: to_do\nNote: Marketing wants to use the font on the pricing page; the license is unclear.","c":"look-up"}
+{"t":"Task: Check current rate limits for payments API\nState: to_do\nNote: The provider updates limits often; our docs are from last year.","c":"look-up"}
+{"t":"Task: Find Node 16 end-of-life date\nState: to_do\nNote: Ops wants to know when we must upgrade the build images.","c":"look-up"}
+{"t":"Task: Find the spec for OAuth PKCE flow\nState: to_do\nNote: Need the current RFC section for the mobile login rewrite.","c":"look-up"}
+{"t":"Task: Check whether the chart library has a new version\nState: to_do\nNote: Our version is two years old; the release notes might mention a fix we need.","c":"look-up"}
+{"t":"Task: Look up GDPR rule for log retention\nState: to_do\nNote: Legal asked how long we can keep request logs. Need the official guidance.","c":"look-up"}
+{"t":"Task: Reply to vendor's pricing email\nState: to_do\nNote: They offered 15% off if we sign by month end. Need a polite counter-offer.","c":"email"}
+{"t":"Task: Sort 80 unread support emails\nState: to_do\nNote: Most are duplicates from the same outage. Need them grouped and triaged.","c":"email"}
+{"t":"Task: Draft outage reply to customer\nState: to_do\nNote: Customer emailed asking when the login issue will be fixed. Need a draft to check before sending.","c":"email"}
+{"t":"Task: Answer Jan's email about sprint demo\nState: to_do\nNote: Jan asked whether the demo can move to Thursday. Haven't replied yet.","c":"email"}
+{"t":"Task: Triage release mailing list\nState: to_do\nNote: Over 120 messages from the list since Monday, many about the same bug.","c":"email"}
+{"t":"Task: Reply to recruiter about backend role\nState: to_do\nNote: Recruiter asked for salary range and availability in a long email.","c":"email"}
+{"t":"Task: See where the migration project stands\nState: in_progress\nNote: Five workstreams are spread across three tools. I need one view of progress.","c":"projects"}
+{"t":"Task: Group Q3 tickets into projects\nState: to_do\nNote: About 200 tickets with no project labels. Themes are obvious when I scan them.","c":"projects"}
+{"t":"Task: Check mobile redesign against plan\nState: to_do\nNote: Lead wants to know if we're behind the June milestone.","c":"projects"}
+{"t":"Task: Set up a project for new billing service\nState: to_do\nNote: Billing service has four teams and two milestones coming up.","c":"projects"}
+{"t":"Task: Find which of the three projects is behind\nState: to_do\nNote: Steering group meets Friday and wants a status per project.","c":"projects"}
+{"t":"Task: Organise docs refresh work into a project\nState: to_do\nNote: Twelve doc pages to rewrite, owned by different people.","c":"projects"}
+{"t":"Task: Run full regression suite on all 40 services overnight\nState: to_do\nNote: Takes about six hours on a laptop; the build server is free overnight.","c":"helpers"}
+{"t":"Task: Migrate image assets on the build server\nState: to_do\nNote: About 60 GB of images to move; it will take most of the day.","c":"helpers"}
+{"t":"Task: Refactor legacy importer on my laptop\nState: to_do\nNote: Large module with unclear dependencies. Would take several days of focused work.","c":"helpers"}
+{"t":"Task: Fix broken links across docs site\nState: to_do\nNote: About 900 pages to crawl and check. Doing it by hand will take a week.","c":"helpers"}
+{"t":"Task: Benchmark search index on dev box\nState: to_do\nNote: Needs a full run on the dev machine with a large dataset, roughly eight hours.","c":"helpers"}
+{"t":"Task: Clean old test data on staging machine\nState: to_do\nNote: Several hundred gigabytes of stale fixtures. Needs careful deletion over a few hours.","c":"helpers"}
+{"t":"Task: Standup at 9:30 daily\nState: to_do\nNote: Recurring calendar event for the platform team.","c":null}
+{"t":"Task: Merged login fix to main\nState: complete\nNote: Merged and deployed to production last Tuesday.","c":null}
+{"t":"Task: Email draft folder cleanup done\nState: complete\nNote: Deleted old drafts in the mail app; nothing left to do.","c":null}
+{"t":"Task: Buy snacks for office shared list\nState: to_do\nNote: Add oat milk and biscuits to the shopping list in the kitchen app.","c":null}
+{"t":"Task: Reorder sprint goals alphabetically\nState: to_do\nNote: Just tidy the list in the planning doc so it reads better.","c":null}
+{"t":"Task: Add new hire to team calendar\nState: to_do\nNote: Invite already sent; just add her to the recurring meetings.","c":null}
+{"t":"Task: Update README badges\nState: to_do\nNote: Build and coverage badges still point to the old CI system.","c":null}
+{"t":"Task: Rotate application logs\nState: to_do\nNote: Logrotate config needs a size limit bump. Routine change.","c":null}
+{"t":"Task: Fix typo on photo gallery page\nState: to_do\nNote: Caption says 'Sumer' instead of 'Summer' in the team photo page.","c":null}
+{"t":"Task: Review pull request for dark mode toggle\nState: in_progress\nNote: Two comments left; waiting for the author to respond.","c":null}
+{"t":"Task: Write unit tests for date parser\nState: to_do\nNote: Cover leap years and timezone edge cases.","c":null}
+{"t":"Task: Restart staging database after patch\nState: complete\nNote: Patch applied and database back online with no errors.","c":null}
+{"t":"Task: Pick up printer toner for the office\nState: to_do\nNote: Errand for the office manager, not related to the platform work.","c":null}
+{"t":"Task: Add books to reading club list\nState: to_do\nNote: Suggest two titles for the team book club in the chat channel.","c":null}
+{"t":"Task: Call printer repair technician\nState: to_do\nNote: Office printer jams on every second page; ticket is already open with the vendor.","c":null}
+{"t":"Task: Timezone lookup table off by one hour\nState: to_do\nNote: Bug: the Sydney offset is wrong during daylight saving. Fix in the code.","c":null}
+{"t":"Task: Projects page colour scheme\nState: to_do\nNote: Change the accent colour on the public projects page to match the new brand.","c":null}
+{"t":"Task: Sprint planning slides\nState: complete\nNote: Deck finished and shared with the team on Monday.","c":null}
+{"t":"Task: Deployed v2.3 to production\nState: complete\nNote: Deployment succeeded and smoke tests passed.","c":null}
+{"t":"Task: Write changelog entry for release\nState: to_do\nNote: Collect merged PRs from the sprint and summarise them.","c":null}
+{"t":"Task: Fix flaky checkout test\nState: in_progress\nNote: Fails about one run in ten on CI; timing issue suspected.","c":null}
+{"t":"Task: Accessibility audit of settings page\nState: to_do\nNote: Check keyboard navigation and contrast on the settings screens.","c":null}
+{"t":"Task: Email validation regex rejects plus signs\nState: to_do\nNote: Bug report says addresses with plus signs fail the signup form.","c":null}
+{"t":"Task: Helper function for date formatting\nState: complete\nNote: Small utility merged and used across three modules.","c":null}
+{"t":"Task: Interview feedback form submitted\nState: complete\nNote: Feedback for the backend candidate was submitted on Tuesday.","c":null}
+{"t":"Task: Track login bug in the backlog\nState: to_do\nNote: Add it to the existing bug board with the right label.","c":null}
+{"t":"Task: Water the office plant\nState: to_do\nNote: Reminder in the team chat; the plant near the window looks dry.","c":null}
+{"t":"Task: Order team coffee beans\nState: to_do\nNote: Same supplier as last month; reorder the usual bag.","c":null}
+{"t":"Task: Update dependency versions\nState: to_do\nNote: Routine minor version bumps; run the test suite afterwards.","c":null}
+{"t":"Task: Set up lunch-and-learn room\nState: to_do\nNote: Book the small meeting room and check the projector works on Thursday.","c":null}
+{"t":"Task: Lookup endpoint returns 404 on empty input\nState: to_do\nNote: Bug in the internal user search route; should return an empty list instead.","c":null}
+{"t":"Task: Print-friendly CSS for invoice page\nState: to_do\nNote: Hide the nav bar and adjust margins when the invoice is printed from the browser.","c":null}
+{"t":"Task: Clean up archived projects folder\nState: complete\nNote: Old folders removed from the shared drive last week.","c":null}
+{"t":"Task: Write release notes from merged PRs\nState: to_do\nNote: Routine step for every release; template is in the repo.","c":null}
+{"t":"Task: Remember to renew the team's domain\nState: complete\nNote: Renewed for another two years; receipt filed.","c":null}
+{"t":"Task: Review onboarding email template wording\nState: in_progress\nNote: Copy is nearly final; a small tone pass left.","c":null}
+{"t":"Task: Move standup notes into the wiki\nState: complete\nNote: Last sprint's notes were copied over and linked from the team page.","c":null}
+{"t":"Task: Scan badge photos for the new office directory\nState: to_do\nNote: Photos are already in the directory system; just need uploading.","c":null}
+{"t":"Task: Helper script to rename log files\nState: complete\nNote: Script is in the repo and works on the staging box.","c":null}
+{"t":"Task: Pay earnest money deposit\nState: to_do\nNote: The deposit is due within three business days of accepting the offer.","c":"track-todo"}
+{"t":"Task: Schedule home inspection\nState: to_do\nNote: The inspector needs access by Thursday and nothing is booked yet.","c":"track-todo"}
+{"t":"Task: Send lender last two pay stubs\nState: in_progress\nNote: The underwriter asked for them and they are due Friday.","c":"track-todo"}
+{"t":"Task: Get homeowners insurance quote renewed\nState: blocked\nNote: Waiting on the agent. Reminder set for the 20th.","c":"track-todo"}
+{"t":"Task: Switch utilities into my name\nState: to_do\nNote: Service has to be active by the March 2 closing.","c":"track-todo"}
+{"t":"Task: Order radon test kit\nState: to_do\nNote: Results are needed before the final walkthrough on the 9th.","c":"track-todo"}
+{"t":"Task: Turn roofer's scope into tasks\nState: to_do\nNote: I pasted a 14-line scope from the roofer and need each item as its own task.","c":"tasks-from-list"}
+{"t":"Task: Split up the closing checklist\nState: to_do\nNote: The title company sent one long bulleted checklist in a single message.","c":"tasks-from-list"}
+{"t":"Task: Break up kitchen remodel steps\nState: to_do\nNote: I pasted my list of demo, plumbing, electrical and tile steps.","c":"tasks-from-list"}
+{"t":"Task: Separate paint shopping list by room\nState: to_do\nNote: One line lists eleven paint colors across different rooms.","c":"tasks-from-list"}
+{"t":"Task: Itemize moving day packing list\nState: to_do\nNote: My pasted packing list is a single block of text with about forty items.","c":"tasks-from-list"}
+{"t":"Task: Make tasks from inspector's repair notes\nState: to_do\nNote: I copied the repair summary from the email body into the note, but it is still one paragraph.","c":"tasks-from-list"}
+{"t":"Task: Read seller's disclosure page 4\nState: to_do\nNote: Phone photo of page 4 is blurry and I cannot make out the sewer line text.","c":"read-photo"}
+{"t":"Task: Copy water heater rating plate\nState: to_do\nNote: I took a photo of the label; I need the model and year.","c":"read-photo"}
+{"t":"Task: Transcribe previous owner's meter readings\nState: to_do\nNote: The readings are handwritten on a sheet I photographed.","c":"read-photo"}
+{"t":"Task: Get numbers from scanned appraisal\nState: to_do\nNote: The scanned pages are image-only and I need the comparable sale prices.","c":"read-photo"}
+{"t":"Task: Read breaker panel labels\nState: to_do\nNote: I photographed the panel door but the labels are too small to read.","c":"read-photo"}
+{"t":"Task: Decipher 1958 deed photo\nState: blocked\nNote: Photo of the old deed; I cannot make out the legal description.","c":"read-photo"}
+{"t":"Task: Make inspection report searchable\nState: to_do\nNote: I need to find every mention of the foundation in the 60-page PDF.","c":"file-to-note"}
+{"t":"Task: Index mortgage disclosure PDF\nState: to_do\nNote: I want to search it later for the APR and fee totals.","c":"file-to-note"}
+{"t":"Task: Bring HOA bylaws into my notes\nState: to_do\nNote: The bylaws are a Word file and I want to search them for pet rules.","c":"file-to-note"}
+{"t":"Task: Make renovation budget workbook searchable\nState: to_do\nNote: The budget spreadsheet has five tabs and I need to look things up in it.","c":"file-to-note"}
+{"t":"Task: Turn survey PDF into a note\nState: to_do\nNote: Lot boundary details are buried in the survey and I keep losing them.","c":"file-to-note"}
+{"t":"Task: Find wire instructions in closing docs\nState: in_progress\nNote: The closing docs are scanned PDFs and I keep losing the wire instructions.","c":"file-to-note"}
+{"t":"Task: Print renovation scope notes for contractor\nState: to_do\nNote: The contractor wants a printed copy of my kitchen plan notes.","c":"note-to-file"}
+{"t":"Task: Send offer terms as PDF\nState: to_do\nNote: I wrote the offer terms in a note and the agent needs a PDF by noon.","c":"note-to-file"}
+{"t":"Task: Make Word version of move-out checklist\nState: to_do\nNote: I need a .docx to share with the seller's agent.","c":"note-to-file"}
+{"t":"Task: Send punch list to builder as PDF\nState: to_do\nNote: The builder asked for a PDF of the punch list items from my note.","c":"note-to-file"}
+{"t":"Task: Export paint spec for designer\nState: to_do\nNote: The designer wants the spec in Word, not in my notes app.","c":"note-to-file"}
+{"t":"Task: Prepare walkthrough notes for printing\nState: in_progress\nNote: I am formatting the walkthrough notes so I can bring a printout to the final walkthrough.","c":"note-to-file"}
+{"t":"Task: Remember inspector's scheduling preferences\nState: to_do\nNote: Marisol Quint likes morning appointments and wants the crawlspace open.","c":"remember-people"}
+{"t":"Task: Keep title office contacts straight\nState: to_do\nNote: There are three people at the title office and I keep mixing up who does what.","c":"remember-people"}
+{"t":"Task: Track which contractor quoted what\nState: in_progress\nNote: Four contractors have quoted and I cannot recall their scopes or prices.","c":"remember-people"}
+{"t":"Task: Note seller's attorney preferences\nState: to_do\nNote: Dev Okafor (invented) prefers email over calls and answers after 4 pm.","c":"remember-people"}
+{"t":"Task: Remember plumber who did the bid\nState: to_do\nNote: Tomasz at Ridge Pipe (invented) gave a bid last spring and I forgot his details.","c":"remember-people"}
+{"t":"Task: Log neighbor's fence agreement details\nState: to_do\nNote: The neighbor and I agreed on a shared fence split and I want the details kept.","c":"remember-people"}
+{"t":"Task: Check permit fee for a deck\nState: to_do\nNote: I need the county's current fee for a 200 square foot deck.","c":"look-up"}
+{"t":"Task: Find flood zone rules for the lot\nState: to_do\nNote: The listing did not say whether the lot is in a flood zone.","c":"look-up"}
+{"t":"Task: Check if knob-and-tube wiring can stay\nState: to_do\nNote: The inspector flagged it and I want to know the current rules before the negotiation.","c":"look-up"}
+{"t":"Task: Verify zoning code for backyard studio\nState: to_do\nNote: I need to know whether a backyard studio is allowed in this zone.","c":"look-up"}
+{"t":"Task: Check recall status for water heater model\nState: to_do\nNote: The model number is in my notes and I want to know if it was recalled.","c":"look-up"}
+{"t":"Task: Look up typical closing costs in this state\nState: to_do\nNote: I want a rough range before the lender sends the official estimate.","c":"look-up"}
+{"t":"Task: Reply to seller's agent on repair credit\nState: to_do\nNote: The agent asked for our answer on the four thousand dollar credit by tomorrow. There are eleven unread threads.","c":"email"}
+{"t":"Task: Sort title company emails\nState: to_do\nNote: Messages about wire, payoff and recording are mixed together in my inbox.","c":"email"}
+{"t":"Task: Draft reply to contractor's bid\nState: to_do\nNote: The bid came in and I need to respond with questions about the timeline.","c":"email"}
+{"t":"Task: Answer appraiser's questions\nState: to_do\nNote: The appraiser emailed two questions about square footage and renovations.","c":"email"}
+{"t":"Task: Go through 200 unread lender emails\nState: to_do\nNote: Most are status updates but a few need action before the loan commitment.","c":"email"}
+{"t":"Task: Follow up with builder about delay\nState: to_do\nNote: The builder has not replied in a week and the start date is slipping.","c":"email"}
+{"t":"Task: Track kitchen remodel as a project\nState: to_do\nNote: Several trades overlap and I want to see how each one is going.","c":"projects"}
+{"t":"Task: Group move-in work into workstreams\nState: to_do\nNote: Painting, utilities, cleaning and furniture delivery are all running at once.","c":"projects"}
+{"t":"Task: Check progress on basement finishing\nState: in_progress\nNote: Framing is done but electrical and drywall are still open with different people.","c":"projects"}
+{"t":"Task: Organize home purchase steps\nState: in_progress\nNote: Financing, inspection, appraisal and title are all moving on separate timelines.","c":"projects"}
+{"t":"Task: Set up backyard landscaping workstream\nState: to_do\nNote: Grading, sod, fencing and irrigation each have their own vendor.","c":"projects"}
+{"t":"Task: Review status of three renovation jobs\nState: to_do\nNote: Bathroom, roof and deck each have different deadlines and I lose track.","c":"projects"}
+{"t":"Task: Research flood history for 12 neighborhoods\nState: to_do\nNote: This means reading county records for each area, which would take an afternoon.","c":"helpers"}
+{"t":"Task: Compare tax records for 30 listings\nState: to_do\nNote: I want the last five years of tax data for each address pulled into one table.","c":"helpers"}
+{"t":"Task: Build renovation cost sheet from six quotes\nState: to_do\nNote: The six quotes are in different formats and I need a single comparison.","c":"helpers"}
+{"t":"Task: Pull all permit records for the address\nState: to_do\nNote: I want every permit filed since 1990, which means checking several city portals.","c":"helpers"}
+{"t":"Task: Gather comparable sales from county site\nState: to_do\nNote: I need sales within one mile for the last two years, which is a long search.","c":"helpers"}
+{"t":"Task: Pay June water bill\nState: complete\nNote: Paid online on June 3.","c":null}
+{"t":"Task: Confirm email sent to lender\nState: complete\nNote: Lender replied that they received the documents.","c":null}
+{"t":"Task: Hang living room curtains\nState: to_do\nNote: Rods are already mounted above the window.","c":null}
+{"t":"Task: Choose greige paint\nState: complete\nNote: Settled on the color and bought two gallons.","c":null}
+{"t":"Task: Upload closing day photo to album\nState: complete\nNote: Uploaded the handshake picture to the family album last week.","c":null}
+{"t":"Task: Buy groceries for the week\nState: to_do\nNote: Shopping list is bread, milk, eggs and a paint roller.","c":null}
+{"t":"Task: Walk the house with the agent Saturday\nState: to_do\nNote: Casual walkthrough to see furniture placement, nothing formal.","c":null}
+{"t":"Task: Replace HVAC air filter\nState: to_do\nNote: Filter is 16x25 and the box is in the hall closet.","c":null}
+{"t":"Task: Call cable company about installation\nState: to_do\nNote: Installer shows up Tuesday between eight and noon.","c":null}
+{"t":"Task: Glance at short closing cost list\nState: to_do\nNote: Only six lines, I just need to confirm the totals match.","c":null}
+{"t":"Task: Sign closing papers\nState: to_do\nNote: Appointment is at the title office on the 2nd at ten.","c":null}
+{"t":"Task: Mow the backyard\nState: to_do\nNote: Grass is about four inches tall.","c":null}
+{"t":"Task: Clean out gutters\nState: to_do\nNote: Ladder is in the garage. Should take an hour.","c":null}
+{"t":"Task: Wipe down kitchen cabinets\nState: complete\nNote: Done before moving the boxes in.","c":null}
+{"t":"Task: Water the new sod\nState: to_do\nNote: Sprinkler timer set for six minutes each morning.","c":null}
+{"t":"Task: Check tile color in the photo\nState: to_do\nNote: The photo is clear and matches the sample. Just confirm with myself before ordering.","c":null}
+{"t":"Task: Update email signature\nState: complete\nNote: Changed my own signature to show my new office line.","c":null}
+{"t":"Task: Final walkthrough done and keys received\nState: complete\nNote: Walkthrough went smoothly and the keys were handed over at closing.","c":null}
+{"t":"Task: Note closing costs total\nState: complete\nNote: Recorded the closing costs at six thousand two hundred dollars.","c":null}
+{"t":"Task: Buy a stepladder\nState: to_do\nNote: Six foot fiberglass, the hardware store has one in stock.","c":null}
+{"t":"Task: Return extra floor tiles\nState: to_do\nNote: Box is unopened and the receipt is in the folder.","c":null}
+{"t":"Task: Hang the new mailbox\nState: to_do\nNote: Post is set in concrete and the hardware is in the bag.","c":null}
+{"t":"Task: Sweep the garage\nState: to_do\nNote: Just a quick pass after the boxes are out.","c":null}
+{"t":"Task: Pick up keys from agent's office\nState: to_do\nNote: Office is open until five today.","c":null}
+{"t":"Task: Stain the back deck\nState: in_progress\nNote: First coat is drying and the second goes on tomorrow.","c":null}
+{"t":"Task: Change the front door locks\nState: to_do\nNote: New deadbolt is in the box on the kitchen counter.","c":null}
+{"t":"Task: Test smoke detectors\nState: to_do\nNote: Batteries are fresh and the test button is on each unit.","c":null}
+{"t":"Task: Plant tulip bulbs in front bed\nState: to_do\nNote: Bulbs arrived in October and need planting before the ground freezes.","c":null}
+{"t":"Task: Read the HOA newsletter\nState: to_do\nNote: Monthly update about the pool opening and parking rules.","c":null}
+{"t":"Task: Renew stall insurance before the 20th\nState: to_do\nNote: The gazebo insurance runs out on the 20th and the treasurer wants it sorted before the market.","c":"track-todo"}
+{"t":"Task: Chase bake sale float returns on Monday\nState: to_do\nNote: Three volunteers still owe their float cash and receipts from the last bake sale.","c":"track-todo"}
+{"t":"Task: Send gate code reminder before Saturday\nState: in_progress\nNote: The reminder is drafted but needs to go out to the rota group before Saturday.","c":"track-todo"}
+{"t":"Task: Order raffle tickets by Wednesday\nState: to_do\nNote: The printer needs the order by Wednesday to deliver before the summer fete.","c":"track-todo"}
+{"t":"Task: Confirm van hire for the 12th\nState: blocked\nNote: The van firm has not replied yet, and we need to know by the 12th whether we can have it.","c":"track-todo"}
+{"t":"Task: Book speaker for open evening, due Friday\nState: to_do\nNote: We still need a speaker for the open evening, and the booking is due Friday.","c":"track-todo"}
+{"t":"Task: Split the stall jobs into separate tasks\nState: to_do\nNote: Ruth pasted 14 jobs for the spring fair in one message and we need them as separate tasks.","c":"tasks-from-list"}
+{"t":"Task: Turn last month's action points into tasks\nState: to_do\nNote: The action points are in a block at the end of the minutes, and each needs an owner.","c":"tasks-from-list"}
+{"t":"Task: Break down the open-day checklist\nState: to_do\nNote: Dana sent a long checklist of setup steps for the open day in a single message.","c":"tasks-from-list"}
+{"t":"Task: Make tasks from the cleaning rota list\nState: blocked\nNote: Waiting for Dana to confirm the cleaning rota list before it can be turned into tasks.","c":"tasks-from-list"}
+{"t":"Task: Sort the 30 volunteer jobs into tasks\nState: in_progress\nNote: Half of the 30 volunteer jobs have been split out so far, the rest are still a single list.","c":"tasks-from-list"}
+{"t":"Task: Divide the hall setup steps into tasks\nState: to_do\nNote: Pasted the setup steps from the committee chat, which is one long list.","c":"tasks-from-list"}
+{"t":"Task: Read the handwritten sign-up sheet\nState: to_do\nNote: Photo of the clipboard sheet from Tuesday coffee morning; the names are hard to read.","c":"read-photo"}
+{"t":"Task: Get the text from the noticeboard flyer photo\nState: to_do\nNote: We need the dates and phone line printed on the flyer, but only have a photo of it.","c":"read-photo"}
+{"t":"Task: Read the scanned 1998 newsletter page\nState: to_do\nNote: The archive only has a scanned page of the old newsletter and we want the text for the history display.","c":"read-photo"}
+{"t":"Task: Transcribe the whiteboard plan photo\nState: in_progress\nNote: Took a photo of the planning whiteboard after Tuesday's meeting; the writing is partly smudged.","c":"read-photo"}
+{"t":"Task: Read the faded bake sale receipt photo\nState: blocked\nNote: The receipt was photographed in poor light, and the amount needs reading before the accounts close.","c":"read-photo"}
+{"t":"Task: Read the photo of the parish map notes\nState: to_do\nNote: Notes were pencilled on the old parish map and photographed for the heritage group.","c":"read-photo"}
+{"t":"Task: Make the 40-page volunteer handbook searchable\nState: to_do\nNote: The volunteer handbook is a 40-page Word file and we keep searching it by hand.","c":"file-to-note"}
+{"t":"Task: Turn the grant application PDF into a searchable note\nState: to_do\nNote: The grant application is a PDF and the bid team needs to search it for deadlines and figures.","c":"file-to-note"}
+{"t":"Task: Import the membership Excel file as a note\nState: to_do\nNote: The membership list is in an Excel file and we want to search names and renewal dates.","c":"file-to-note"}
+{"t":"Task: Put the old minutes PDF into searchable notes\nState: in_progress\nNote: Ten years of minutes are in one PDF, and the first three years have been done already.","c":"file-to-note"}
+{"t":"Task: Convert the safeguarding policy Word file to notes\nState: to_do\nNote: The trustees want to search the safeguarding policy Word file for the reporting steps.","c":"file-to-note"}
+{"t":"Task: Make the budget spreadsheet searchable\nState: blocked\nNote: The budget spreadsheet is locked until the treasurer shares the password.","c":"file-to-note"}
+{"t":"Task: Print AGM notes for 30 members\nState: to_do\nNote: Printed copies are needed for the 30 members at the hall on Saturday.","c":"note-to-file"}
+{"t":"Task: Make the volunteer rota note into a Word file\nState: to_do\nNote: The rota is only in a note on my phone and the coordinator wants a Word file to send round.","c":"note-to-file"}
+{"t":"Task: Export the stall guide note as a PDF\nState: to_do\nNote: The printer shop needs a PDF of the stall guide before the fair.","c":"note-to-file"}
+{"t":"Task: Turn the newsletter draft into a Word doc\nState: in_progress\nNote: The newsletter text is in a note and the designer needs a Word document to lay it out.","c":"note-to-file"}
+{"t":"Task: Make the fundraising letter into a PDF to post\nState: to_do\nNote: The fundraising letter is finished in my notes and it needs to be a PDF for the mail merge.","c":"note-to-file"}
+{"t":"Task: Turn the agenda note into a PDF for trustees\nState: to_do\nNote: Trustees want the agenda as a PDF to read before Thursday's meeting.","c":"note-to-file"}
+{"t":"Task: Note that Oona prefers calls\nState: to_do\nNote: Oona Pell asked for phone calls about the rota, not texts.","c":"remember-people"}
+{"t":"Task: Remember Dev's nut allergy for lunch\nState: to_do\nNote: Dev Marrow mentioned a nut allergy when he joined the lunch rota.","c":"remember-people"}
+{"t":"Task: Note Ilse Varga is hard of hearing\nState: to_do\nNote: Mrs Ilse Varga struggles in noisy rooms, so the speakers should face her at meetings.","c":"remember-people"}
+{"t":"Task: Keep track of Marcus's school pickup days\nState: to_do\nNote: Marcus offered to do car share on Tuesdays and Thursdays, and the times change each term.","c":"remember-people"}
+{"t":"Task: Record the Hendricks family's large print request\nState: to_do\nNote: The Hendricks family want the newsletter in large print from now on.","c":"remember-people"}
+{"t":"Task: Note Pia Lund leads the choir and wants details early\nState: to_do\nNote: Pia Lund runs the Wednesday choir and always asks for the room details a week before.","c":"remember-people"}
+{"t":"Task: Check council rules on high street market stalls\nState: to_do\nNote: Not sure whether a stall on the high street needs a permit; the council website should say.","c":"look-up"}
+{"t":"Task: Find current food hygiene rules for bake sales\nState: to_do\nNote: Need to confirm the rules before the next bake sale, and the national guidance may have changed.","c":"look-up"}
+{"t":"Task: Find the price of gazebo weights\nState: to_do\nNote: We need two more weights for the marquee; I have not compared prices yet.","c":"look-up"}
+{"t":"Task: Find the deadline for the lottery grant\nState: to_do\nNote: The lottery fund's next round date is not in our notes and the bid depends on it.","c":"look-up"}
+{"t":"Task: Check the Sunday bus timetable\nState: to_do\nNote: Volunteers without cars ask about the Sunday run, and I want the current timetable.","c":"look-up"}
+{"t":"Task: Find fire safety rules for hall events\nState: to_do\nNote: Need the current capacity and exit rules for events in the church hall before the quiz night.","c":"look-up"}
+{"t":"Task: Sort 80 unread volunteer emails\nState: to_do\nNote: The inbox has 80 unread messages about the fete, mostly questions.","c":"email"}
+{"t":"Task: Draft replies to sponsorship enquiries\nState: to_do\nNote: Three local businesses asked about sponsoring the fun run and need a considered reply.","c":"email"}
+{"t":"Task: Reply to the parking emails\nState: to_do\nNote: Three neighbours emailed asking where to park during the summer fair.","c":"email"}
+{"t":"Task: Triage the inbox before trustees meet\nState: in_progress\nNote: Started going through the inbox, but about half of the messages are still unsorted.","c":"email"}
+{"t":"Task: Answer Gill's room booking emails\nState: to_do\nNote: Gill has sent four emails about the room booking and the last one is unanswered.","c":"email"}
+{"t":"Task: Draft replies to website sign-ups\nState: to_do\nNote: New members signed up through the website form and each needs a welcome reply.","c":"email"}
+{"t":"Task: See how the autumn events are going\nState: to_do\nNote: Five events are running at once across three volunteers and it is hard to tell what is behind.","c":"projects"}
+{"t":"Task: Group the garden tasks into projects\nState: to_do\nNote: The community garden has planting, fencing and the water tank all mixed in one list.","c":"projects"}
+{"t":"Task: Track progress on the youth café refit\nState: in_progress\nNote: The refit has painting, flooring and furniture workstreams, each with a different lead.","c":"projects"}
+{"t":"Task: Set up projects for the three grant bids\nState: to_do\nNote: Three grant bids are running in parallel and each needs its own timeline and owner.","c":"projects"}
+{"t":"Task: Check how each summer campaign is going\nState: to_do\nNote: The summer campaigns each have their own goals and I cannot see which are on track.","c":"projects"}
+{"t":"Task: Organise winter shelter work into projects\nState: to_do\nNote: Winter shelter work covers rota, supplies and transport, and the leads want a status view.","c":"projects"}
+{"t":"Task: Sort 6,000 scanned receipts by year\nState: to_do\nNote: Receipts are spread across three laptops and sorting them by hand would take days.","c":"helpers"}
+{"t":"Task: Rename the old photo archive on the shared PC\nState: to_do\nNote: The shared PC has about 9,000 old event photos with no consistent names.","c":"helpers"}
+{"t":"Task: Merge the old membership spreadsheets\nState: to_do\nNote: We need one membership database and the old spreadsheets are on three computers.","c":"helpers"}
+{"t":"Task: Rebuild the website archive from old files\nState: blocked\nNote: The old site files are on a laptop that has to be found before the rebuild can start.","c":"helpers"}
+{"t":"Task: Collate 2019 to 2024 accounts from all laptops\nState: to_do\nNote: Accounts for six years are spread across several laptops and need putting in one folder.","c":"helpers"}
+{"t":"Task: Remove duplicate contacts across computers\nState: to_do\nNote: The same volunteers appear many times across the three computers' address books.","c":"helpers"}
+{"t":"Task: Pay the hall deposit\nState: complete\nNote: Deposit paid by bank transfer and the receipt is filed.","c":null}
+{"t":"Task: Send thank-you emails to all volunteers\nState: complete\nNote: The thank-you emails went out on Monday after the open day.","c":null}
+{"t":"Task: Water the herb planters on Thursday\nState: to_do\nNote: Routine watering for the planters outside the community kitchen.","c":null}
+{"t":"Task: Buy milk and biscuits for Tuesday coffee\nState: to_do\nNote: Just a quick shop before the coffee morning starts at ten.","c":null}
+{"t":"Task: Hang the founders photo in the hall\nState: complete\nNote: The framed photo is back on the wall by the entrance.","c":null}
+{"t":"Task: Stack the chairs after quiz night\nState: to_do\nNote: Chairs go back to the storeroom once the quiz finishes on Friday.","c":null}
+{"t":"Task: Shopping list: rolls, descaler, bin bags\nState: to_do\nNote: Pick these up at the cash and carry on the way to the hall.","c":null}
+{"t":"Task: Name badges for the open day\nState: complete\nNote: All 40 name badges were printed and handed out at the door.","c":null}
+{"t":"Task: Reply to Ann: yes, I will bring the urn\nState: to_do\nNote: Ann asked a simple yes or no about bringing the urn to the picnic.","c":null}
+{"t":"Task: Lock the store cupboard after the bake sale\nState: to_do\nNote: Keys are on the hook in the kitchen; double check the padlock.","c":null}
+{"t":"Task: Save the fete map PDF to the Fete folder\nState: to_do\nNote: The map is final and only needs filing in the shared drive folder.","c":null}
+{"t":"Task: Check the photo tripod is in the cupboard\nState: to_do\nNote: The tripod was used at the open day and should be back in the store.","c":null}
+{"t":"Task: Team lunch booked for Friday\nState: complete\nNote: The café confirmed a table for twelve at one o'clock.","c":null}
+{"t":"Task: Take the bins out Sunday night\nState: to_do\nNote: Rota says it is my turn for the recycling and general waste.","c":null}
+{"t":"Task: Sweep the community kitchen floor\nState: to_do\nNote: Standard end of session clean for the kitchen.","c":null}
+{"t":"Task: Gazebo returned to the hall\nState: complete\nNote: The gazebo came back from the Elm Road event and is stored.","c":null}
+{"t":"Task: Rota swap with Sam confirmed\nState: complete\nNote: Sam and I agreed the swap over the group chat and it is updated.","c":null}
+{"t":"Task: Update the email signature template\nState: to_do\nNote: The group's signature block still shows last year's trustee names.","c":null}
+{"t":"Task: Read the council letter in the post\nState: to_do\nNote: A letter from the council arrived in the post and needs a quick read.","c":null}
+{"t":"Task: Write Tuesday's meeting minutes\nState: in_progress\nNote: Half done in the minutes template; the rest needs the treasurer's update.","c":null}
+{"t":"Task: Put up the noticeboard flyer on Elm Road\nState: to_do\nNote: Flyers are printed and the board outside the shop needs them up by the weekend.","c":null}
+{"t":"Task: Charge the loudspeaker battery\nState: to_do\nNote: The speaker needs charging before the Saturday market.","c":null}
+{"t":"Task: Count the raffle float\nState: complete\nNote: The float was counted and the total signed off by two volunteers.","c":null}
+{"t":"Task: Thank the choir for the concert\nState: complete\nNote: Cards went to each singer after the Christmas concert.","c":null}
+{"t":"Task: Hand out keys to new cleaners\nState: to_do\nNote: Two new cleaners start on Monday and need their keys at the hall.","c":null}
+{"t":"Task: Sign the bank mandate at next meeting\nState: to_do\nNote: The new signatories have to sign the form in person at the next committee meeting.","c":null}
+{"t":"Task: Set out chairs for Thursday's talk\nState: to_do\nNote: Forty chairs in rows of eight, as usual for talks in the main room.","c":null}
+{"t":"Task: Photocopy the sign-in sheet\nState: to_do\nNote: Need five copies of the blank sign-in sheet for the Saturday session.","c":null}
+{"t":"Task: Fix the wobbly table leg in the hall\nState: to_do\nNote: The table in the side room rocks; someone with a screwdriver should tighten it.","c":null}
+{"t":"Task: Review the flyer draft in the shared folder\nState: to_do\nNote: Draft is in the shared folder for comments before we print.","c":null}
+{"t":"Task: Restock sunscreen before the weekend\nState: to_do\nNote: Summer rush is coming and the shelf is nearly empty. Due Friday.","c":"track-todo"}
+{"t":"Task: Call the candle supplier about late delivery\nState: to_do\nNote: Last two orders arrived a week behind. Call again by Thursday.","c":"track-todo"}
+{"t":"Task: Renew the sales tax permit\nState: to_do\nNote: Expires at the end of the month. Keep a reminder for the 20th.","c":"track-todo"}
+{"t":"Task: Book the quarterly inventory count\nState: to_do\nNote: Needs two staff on a Saturday in early March.","c":"track-todo"}
+{"t":"Task: Pay the rent deposit for the storage unit\nState: to_do\nNote: Due on the 1st. Remember before the bank cutoff.","c":"track-todo"}
+{"t":"Task: Order new gift wrap rolls\nState: to_do\nNote: Two colors nearly gone. Need them in stock before the holidays, due December 5.","c":"track-todo"}
+{"t":"Task: Turn the supplier price list into tasks\nState: to_do\nNote: Pasted list has twelve items: update prices, reorder labels, check the new vendor catalog.","c":"tasks-from-list"}
+{"t":"Task: Split the opening checklist into separate tasks\nState: to_do\nNote: The checklist I pasted has nine lines: unlock, count till, face shelves, check the back door.","c":"tasks-from-list"}
+{"t":"Task: Break down the spring event plan\nState: to_do\nNote: Plan is a long list pasted from my notes with about fifteen steps for the in-store sale.","c":"tasks-from-list"}
+{"t":"Task: Convert the vendor's emailed item list into tasks\nState: in_progress\nNote: I pasted the list of new arrivals to check against stock, one line per item.","c":"tasks-from-list"}
+{"t":"Task: Make tasks from the staff training list\nState: to_do\nNote: Pasted outline covers register training, returns policy, and loss prevention basics.","c":"tasks-from-list"}
+{"t":"Task: Split the weekly cleaning list into tasks\nState: to_do\nNote: Pasted list of eight cleaning jobs for the back room and floor.","c":"tasks-from-list"}
+{"t":"Task: Read the handwritten delivery slip\nState: to_do\nNote: Photo of the slip is faded; the quantities are hard to make out.","c":"read-photo"}
+{"t":"Task: Read the numbers off the till receipt photo\nState: to_do\nNote: Snapped a picture of the printed receipt from the register audit.","c":"read-photo"}
+{"t":"Task: Get text from the scanned shipping manifest\nState: to_do\nNote: The manifest came as a scanned page and I need the item codes in text.","c":"read-photo"}
+{"t":"Task: Transcribe the handwritten price tags\nState: in_progress\nNote: Photo of tags from the clearance bin; some prices are scribbled.","c":"read-photo"}
+{"t":"Task: Read the old supplier invoice photo\nState: blocked\nNote: Took a photo of the invoice on the counter but the text is too small to read by eye.","c":"read-photo"}
+{"t":"Task: Pull the text from the whiteboard photo\nState: to_do\nNote: Photo of the staff schedule whiteboard. Need the names and shift times typed out.","c":"read-photo"}
+{"t":"Task: Make the 2022 lease PDF searchable\nState: to_do\nNote: Lease is a PDF I want to search for the renewal clause.","c":"file-to-note"}
+{"t":"Task: Turn the Excel stock sheet into a note\nState: to_do\nNote: Spreadsheet of all inventory counts. I want to search it from my phone.","c":"file-to-note"}
+{"t":"Task: Import the Word supplier agreement\nState: to_do\nNote: Word file with return terms. Want to find the restocking fee quickly.","c":"file-to-note"}
+{"t":"Task: Make a searchable note from last year's tax PDF\nState: to_do\nNote: The PDF has the full sales tax filings. I need to look up figures by month.","c":"file-to-note"}
+{"t":"Task: Store the staff handbook Word doc as a note\nState: to_do\nNote: Handbook is a long Word file. Want to find policies without scrolling.","c":"file-to-note"}
+{"t":"Task: Index the product catalog spreadsheet\nState: blocked\nNote: Excel catalog has 400 rows. Can't find SKUs by name; need it as a searchable note.","c":"file-to-note"}
+{"t":"Task: Print the holiday hours sign as PDF\nState: to_do\nNote: Sign text is in a note. Need a printable PDF for the front window.","c":"note-to-file"}
+{"t":"Task: Send the return policy to the landlord as Word\nState: to_do\nNote: Policy is written in my notes. The landlord wants a Word file.","c":"note-to-file"}
+{"t":"Task: Make a PDF of the new price list\nState: to_do\nNote: Price list lives in a note. Print copies for the counter.","c":"note-to-file"}
+{"t":"Task: Export the staff schedule note to Word\nState: to_do\nNote: Schedule for next month is in a note. The accountant needs it as a Word doc.","c":"note-to-file"}
+{"t":"Task: Turn the window display plan into a PDF\nState: in_progress\nNote: Plan is written as a note. Printing it for the window team.","c":"note-to-file"}
+{"t":"Task: Send the gift card terms as a PDF\nState: to_do\nNote: Terms are in a note. Customers ask for a copy to take home.","c":"note-to-file"}
+{"t":"Task: Remember the new wholesaler's buyer details\nState: to_do\nNote: Buyer is Dana from the wholesaler; she prefers calls before noon and orders in bulk.","c":"remember-people"}
+{"t":"Task: Note the landlord's preferences\nState: to_do\nNote: Landlord wants monthly updates by text and dislikes surprise repairs.","c":"remember-people"}
+{"t":"Task: Save details on the regular customer Mrs. Okafor\nState: to_do\nNote: She buys tea every Tuesday and likes her orders held. Her birthday is in March.","c":"remember-people"}
+{"t":"Task: Keep track of the courier's contact notes\nState: to_do\nNote: Driver Sam works mornings, prefers a text, and needs the back gate code.","c":"remember-people"}
+{"t":"Task: Record which staff member handles returns\nState: to_do\nNote: Priya covers returns on weekdays and wants shift swaps by Wednesday.","c":"remember-people"}
+{"t":"Task: Note the accountant's availability\nState: to_do\nNote: Accountant Tom is busy in tax season and prefers emails before calls.","c":"remember-people"}
+{"t":"Task: Find the current Canadian duty rate on imported soap\nState: to_do\nNote: Need the rate before pricing the new shipment from abroad.","c":"look-up"}
+{"t":"Task: Check whether the city allows A-board signs\nState: to_do\nNote: Want to know the sidewalk sign rules before buying one.","c":"look-up"}
+{"t":"Task: Look up the shipping time to the western region\nState: to_do\nNote: Customer asked how long delivery takes; I don't know the carrier's current times.","c":"look-up"}
+{"t":"Task: Find the recall notice for a kitchen gadget\nState: to_do\nNote: Supplier mentioned a recall; I need the official notice to confirm the model.","c":"look-up"}
+{"t":"Task: Check the minimum wage for next year\nState: to_do\nNote: Need to confirm the figure before the budget meeting.","c":"look-up"}
+{"t":"Task: Find a local printer that does rush flyers\nState: to_do\nNote: Need flyers for the grand opening in two weeks; looking for options online.","c":"look-up"}
+{"t":"Task: Answer the returns email from the wholesaler\nState: to_do\nNote: Wholesaler asks whether we accept the damaged case. Draft a reply for me to check.","c":"email"}
+{"t":"Task: Sort the supplier emails from this week\nState: to_do\nNote: Inbox has invoices, delivery notices and two complaints mixed together.","c":"email"}
+{"t":"Task: Reply to the customer complaint email\nState: to_do\nNote: Customer says the jacket came with a torn seam. Draft a response for review.","c":"email"}
+{"t":"Task: Go through the unread emails from the landlord\nState: in_progress\nNote: Several unread messages about the roof leak and the parking lot repaint.","c":"email"}
+{"t":"Task: Draft the reply to the job applicant\nState: to_do\nNote: Applicant asked about weekend hours. Draft a polite reply for me to check.","c":"email"}
+{"t":"Task: Sort vendor invoices from the inbox\nState: to_do\nNote: Invoices arrive as emails. Need them filed by supplier name.","c":"email"}
+{"t":"Task: Group the holiday promo work into a project\nState: to_do\nNote: Promo includes window décor, a newsletter, and a staff contest. Track progress across them.","c":"projects"}
+{"t":"Task: Track the store renovation as a project\nState: in_progress\nNote: Shelving, painting and new lighting, each with a different contractor and deadline.","c":"projects"}
+{"t":"Task: Set up the new loyalty program rollout\nState: to_do\nNote: Involves signage, POS setup, staff training and a launch email. Want to see how each part is going.","c":"projects"}
+{"t":"Task: Organize the e-commerce site relaunch\nState: blocked\nNote: Photos, product descriptions, and payment setup are all in progress but scattered.","c":"projects"}
+{"t":"Task: Plan the summer clearance across three departments\nState: to_do\nNote: Each department has its own markdown plan and deadline. Want an overview of how each one is going.","c":"projects"}
+{"t":"Task: Coordinate the community market booth prep\nState: to_do\nNote: Tent, inventory, pricing and volunteer schedule all need tracking to the June date.","c":"projects"}
+{"t":"Task: Have a helper rebuild the year-end sales report\nState: to_do\nNote: Pulling twelve months of register exports and building the summary takes hours on the store computer.","c":"helpers"}
+{"t":"Task: Send a helper to reconcile the inventory database\nState: blocked\nNote: Thousands of rows across two files on the back office machine; too long to do by hand.","c":"helpers"}
+{"t":"Task: Get a helper to resize the product photos\nState: to_do\nNote: Four hundred product images on the shop laptop need resizing for the website.","c":"helpers"}
+{"t":"Task: Run the monthly payroll export on the shop PC\nState: to_do\nNote: Export pulls hours from the timeclock files and takes most of an afternoon.","c":"helpers"}
+{"t":"Task: Have a helper clean up the duplicate customer files\nState: to_do\nNote: Thousands of duplicate entries across the shared drive on the office computer.","c":"helpers"}
+{"t":"Task: Let a helper back up the POS data folders\nState: to_do\nNote: Backup covers several years of sales data on the register computer and takes hours.","c":"helpers"}
+{"t":"Task: Restock the sunscreen shelf\nState: complete\nNote: Finished this morning; shelf is full and the price tags are up.","c":null}
+{"t":"Task: Email list cleanup finished\nState: complete\nNote: Removed bounced addresses last week. Nothing left to do.","c":null}
+{"t":"Task: Take a photo of the new window display\nState: to_do\nNote: Just need a picture for the Instagram post. No text to read.","c":null}
+{"t":"Task: Water the shop plants\nState: to_do\nNote: Weekly routine; the fern by the door is drying out.","c":null}
+{"t":"Task: Count the cash drawer at close\nState: to_do\nNote: Standard end-of-day routine; the form is already on the counter.","c":null}
+{"t":"Task: Sweep the back storeroom\nState: to_do\nNote: Routine Monday cleaning; the broom is in the closet.","c":null}
+{"t":"Task: Replace the burnt-out bulb over the register\nState: to_do\nNote: Ladder is in the back. Ten minutes of work.","c":null}
+{"t":"Task: Lunch order for the staff meeting\nState: to_do\nNote: Ordered sandwiches for Thursday. Just confirm the count with the deli.","c":null}
+{"t":"Task: Update the chalkboard specials sign\nState: to_do\nNote: Specials change weekly; new list is written on the back of the menu card.","c":null}
+{"t":"Task: Reconcile the card terminal batch\nState: complete\nNote: Batch closed and totals match the bank deposit from yesterday.","c":null}
+{"t":"Task: Print the staff schedule and post it\nState: complete\nNote: Printed on Monday and pinned in the break room.","c":null}
+{"t":"Task: Check the list of holiday hours for typos\nState: to_do\nNote: Read it over against the calendar before the sign goes up.","c":null}
+{"t":"Task: Reply to the mom who called about her order\nState: to_do\nNote: Called her back this morning and she's picking it up tomorrow. Just confirm the pickup time.","c":null}
+{"t":"Task: Change the lock code on the back door\nState: complete\nNote: Done last week and the new code is in the safe.","c":null}
+{"t":"Task: Dust the top shelves in the candle aisle\nState: to_do\nNote: Routine weekly dusting. Step stool is in the stockroom.","c":null}
+{"t":"Task: Fix the squeaky door hinge\nState: to_do\nNote: Bought a can of lubricant. Five-minute job before opening.","c":null}
+{"t":"Task: Refill the bag supply at the counter\nState: to_do\nNote: Paper bags are low; the restock box is under the register.","c":null}
+{"t":"Task: Check the fitting room mirror for cracks\nState: to_do\nNote: Visual check during the Friday walkthrough. No problems so far.","c":null}
+{"t":"Task: Organize the sale rack by size\nState: in_progress\nNote: Half done; the rest will be finished before the afternoon rush.","c":null}
+{"t":"Task: Photocopy the new vendor contract\nState: complete\nNote: Two copies made and one filed in the cabinet.","c":null}
+{"t":"Task: Call the plumber about the sink\nState: to_do\nNote: Plumber's number is on the fridge. Quick call to book a visit.","c":null}
+{"t":"Task: Clean the glass display case\nState: to_do\nNote: Weekly wipe-down with glass cleaner; nothing unusual.","c":null}
+{"t":"Task: Read the weekly sales dashboard\nState: to_do\nNote: Glance at the numbers each Monday. No changes needed.","c":null}
+{"t":"Task: Restock the greeting card rack\nState: to_do\nNote: New cards arrived in the box by the door. Shelve them today.","c":null}
+{"t":"Task: Get the pricing list laminated\nState: to_do\nNote: Laminating sheet was already done; just pick them up from the copy shop.","c":null}
+{"t":"Task: Unpack the new espresso machine\nState: in_progress\nNote: Box is open; the manual is inside for setup.","c":null}
+{"t":"Task: Dispose of expired stock in the back\nState: to_do\nNote: Pull out items past their date and put them in the bin.","c":null}

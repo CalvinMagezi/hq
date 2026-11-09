@@ -118,6 +118,35 @@ pub fn muted(conn: &Connection, now: i64) -> Result<HashSet<String>> {
         .collect())
 }
 
+/// A task a turn worked on, as the next-step suggestion weighs it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TouchedTask {
+    pub title: String,
+    pub description: String,
+    pub status: String,
+}
+
+/// The open task changed most recently at or after `since`.
+// ponytail: takes the newest change by anyone, so another agent's write during the turn can win.
+// A wrong pick costs one dismissible line; record the turn's task ids if that shows up.
+pub fn task_touched_since(conn: &Connection, since: i64) -> Result<Option<TouchedTask>> {
+    Ok(conn
+        .query_row(
+            "SELECT title, description, status FROM tasks
+              WHERE archived_at IS NULL AND status != 'complete' AND unixepoch(updated_at) >= ?1
+              ORDER BY unixepoch(updated_at) DESC, rowid DESC LIMIT 1",
+            params![since],
+            |r| {
+                Ok(TouchedTask {
+                    title: r.get(0)?,
+                    description: r.get(1)?,
+                    status: r.get(2)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
 /// One kind of offer over a window.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OfferStats {
