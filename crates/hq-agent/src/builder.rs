@@ -86,9 +86,6 @@ pub const WORKER_TOOLS: &[&str] = &[
     "subagent_run_status",
     "subagent_run_result",
     "subagent_run_list",
-    "watch_create",
-    "watch_list",
-    "watch_cancel",
     "report_progress",
     "notify_owner",
 ];

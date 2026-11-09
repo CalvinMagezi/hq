@@ -59,11 +59,11 @@ One branch, one focused commit per step, one pull request at the end.
   A new checkpoint resets the count. No wait for the lease, no owner needed.
 - **Transient errors** back off and retry in the loop, then requeue with the same limit.
 - **Checkpoints.** The skill records one after each push and fix; a new attempt reads it first.
-- **Refresh only when nothing was pushed.** Otherwise keep the checkout. `github_write` builds on
-  the branch head when the branch is already ours. File writes become temp file plus rename.
-- **Stored CI wait.** After a push the turn ends and the job moves to `waiting_ci`. The daemon
-  polls GitHub with no model, then finishes the job or starts a fix attempt. Fix rounds are counted
-  in code.
+- **Refresh only when nothing was pushed.** Otherwise keep the checkout, since `github_write`
+  publishes the whole checkout against its base.
+- **CI waits without a model.** `github_read` action `wait_ci` polls inside the tool, so the wait
+  costs no model calls. A kill during it is one more counted attempt, and the checkpoint resumes at
+  CI. A separate stored wait in the daemon was the first idea; this does the same job with far less.
 
 Not taken from `pi`, because they solve problems one task on a phone does not have: group commit,
 per-tool durable tasks, the code-mode journal, the task graph, partial-change encoding and

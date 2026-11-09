@@ -38,6 +38,12 @@ const MAX_LIMIT: u64 = 100;
 const API_HOST_URL: &str = "https://api.github.com/";
 const API_PREFIXES: [&str; 5] = ["repos/", "search/", "orgs/", "users/", "rate_limit"];
 const SEARCH_KINDS: [&str; 4] = ["repos", "code", "issues", "prs"];
+const WAIT_CI_ACTION: &str = "wait_ci";
+const CI_POLL: Duration = Duration::from_secs(20);
+/// A workflow can take a while to appear after a push; past this the commit has no CI.
+const CI_NO_RUN_GRACE: Duration = Duration::from_secs(120);
+/// Under the reply's own time limit, so the worker can still act on the answer.
+const CI_MAX_WAIT: Duration = Duration::from_secs(20 * 60);
 /// Variables the child may see. The token is the only secret; GH_HOST is deliberately absent.
 const CHILD_ENV: [&str; 6] = ["PATH", "HOME", "GH_TOKEN", "GITHUB_TOKEN", "LANG", "TMPDIR"];
 
@@ -288,9 +294,10 @@ impl HqTool for GithubReadTool {
 
     fn description(&self) -> &str {
         "Read GitHub without changing anything: repo_view, pr_list, pr_view, pr_diff, issue_list, \
-         issue_view, release_list, run_list, search (kind: repos, code, issues, prs), file (repo, path, optional ref) \
-         and api (a GET path under repos/, search/, orgs/ or users/). Uses the gh CLI when installed, otherwise reads \
-         public data over HTTPS. Cannot create, edit, comment or merge."
+         issue_view, release_list, run_list, search (kind: repos, code, issues, prs; give repo to search a private one), \
+         file (repo, path, optional ref), api (a GET path under repos/, search/, orgs/ or users/) and wait_ci (repo, ref: \
+         waits for CI on that branch or commit and answers passed, failed, none or running). Uses the gh CLI when \
+         installed, otherwise HTTPS with HQ's GitHub App for repositories it covers. Cannot create, edit, comment or merge."
     }
 
     fn category(&self) -> &str {
@@ -305,7 +312,7 @@ impl HqTool for GithubReadTool {
         json!({
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["repo_view", "pr_list", "pr_view", "pr_diff", "issue_list", "issue_view", "release_list", "run_list", "search", "file", "api"]},
+                "action": {"type": "string", "enum": ["repo_view", "pr_list", "pr_view", "pr_diff", "issue_list", "issue_view", "release_list", "run_list", "search", "file", "api", "wait_ci"]},
                 "repo": {"type": "string", "description": "owner/name"},
                 "number": {"type": "integer", "description": "PR or issue number"},
                 "query": {"type": "string"},
@@ -320,6 +327,9 @@ impl HqTool for GithubReadTool {
     }
 
     async fn execute(&self, args: Value) -> Result<Value> {
+        if text(&args, "action") == Some(WAIT_CI_ACTION) {
+            return wait_ci(&args).await;
+        }
         let call = build_call(&args)?;
         let have_gh = which::which("gh").is_ok();
         let output = match (call, have_gh) {
@@ -333,27 +343,138 @@ impl HqTool for GithubReadTool {
                 .await?
             }
             (GhCall::ApiGet(path), false) => read_without_gh(&path).await?,
-            (GhCall::Gh(_), false) => match run_list_path(&args) {
-                Some(path) => read_without_gh(&path).await?,
-                None => bail!(
-                    "the gh CLI is not installed here; repo_view, file, run_list and api still work"
-                ),
-            },
+            (GhCall::Gh(_), false) => {
+                let path = rest_path(&args)
+                    .with_context(|| "this action needs `repo`, and `number` where it applies")?;
+                read_rest(&args, &path).await?
+            }
         };
         Ok(json!({ "output": output }))
     }
 }
 
-/// The API path of `run_list`, which a phone without `gh` needs to read CI.
-fn run_list_path(args: &Value) -> Option<String> {
-    if text(args, "action") != Some("run_list") {
-        return None;
+/// The REST path of an action `gh` would serve, for a phone without it.
+fn rest_path(args: &Value) -> Option<String> {
+    let action = text(args, "action")?;
+    if action == "search" {
+        return search_path(args);
     }
     let repo = repo(args).ok()?;
-    Some(format!(
-        "repos/{repo}/actions/runs?per_page={}",
-        limit(args)
-    ))
+    let per = limit(args);
+    Some(match action {
+        "pr_list" => format!("repos/{repo}/pulls?state=open&per_page={per}"),
+        "issue_list" => format!("repos/{repo}/issues?state=open&per_page={per}"),
+        "release_list" => format!("repos/{repo}/releases?per_page={per}"),
+        "run_list" => format!("repos/{repo}/actions/runs?per_page={per}"),
+        "pr_view" | "pr_diff" => format!("repos/{repo}/pulls/{}", number(args).ok()?),
+        "issue_view" => format!("repos/{repo}/issues/{}", number(args).ok()?),
+        _ => return None,
+    })
+}
+
+/// A search over REST. `repo`, when given, narrows it and lets a private repository be searched.
+fn search_path(args: &Value) -> Option<String> {
+    let query = free_text(args, "query").ok()?;
+    let (endpoint, qualifier) = match text(args, "kind").unwrap_or("repos") {
+        "repos" => ("repositories", ""),
+        "code" => ("code", ""),
+        "issues" => ("issues", " is:issue"),
+        "prs" => ("issues", " is:pr"),
+        _ => return None,
+    };
+    let scope = repo(args).map(|r| format!(" repo:{r}")).unwrap_or_default();
+    let full = format!("{query}{qualifier}{scope}");
+    let q: String = url::form_urlencoded::byte_serialize(full.as_bytes()).collect();
+    Some(format!("search/{endpoint}?q={q}&per_page={}", limit(args)))
+}
+
+async fn read_rest(args: &Value, path: &str) -> Result<String> {
+    let accept = match text(args, "action") {
+        Some("pr_diff") => "application/vnd.github.diff",
+        _ => "application/vnd.github+json",
+    };
+    let app = app::AppClient::standard()?;
+    let token = match path_repo(path).or_else(|| repo(args).ok()) {
+        Some(repo) => app_token(&app, &repo, step_for_path(path)).await?,
+        None => None,
+    };
+    let secret = token.as_ref().map(app::AppToken::secret);
+    http_get_as(path, accept, MAX_OUTPUT_CHARS, secret).await
+}
+
+async fn read_api(path: &str) -> Result<String> {
+    if which::which("gh").is_ok() {
+        let argv = ["api".into(), "--method".into(), "GET".into(), path.into()];
+        return run("gh", &argv, COMMAND_TIMEOUT).await;
+    }
+    read_without_gh(path).await
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CiState {
+    NoRuns,
+    Running,
+    Passed,
+    Failed,
+}
+
+/// Where a commit's workflow runs stand, from the runs list.
+fn ci_state(runs: &[Value]) -> CiState {
+    const GOOD: [&str; 3] = ["success", "skipped", "neutral"];
+    if runs.is_empty() {
+        return CiState::NoRuns;
+    }
+    if runs.iter().any(|r| r["status"] != "completed") {
+        return CiState::Running;
+    }
+    let passed = runs
+        .iter()
+        .all(|r| r["conclusion"].as_str().is_some_and(|c| GOOD.contains(&c)));
+    if passed {
+        CiState::Passed
+    } else {
+        CiState::Failed
+    }
+}
+
+/// Waits for CI on a branch or commit inside the tool, so the wait costs no model calls.
+async fn wait_ci(args: &Value) -> Result<Value> {
+    let repo = repo(args)?;
+    let git_ref = free_text(args, "ref")?;
+    if !ENDPOINT.is_match(git_ref) || git_ref.contains("..") {
+        bail!("`ref` must be a plain branch, tag or commit");
+    }
+    let commit: Value =
+        serde_json::from_str(&read_api(&format!("repos/{repo}/commits/{git_ref}")).await?)?;
+    let sha = commit["sha"]
+        .as_str()
+        .context("GitHub returned no commit")?;
+    let started = std::time::Instant::now();
+    let path = format!("repos/{repo}/actions/runs?head_sha={sha}&per_page={MAX_LIMIT}");
+    loop {
+        let body: Value = serde_json::from_str(&read_api(&path).await?)?;
+        let runs = body["workflow_runs"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let waited = started.elapsed();
+        let state = ci_state(&runs);
+        let verdict = match state {
+            CiState::Passed => Some("passed"),
+            CiState::Failed => Some("failed"),
+            CiState::NoRuns if waited >= CI_NO_RUN_GRACE => Some("none"),
+            _ if waited >= CI_MAX_WAIT => Some("running"),
+            _ => None,
+        };
+        if let Some(ci) = verdict {
+            let runs: Vec<Value> = runs
+                .iter()
+                .map(|r| json!({"id": r["id"], "name": r["name"], "conclusion": r["conclusion"]}))
+                .collect();
+            return Ok(json!({ "ci": ci, "commit": sha, "runs": runs }));
+        }
+        tokio::time::sleep(CI_POLL).await;
+    }
 }
 
 /// `owner/name` of a `repos/...` API path.
@@ -859,6 +980,65 @@ mod tests {
             !env.iter()
                 .any(|k| k == "GH_HOST" || k == "GH_ENTERPRISE_TOKEN")
         );
+    }
+
+    #[test]
+    fn every_action_has_a_rest_path_for_a_phone_without_gh() {
+        let path = |args: Value| rest_path(&args).unwrap();
+        assert_eq!(
+            path(json!({"action": "pr_list", "repo": "o/r"})),
+            "repos/o/r/pulls?state=open&per_page=20"
+        );
+        assert_eq!(
+            path(json!({"action": "pr_diff", "repo": "o/r", "number": 7})),
+            "repos/o/r/pulls/7"
+        );
+        assert_eq!(
+            path(json!({"action": "issue_view", "repo": "o/r", "number": 7})),
+            "repos/o/r/issues/7"
+        );
+        assert_eq!(
+            path(json!({"action": "release_list", "repo": "o/r", "limit": 5})),
+            "repos/o/r/releases?per_page=5"
+        );
+        assert_eq!(
+            path(json!({"action": "search", "kind": "prs", "query": "fix bug", "repo": "o/r"})),
+            "search/issues?q=fix+bug+is%3Apr+repo%3Ao%2Fr&per_page=20"
+        );
+        assert_eq!(
+            rest_path(&json!({"action": "pr_view", "repo": "o/r"})),
+            None,
+            "no number"
+        );
+    }
+
+    #[test]
+    fn ci_is_read_from_every_run_of_the_commit() {
+        let run =
+            |status: &str, conclusion: Value| json!({"status": status, "conclusion": conclusion});
+        assert_eq!(ci_state(&[]), CiState::NoRuns);
+        assert_eq!(
+            ci_state(&[
+                run("completed", json!("success")),
+                run("in_progress", Value::Null)
+            ]),
+            CiState::Running
+        );
+        assert_eq!(
+            ci_state(&[
+                run("completed", json!("success")),
+                run("completed", json!("skipped"))
+            ]),
+            CiState::Passed
+        );
+        assert_eq!(
+            ci_state(&[
+                run("completed", json!("success")),
+                run("completed", json!("failure"))
+            ]),
+            CiState::Failed
+        );
+        assert_eq!(ci_state(&[run("completed", Value::Null)]), CiState::Failed);
     }
 
     #[test]
