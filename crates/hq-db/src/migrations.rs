@@ -429,6 +429,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "117_link_captures",
         include_str!("../sql/117_link_captures.sql"),
     ),
+    (
+        "118_collection_tips",
+        include_str!("../sql/118_collection_tips.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

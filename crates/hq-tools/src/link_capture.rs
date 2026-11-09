@@ -16,6 +16,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, LazyLock};
 
+/// Marks a note as something the owner saved from elsewhere: a shared link or a Keep note.
+pub const SAVED_ITEM_TAG: &str = "saved-item";
 pub const MAX_PAGE_CHARS: usize = 20_000;
 const MAX_URL_LEN: usize = 2048;
 const MAX_SUMMARY_CHARS: usize = 600;
@@ -176,6 +178,7 @@ fn write_if_unchanged(
         &capture.path,
         &raw,
         frontmatter_keys(&capture.url, &enriched.tags),
+        SAVED_ITEM_TAG,
         &summary_block(enriched),
     )?;
     Ok(Outcome::Written)
@@ -357,6 +360,7 @@ mod tests {
         assert!(note.contains("**Proposed tags:** rust, systems-code"));
         assert!(note.contains(NOTE));
         assert!(note.contains("source_url: https://example.com/post"));
+        assert!(note.contains(SAVED_ITEM_TAG));
         assert!(!fx.is_due_later());
     }
 

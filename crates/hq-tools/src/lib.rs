@@ -18,6 +18,7 @@ pub mod brand;
 pub mod budget_status;
 pub mod capabilities;
 pub mod coding;
+pub mod collection_tip;
 pub mod convert;
 pub mod copilot_credits;
 pub mod external_runner;

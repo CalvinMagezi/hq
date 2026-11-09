@@ -17,6 +17,9 @@ pub type QueryEmbedder =
     Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<Vec<f32>>> + Send>> + Send + Sync>;
 
 /// Multi-modal search tool: supports hybrid (FTS5 + embeddings), keyword, and semantic search modes.
+const TAG_FILTER_DEPTH: usize = 10;
+const TAG_FILTER_MAX_FETCH: usize = 200;
+
 pub struct VaultSearchTool {
     db: Arc<Database>,
     /// The embedder and the model label its vectors are stored under. Without one, hybrid and
@@ -95,7 +98,7 @@ impl HqTool for VaultSearchTool {
                 "sort_by": { "type": "string", "enum": ["relevance", "recency"], "description": "Result ordering (default: relevance)", "default": "relevance" },
                 "limit": { "type": "integer", "description": "Max results (default 20)", "default": 20 },
                 "notebook": { "type": "string", "description": "Optional notebook filter (e.g. Projects)" },
-                "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional tag filters" }
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional tag filters. `saved-item` finds what the owner saved from elsewhere: shared links and Keep notes" }
             },
             "required": []
         })
@@ -130,6 +133,14 @@ impl HqTool for VaultSearchTool {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
+        // A tag filter runs after the search, so it needs a deeper pool to fill the limit.
+        let fetch = if tag_filters.is_empty() {
+            limit * 2
+        } else {
+            limit
+                .saturating_mul(TAG_FILTER_DEPTH)
+                .min(TAG_FILTER_MAX_FETCH)
+        };
         let query_vector = self.query_vector(&query, mode).await;
         let db = self.db.clone();
         let mode_owned = mode.to_string();
@@ -143,13 +154,13 @@ impl HqTool for VaultSearchTool {
         ) = tokio::task::spawn_blocking(move || {
             db.with_conn(|conn| {
                 let mut results = match mode_owned.as_str() {
-                    "recent" => hq_db::search::recent_notes(conn, limit * 2)?,
-                    "keyword" => hq_db::search::keyword_search(conn, &query_owned, limit * 2)?,
+                    "recent" => hq_db::search::recent_notes(conn, fetch)?,
+                    "keyword" => hq_db::search::keyword_search(conn, &query_owned, fetch)?,
                     _ => {
                         let vector = query_vector
                             .as_ref()
                             .map(|(v, model)| (v.as_slice(), model.as_str()));
-                        hq_db::search::hybrid_search(conn, &query_owned, vector, limit * 2)?
+                        hq_db::search::hybrid_search(conn, &query_owned, vector, fetch)?
                     }
                 };
 

@@ -112,7 +112,9 @@ pub const ADOPTION_DIGEST_SOURCE: &str = "adoption_digest";
 /// (the web inbox, the phone app reading its HQ) and never leave through a third party: no web
 /// push (which crosses Google's, Apple's or Mozilla's push service), no model prompt, no chat
 /// relay. See `docs/security/ADOPTION_DATA.md`.
-pub const DEVICE_ONLY_SOURCES: &[&str] = &[ADOPTION_DIGEST_SOURCE];
+/// Source name of the weekly item that brings up something the owner saved.
+pub const COLLECTION_TIP_SOURCE: &str = "collection_tip";
+pub const DEVICE_ONLY_SOURCES: &[&str] = &[ADOPTION_DIGEST_SOURCE, COLLECTION_TIP_SOURCE];
 
 impl ValueItem {
     pub fn new(

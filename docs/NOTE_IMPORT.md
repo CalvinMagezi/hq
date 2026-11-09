@@ -93,6 +93,7 @@ or a layout that could not be kept).
 | CSV, TSV, text | native | delimiter and encoding detected |
 | PDF | poppler `pdftotext -layout` when present, else the text layer | tables rebuilt from column layout, including a table that runs across pages; a PDF with no text is read by OCR |
 | Images | OCR (tesseract on Linux, Vision on macOS) | always `degraded`; with tesseract the note says the average confidence and lists the words it was least sure of, numbers first |
+| Google Keep | native, from a Takeout `Keep` folder | each JSON note keeps its link (`source_url`) and labels (tags) and is tagged `saved-item`; notes in Keep's trash are skipped and the HTML copy is ignored |
 | DOC, PPT | LibreOffice, when installed | `blocked` in the inventory on a host without it |
 
 The format comes from the file's content, and its name is only the fallback. A Word

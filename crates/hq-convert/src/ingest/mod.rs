@@ -9,6 +9,7 @@
 mod docx;
 mod html;
 pub mod ir;
+mod keep;
 mod legacy;
 mod numfmt;
 mod odf;
@@ -98,6 +99,15 @@ pub struct Converted {
     /// A title the file itself names (document properties or a title block).
     pub title: Option<String>,
     pub report: ConversionReport,
+    /// What a saved-items export says about the note; empty for every other format.
+    pub saved: SavedMeta,
+}
+
+/// The address and labels of an item saved in another app.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SavedMeta {
+    pub source_url: Option<String>,
+    pub labels: Vec<String>,
 }
 
 /// Converts the file at `path`.
@@ -152,6 +162,7 @@ pub async fn convert_bytes(
     }
 
     let mut losses = Losses::default();
+    let mut saved = SavedMeta::default();
     let ext = ext.to_ascii_lowercase();
     let ext = ext.as_str();
     let (markdown, title, engine) = match sniffed.kind {
@@ -192,6 +203,12 @@ pub async fn convert_bytes(
             let b = bytes.clone();
             let parsed = blocking(move || text::read_plain(&b)).await?;
             finish(parsed, &mut losses, "native:text".into())
+        }
+        Kind::KeepNote => {
+            let b = bytes.clone();
+            let note = blocking(move || keep::read(&b)).await?;
+            saved = note.saved;
+            finish(note.parsed, &mut losses, "native:keep".into())
         }
         Kind::Rtf => {
             let b = bytes.clone();
@@ -342,6 +359,7 @@ pub async fn convert_bytes(
         markdown,
         title,
         report,
+        saved,
     })
 }
 

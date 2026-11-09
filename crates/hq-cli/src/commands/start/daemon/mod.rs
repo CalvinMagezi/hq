@@ -501,6 +501,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("due-reminders", Duration::from_secs(3600)),
         // Links the owner shared, summarised into their notes; `daemon.link_capture`.
         DaemonTask::with_default_timeout("link-capture", Duration::from_secs(120)),
+        // One saved note that matches open tasks, chosen on the device; `daemon.collection_tip`.
+        DaemonTask::with_default_timeout("collection-tip", Duration::from_secs(604800)),
         DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("verify-briefing", Duration::from_secs(3600)),
     ]
@@ -661,6 +663,7 @@ async fn dispatch_task(
         "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
         "due-reminders" => tasks_periodic::run_due_reminders(db).await,
         "link-capture" => tasks_periodic::run_link_capture(vault_path, db, config).await,
+        "collection-tip" => tasks_periodic::run_collection_tip(db, config).await,
 
         unknown => {
             warn!(task = unknown, "daemon: unknown task");

@@ -3,6 +3,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, params};
+use std::collections::HashSet;
 
 const STATE_PENDING: &str = "pending";
 const PURGE_AFTER_DAYS: i64 = 30;
@@ -116,6 +117,21 @@ pub fn purge_finished(conn: &Connection, now: DateTime<Utc>) -> Result<usize> {
         "DELETE FROM link_captures WHERE state != ?1 AND created_at < ?2",
         params![STATE_PENDING, cutoff],
     )?)
+}
+
+/// Saved notes already brought up, so the weekly tip does not repeat one.
+pub fn tipped_paths(conn: &Connection) -> Result<HashSet<String>> {
+    let mut stmt = conn.prepare("SELECT path FROM collection_tips")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<HashSet<String>>>()?)
+}
+
+pub fn record_tip(conn: &Connection, path: &str, now: DateTime<Utc>) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO collection_tips (path, surfaced_at) VALUES (?1, ?2)",
+        params![path, now.to_rfc3339()],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

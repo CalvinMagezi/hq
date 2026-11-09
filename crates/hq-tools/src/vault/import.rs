@@ -13,6 +13,7 @@
 //! Sources must be inside the vault, so the tool reads nothing else on the host.
 
 use std::collections::{BTreeMap, HashMap};
+use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -38,6 +39,9 @@ use crate::registry::HqTool;
 const MEDIA_DIR: &str = "_media";
 /// Where originals go when `archive_originals` is set.
 const ARCHIVE_DIR: &str = "_archive/originals";
+const KEEP_EXPORT_DIR: &str = "Keep";
+const MAX_KEEP_LABELS: usize = 8;
+const KEEP_HEAD_BYTES: usize = 4096;
 const MAX_DEPTH: usize = 24;
 const MAX_VISITED: usize = 100_000;
 const MAX_BATCH: usize = 200;
@@ -61,11 +65,48 @@ fn skip_dir(name: &str, top_level: bool) -> bool {
         || (top_level && (name == "Exports" || (name.starts_with('_') && name != MEDIA_DIR)))
 }
 
+/// Whether a file sits in the `Keep` folder of a Google Takeout export.
+fn in_keep_export(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .is_some_and(|n| n == KEEP_EXPORT_DIR)
+}
+
+/// Whether the start of a file is a Keep note, so a folder that only happens to be called `Keep`
+/// does not turn its JSON into notes.
+fn is_keep_note(path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut head = Vec::with_capacity(KEEP_HEAD_BYTES);
+    if file
+        .take(KEEP_HEAD_BYTES as u64)
+        .read_to_end(&mut head)
+        .is_err()
+    {
+        return false;
+    }
+    let text = String::from_utf8_lossy(&head).to_lowercase();
+    text.trim_start().starts_with('{')
+        && text.contains("\"istrashed\"")
+        && text.contains("\"ispinned\"")
+}
+
 /// The kind of a file worth importing, from its name; `None` for notes, data and everything else.
 fn candidate_kind(path: &Path) -> Option<Kind> {
     let name = path.file_name()?.to_string_lossy();
     if name.starts_with('.') {
         return None;
+    }
+    if in_keep_export(path) {
+        let ext = path.extension()?.to_str()?;
+        if ext.eq_ignore_ascii_case("json") && is_keep_note(path) {
+            return Some(Kind::KeepNote);
+        }
+        // Takeout writes each note twice; the JSON is the one that keeps its link and labels.
+        if ext.eq_ignore_ascii_case("html") && is_keep_note(&path.with_extension("json")) {
+            return None;
+        }
     }
     match Kind::from_extension(path.extension()?.to_str()?) {
         Kind::Unknown | Kind::Markdown | Kind::Zip | Kind::Epub => None,
@@ -302,7 +343,6 @@ impl ImportedIndex {
 
 /// `(source, source_sha256)` from the head of a note an import wrote; `None` for any other note.
 fn import_origin(abs: &Path) -> Option<(String, String)> {
-    use std::io::Read;
     let mut head = Vec::with_capacity(8192);
     std::fs::File::open(abs)
         .ok()?
@@ -569,7 +609,16 @@ impl Importer {
         let mut tags = vec!["imported".to_string(), report.source_format.clone()];
         tags.extend(s.tags.iter().cloned());
         tags.dedup();
-        let note = build_note(&path, &title, body, rel, &converted.report, kind, &tags);
+        let note = build_note(
+            &path,
+            &title,
+            body,
+            rel,
+            &converted.report,
+            kind,
+            &tags,
+            &converted.saved,
+        );
         let vault = self.vault.clone();
         let (note_path, to_write) = (path.clone(), note.clone());
         tokio::task::spawn_blocking(move || vault.write_note(&note_path, &to_write)).await??;
@@ -902,6 +951,29 @@ fn compose_body(title: &str, markdown: &str, report: &ConversionReport, rel: &st
     body
 }
 
+/// The caller's tags, and for a Keep note its labels as slugs and the tag that marks a saved item.
+fn with_saved_tags(tags: &[String], kind: Kind, saved: &ingest::SavedMeta) -> Vec<String> {
+    let mut all = tags.to_vec();
+    if kind != Kind::KeepNote {
+        return all;
+    }
+    let slugs = saved.labels.iter().take(MAX_KEEP_LABELS).map(|l| {
+        l.trim()
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+    });
+    for slug in slugs.chain([crate::link_capture::SAVED_ITEM_TAG.to_string()]) {
+        let slug = slug.trim_matches('-').to_string();
+        if !slug.is_empty() && !all.contains(&slug) {
+            all.push(slug);
+        }
+    }
+    all
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_note(
     path: &str,
     title: &str,
@@ -910,6 +982,7 @@ fn build_note(
     report: &ConversionReport,
     kind: Kind,
     tags: &[String],
+    saved: &ingest::SavedMeta,
 ) -> hq_core::types::Note {
     let mut fm: HashMap<String, serde_yaml::Value> = HashMap::new();
     let text = |s: &str| serde_yaml::Value::String(s.to_string());
@@ -928,6 +1001,10 @@ fn build_note(
         "conversion".into(),
         text(if report.has_loss() { "degraded" } else { "ok" }),
     );
+    let tags = with_saved_tags(tags, kind, saved);
+    if let Some(url) = &saved.source_url {
+        fm.insert("source_url".into(), text(url));
+    }
     fm.insert(
         "tags".into(),
         serde_yaml::Value::Sequence(tags.iter().map(|t| text(t)).collect()),
@@ -938,7 +1015,7 @@ fn build_note(
         path: path.to_string(),
         frontmatter: fm,
         note_type: None,
-        tags: tags.to_vec(),
+        tags,
         pinned: false,
         source: None,
         embedding_status: None,
@@ -1125,6 +1202,47 @@ impl HqTool for VaultImportTool {
         self.importer
             .run(source, &settings, limit, &Caller::Tool(&args))
             .await
+    }
+}
+
+#[cfg(test)]
+mod keep_tests {
+    use super::*;
+
+    #[test]
+    fn a_keep_folder_imports_its_json_once_and_json_elsewhere_stays_out() {
+        let tmp = tempfile::tempdir().unwrap();
+        let keep = tmp.path().join("Takeout/Keep");
+        std::fs::create_dir_all(&keep).unwrap();
+        let note = r#"{"isTrashed":false,"isPinned":false,"title":"t"}"#;
+        std::fs::write(keep.join("a.json"), note).unwrap();
+        std::fs::write(keep.join("config.json"), r#"{"a":1}"#).unwrap();
+        for name in ["a.html", "b.html", "config.html"] {
+            std::fs::write(keep.join(name), "x").unwrap();
+        }
+        assert_eq!(candidate_kind(&keep.join("a.json")), Some(Kind::KeepNote));
+        assert_eq!(candidate_kind(&keep.join("config.json")), None);
+        assert_eq!(candidate_kind(&keep.join("a.html")), None);
+        assert_eq!(candidate_kind(&keep.join("b.html")), Some(Kind::Html));
+        assert_eq!(candidate_kind(&keep.join("config.html")), Some(Kind::Html));
+        assert_eq!(candidate_kind(&tmp.path().join("Takeout/other.json")), None);
+    }
+
+    #[test]
+    fn keep_labels_become_slugs_and_the_saved_tag_is_added_only_for_keep() {
+        let saved = ingest::SavedMeta {
+            source_url: None,
+            labels: vec!["To Try!".to_string(), "---".to_string()],
+        };
+        let tags = with_saved_tags(&["old".to_string()], Kind::KeepNote, &saved);
+        assert_eq!(
+            tags,
+            vec!["old", "to-try", crate::link_capture::SAVED_ITEM_TAG]
+        );
+        assert_eq!(
+            with_saved_tags(&[], Kind::Html, &saved),
+            Vec::<String>::new()
+        );
     }
 }
 

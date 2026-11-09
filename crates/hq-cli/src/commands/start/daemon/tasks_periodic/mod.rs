@@ -5,6 +5,7 @@
 
 pub mod adoption_digest;
 pub mod backup;
+pub mod collection_tip;
 pub mod copilot_usage;
 pub mod disk_watchdog;
 pub mod due_reminders;
@@ -29,6 +30,7 @@ pub mod verify_dispatch;
 
 pub use adoption_digest::run_adoption_digest;
 pub use backup::run_backup;
+pub use collection_tip::run_collection_tip;
 pub use copilot_usage::run_copilot_usage;
 pub use disk_watchdog::run_disk_watchdog;
 pub use due_reminders::run_due_reminders;
