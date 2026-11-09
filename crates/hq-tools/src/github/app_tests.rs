@@ -432,6 +432,26 @@ async fn the_installation_comes_from_github_and_matches_the_owner() {
     assert_eq!(standing(Some(&found)), Standing::Connected);
 }
 
+/// Opt-in, with a throwaway GitHub account only. Run `hq github connect` and install the App on a
+/// test repository, then:
+/// `HQ_GITHUB_LIVE_REPO=<owner>/<repo> cargo test -p hq-tools github::app -- --ignored`
+#[tokio::test]
+#[ignore = "needs a connected throwaway GitHub App and the network"]
+async fn a_real_app_mints_a_token_that_reads_its_repository() {
+    let repo = std::env::var("HQ_GITHUB_LIVE_REPO").expect("set HQ_GITHUB_LIVE_REPO");
+    let app = AppClient::standard().unwrap();
+    let token = app.token(&repo, Step::Fetch).await.unwrap();
+    let (client, base) = app.http();
+    let response = client
+        .get(format!("{base}repos/{repo}"))
+        .header("Accept", ACCEPT_JSON)
+        .bearer_auth(token.secret())
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success(), "{}", response.status());
+}
+
 #[tokio::test]
 async fn with_nothing_connected_no_token_is_asked_for() {
     let f = fixture(None).await;
