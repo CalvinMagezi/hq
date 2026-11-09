@@ -903,8 +903,13 @@ mod lite_tests {
 
     #[test]
     fn the_data_saver_also_stops_the_timers_that_call_a_model_or_a_mail_api() {
-        let saving = names(&mobile(true));
-        let spending = names(&mobile(false));
+        let remote = |data_saver| {
+            let mut config = mobile(data_saver);
+            config.daemon.embedding_provider = EmbeddingProvider::Remote;
+            config
+        };
+        let saving = names(&remote(true));
+        let spending = names(&remote(false));
         for task in MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS {
             assert!(
                 !saving.contains(task),
@@ -930,10 +935,8 @@ mod lite_tests {
     }
 
     #[test]
-    fn with_the_local_embedder_triage_runs_under_the_data_saver() {
-        let mut config = mobile(true);
-        config.daemon.embedding_provider = EmbeddingProvider::Local;
-        let tasks = names(&config);
+    fn with_the_default_local_embedder_triage_runs_under_the_data_saver() {
+        let tasks = names(&mobile(true));
         assert!(tasks.contains(&"inbox-triage"));
         assert!(!tasks.contains(&"memory-consolidation"));
     }
@@ -941,9 +944,9 @@ mod lite_tests {
     #[test]
     fn a_reload_cannot_switch_the_embedding_provider() {
         let running = HqConfig::default();
-        let mut local = HqConfig::default();
-        local.daemon.embedding_provider = EmbeddingProvider::Local;
-        let err = accept_reload(&running, local, &no_env).unwrap_err();
+        let mut remote = HqConfig::default();
+        remote.daemon.embedding_provider = EmbeddingProvider::Remote;
+        let err = accept_reload(&running, remote, &no_env).unwrap_err();
         assert!(err.contains("embedding_provider"), "{err}");
     }
 

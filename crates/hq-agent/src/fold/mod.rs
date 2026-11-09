@@ -676,13 +676,11 @@ fn record_relations(db: &Database, done: &[FoldOutcome]) {
     }
 }
 
-/// Embeds new fold summaries with the on-device model, when the owner chose local embeddings,
+/// Embeds new fold summaries with the on-device model, when this instance embeds locally,
 /// so `session_search` can find them by meaning offline. A remote embedder is never used here:
 /// it would make every fold a second paid call. Failures only cost the meaning search.
 async fn embed_folds(db: &Database, done: &[FoldOutcome]) {
-    let local = hq_core::config::HqConfig::load().is_ok_and(|c| {
-        c.daemon.embedding_provider == hq_core::config::EmbeddingProvider::Local && c.embeds_notes()
-    });
+    let local = hq_core::config::HqConfig::load().is_ok_and(|c| c.embeds_locally());
     if !local {
         return;
     }

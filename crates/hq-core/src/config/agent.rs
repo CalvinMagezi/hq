@@ -75,11 +75,13 @@ pub enum MemoryExtraction {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EmbeddingProvider {
-    /// OpenRouter when an API key is configured, Ollama on this machine otherwise.
-    #[default]
-    Remote,
     /// A small static model on this machine, downloaded once and checked against pinned hashes.
+    /// The default because note text then never leaves the device.
+    #[default]
     Local,
+    /// OpenRouter when an API key is configured, Ollama on this machine otherwise. Note text
+    /// goes to that provider, so an owner has to ask for it.
+    Remote,
 }
 
 fn default_embed_batch() -> usize {

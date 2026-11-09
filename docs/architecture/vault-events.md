@@ -107,13 +107,16 @@ Where vectors come from is `daemon.embedding_provider`:
 
 ```yaml
 daemon:
-  embedding_provider: local   # default: remote
+  embedding_provider: remote   # default: local
 ```
 
-- `remote` (the default): OpenRouter when `openrouter_api_key` is set, Ollama on this machine
-  otherwise. Note text leaves the machine with every embedding.
-- `local`: a static Model2Vec model (`potion-base-8M`, about 30 MB on disk and 36 MB in memory)
-  runs in the `hq` process. The first use downloads three files from a pinned Hugging Face
+- `remote`: OpenRouter when `openrouter_api_key` is set, Ollama on this machine otherwise. Note
+  text leaves the machine with every embedding, so it is opt-in.
+- `local` (the default): a static Model2Vec model (`potion-base-8M`, about 30 MB on disk and
+  36 MB in memory) runs in the `hq` process, and note text stays on the device. Only an instance
+  that embeds notes loads it, so Lite never does. Changing to it from `remote` embeds every note
+  again once, because vectors are labelled with the model that made them. The first use
+  downloads three files from a pinned Hugging Face
   revision into `~/.hq/models/potion-base-8M` and checks each against a pinned SHA-256; a
   file that does not match is never installed. Files already there with the right hashes are
   used without the network, which is also how an offline machine is set up: copy them in.
