@@ -488,6 +488,12 @@ impl HostBackend for NativeBackend {
         self.dir().map(|_| path.is_dir())
     }
 
+    fn installed_programs(&self, names: &[String]) -> Option<Vec<String>> {
+        // A host too old to know this method fails the call, which reads as "cannot say".
+        let reply = self.call("host.programs", json!({ "names": names })).ok()?;
+        serde_json::from_value(reply.get("found")?.clone()).ok()
+    }
+
     fn workspace(&self) -> Result<Value, AgentHostError> {
         self.call("host.workspace", json!({}))
     }

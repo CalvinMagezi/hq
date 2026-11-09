@@ -18,6 +18,7 @@ class LinksTest {
         assertEquals(LinkTarget(Place.Tasks, id = "tk-1792633187805-071613"), parse("hq://tasks/tk-1792633187805-071613"))
         assertEquals(LinkTarget(Place.Helpers), parse("hq://helpers"))
         assertEquals(LinkTarget(Place.Helpers, id = "s-42"), parse("hq://helpers/s-42"))
+        assertEquals(LinkTarget(Place.Helpers, github = true), parse("hq://helpers/github"))
         assertEquals(LinkTarget(Place.Chat), parse("hq://chat"))
     }
 

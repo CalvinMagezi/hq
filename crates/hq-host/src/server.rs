@@ -496,6 +496,13 @@ impl Conn {
                     .unwrap_or_default();
                 Ok(json!({ "lockdown": self.host.lockdown(reason, "operator") }))
             }
+            "host.programs" => {
+                let names: Vec<String> = params
+                    .get("names")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                Ok(json!({ "found": crate::programs::installed(&names) }))
+            }
             "host.workspace" => self.workspace_call(|root| Ok(crate::workspace::describe(root))),
             "host.dirs" => {
                 let path = params.get("path").and_then(Value::as_str);

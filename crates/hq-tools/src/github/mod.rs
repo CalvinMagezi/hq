@@ -514,7 +514,7 @@ async fn read_without_gh(path: &str) -> Result<String> {
 /// `owner/name`, as the tool validates a repository. Neither part may start with a dot: `o/.`
 /// would name the owner folder of the clone root (and the refresh would delete it), `../x` its
 /// parent, and GitHub allows neither as an owner or a repository name.
-pub(crate) fn is_valid_repo(repo: &str) -> bool {
+pub fn is_valid_repo(repo: &str) -> bool {
     REPO.is_match(repo)
         && !repo.starts_with('-')
         && !repo.contains("..")

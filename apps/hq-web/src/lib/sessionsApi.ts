@@ -1,6 +1,7 @@
 import { hqJson } from './hqAuth'
 import type { TaskStatus } from './tasksApi'
 import type { ServerAnswer } from './autoAnswers'
+import { searchNotes } from '~/lib/vaultApi'
 
 export type SessionStatus = 'running' | 'exited' | 'stopped' | 'orphaned'
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done'
@@ -211,7 +212,17 @@ export interface WorkbenchHost {
   workspace_error?: string
   error?: string
   lockdown?: HostLockdown | null
+  /** The agents this computer can start; null or missing when it cannot say. */
+  agents?: string[] | null
 }
+
+/** A note or task a helper starts connected to. */
+export interface AttachHit {
+  id: string
+  title: string
+}
+
+export type AttachSearcher = (query: string) => Promise<AttachHit[]>
 
 /** What the emergency stop did on each computer; an unreachable one is not locked. */
 export interface LockdownResult {
@@ -251,6 +262,10 @@ export interface SpawnInput {
   branch?: string
   /** The HQ task it works on; the task then records what it does (WR17). */
   task_id?: string
+  /** A vault note to add to its first message. */
+  note?: string
+  /** A GitHub repository, as owner/name, to work in. */
+  repo?: string
 }
 
 /** Coding agents edit code; general-purpose agents (Hermes, OpenClaw) never take code work. */
@@ -289,6 +304,19 @@ export const workbenchApi = {
   /** Stops every agent on one computer, or on all of them when `host` is left out. */
   lockdown: (body: { reason?: string; host?: string }): Promise<LockdownResult> =>
     hqJson('/api/workbench/lockdown', 'POST', body),
+}
+
+const ATTACH_RESULTS = 6
+
+export const attachSearch = {
+  notes: async (query: string): Promise<AttachHit[]> =>
+    (await searchNotes(query)).results.slice(0, ATTACH_RESULTS).map((hit) => ({ id: hit.notePath, title: hit.title || hit.notePath })),
+  tasks: async (query: string): Promise<AttachHit[]> => {
+    const res = await hqJson<{ tasks?: { display_id: string; title: string; status: string }[] }>(
+      `/api/tasks?top_level_only=true&limit=${ATTACH_RESULTS}&search=${encodeURIComponent(query)}`,
+    )
+    return (res.tasks ?? []).filter((task) => task.status !== 'complete').map((task) => ({ id: task.display_id, title: task.title || task.display_id }))
+  },
 }
 
 export const globalSessionsApi = {

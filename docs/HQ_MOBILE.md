@@ -166,8 +166,15 @@ computer" through the share sheet) and a **Scan the code** button that opens the
 sheet asks HQ again when the owner comes back to it. See "One command, for the phone app" in
 [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md).
 
-**Code from this phone (HQ Coder).** The start sheet also offers HQ's own worker, which needs no
-computer. Connect GitHub makes the person's own private GitHub App in a Custom Tab; its key stays in
+**Start a helper.** The sheet lists HQ Coder and then the agents the chosen computer really has:
+each computer looks along the PATH its agents start with (`host.programs`), and a computer too old to answer lists every agent HQ knows. Any helper can start
+connected to a note (added to its first message, up to 8000 characters), a task (the task records
+its work) or a repository (named in its first message). With a task attached, the words are
+optional.
+
+**HQ Coder.** The start sheet also offers HQ's own worker, which needs no
+computer. After GitHub's install page, "Back to HQ" (`hq://helpers/github`) reopens the sheet, which
+says the connection worked. Connect GitHub makes the person's own private GitHub App in a Custom Tab; its key stays in
 `<hq dir>/github/` on the phone (mode 0600, outside the vault), and nobody else, the HQ project
 included, holds a way in. HQ fetches the repository, a sub-agent edits it, GitHub's CI tests the `hq/`
 branch and the person reviews and merges. A repository whose workflows use secrets, or that has a

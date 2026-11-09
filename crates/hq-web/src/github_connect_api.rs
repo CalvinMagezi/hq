@@ -5,14 +5,14 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
-use axum::http::{HeaderName, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use hq_core::config::HqConfig;
 use hq_tools::github::app::{
     AppClient, Flows, INSTALLED_PATH, PAGE_HEADERS, Page, RETURN_PATH, START_PATH, Standing,
-    TokenRefused, message_page, standing, start_page,
+    TokenRefused, finished_page, message_page, standing, start_page,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -20,6 +20,9 @@ use tokio::sync::Notify;
 
 use crate::WsState;
 use crate::error::ApiError;
+
+/// The phone app's own link to its GitHub sheet.
+const BACK_TO_APP: &str = "hq://helpers/github";
 
 /// One server's connection attempts and the address GitHub sends the browser back to.
 pub struct BrowserFlow {
@@ -106,13 +109,19 @@ async fn returned(State(flow): State<Arc<BrowserFlow>>, Query(q): Query<ReturnQu
 
 /// Changes nothing: anyone can open this address. The owner's own status call reads the
 /// installation from GitHub.
-async fn installed(State(flow): State<Arc<BrowserFlow>>) -> Response {
+async fn installed(State(flow): State<Arc<BrowserFlow>>, headers: HeaderMap) -> Response {
     flow.installed.notify_waiters();
+    let on_phone = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ua| ua.contains("Android"));
+    let back = on_phone.then_some(("Back to HQ", BACK_TO_APP));
     page(
         StatusCode::OK,
-        message_page(
+        finished_page(
             "GitHub is connected",
-            "You can close this page and go back to HQ.",
+            "Go back to HQ to choose what it should work on.",
+            back,
         ),
     )
 }

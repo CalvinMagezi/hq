@@ -24,9 +24,11 @@ data class LinkTarget(
     val web: String? = null,
     /** hq://chat?compose=1: Chat with the composer focused and the keyboard up, never the microphone. */
     val compose: Boolean = false,
+    /** hq://helpers/github: the HQ Coder sheet, where the browser comes back after connecting GitHub. */
+    val github: Boolean = false,
 )
 
-/** The links of the design's "Navigation and Back" table: hq://chat/{id}, inbox/{id}, tasks/{id}, notes/{path}, notes/n/{id}, tasks/away, helpers[/{id}], settings/{screen}, search[/{scope}]. hq://web/{usage|board|timeline} opens a web page in the app's own screen; hq://web/home and vault open Notes. */
+/** The links of the design's "Navigation and Back" table: hq://chat/{id}, inbox/{id}, tasks/{id}, notes/{path}, notes/n/{id}, tasks/away, helpers[/{id}], helpers/github, settings/{screen}, search[/{scope}]. hq://web/{usage|board|timeline} opens a web page in the app's own screen; hq://web/home and vault open Notes. */
 object Links {
     const val SCHEME = "hq"
     const val EXTRA = "link"
@@ -46,7 +48,7 @@ object Links {
             "chat" -> LinkTarget(Place.Chat, id = id(rest), compose = u.query == "compose=1")
             "inbox" -> LinkTarget(Place.Inbox, id = id(rest))
             "tasks" -> if (rest == "away") LinkTarget(Place.Tasks, away = true) else LinkTarget(Place.Tasks, id = id(rest))
-            "helpers" -> LinkTarget(Place.Helpers, id = id(rest))
+            "helpers" -> if (rest == "github") LinkTarget(Place.Helpers, github = true) else LinkTarget(Place.Helpers, id = id(rest))
             "notes" -> if (rest.startsWith("n/")) LinkTarget(Place.Notes, noteId = id(rest.removePrefix("n/"))) else LinkTarget(Place.Notes, path = notePath(rest))
             "settings" -> rest.lowercase().ifEmpty { "home" }.takeIf { it in SETTINGS_SCREENS }?.let { LinkTarget(Place.Chat, screen = it) }
             "search" -> LinkTarget(Place.Notes, search = SearchScope.entries.firstOrNull { it.name.equals(rest, true) } ?: SearchScope.All)

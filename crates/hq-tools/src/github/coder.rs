@@ -90,13 +90,24 @@ fn strings(args: &Value, key: &str) -> Vec<String> {
 }
 
 /// Only an ordinary note may reach a worker: a path inside the vault, outside HQ's own folders.
-fn check_note(raw: &str) -> Result<()> {
+pub fn check_note(raw: &str) -> Result<()> {
     let path = hq_vault::rel_path::RelPath::parse(raw)?;
     let top = path.top().unwrap_or_default();
     if top.starts_with('_') || top.starts_with('.') {
         bail!("{raw} is not a note a coding job may read");
     }
     Ok(())
+}
+
+/// The file of an ordinary note, checked again after links are followed: a link in a normal folder
+/// can lead out of the vault or into HQ's own folders.
+pub fn resolve_note(vault: &std::path::Path, raw: &str) -> Result<std::path::PathBuf> {
+    check_note(raw)?;
+    let root = vault.canonicalize()?;
+    let target = vault.join(raw).canonicalize()?;
+    let inside = target.strip_prefix(&root)?;
+    check_note(&inside.to_string_lossy())?;
+    Ok(target)
 }
 
 fn task_of(conn: &rusqlite::Connection, reference: &str) -> Result<t::Task> {
@@ -417,12 +428,7 @@ impl CoderContextTool {
     /// Checked again here: a link may have come from elsewhere, and a link inside the vault can
     /// point out of it.
     fn is_ordinary_note(&self, reference: &str) -> bool {
-        if check_note(reference).is_err() {
-            return false;
-        }
-        let root = self.vault.vault_path().canonicalize();
-        let target = self.vault.vault_path().join(reference).canonicalize();
-        matches!((root, target), (Ok(root), Ok(target)) if target.starts_with(&root))
+        resolve_note(self.vault.vault_path(), reference).is_ok()
     }
 }
 

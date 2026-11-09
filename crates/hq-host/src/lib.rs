@@ -43,6 +43,7 @@ mod lockdown;
 #[cfg(unix)]
 mod pane;
 #[cfg(unix)]
+mod programs;
 mod proto;
 #[cfg(unix)]
 mod relay;

@@ -67,7 +67,8 @@ object HelperWords {
         "codex" -> "Codex"
         "cursor" -> "Cursor"
         "opencode" -> "OpenCode"
-        "copilot", "copilot-cli" -> "Copilot"
+        "copilot", "copilot-cli", "github-copilot" -> "Copilot"
+        "antigravity", "agy" -> "Antigravity"
         "hermes" -> "Hermes"
         "openclaw" -> "OpenClaw"
         else -> harness.split('-', '_').filter { it.isNotBlank() }.joinToString(" ") { it.replaceFirstChar(Char::uppercase) }.ifBlank { w.s(R.string.helpers_a_helper) }
@@ -416,6 +417,41 @@ object HelperWords {
     })
 
     const val EDGE_PREFIX = "edge:"
+
+    /** HQ's own worker in the start sheet's list of helpers; it is not a harness and needs no computer. */
+    const val HQ_CODER = "hq-coder"
+    private const val PREFERRED_AGENT = "claude-code"
+    private const val STANDING_CONNECTED = "connected"
+    private val REPO_NAME = Regex("[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*")
+
+    /** HQ Coder first, because it always works, then the computer's agents. */
+    fun startChoices(form: StartForm): List<String> = listOf(HQ_CODER) + form.chosenAgents()
+
+    /** Keeps the helper chosen while the computer has it, else the usual one, else what is there. */
+    fun fitHarness(current: String, agents: List<String>): String = when {
+        current == HQ_CODER || current in agents -> current
+        PREFERRED_AGENT in agents -> PREFERRED_AGENT
+        else -> agents.firstOrNull() ?: HQ_CODER
+    }
+
+    fun coderReady(link: HqClient.GithubLink?): Boolean = link?.standing == STANDING_CONNECTED
+
+    fun coderRepo(form: StartForm, link: HqClient.GithubLink?): String? =
+        chosenRepo(form.repo?.id, link?.repos.orEmpty().filter { it.picked }.map { it.repo })
+
+    fun canStartCoder(form: StartForm, link: HqClient.GithubLink?): Boolean =
+        coderReady(link) && coderRepo(form, link) != null && (form.job.isNotBlank() || form.task != null)
+
+    fun canStartHelper(form: StartForm): Boolean =
+        form.host != null && form.harness in form.chosenAgents() && (form.job.isNotBlank() || form.task != null)
+
+    /** What the owner can attach as a repository: theirs that match, and exactly what they typed when it reads as owner/name. */
+    fun repoChoices(query: String, known: List<String>): List<Attached> {
+        val typed = query.trim()
+        val matching = known.filter { it.contains(typed, ignoreCase = true) }
+        val extra = listOf(typed).filter { REPO_NAME.matches(it) && it !in matching }
+        return (matching + extra).map { Attached(it, it) }
+    }
 
     /** The repository a job is for: the one chosen, or the only one there is. */
     fun chosenRepo(chosen: String?, picked: List<String>): String? = chosen?.takeIf { it in picked } ?: picked.singleOrNull()

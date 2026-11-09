@@ -114,5 +114,5 @@ test('a task page starts a helper on that task, and the start sends it (WR17)', 
   const sessions = src('../components/tasks/TaskSessions.tsx')
   expect(sessions).toContain("t('helpers_start_on_task')")
   expect(sessions).toContain('task={{ id: taskId, title: taskTitle }}')
-  expect(src('../components/sessions/NewAgentDialog.tsx')).toContain('task_id: task.id')
+  expect(src('../components/sessions/NewAgentDialog.tsx')).toContain('task?.id ?? attachedTask?.id')
 })

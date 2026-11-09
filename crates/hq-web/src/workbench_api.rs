@@ -21,6 +21,7 @@ use crate::error::ApiError;
 
 const MAX_LABEL_CHARS: usize = 80;
 const MAX_PROMPT_CHARS: usize = 20_000;
+const MAX_NOTE_CHARS: usize = 8_000;
 const UNKNOWN_HOST: &str = "no such computer";
 /// Longest lockdown reason the page may send; the host keeps the same bound.
 const MAX_LOCKDOWN_REASON_CHARS: usize = 300;
@@ -63,12 +64,38 @@ fn join_error(e: tokio::task::JoinError) -> ApiError {
     ApiError::internal(e)
 }
 
+/// The agents this computer can really start; `None` when it cannot say. A profile whose command
+/// is left to a shell, or names a full path, cannot be looked for, so it stays listed.
+fn installed_agents(h: &Host) -> Option<Vec<String>> {
+    let wanted: Vec<(String, Option<String>)> = harness::known_harnesses()
+        .into_iter()
+        .map(|name| {
+            let program = harness::spec::resolve(&name)
+                .ok()
+                .and_then(|resolved| harness::plain_binary(&resolved))
+                .filter(|program| !program.starts_with('/'));
+            (name, program)
+        })
+        .collect();
+    let mut programs: Vec<String> = wanted.iter().filter_map(|(_, p)| p.clone()).collect();
+    programs.sort();
+    programs.dedup();
+    let found = h.installed_programs(&programs)?;
+    Some(
+        wanted
+            .into_iter()
+            .filter(|(_, program)| program.as_ref().is_none_or(|p| found.contains(p)))
+            .map(|(name, _)| name)
+            .collect(),
+    )
+}
+
 fn host_row(h: &Host) -> Value {
     let workspace = h.workspace();
     match (h.version(), workspace) {
         (Ok(version), Ok(workspace)) => {
             let lockdown = h.lockdown_status().unwrap_or(Value::Null);
-            json!({ "host": h.name(), "reachable": true, "host_version": version, "workspace": workspace, "lockdown": lockdown })
+            json!({ "host": h.name(), "reachable": true, "host_version": version, "workspace": workspace, "lockdown": lockdown, "agents": installed_agents(h) })
         }
         (Ok(version), Err(e)) => {
             let lockdown = h.lockdown_status().unwrap_or(Value::Null);
@@ -177,6 +204,42 @@ pub(crate) struct SpawnBody {
     branch: Option<String>,
     /// The HQ task (id or display id) it works on (WR17); the task then records its work.
     task_id: Option<String>,
+    /// A vault note to give it, added to its first message.
+    note: Option<String>,
+    /// A GitHub repository (`owner/name`) to work in, named in its first message.
+    repo: Option<String>,
+}
+
+/// Reads a note to hand to a helper, refusing anything but an ordinary path in the vault.
+fn note_for_helper(state: &WsState, path: &str) -> Result<String, ApiError> {
+    let refused = || ApiError::bad_request("that is not a note in the vault");
+    if !state.path_allowed(path) {
+        return Err(refused());
+    }
+    let file = hq_tools::github::coder::resolve_note(&state.vault_path, path)
+        .ok()
+        .filter(|f| state.resolved_allowed(f))
+        .ok_or_else(refused)?;
+    let text = std::fs::read_to_string(file).map_err(|_| refused())?;
+    Ok(text.chars().take(MAX_NOTE_CHARS).collect())
+}
+
+/// The first message with what the helper was connected to.
+fn first_message(
+    prompt: Option<String>,
+    note: Option<(String, String)>,
+    repo: Option<String>,
+) -> Option<String> {
+    let mut parts: Vec<String> = prompt.into_iter().collect();
+    if let Some(repo) = repo {
+        parts.push(format!(
+            "Repository: {repo}. Clone it here if it is not already present."
+        ));
+    }
+    if let Some((path, text)) = note {
+        parts.push(format!("Note {path}, for reference:\n\n{text}"));
+    }
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 #[derive(Deserialize)]
@@ -300,8 +363,25 @@ pub(crate) async fn spawn_handler(
 async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError> {
     let harness_name = trimmed(Some(body.harness))
         .ok_or_else(|| ApiError::bad_request("choose which agent to start"))?;
-    let prompt = trimmed(body.prompt);
-    if prompt
+    let note = match trimmed(body.note) {
+        Some(path) => {
+            let text = note_for_helper(state, &path)?;
+            Some((path, text))
+        }
+        None => None,
+    };
+    let repo = trimmed(body.repo);
+    if repo
+        .as_deref()
+        .is_some_and(|r| !hq_tools::github::is_valid_repo(r))
+    {
+        return Err(ApiError::bad_request(
+            "the repository must look like owner/name",
+        ));
+    }
+    // Only what the owner typed is held to the limit; an attached note is capped on its own.
+    let typed = trimmed(body.prompt);
+    if typed
         .as_deref()
         .is_some_and(|p| p.chars().count() > MAX_PROMPT_CHARS)
     {
@@ -309,6 +389,7 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
             "the first message is longer than {MAX_PROMPT_CHARS} characters"
         )));
     }
+    let prompt = first_message(typed, note, repo);
     let label = trimmed(body.label).unwrap_or_default();
     if label.chars().count() > MAX_LABEL_CHARS {
         return Err(ApiError::bad_request(format!(
@@ -611,6 +692,8 @@ mod tests {
                 purpose: None,
                 branch: None,
                 task_id: Some("NOPE-999".into()),
+                note: None,
+                repo: None,
             }),
         )
         .await;
@@ -619,6 +702,50 @@ mod tests {
             .await
             .unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains("NOPE-999"));
+    }
+
+    #[test]
+    fn the_first_message_says_what_the_helper_is_connected_to() {
+        assert_eq!(first_message(None, None, None), None);
+        let text = first_message(
+            Some("Fix it".into()),
+            Some(("Notebooks/plan.md".into(), "the plan".into())),
+            Some("owner/name".into()),
+        )
+        .unwrap();
+        assert!(
+            text.starts_with("Fix it\n\nRepository: owner/name."),
+            "{text}"
+        );
+        assert!(text.contains("Notebooks/plan.md"), "{text}");
+        assert!(text.ends_with("the plan"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn only_a_note_in_the_vault_reaches_a_helper() {
+        let state = test_state();
+        for bad in [
+            "../outside.md",
+            "_data/vault.db",
+            "/etc/passwd",
+            ".git/config",
+        ] {
+            assert!(note_for_helper(&state, bad).is_err(), "{bad}");
+        }
+        let private = state.vault_path.join("_data");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(private.join("secret.md"), "private").unwrap();
+        std::fs::create_dir_all(state.vault_path.join("Notebooks")).unwrap();
+        std::os::unix::fs::symlink(
+            private.join("secret.md"),
+            state.vault_path.join("Notebooks/link.md"),
+        )
+        .unwrap();
+        assert!(note_for_helper(&state, "Notebooks/link.md").is_err());
+        let long = "x".repeat(MAX_NOTE_CHARS + 10);
+        std::fs::write(state.vault_path.join("Notebooks/plan.md"), &long).unwrap();
+        let text = note_for_helper(&state, "Notebooks/plan.md").unwrap();
+        assert_eq!(text.chars().count(), MAX_NOTE_CHARS);
     }
 
     #[tokio::test]
@@ -634,6 +761,8 @@ mod tests {
             purpose: None,
             branch: None,
             task_id: None,
+            note: None,
+            repo: None,
         };
         for bad in [
             body("  ", None, None),

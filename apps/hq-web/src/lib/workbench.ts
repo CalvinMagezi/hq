@@ -35,6 +35,14 @@ export const agentCategory = (hosts: Pick<WorkbenchHosts, 'categories'> | null, 
 export const harnessesIn = (hosts: Pick<WorkbenchHosts, 'harnesses' | 'categories'>, category: AgentCategory): string[] =>
   hosts.harnesses.filter((h) => agentCategory(hosts, h) === category)
 
+/** Of `names`, the agents this computer has; every one of them when it cannot say. */
+export const agentsOn = (host: { agents?: string[] | null } | undefined, names: string[]): string[] =>
+  host?.agents ? names.filter((name) => host.agents?.includes(name)) : names
+
+/** Keeps the agent chosen while this computer has it, else the usual one, else the first it has. */
+export const fitAgent = (current: string, available: string[]): string =>
+  available.includes(current) ? current : available.includes(DEFAULT_AGENT) ? DEFAULT_AGENT : (available[0] ?? '')
+
 /** Screen polling periods: fast while the agent is moving or waiting on you, slow once it is ready. */
 export const BUSY_POLL_MS = 1_500
 export const READY_POLL_MS = 4_000

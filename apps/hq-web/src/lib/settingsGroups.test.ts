@@ -31,7 +31,7 @@ describe('the four groups (check 1)', () => {
     const rows = settingsGroups(HERE).flatMap((g) => g.rows.map((r) => t(r.label)))
     expect(rows).toEqual([
       'Notifications', 'Time zone', 'Install and version', 'Data used', 'Sign out this browser',
-      'AI service and keys', 'Messaging apps', 'Other devices', 'Code from this phone',
+      'AI service and keys', 'Messaging apps', 'Other devices', 'HQ Coder',
       'Spending limits', 'Safety and limits', 'Folders helpers may use',
       'Backup and about',
     ])

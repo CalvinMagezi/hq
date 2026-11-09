@@ -793,7 +793,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun phoneRow(key: String) {
-        if (key == CODE_FROM_PHONE_ROW) {
+        if (key == HQ_CODER_ROW) {
             _state.update { it.copy(open = false) }
             actions.onCodeFromPhone()
             return
