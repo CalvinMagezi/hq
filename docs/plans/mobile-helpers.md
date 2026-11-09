@@ -94,7 +94,9 @@ the Android app id and the release signing key. Its settings:
 
 - **Device flow** enabled. **User token expiration** on.
 - **No webhook**, no callback URL, no setup URL. **No private key generated**: HQ never acts as the
-  App itself (installation tokens need the key), only as the person.
+  App itself (installation tokens need the key), only as the person. This is a practice, not a
+  guarantee: whoever controls the owning account can generate a key at any time, and with it act
+  on every installation (see Risks).
 - **Repository permissions:** Contents read and write, Pull requests read and write, Actions read
   (CI runs and logs), Checks read, Commit statuses read, Metadata read (always present).
 - **Not granted:** Workflows (so GitHub itself refuses a push that changes
@@ -193,10 +195,26 @@ the phone as always (`docs/security/ADOPTION_DATA.md`); a sponsor gets no view i
   card says so. Reading and correcting the diff is the practice; merging blind is not.
 - **CI as the only test runner.** A repository with slow or no CI is a poor fit. The repository
   list says so for each one, and offers a task to add CI that the person merges by hand.
-- **The project owns an App many people trust.** Its settings page is the place to widen every
-  user's access at once. Changing its permissions makes GitHub ask each installer to approve the
-  change, which is the backstop. Two-factor authentication and a short list of App managers on the
-  owning account are required, and changes go in `docs/security/RELEASE_CHECKLIST.md`.
+- **The project owns an App many people trust.** This is the largest new risk. Whoever controls
+  the owning account can generate a private key and mint installation tokens that write to every
+  repository every user picked, with no user involved; GitHub only asks installers to approve a
+  change of permissions, not a new key. So: the App lives in an organisation, not a personal
+  account, with hardware-key two-factor for every owner and App manager; key creation is watched
+  in the organisation's audit log and raises an alert; and the App's settings are on
+  `docs/security/RELEASE_CHECKLIST.md`. Users who do not accept that trust use their own App
+  (`github.app_client_id`) or a fine-grained token.
+- **The token can write to more than `hq/` branches.** The `hq/`-only rule is HQ's, not GitHub's.
+  A token taken from the device can push to any branch of a picked repository, including the
+  default one, unless branch protection or a ruleset stops it. On GitHub Free those exist for
+  public repositories only, so a free private repository has no server-side backstop. The
+  repository list says so per repository and links to the branch protection page where it is
+  available. The token file sits outside the vault, so `hq backup` does not carry it and Android
+  cloud backup and device transfer do not either (`data_extraction_rules.xml`).
+- **Preview deployments run the worker's branch.** A repository wired to Vercel, Netlify or
+  Cloudflare Pages builds every `hq/` branch with the preview environment's variables, the same
+  exposure as CI secrets. The connect check flags it alongside workflow secrets.
+- **Spend with no one watching.** `dispatch_tasks` on by default means a tagged task starts on its
+  own. The first task after connecting asks for confirmation, and every task has its budget.
 - **Device-code phishing.** Anyone can send a person a GitHub device code and ask them to approve
   it. The approval page names "HQ Coder"; the phone only shows a code it asked for itself, and
   copy in the app says never to enter a code someone sent you.
