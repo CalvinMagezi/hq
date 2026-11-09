@@ -235,19 +235,23 @@ fn children_run_under_the_parents_permission_mode_and_nested_ones_too() {
     let service = service_with_fleet();
     let paths = vec![PathBuf::from("/tmp")];
     assert!(matches!(
-        service.child_guardian(paths.clone()).permission_mode(),
+        service
+            .child_guardian(paths.clone(), false)
+            .permission_mode(),
         PermissionMode::Default
     ));
 
     let read_only = service.with_permission_mode(PermissionMode::DontAsk);
     assert!(matches!(
-        read_only.child_guardian(paths.clone()).permission_mode(),
+        read_only
+            .child_guardian(paths.clone(), false)
+            .permission_mode(),
         PermissionMode::DontAsk
     ));
     assert!(matches!(
         read_only
             .child_service()
-            .child_guardian(paths)
+            .child_guardian(paths, false)
             .permission_mode(),
         PermissionMode::DontAsk
     ));
@@ -262,7 +266,12 @@ fn orchestrator_children_have_no_file_writers() {
     let config = SessionConfig::default();
     let names = |service: AgentService| -> Vec<String> {
         service
-            .build_inprocess_tools(&config, &provider)
+            .build_inprocess_tools(
+                &config,
+                &provider,
+                &[std::path::PathBuf::from("/tmp")],
+                false,
+            )
             .iter()
             .map(|t| t.name().to_string())
             .collect()
@@ -315,10 +324,15 @@ fn orchestrator_children_cannot_use_a_file_editing_external_backend() {
 fn children_ask_the_owner_when_the_parent_does_and_nested_ones_too() {
     let paths = vec![PathBuf::from("/tmp")];
     let service = service_with_fleet();
-    assert!(!service.child_guardian(paths.clone()).asks_owner());
+    assert!(!service.child_guardian(paths.clone(), false).asks_owner());
     let db = Arc::new(hq_db::Database::open_memory().unwrap());
     let asking =
         service.with_owner_approval(Some(crate::governance::OwnerApproval::new(db, "web:t1")));
-    assert!(asking.child_guardian(paths.clone()).asks_owner());
-    assert!(asking.child_service().child_guardian(paths).asks_owner());
+    assert!(asking.child_guardian(paths.clone(), false).asks_owner());
+    assert!(
+        asking
+            .child_service()
+            .child_guardian(paths, false)
+            .asks_owner()
+    );
 }

@@ -433,7 +433,11 @@ async fn github(head: Option<(&str, &str)>, patch_status: u16) -> MockServer {
         .await;
     Mock::given(method("GET"))
         .and(path(format!("/repos/{REPO}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"default_branch": "main"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({"full_name": REPO, "private": true, "default_branch": "main"}),
+            ),
+        )
         .mount(&server)
         .await;
     Mock::given(method("POST"))
@@ -477,6 +481,14 @@ fn connect_app(f: &Fixture, needs_reconnect: bool) {
 }
 
 async fn mount_app_token(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/app/installations/9/access_tokens"))
+        .and(body_partial_json(
+            json!({"permissions": {"contents": "read"}}),
+        ))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({"token": "ghs_test_read"})))
+        .mount(server)
+        .await;
     let wanted = json!({"repositories": ["r"],
                         "permissions": {"contents": "write", "pull_requests": "write"}});
     Mock::given(method("POST"))
@@ -518,10 +530,11 @@ async fn a_connected_app_pushes_with_its_own_token_and_credits_the_person() {
     );
     let expected = format!("Bearer {APP_TOKEN}");
     let requests = server.received_requests().await.unwrap();
-    let to_repo = requests
+    // Reads run on their own read-only token; only what changes the repository carries this one.
+    let writes = requests
         .iter()
-        .filter(|r| r.url.path().starts_with("/repos/"));
-    for request in to_repo {
+        .filter(|r| r.url.path().starts_with("/repos/") && r.method.as_str() != "GET");
+    for request in writes {
         assert_eq!(request.headers["authorization"], expected.as_str());
     }
 }

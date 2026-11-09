@@ -136,6 +136,70 @@ fn other_secrets_are_found_in_every_spelling() {
         secret_names("a: ${{ toJSON(secrets) }}"),
         names(&[ALL_SECRETS])
     );
+    assert_eq!(
+        secret_names("a: ${{ tojson(SECRETS) }}"),
+        names(&[ALL_SECRETS])
+    );
+    assert_eq!(secret_names("a: ${{ SECRETS.foo }}"), names(&["foo"]));
+    assert_eq!(
+        secret_names("a: ${{ secrets[matrix.name] }}"),
+        names(&[ALL_SECRETS])
+    );
+}
+
+#[tokio::test]
+async fn a_secret_added_after_the_scan_stops_the_next_push() {
+    let f = fixture().await;
+    repository(&f, Some("k: ${{ secrets.FOO }}"), json!([])).await;
+    let clean = RepoReport {
+        repo: REPO.into(),
+        private: true,
+        default_branch: "main".into(),
+        protected: false,
+        has_ci: true,
+        secrets: Vec::new(),
+        previews: Vec::new(),
+        unchecked: false,
+        confirmed: false,
+    };
+    f.app
+        .save_repositories(std::slice::from_ref(&clean))
+        .unwrap();
+    assert!(f.app.ensure_picked(REPO).await.is_err());
+    assert_eq!(f.app.repositories()[0].secrets, ["FOO"]);
+}
+
+#[test]
+fn a_read_that_failed_keeps_no_confirmation() {
+    let old = RepoReport {
+        repo: REPO.into(),
+        private: true,
+        default_branch: "main".into(),
+        protected: false,
+        has_ci: true,
+        secrets: vec!["FOO".into()],
+        previews: Vec::new(),
+        unchecked: false,
+        confirmed: true,
+    };
+    let mut now = old.clone();
+    now.secrets.clear();
+    now.unchecked = true;
+    assert!(!confirmation_holds(&[old], &now));
+}
+
+#[tokio::test]
+async fn reconnect_is_heard_but_a_repository_of_someone_else_is_read_publicly() {
+    use crate::github::{app::Step as S, app_token};
+    let f = fixture().await;
+    let elsewhere = app_token(&f.app, "someone-else/project", S::Fetch)
+        .await
+        .unwrap();
+    assert!(elsewhere.is_none());
+    let mut record = f.app.store().load().unwrap();
+    record.needs_reconnect = true;
+    f.app.store().save_record(&record).unwrap();
+    assert!(app_token(&f.app, REPO, S::Fetch).await.is_err());
 }
 
 #[tokio::test]

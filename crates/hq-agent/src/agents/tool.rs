@@ -353,7 +353,7 @@ pub(super) fn task_schema() -> Value {
             "items": { "type": "string" },
             "description": "Files this task will edit. If non-empty and `backend` names a known leaf/text-only harness (e.g. groq, cerebras), dispatch is rejected up front with a clear error instead of silently returning an unapplied diff."
         },
-        "allowed_paths": { "type": "array", "items": { "type": "string" }, "description": "Absolute folders this child may touch, narrowing what you may touch yourself. Enforced on its file tools, unlike an instruction in the goal." },
+        "allowed_paths": { "type": "array", "items": { "type": "string" }, "description": "Absolute folders this child may touch, narrowing what you may touch yourself. Enforced on its file tools and on any child it starts, unlike an instruction in the goal. A shell is not limited by this, so do not give a confined child one." },
         "success_criteria": { "type": "array", "items": { "type": "string" }, "description": "What must be true for the deliverable to count as done. Recorded with the run; a clean exit is still reported as unverified until you review it." },
         "required_tools": { "type": "array", "items": { "type": "string" }, "description": "Tool names the child must have. If it will not have one, the child is blocked before it starts instead of reporting success without the deliverable." },
         "task_id": { "type": "string", "description": "HQ task this child's work belongs to, recorded on its run." },

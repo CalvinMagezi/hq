@@ -131,6 +131,21 @@ pub(crate) fn flow_for(state: &WsState) -> Option<Arc<BrowserFlow>> {
     )))
 }
 
+/// With sign-in off, `/api` answers anything local, including a model's shell, so nothing that
+/// changes the connection runs without it. `hq github` is the way in on such an install.
+pub(crate) async fn require_sign_in(
+    State(state): State<Arc<WsState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if request.method() == axum::http::Method::GET || state.web_auth_enabled_async().await {
+        return next.run(request).await;
+    }
+    let refused =
+        json!({"error": "Turn on sign-in for this HQ, or use `hq github` on this machine."});
+    (StatusCode::FORBIDDEN, Json(refused)).into_response()
+}
+
 /// Behind the web credential, which is the owner's: `/mcp` and its keys never reach these.
 pub(crate) fn owner_routes<S>(flow: Arc<BrowserFlow>) -> Router<S> {
     Router::new()

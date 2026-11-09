@@ -17,6 +17,10 @@ pub enum GithubAction {
     Status,
     /// Delete the App's key from this device and show where to delete the App on GitHub
     Disconnect,
+    /// Let HQ work on a repository that was flagged for using secrets or preview builds
+    Confirm { repo: String },
+    /// Agree to the first queued task after connecting
+    FirstTask,
 }
 
 pub async fn run(action: GithubAction) -> Result<()> {
@@ -25,7 +29,26 @@ pub async fn run(action: GithubAction) -> Result<()> {
         GithubAction::Connect => connect(client).await,
         GithubAction::Status => status(client).await,
         GithubAction::Disconnect => disconnect(&client),
+        GithubAction::Confirm { repo } => confirm(client, &repo).await,
+        GithubAction::FirstTask => first_task(&client),
     }
+}
+
+async fn confirm(client: AppClient, repo: &str) -> Result<()> {
+    client.scan_repositories().await?;
+    match client.confirm_repository(repo)? {
+        true => println!("HQ may now work on {repo}."),
+        false => println!("HQ's App does not reach {repo}."),
+    }
+    Ok(())
+}
+
+fn first_task(client: &AppClient) -> Result<()> {
+    match client.confirm_first_task()? {
+        true => println!("HQ may start its first queued task."),
+        false => println!("GitHub is not connected. Run: hq github connect"),
+    }
+    Ok(())
 }
 
 async fn connect(client: AppClient) -> Result<()> {

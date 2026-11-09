@@ -76,6 +76,33 @@ fn test_guardian_rejects_empty_paths() {
 }
 
 #[test]
+fn a_confined_guardian_does_not_add_home() {
+    let home = dirs::home_dir().expect("a home directory");
+    let folder = PathBuf::from("/tmp/hq-confined-checkout");
+    let open = ToolGuardian::new(
+        vec![folder.clone()],
+        SecurityProfile::Guarded,
+        PermissionMode::Default,
+    );
+    assert!(
+        open.allowed_paths.contains(&home),
+        "the usual guardian includes it"
+    );
+    let confined = ToolGuardian::confined(
+        vec![folder],
+        SecurityProfile::Guarded,
+        PermissionMode::Default,
+    );
+    assert!(!confined.allowed_paths.contains(&home));
+}
+
+#[test]
+#[should_panic(expected = "requires at least one allowed path")]
+fn a_confined_guardian_refuses_an_empty_list() {
+    ToolGuardian::confined(vec![], SecurityProfile::Guarded, PermissionMode::Default);
+}
+
+#[test]
 fn test_guardian_accepts_valid_config() {
     let guardian = ToolGuardian::new(
         vec![PathBuf::from("/tmp")],

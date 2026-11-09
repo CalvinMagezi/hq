@@ -716,7 +716,12 @@ pub fn create_router(state: Arc<WsState>) -> Router {
     let router = match github_connect_api::flow_for(&state) {
         Some(flow) => router
             .merge(github_connect_api::browser_routes(flow.clone()))
-            .merge(github_connect_api::owner_routes(flow)),
+            .merge(github_connect_api::owner_routes(flow).route_layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    github_connect_api::require_sign_in,
+                ),
+            )),
         None => router,
     };
 

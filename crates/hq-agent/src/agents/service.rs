@@ -48,6 +48,8 @@ pub struct AgentService {
     vault_path: PathBuf,
     /// The service's own path allowlist. Child overrides must stay within it.
     allowed_paths: Vec<PathBuf>,
+    /// A child was limited to `allowed_paths`, so its own children get no `$HOME` either.
+    confined: bool,
     /// Base session config cloned for each child.
     session_config: SessionConfig,
     /// Security profile applied to every child's governed registry.
@@ -142,6 +144,7 @@ impl AgentService {
             backend_registry: None,
             vault_path,
             allowed_paths,
+            confined: false,
             session_config,
             security_profile,
             permission_mode: PermissionMode::Default,
@@ -212,8 +215,12 @@ impl AgentService {
     }
 
     /// The guardian for one child: the service's profile and permission mode over the child's paths.
-    fn child_guardian(&self, allowed_paths: Vec<PathBuf>) -> ToolGuardian {
-        let mut guardian = ToolGuardian::new(
+    fn child_guardian(&self, allowed_paths: Vec<PathBuf>, confined: bool) -> ToolGuardian {
+        let build = match confined {
+            true => ToolGuardian::confined,
+            false => ToolGuardian::new,
+        };
+        let mut guardian = build(
             allowed_paths,
             self.security_profile.clone(),
             self.permission_mode.clone(),
@@ -484,7 +491,12 @@ impl AgentService {
         let available: Vec<String> = match resolution.executor {
             ResolvedExecutor::External(_) => Vec::new(),
             ResolvedExecutor::InProcess => self
-                .build_inprocess_tools(&self.session_config, &self.provider)
+                .build_inprocess_tools(
+                    &self.session_config,
+                    &self.provider,
+                    &self.allowed_paths,
+                    self.confined,
+                )
                 .iter()
                 .map(|t| t.name().to_string())
                 .collect(),
@@ -668,7 +680,8 @@ impl AgentService {
         // Tools: in-process children get the full HQ coding tool set (plus a
         // recursion-guarded spawn_subagents tool); external children run
         // tool-free (pure reasoning/drafting).
-        let mut guardian = self.child_guardian(resolution.allowed_paths.clone());
+        let confined = self.confined || req.allowed_paths.is_some();
+        let mut guardian = self.child_guardian(resolution.allowed_paths.clone(), confined);
         guardian.set_denial_notifier(crate::builder::inbox_denial_notifier(
             self.vault_path.clone(),
         ));
@@ -676,7 +689,12 @@ impl AgentService {
         let mut tools = if external {
             Vec::new()
         } else {
-            self.build_inprocess_tools(&child_config, &provider)
+            self.build_inprocess_tools(
+                &child_config,
+                &provider,
+                &resolution.allowed_paths,
+                confined,
+            )
         };
         // External children are tool-free, so a catalog they cannot load from is noise.
         let skill_index = (!external)
@@ -766,6 +784,8 @@ impl AgentService {
         &self,
         child_config: &SessionConfig,
         provider: &Arc<dyn LlmProvider>,
+        allowed_paths: &[PathBuf],
+        confined: bool,
     ) -> Vec<Box<dyn crate::tools::AgentTool>> {
         let state_cache = hq_tools::file_edit::FileStateCache::default();
         let history = hq_tools::file_edit::FileHistory::default();
@@ -805,6 +825,9 @@ impl AgentService {
         let child_service = self.child_service();
         if child_service.can_spawn() {
             let mut recursive = child_service;
+            // A confined child's own children can reach no further than it can.
+            recursive.allowed_paths = allowed_paths.to_vec();
+            recursive.confined = confined;
             recursive.session_config = child_config.clone();
             recursive.provider = provider.clone();
             tools.push(Box::new(super::tool::SpawnSubagentsTool::new(Arc::new(

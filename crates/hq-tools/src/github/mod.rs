@@ -549,7 +549,8 @@ async fn app_token(
     }
     match app.token(repo, step).await {
         Ok(token) => Ok(Some(token)),
-        Err(e) if e.downcast_ref::<app::TokenRefused>().is_some() => Ok(None),
+        // Only "not one of yours" may fall through to a public read; "Reconnect" must be heard.
+        Err(e) if matches!(e.downcast_ref(), Some(app::TokenRefused::NotCovered(_))) => Ok(None),
         Err(e) => Err(e),
     }
 }

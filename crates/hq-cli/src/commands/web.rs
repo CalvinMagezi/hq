@@ -198,8 +198,13 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
     hq_agent::install_ledger(db.clone());
     super::skills::sync_builtin_at_start(config);
     starting.progress.at(STEP_LOADING);
+    // GitHub's return address is built from this, so it must be the port actually served.
+    let served = HqConfig {
+        ws_port: port,
+        ..config.clone()
+    };
     let state =
-        super::start::build_web_state(config, &vault, &db, Some(static_dir.clone()), token, &bind);
+        super::start::build_web_state(&served, &vault, &db, Some(static_dir.clone()), token, &bind);
     starting.progress.at(STEP_ALMOST_READY);
     starting.ready(hq_web::create_router(state));
 

@@ -113,6 +113,21 @@ async fn the_browser_routes_are_reachable_but_do_nothing_without_a_flow() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
+#[tokio::test]
+async fn with_sign_in_off_nothing_can_change_the_connection() {
+    let vault = TempDir::new().unwrap();
+    let app = crate::create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+    for uri in [
+        "/api/github/connect",
+        "/api/github/first-task",
+        "/api/github/repos/confirm",
+    ] {
+        let request = local("POST", uri).body(Body::empty()).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{uri}");
+    }
+}
+
 #[test]
 fn lite_serves_none_of_the_owner_routes() {
     for (_, uri) in OWNER_ROUTES {

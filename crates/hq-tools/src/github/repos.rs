@@ -30,12 +30,18 @@ const PREVIEW_FILES: [&str; 6] = [
     "wrangler.jsonc",
 ];
 
+// GitHub's expressions ignore case.
 static SECRET_REF: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*['"]([^'"]+)['"]\s*\])"#)
+    Regex::new(r#"(?i)\bsecrets\s*(?:\.\s*([A-Za-z_][A-Za-z0-9_]*)|\[\s*['"]([^'"]+)['"]\s*\])"#)
         .unwrap()
 });
-static EVERY_SECRET: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bsecrets\s*:\s*inherit\b|\btoJSON\(\s*secrets\s*\)").unwrap());
+/// A computed index such as `secrets[matrix.name]` can reach any secret.
+static EVERY_SECRET: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)\bsecrets\s*:\s*inherit\b|\btoJSON\(\s*secrets\s*\)|\bsecrets\s*\[\s*[^'"\s]"#,
+    )
+    .unwrap()
+});
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoReport {
@@ -272,23 +278,15 @@ impl AppClient {
         Ok(true)
     }
 
-    /// Refuses work on a flagged repository the owner has not confirmed. One HQ has never seen
-    /// (added on GitHub after the last scan) is read first, so new repositories are covered too.
+    /// Refuses work on a flagged repository the owner has not confirmed. Read afresh every time,
+    /// so a workflow that gained a secret since the last scan, or a repository added since, counts.
     pub async fn ensure_picked(&self, repo: &str) -> Result<()> {
+        let mut report = self.first_look(repo).await?;
         let mut reports = self.repositories();
-        let known = reports
-            .iter()
-            .find(|r| r.repo.eq_ignore_ascii_case(repo))
-            .cloned();
-        let report = match known {
-            Some(report) => report,
-            None => {
-                let report = self.first_look(repo).await?;
-                reports.push(report.clone());
-                self.save_repositories(&reports)?;
-                report
-            }
-        };
+        report.confirmed = confirmation_holds(&reports, &report);
+        reports.retain(|r| !r.repo.eq_ignore_ascii_case(repo));
+        reports.push(report.clone());
+        self.save_repositories(&reports)?;
         if !report.picked() {
             return Err(TokenRefused::NeedsConfirmation(repo.to_string()).into());
         }
@@ -314,12 +312,14 @@ impl AppClient {
 
 /// A confirmation covers what the owner saw; a new secret or preview asks again.
 fn confirmation_holds(before: &[RepoReport], now: &RepoReport) -> bool {
-    before.iter().any(|old| {
-        old.confirmed
-            && old.repo == now.repo
-            && now.secrets.iter().all(|s| old.secrets.contains(s))
-            && now.previews.iter().all(|p| old.previews.contains(p))
-    })
+    // A failed read shows no secrets, which says nothing about whether there are any.
+    !now.unchecked
+        && before.iter().any(|old| {
+            old.confirmed
+                && old.repo == now.repo
+                && now.secrets.iter().all(|s| old.secrets.contains(s))
+                && now.previews.iter().all(|p| old.previews.contains(p))
+        })
 }
 
 #[cfg(test)]
