@@ -18,7 +18,7 @@ then adds a short summary and proposed tags.
 | The fetch reaches the local network | The SSRF checks of `web_fetch` apply, redirects included. |
 | The summary is trusted later | Recorded as written by `link-capture`, not the owner. Reading a vault note taints a session. |
 | The owner's edit is overwritten | The note's hash is checked after the fetch and again right before the write. |
-| Runaway cost | Three per run, fifty tries a day, three attempts per link. Data saver stops the task. |
+| Runaway cost | Three per run, fifty tries a day, three attempts per link. Data saver leaves it on, because it only runs for a link the owner just shared. |
 | Page text goes to the AI provider | Only for a link the owner shared, and "Summarize links you share" turns it off. |
 
 Not built: accepting a proposed tag with one tap, and sharing from the web app. Proposed tags are
