@@ -638,9 +638,34 @@ pub(crate) async fn note_create_handler(
             index_web_note(&state, &path, content);
             record_owner_write(&state, &path);
             let rel = rel_to_vault(&state.vault_path, &path);
+            if let Some(url) = body.get("enrich_url").and_then(Value::as_str) {
+                queue_link_capture(&state, &path, &rel, url);
+            }
             Json(json!({"success": true, "path": rel})).into_response()
         }
         Err(e) => ApiError::internal(e).into_response(),
+    }
+}
+
+/// Puts a link the owner shared on the queue for its summary. The note is already saved, so a
+/// refused or unqueued link only means it stays a plain note.
+fn queue_link_capture(state: &WsState, abs: &Path, rel: &str, url: &str) {
+    let on = state
+        .hq_config
+        .as_deref()
+        .is_none_or(|c| c.daemon.link_capture);
+    if !on || state.profile().is_lite() || !hq_tools::link_capture::acceptable_url(url) {
+        return;
+    }
+    let Ok(raw) = std::fs::read_to_string(abs) else {
+        return;
+    };
+    let hash = hq_db::search::content_hash(&raw);
+    if let Err(e) = state
+        .db
+        .with_conn(|c| hq_db::link_captures::enqueue(c, rel, url, &hash))
+    {
+        tracing::warn!(error = %e, "notes: could not queue the shared link");
     }
 }
 

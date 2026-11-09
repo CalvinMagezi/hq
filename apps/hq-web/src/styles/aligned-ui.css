@@ -286,6 +286,7 @@ a.a-card:hover,button.a-card:hover{border-color:var(--line)}
 .a-btn.quiet.danger{background:transparent;border-color:transparent;color:var(--danger)}
 .a-btn.quiet.danger:hover{background:var(--surface-100)}
 .a-btn.compact{min-height:44px;padding:0 16px}
+.a-btn:not(.secondary):not(.tonal):not(.quiet):not(.danger) .a-kbd{color:var(--on-green);border-color:currentColor}
 .a-btn.block{display:flex;width:100%}
 .a-btn:disabled,.a-btn[aria-disabled="true"]{opacity:.5;cursor:not-allowed}
 .a-btn:disabled:hover{background:var(--brand-green)}

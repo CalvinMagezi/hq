@@ -23,6 +23,21 @@ class AssistantWordsTest {
         assertEquals("On · hold Home to ask", s(true, true, MicFact.NotAsked, true))
     }
 
+    @Test fun theMicrophoneCanAlwaysBeAskedForAgain() {
+        assertEquals(MicAction.None, AssistantWords.micAction(MicFact.Allowed, blocked = false))
+        assertEquals(MicAction.Allow, AssistantWords.micAction(MicFact.NotAsked, blocked = false))
+        assertEquals(MicAction.AskAgain, AssistantWords.micAction(MicFact.Off, blocked = false))
+        // Android answered without its dialog: App info is the only way left.
+        assertEquals(MicAction.AppInfo, AssistantWords.micAction(MicFact.Off, blocked = true))
+        assertEquals(MicAction.None, AssistantWords.micAction(MicFact.Allowed, blocked = true))
+    }
+
+    @Test fun comingBackFromAndroidSettingsSaysWhetherItWorked() {
+        assertEquals(null, AssistantWords.afterSettings(wentToSettings = false, held = false))
+        assertEquals("HQ is now your phone's assistant. Hold Home on any screen to ask.", w.s(AssistantWords.afterSettings(true, true)!!))
+        assertEquals("HQ is not the assistant yet. In Android's list, choose AgentHQ, then tap OK.", w.s(AssistantWords.afterSettings(true, false)!!))
+    }
+
     @Test fun onlyTheMicrophoneWarns() {
         assertTrue(AssistantWords.warn(true, true, MicFact.Off))
         assertFalse(AssistantWords.warn(true, false, MicFact.Off))

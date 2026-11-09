@@ -594,8 +594,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** Makes a new note and returns its vault path; the title only names the file. */
-    suspend fun createNote(folder: String, title: String, content: String, clientId: String? = null): String =
-        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).apply { clientId?.let { put("client_id", it) } }.toString().toRequestBody("application/json".toMediaType())).build()) {
+    suspend fun createNote(folder: String, title: String, content: String, clientId: String? = null, enrichUrl: String? = null): String =
+        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).apply { clientId?.let { put("client_id", it) }; enrichUrl?.let { put("enrich_url", it) } }.toString().toRequestBody("application/json".toMediaType())).build()) {
             JSONObject(it).getString("path")
         }
 
@@ -603,6 +603,32 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun postJson(path: String, body: JSONObject = JSONObject()): JSONObject = send(authed(path).post(json(body)).build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
 
     suspend fun deleteAt(path: String) { send(authed(path).delete().build()) { } }
+
+    data class TrashedNote(val trashPath: String, val originalPath: String, val trashedOn: String, val daysLeft: Int)
+
+    suspend fun deleteNote(path: String): String =
+        send(authed("/api/note?path=${java.net.URLEncoder.encode(path, "UTF-8")}").delete().build()) {
+            JSONObject(it).getString("trash_path")
+        }
+
+    suspend fun trash(): Pair<List<TrashedNote>, Int> =
+        send(authed("/api/note/trash").build()) { text ->
+            val json = JSONObject(text)
+            val items = json.optJSONArray("items").objects().map {
+                TrashedNote(it.getString("trash_path"), it.getString("original_path"), it.getString("trashed_on"), it.optInt("days_left", 0))
+            }
+            items to json.optInt("retention_days", 30)
+        }
+
+    suspend fun trashedText(trashPath: String): String =
+        send(authed("/api/note/trash/read?path=${java.net.URLEncoder.encode(trashPath, "UTF-8")}").build()) {
+            JSONObject(it).getString("content")
+        }
+
+    suspend fun restoreNote(trashPath: String): String =
+        send(authed("/api/note/trash/restore").post(JSONObject().put("trash_path", trashPath).toString().toRequestBody("application/json".toMediaType())).build()) {
+            JSONObject(it).getString("path")
+        }
 
     /** Checks an AI provider key with one small call to the provider and, if it works, stores it. 400 means the key was refused, 409 that the environment sets it. */
     suspend fun setProviderKey(provider: String, key: String) {

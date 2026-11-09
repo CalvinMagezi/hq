@@ -1,7 +1,7 @@
 // Vault reads as React Query queries, so they persist on the device and paint
 // instantly on the next visit.
 import { queryOptions } from '@tanstack/react-query'
-import { getNote, getNoteTree, getPinnedNotes, getVaultSignals } from './vaultApi'
+import { getNote, getNoteTree, getPinnedNotes, getVaultSignals, listTrash } from './vaultApi'
 
 export const vaultKeys = {
   all: ['vault'] as const,
@@ -9,8 +9,10 @@ export const vaultKeys = {
   pinned: ['vault', 'pinned'] as const,
   tree: (root: string) => ['vault', 'tree', root] as const,
   note: (path: string) => ['vault', 'note', path] as const,
+  trash: ['vault', 'trash'] as const,
 }
 
+export const trashQuery = queryOptions({ queryKey: vaultKeys.trash, queryFn: listTrash })
 export const vaultSignalsQuery = queryOptions({ queryKey: vaultKeys.signals, queryFn: getVaultSignals })
 export const pinnedNotesQuery = queryOptions({ queryKey: vaultKeys.pinned, queryFn: getPinnedNotes })
 export const noteTreeQuery = (root: string) =>

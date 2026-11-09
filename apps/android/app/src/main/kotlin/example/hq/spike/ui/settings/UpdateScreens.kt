@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +33,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import example.hq.spike.R
 import example.hq.spike.download.DlState
@@ -59,10 +62,14 @@ private fun waitingManifest(s: UpdateState): ChannelManifest? = when (s) {
     else -> Updater.manifestOf(s)
 }
 
+/** The version the card and the line offer: one that is ready, not put off with "Not now", and not stuck on a problem other than install permission. */
+internal fun readyManifest(ui: SettingsUi): ChannelManifest? =
+    waitingManifest(ui.update)?.takeIf { !ui.updateHidden && ui.update !is UpdateState.Problem || (ui.update as? UpdateState.Problem)?.kind == ProblemKind.NotAllowed }
+
 /** The Home card for a version that is ready. It is out of the way while "Not now" holds, and gone once the version is installed. */
 @Composable
 internal fun UpdateCard(ui: SettingsUi, actions: SettingsActions) {
-    val m = waitingManifest(ui.update)?.takeIf { !ui.updateHidden && ui.update !is UpdateState.Problem || (ui.update as? UpdateState.Problem)?.kind == ProblemKind.NotAllowed } ?: return
+    val m = readyManifest(ui) ?: return
     val w = rememberWords()
     val shape = RoundedCornerShape(12.dp)
     Column(
@@ -74,6 +81,35 @@ internal fun UpdateCard(ui: SettingsUi, actions: SettingsActions) {
         CardButton(stringResource(R.string.upd_card_see), true) { actions.onPage(SettingsPage.Update) }
         if (ui.backup.saveCopyOn) CardButton(stringResource(R.string.upd_card_save_copy), false) { actions.onPage(SettingsPage.About) }
     }
+}
+
+/**
+ * The line under the top bar on every place while a version is ready, so nobody has to open Settings to find it. Update
+ * opens the Update page; Not now puts it (and the Settings card) off for seven days, or until a newer version.
+ */
+@Composable
+fun UpdateLine(ui: SettingsUi, onUpdate: () -> Unit, onNotNow: () -> Unit) {
+    val m = readyManifest(ui) ?: return
+    Row(
+        Modifier.fillMaxWidth().background(Mts.Surface100).padding(start = 16.dp, end = 4.dp).heightIn(min = 48.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).background(Mts.BrandBlue, CircleShape))
+        Text(
+            stringResource(R.string.upd_line_ready, m.version), style = HqType.BodySm, color = Mts.Ink,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 8.dp),
+        )
+        LineButton(stringResource(R.string.confirm_not_now), Mts.InkMuted, onNotNow)
+        LineButton(stringResource(R.string.upd_line_update), Mts.BrandGreen, onUpdate)
+    }
+}
+
+@Composable
+private fun LineButton(label: String, ink: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Box(
+        Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(24.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, style = HqType.BodySmBold, color = ink) }
 }
 
 /** The card for a build that was pulled after it was installed: it says so and opens the page that has the fix. */

@@ -28,6 +28,27 @@ object AssistantWords {
         },
     )
 
+    /**
+     * The microphone button under the facts. Not asked yet: Android's dialog. Off: ask again, because a first
+     * "Don't allow" still lets Android ask once more. Once Android answered without showing its dialog, only App info
+     * can turn it on.
+     */
+    fun micAction(mic: MicFact, blocked: Boolean): MicAction = when {
+        mic == MicFact.Allowed -> MicAction.None
+        blocked -> MicAction.AppInfo
+        mic == MicFact.NotAsked -> MicAction.Allow
+        else -> MicAction.AskAgain
+    }
+
+    /** What the page says after the owner went to Android's settings to choose the assistant; nothing before that. */
+    fun afterSettings(wentToSettings: Boolean, held: Boolean): Int? = when {
+        !wentToSettings -> null
+        held -> R.string.assist_now_set
+        else -> R.string.assist_not_set_yet
+    }
+
     /** Android 10 and later call the setting Digital assistant app; 8 and 9 call it Assist app. */
     fun firstStep(sdk: Int): Int = if (sdk >= 29) R.string.assist_step_digital else R.string.assist_step_assist
 }
+
+enum class MicAction { None, Allow, AskAgain, AppInfo }

@@ -41,6 +41,14 @@ pub struct DaemonConfig {
     #[serde(default)]
     pub memory_extraction: MemoryExtraction,
 
+    /// A weekly inbox item bringing up one saved note that matches open tasks. No model is used.
+    #[serde(default = "default_true")]
+    pub collection_tip: bool,
+
+    /// Summarise links the owner shares into a note. Page text goes to the configured model.
+    #[serde(default = "default_true")]
+    pub link_capture: bool,
+
     /// A weekly inbox digest of recurring tool failures. Reads local telemetry only.
     #[serde(default = "default_true")]
     pub tool_failure_digest: bool,
@@ -89,6 +97,8 @@ impl Default for DaemonConfig {
             embedding_interval_secs: default_embed_interval(),
             embedding_provider: EmbeddingProvider::default(),
             memory_extraction: MemoryExtraction::default(),
+            collection_tip: true,
+            link_capture: true,
             tool_failure_digest: true,
             adoption_digest: true,
         }

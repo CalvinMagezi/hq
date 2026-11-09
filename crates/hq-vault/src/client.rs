@@ -107,6 +107,33 @@ impl VaultClient {
         crate::reorg::trash_note(&self.vault_path, rel_path, dry_run)
     }
 
+    /// The notes in the trash, newest first.
+    pub fn list_trash(&self) -> Result<Vec<crate::reorg::TrashedNote>> {
+        crate::reorg::list_trash(&self.vault_path)
+    }
+
+    /// The text of a note in the trash.
+    pub fn read_trashed(&self, trash_rel: &str) -> Result<String> {
+        crate::reorg::read_trashed(&self.vault_path, trash_rel)
+    }
+
+    /// Put a trashed note back, never over another note.
+    pub fn restore_note(&self, trash_rel: &str) -> Result<crate::reorg::RestoredNote> {
+        crate::reorg::restore_note(&self.vault_path, trash_rel)
+    }
+
+    /// Set frontmatter keys, add a tag and put `prefix` above the body of `raw`, in one atomic write.
+    pub fn prepend_to_note(
+        &self,
+        rel_path: &str,
+        raw: &str,
+        set: HashMap<String, serde_yaml::Value>,
+        tag: &str,
+        prefix: &str,
+    ) -> Result<()> {
+        crate::reorg::prepend_to_note(&self.vault_path, rel_path, raw, set, tag, prefix)
+    }
+
     /// Set and/or remove frontmatter keys on a note, preserving the body.
     pub fn update_frontmatter(
         &self,

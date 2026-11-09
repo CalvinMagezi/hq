@@ -58,6 +58,29 @@ class UpdateAndDataPagesTest {
         assertEquals(listOf(SettingsPage.Update), pages)
     }
 
+    @Test fun theLineUnderTheBarSaysAVersionIsReadyAndOpensTheUpdatePage() {
+        var updates = 0
+        var notNow = 0
+        rule.setContent { HqTheme { UpdateLine(SettingsUi(update = UpdateState.Available(manifest)), { updates++ }, { notNow++ }) } }
+        rule.onNodeWithText("AgentHQ 1.4.0 is ready to install").assertIsDisplayed()
+        rule.onNodeWithText("Update").performClick()
+        rule.onNodeWithText("Not now").performClick()
+        assertEquals(1, updates)
+        assertEquals(1, notNow)
+    }
+
+    @Test fun theLineStaysAwayWhileNotNowHoldsAndWhenNothingIsReady() {
+        rule.setContent {
+            HqTheme {
+                androidx.compose.foundation.layout.Column {
+                    UpdateLine(SettingsUi(update = UpdateState.Available(manifest), updateHidden = true), {}, {})
+                    UpdateLine(SettingsUi(update = UpdateState.UpToDate), {}, {})
+                }
+            }
+        }
+        rule.onAllNodesWithText("AgentHQ 1.4.0 is ready to install").assertCountEquals(0)
+    }
+
     @Test fun mobileDataAsksAboutAnyNetworkAndCanForgetWifi() {
         val asked = mutableListOf<Boolean>()
         var forgot = 0

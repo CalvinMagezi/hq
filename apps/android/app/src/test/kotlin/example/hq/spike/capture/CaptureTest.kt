@@ -6,6 +6,11 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class CaptureTest {
+    @org.junit.Test fun aSharedLinkAsksForASummaryAndAPlainNoteDoesNot() {
+        org.junit.Assert.assertEquals("https://example.com/a", CaptureWords.noteBody("Notebooks/Inbox", "T", "b", "https://example.com/a").getString("enrich_url"))
+        org.junit.Assert.assertFalse(CaptureWords.noteBody("Notebooks/Inbox", "T", "b").has("enrich_url"))
+    }
+
     @Test fun aSharedLinkGetsAPreviewWithoutTheSchemeOrWww() {
         val p = CaptureWords.preview("Why Compose beat the WebView for chat", "https://www.example.com/compose-chat")!!
         assertEquals("Why Compose beat the WebView for chat", p.title)

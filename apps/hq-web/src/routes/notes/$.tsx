@@ -4,11 +4,11 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileQuestion } from 'lucide-react'
-import { fetchNoteExport, togglePinNote, type DirEntry, type NoteTreeNode } from '~/lib/vaultApi'
+import { deleteNote, fetchNoteExport, restoreNote, togglePinNote, type DirEntry, type NoteTreeNode } from '~/lib/vaultApi'
 import { exportFileName, exportGate, exportKeys, exportOptionsFor, type NoteExportFormat } from '~/lib/noteExport'
 import { t } from '~/strings'
 import { Dialog, workingLabel } from '~/components/ui/Dialog'
-import { toastNotice, useToasts } from '~/lib/toast'
+import { toastAlert, toastNotice, toastUndo, useToasts } from '~/lib/toast'
 import { isSharedComputer } from '~/lib/sharedComputer'
 import { useInHub } from '~/lib/hubWindow'
 import { useEdition } from '~/lib/edition'
@@ -153,6 +153,26 @@ function VaultFileView({ filePath, content, hash }: {
             queryClient.invalidateQueries({ queryKey: vaultKeys.pinned })
         } finally {
             setPinning(false)
+        }
+    }
+
+    // No question first: the note goes to the Trash, and Undo or the Trash page brings it back.
+    const handleDelete = async () => {
+        try {
+            const { trash_path: trashPath } = await deleteNote(filePath)
+            void queryClient.invalidateQueries({ queryKey: vaultKeys.all })
+            toastUndo(
+                t('note_deleted'),
+                async () => {
+                    await restoreNote(trashPath)
+                    void queryClient.invalidateQueries({ queryKey: vaultKeys.all })
+                },
+                t('note_restored'),
+                'undo.note_deleted',
+            )
+            void navigate({ to: '/notes' })
+        } catch {
+            toastAlert(t('note_delete_failed'))
         }
     }
 
@@ -380,6 +400,7 @@ ${safeHtml}
                             lite={lite}
                             onTask={handleConvertToTask}
                             onPin={handleTogglePin}
+                            onDelete={() => void handleDelete()}
                             onExport={(e) => {
                                 const rect = e.currentTarget.getBoundingClientRect()
                                 setExportMenu({ x: rect.left, y: rect.bottom + 6 })

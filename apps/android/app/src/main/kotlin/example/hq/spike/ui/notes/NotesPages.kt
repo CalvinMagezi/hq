@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import example.hq.spike.R
 import example.hq.spike.ui.shell.ConfirmCopy
@@ -102,6 +103,7 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
                 is NotesRoute.Reader -> ReaderPage(ui, actions, onAskHq)
                 is NotesRoute.Folder -> FolderPage(ui, actions)
                 is NotesRoute.Write -> ui.write?.let { WritePage(it, ui.folders, actions) }
+                is NotesRoute.Trash -> TrashPage(ui, actions)
             }
         }
     }
@@ -112,10 +114,16 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
             NoteMenuActions(
                 onClose = { actions.onMenu(false) }, onEdit = actions.onEdit, onTogglePin = actions.onTogglePin,
                 onAsk = { onAskHq(listOf(ready.note.path to ready.note.title)) }, onExport = actions.onExport, onNotice = actions.onNotice,
+                onDelete = actions.onDelete,
             ),
         )
     }
     ui.export?.let { ExportOverlay(it, ExportActions(actions.onExportFormat, actions.onExportClose, actions.onExportAgain, actions.onNotice)) }
+    if (ui.undoDelete != null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            example.hq.spike.ui.shell.UndoSnackbar(ui.undoText ?: "", actions.onUndoDelete, Modifier.navigationBarsPadding())
+        }
+    }
     ui.notice?.let { NotesSnack(it.text, actions.onDismissNotice, Modifier.fillMaxSize()) }
 }
 
@@ -289,6 +297,63 @@ private fun SubFolders(folders: List<Pair<String, Int>>, onOpen: (String) -> Uni
                 Text(path.substringAfterLast('/'), style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Text("$count", style = HqType.BodySm, color = Mts.InkMuted)
                 Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrashPage(ui: NotesUi, actions: NotesActions) {
+    val trash = ui.trash
+    Column(Modifier.fillMaxSize()) {
+        TopBar(stringResource(R.string.notes_trash), null, actions.onBack)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)) {
+            item {
+                Text(stringResource(R.string.trash_intro, trash.retentionDays), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
+            }
+            if (trash.failed) {
+                item { Text(stringResource(R.string.trash_load_failed), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            } else if (trash.loaded && trash.items.isEmpty()) {
+                item { Text(stringResource(R.string.trash_empty), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            }
+            items(trash.items, key = { it.trashPath }) { item ->
+                val name = item.originalPath.substringAfterLast('/').removeSuffix(".md")
+                val trail = NoteRefs.folderTrail(item.originalPath).ifEmpty { stringResource(R.string.notes_your_notes) }
+                val left = if (item.daysLeft > 0) pluralStringResource(R.plurals.trash_days_left, item.daysLeft, item.daysLeft) else stringResource(R.string.trash_last_day)
+                val line = stringResource(R.string.trash_line, trail, item.trashedOn) + " · " + left
+                val isOpen = item.trashPath in trash.open
+                val isBusy = item.trashPath in trash.busy
+                Column(
+                    Modifier.fillMaxWidth().drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Text(name, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(line, style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(top = 2.dp))
+                    Row(
+                        Modifier.padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { actions.onToggleTrashed(item.trashPath) }.padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(stringResource(if (isOpen) R.string.trash_hide else R.string.trash_view), style = HqType.BodySmBold, color = Mts.BrandBlue)
+                        }
+                        Box(
+                            Modifier.heightIn(min = 48.dp).clickable(enabled = !isBusy, role = Role.Button) { actions.onRestore(item.trashPath) }.padding(horizontal = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(stringResource(R.string.trash_restore), style = HqType.BodySmBold, color = if (isBusy) Mts.InkMuted else Mts.BrandBlue)
+                        }
+                    }
+                    if (isOpen) {
+                        val text = trash.open[item.trashPath]
+                        if (text != null) {
+                            Text(text, style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                }
             }
         }
     }

@@ -26,18 +26,20 @@ export function PinnedCard({ note, onKeepPin, onNotNow }: PinnedCardProps) {
         </span>
       </Link>
       {suggested && (
-        <div className="a-chips">
+        <div className="an-sug-foot">
           <span className="a-body-sm a-muted">{t('pin_suggested_by', { name: note.suggestedBy ?? '' })}</span>
-          {onKeepPin && (
-            <button type="button" className="a-btn compact" onClick={() => onKeepPin(note.path)}>
-              {t('pin_keep')}
-            </button>
-          )}
-          {onNotNow && (
-            <button type="button" className="a-btn compact" onClick={() => onNotNow(note.path)}>
-              {t('pin_not_now')}
-            </button>
-          )}
+          <div className="a-btns">
+            {onKeepPin && (
+              <button type="button" className="a-btn" onClick={() => onKeepPin(note.path)}>
+                {t('pin_keep')}
+              </button>
+            )}
+            {onNotNow && (
+              <button type="button" className="a-btn secondary" onClick={() => onNotNow(note.path)}>
+                {t('pin_not_now')}
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
