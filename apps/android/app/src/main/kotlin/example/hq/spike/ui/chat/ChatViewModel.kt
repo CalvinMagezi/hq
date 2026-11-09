@@ -82,6 +82,7 @@ class ChatActions(
     val onExportAgain: () -> Unit = {},
     /** Answers the offer under a reply: the reply's id, and Yes or Not now. */
     val onOffer: (String, Boolean) -> Unit = { _, _ -> },
+    val onScheduleOffer: (String, Long) -> Unit = { _, _ -> },
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -123,7 +124,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onRegenerate = ::regenerate, onEditResend = ::editResend, onCancelEdit = { _state.update { s -> s.copy(editing = null, draft = "", files = s.files.filter { it.uri.isNotEmpty() }) } },
         onNoteMenu = { open -> _state.update { it.copy(noteMenu = open) } }, onTogglePin = ::togglePin,
         onExport = { _state.value.note?.let { n -> _state.update { it.copy(noteMenu = false) }; exporter.choose(n.path, n.title, n.body) } }, onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
-        onLoadOlder = ::loadOlder, onOffer = ::answerOffer, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
+        onLoadOlder = ::loadOlder, onOffer = ::answerOffer, onScheduleOffer = ::scheduleOffer, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
     )
 
     init {
@@ -360,6 +361,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (offer.send && s.connected && !s.running) submit(offer.reply, replaceFrom = null, files = emptyList(), contexts = emptyList()) else setDraft(offer.reply)
     }
 
+    /** Hides the line at once; the person is told whether it was scheduled. */
+    private fun scheduleOffer(id: String, at: Long) {
+        _state.update { s -> s.copy(messages = s.messages.map { if (it.id == id) it.copy(offer = null) else it }) }
+        viewModelScope.launch {
+            val saved = try {
+                client.postJson("/api/offers/answer", org.json.JSONObject().put("message_id", id).put("answer", "scheduled").put("at", at))
+                true
+            } catch (e: Exception) {
+                android.util.Log.w("ChatViewModel", "could not schedule an offer", e)
+                false
+            }
+            _state.update { it.copy(notice = Notice(if (saved) OFFER_SCHEDULED else OFFER_NOT_SCHEDULED)) }
+        }
+    }
+
     /** Fetches the note first and opens the sheet when it is in hand, so a chip can say "Opening…" and a missing note never flashes an empty sheet. */
     private fun openNote(path: String) {
         val s = _state.value
@@ -507,6 +523,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val NEW_CHAT_KEY = "new"
         const val MAX_ATTACHED = 10
         const val NOTE_GONE = "That note is not in your notes any more"
+        const val OFFER_SCHEDULED = "I will bring this back then."
+        const val OFFER_NOT_SCHEDULED = "Could not schedule that. Try again."
         const val CHAT_GONE = "That chat is not in your list"
     }
 }

@@ -263,6 +263,7 @@ const LITE_DAEMON_TASKS: &[&str] = &[
     "db-vacuum",
     "tool-failure-digest",
     "vault-cap-enforcer",
+    "scheduled-offers",
 ];
 
 /// The scheduled tasks `profile: mobile` never runs: only the one that watches the disk, the
@@ -498,6 +499,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("adoption-digest", Duration::from_secs(604800)),
         // Tasks made in chat that are due today or tomorrow, or overdue; acts in waking hours only.
         DaemonTask::with_default_timeout("due-reminders", Duration::from_secs(3600)),
+        // Next steps the owner scheduled, back in their chat at the chosen time.
+        DaemonTask::with_default_timeout("scheduled-offers", Duration::from_secs(60)),
         // Links the owner shared, summarised into their notes; `daemon.link_capture`.
         DaemonTask::with_default_timeout("link-capture", Duration::from_secs(120)),
         // One saved note that matches open tasks, chosen on the device; `daemon.collection_tip`.
@@ -661,6 +664,7 @@ async fn dispatch_task(
         "tool-failure-digest" => tasks_periodic::run_tool_failure_digest(db, config).await,
         "adoption-digest" => tasks_periodic::run_adoption_digest(db, config).await,
         "due-reminders" => tasks_periodic::run_due_reminders(db).await,
+        "scheduled-offers" => tasks_periodic::run_scheduled_offers(db).await,
         "link-capture" => tasks_periodic::run_link_capture(vault_path, db, config).await,
         "collection-tip" => tasks_periodic::run_collection_tip(db, config).await,
 

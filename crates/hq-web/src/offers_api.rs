@@ -13,6 +13,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use hq_core::config::HqConfig;
+use hq_db::offers::{Answer, MAX_SCHEDULE_SECS};
 use hq_tools::capabilities::next_step;
 use hq_tools::capabilities::offers::{TurnInput, TurnOffer, for_turn, ready_detectors};
 use hq_tools::capabilities::{Install, Offer, catalog, resolve, used_tools};
@@ -134,10 +135,29 @@ pub(crate) fn record_shown(db: &hq_db::Database, message_id: &str, kind: &str) {
     }
 }
 
+/// The answer that brings an offer back later instead of taking it now.
+const SCHEDULED: &str = "scheduled";
+
 #[derive(Deserialize)]
 pub(crate) struct AnswerBody {
     message_id: String,
     answer: String,
+    /// When a scheduled offer should come back, in unix seconds.
+    at: Option<i64>,
+}
+
+/// The time a `scheduled` answer asks for, which must be ahead of now and not too far. Other
+/// answers have none.
+fn schedule_time(answer: &str, at: Option<i64>, now: i64) -> Result<Option<i64>, ApiError> {
+    if answer != SCHEDULED {
+        return Ok(None);
+    }
+    match at {
+        Some(due) if due > now && due - now <= MAX_SCHEDULE_SECS => Ok(Some(due)),
+        _ => Err(ApiError::bad_request(
+            "scheduled needs a time ahead of now and within 90 days",
+        )),
+    }
 }
 
 /// `POST /api/offers/answer`: Yes or Not now to the offer under one reply. The offer leaves the
@@ -147,13 +167,21 @@ pub(crate) async fn answer_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<AnswerBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let Some(answer) = hq_db::offers::Answer::parse(&body.answer) else {
-        return Err(ApiError::bad_request("answer is yes or not_now"));
+    let now = chrono::Utc::now().timestamp();
+    let due = schedule_time(&body.answer, body.at, now)?;
+    let answer = match Answer::parse(&body.answer) {
+        Some(answer) => answer,
+        None if due.is_some() => Answer::Yes,
+        None => {
+            return Err(ApiError::bad_request("answer is yes, not_now or scheduled"));
+        }
     };
     let db = state.db.clone();
-    let at = chrono::Utc::now().timestamp();
     let answered = tokio::task::spawn_blocking(move || {
-        db.with_conn(|c| hq_db::offers::answer(c, &body.message_id, answer, at))
+        db.with_conn(|c| match due {
+            Some(due_at) => hq_db::offers::schedule(c, &body.message_id, due_at, now),
+            None => hq_db::offers::answer(c, &body.message_id, answer, now),
+        })
     })
     .await
     .map_err(ApiError::internal)?

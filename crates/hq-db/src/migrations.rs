@@ -438,6 +438,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "120_fetch_site_grants",
         include_str!("../sql/120_fetch_site_grants.sql"),
     ),
+    (
+        "121_offer_schedule",
+        include_str!("../sql/121_offer_schedule.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

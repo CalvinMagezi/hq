@@ -8,6 +8,7 @@ import { CREDITS_TOOLTIP, formatCredits, totalCredits, type StepCredit } from '~
 import { ToolCallBlock } from './ToolCallBlock'
 import { ThinkingPanel } from './ThinkingPanel'
 import { MessageAttachments } from './AttachmentChips'
+import { canSchedule, scheduleChoices } from '~/lib/offersApi'
 import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
@@ -42,13 +43,15 @@ interface Props {
   onRegenerate?: () => void
   /** Answers the offer under this reply. */
   onOffer?: (yes: boolean) => void
+  /** Brings the offer under this reply back at a time, in unix seconds. */
+  onScheduleOffer?: (at: number) => void
 }
 
 /**
  * One chat message. A streaming reply renders through this same layout
  * (thinking, tools, then text), so nothing moves when it becomes a saved message.
  */
-export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffer }: Props) {
+export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffer, onScheduleOffer }: Props) {
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
   const steps = message.toolSteps ?? []
@@ -81,7 +84,7 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffe
           {t('chat_working')}
         </p>
       )}
-      {!isUser && !live && message.offer && onOffer && <OfferLine offer={message.offer} onAnswer={onOffer} />}
+      {!isUser && !live && message.offer && onOffer && <OfferLine offer={message.offer} onAnswer={onOffer} onSchedule={onScheduleOffer} />}
 
       {!live && (
         <div className="a-meta">
@@ -118,7 +121,25 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate, onOffe
 }
 
 /** One thing HQ can also do here, with Yes and Not now. Not a notification: it sits under the reply. */
-function OfferLine({ offer, onAnswer }: { offer: ChatOffer; onAnswer: (yes: boolean) => void }) {
+function OfferLine({ offer, onAnswer, onSchedule }: { offer: ChatOffer; onAnswer: (yes: boolean) => void; onSchedule?: (at: number) => void }) {
+  const [picking, setPicking] = useState(false)
+  if (picking && onSchedule) {
+    return (
+      <div className="hq-offer">
+        <span className="a-body-sm a-muted">{offer.line}</span>
+        <span className="a-btns">
+          {scheduleChoices(new Date()).map((c) => (
+            <button key={c.key} type="button" className="a-btn secondary compact" onClick={() => onSchedule(c.at)}>
+              {t(c.key)}
+            </button>
+          ))}
+          <button type="button" className="a-btn quiet compact" onClick={() => setPicking(false)}>
+            {t('chat_offer_back')}
+          </button>
+        </span>
+      </div>
+    )
+  }
   return (
     <div className="hq-offer">
       <span className="a-body-sm a-muted">{offer.line}</span>
@@ -126,6 +147,11 @@ function OfferLine({ offer, onAnswer }: { offer: ChatOffer; onAnswer: (yes: bool
         <button type="button" className="a-btn secondary compact" onClick={() => onAnswer(true)}>
           {t('chat_offer_yes')}
         </button>
+        {onSchedule && canSchedule(offer) && (
+          <button type="button" className="a-btn secondary compact" onClick={() => setPicking(true)}>
+            {t('chat_offer_schedule')}
+          </button>
+        )}
         <button type="button" className="a-btn quiet compact" onClick={() => onAnswer(false)}>
           {t('chat_offer_not_now')}
         </button>

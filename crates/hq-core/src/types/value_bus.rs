@@ -114,7 +114,13 @@ pub const ADOPTION_DIGEST_SOURCE: &str = "adoption_digest";
 /// relay. See `docs/security/ADOPTION_DATA.md`.
 /// Source name of the weekly item that brings up something the owner saved.
 pub const COLLECTION_TIP_SOURCE: &str = "collection_tip";
-pub const DEVICE_ONLY_SOURCES: &[&str] = &[ADOPTION_DIGEST_SOURCE, COLLECTION_TIP_SOURCE];
+/// Source name of the item that says a step the owner scheduled is back in their chat.
+pub const SCHEDULED_OFFER_SOURCE: &str = "scheduled_offer";
+pub const DEVICE_ONLY_SOURCES: &[&str] = &[
+    ADOPTION_DIGEST_SOURCE,
+    COLLECTION_TIP_SOURCE,
+    SCHEDULED_OFFER_SOURCE,
+];
 
 impl ValueItem {
     pub fn new(
