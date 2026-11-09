@@ -54,7 +54,7 @@ async-openai = "0.27"
 rmcp = { version = "3", features = ["server", "transport-io"] }
 
 # SQLite
-rusqlite = { version = "0.33", features = ["bundled", "vtab"] }
+rusqlite = { version = "0.41", features = ["bundled", "vtab", "fallible_uint"] }
 r2d2 = "0.8"
 
 # Serialization
