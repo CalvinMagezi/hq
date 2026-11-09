@@ -8,6 +8,7 @@ pub mod bridge_setup;
 pub mod chat;
 pub mod chat_search;
 pub mod client_ids;
+pub mod coder_jobs;
 pub mod copilot_usage_samples;
 pub mod dialog_alerts;
 pub mod folder_grants;

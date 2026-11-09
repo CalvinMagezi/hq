@@ -9,10 +9,12 @@ use hq_core::config::HqConfig;
 use hq_core::types::{ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::ask_requests as asks;
+use hq_db::coder_jobs;
 use hq_db::tasks as t;
 use serde_json::json;
 
 use super::app::{AppClient, Standing, standing};
+use crate::ask::AskJob;
 
 /// Tasks carrying this tag are the worker's queue. Its own tag, so tasks that are merely about
 /// the worker are never taken for work by it. Scoped connections may not set it
@@ -26,7 +28,7 @@ const WORKER_SKILL: &str = "edge-coding-worker";
 /// An assignee that marks a task as HQ's own, beside the unassigned ones.
 const HQ_ASSIGNEE: &str = "hq";
 const CALLER: &str = "edge-worker";
-const ASK_TOOL: &str = "hq_ask";
+const STOPPED_WITHOUT_HANDOVER: &str = "HQ's worker stopped without handing the task over";
 /// The ask scope and mode the worker's asks run under.
 const ASK_SCOPE: &str = "full";
 const ASK_MODE: &str = "full";
@@ -116,17 +118,14 @@ pub async fn dispatch_with(
     match db.with_conn(move |c| busy_with(c, ttl))? {
         Busy::On(what) => return Ok(Outcome::Busy(what)),
         Busy::Free(dropped) => {
-            for task in dropped {
-                park(
-                    &db,
-                    &task,
-                    "HQ's worker stopped without handing the task over",
-                )?;
+            for (task, why) in dropped {
+                park(&db, &task, &why)?;
             }
         }
     }
     let repos = allowed_repos(config, app);
-    let candidates = db.with_conn(move |c| candidates(c, &repos))?;
+    let allowed = repos.clone();
+    let candidates = db.with_conn(move |c| candidates(c, &allowed))?;
     if let Some(first) = candidates.first()
         && awaiting_first_confirmation(app)
     {
@@ -148,9 +147,16 @@ pub async fn dispatch_with(
             )?;
             continue;
         }
-        let model = config.github_write.dispatch_model.as_deref();
-        let budget = config.github_write.task_budget_usd;
-        let ask_id = ask_to_work(db.clone(), runner, &task, model, budget).await?;
+        let (job, model) = match open_job(&db, config, &task, &repos).await? {
+            Ok(opened) => opened,
+            Err(why) => {
+                park(&db, &task, &why)?;
+                continue;
+            }
+        };
+        let task_id = task.id.clone();
+        db.with_conn(move |c| coder_jobs::begin_attempt(c, &task_id))?;
+        let ask_id = ask_to_work(db.clone(), runner, &task, model.as_deref(), job).await?;
         return Ok(Outcome::Started {
             task: task.display_id,
             ask_id,
@@ -159,12 +165,99 @@ pub async fn dispatch_with(
     Ok(Outcome::Idle)
 }
 
+/// The job for this task and the model it runs on, or why it cannot start.
+async fn open_job(
+    db: &Arc<Database>,
+    config: &HqConfig,
+    task: &t::Task,
+    repos: &[String],
+) -> Result<std::result::Result<(AskJob, Option<String>), String>> {
+    let job = db.with_conn(|c| {
+        coder_jobs::ensure(
+            c,
+            &coder_jobs::NewJob {
+                task_id: &task.id,
+                repo: named_repo(task, repos).unwrap_or_default(),
+                budget_usd: config.github_write.task_budget_usd,
+                credit_cap: None,
+                model: config.github_write.dispatch_model.as_deref(),
+                origin_thread: None,
+            },
+        )
+    })?;
+    if job.spent_usd >= job.budget_usd {
+        return Ok(Err(budget_words(&job)));
+    }
+    if job
+        .model
+        .as_deref()
+        .is_some_and(|m| !model_is_declared(config, m))
+    {
+        return Ok(Err(format!(
+            "its model '{}' is not an enabled backend",
+            job.model.as_deref().unwrap_or_default()
+        )));
+    }
+    let credit_ceiling = match credit_ceiling(db, &job).await? {
+        Ok(ceiling) => ceiling,
+        Err(why) => return Ok(Err(why)),
+    };
+    let ask_job = AskJob {
+        task_id: job.task_id,
+        budget_usd: job.budget_usd,
+        spent_usd: job.spent_usd,
+        credit_ceiling,
+    };
+    Ok(Ok((ask_job, job.model)))
+}
+
+/// A job with a credit cap needs a starting reading: without one its cap cannot be enforced.
+async fn credit_ceiling(
+    db: &Arc<Database>,
+    job: &coder_jobs::Job,
+) -> Result<std::result::Result<Option<f64>, String>> {
+    if job.credit_cap.is_none() || job.credit_start.is_some() {
+        return Ok(Ok(job.credit_ceiling()));
+    }
+    let reading = hq_llm::copilot_usage::fetch_quota()
+        .await
+        .ok()
+        .filter(|quota| quota.is_metered())
+        .map(|quota| quota.credits_used);
+    let Some(used) = reading else {
+        return Ok(Err(
+            "it has a Copilot credit limit, and HQ could not read the credit counter".into(),
+        ));
+    };
+    db.with_conn(|c| coder_jobs::set_credit_start(c, &job.task_id, used))?;
+    Ok(Ok(job.credit_cap.map(|cap| used + cap)))
+}
+
+fn budget_words(job: &coder_jobs::Job) -> String {
+    format!(
+        "it used its budget of ${:.2} (spent ${:.2})",
+        job.budget_usd, job.spent_usd
+    )
+}
+
+/// Why a job's own limit ended its run, if it did.
+fn stop_words(job: &coder_jobs::Job) -> Option<String> {
+    match job.stop_reason.as_deref()? {
+        coder_jobs::STOP_CREDITS => Some(format!(
+            "it reached its limit of {:.0} Copilot credits",
+            job.credit_cap.unwrap_or_default()
+        )),
+        _ => Some(budget_words(job)),
+    }
+}
+
 /// What the worker is on: a reply still running, or a queue task held under a live lease or
 /// moved to in progress by someone else (the owner working it by hand). `Free` lists the tasks
-/// the worker itself left in progress with nothing running, which are parked, not waited on.
+/// the worker itself left in progress with nothing running, which are parked, not waited on, each
+/// with the reason.
 enum Busy {
     On(String),
-    Free(Vec<t::Task>),
+    Free(Vec<(t::Task, String)>),
 }
 
 fn busy_with(conn: &rusqlite::Connection, ttl: i64) -> Result<Busy> {
@@ -177,10 +270,20 @@ fn busy_with(conn: &rusqlite::Connection, ttl: i64) -> Result<Busy> {
         let worked_by_hq =
             asks::latest_by_external_prefix(conn, ASK_SCOPE, &format!("{CALLER}:{}:", task.id))?
                 .is_some();
-        if !worked_by_hq || t::live_lease(conn, &task.id, ttl)?.is_some() {
+        if !worked_by_hq {
             return Ok(Busy::On(task.display_id));
         }
-        dropped.push(task);
+        let stopped = coder_jobs::get(conn, &task.id)?
+            .as_ref()
+            .and_then(stop_words);
+        if let Some(why) = stopped {
+            dropped.push((task, why));
+            continue;
+        }
+        if t::live_lease(conn, &task.id, ttl)?.is_some() {
+            return Ok(Busy::On(task.display_id));
+        }
+        dropped.push((task, STOPPED_WITHOUT_HANDOVER.to_string()));
     }
     Ok(Busy::Free(dropped))
 }
@@ -216,9 +319,13 @@ fn has_tag(tags: &[String], tag: &str) -> bool {
     tags.iter().any(|g| g.eq_ignore_ascii_case(tag))
 }
 
-/// Whether the task's title or description names an allowed repository as a whole word, so
-/// `o/r` is not found inside `o/r2` or `xo/r`.
 fn names_a_repo(task: &t::Task, repos: &[String]) -> bool {
+    named_repo(task, repos).is_some()
+}
+
+/// The allowed repository the task's title or description names as a whole word, so `o/r` is not
+/// found inside `o/r2` or `xo/r`.
+fn named_repo<'a>(task: &t::Task, repos: &'a [String]) -> Option<&'a str> {
     let text = format!("{}\n{}", task.title, task.description).to_ascii_lowercase();
     let words: Vec<&str> = text
         .split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '_' | '-' | ':')))
@@ -226,7 +333,8 @@ fn names_a_repo(task: &t::Task, repos: &[String]) -> bool {
         .collect();
     repos
         .iter()
-        .any(|r| words.contains(&r.to_ascii_lowercase().as_str()))
+        .find(|r| words.contains(&r.to_ascii_lowercase().as_str()))
+        .map(String::as_str)
 }
 
 /// The `owner/name` a word stands for: itself, or the repository part of a GitHub URL
@@ -255,13 +363,10 @@ async fn ask_to_work(
     runner: crate::ask::RunnerCell,
     task: &t::Task,
     model: Option<&str>,
-    budget_usd: f64,
+    job: AskJob,
 ) -> Result<String> {
-    let tools = crate::ask::create_ask_tools_with(db, runner, None);
-    let ask = tools
-        .iter()
-        .find(|tool| tool.name() == ASK_TOOL)
-        .context("the hq_ask tool is missing")?;
+    let budget_usd = job.budget_usd;
+    let ask = crate::ask::create_worker_ask_tool(db, runner, job);
     let args = json!({
         // The skill is named outright: its hints need not appear in a one-line question.
         "question": format!(

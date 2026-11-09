@@ -907,6 +907,12 @@ impl ChatTurn {
             session.is_live_user_turn = ask.is_live_user_turn();
             // The asker is not the owner typing, so the exchange must not feed skill self-edits.
             session.background_review = false;
+            if let Some(job) = &ask.job {
+                let budget = ask::job_budget(&self.db, job);
+                // A credit limit needs the counter read after every Copilot step.
+                session.copilot_step_credits |= budget.has_credit_ceiling();
+                session.job_budget = Some(budget);
+            }
         }
         session
     }

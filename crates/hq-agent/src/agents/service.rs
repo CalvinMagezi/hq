@@ -673,17 +673,22 @@ impl AgentService {
         let role = req.role();
         let mut child_config = self.session_config.clone();
 
-        // Budget: explicit per-child cap, else a fraction of the parent's.
-        if let Some(cap) = req.max_budget_usd {
+        // Budget: a job's children draw on the job's one limit. Otherwise an explicit per-child
+        // cap, else a fraction of the parent's.
+        match (
+            &child_config.job_budget,
+            req.max_budget_usd,
+            child_config.max_budget_usd,
+        ) {
+            (Some(_), _, _) | (None, None, None) => {}
             // A model-chosen cap may lower the parent's but never raise it, so the owner's
             // per-run ceiling on a background parent holds for every child.
-            child_config.max_budget_usd = Some(
-                child_config
-                    .max_budget_usd
-                    .map_or(cap, |parent| cap.min(parent)),
-            );
-        } else if let Some(parent_cap) = child_config.max_budget_usd {
-            child_config.max_budget_usd = Some(parent_cap * budget_fraction(role));
+            (None, Some(cap), parent) => {
+                child_config.max_budget_usd = Some(parent.map_or(cap, |p| cap.min(p)));
+            }
+            (None, None, Some(parent)) => {
+                child_config.max_budget_usd = Some(parent * budget_fraction(role));
+            }
         }
 
         let external = matches!(resolution.executor, ResolvedExecutor::External(_));

@@ -164,6 +164,9 @@ impl AgentSession {
             return;
         };
         let after = after.await.ok().flatten();
+        if let (Some(job), Some(used)) = (&self.config.job_budget, after) {
+            job.credit_reading(used);
+        }
         let before = match std::mem::replace(&mut tracker.baseline, Baseline::Known(after)) {
             Baseline::Known(v) => v,
             Baseline::Pending(handle) => handle.await.ok().flatten(),

@@ -5,6 +5,7 @@
 
 pub mod context;
 mod credits;
+pub mod job_budget;
 pub mod r#loop;
 pub(crate) mod role_denial;
 pub mod routing;
@@ -71,6 +72,8 @@ pub struct SessionConfig {
     pub is_live_user_turn: bool,
     /// Emit `StepCredits` after each step served by Copilot (web chat only, since it costs one HTTP call per step).
     pub copilot_step_credits: bool,
+    /// Set for a coding job: this turn and its children draw on one limit, `max_budget_usd`.
+    pub job_budget: Option<Arc<job_budget::JobBudget>>,
 }
 
 /// Configuration for self-healing execution (AutoResearchClaw-inspired).
@@ -104,6 +107,7 @@ impl Default for SessionConfig {
             background_review: true,
             is_live_user_turn: false,
             copilot_step_credits: false,
+            job_budget: None,
         }
     }
 }

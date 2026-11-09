@@ -371,12 +371,16 @@ impl AgentSession {
             reasoning: out.reasoning_tokens,
             billed_usd: out.provider_cost_usd,
         };
-        self.total_cost += hq_llm::cost::price_call(
+        let call_usd = hq_llm::cost::price_call(
             hq_llm::cost::ProviderClass::of_name(&out.active_backend).for_session_budget(),
             &resolved_model,
             &usage,
         )
         .usd;
+        self.total_cost += call_usd;
+        if let Some(job) = &self.config.job_budget {
+            job.add(call_usd);
+        }
         // Accounting is session-generated bookkeeping, not backend output.
         self.emit(SessionEvent::CostUpdate {
             total_usd: self.total_cost,
@@ -447,7 +451,19 @@ impl AgentSession {
     /// here (FR-056): a session runs until natural completion, explicit
     /// cancellation, budget exhaustion, or a wall-clock/provider limit.
     pub(super) fn check_limits(&self, last_text: &str) -> Option<SessionResult> {
-        if let Some(budget) = self.config.max_budget_usd
+        if let Some(job) = &self.config.job_budget
+            && let Some(why) = job.stop_now(self.config.max_budget_usd)
+        {
+            let spent = job.spent();
+            warn!(spent, ?why, "coding job stopped by its limit");
+            self.emit(SessionEvent::BudgetExhausted {
+                spent,
+                budget: self.config.max_budget_usd.unwrap_or(spent),
+            });
+            return Some(SessionResult::BudgetExhausted(last_text.to_string()));
+        }
+        if self.config.job_budget.is_none()
+            && let Some(budget) = self.config.max_budget_usd
             && self.total_cost >= budget
         {
             warn!(spent = self.total_cost, budget, "USD budget exhausted");
