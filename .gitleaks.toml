@@ -5,6 +5,10 @@ title = "agent-hq gitleaks config"
 [extend]
 useDefault = true
 
+[[allowlists]]
+description = "A key generated only for the GitHub App unit tests; it signs in nowhere"
+paths = ['''crates/hq-tools/src/github/testdata/test_app_key\.pem''']
+
 # HQ's own secrets: a prefix and 64 hex characters (`hq_db::web_auth`, `bridge_setup`,
 # `session_tokens`, `mcp_connector`, `tasks::leases`). The redactor knows the same shapes
 # (`hq_core::redact`). Telegram bot tokens are covered by the default `telegram-bot-api-token`.

@@ -141,6 +141,18 @@ What this changes in the design:
 - The redirect went to a server reached through `adb reverse`. G7 repeats it against HQ's own
   server on the phone.
 
+Deviations from the plan above, decided while building G1:
+
+- **The App's name is `HQ Coder <6 hex>`, not `HQ Coder (<login>)`.** HQ does not know the login
+  until GitHub has made the App, and a long login would pass GitHub's name limit. The random suffix
+  also removes the "name taken" case. The person can rename it on the page.
+- **`client_secret` is not stored.** Nothing in this design uses it.
+- **On a server, `hq github connect` needs an SSH port forward.** The start page is on the server's
+  loopback too, so a printed link alone cannot reach it. With the forward the return works as on a
+  laptop; pasting the return address remains for a browser that refuses the redirect.
+- **`hq github` is not part of Lite,** which reaches no other service. On Windows the key is never
+  written, because there are no owner-only file modes to protect it; WSL2 works.
+
 ## Secure by default
 
 | Control | Default | Why |

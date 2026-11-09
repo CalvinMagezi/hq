@@ -56,6 +56,7 @@ pub mod bridge_setup;
 #[cfg(all(unix, feature = "bridge"))]
 pub mod claude;
 pub mod connector;
+pub mod github;
 pub mod install;
 pub mod kill;
 pub mod lite;

@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crate::registry::HqTool;
 
+pub mod app;
 mod changes;
 pub mod dispatch;
 mod tarball;

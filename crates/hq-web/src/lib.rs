@@ -17,6 +17,7 @@ mod devices_door;
 mod dialog_answer;
 mod edge_worker_api;
 mod error;
+pub mod github_connect_api;
 pub mod gmail_ingest;
 mod mcp_http;
 mod note_ids;
