@@ -10,6 +10,7 @@ struct Recorder {
     questions: Mutex<Vec<String>>,
     untrusted: Mutex<Vec<bool>>,
     models: Mutex<Vec<Option<String>>>,
+    budgets: Mutex<Vec<Option<f64>>>,
 }
 
 #[async_trait::async_trait]
@@ -29,6 +30,7 @@ impl AskRunner for Recorder {
             .lock()
             .unwrap()
             .push(req.model.map(str::to_string));
+        self.budgets.lock().unwrap().push(req.budget_usd);
         Ok(format!("turn-{}", req.ask_id))
     }
 
@@ -43,6 +45,7 @@ fn chat(db: &Arc<Database>) -> (RunnerCell, Arc<Recorder>) {
         questions: Mutex::new(Vec::new()),
         untrusted: Mutex::new(Vec::new()),
         models: Mutex::new(Vec::new()),
+        budgets: Mutex::new(Vec::new()),
     });
     let cell: RunnerCell = Arc::new(OnceLock::new());
     let as_dyn: Arc<dyn AskRunner> = recorder.clone();
@@ -574,6 +577,18 @@ async fn the_driver_runs_on_the_configured_dispatch_model() {
         *recorder.models.lock().unwrap(),
         [Some("anthropic-haiku".to_string())]
     );
+}
+
+#[tokio::test]
+async fn every_task_runs_under_the_configured_budget() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    let mut config = on();
+    config.github_write.task_budget_usd = 0.2;
+    dispatch(db, &config, cell).await.unwrap();
+    assert_eq!(*recorder.budgets.lock().unwrap(), [Some(0.2)]);
 }
 
 #[tokio::test]

@@ -137,6 +137,19 @@ pub(super) fn settle_finished(
 
 /// Posts the question as a user message and starts HQ's reply. Any error means
 /// nothing was posted and no reply runs.
+/// A reply's own cap, which can only be lower than the owner's.
+fn with_budget(
+    config: Arc<hq_core::config::HqConfig>,
+    budget_usd: Option<f64>,
+) -> Arc<hq_core::config::HqConfig> {
+    let Some(budget) = budget_usd else {
+        return config;
+    };
+    let mut lowered = (*config).clone();
+    lowered.budget.session_cap_usd = lowered.budget.session_cap_usd.min(budget);
+    Arc::new(lowered)
+}
+
 async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<String> {
     let mut turns = state.active_chat_turns.write().await;
     if turns.contains_key(req.thread_id) {
@@ -147,6 +160,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
         .map(Arc::new)
         .or_else(|| state.hq_config.clone())
         .ok_or_else(|| anyhow!("HQ's config could not be read"))?;
+    let config = with_budget(config, req.budget_usd);
     let history = thread_history(&state.db, req.thread_id, &config.context_fold);
     let meta = json!({"source": {
         "kind": "mcp",
@@ -582,6 +596,7 @@ mod tests {
                 scope: AskScope::Full,
                 untrusted: false,
                 model: None,
+                budget_usd: None,
                 caller: "claude-code",
             })
             .await
@@ -653,6 +668,7 @@ mod tests {
                 scope: AskScope::Full,
                 untrusted: false,
                 model: None,
+                budget_usd: None,
                 caller: "c",
             })
             .await

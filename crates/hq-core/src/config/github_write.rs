@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// With a connected GitHub App the repositories are the ones the person picked on GitHub, and
 /// `repos` only narrows them. Without an App, an empty list refuses every call. The list is the
 /// owner's alone; `config_manage` refuses this key and agents cannot write the config file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GithubWriteConfig {
     /// Repositories as `owner/name`.
     #[serde(default)]
@@ -19,10 +19,18 @@ pub struct GithubWriteConfig {
     /// cheaper model than the chat's own chain. Unset, the chat's chain drives it.
     #[serde(default)]
     pub dispatch_model: Option<String>,
+    /// The most one queued task may spend on models, in US dollars. A task that runs out is
+    /// parked. It can only lower `budget.session_cap_usd`.
+    #[serde(default = "default_task_budget_usd")]
+    pub task_budget_usd: f64,
 }
 
 fn default_dispatch_tasks() -> bool {
     true
+}
+
+fn default_task_budget_usd() -> f64 {
+    0.50
 }
 
 impl Default for GithubWriteConfig {
@@ -31,6 +39,7 @@ impl Default for GithubWriteConfig {
             repos: Vec::new(),
             dispatch_tasks: default_dispatch_tasks(),
             dispatch_model: None,
+            task_budget_usd: default_task_budget_usd(),
         }
     }
 }

@@ -31,6 +31,7 @@ pub(crate) async fn edge_worker_handler(
         "enabled": dispatch::armed(&config, &app),
         "tag": dispatch::DISPATCH_TAG,
         "repos": dispatch::allowed_repos(&config, &app),
+        "task_budget_usd": config.github_write.task_budget_usd,
         "runs": runs,
     })))
 }

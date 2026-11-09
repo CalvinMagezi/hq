@@ -130,7 +130,7 @@ pub async fn dispatch_with(
     if let Some(first) = candidates.first()
         && awaiting_first_confirmation(app)
     {
-        ask_for_first_confirmation(&db, first);
+        ask_for_first_confirmation(&db, first, config.github_write.task_budget_usd);
         return Ok(Outcome::AwaitingConfirmation(first.display_id.clone()));
     }
     for task in candidates {
@@ -149,7 +149,8 @@ pub async fn dispatch_with(
             continue;
         }
         let model = config.github_write.dispatch_model.as_deref();
-        let ask_id = ask_to_work(db.clone(), runner, &task, model).await?;
+        let budget = config.github_write.task_budget_usd;
+        let ask_id = ask_to_work(db.clone(), runner, &task, model, budget).await?;
         return Ok(Outcome::Started {
             task: task.display_id,
             ask_id,
@@ -254,6 +255,7 @@ async fn ask_to_work(
     runner: crate::ask::RunnerCell,
     task: &t::Task,
     model: Option<&str>,
+    budget_usd: f64,
 ) -> Result<String> {
     let tools = crate::ask::create_ask_tools_with(db, runner, None);
     let ask = tools
@@ -274,6 +276,7 @@ async fn ask_to_work(
         // Anyone the owner lets file tasks may have written the task and its comments.
         "untrusted": true,
         "model": model,
+        "budget_usd": budget_usd,
     });
     let reply = ask.execute(args).await?;
     let ask_id = reply
@@ -356,14 +359,14 @@ fn model_is_declared(config: &HqConfig, model: &str) -> bool {
         .any(|b| b.name == model || b.model.as_deref() == Some(model))
 }
 
-fn ask_for_first_confirmation(db: &Database, task: &t::Task) {
+fn ask_for_first_confirmation(db: &Database, task: &t::Task, budget_usd: f64) {
     let item = ValueItem::new(
         INBOX_SOURCE,
         ValueKind::ActionNeeded,
         "HQ Coder is ready for its first task",
         format!(
-            "{} is waiting. HQ will spend model credits on it and open a pull request. \
-             Start it from Code from this phone.",
+            "{} is waiting. HQ will spend up to ${budget_usd:.2} of model credits on it and open a \
+             pull request. Start it from Code from this phone.",
             task.title
         ),
     )

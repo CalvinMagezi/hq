@@ -120,6 +120,8 @@ pub struct AskStart<'a> {
     pub untrusted: bool,
     /// A declared backend, or the model one serves, for the reply instead of the chat's chain.
     pub model: Option<&'a str>,
+    /// Lowers the reply's spending cap; it can never raise the owner's own.
+    pub budget_usd: Option<f64>,
 }
 
 /// Implemented by hq-web, which owns the chat turns.
@@ -291,6 +293,7 @@ struct AskArgs {
     wait: Duration,
     untrusted: bool,
     model: Option<String>,
+    budget_usd: Option<f64>,
 }
 
 impl AskArgs {
@@ -351,6 +354,10 @@ impl AskArgs {
             wait: clamp_wait(args),
             untrusted: args.get("untrusted").and_then(Value::as_bool) == Some(true),
             model,
+            budget_usd: args
+                .get("budget_usd")
+                .and_then(Value::as_f64)
+                .filter(|budget| *budget > 0.0),
         })
     }
 }
@@ -590,6 +597,7 @@ impl HqAskTool {
                 caller: &req.caller,
                 untrusted: req.untrusted,
                 model: req.model.as_deref(),
+                budget_usd: req.budget_usd,
             })
             .await;
         match started {
