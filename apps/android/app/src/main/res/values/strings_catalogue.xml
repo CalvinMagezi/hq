@@ -637,6 +637,26 @@
     <string name="tasks_new_task">New task</string>
     <string name="tasks_check_it">Check it</string>
     <string name="notes_ask_hq_to_write">Ask HQ to write one</string>
+    <string name="notes_delete">Delete</string>
+    <string name="notes_trash">Trash</string>
+    <string name="note_deleted">Moved to Trash</string>
+    <string name="note_restored">Note restored</string>
+    <string name="note_delete_failed">Could not delete this note. Try again.</string>
+    <string name="trash_intro">Deleted notes stay here for %1$s days. After that they are gone for good.</string>
+    <string name="trash_empty">Nothing in the Trash.</string>
+    <string name="trash_load_failed">Could not load the Trash.</string>
+    <string name="trash_view">View</string>
+    <string name="trash_hide">Hide</string>
+    <string name="trash_restore">Restore</string>
+    <string name="trash_restored_to">Restored to %1$s</string>
+    <string name="trash_restore_failed">Could not restore this note. Try again.</string>
+    <string name="trash_read_failed">Could not open this note.</string>
+    <string name="trash_line">%1$s · Deleted %2$s</string>
+    <string name="trash_last_day">Last day</string>
+    <plurals name="trash_days_left">
+        <item quantity="one">%1$s day left</item>
+        <item quantity="other">%1$s days left</item>
+    </plurals>
     <string name="notes_write_one_yourself_or">Write one yourself, or ask HQ to write one for you.</string>
     <string name="notes_your_notes_will_show">Your notes will show up here</string>
     <string name="notes_search_your_notes">Search your notes</string>

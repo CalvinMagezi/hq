@@ -5,6 +5,7 @@ export const NOTICED_NAMES = [
   'undo.chat_archived',
   'undo.inbox_cleared',
   'undo.limit_deleted',
+  'undo.note_deleted',
   'undo.task_archived',
   'undo.task_done',
   'undo.tasks_archived',

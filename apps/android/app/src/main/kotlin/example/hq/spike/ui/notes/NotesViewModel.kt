@@ -6,15 +6,19 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import example.hq.spike.R
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.data.NoteChanged
 import example.hq.spike.data.NoteNotFound
+import example.hq.spike.measure.Counter
+import example.hq.spike.measure.Counters
 import example.hq.spike.ui.chat.NoteExporter
 import example.hq.spike.ui.chat.Notice
 import example.hq.spike.ui.chat.NoteSheet
 import example.hq.spike.ui.chat.blocks.NoteRefs
 import example.hq.spike.ui.chat.blocks.NoteText
+import example.hq.spike.ui.shell.Undo
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +55,11 @@ class NotesActions(
     val onLeave: () -> Unit = {},
     val onKeepEditing: () -> Unit = {},
     val onDiscard: () -> Unit = {},
+    val onDelete: () -> Unit = {},
+    val onOpenTrash: () -> Unit = {},
+    val onToggleTrashed: (String) -> Unit = {},
+    val onRestore: (String) -> Unit = {},
+    val onUndoDelete: () -> Unit = {},
     /** The note page being left reports how far it was scrolled (first visible item, offset), so Back can return to the same place. */
     val onScrolled: (String, Int, Int) -> Unit = { _, _, _ -> },
     val scrollOf: (String) -> Pair<Int, Int>? = { null },
@@ -64,6 +73,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<NotesUi> = _state
     private val exporter = NoteExporter(app, client, viewModelScope)
     private var frozen = false
+    private var undoJob: Job? = null
 
     private val scrolls = ScrollMemory()
 
@@ -80,6 +90,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onChooseFolder = { open -> edit { it.copy(chooser = open) } },
         onPickFolder = { f -> edit { it.copy(folder = f, chooser = false) } },
         onSave = ::save, onSeeTheirs = ::seeTheirs, onKeepBoth = ::keepBoth, onLeave = ::leave, onKeepEditing = { edit { it.copy(leaving = false) } }, onDiscard = ::discard,
+        onDelete = ::deleteNote, onOpenTrash = ::openTrash, onToggleTrashed = ::toggleTrashed, onRestore = ::restoreTrashed, onUndoDelete = ::undoDelete,
         onScrolled = scrolls::save, scrollOf = scrolls::restore,
     )
 
@@ -220,6 +231,111 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
                 getApplication<Application>().getString(if (e.status == 0) example.hq.spike.R.string.notes_task_no_reply else example.hq.spike.R.string.notes_task_failed)
             }
             _state.update { it.copy(notice = Notice(said)) }
+        }
+    }
+
+    /** After a delete or a restore: the home lists and the folder showing behind the page are out of date. */
+    private fun reloadBehind() {
+        refresh()
+        (_state.value.top as? NotesRoute.Folder)?.let { loadFolder(it.path) }
+    }
+
+    private fun deleteNote() {
+        val ready = _state.value.reader as? ReaderPhase.Ready ?: return
+        _state.update { it.copy(menu = false) }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                val trashPath = client.deleteNote(ready.note.path)
+                Counters.get(app).bump(Counter.UndoNoteDeleted, 1)
+                undoJob?.cancel()
+                _state.update { it.copy(undoDelete = trashPath, undoText = app.getString(R.string.note_deleted)) }
+                popNow()
+                reloadBehind()
+                undoJob = viewModelScope.launch {
+                    delay(Undo.millis(app))
+                    _state.update { it.copy(undoDelete = null, undoText = null) }
+                }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.note_delete_failed))) }
+            }
+        }
+    }
+
+    private fun undoDelete() {
+        val trashPath = _state.value.undoDelete ?: return
+        undoJob?.cancel()
+        undoJob = null
+        _state.update { it.copy(undoDelete = null, undoText = null) }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                client.restoreNote(trashPath)
+                Counters.get(app).bump(Counter.UndoNoteDeleted, 0)
+                _state.update { it.copy(notice = Notice(app.getString(R.string.note_restored))) }
+                reloadBehind()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.trash_restore_failed))) }
+            }
+        }
+    }
+
+    private fun openTrash() {
+        push(NotesRoute.Trash)
+        _state.update { it.copy(trash = TrashView(loaded = false, failed = false)) }
+        viewModelScope.launch {
+            try {
+                val (items, retentionDays) = client.trash()
+                _state.update { s -> s.copy(trash = s.trash.copy(loaded = true, failed = false, items = items, retentionDays = retentionDays)) }
+            } catch (e: HqUnavailable) {
+                _state.update { s -> s.copy(trash = s.trash.copy(loaded = true, failed = true)) }
+            }
+        }
+    }
+
+    private fun toggleTrashed(trashPath: String) {
+        if (trashPath in _state.value.trash.open) {
+            _state.update { it.copy(trash = it.trash.copy(open = it.trash.open - trashPath)) }
+            return
+        }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                val text = client.trashedText(trashPath)
+                _state.update { it.copy(trash = it.trash.copy(open = it.trash.open + (trashPath to text))) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice(app.getString(R.string.trash_read_failed))) }
+            }
+        }
+    }
+
+    private fun restoreTrashed(trashPath: String) {
+        if (trashPath in _state.value.trash.busy) return
+        _state.update { it.copy(trash = it.trash.copy(busy = it.trash.busy + trashPath)) }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            try {
+                val restoredPath = client.restoreNote(trashPath)
+                val folder = restoredFolder(restoredPath)
+                _state.update { s ->
+                    s.copy(
+                        notice = Notice(app.getString(R.string.trash_restored_to, folder)),
+                        trash = s.trash.copy(
+                            busy = s.trash.busy - trashPath,
+                            items = s.trash.items.filter { it.trashPath != trashPath },
+                            open = s.trash.open - trashPath,
+                        ),
+                    )
+                }
+                refresh()
+            } catch (e: HqUnavailable) {
+                _state.update { s ->
+                    s.copy(
+                        notice = Notice(app.getString(R.string.trash_restore_failed)),
+                        trash = s.trash.copy(busy = s.trash.busy - trashPath),
+                    )
+                }
+            }
         }
     }
 

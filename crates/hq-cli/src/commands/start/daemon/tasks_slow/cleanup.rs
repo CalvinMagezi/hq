@@ -61,7 +61,7 @@ pub async fn run_vault_cleanup(vault_path: &Path, db: &Database) -> Result<()> {
         let mut actions = Vec::new();
 
         // Purge _trash/ folders past the 30-day retention window
-        match hq_vault::reorg::purge_trash(vault_path, 30) {
+        match hq_vault::reorg::purge_trash(vault_path, hq_vault::reorg::TRASH_RETENTION_DAYS) {
             Ok(0) => {}
             Ok(n) => actions.push(format!("Purged {n} expired _trash day-folders")),
             Err(e) => tracing::warn!(%e, "vault-cleanup: trash purge failed"),

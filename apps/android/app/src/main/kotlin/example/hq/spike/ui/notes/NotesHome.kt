@@ -69,6 +69,16 @@ private fun NotesList(ui: NotesUi, actions: NotesActions) {
         LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 96.dp)) {
             item { val open = example.hq.spike.ui.shell.LocalOpenSearch.current; SearchPill { open(example.hq.spike.ui.search.SearchStart(example.hq.spike.ui.search.SearchScope.Notes)) } }
             if (ui.topFolders.isNotEmpty()) item { FolderChips(ui.topFolders) { actions.onOpenFolder("Notebooks/$it") } }
+            item {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onOpenTrash).padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(HqIcons.Trash, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+                    Text(stringResource(R.string.notes_trash), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+            }
             if (ui.pinned.isNotEmpty()) {
                 item { SectionLabel(stringResource(R.string.notes_home_pinned)) }
                 item {

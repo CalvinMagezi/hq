@@ -20,6 +20,7 @@ mod error;
 pub mod gmail_ingest;
 mod mcp_http;
 mod note_ids;
+mod note_trash;
 mod notifications_api;
 mod notifications_watch;
 mod oauth;
@@ -354,7 +355,15 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/search", get(api::search_handler))
         .route(
             "/api/note",
-            get(api::note_read_handler).put(vault_api::note_update_handler),
+            get(api::note_read_handler)
+                .put(vault_api::note_update_handler)
+                .delete(note_trash::note_delete_handler),
+        )
+        .route("/api/note/trash", get(note_trash::trash_list_handler))
+        .route("/api/note/trash/read", get(note_trash::trash_read_handler))
+        .route(
+            "/api/note/trash/restore",
+            post(note_trash::trash_restore_handler),
         )
         .route("/api/note/create", post(vault_api::note_create_handler))
         .route("/api/note/versions", get(vault_api::note_versions_handler))

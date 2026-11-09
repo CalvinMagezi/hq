@@ -1,6 +1,7 @@
 package example.hq.spike.ui.notes
 
 import androidx.compose.ui.text.input.TextFieldValue
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.NoteItem
 import example.hq.spike.ui.chat.ExportState
 import example.hq.spike.ui.chat.Notice
@@ -15,6 +16,7 @@ sealed interface NotesRoute {
     data class Folder(val path: String) : NotesRoute
     data class Reader(val path: String) : NotesRoute
     data class Write(val path: String?) : NotesRoute
+    data object Trash : NotesRoute
 }
 
 /** What the reader is showing for a note: still fetching, ready, gone (a 404), or HQ not answering. */
@@ -24,6 +26,8 @@ sealed interface ReaderPhase {
     data object Gone : ReaderPhase
     data object Failed : ReaderPhase
 }
+
+data class TrashView(val loaded: Boolean = false, val failed: Boolean = false, val items: List<HqClient.TrashedNote> = emptyList(), val retentionDays: Int = 30, val open: Map<String, String> = emptyMap(), val busy: Set<String> = emptySet())
 
 data class FolderView(val path: String, val folders: List<Pair<String, Int>> = emptyList(), val notes: List<String> = emptyList(), val loading: Boolean = true)
 
@@ -70,12 +74,19 @@ data class NotesUi(
     val menu: Boolean = false,
     val export: ExportState? = null,
     val notice: Notice? = null,
+    val trash: TrashView = TrashView(),
+    val undoDelete: String? = null,
+    val undoText: String? = null,
 ) {
     val top: NotesRoute? get() = stack.lastOrNull()
 
     /** The folders directly under Notebooks, Inbox first, for the chips on the home screen. */
     val topFolders: List<String> get() = folders.map { it.removePrefix("Notebooks/").substringBefore('/') }.filter { it.isNotBlank() }.distinct()
 }
+
+/** The folder part of a note's vault path with the leading Notebooks/ removed. */
+internal fun restoredFolder(path: String): String =
+    path.substringBeforeLast('/').removePrefix("Notebooks/").ifEmpty { "Notebooks" }
 
 /** The task "Make a task" adds: the note's title, its path as the description (a task has no link field), and the path as the repeat key. */
 internal fun noteTaskBody(path: String, title: String): org.json.JSONObject =
