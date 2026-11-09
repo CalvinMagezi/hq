@@ -1,7 +1,7 @@
 //! What HQ Coder must not lose about a task's run. The task stays the record of the work.
 
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 pub const PHASE_QUEUED: &str = "queued";
@@ -10,7 +10,7 @@ pub const STOP_BUDGET: &str = "budget";
 pub const STOP_CREDITS: &str = "credits";
 
 const COLUMNS: &str = "task_id, repo, budget_usd, credit_cap, credit_start, model, phase, attempts, \
-     spent_usd, stop_reason, origin_thread";
+     spent_usd, stop_reason, origin_thread, next_check_at";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
@@ -26,9 +26,19 @@ pub struct Job {
     pub spent_usd: f64,
     pub stop_reason: Option<String>,
     pub origin_thread: Option<String>,
+    /// Not before this time (RFC 3339), after a run that failed for a passing reason.
+    pub next_check_at: Option<String>,
 }
 
 impl Job {
+    /// Whether the job's wait, if it has one, is over.
+    pub fn is_due(&self, now: DateTime<Utc>) -> bool {
+        self.next_check_at
+            .as_deref()
+            .and_then(|at| DateTime::parse_from_rfc3339(at).ok())
+            .is_none_or(|at| at <= now)
+    }
+
     /// The counter value at which the job must stop, once it has a starting reading.
     pub fn credit_ceiling(&self) -> Option<f64> {
         Some(self.credit_start? + self.credit_cap?)
@@ -47,6 +57,7 @@ impl Job {
             spent_usd: r.get(8)?,
             stop_reason: r.get(9)?,
             origin_thread: r.get(10)?,
+            next_check_at: r.get(11)?,
         })
     }
 }
@@ -116,6 +127,16 @@ pub fn set_credit_start(conn: &Connection, task_id: &str, reading: f64) -> Resul
 
 pub fn set_stop_reason(conn: &Connection, task_id: &str, reason: &str) -> Result<()> {
     touch(conn, task_id, "stop_reason = ?1", &reason)
+}
+
+/// Back in the queue, not to start again for `wait_secs`.
+pub fn requeue(conn: &Connection, task_id: &str, wait_secs: i64) -> Result<()> {
+    let at = (Utc::now() + Duration::seconds(wait_secs)).to_rfc3339();
+    conn.execute(
+        "UPDATE coder_jobs SET phase = ?1, next_check_at = ?2, updated_at = ?3 WHERE task_id = ?4",
+        params![PHASE_QUEUED, at, Utc::now().to_rfc3339(), task_id],
+    )?;
+    Ok(())
 }
 
 pub fn begin_attempt(conn: &Connection, task_id: &str) -> Result<()> {

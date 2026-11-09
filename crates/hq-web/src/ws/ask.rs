@@ -14,14 +14,12 @@ use serde_json::json;
 use std::sync::{Arc, Weak};
 
 pub(super) const STOPPED_REASON: &str = "The reply was stopped in the chat before it finished.";
-pub(super) const PANIC_REASON: &str =
-    "The reply stopped unexpectedly. What was written before that is in the chat.";
+pub(super) use asks::PANIC_REASON;
 const NO_ANSWER: &str = "No reply text was saved: HQ wrote none, or the chat was deleted or archived while it ran. Open the chat, if it still exists, to see what happened.";
 pub(super) const MCP_EDIT_REASON: &str =
     "A question an MCP client asked cannot be edited or regenerated.";
 const BUSY: &str =
     "a reply is still running in that thread. Wait for it, or pass a different thread_id";
-const INCOMPLETE: &str = "HQ could not finish the reply. Open the chat to see how far it got.";
 /// An ask's reply gets this long, far less than a chat turn, so a handful of asks cannot hold turns open for hours.
 pub(super) const ASK_TURN_TIMEOUT_SECS: u64 = 30 * 60;
 
@@ -142,7 +140,7 @@ impl AskTurn {
 /// What the caller is told when a run did not complete. The run's own text can carry provider error bodies, so it is logged and not passed on.
 pub(super) fn failure_reason(text: &str) -> String {
     tracing::warn!(detail = %text.trim().chars().take(500).collect::<String>(), "an hq_ask reply did not complete");
-    INCOMPLETE.to_string()
+    asks::INCOMPLETE_REASON.to_string()
 }
 
 pub(super) fn settle_failed(db: &hq_db::Database, ask_id: &str, reason: &str) {

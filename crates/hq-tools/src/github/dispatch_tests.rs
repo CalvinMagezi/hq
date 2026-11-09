@@ -699,6 +699,92 @@ async fn a_job_stopped_by_its_limit_is_parked_at_once_with_the_reason() {
     assert!(parked.blocked_reason.unwrap().contains("budget"));
 }
 
+fn job_of(db: &Database, id: &str) -> coder_jobs::Job {
+    db.with_conn(|c| coder_jobs::get(c, id)).unwrap().unwrap()
+}
+
+#[tokio::test]
+async fn a_run_killed_by_a_restart_goes_again_at_once_with_no_wait_for_its_lease() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    claim(&db, "tk-a");
+    settle_all(&db, asks::RESTART_REASON);
+
+    let outcome = dispatch(db.clone(), &on(), cell).await.unwrap();
+
+    assert!(matches!(outcome, Outcome::Started { .. }), "{outcome:?}");
+    assert_eq!(recorder.questions.lock().unwrap().len(), 2);
+    assert_eq!(job_of(&db, "tk-a").attempts, 2);
+    assert!(
+        !task(&db, "tk-a").tags.iter().any(|g| g == PARKED_TAG),
+        "the owner is not needed"
+    );
+}
+
+#[tokio::test]
+async fn a_run_cut_off_before_claiming_also_goes_again() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    settle_all(&db, asks::RESTART_REASON);
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    assert_eq!(recorder.questions.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_provider_error_waits_longer_each_time() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    claim(&db, "tk-a");
+    settle_all(&db, asks::INCOMPLETE_REASON);
+
+    assert_eq!(
+        dispatch(db.clone(), &on(), cell).await.unwrap(),
+        Outcome::Idle,
+        "it waits before trying again"
+    );
+    assert_eq!(recorder.questions.lock().unwrap().len(), 1);
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_TO_DO);
+    assert!(!job_of(&db, "tk-a").is_due(chrono::Utc::now()));
+}
+
+#[tokio::test]
+async fn a_job_cut_off_too_often_is_parked_for_the_owner() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, _) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    for _ in 0..MAX_ATTEMPTS {
+        dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+        settle_all(&db, asks::RESTART_REASON);
+    }
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    let parked = task(&db, "tk-a");
+    assert_eq!(parked.status, t::STATUS_BLOCKED);
+    assert!(parked.blocked_reason.unwrap().contains("cut off"));
+}
+
+#[tokio::test]
+async fn a_run_the_owner_stopped_is_not_tried_again() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    dispatch(db.clone(), &on(), cell.clone()).await.unwrap();
+    settle_all(&db, "The reply was stopped in the chat before it finished.");
+    dispatch(db.clone(), &on(), cell).await.unwrap();
+    assert_eq!(recorder.questions.lock().unwrap().len(), 1);
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_BLOCKED);
+}
+
 #[tokio::test]
 async fn an_undeclared_dispatch_model_stops_dispatch_without_parking_anything() {
     let _active = worker_on();

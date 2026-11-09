@@ -29,6 +29,11 @@ const WORKER_SKILL: &str = "edge-coding-worker";
 const HQ_ASSIGNEE: &str = "hq";
 const CALLER: &str = "edge-worker";
 const STOPPED_WITHOUT_HANDOVER: &str = "HQ's worker stopped without handing the task over";
+const RUN_CUT_OFF: &str = "The last run was cut off, so HQ will try again.";
+/// Tries a job gets across restarts and provider errors, so a real fault still reaches the owner.
+const MAX_ATTEMPTS: i64 = 4;
+/// Added to the wait before each new try after a provider error or a lost network.
+const RETRY_STEP_SECS: i64 = 300;
 /// The ask scope and mode the worker's asks run under.
 const ASK_SCOPE: &str = "full";
 const ASK_MODE: &str = "full";
@@ -117,9 +122,12 @@ pub async fn dispatch_with(
     let ttl = i64::try_from(config.tasks.lease_ttl()).unwrap_or(i64::MAX);
     match db.with_conn(move |c| busy_with(c, ttl))? {
         Busy::On(what) => return Ok(Outcome::Busy(what)),
-        Busy::Free(dropped) => {
+        Busy::Free { dropped, cut_off } => {
             for (task, why) in dropped {
                 park(&db, &task, &why)?;
+            }
+            for (task, wait) in cut_off {
+                db.with_conn(|c| requeue(c, &task, wait))?;
             }
         }
     }
@@ -133,21 +141,10 @@ pub async fn dispatch_with(
         return Ok(Outcome::AwaitingConfirmation(first.display_id.clone()));
     }
     for task in candidates {
-        let key = ask_key(&task);
-        let earlier = db.with_conn(move |c| asks::get_by_external(c, ASK_SCOPE, &key))?;
-        if let Some(ask) = earlier {
-            // The reply for this version of the task ended without taking it.
-            let reason = ask
-                .error
-                .unwrap_or_else(|| "it did not claim the task".into());
-            park(
-                &db,
-                &task,
-                &format!("HQ's worker stopped before starting: {reason}"),
-            )?;
+        if !job_is_due(&db, &task)? {
             continue;
         }
-        let (job, model) = match open_job(&db, config, &task, &repos).await? {
+        let (job, model, attempt) = match open_job(&db, config, &task, &repos).await? {
             Ok(opened) => opened,
             Err(why) => {
                 park(&db, &task, &why)?;
@@ -156,7 +153,7 @@ pub async fn dispatch_with(
         };
         let task_id = task.id.clone();
         db.with_conn(move |c| coder_jobs::begin_attempt(c, &task_id))?;
-        let ask_id = ask_to_work(db.clone(), runner, &task, model.as_deref(), job).await?;
+        let ask_id = ask_to_work(db.clone(), runner, &task, model.as_deref(), job, attempt).await?;
         return Ok(Outcome::Started {
             task: task.display_id,
             ask_id,
@@ -165,13 +162,48 @@ pub async fn dispatch_with(
     Ok(Outcome::Idle)
 }
 
-/// The job for this task and the model it runs on, or why it cannot start.
+fn job_is_due(db: &Database, task: &t::Task) -> Result<bool> {
+    let job = db.with_conn(|c| coder_jobs::get(c, &task.id))?;
+    Ok(job.is_none_or(|j| j.is_due(chrono::Utc::now())))
+}
+
+/// Why this task's last run rules out another, if it does: a reply that simply ended without
+/// claiming the task, or a job that has been cut off too often.
+fn no_more_tries(
+    conn: &rusqlite::Connection,
+    task: &t::Task,
+    job: &coder_jobs::Job,
+) -> Result<Option<String>> {
+    let version = format!("{CALLER}:{}:{}:", task.id, task.updated_at);
+    let Some(ask) = asks::latest_by_external_prefix(conn, ASK_SCOPE, &version)? else {
+        return Ok(None);
+    };
+    if !asks::was_cut_off(ask.error.as_deref()) {
+        let reason = ask
+            .error
+            .unwrap_or_else(|| "it did not claim the task".into());
+        return Ok(Some(format!(
+            "HQ's worker stopped before starting: {reason}"
+        )));
+    }
+    Ok((job.attempts >= MAX_ATTEMPTS).then(|| out_of_tries(job)))
+}
+
+fn out_of_tries(job: &coder_jobs::Job) -> String {
+    format!(
+        "HQ's worker was cut off {} times, by a restart or a provider error",
+        job.attempts
+    )
+}
+
+/// The job for this task, the model it runs on and the number of this attempt, or why it cannot
+/// start.
 async fn open_job(
     db: &Arc<Database>,
     config: &HqConfig,
     task: &t::Task,
     repos: &[String],
-) -> Result<std::result::Result<(AskJob, Option<String>), String>> {
+) -> Result<std::result::Result<(AskJob, Option<String>, i64), String>> {
     let job = db.with_conn(|c| {
         coder_jobs::ensure(
             c,
@@ -185,6 +217,12 @@ async fn open_job(
             },
         )
     })?;
+    if let Some(why) = db.with_conn(|c| no_more_tries(c, task, &job))? {
+        return Ok(Err(why));
+    }
+    if let Some(why) = stop_words(&job) {
+        return Ok(Err(why));
+    }
     if job.spent_usd >= job.budget_usd {
         return Ok(Err(budget_words(&job)));
     }
@@ -202,13 +240,27 @@ async fn open_job(
         Ok(ceiling) => ceiling,
         Err(why) => return Ok(Err(why)),
     };
+    let attempt = job.attempts + 1;
     let ask_job = AskJob {
         task_id: job.task_id,
         budget_usd: job.budget_usd,
         spent_usd: job.spent_usd,
         credit_ceiling,
     };
-    Ok(Ok((ask_job, job.model)))
+    Ok(Ok((ask_job, job.model, attempt)))
+}
+
+/// A run that was cut off goes back in the queue, with its dead lease ended so nothing waits on it.
+fn requeue(conn: &rusqlite::Connection, task: &t::Task, wait_secs: i64) -> Result<()> {
+    t::end_live_leases(conn, &task.id)?;
+    let patch = t::TaskPatch {
+        status: Some(t::STATUS_TO_DO.into()),
+        ..Default::default()
+    };
+    t::update_task(conn, &task.id, &patch, Some(&task.status))?;
+    coder_jobs::requeue(conn, &task.id, wait_secs)?;
+    t::add_comment(conn, &task.id, CALLER, RUN_CUT_OFF, None)?;
+    Ok(())
 }
 
 /// A job with a credit cap needs a starting reading: without one its cap cannot be enforced.
@@ -254,10 +306,23 @@ fn stop_words(job: &coder_jobs::Job) -> Option<String> {
 /// What the worker is on: a reply still running, or a queue task held under a live lease or
 /// moved to in progress by someone else (the owner working it by hand). `Free` lists the tasks
 /// the worker itself left in progress with nothing running, which are parked, not waited on, each
-/// with the reason.
+/// with the reason. `cut_off` lists those a restart or provider error ended, with how long to
+/// wait before trying again.
 enum Busy {
     On(String),
-    Free(Vec<(t::Task, String)>),
+    Free {
+        dropped: Vec<(t::Task, String)>,
+        cut_off: Vec<(t::Task, i64)>,
+    },
+}
+
+/// A restart is over, so the run may go again now. A provider error or lost network needs time,
+/// and more of it each try.
+fn retry_wait(ask: &asks::AskRow, job: Option<&coder_jobs::Job>) -> i64 {
+    if ask.error.as_deref() == Some(asks::RESTART_REASON) {
+        return 0;
+    }
+    job.map_or(0, |j| j.attempts) * RETRY_STEP_SECS
 }
 
 fn busy_with(conn: &rusqlite::Connection, ttl: i64) -> Result<Busy> {
@@ -266,18 +331,23 @@ fn busy_with(conn: &rusqlite::Connection, ttl: i64) -> Result<Busy> {
         return Ok(Busy::On(ask.external_id.unwrap_or(ask.ask_id)));
     }
     let mut dropped = Vec::new();
+    let mut cut_off = Vec::new();
     for task in queue(conn, t::STATUS_IN_PROGRESS)? {
-        let worked_by_hq =
-            asks::latest_by_external_prefix(conn, ASK_SCOPE, &format!("{CALLER}:{}:", task.id))?
-                .is_some();
-        if !worked_by_hq {
+        let latest =
+            asks::latest_by_external_prefix(conn, ASK_SCOPE, &format!("{CALLER}:{}:", task.id))?;
+        let Some(latest) = latest else {
             return Ok(Busy::On(task.display_id));
-        }
-        let stopped = coder_jobs::get(conn, &task.id)?
-            .as_ref()
-            .and_then(stop_words);
-        if let Some(why) = stopped {
+        };
+        let job = coder_jobs::get(conn, &task.id)?;
+        if let Some(why) = job.as_ref().and_then(stop_words) {
             dropped.push((task, why));
+            continue;
+        }
+        if asks::was_cut_off(latest.error.as_deref()) {
+            match job.as_ref().filter(|j| j.attempts >= MAX_ATTEMPTS) {
+                Some(spent) => dropped.push((task, out_of_tries(spent))),
+                None => cut_off.push((task, retry_wait(&latest, job.as_ref()))),
+            }
             continue;
         }
         if t::live_lease(conn, &task.id, ttl)?.is_some() {
@@ -285,7 +355,7 @@ fn busy_with(conn: &rusqlite::Connection, ttl: i64) -> Result<Busy> {
         }
         dropped.push((task, STOPPED_WITHOUT_HANDOVER.to_string()));
     }
-    Ok(Busy::Free(dropped))
+    Ok(Busy::Free { dropped, cut_off })
 }
 
 fn queue(conn: &rusqlite::Connection, status: &str) -> Result<Vec<t::Task>> {
@@ -351,10 +421,10 @@ fn repo_of(word: &str) -> &str {
     path[..end].trim_end_matches(".git")
 }
 
-/// The ask's key names the task and its last change: a task that changes (rework, an edit) is
-/// asked about afresh, and the same version never twice.
-fn ask_key(task: &t::Task) -> String {
-    format!("{CALLER}:{}:{}", task.id, task.updated_at)
+/// The ask's key names the task, its last change and the attempt: a task that changes (rework, an
+/// edit) is asked about afresh, and a run that was cut off gets a new attempt.
+fn ask_key(task: &t::Task, attempt: i64) -> String {
+    format!("{CALLER}:{}:{}:a{attempt}", task.id, task.updated_at)
 }
 
 /// Asks HQ, through the same path as `hq_ask`, to work the task.
@@ -364,6 +434,7 @@ async fn ask_to_work(
     task: &t::Task,
     model: Option<&str>,
     job: AskJob,
+    attempt: i64,
 ) -> Result<String> {
     let budget_usd = job.budget_usd;
     let ask = crate::ask::create_worker_ask_tool(db, runner, job);
@@ -376,7 +447,7 @@ async fn ask_to_work(
         "title": format!("Edge worker: {}", task.display_id),
         "mode": ASK_MODE,
         "caller": CALLER,
-        "external_id": ask_key(task),
+        "external_id": ask_key(task, attempt),
         "wait_secs": 0,
         // Anyone the owner lets file tasks may have written the task and its comments.
         "untrusted": true,

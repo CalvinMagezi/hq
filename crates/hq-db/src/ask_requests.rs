@@ -14,6 +14,20 @@ pub const STATUS_FAILED: &str = "failed";
 
 /// Why an ask that was waiting when the daemon restarted can never finish.
 pub const RESTART_REASON: &str = "HQ restarted before the reply finished, so this question was not answered. Ask again with a new external_id.";
+/// A reply that ended early: a provider error, a rate limit, a lost network.
+pub const INCOMPLETE_REASON: &str =
+    "HQ could not finish the reply. Open the chat to see how far it got.";
+pub const PANIC_REASON: &str =
+    "The reply stopped unexpectedly. What was written before that is in the chat.";
+
+/// Whether a failed reply was cut off by something outside the work, so trying again may succeed.
+/// A reply the owner stopped is not one of these.
+pub fn was_cut_off(error: Option<&str>) -> bool {
+    matches!(
+        error,
+        Some(RESTART_REASON | INCOMPLETE_REASON | PANIC_REASON)
+    )
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct AskRow {
