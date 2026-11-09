@@ -15,6 +15,12 @@ use crate::adoption::DAY_SECS;
 pub const MUTE_SECS: i64 = 30 * DAY_SECS;
 /// "Not now" answers in a row that mute an offer.
 const NOT_NOW_TO_MUTE: usize = 2;
+/// The furthest ahead a next step can be scheduled.
+pub const MAX_SCHEDULE_SECS: i64 = 90 * DAY_SECS;
+/// Only next steps stand alone; a rule's offer says "that list" and means this conversation.
+const SCHEDULABLE_PREFIX: &str = "next_";
+/// What a scheduled step says when it comes back. Its request stays in the offer.
+const BROUGHT_BACK: &str = "You asked me to bring this back.";
 
 /// The person's answer to one offer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +81,108 @@ pub fn answer(
         )?;
     }
     Ok(offer)
+}
+
+/// Schedules the open offer under `message_id` to come back at `due_at`, from the reply's own saved
+/// offer. Returns its kind, or `None` when that reply has no open offer that can be scheduled.
+pub fn schedule(
+    conn: &Connection,
+    message_id: &str,
+    due_at: i64,
+    now: i64,
+) -> Result<Option<String>> {
+    let saved: Option<(String, String)> = conn
+        .query_row(
+            "SELECT thread_id, meta FROM chat_messages WHERE message_id = ?1 AND json_valid(meta)",
+            params![message_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((thread_id, meta)) = saved else {
+        return Ok(None);
+    };
+    let meta: serde_json::Value = serde_json::from_str(&meta)?;
+    let offer = &meta["offer"];
+    let (Some(kind), Some(line), Some(reply)) = (
+        offer["kind"].as_str(),
+        offer["line"].as_str(),
+        offer["reply"].as_str(),
+    ) else {
+        return Ok(None);
+    };
+    if !kind.starts_with(SCHEDULABLE_PREFIX) {
+        return Ok(None);
+    }
+    let tx = conn.unchecked_transaction()?;
+    // In `offer_log` a scheduled step is a Yes: the person wanted it, just later.
+    let answered = answer(&tx, message_id, Answer::Yes, now)?;
+    if answered.is_some() {
+        tx.execute(
+            "INSERT INTO offer_schedule (thread_id, offer, line, reply, send, due_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                thread_id,
+                kind,
+                line,
+                reply,
+                offer["send"].as_bool().unwrap_or(false),
+                due_at
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(answered)
+}
+
+/// Brings back up to `limit` scheduled steps that are due, each as a new offer at the end of its
+/// chat and exactly once. A step whose chat has been deleted is dropped. Returns how many came back.
+pub fn deliver_due(conn: &Connection, now: i64, limit: usize) -> Result<usize> {
+    let due = {
+        let mut stmt = conn.prepare(
+            "SELECT id, thread_id, offer, line, reply, send FROM offer_schedule
+              WHERE due_at <= ?1 ORDER BY due_at LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![now, limit as i64], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, bool>(5)?,
+            ))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut delivered = 0;
+    for (id, thread_id, kind, line, reply, send) in due {
+        let tx = conn.unchecked_transaction()?;
+        let chat_exists = tx
+            .query_row(
+                "SELECT 1 FROM chat_threads WHERE thread_id = ?1",
+                params![thread_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if chat_exists {
+            let meta = serde_json::json!({
+                "offer": { "kind": kind, "line": line, "reply": reply, "send": send }
+            });
+            let message = crate::chat::add_message_with_meta(
+                &tx,
+                &thread_id,
+                "assistant",
+                BROUGHT_BACK,
+                Some(&meta),
+            )?;
+            record_shown(&tx, &message.message_id, &kind, now)?;
+            delivered += 1;
+        }
+        tx.execute("DELETE FROM offer_schedule WHERE id = ?1", params![id])?;
+        tx.commit()?;
+    }
+    Ok(delivered)
 }
 
 /// When each kind of offer was last shown, for spacing offers out.
@@ -229,6 +337,93 @@ mod tests {
             let kept: serde_json::Value = serde_json::from_str(&kept)?;
             assert!(kept.get("offer").is_none());
             assert!(kept["tool_steps"].is_array());
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn offered_reply(c: &Connection, thread: &str, kind: &str) -> String {
+        let meta = serde_json::json!({
+            "offer": { "kind": kind, "line": "I can also look it up.", "reply": "Look it up.", "send": false }
+        });
+        let m =
+            crate::chat::add_message_with_meta(c, thread, "assistant", "ok", Some(&meta)).unwrap();
+        record_shown(c, &m.message_id, kind, NOW).unwrap();
+        m.message_id
+    }
+
+    fn scheduled_count(c: &Connection) -> i64 {
+        c.query_row("SELECT COUNT(*) FROM offer_schedule", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_scheduled_step_comes_back_once_as_a_new_offer_in_its_chat() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            let t = crate::chat::create_thread(c, "t", "user", "user")?;
+            let m = offered_reply(c, &t.thread_id, "next_look_up");
+            assert_eq!(
+                schedule(c, &m, NOW + 100, NOW)?.as_deref(),
+                Some("next_look_up")
+            );
+            assert_eq!(schedule(c, &m, NOW + 100, NOW)?, None, "already answered");
+
+            assert_eq!(deliver_due(c, NOW + 99, 10)?, 0, "not due yet");
+            assert_eq!(deliver_due(c, NOW + 100, 10)?, 1);
+            assert_eq!(deliver_due(c, NOW + 200, 10)?, 0, "only once");
+
+            let (content, meta): (String, String) = c.query_row(
+                "SELECT content, meta FROM chat_messages
+                  WHERE thread_id = ?1 ORDER BY rowid DESC LIMIT 1",
+                params![t.thread_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let meta: serde_json::Value = serde_json::from_str(&meta)?;
+            assert_eq!(content, BROUGHT_BACK);
+            assert_eq!(meta["offer"]["reply"], "Look it up.");
+            assert_eq!(meta["offer"]["send"], false);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn only_next_steps_can_be_scheduled_and_scheduling_is_no_refusal() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            let t = crate::chat::create_thread(c, "t", "user", "user")?;
+            let rule = offered_reply(c, &t.thread_id, "pasted_list");
+            assert_eq!(schedule(c, &rule, NOW + 100, NOW)?, None);
+            assert_eq!(scheduled_count(c), 0);
+
+            let first = offered_reply(c, &t.thread_id, "next_email");
+            let second = offered_reply(c, &t.thread_id, "next_email");
+            answer(c, &first, Answer::NotNow, NOW + 1)?;
+            schedule(c, &second, NOW + 100, NOW + 2)?;
+            assert!(
+                muted(c, NOW + 3)?.is_empty(),
+                "scheduling breaks a run of Not now"
+            );
+            let s = stats(c, NOW, NOW + 10)?;
+            let email = s.iter().find(|o| o.offer == "next_email").unwrap();
+            assert_eq!((email.accepted, email.declined), (1, 1));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_step_for_a_deleted_chat_is_dropped() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO offer_schedule (thread_id, offer, line, reply, send, due_at)
+                 VALUES ('gone', 'next_email', 'l', 'r', 0, ?1)",
+                params![NOW],
+            )?;
+            assert_eq!(deliver_due(c, NOW, 10)?, 0);
+            assert_eq!(scheduled_count(c), 0);
             Ok(())
         })
         .unwrap();

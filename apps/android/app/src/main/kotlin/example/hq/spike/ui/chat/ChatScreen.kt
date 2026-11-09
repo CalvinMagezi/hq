@@ -171,7 +171,7 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
                 ) {
                     // Only the newest reply carries its offer: one written to since has moved on.
                     val answer = if (m === newestFirst.firstOrNull() && state.live == null) { yes: Boolean -> actions.onOffer(m.id, yes) } else null
-                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile, spoken = m.spoken) else ReplyBubble(m, blocks, onOffer = answer)
+                    if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile, spoken = m.spoken) else ReplyBubble(m, blocks, onOffer = answer, onScheduleOffer = if (answer != null) { at: Long -> actions.onScheduleOffer(m.id, at) } else null)
                 }
             }
         }
