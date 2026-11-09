@@ -163,6 +163,36 @@ Deviations from the plan above, decided while building G1:
 - **`hq github` is not part of Lite,** which reaches no other service. On Windows the key is never
   written, because there are no owner-only file modes to protect it; WSL2 works.
 
+## First phone run (G7, 2026-11-09)
+
+Samsung Galaxy A32, Android 13, a debug build beside the real app with its own id and port, a
+private test repository with a pytest workflow, Haiku 5.5 through OpenRouter driving and
+`openai/gpt-6-luna` as the coding sub-agent. The phone screens (G4) did not exist yet, so the owner
+routes were called over `adb forward` against a second server inside the test app, and the
+browser steps ran in a real Custom Tab.
+
+| Measure | Result |
+|---|---|
+| Queue to pull request, first task | 83 seconds of work, after waiting up to two minutes for the worker's tick |
+| Second task, after forced Doze | 4 min 30 s; a new token was minted with no new sign-in |
+| CI on the pull request | 13 to 14 seconds, green |
+| Model cost per merged pull request | $0.0185 for the first task, $0.0105 for the second |
+| Data for the first task | about 2.1 MB (0.48 MB in, 1.66 MB out), counting the idle hub in that window |
+| Squash merge credit | GitHub lists the App's bot and the person together as authors of the commit |
+
+Checks that passed on the phone: the key and record are mode 0600 in a 0700 folder; an owner route
+answers 401 with no token; a repository using `secrets.FOO` is flagged and its task is not taken;
+the first task waits for the owner; no `ghs_` token and no model key appear under `files/` or in
+`logcat`.
+
+Bugs only the phone found, all fixed with tests: the manifest's homepage was empty for this crate,
+and GitHub refused it; the worker skill needed `github_write.repos`, so connecting alone never armed
+it; `github_read` had no way into a private repository without `gh`; a deleted App answers 404
+rather than 401.
+
+Not measured: mobile data on a metered network (the phone was on Wi-Fi), Samsung Internet, and a
+full `-Phq.caddy` build (a placeholder was packaged, since Caddy stays off without a Caddyfile).
+
 ## Secure by default
 
 | Control | Default | Why |
