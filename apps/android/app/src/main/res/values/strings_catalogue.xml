@@ -166,7 +166,7 @@
     <string name="device_out_failed">Could not sign that device out.</string>
     <string name="device_keep_failed">Could not keep that device signed in.</string>
     <string name="device_operator">The first sign-in link from whoever set up your HQ still works. Sign out everywhere turns it off.</string>
-    <string name="device_pair_note">Pair a device by QR code on your phone or in HQ Hub. A paired device reaches HQ directly.</string>
+    <string name="device_pair_note">Pair a device by QR code on your phone or in HQ Hub. The bridge is built into HQ, so there is nothing else to install. A paired device connects directly and encrypted.</string>
     <string name="sign_out_all_failed">Could not sign out everywhere.</string>
     <string name="sign_out_all_blocked">Every device was signed out, but this browser blocked saving the new sign-in. Use a code or /login.</string>
     <string name="sign_out_browser_operator">This browser signed in with the first login link. Only Sign out everywhere ends that.</string>
@@ -1423,7 +1423,7 @@
     <string name="hub_claude_moved">Claude\'s entries for HQ now point to the renamed app: %1$s.</string>
     <string name="dev_off_title">Pair a phone or another computer</string>
     <string name="dev_off_state">Off</string>
-    <string name="dev_off_note">A device you pair can reach this computer directly, with no account to make. Switching on opens one network port. Only devices you pair get through.</string>
+    <string name="dev_off_note">The bridge is built into HQ. There is nothing else to install and no account to make. A device you pair connects to this computer directly and encrypted. Switching on opens one network port. Only devices you pair get through.</string>
     <string name="dev_switch_on">Switch on</string>
     <string name="dev_switch_off">Switch off</string>
     <string name="dev_on_title">Pairing is on</string>
@@ -3012,6 +3012,7 @@
     <string name="helpers_pair_a_computer">Helpers run on a computer, not on this phone. Pair one in Settings, Other devices.</string>
     <string name="helpers_pair_title">First, pair a computer</string>
     <string name="helpers_pair_body">Helpers run on a Mac or Linux computer you own, not on this phone. On that computer, open Terminal and run this line. It installs HQ and shows a code.</string>
+    <string name="helpers_pair_how">The bridge is built into HQ, on this phone and the computer. There is no other service or account to set up. The two connect directly and encrypted. If they find no direct path, a public relay passes the encrypted traffic along. It cannot read it.</string>
     <string name="helpers_pair_copy">Copy</string>
     <string name="helpers_pair_copied">Copied</string>
     <string name="helpers_pair_send">Send to my computer</string>

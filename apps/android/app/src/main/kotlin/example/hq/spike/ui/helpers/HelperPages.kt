@@ -415,6 +415,7 @@ private fun PairComputer(actions: HelpersActions) {
         }
     }
     Text(stringResource(R.string.helpers_pair_then), style = HqType.BodySm, color = Mts.InkMuted)
+    Text(stringResource(R.string.helpers_pair_how), style = HqType.BodySm, color = Mts.InkMuted)
     PrimaryButton(stringResource(R.string.helpers_pair_scan), Modifier.fillMaxWidth()) {
         context.startActivity(Intent(context, PairingActivity::class.java).putExtra(PairingActivity.EXTRA_SCREEN, "scan"))
     }

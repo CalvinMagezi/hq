@@ -7,7 +7,7 @@ import example.hq.spike.bridge.TicketEnd
 /** The words of the pairing screens. Pure, so each sentence is tested from the state that makes it. */
 object PairingWords {
     const val TITLE = "Pair a device"
-    const val INTRO = "A device you pair can reach this phone directly, with no account. Only devices you pair here can."
+    const val INTRO = "The bridge is built into HQ. There is nothing else to install and no account to make. A device you pair connects to this phone directly and encrypted. Only devices you pair here can."
     const val SHOW_TITLE = "Show a code"
     const val SHOW_HELP = "On the other device, scan this code, or paste the link."
     const val SCAN_TITLE = "Scan a code"
