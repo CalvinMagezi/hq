@@ -81,7 +81,7 @@ fun HelperOverlays(shownUi: HelpersUi, actions: HelpersActions) {
         if (open.rename != null) RenameDialog(open.rename, actions)
         if (open.menu) MenuSheet(card, actions)
     }
-    ui.start?.let { StartSheet(it, actions) }
+    ui.start?.let { StartSheet(it, ui, actions) }
     if (ui.githubOpen) GithubSheet(ui, actions)
     ui.edgeRuns.firstOrNull { it.askId == ui.openJob }?.let { CoderJobSheet(it, ui, actions) }
 }
@@ -342,31 +342,28 @@ private fun MenuSheet(card: HelperCard, actions: HelpersActions) {
 }
 
 @Composable
-private fun StartSheet(form: StartForm, actions: HelpersActions) {
+private fun StartSheet(form: StartForm, ui: HelpersUi, actions: HelpersActions) {
     SheetFrame(actions.onStartClose, top = 90.dp) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.helpers_start_a_helper), style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
                 IconAction(HqIcons.Close, stringResource(R.string.close), iconSize = 24.dp, onClick = actions.onStartClose)
             }
-            CodeFromThisPhoneRow(actions)
             val shape = RoundedCornerShape(12.dp)
-            Column(Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(Mts.Surface000).border(2.dp, Mts.BrandBlue, shape).padding(horizontal = 16.dp, vertical = 10.dp)) {
-                Text(stringResource(R.string.helpers_what_should_it_do), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
-                BasicTextField(form.job, actions.onJob, Modifier.fillMaxWidth(), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
-            }
-            Caps(stringResource(R.string.helpers_which_helper))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("claude-code" to "Claude", "codex" to "Codex").forEach { (key, label) ->
-                    val on = form.harness == key
-                    Box(
-                        Modifier.weight(1f).heightIn(min = 56.dp).clip(shape).background(Mts.Surface100).border(1.dp, if (on) Mts.BrandGreen else Mts.Line, shape)
-                            .clickable(role = Role.RadioButton, onClickLabel = label) { actions.onHarness(key) }.padding(horizontal = 16.dp, vertical = 12.dp),
-                        contentAlignment = Alignment.CenterStart,
-                    ) { Text(label, style = HqType.BodyBold, color = Mts.Ink) }
+            val coder = form.harness == HelperWords.HQ_CODER
+            if (coder && form.task != null) {
+                Text(stringResource(R.string.helpers_coder_task_says), style = HqType.BodySm, color = Mts.InkMuted)
+            } else {
+                Column(Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(Mts.Surface000).border(2.dp, Mts.BrandBlue, shape).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text(stringResource(R.string.helpers_what_should_it_do), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+                    BasicTextField(form.job, actions.onJob, Modifier.fillMaxWidth(), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
                 }
             }
-            if (HelperWords.needsComputer(form.hosts)) PairComputer(actions) else StartWhere(form, shape, actions)
+            Caps(stringResource(R.string.helpers_which_helper))
+            WhichHelper(form, actions)
+            AttachChoices(form, actions)
+            if (coder) CoderChoices(form, ui, actions)
+            if (HelperWords.needsComputer(form.hosts)) PairComputer(actions) else if (!coder) StartWhere(form, shape, actions)
         }
     }
 }
@@ -385,7 +382,7 @@ private fun StartWhere(form: StartForm, shape: RoundedCornerShape, actions: Help
     }
     Text(stringResource(R.string.helpers_it_asks_before_it), style = SmallText, color = Mts.InkMuted)
     form.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
-    PrimaryButton(stringResource(if (form.busy) R.string.helpers_starting else R.string.helpers_start), Modifier.fillMaxWidth(), enabled = form.job.isNotBlank() && form.host != null && !form.busy, onClick = actions.onStartSubmit)
+    PrimaryButton(stringResource(if (form.busy) R.string.helpers_starting else R.string.helpers_start), Modifier.fillMaxWidth(), enabled = HelperWords.canStartHelper(form) && !form.busy, onClick = actions.onStartSubmit)
 }
 
 /**

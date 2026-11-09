@@ -509,4 +509,43 @@ class HelperWordsTest {
         assertNull(HelperWords.chosenRepo(null, listOf("o/r", "o/s")))
         assertEquals("o/s", HelperWords.chosenRepo("o/s", listOf("o/r", "o/s")))
     }
+
+    private val laptop = HqClient.HelperHost("laptop", reachable = true, error = null, agents = listOf("codex", "pi"))
+
+    @Test fun `the start sheet offers HQ Coder and what the computer has`() {
+        assertEquals(listOf(HelperWords.HQ_CODER, "codex", "pi"), HelperWords.startChoices(StartForm(host = "laptop", hosts = listOf(laptop))))
+        assertEquals(listOf(HelperWords.HQ_CODER), HelperWords.startChoices(StartForm()))
+    }
+
+    @Test fun `a helper this computer lacks gives way to one it has`() {
+        assertEquals("codex", HelperWords.fitHarness("codex", listOf("codex", "pi")))
+        assertEquals("claude-code", HelperWords.fitHarness("pi", listOf("codex", "claude-code")))
+        assertEquals("codex", HelperWords.fitHarness("claude-code", listOf("codex", "pi")))
+        assertEquals(HelperWords.HQ_CODER, HelperWords.fitHarness("claude-code", emptyList()))
+        assertEquals(HelperWords.HQ_CODER, HelperWords.fitHarness(HelperWords.HQ_CODER, listOf("codex")))
+    }
+
+    @Test fun `a helper starts from words or a task, on something the computer has`() {
+        val form = StartForm(harness = "codex", host = "laptop", hosts = listOf(laptop))
+        assertEquals(false, HelperWords.canStartHelper(form))
+        assertEquals(true, HelperWords.canStartHelper(form.copy(job = "fix it")))
+        assertEquals(true, HelperWords.canStartHelper(form.copy(task = Attached("T-1", "A task"))))
+        assertEquals(false, HelperWords.canStartHelper(form.copy(job = "fix it", harness = "claude-code")))
+    }
+
+    @Test fun `HQ Coder needs GitHub connected and one repository`() {
+        val repo = { name: String -> HqClient.GithubRepo(name, flagged = false, picked = true, secrets = emptyList(), previews = emptyList(), hasCi = true, protected = true) }
+        val link = { repos: List<HqClient.GithubRepo> -> HqClient.GithubLink("connected", "owner", "selected", null, null, true, repos) }
+        val form = StartForm(job = "fix it", harness = HelperWords.HQ_CODER)
+        assertEquals(false, HelperWords.canStartCoder(form, null))
+        assertEquals(true, HelperWords.canStartCoder(form, link(listOf(repo("o/a")))))
+        assertEquals(false, HelperWords.canStartCoder(form, link(listOf(repo("o/a"), repo("o/b")))))
+        assertEquals(true, HelperWords.canStartCoder(form.copy(repo = Attached("o/b", "o/b")), link(listOf(repo("o/a"), repo("o/b")))))
+    }
+
+    @Test fun `a typed repository is offered only when it reads as owner and name`() {
+        assertEquals(listOf(Attached("o/a", "o/a")), HelperWords.repoChoices("a", listOf("o/a", "o/x")).take(1))
+        assertEquals(listOf(Attached("me/new", "me/new")), HelperWords.repoChoices("me/new", listOf("o/a")))
+        assertEquals(emptyList<Attached>(), HelperWords.repoChoices("not a repo", listOf("o/a")))
+    }
 }

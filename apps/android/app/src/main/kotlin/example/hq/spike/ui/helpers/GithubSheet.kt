@@ -55,9 +55,9 @@ internal fun openCustomTab(context: Context, url: String): Boolean {
     }
 }
 
-/** The way in from the start sheet. */
+/** Where GitHub is connected and repositories are chosen, from the start sheet. */
 @Composable
-internal fun CodeFromThisPhoneRow(actions: HelpersActions) {
+internal fun HqCoderRow(actions: HelpersActions) {
     val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape)
@@ -118,6 +118,7 @@ private fun GithubBody(ui: HelpersUi, actions: HelpersActions) {
 
 @Composable
 private fun Connected(link: HqClient.GithubLink, ui: HelpersUi, actions: HelpersActions) {
+    if (ui.githubJustConnected) Text(stringResource(R.string.github_just_connected), style = HqType.BodyBold, color = Mts.Ink)
     Text(stringResource(R.string.github_connected_as, link.owner.orEmpty()), style = HqType.BodyBold, color = Mts.Ink)
     if (link.selection == SELECTION_ALL) Text(stringResource(R.string.github_all_repos), style = HqType.BodySm, color = Mts.Amber)
     if (link.repos.isEmpty()) Text(stringResource(R.string.github_no_repos), style = HqType.BodySm, color = Mts.InkMuted)

@@ -1,16 +1,18 @@
 import { t } from '~/strings'
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { GENERAL_PURPOSES, workbenchApi, type LaunchReport, type Purpose, type WorkbenchHosts } from '~/lib/sessionsApi'
+import { GENERAL_PURPOSES, attachSearch, workbenchApi, type AttachHit, type LaunchReport, type Purpose, type WorkbenchHosts } from '~/lib/sessionsApi'
 import {
-  DEFAULT_AGENT,
   agentCategory,
   agentName,
+  agentsOn,
   computerName,
   computerUnavailableReason,
+  fitAgent,
   harnessesIn,
   plainPath,
 } from '~/lib/workbench'
+import { AttachSearch } from './AttachSearch'
 import { ErrorText } from './ErrorText'
 import { FolderPicker } from './FolderPicker'
 import { LockdownBanner } from './EmergencyStop'
@@ -25,6 +27,7 @@ const PURPOSE_WORDS: Record<Purpose, 'helpers_new_purpose_general' | 'helpers_ne
   monitor: 'helpers_new_purpose_monitor',
 }
 const LABEL_CLASS = 'a-field-label'
+const NOTHING_ATTACHED = null as AttachHit | null
 
 interface Props {
   onClose: () => void
@@ -59,6 +62,9 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
   const [prompt, setPrompt] = useState('')
   const [label, setLabel] = useState('')
   const [branch, setBranch] = useState('')
+  const [note, setNote] = useState(NOTHING_ATTACHED)
+  const [attachedTask, setAttachedTask] = useState(NOTHING_ATTACHED)
+  const [repo, setRepo] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<LaunchReport | null>(null)
@@ -72,7 +78,6 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
       .then((res) => {
         setHosts(res)
         setHost(res.hosts.find((h) => !computerUnavailableReason(h))?.host ?? '')
-        setHarness(res.harnesses.includes(DEFAULT_AGENT) ? DEFAULT_AGENT : (res.harnesses[0] ?? ''))
       })
       .catch((e) => setLoadError(e instanceof Error ? e.message : t('helpers_load_failed')))
   }, [])
@@ -85,6 +90,11 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
   }
   const selected = hosts?.hosts.find((h) => h.host === host)
   const noneReachable = Boolean(hosts && !hosts.hosts.some((h) => h.reachable))
+  // A computer can have fewer agents than the last one, so the choice is checked when it changes.
+  useEffect(() => {
+    if (hosts) setHarness((current) => fitAgent(current, agentsOn(selected, hosts.harnesses)))
+  }, [hosts, selected])
+  const taskId = task?.id ?? attachedTask?.id
   // A general-purpose agent is started for a stated purpose; a coding agent's purpose is code.
   const generalPurpose = agentCategory(hosts, harness) === 'general_purpose'
   const start = async () => {
@@ -99,7 +109,9 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
         ...(label.trim() ? { label: label.trim() } : {}),
         ...(!generalPurpose && branch.trim() ? { branch: branch.trim() } : {}),
-        ...(task ? { task_id: task.id } : {}),
+        ...(taskId ? { task_id: taskId } : {}),
+        ...(note ? { note: note.id } : {}),
+        ...(repo.trim() ? { repo: repo.trim() } : {}),
       })
       if (launched.blocked || launched.note) setReport(launched)
       else onStarted(launched.session_id)
@@ -159,7 +171,7 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
                 </label>
                 <select id="agent-kind" value={harness} onChange={(e) => setHarness(e.target.value)} className={FIELD_CLASS}>
                   {(['coding', 'general_purpose'] as const)
-                    .map((category) => [category, harnessesIn(hosts, category)] as const)
+                    .map((category) => [category, agentsOn(selected, harnessesIn(hosts, category))] as const)
                     .filter(([, names]) => names.length > 0)
                     .map(([category, names]) => (
                       <optgroup key={category} label={t(category === 'coding' ? 'helpers_new_group_coding' : 'helpers_new_group_general')}>
@@ -171,6 +183,17 @@ export function NewAgentDialog({ onClose, onStarted, task }: Props) {
                       </optgroup>
                     ))}
                 </select>
+              </div>
+
+              {selected?.agents?.length === 0 && <p role="status" className="a-cap a-warn-t">{t('helpers_agents_none')}</p>}
+
+              <AttachSearch id="agent-note" label={t('helpers_attach_note')} placeholder={t('helpers_attach_search_notes')} value={note} onChange={setNote} search={attachSearch.notes} />
+              {!task && <AttachSearch id="agent-task" label={t('helpers_attach_task')} placeholder={t('helpers_attach_search_tasks')} value={attachedTask} onChange={setAttachedTask} search={attachSearch.tasks} />}
+              <div className="a-field">
+                <label htmlFor="agent-repo" className={LABEL_CLASS}>
+                  {t('helpers_attach_repo')}
+                </label>
+                <input id="agent-repo" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder={t('helpers_attach_repo_hint')} className={FIELD_CLASS} />
               </div>
 
               {generalPurpose && (

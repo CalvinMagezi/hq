@@ -27,6 +27,11 @@ enum class HelperFilter { All, Needs, Working, Finished }
 /** Which page a helper is open on: its own page, or the question it is waiting on. */
 enum class HelperPage { Detail, Ask }
 
+enum class AttachKind { Note, Task, Repo }
+
+/** Something a helper starts connected to: what HQ knows it by, and what the owner reads. */
+data class Attached(val id: String, val title: String)
+
 data class StartForm(
     val job: String = "",
     val harness: String = "claude-code",
@@ -34,7 +39,28 @@ data class StartForm(
     val hosts: List<HelperHost>? = null,
     val busy: Boolean = false,
     val error: String? = null,
-)
+    val note: Attached? = null,
+    val task: Attached? = null,
+    val repo: Attached? = null,
+    val picking: AttachKind? = null,
+    val pickQuery: String = "",
+    val pickResults: List<Attached> = emptyList(),
+) {
+    /** The agents installed on the computer chosen. */
+    fun chosenAgents(): List<String> = hosts.orEmpty().firstOrNull { it.name == host }?.agents.orEmpty()
+
+    fun attached(kind: AttachKind): Attached? = when (kind) {
+        AttachKind.Note -> note
+        AttachKind.Task -> task
+        AttachKind.Repo -> repo
+    }
+
+    fun withAttached(kind: AttachKind, item: Attached?): StartForm = when (kind) {
+        AttachKind.Note -> copy(note = item)
+        AttachKind.Task -> copy(task = item)
+        AttachKind.Repo -> copy(repo = item)
+    }
+}
 
 data class HelperOpen(
     val id: String,
@@ -83,6 +109,8 @@ data class HelpersUi(
     val githubRepo: String? = null,
     val githubJob: String = "",
     val githubStarted: Boolean = false,
+    /** The owner just came back from connecting GitHub, so the sheet says it worked. */
+    val githubJustConnected: Boolean = false,
     /** This phone's HQ runs in standby, which takes no queued work. */
     val hqPaused: Boolean = false,
     val line: HelperLine? = null,
@@ -136,6 +164,10 @@ class HelpersActions(
     val onNextHost: () -> Unit = {},
     val onRefreshHosts: () -> Unit = {},
     val onStartSubmit: () -> Unit = {},
+    val onAttachOpen: (AttachKind) -> Unit = {},
+    val onAttachQuery: (String) -> Unit = {},
+    val onAttachPick: (AttachKind, Attached) -> Unit = { _, _ -> },
+    val onAttachClear: (AttachKind) -> Unit = {},
     val onDismissLine: () -> Unit = {},
     val onGithubOpen: () -> Unit = {},
     val onGithubClose: () -> Unit = {},
@@ -196,16 +228,20 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onStartOpen = ::openStart,
         onStartClose = { _state.update { it.copy(start = null) } },
         onJob = { j -> _state.update { s -> s.copy(start = s.start?.copy(job = j, error = null)) } },
-        onHarness = { h -> _state.update { s -> s.copy(start = s.start?.copy(harness = h)) } },
+        onHarness = ::chooseHarness,
         onNextHost = ::nextHost,
         onRefreshHosts = ::loadHosts,
         onStartSubmit = ::submitStart,
+        onAttachOpen = ::openPicker,
+        onAttachQuery = ::searchPicker,
+        onAttachPick = { kind, item -> _state.update { s -> s.copy(start = s.start?.withAttached(kind, item)?.copy(picking = null, pickQuery = "", pickResults = emptyList(), error = null)) } },
+        onAttachClear = { kind -> _state.update { s -> s.copy(start = s.start?.withAttached(kind, null)?.copy(error = null)) } },
         onDismissLine = { _state.update { it.copy(line = null) } },
         onGithubOpen = { _state.update { it.copy(githubOpen = true, githubError = null) }; refreshGithub() },
-        onGithubClose = { _state.update { it.copy(githubOpen = false, githubStarted = false) } },
+        onGithubClose = { _state.update { it.copy(githubOpen = false, githubStarted = false, githubJustConnected = false) } },
         onGithubRefresh = ::refreshGithub,
-        onGithubConnect = { githubCall { openGithub(client.postJson("/api/github/connect").optString("url")) } },
-        onGithubInstall = { _state.value.github?.installUrl?.let(::openGithub) },
+        onGithubConnect = { awaitingGithub = true; githubCall { openGithub(client.postJson("/api/github/connect").optString("url")) } },
+        onGithubInstall = { awaitingGithub = true; _state.value.github?.installUrl?.let(::openGithub) },
         onGithubConfirm = { repo -> githubCall { client.postJson("/api/github/repos/confirm", JSONObject().put("repo", repo)) } },
         onGithubDisconnect = { githubCall { openGithub(client.postJson("/api/github/disconnect").optString("settings_url")) } },
         onGithubRepo = { r -> _state.update { it.copy(githubRepo = r) } },
@@ -291,11 +327,22 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 val link = client.github()
                 val budget = client.edgeWorker().taskBudgetUsd
                 val paused = hqPaused()
-                _state.update { it.copy(github = link, taskBudgetUsd = budget, hqPaused = paused, githubError = null) }
+                val arrived = awaitingGithub && HelperWords.coderReady(link)
+                if (arrived) awaitingGithub = false
+                _state.update { it.copy(github = link, taskBudgetUsd = budget, hqPaused = paused, githubError = null, githubJustConnected = it.githubJustConnected || arrived) }
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(githubError = w().s(R.string.github_failed)) }
             }
         }
+    }
+
+    /** Set when the owner leaves for GitHub, so the sheet can say it worked when they come back. */
+    private var awaitingGithub = false
+
+    /** The browser's way back after GitHub: hq://helpers/github. */
+    fun openGithubAfterConnect() {
+        awaitingGithub = true
+        actions.onGithubOpen()
     }
 
     private fun openGithub(url: String) {
@@ -548,17 +595,22 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     private fun openStart() {
         _state.update { it.copy(start = StartForm()) }
         loadHosts()
+        refreshGithub()
     }
 
     /** Asks HQ where helpers can run. Also when the owner comes back to an open sheet, which may be from pairing a computer. */
     private fun loadHosts() {
         if (_state.value.start == null) return
         viewModelScope.launch {
-            val hosts = try { client.helperHosts() } catch (e: HqUnavailable) { emptyList() }
+            val hosts = try { client.helperHosts() } catch (e: HqUnavailable) { null }
             _state.update { s ->
                 s.start?.let { f ->
+                    // No answer says nothing about the computers, so what the owner chose stays.
+                    if (hosts == null) return@let s.copy(start = f.copy(hosts = f.hosts ?: emptyList()))
                     val kept = f.host?.takeIf { name -> hosts.any { it.name == name && it.reachable } }
-                    s.copy(start = f.copy(hosts = hosts, host = kept ?: hosts.firstOrNull { it.reachable }?.name))
+                    val host = kept ?: hosts.firstOrNull { it.reachable }?.name
+                    val next = f.copy(hosts = hosts, host = host)
+                    s.copy(start = next.copy(harness = HelperWords.fitHarness(f.harness, next.chosenAgents())))
                 } ?: s
             }
         }
@@ -567,17 +619,78 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     private fun nextHost() = _state.update { s ->
         val f = s.start ?: return@update s
         val reachable = f.hosts.orEmpty().filter { it.reachable }
-        if (reachable.size < 2) s else s.copy(start = f.copy(host = reachable[(reachable.indexOfFirst { it.name == f.host } + 1) % reachable.size].name))
+        if (reachable.size < 2) return@update s
+        val next = f.copy(host = reachable[(reachable.indexOfFirst { it.name == f.host } + 1) % reachable.size].name)
+        s.copy(start = next.copy(harness = HelperWords.fitHarness(f.harness, next.chosenAgents())))
+    }
+
+    /** HQ Coder's only repositories are the ones the App may touch, so a repository picked for another helper does not carry over. */
+    private fun chooseHarness(harness: String) = _state.update { s ->
+        val f = s.start ?: return@update s
+        val coderChanged = (harness == HelperWords.HQ_CODER) != (f.harness == HelperWords.HQ_CODER)
+        s.copy(start = f.copy(harness = harness, error = null, repo = if (coderChanged) null else f.repo, picking = if (coderChanged) null else f.picking))
+    }
+
+    private var pickJob: Job? = null
+
+    private fun openPicker(kind: AttachKind) {
+        pickJob?.cancel()
+        val shut = _state.value.start?.picking == kind
+        _state.update { s -> s.copy(start = s.start?.copy(picking = if (shut) null else kind, pickQuery = "", pickResults = emptyList())) }
+        if (!shut) searchPicker("")
+    }
+
+    /** Waits for a pause in typing, so each key press is not a search. */
+    private fun searchPicker(query: String) {
+        val kind = _state.value.start?.picking ?: return
+        _state.update { s -> s.copy(start = s.start?.copy(pickQuery = query)) }
+        pickJob?.cancel()
+        pickJob = viewModelScope.launch {
+            delay(PICK_PAUSE_MS)
+            val found = try { pickerResults(kind, query) } catch (e: HqUnavailable) { emptyList() }
+            _state.update { s -> s.copy(start = s.start?.takeIf { it.picking == kind }?.copy(pickResults = found) ?: s.start) }
+        }
+    }
+
+    private suspend fun pickerResults(kind: AttachKind, query: String): List<Attached> = when (kind) {
+        AttachKind.Note -> if (query.isBlank()) emptyList() else client.searchNotes(query).map { (path, title, _) -> Attached(path, title.ifBlank { path }) }
+        AttachKind.Task -> client.searchTasks(query).filter { (_, _, status) -> status != TASK_COMPLETE }.map { (id, title, _) -> Attached(id, title.ifBlank { id }) }
+        AttachKind.Repo -> HelperWords.repoChoices(query, _state.value.github?.repos.orEmpty().filter { it.picked }.map { it.repo })
+    }
+
+    /** HQ Coder takes the job on HQ itself: a task keeps its own words, otherwise the words typed here become one. */
+    private fun submitCoder(f: StartForm) {
+        val link = _state.value.github ?: return
+        val repo = HelperWords.coderRepo(f, link) ?: return
+        if (f.busy) return
+        val body = JSONObject().put("repo", repo)
+        if (f.task != null) body.put("tasks", org.json.JSONArray().put(f.task.id)) else body.put("job", f.job.trim())
+        f.note?.let { body.put("notes", org.json.JSONArray().put(it.id)) }
+        _state.update { it.copy(start = f.copy(busy = true, error = null)) }
+        viewModelScope.launch {
+            try {
+                // Pressing Start with the budget in view is the owner's yes to the first task.
+                if (!link.firstTaskConfirmed) client.postJson("/api/github/first-task")
+                client.postJson("/api/coder/start", body)
+                _state.update { it.copy(start = null) }
+                say(w().s(R.string.helpers_coder_started))
+                refresh()
+            } catch (e: HqUnavailable) {
+                val why = if (e.status == HTTP_CONFLICT) R.string.helpers_coder_public_note else R.string.github_failed
+                _state.update { s -> s.copy(start = s.start?.copy(busy = false, error = w().s(why))) }
+            }
+        }
     }
 
     private fun submitStart() {
         val f = _state.value.start ?: return
+        if (f.harness == HelperWords.HQ_CODER) { submitCoder(f); return }
         val host = f.host
-        if (f.busy || f.job.isBlank() || host == null) return
+        if (f.busy || !HelperWords.canStartHelper(f) || host == null) return
         _state.update { it.copy(start = f.copy(busy = true, error = null)) }
         viewModelScope.launch {
             try {
-                val id = client.startHelper(f.harness, host, f.job.trim(), HelperWords.oneLineLabel(f.job))
+                val id = client.startHelper(f.harness, host, f.job.trim(), HelperWords.oneLineLabel(f.job.ifBlank { f.task?.title.orEmpty() }), f.note?.id, f.task?.id, f.repo?.id)
                 _state.update { it.copy(start = null) }
                 say(w().s(R.string.helpers_started))
                 refresh()
@@ -602,6 +715,9 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         const val POLL_MS = 8_000L
         const val SCREEN_MS = 5_000L
         const val LINE_MS = 4_000L
+        const val PICK_PAUSE_MS = 250L
+        const val HTTP_CONFLICT = 409
+        const val TASK_COMPLETE = "complete"
         /** More lines than the poll reads, so the check never shares the poll's cached read. */
         const val CHECK_LINES = 81
     }

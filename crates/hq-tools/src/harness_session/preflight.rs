@@ -49,7 +49,7 @@ const NON_LITERAL_WORD: [char; 5] = ['=', '$', '~', '\'', '"'];
 /// absolute path followed by arguments: an env prefix (`A=b claude`), a `cd x
 /// && claude`, a quoted path or a `$VAR` all leave the real binary to the shell
 /// and yield `None`.
-fn plain_binary(harness: &Harness) -> Option<String> {
+pub fn plain_binary(harness: &Harness) -> Option<String> {
     let Some(command) = harness.profile.as_ref().and_then(|p| p.command.as_deref()) else {
         return Some(harness.spec.binary().to_string());
     };

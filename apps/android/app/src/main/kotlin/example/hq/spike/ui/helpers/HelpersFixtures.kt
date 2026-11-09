@@ -41,7 +41,7 @@ fun helpersFixture(name: String?): HelpersUi? {
         "h-tech" -> base.copy(open = HelperOpen("b", HelperPage.Detail, technical = true, screen = screen))
         "h-stop" -> base.copy(open = HelperOpen("b", HelperPage.Detail, confirmStop = true))
         "h-menu" -> base.copy(open = HelperOpen("b", HelperPage.Detail, menu = true))
-        "h-start" -> base.copy(start = StartForm("Move the build from scripts to Gradle", hosts = listOf(HelperHost("Mac mini", true, null)), host = "Mac mini"))
+        "h-start" -> base.copy(start = StartForm("Move the build from scripts to Gradle", hosts = listOf(HelperHost("Mac mini", true, null, listOf("claude-code", "codex", "github-copilot", "pi"))), host = "Mac mini"))
         "h-nohost" -> base.copy(start = StartForm("Move the build", hosts = listOf(HelperHost("laptop", false, "no gate key"))))
         "h-cmd" -> commandHelpers(now)
         "h-cmd-page" -> commandHelpers(now).let { it.copy(open = HelperOpen("c1", HelperPage.Ask, screen = LONG_COMMAND)) }

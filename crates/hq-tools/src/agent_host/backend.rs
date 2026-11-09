@@ -182,6 +182,11 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         })
     }
 
+    /// Which of these programs the host can start. `None` when it cannot say.
+    fn installed_programs(&self, _names: &[String]) -> Option<Vec<String>> {
+        None
+    }
+
     /// The folder agents started from the web run in by default on this host, created if
     /// missing: `{root, os, wsl, explorer_path}`. Only the built-in host has one.
     fn workspace(&self) -> Result<serde_json::Value, AgentHostError> {
@@ -404,6 +409,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         env: Vec<(String, String)>,
     ) -> Result<(), AgentHostError> {
         (**self).resume_awaiting(name, env)
+    }
+    fn installed_programs(&self, names: &[String]) -> Option<Vec<String>> {
+        (**self).installed_programs(names)
     }
     fn workspace(&self) -> Result<serde_json::Value, AgentHostError> {
         (**self).workspace()

@@ -66,7 +66,7 @@ work overnight or over a holiday needs no new sign-in.
 
 ### What the person sees on the phone
 
-1. **Helpers, Code from this phone, Connect GitHub.** A Custom Tab opens GitHub's "Create GitHub
+1. **Helpers, HQ Coder, Connect GitHub.** A Custom Tab opens GitHub's "Create GitHub
    App" page, already filled in with the name, the permissions and no webhook. They press Create.
 2. **Pick repositories.** GitHub sends them back to HQ (on the phone, HQ's own server on
    `127.0.0.1`, which the browser on the same phone reaches), and HQ opens the install page at
@@ -231,7 +231,7 @@ That is GitHub's rule, and the sheet says so instead of failing quietly.
 
 ## Where it shows up
 
-- **Helpers, with no computer paired:** "Code from this phone" first, the pairing line second.
+- **Helpers, with no computer paired:** "HQ Coder" first, the pairing line second.
   With a computer paired, HQ Coder is still listed as a place to run, as "This phone (HQ)". Its
   runs already appear as cards (`HelperWords.edgeCard`).
 - **Tasks quick-add:** "Let HQ code" appears once GitHub is connected (today it waits for config).
@@ -246,7 +246,7 @@ That is GitHub's rule, and the sheet says so instead of failing quietly.
 | G1 | The manifest flow (manifest page, `state`, return route, code exchange), key store, App JWT and scoped installation tokens; `hq github connect | status | disconnect` | `crates/hq-tools/src/github/app.rs` (new), `crates/hq-cli/src/commands/github.rs` (new) |
 | G2 | `github_write` and `github_clone` take an installation token first and `HQ_GITHUB_WRITE_TOKEN` second; the allowlist is the installation, narrowed by `github_write.repos`; commit authorship | `crates/hq-tools/src/github/write.rs`, `crates/hq-core/src/config/github_write.rs` |
 | G3 | Owner-only REST routes for the flow and the repository list with its CI, preview and branch protection checks | `crates/hq-web/src/github_connect_api.rs` (new) |
-| G4 | Phone: Connect GitHub on Helpers and in Settings, the repository list, "Code from this phone" | `apps/android/.../ui/helpers/`, `ui/settings/` |
+| G4 | Phone: Connect GitHub on Helpers and in Settings, the repository list, "HQ Coder" | `apps/android/.../ui/helpers/`, `ui/settings/` |
 | G5 | Web: the same in Settings and Helpers | `apps/hq-web/src/routes/helpers.tsx`, settings |
 | G6 | Flip the defaults (`dispatch_tasks: true`, worker armed without `repos`), the first-task confirmation, the per-task budget, and the worker preset of edge-worker step S3 | config, `edge-worker-dispatch` |
 | G7 | First live run on a small Django or React Native repository with fast CI, on a mid-range phone on mobile data: megabytes per task, model cost per merged pull request, time to green | measurements in `docs/plans/` |

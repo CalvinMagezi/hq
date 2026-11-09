@@ -19,8 +19,9 @@ pub const GATE_DENIED_EXIT: i32 = 64;
 /// not end the host), and so is `agent.report`, which belongs to the agent's own
 /// hooks on the machine where it runs. `host.lockdown` is in so HQ can stop a
 /// machine's agents from anywhere; unlocking has no method at all.
-const ALLOWED: [&str; 30] = [
+const ALLOWED: [&str; 31] = [
     "host.status",
+    "host.programs",
     "host.lockdown",
     "host.workspace",
     "host.dirs",

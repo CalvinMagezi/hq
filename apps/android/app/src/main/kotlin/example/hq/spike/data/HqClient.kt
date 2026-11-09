@@ -437,7 +437,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val notificationId: String get() = "val_$itemId"
     }
 
-    data class HelperHost(val name: String, val reachable: Boolean, val error: String?)
+    /** [agents] is what this computer can start; an older computer that cannot say lists every agent HQ knows. */
+    data class HelperHost(val name: String, val reachable: Boolean, val error: String?, val agents: List<String> = emptyList())
 
     /** One run of HQ's own edge worker: the chat that worked a task, and the task as it is now. */
     data class EdgeRun(
@@ -521,15 +522,17 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     }
 
     /** Starts a helper in a new folder on [host], given its first instruction; returns the new session's id. */
-    suspend fun startHelper(harness: String, host: String, prompt: String, label: String): String =
+    suspend fun startHelper(harness: String, host: String, prompt: String, label: String, note: String? = null, taskId: String? = null, repo: String? = null): String =
         send(
-            authed("/api/harness-sessions").post(JSONObject().put("harness", harness).put("host", host).put("prompt", prompt).put("label", label).toString().toRequestBody("application/json".toMediaType())).build(),
+            authed("/api/harness-sessions").post(JSONObject().put("harness", harness).put("host", host).put("prompt", prompt).put("label", label).put("note", note).put("task_id", taskId).put("repo", repo).toString().toRequestBody("application/json".toMediaType())).build(),
             caller = startHttp,
         ) { JSONObject(it).getString("session_id") }
 
     /** The computers helpers can run on, and whether each answered. */
     suspend fun helperHosts(): List<HelperHost> = send(authed("/api/workbench/hosts").build()) { text ->
-        JSONObject(text).optJSONArray("hosts").objects().mapNotNull { h -> h.optStringOrNull("host")?.let { HelperHost(it, h.optBoolean("reachable", false), h.optStringOrNull("error")) } }
+        val root = JSONObject(text)
+        val every = root.optJSONArray("harnesses").strings()
+        root.optJSONArray("hosts").objects().mapNotNull { h -> h.optStringOrNull("host")?.let { HelperHost(it, h.optBoolean("reachable", false), h.optStringOrNull("error"), h.optJSONArray("agents")?.strings() ?: every) } }
     }
 
     /** A read-only JSON route as it is, for the Settings pages that only show what the server says. */

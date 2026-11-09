@@ -165,9 +165,21 @@ pub fn start_page(state: &str, base: &str) -> Page {
 
 /// A plain message page for the end of the flow.
 pub fn message_page(title: &str, body: &str) -> Page {
+    finished_page(title, body, None)
+}
+
+/// The message page with a link back to where the flow began, as `(words, address)`.
+pub fn finished_page(title: &str, body: &str, back: Option<(&str, &str)>) -> Page {
+    let link = back.map_or(String::new(), |(words, href)| {
+        format!(
+            "<p><a href=\"{}\">{}</a></p>",
+            escape_html(href),
+            escape_html(words)
+        )
+    });
     let html = format!(
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>\
-         <title>{0}</title><h1>{0}</h1><p>{1}</p>",
+         <title>{0}</title><h1>{0}</h1><p>{1}</p>{link}",
         escape_html(title),
         escape_html(body),
     );
