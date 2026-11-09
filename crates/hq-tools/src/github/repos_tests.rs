@@ -101,6 +101,27 @@ fn no_tool_can_start_or_finish_a_connection() {
 }
 
 #[test]
+fn reading_without_gh_finds_the_repository_and_the_least_permission() {
+    use crate::github::{path_repo, run_list_path, step_for_path};
+    assert_eq!(
+        path_repo("repos/o/r/actions/runs?per_page=5").as_deref(),
+        Some("o/r")
+    );
+    assert_eq!(path_repo("users/o"), None);
+    assert_eq!(path_repo("repos/../x/y"), None);
+    assert_eq!(step_for_path("repos/o/r/actions/jobs/7/logs"), Step::ReadCi);
+    assert_eq!(step_for_path("repos/o/r/contents/a.py"), Step::Fetch);
+    assert_eq!(
+        run_list_path(&json!({"action": "run_list", "repo": "o/r", "limit": 5})).as_deref(),
+        Some("repos/o/r/actions/runs?per_page=5")
+    );
+    assert_eq!(
+        run_list_path(&json!({"action": "pr_list", "repo": "o/r"})),
+        None
+    );
+}
+
+#[test]
 fn github_token_alone_is_not_a_secret_worth_flagging() {
     assert!(secret_names("token: ${{ secrets.GITHUB_TOKEN }}").is_empty());
     assert!(secret_names("token: ${{ secrets.github_token }}").is_empty());

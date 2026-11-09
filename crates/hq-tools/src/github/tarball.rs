@@ -225,7 +225,7 @@ fn sweep_leftovers(parent: &Path) {
 }
 
 /// The App's token when there is one, otherwise the read-only token from the environment.
-fn authed(
+pub(super) fn authed(
     client: &reqwest::Client,
     url: &str,
     accept: &str,

@@ -245,13 +245,21 @@ async fn http_get(path: &str) -> Result<String> {
 }
 
 async fn http_get_accepting(path: &str, accept: &str, max_chars: usize) -> Result<String> {
+    http_get_as(path, accept, max_chars, None).await
+}
+
+async fn http_get_as(
+    path: &str,
+    accept: &str,
+    max_chars: usize,
+    token: Option<&str>,
+) -> Result<String> {
     let client = reqwest::Client::builder()
         .timeout(COMMAND_TIMEOUT)
         .user_agent(USER_AGENT)
         .build()?;
-    let resp = read_request(&client, &format!("{API_HOST_URL}{path}"), accept)
-        .send()
-        .await?;
+    let url = format!("{API_HOST_URL}{path}");
+    let resp = tarball::authed(&client, &url, accept, token).send().await?;
     let status = resp.status();
     let body = resp.text().await?;
     if !status.is_success() {
@@ -324,13 +332,61 @@ impl HqTool for GithubReadTool {
                 )
                 .await?
             }
-            (GhCall::ApiGet(path), false) => http_get(&path).await?,
-            (GhCall::Gh(_), false) => bail!(
-                "the gh CLI is not installed here; repo_view, file and api still work for public data"
-            ),
+            (GhCall::ApiGet(path), false) => read_without_gh(&path).await?,
+            (GhCall::Gh(_), false) => match run_list_path(&args) {
+                Some(path) => read_without_gh(&path).await?,
+                None => bail!(
+                    "the gh CLI is not installed here; repo_view, file, run_list and api still work"
+                ),
+            },
         };
         Ok(json!({ "output": output }))
     }
+}
+
+/// The API path of `run_list`, which a phone without `gh` needs to read CI.
+fn run_list_path(args: &Value) -> Option<String> {
+    if text(args, "action") != Some("run_list") {
+        return None;
+    }
+    let repo = repo(args).ok()?;
+    Some(format!(
+        "repos/{repo}/actions/runs?per_page={}",
+        limit(args)
+    ))
+}
+
+/// `owner/name` of a `repos/...` API path.
+fn path_repo(path: &str) -> Option<String> {
+    let mut parts = path.strip_prefix("repos/")?.split(['/', '?']);
+    let repo = format!("{}/{}", parts.next()?, parts.next()?);
+    is_valid_repo(&repo).then_some(repo)
+}
+
+/// The least a token needs for this path: CI reads are their own permission.
+fn step_for_path(path: &str) -> app::Step {
+    let ci = ["/actions/", "/check-runs", "/check-suites", "/status"];
+    match ci.iter().any(|part| path.contains(part)) {
+        true => app::Step::ReadCi,
+        false => app::Step::Fetch,
+    }
+}
+
+/// With an App, a token for just that repository and kind of read; otherwise public data.
+async fn read_without_gh(path: &str) -> Result<String> {
+    let app = app::AppClient::standard()?;
+    let token = match path_repo(path) {
+        Some(repo) => app_token(&app, &repo, step_for_path(path)).await?,
+        None => None,
+    };
+    let secret = token.as_ref().map(app::AppToken::secret);
+    http_get_as(
+        path,
+        "application/vnd.github+json",
+        MAX_OUTPUT_CHARS,
+        secret,
+    )
+    .await
 }
 
 /// `owner/name`, as the tool validates a repository. Neither part may start with a dot: `o/.`
@@ -481,13 +537,17 @@ pub fn records_root() -> PathBuf {
     hq_core::config::HqConfig::hq_dir().join("github")
 }
 
-/// A read-only token for `repo` from the App. `None` when the App is absent or does not cover
-/// it, so a public repository can still be read without one.
-async fn fetch_token(app: &app::AppClient, repo: &str) -> Result<Option<app::AppToken>> {
+/// A read token for `repo` from the App. `None` when the App is absent or does not cover it, so
+/// a public repository can still be read without one.
+async fn app_token(
+    app: &app::AppClient,
+    repo: &str,
+    step: app::Step,
+) -> Result<Option<app::AppToken>> {
     if app.store().load().is_none() {
         return Ok(None);
     }
-    match app.token(repo, app::Step::Fetch).await {
+    match app.token(repo, step).await {
         Ok(token) => Ok(Some(token)),
         Err(e) if e.downcast_ref::<app::TokenRefused>().is_some() => Ok(None),
         Err(e) => Err(e),
@@ -584,7 +644,7 @@ impl HqTool for GithubCloneTool {
         // A base record left for a git checkout would describe files git did not fetch.
         let _ = std::fs::remove_file(tarball::base_record_path(&records));
         if method == CloneMethod::Tarball {
-            let token = fetch_token(&app, &repo).await?;
+            let token = app_token(&app, &repo, app::Step::Fetch).await?;
             let secret = token.as_ref().map(app::AppToken::secret);
             let fetched = tarball::fetch(API_HOST_URL, &repo, &dest, &records, secret).await?;
             return Ok(tarball_reply(&dest_arg, &fetched));
