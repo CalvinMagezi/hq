@@ -32,6 +32,8 @@ pub enum Kind {
     Markdown,
     Image,
     Epub,
+    /// One note from a Google Keep (Takeout) export, as JSON.
+    KeepNote,
     /// A zip container that is none of the office formats.
     Zip,
     Unknown,
@@ -59,6 +61,7 @@ impl Kind {
             Kind::Markdown => "markdown",
             Kind::Image => "image",
             Kind::Epub => "epub",
+            Kind::KeepNote => "keep-note",
             Kind::Zip => "zip",
             Kind::Unknown => "unknown",
         }
@@ -109,6 +112,7 @@ impl Kind {
             | Kind::Csv
             | Kind::Tsv
             | Kind::Txt
+            | Kind::KeepNote
             | Kind::Pdf => Support::Ready,
             Kind::Image if caps.ocr => Support::Ready,
             Kind::Image => Support::NeedsOcr,
@@ -242,6 +246,13 @@ pub fn sniff(bytes: &[u8], ext: &str) -> Sniffed {
             .to_lowercase();
         if lower.starts_with("{\\rtf") {
             return content(Kind::Rtf, by_name);
+        }
+        if by_name == Kind::Unknown
+            && lower.starts_with('{')
+            && lower.contains("\"istrashed\"")
+            && lower.contains("\"ispinned\"")
+        {
+            return content(Kind::KeepNote, by_name);
         }
         if lower.starts_with("<!doctype html")
             || lower.starts_with("<html")

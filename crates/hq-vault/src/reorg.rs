@@ -385,19 +385,40 @@ pub(crate) fn restore_note(vault_path: &Path, trash_rel: &str) -> Result<Restore
     })
 }
 
-/// Set frontmatter keys and put `prefix` above the body of `raw`, in one atomic write, so a
-/// failure leaves the note as it was.
+/// Adds a tag, leaving the ones already there as they are, numbers and all.
+fn add_tag(fm: &mut HashMap<String, serde_yaml::Value>, tag: &str) {
+    let value = serde_yaml::Value::from(tag);
+    if let Some(serde_yaml::Value::Sequence(items)) = fm.get_mut("tags") {
+        if !items.contains(&value) {
+            items.push(value);
+        }
+        return;
+    }
+    let mut tags = crate::frontmatter::yaml_tags(fm.get("tags"));
+    if !tags.iter().any(|t| t == tag) {
+        tags.push(tag.to_string());
+    }
+    fm.insert(
+        "tags".to_string(),
+        serde_yaml::Value::Sequence(tags.into_iter().map(Into::into).collect()),
+    );
+}
+
+/// Set frontmatter keys, add `tag` to the note's tags and put `prefix` above the body of `raw`,
+/// in one atomic write, so a failure leaves the note as it was.
 pub(crate) fn prepend_to_note(
     vault_path: &Path,
     rel: &str,
     raw: &str,
     set: HashMap<String, serde_yaml::Value>,
+    tag: &str,
     prefix: &str,
 ) -> Result<()> {
     let rel = &guard_rel_path(rel)?;
     require_md(rel)?;
     let (mut fm, body) = crate::frontmatter::parse(raw)?;
     fm.extend(set);
+    add_tag(&mut fm, tag);
     let out = crate::frontmatter::serialize(&fm, &format!("{prefix}{body}"))?;
     crate::notes::write_atomic(&vault_path.join(rel), out.as_bytes())
 }
@@ -697,14 +718,30 @@ mod tests {
         write(tmp.path(), "Notebooks/n.md", "---\nkept: 1\n---\nbody");
         let raw = std::fs::read_to_string(tmp.path().join("Notebooks/n.md")).unwrap();
         let set = HashMap::from([("source_url".to_string(), "https://example.com".into())]);
-        prepend_to_note(tmp.path(), "Notebooks/n.md", &raw, set.clone(), "top\n\n").unwrap();
+        prepend_to_note(
+            tmp.path(),
+            "Notebooks/n.md",
+            &raw,
+            set.clone(),
+            "saved",
+            "top\n\n",
+        )
+        .unwrap();
         let out = std::fs::read_to_string(tmp.path().join("Notebooks/n.md")).unwrap();
         assert!(
             out.contains("kept: 1") && out.contains("source_url"),
             "{out}"
         );
         assert!(out.contains("top\n\nbody"), "{out}");
-        assert!(prepend_to_note(tmp.path(), "skills/x.md", "", set, "t").is_err());
+        assert!(out.contains("- saved"), "{out}");
+        let mut fm: HashMap<String, serde_yaml::Value> =
+            serde_yaml::from_str("tags: [2024, foo]").unwrap();
+        add_tag(&mut fm, "saved");
+        assert_eq!(
+            fm["tags"],
+            serde_yaml::from_str::<serde_yaml::Value>("[2024, foo, saved]").unwrap()
+        );
+        assert!(prepend_to_note(tmp.path(), "skills/x.md", "", set, "s", "t").is_err());
     }
 
     #[test]

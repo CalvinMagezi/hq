@@ -24,20 +24,20 @@ then adds a short summary and proposed tags.
 Not built: accepting a proposed tag with one tap, and sharing from the web app. Proposed tags are
 shown in the note and held in `proposed_tags`.
 
-## Phase 2: proposed, not built
+## Phase 2: built
 
-Goal: HQ brings up what the owner collected when it is relevant, without being asked.
+Goal: HQ brings up what the owner collected when it is relevant, without being asked. Saved notes
+carry the tag `saved-item`.
 
-1. **Import what exists.** Google Takeout exports Keep as files that `vault_import` can read, so
-   old links can join the collection without a new connector.
-2. **Find it during work.** These notes are already searchable. Add a `source_url` filter so the
-   agent can ask for "things I saved about X". Results stay tainted like any vault read.
-3. **Surface it, chosen on the device.** A periodic task matches open task titles against the
-   collection with the keyword index and puts at most one item a week in the inbox, naming the
-   note and why it matched. No model chooses it, and no usage data leaves the device, in line with
-   `docs/security/ADOPTION_DATA.md`.
-4. **Learn tastes only if asked.** A profile of what the owner likes is sensitive and would be
-   sent to a model in every session. It should be a separate, explicit opt-in.
+1. **Import what exists.** Put a Google Takeout `Keep` folder in the vault and run `vault_import`
+   on it. Each note keeps its title, text, checklist, link (`source_url`) and labels (as tags).
+   Notes in Keep's trash are skipped, and the HTML twin of a JSON note is ignored.
+2. **Find it during work.** `vault_search` with `tags: ["saved-item"]` finds things the owner
+   saved about a subject. Results taint the session like any vault read.
+3. **Surface it, chosen on the device.** The weekly task `collection-tip` matches open task titles
+   against saved notes with the keyword index, needs two shared words, never repeats a note, and
+   puts at most one item a week in the inbox. No model is involved, the item is device-only, and
+   `daemon.collection_tip: false` turns it off.
 
-Needs the owner's decision before building: whether a weekly surfaced item is wanted, and whether
-step 4 is wanted at all.
+Not built, on the owner's decision: a profile of what the owner likes. It is sensitive and would
+go to a model in every session.
