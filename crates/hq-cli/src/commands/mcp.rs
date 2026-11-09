@@ -23,13 +23,13 @@ pub struct Scope {
 /// Install, check, or remove HQ MCP server configuration.
 pub async fn run(config: &HqConfig, sub: &str, scope: Scope) -> Result<()> {
     match sub {
-        "install" | "" => install(config, &scope),
-        "status" => status(config, &scope),
+        "install" => install(config, &scope),
+        "status" | "" => status(config, &scope),
         "remove" => remove(&scope),
         "doctor" => doctor(config).await,
         _ => {
             println!(
-                "Usage: hq mcp [install|status|remove|doctor] [path] [--target <client>] [--global]"
+                "Usage: hq mcp [status|install|remove|doctor] [path] [--target <client>] [--global]"
             );
             Ok(())
         }
@@ -106,6 +106,7 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
     };
     println!("Installing HQ MCP server configuration...\n");
     let mut installed = 0;
+    let mut kept = 0;
     let mut written: Vec<PathBuf> = Vec::new();
     let mut legacy: Vec<Target> = Vec::new();
     for t in selected_targets(scope)? {
@@ -115,6 +116,7 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
         }
         if let Some(why) = cursor_mcp_config::keep_reason(&t, &opts) {
             println!("  Kept {} ({why})", t.path.display());
+            kept += 1;
             continue;
         }
         let shown_scope = if opts.remote_url.is_some() {
@@ -128,6 +130,11 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
         match cursor_mcp_config::write_target(&t, &config.vault_path, &opts) {
             Ok(Some(path)) => {
                 println!("  Installed to: {} ({shown_scope})", path.display());
+                if t.copilot {
+                    println!(
+                        "  Note: Copilot now loads HQ's tools in every session. Add agent-hq to the --disable-mcp-server list of any lean profile."
+                    );
+                }
                 written.push(path.to_path_buf());
                 installed += 1;
             }
@@ -142,7 +149,7 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
             .path
             .parent()
             .is_some_and(|dir| written.iter().any(|w| w.parent() == Some(dir)));
-        if replaced && cursor_mcp_config::has_entry(&t) {
+        if replaced && t.path.ends_with("settings.json") && cursor_mcp_config::has_entry(&t) {
             println!(
                 "  Note: {} still has an older agent-hq entry (the \"mcp.servers\" setting). VS Code now reads mcp.json, so delete that entry from settings.json yourself; HQ leaves the file alone because it is usually JSONC with your own settings.",
                 t.path.display()
@@ -150,7 +157,9 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
         }
     }
 
-    if installed == 0 {
+    if installed == 0 && kept > 0 {
+        println!("\nNothing changed.");
+    } else if installed == 0 {
         println!("No supported AI editor configs found.");
         if let Some(url) = &opts.remote_url {
             println!(
@@ -179,6 +188,7 @@ fn status(config: &HqConfig, scope: &Scope) -> Result<()> {
         );
     }
     println!("  Vault: {}", config.vault_path.display());
+    println!("\nTo change these files: hq mcp install or hq mcp remove");
     Ok(())
 }
 

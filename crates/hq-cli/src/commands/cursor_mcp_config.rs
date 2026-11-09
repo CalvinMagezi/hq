@@ -156,16 +156,35 @@ pub fn validate_remote_url(raw: &str) -> Result<String> {
 /// project-level file several harnesses may read.
 const GENERIC_AGENT_ID: &str = "coding-agent";
 
+const BACKUP_SUFFIX: &str = ".hq-backup";
+
 fn read_json(path: &Path) -> Result<Value> {
     let content = std::fs::read_to_string(path)?;
     Ok(serde_json::from_str(&content)?)
 }
 
+/// Saves the file's previous contents beside it, so a change HQ makes can be undone by hand.
+fn back_up(path: &Path) -> Result<()> {
+    if path.exists() {
+        let mut backup = path.as_os_str().to_owned();
+        backup.push(BACKUP_SUFFIX);
+        std::fs::copy(path, backup)?;
+    }
+    Ok(())
+}
+
+/// Writes `value`, backing up what was there. Rewriting identical content does nothing, so a
+/// repeated install cannot replace the backup with a copy of itself.
 fn write_json(path: &Path, value: &Value) -> Result<()> {
+    let text = serde_json::to_string_pretty(value)?;
+    if std::fs::read_to_string(path).is_ok_and(|old| old == text) {
+        return Ok(());
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(value)?)?;
+    back_up(path)?;
+    std::fs::write(path, text)?;
     Ok(())
 }
 
@@ -190,6 +209,8 @@ pub struct Target {
     needs_parent: bool,
     /// A VS Code `mcp.json`: entries carry a `type`, and a remote form is accepted.
     vscode: bool,
+    /// Copilot CLI's `mcp-config.json`: entries carry a `type` and a `tools` list.
+    pub copilot: bool,
     /// An old location HQ no longer writes. `install` migrates its entry away,
     /// and `status` and `remove` still look there.
     pub legacy: bool,
@@ -202,6 +223,7 @@ fn target(path: PathBuf, key: &'static str, agent_id: &'static str) -> Target {
         agent_id,
         needs_parent: false,
         vscode: false,
+        copilot: false,
         legacy: false,
     }
 }
@@ -219,11 +241,15 @@ pub fn global_targets(client: &str) -> Result<Vec<Target>> {
             .collect(),
         "claude-code" => vec![
             target(home.join(".claude.json"), "mcpServers", "claude-code"),
-            target(
-                home.join(".claude/settings.json"),
-                "mcpServers",
-                "claude-code",
-            ),
+            // Claude Code reads MCP servers from `.claude.json`, not here.
+            Target {
+                legacy: true,
+                ..target(
+                    home.join(".claude/settings.json"),
+                    "mcpServers",
+                    "claude-code",
+                )
+            },
         ],
         "vscode" => {
             // `dirs::config_dir` is %APPDATA% on Windows, ~/Library/Application Support
@@ -255,13 +281,29 @@ pub fn global_targets(client: &str) -> Result<Vec<Target>> {
             agent_id: "antigravity",
             needs_parent: false,
             vscode: false,
+            copilot: false,
             legacy: false,
         }],
-        "copilot" => vec![target(
-            home.join(".copilot/mcp.json"),
-            "mcpServers",
-            "github-copilot",
-        )],
+        "copilot" => vec![
+            Target {
+                needs_parent: true,
+                copilot: true,
+                ..target(
+                    home.join(".copilot/mcp-config.json"),
+                    "mcpServers",
+                    "github-copilot",
+                )
+            },
+            // An older HQ wrote here, and Copilot CLI never read it.
+            Target {
+                legacy: true,
+                ..target(
+                    home.join(".copilot/mcp.json"),
+                    "mcpServers",
+                    "github-copilot",
+                )
+            },
+        ],
         "opencode" => vec![target(
             home.join(".config/opencode/opencode.json"),
             "mcp",
@@ -324,10 +366,22 @@ fn classify(entry: &Value) -> Existing {
     if entry.get("url").is_some() {
         return Existing::Remote;
     }
-    let Some(args) = entry.get("args").and_then(Value::as_array) else {
+    // OpenCode's own form has no `args`: `command` is the whole argument list.
+    let list = entry
+        .get("args")
+        .or_else(|| entry.get("command"))
+        .and_then(Value::as_array);
+    let Some(args) = list else {
         return Existing::Local(ServeScope::Full);
     };
     let args: Vec<&str> = args.iter().filter_map(Value::as_str).collect();
+    // `mcp-serve --remote <name>` relays to another HQ, so its reach is that HQ's key too.
+    if args
+        .iter()
+        .any(|a| *a == "--remote" || a.starts_with("--remote="))
+    {
+        return Existing::Remote;
+    }
     for (i, arg) in args.iter().enumerate() {
         let value = if *arg == "--scope" {
             args.get(i + 1).copied()
@@ -452,7 +506,15 @@ pub fn write_target<'a>(
     let server = match &opts.remote_url {
         Some(_) if !t.vscode => return Ok(None),
         Some(url) => build_remote_entry(url),
-        None => build_stdio_entry(vault_path, t.agent_id, effective_scope(t, opts), t.vscode),
+        None => {
+            let mut entry =
+                build_stdio_entry(vault_path, t.agent_id, effective_scope(t, opts), t.vscode);
+            if t.copilot {
+                entry["type"] = json!("local");
+                entry["tools"] = json!(["*"]);
+            }
+            entry
+        }
     };
     let Some(key) = t.key else {
         write_json(&t.path, &server)?;
@@ -526,6 +588,7 @@ pub fn remove_target(t: &Target) -> Result<bool> {
         return Ok(false);
     }
     let Some(key) = t.key else {
+        back_up(&t.path)?;
         std::fs::remove_file(&t.path)?;
         return Ok(true);
     };
@@ -999,6 +1062,111 @@ mod tests {
                 .get("command")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn a_plain_install_keeps_an_entry_that_relays_to_another_hq() {
+        let dir = tempfile::tempdir().unwrap();
+        for args in [
+            json!(["mcp-serve", "--remote", "server"]),
+            json!(["mcp-serve", "--remote=server"]),
+        ] {
+            let t = target(dir.path().join("relay.json"), "mcpServers", "cursor");
+            let relay =
+                json!({ "mcpServers": { "agent-hq": { "command": "hq", "args": args.clone() } } });
+            write_json(&t.path, &relay).unwrap();
+
+            let plain = EntryOptions::default();
+            assert!(keep_reason(&t, &plain).is_some(), "{args}");
+            assert!(
+                write_target(&t, Path::new("/vault"), &plain)
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(read_json(&t.path).unwrap(), relay);
+            assert_eq!(describe(&t), "installed (remote HQ)");
+        }
+    }
+
+    #[test]
+    fn opencodes_own_form_of_a_relay_is_kept_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = target(dir.path().join("opencode.json"), "mcp", "opencode");
+        let relay = json!({ "mcp": { "agent-hq": {
+            "type": "local",
+            "command": ["hq", "mcp-serve", "--remote", "server"],
+            "enabled": true,
+        } } });
+        write_json(&t.path, &relay).unwrap();
+        assert!(keep_reason(&t, &EntryOptions::default()).is_some());
+        assert_eq!(describe(&t), "installed (remote HQ)");
+    }
+
+    #[test]
+    fn a_change_keeps_a_backup_and_repeating_it_does_not_replace_the_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = target(dir.path().join("mcp.json"), "mcpServers", "cursor");
+        let backup = dir.path().join("mcp.json.hq-backup");
+        let original = json!({ "mcpServers": { "other": { "command": "x" } } });
+        write_json(&t.path, &original).unwrap();
+        assert!(!backup.exists(), "a new file has nothing to back up");
+
+        write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
+        assert_eq!(read_json(&backup).unwrap(), original);
+
+        write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
+        assert_eq!(
+            read_json(&backup).unwrap(),
+            original,
+            "the second install changed nothing"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_backup_is_as_private_as_the_file_it_copies() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mcp.json");
+        std::fs::write(&path, "{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        back_up(&path).unwrap();
+        let mode = std::fs::metadata(dir.path().join("mcp.json.hq-backup"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn copilot_gets_its_entry_in_the_file_it_reads_and_in_its_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = Target {
+            copilot: true,
+            ..target(
+                dir.path().join("mcp-config.json"),
+                "mcpServers",
+                "github-copilot",
+            )
+        };
+        write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
+        let entry = &read_json(&t.path).unwrap()["mcpServers"]["agent-hq"];
+        assert_eq!(entry["type"], "local");
+        assert_eq!(entry["tools"], json!(["*"]));
+
+        let targets = global_targets("copilot").unwrap();
+        let live: Vec<&Target> = targets.iter().filter(|t| !t.legacy).collect();
+        assert_eq!(live.len(), 1);
+        assert!(live[0].path.ends_with(".copilot/mcp-config.json"));
+    }
+
+    #[test]
+    fn claude_code_is_written_only_where_it_reads_servers() {
+        let targets = global_targets("claude-code").unwrap();
+        let live: Vec<&Target> = targets.iter().filter(|t| !t.legacy).collect();
+        assert_eq!(live.len(), 1);
+        assert!(live[0].path.ends_with(".claude.json"));
     }
 
     #[test]

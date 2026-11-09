@@ -512,10 +512,10 @@ enum Commands {
         value: Option<String>,
     },
 
-    /// Install MCP server config for Claude, Cursor, VS Code, Copilot, OpenCode, Antigravity
+    /// Show, install or remove the MCP config for Claude, Cursor, VS Code, Copilot, OpenCode, Antigravity
     Mcp {
-        /// Subcommand: install, status, remove, doctor
-        #[arg(default_value = "install")]
+        /// Subcommand: status, install, remove, doctor. Only install and remove change files
+        #[arg(default_value = "status")]
         sub: String,
         /// Project directory for the project-level configs (default: current directory)
         path: Option<String>,
@@ -1483,6 +1483,22 @@ mod lite_rule_tests {
         ] {
             assert_eq!(rule(argv), "open", "{argv:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod mcp_args_tests {
+    use super::{Cli, Commands};
+    use clap::Parser;
+
+    #[test]
+    fn bare_hq_mcp_only_reports_and_install_has_to_be_asked_for() {
+        let sub_of = |argv: &[&str]| match Cli::try_parse_from(argv).unwrap().command {
+            Some(Commands::Mcp { sub, .. }) => sub,
+            _ => panic!("not the mcp command"),
+        };
+        assert_eq!(sub_of(&["hq", "mcp"]), "status");
+        assert_eq!(sub_of(&["hq", "mcp", "install"]), "install");
     }
 }
 

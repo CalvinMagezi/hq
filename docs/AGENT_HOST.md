@@ -321,7 +321,7 @@ What it cannot do:
   what HQ itself runs or serves: the `hq` binary (`~/.local/bin/hq`, `~/bin/hq`, the binary
   the host runs from and the path it was started as, and `self_update.install_paths`), the
   MCP client configs `hq mcp install` writes (`~/.cursor/mcp.json`, VS Code's user `mcp.json`
-  and `settings.json`, Claude Desktop's config, `~/.copilot/mcp.json`, opencode's and
+  and `settings.json`, Claude Desktop's config, `~/.copilot/mcp-config.json` and `mcp.json`, opencode's and
   Antigravity's) and Codex's `~/.codex/config.toml`, each of which names commands its client
   runs later; and the web UI HQ serves (`web_static_dir`, or each folder HQ would look in up
   to the one it serves from), unless it lies in the agent's own project. HQ no longer looks
