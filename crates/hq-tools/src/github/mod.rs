@@ -583,7 +583,7 @@ fn make_private_root(root: &Path) -> Result<()> {
 }
 
 /// Shallow checkouts land here so a repo can be searched with grep and read_file.
-fn clone_root() -> PathBuf {
+pub fn clone_root() -> PathBuf {
     std::env::temp_dir().join("hq-github-clones")
 }
 

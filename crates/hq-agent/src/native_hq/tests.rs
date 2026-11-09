@@ -402,6 +402,52 @@ async fn a_read_only_preset_denies_mutating_tools_and_keeps_the_reads() {
     );
 }
 
+#[tokio::test]
+async fn the_coding_worker_has_only_its_own_tools() {
+    let vault = tempfile::TempDir::new().unwrap();
+    let config = HqConfig {
+        openrouter_api_key: Some("test-key-no-network".to_string()),
+        vault_path: vault.path().to_path_buf(),
+        ..HqConfig::default()
+    };
+    let worker = crate::builder::SessionBuilder::from_config(&config)
+        .working_dir(vault.path().to_path_buf())
+        .session_config(SessionConfig {
+            is_live_user_turn: true,
+            model: "anthropic/claude-haiku-5.5".to_string(),
+            ..SessionConfig::default()
+        })
+        .worker_preset(vault.path().join("clones"))
+        .build()
+        .await
+        .unwrap()
+        .tool_names()
+        .await;
+    for needed in [
+        "spawn_subagents",
+        "load_skill",
+        "task_claim",
+        "task_release",
+    ] {
+        assert!(worker.iter().any(|n| n == needed), "{needed}: {worker:?}");
+    }
+    for name in &worker {
+        assert!(
+            crate::builder::WORKER_TOOLS.contains(&name.as_str()),
+            "{name}"
+        );
+    }
+    for never in [
+        "bash",
+        "read_file",
+        "write_file",
+        "task_create",
+        "config_manage",
+    ] {
+        assert!(!worker.iter().any(|n| n == never), "{never}");
+    }
+}
+
 /// The handoff key was kept off these tools on purpose; a read-only ask on that key must not get them back.
 #[tokio::test]
 async fn a_handoff_ask_turn_has_none_of_the_tools_the_handoff_key_is_kept_off() {

@@ -277,6 +277,7 @@ async fn ask_to_work(
         "untrusted": true,
         "model": model,
         "budget_usd": budget_usd,
+        "worker_preset": true,
     });
     let reply = ask.execute(args).await?;
     let ask_id = reply

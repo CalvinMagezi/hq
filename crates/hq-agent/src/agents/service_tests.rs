@@ -257,6 +257,40 @@ fn children_run_under_the_parents_permission_mode_and_nested_ones_too() {
     ));
 }
 
+#[test]
+fn a_confined_child_has_file_tools_and_no_shell() {
+    let provider: Arc<dyn LlmProvider> = Arc::new(DummyProvider);
+    let config = SessionConfig::default();
+    let root = [std::path::PathBuf::from("/tmp/hq-confined")];
+    let names = |confined: bool| -> Vec<String> {
+        service_with_fleet()
+            .build_inprocess_tools(&config, &provider, &root, confined)
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect()
+    };
+    assert!(names(false).iter().any(|n| n == "bash"));
+    let confined = names(true);
+    assert!(confined.iter().any(|n| n == "edit_file"), "{confined:?}");
+    assert!(
+        confined
+            .iter()
+            .all(|n| CONFINED_CHILD_TOOLS.contains(&n.as_str())),
+        "{confined:?}"
+    );
+    assert!(!confined.iter().any(|n| n == "bash"));
+}
+
+#[test]
+fn confining_a_service_limits_every_child_it_starts() {
+    let root = std::path::PathBuf::from("/tmp/hq-confined");
+    let service = service_with_fleet().confined_to(Some(root.clone()));
+    assert_eq!(service.allowed_paths, [root]);
+    assert!(service.confined);
+    let open = service_with_fleet().confined_to(None);
+    assert!(!open.confined);
+}
+
 /// An orchestrator's children read, search and report, but have no file or git writers.
 #[test]
 fn orchestrator_children_have_no_file_writers() {

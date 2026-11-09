@@ -122,6 +122,9 @@ pub struct AskStart<'a> {
     pub model: Option<&'a str>,
     /// Lowers the reply's spending cap; it can never raise the owner's own.
     pub budget_usd: Option<f64>,
+    /// The reply is the unattended coding worker: fewer tools, and confined sub-agents. It can
+    /// only take power away.
+    pub worker_preset: bool,
 }
 
 /// Implemented by hq-web, which owns the chat turns.
@@ -294,6 +297,7 @@ struct AskArgs {
     untrusted: bool,
     model: Option<String>,
     budget_usd: Option<f64>,
+    worker_preset: bool,
 }
 
 impl AskArgs {
@@ -358,6 +362,7 @@ impl AskArgs {
                 .get("budget_usd")
                 .and_then(Value::as_f64)
                 .filter(|budget| *budget > 0.0),
+            worker_preset: args.get("worker_preset").and_then(Value::as_bool) == Some(true),
         })
     }
 }
@@ -598,6 +603,7 @@ impl HqAskTool {
                 untrusted: req.untrusted,
                 model: req.model.as_deref(),
                 budget_usd: req.budget_usd,
+                worker_preset: req.worker_preset,
             })
             .await;
         match started {

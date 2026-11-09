@@ -46,6 +46,7 @@ pub(super) struct AskTurn {
     pub(super) scope: AskScope,
     pub(super) untrusted: bool,
     pub(super) model: Option<String>,
+    pub(super) worker_preset: bool,
 }
 
 impl AskTurn {
@@ -194,6 +195,7 @@ async fn start_ask_turn(state: &Arc<WsState>, req: &AskStart<'_>) -> Result<Stri
             scope: req.scope,
             untrusted: req.untrusted,
             model: req.model.map(str::to_string),
+            worker_preset: req.worker_preset,
         }),
         spoken: None,
         offer: None,
@@ -353,6 +355,7 @@ mod tests {
                 scope: AskScope::Full,
                 untrusted: false,
                 model: None,
+                worker_preset: false,
             }),
             spoken: None,
             offer: None,
@@ -379,6 +382,7 @@ mod tests {
             scope,
             untrusted: false,
             model: None,
+            worker_preset: false,
         };
         let denied = turn(AskScope::Connector, AskMode::ReadOnly).denied_tool_prefixes();
         let blocks = |tool: &str| denied.iter().any(|p| tool.starts_with(p.as_str()));
@@ -419,6 +423,7 @@ mod tests {
             scope: AskScope::Full,
             untrusted,
             model: None,
+            worker_preset: false,
         };
         assert_eq!(
             turn(true).untrusted_source().as_deref(),
@@ -440,6 +445,7 @@ mod tests {
             scope: AskScope::Full,
             untrusted: false,
             model: None,
+            worker_preset: false,
         };
         assert_eq!(
             read_only.permission_preset(),
@@ -597,6 +603,7 @@ mod tests {
                 untrusted: false,
                 model: None,
                 budget_usd: None,
+                worker_preset: false,
                 caller: "claude-code",
             })
             .await
@@ -669,6 +676,7 @@ mod tests {
                 untrusted: false,
                 model: None,
                 budget_usd: None,
+                worker_preset: false,
                 caller: "c",
             })
             .await

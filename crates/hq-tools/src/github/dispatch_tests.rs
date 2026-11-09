@@ -11,6 +11,7 @@ struct Recorder {
     untrusted: Mutex<Vec<bool>>,
     models: Mutex<Vec<Option<String>>>,
     budgets: Mutex<Vec<Option<f64>>>,
+    presets: Mutex<Vec<bool>>,
 }
 
 #[async_trait::async_trait]
@@ -31,6 +32,7 @@ impl AskRunner for Recorder {
             .unwrap()
             .push(req.model.map(str::to_string));
         self.budgets.lock().unwrap().push(req.budget_usd);
+        self.presets.lock().unwrap().push(req.worker_preset);
         Ok(format!("turn-{}", req.ask_id))
     }
 
@@ -46,6 +48,7 @@ fn chat(db: &Arc<Database>) -> (RunnerCell, Arc<Recorder>) {
         untrusted: Mutex::new(Vec::new()),
         models: Mutex::new(Vec::new()),
         budgets: Mutex::new(Vec::new()),
+        presets: Mutex::new(Vec::new()),
     });
     let cell: RunnerCell = Arc::new(OnceLock::new());
     let as_dyn: Arc<dyn AskRunner> = recorder.clone();
@@ -589,6 +592,11 @@ async fn every_task_runs_under_the_configured_budget() {
     config.github_write.task_budget_usd = 0.2;
     dispatch(db, &config, cell).await.unwrap();
     assert_eq!(*recorder.budgets.lock().unwrap(), [Some(0.2)]);
+    assert_eq!(
+        *recorder.presets.lock().unwrap(),
+        [true],
+        "every queued task runs as the worker"
+    );
 }
 
 #[tokio::test]

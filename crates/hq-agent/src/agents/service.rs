@@ -33,6 +33,19 @@ use super::types::{
 
 /// The in-process executor label (mirrors the historical "hq" harness name).
 pub const INPROCESS_BACKEND: &str = "hq";
+/// All a confined child may call: the tools its path limit actually binds, and its own children.
+const CONFINED_CHILD_TOOLS: &[&str] = &[
+    "read_file",
+    "write_file",
+    "edit_file",
+    "file_edit_batch",
+    "rollback_file",
+    "find_files",
+    "grep",
+    "list_dir",
+    "todo_write",
+    "spawn_subagents",
+];
 
 /// The unified child-execution runtime.
 ///
@@ -183,6 +196,15 @@ impl AgentService {
         approval: Option<Arc<crate::governance::OwnerApproval>>,
     ) -> Self {
         self.owner_approval = approval;
+        self
+    }
+
+    /// Every child stays inside `root`, with file tools and no shell. `None` changes nothing.
+    pub fn confined_to(mut self, root: Option<PathBuf>) -> Self {
+        if let Some(root) = root {
+            self.allowed_paths = vec![root];
+            self.confined = true;
+        }
         self
     }
 
@@ -837,6 +859,11 @@ impl AgentService {
 
         if self.role == crate::builder::SessionRole::Orchestrator {
             tools.retain(|t| !crate::builder::ORCHESTRATOR_REMOVED_TOOLS.contains(&t.name()));
+        }
+        // Path limits bind file tools only, so a confined child gets nothing else: a shell or a
+        // language server would walk straight out of the folder.
+        if confined {
+            tools.retain(|t| CONFINED_CHILD_TOOLS.contains(&t.name()));
         }
         tools
     }
