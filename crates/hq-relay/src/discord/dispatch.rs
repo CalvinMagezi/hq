@@ -45,7 +45,10 @@ async fn dispatch_hq_native(
 ) -> Result<String> {
     let config = crate::native_run::load_config("discord dispatch");
     // A Discord message was just received; a live person is driving this turn.
-    let (session, repo_root) = crate::native_run::relay_session(&config, true);
+    let (mut session, repo_root) = crate::native_run::relay_session(&config, true);
+    if guest_name.is_some() {
+        session.max_budget_usd = crate::native_run::guest_cap(&config);
+    }
     let mut instructions = strip_loaded_soul(system_prompt, &config.vault_path);
     let owner = config.relay.owner_name();
     let allowed = config.relay.discord_family_allowed_harnesses.clone();

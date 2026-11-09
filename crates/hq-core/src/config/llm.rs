@@ -27,7 +27,7 @@ pub struct ProviderConfig {
 /// Budget configuration for LLM spending.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BudgetConfig {
-    /// Per-session spending cap in USD (prevents runaway sessions).
+    /// Spending cap in USD for one unattended, guest or tool-asked run. The owner typing in chat has none.
     #[serde(default = "default_session_cap")]
     pub session_cap_usd: f64,
 }

@@ -899,6 +899,8 @@ impl ChatTurn {
         let mut session = hq_agent::session_presets::chat_session_config(config);
         if let Some(ask) = &self.ask {
             session.is_live_user_turn = ask.is_live_user_turn();
+            // An ask is not the owner typing: a tool's question or a coding job keeps a limit.
+            session.max_budget_usd = Some(config.budget.session_cap_usd);
             // The asker is not the owner typing, so the exchange must not feed skill self-edits.
             session.background_review = false;
             if let Some(job) = &ask.job {

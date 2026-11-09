@@ -61,6 +61,7 @@ pub(super) async fn dispatch_hq(
     let (mut session, repo_root) = crate::native_run::relay_session(&config, true);
     if caller.role == TelegramRole::Guest {
         session.agent_name = "telegram_guest".to_string();
+        session.max_budget_usd = crate::native_run::guest_cap(&config);
     }
     let instructions = match inputs.system_prompt.as_deref() {
         Some(sp) => crate::session_runner::strip_loaded_soul(sp, &config.vault_path),
