@@ -278,7 +278,6 @@ const MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS: &[&str] = &[
     "inbox-triage",
     "email-poll",
     "verify-dispatch",
-    "link-capture",
 ];
 
 /// The tasks the scheduler runs for `config`.
@@ -915,6 +914,12 @@ mod lite_tests {
         }
         // The keyword index is local and keeps following edits either way.
         assert!(saving.contains(&"embeddings"));
+    }
+
+    #[test]
+    fn a_link_the_owner_shared_is_summarised_under_the_data_saver() {
+        assert!(MobileConfig::default().data_saver);
+        assert!(names(&mobile(true)).contains(&"link-capture"));
     }
 
     #[test]
