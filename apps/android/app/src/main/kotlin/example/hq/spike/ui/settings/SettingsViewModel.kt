@@ -71,6 +71,7 @@ data class SettingsUi(
     val loaded: Boolean = false,
     val phone: List<HomeRow> = emptyList(),
     val safetyTab: SettingsWords.SafetyTab = SettingsWords.SafetyTab.Safety,
+    val trustedSites: List<String> = emptyList(),
     val mode: String = "standby",
     val build: String = "",
     val line: String? = null,
@@ -142,6 +143,7 @@ class SettingsActions(
     val onBack: () -> Unit = {},
     val onPage: (SettingsPage) -> Unit = {},
     val onTab: (SettingsWords.SafetyTab) -> Unit = {},
+    val onForgetSite: (String) -> Unit = {},
     val onPhoneRow: (String) -> Unit = {},
     /** Set by the shell: opens HQ Coder on the Helpers page. */
     var onCodeFromPhone: () -> Unit = {},
@@ -218,6 +220,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onBack = { _state.update { if (it.busyBehind()) it else if (it.stack.isEmpty()) it.copy(open = false) else it.copy(stack = it.stack.dropLast(1)) } },
         onPage = { p -> _state.update { it.copy(stack = it.stack + p) } },
         onTab = { t -> _state.update { it.copy(safetyTab = t) } },
+        onForgetSite = ::forgetSite,
         onPhoneRow = ::phoneRow,
         onCopyDiagnostics = ::copyDiagnostics,
         onDismissLine = { _state.update { it.copy(line = null) } },
@@ -342,7 +345,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun refreshNow() {
         if (frozen) return
-        val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health", "vault" to "/api/vault-status")
+        val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health", "vault" to "/api/vault-status", TRUSTED_SITES to "/api/fetch-sites")
         val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage", "forecast" to "/api/usage/forecast")
         coroutineScope {
             val slow = remote.map { (key, path) -> async { key to get(path) } }
@@ -355,6 +358,13 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             serverBackup = server.await()
             if (frozen) return@coroutineScope
             publish(fast, late)
+        }
+    }
+
+    private fun forgetSite(site: String) {
+        viewModelScope.launch {
+            val gone = try { client.deleteAt("/api/fetch-sites/${java.net.URLEncoder.encode(site, "UTF-8")}"); true } catch (e: HqUnavailable) { false }
+            if (gone) _state.update { it.copy(trustedSites = it.trustedSites - site) }
         }
     }
 
@@ -375,6 +385,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"), vault = body("vault"),
         )
         val now = Instant.now()
+        val sites = got[TRUSTED_SITES]?.body?.optJSONArray("sites")?.let { a -> (0 until a.length()).map(a::getString) }
+        if (sites != null) _state.update { it.copy(trustedSites = sites) }
         _state.update { it.copy(snap = snap, loaded = true, phone = phoneRows(), mode = modeOf(), now = now, savedAt = if (answeredAny) now else it.savedAt, stale = silent.isNotEmpty() && !answeredAny).withFacts() }
     }
 
@@ -878,3 +890,5 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private fun saveFailedLine() = ctx().getString(R.string.settings_save_failed)
     private fun restartTimeoutLine() = ctx().getString(R.string.settings_restart_timeout)
 }
+
+private const val TRUSTED_SITES = "trustedSites"

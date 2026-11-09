@@ -327,6 +327,30 @@ fn with_inbox(session: &mut Session) -> Arc<hq_db::Database> {
 }
 
 #[tokio::test]
+async fn a_site_the_owner_allowed_is_fetched_without_asking_unless_the_address_is_long() {
+    let mut session = Session::new();
+    let db = with_inbox(&mut session);
+    session.read_untrusted_page().await;
+    let site = "docs.example.com";
+    db.with_conn(|c| hq_db::fetch_sites::allow_whole_site(c, site, "web:t1"))
+        .unwrap();
+    let (ran, _) = session
+        .call(
+            "web_fetch",
+            json!({"url": "https://docs.example.com/any/page"}),
+        )
+        .await;
+    assert!(ran, "the whole site is allowed in this chat");
+    let (ran, _) = session
+        .call("web_fetch", json!({"url": "https://other.example.com/"}))
+        .await;
+    assert!(!ran, "another site still asks");
+    let long = format!("https://docs.example.com/x?d={}", "a".repeat(250));
+    let (ran, _) = session.call("web_fetch", json!({ "url": long })).await;
+    assert!(!ran, "a long address can carry notes out, so it still asks");
+}
+
+#[tokio::test]
 async fn an_unattended_tainted_turn_leaves_what_needs_the_owner_for_them() {
     let session = Session::new();
     session.guardian.taint().set_unattended();

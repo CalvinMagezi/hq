@@ -1,5 +1,6 @@
 import { Link, Outlet, createFileRoute, useLocation, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { TrustedSites } from '~/components/settings/TrustedSites'
 import { useEffect, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import { fetchSettings, type HqSettings } from '~/lib/settingsApi'
@@ -185,7 +186,12 @@ export function SafetyPage() {
   const { data: s, isError, refetch } = useSettingsData()
   const [tab, setTab] = useState<SafetyTab>('safety')
   if (!s) return isError ? <LoadFailed onRetry={() => void refetch()} /> : <SettingsSkeleton label={t('settings_loading')} />
-  return <SafetyView s={s} tab={tab} onTab={setTab} />
+  return (
+    <>
+      <SafetyView s={s} tab={tab} onTab={setTab} />
+      {tab === 'safety' && <TrustedSites />}
+    </>
+  )
 }
 
 export function FoldersPage() {

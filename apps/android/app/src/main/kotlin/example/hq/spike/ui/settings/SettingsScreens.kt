@@ -357,6 +357,19 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
             Notice(stringResource(R.string.settings_read_only_notice))
             val rows = SettingsWords.safetyRows(w, ui.snap.settings, ui.safetyTab)
             Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) Unanswered(ui, "settings", false) else Facts(rows, actions.onPage) }
+            if (ui.safetyTab == SettingsWords.SafetyTab.Safety && ui.trustedSites.isNotEmpty()) TrustedSites(ui.trustedSites, actions.onForgetSite)
+        }
+    }
+}
+
+@Composable
+private fun TrustedSites(sites: List<String>, onForget: (String) -> Unit) {
+    Label(stringResource(R.string.sites_trusted_title))
+    Text(stringResource(R.string.sites_trusted_body), style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(horizontal = 20.dp))
+    sites.forEach { site ->
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(site, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+            example.hq.spike.ui.helpers.OutlineButton(stringResource(R.string.sites_trusted_remove)) { onForget(site) }
         }
     }
 }

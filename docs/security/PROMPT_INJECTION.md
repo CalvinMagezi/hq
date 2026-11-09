@@ -80,7 +80,11 @@ normal and the `BypassPermissions` paths.
      this session (a URL or a bare `docs.example.com`; subdomains of a named
      host count), or of an address whose path, query and fragment pass 200
      bytes. An article address with a few tracking parameters fits under 200
-     bytes; a paragraph of notes or a key encoded into the URL does not. The
+     bytes; a paragraph of notes or a key encoded into the URL does not. A host
+     also stops asking once the owner allows the whole site, approves three
+     fetches of it in the chat, or has approved it in three chats (the exact
+     host only, recorded only from the owner's answers, removable in Settings,
+     `hq_db::fetch_sites`). A long address still asks in every case. The
      owner's words are the turn's prompt and the user messages in its history,
      never a tool result or a prompt HQ wrote itself (a Drive or follow-up turn);
    - `web_search` with a query over 150 characters, longer than people type

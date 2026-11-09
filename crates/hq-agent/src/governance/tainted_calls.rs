@@ -45,13 +45,31 @@ pub(super) fn tainted_reason(tool: &str, args: &Value, taint: &TaintTracker) -> 
     }
 }
 
+fn data_bytes(url: &url::Url) -> usize {
+    url.path().len()
+        + url.query().map_or(0, |q| q.len() + 1)
+        + url.fragment().map_or(0, |f| f.len() + 1)
+}
+
+/// The site a `web_fetch` call may be allowed under: its host, without `www.`. `None` for a long
+/// address, which always asks, because that check is what stops notes leaving inside a URL.
+pub fn fetch_site(tool: &str, args: &Value) -> Option<String> {
+    if tool != "web_fetch" {
+        return None;
+    }
+    let url = url::Url::parse(args.get("url")?.as_str()?.trim()).ok()?;
+    if data_bytes(&url) > MAX_UNASKED_URL_DATA_BYTES {
+        return None;
+    }
+    let host = url.host_str()?.to_ascii_lowercase();
+    Some(host.strip_prefix("www.").unwrap_or(&host).to_string())
+}
+
 fn fetch_reason(raw: &str, taint: &TaintTracker) -> Option<String> {
     let Ok(url) = url::Url::parse(raw.trim()) else {
         return Some("would fetch an address HQ cannot read".into());
     };
-    let carried = url.path().len()
-        + url.query().map_or(0, |q| q.len() + 1)
-        + url.fragment().map_or(0, |f| f.len() + 1);
+    let carried = data_bytes(&url);
     if carried > MAX_UNASKED_URL_DATA_BYTES {
         return Some(format!(
             "would send {carried} bytes of path and query to {}",
@@ -135,6 +153,22 @@ mod tests {
         let long = format!("https://docs.example.com/x?d={}", "a".repeat(250));
         assert!(reason(&long).unwrap().contains("bytes of path and query"));
         assert!(reason("not a url").is_some());
+    }
+
+    #[test]
+    fn a_site_is_its_exact_host_and_a_long_address_has_none() {
+        let site = |url: &str| fetch_site("web_fetch", &json!({ "url": url }));
+        assert_eq!(
+            site("https://WWW.Docs.Example.com/a?b=1").as_deref(),
+            Some("docs.example.com")
+        );
+        let long = format!("https://docs.example.com/x?d={}", "a".repeat(250));
+        assert_eq!(site(&long), None);
+        assert_eq!(site("not a url"), None);
+        assert_eq!(
+            fetch_site("bash", &json!({"url": "https://a.example/"})),
+            None
+        );
     }
 
     #[test]

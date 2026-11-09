@@ -68,6 +68,7 @@ data class Allowed(val card: InboxCard, val at: String, val sent: Boolean = fals
 class InboxActions(
     val onTab: (InboxTab) -> Unit = {},
     val onAllow: (InboxCard) -> Unit = {},
+    val onAllowSite: (InboxCard) -> Unit = {},
     val onNotNow: (InboxCard) -> Unit = {},
     val onDetails: (InboxCard?) -> Unit = {},
     val onClear: (InboxCard) -> Unit = {},
@@ -91,7 +92,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     private var frozen = false
 
     val actions = InboxActions(
-        onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onNotNow = { answer(it, allow = false) },
+        onTab = { t -> _state.update { it.copy(tab = t) } }, onAllow = { answer(it, allow = true) }, onAllowSite = { answer(it, allow = true, wholeSite = true) }, onNotNow = { answer(it, allow = false) },
         onDetails = { c -> _state.update { it.copy(details = c) } }, onClear = { clear(listOf(it), getApplication<Application>().getString(R.string.undo_update_cleared)) },
         onClearAll = { clear(_state.value.shownUpdates, "") }, onUndo = ::undo, onDismissLine = { _state.update { it.copy(line = null) } },
         onBannerNotNow = { NotifAccess.snooze(getApplication()); refreshBanner() },
@@ -182,7 +183,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         if (sent) _state.update { it.copy(allowed = it.allowed?.copy(sent = true)) }
     }
 
-    private fun answer(card: InboxCard, allow: Boolean) {
+    private fun answer(card: InboxCard, allow: Boolean, wholeSite: Boolean = false) {
         if (_state.value.answering[card.id] == Answer.Sending) return
         _state.update { it.copy(answering = it.answering + (card.id to Answer.Sending)) }
         viewModelScope.launch {
@@ -193,7 +194,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     // A helper is answered in its own terminal first, and only if its screen still shows the dialog this card quoted.
                     if (card.kind == CardKind.HelperAsks && card.sessionId != null && !answerHelper(card, if (allow) "enter" else "esc")) return@launch
-                    client.answerNotification(card.id, if (allow) "approve" else "reject")
+                    client.answerNotification(card.id, if (wholeSite) "approve_site" else if (allow) "approve" else "reject")
                 }
                 val spoken = allow && card.kind == CardKind.Approval && card.quote != null && card.threadId != null
                 _state.update {

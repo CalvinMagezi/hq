@@ -368,7 +368,9 @@ impl GovernedTool {
         let asks = (matches!(self.permission_mode, PermissionMode::Default)
             && self.needs_owner(args))
             || tainted_reason(tool_name, args, &self.taint).is_some();
-        if !asks {
+        let site_allowed = super::tainted_calls::fetch_site(tool_name, args)
+            .is_some_and(|s| approval.site_allowed(&s));
+        if !asks || site_allowed {
             return None;
         }
         approval.check(tool_name, args).await

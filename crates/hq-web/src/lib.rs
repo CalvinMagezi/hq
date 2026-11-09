@@ -17,6 +17,7 @@ mod devices_door;
 mod dialog_answer;
 mod edge_worker_api;
 mod error;
+mod fetch_sites_api;
 pub mod github_connect_api;
 pub mod gmail_ingest;
 mod mcp_http;
@@ -448,6 +449,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/threads/{thread_id}/stop",
             axum::routing::post(threads_api::stop_thread_handler),
+        )
+        .route("/api/fetch-sites", get(fetch_sites_api::list_handler))
+        .route(
+            "/api/fetch-sites/{host}",
+            axum::routing::delete(fetch_sites_api::forget_handler),
         )
         .route(
             "/api/notifications",
