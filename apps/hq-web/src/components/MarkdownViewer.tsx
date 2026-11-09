@@ -33,9 +33,32 @@ function escapeHtml(text: string) {
 // Configure marked renderer once at module level (not per-component-render)
 // A promise, not a flag: concurrent callers must all wait until the renderer is registered.
 let markedConfigured: Promise<void> | null = null
+let markedReady = false
 function ensureMarkedConfigured() {
-    markedConfigured ??= configureMarked()
+    markedConfigured ??= configureMarked().then(() => { markedReady = true })
     return markedConfigured
+}
+
+function renderHtml(markdown: string): string {
+    const md = markdown.replace(/\[\[([^\]]+)\]\]/g, (_match, p1) => {
+        const parts = p1.split('|')
+        const target = parts[0].trim()
+        const label = (parts[1] || parts[0]).trim()
+        return `<button type="button" class="md-wikilink a-link" data-vault-note="${escapeHtml(target)}" aria-label="Open note ${escapeHtml(label)}">${escapeHtml(label)}</button>`
+    })
+    const raw = marked.parse(md, { async: false }) as string
+    const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['data-copy-text', 'data-vault-note', 'data-chart-slot', 'data-table-copy', 'data-table-expand'] })
+    return fillChartSlots(blockRemoteImages(sanitized))
+}
+
+/** A chat reply's first paint. An empty bubble would collapse the chat and throw the reader's place away. */
+function firstHtml(content: string, bare: boolean | undefined): string {
+    if (!bare || !markedReady) return ''
+    try {
+        return renderHtml(content || '')
+    } catch {
+        return ''
+    }
 }
 
 
@@ -110,9 +133,12 @@ export function tableText(table: HTMLTableElement): string {
         .join('\n')
 }
 
+/** Resolves once chat replies render on their first paint. */
+export const markdownReady = () => ensureMarkedConfigured()
+
 /** `bare` drops the frontmatter panel and selection toolbar, for chat bubbles. */
 export function MarkdownViewer({ content, activePath, zoom, bare }: { content: string; activePath?: string; zoom?: number; bare?: boolean }) {
-    const [html, setHtml] = useState<string>('')
+    const [html, setHtml] = useState(() => firstHtml(content, bare))
     const [frontmatter, setFrontmatter] = useState<Record<string, any>>({})
     const [metaOpen, setMetaOpen] = useState(false)
     // A table opened on its own, at the width the page allows.
@@ -153,17 +179,7 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
             // 2. Ensure marked renderer is configured (only runs once globally)
             await ensureMarkedConfigured()
 
-            // 3. Process Wikilinks [[...]]
-            md = md.replace(/\[\[([^\]]+)\]\]/g, (_match, p1) => {
-                const parts = p1.split('|')
-                const target = parts[0].trim()
-                const label = (parts[1] || parts[0]).trim()
-                return `<button type="button" class="md-wikilink a-link" data-vault-note="${escapeHtml(target)}" aria-label="Open note ${escapeHtml(label)}">${escapeHtml(label)}</button>`
-            })
-
-            const raw = await marked.parse(md)
-            const sanitized = DOMPurify.sanitize(raw, { USE_PROFILES: { html: true }, ADD_ATTR: ['data-copy-text', 'data-vault-note', 'data-chart-slot', 'data-table-copy', 'data-table-expand'] })
-            const result = fillChartSlots(blockRemoteImages(sanitized))
+            const result = renderHtml(md)
             if (active) setHtml(result)
         }
 

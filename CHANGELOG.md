@@ -6,6 +6,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Added
 
+- **A chat keeps your place.** A finished reply no longer collapses the chat for a moment, a late scroll report no longer stops it following new text (the desktop app's WebKit), older messages added above stay put, and on the phone a reload keeps the older pages you had loaded.
 - **Schedule a suggested next step.** A next step under a reply now has **Schedule** beside Yes and Not now, with Later today, Tomorrow morning and Next week. At that time the step comes back as a new offer at the end of that chat, with an inbox note that names no task and is never web-pushed. Nothing runs until you tap it and send the request. Only next steps can be scheduled, up to 90 days ahead, and scheduling one does not count toward a mute (migration 121, `offer_schedule`, daemon task `scheduled-offers`).
 - **Chat has no per-turn budget.** The owner typing in the web, desktop, phone or a messaging app is no longer stopped by `budget.session_cap_usd` (default $0.50), which an Anthropic key could reach on one request. The spending limits you set in Settings still apply, and coding jobs, questions from tools, unattended runs and guests keep their caps.
 - **Security updates.** `rmcp` moves to 3.9.0 and `rusqlite` to 0.41 (SQLite through `libsqlite3-sys` 0.39), closing RUSTSEC-2026-0457, 0459, 0461 and 0462.
