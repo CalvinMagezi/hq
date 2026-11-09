@@ -1,5 +1,7 @@
 use super::*;
 use crate::ask::{AskRunner, AskStart, RunnerCell};
+use crate::github::app::{AppRecord, Store};
+use crate::github::repos::SCAN_FILE;
 use std::sync::{Mutex, OnceLock};
 
 /// Records each question and leaves the reply running, as a real chat would while it works.
@@ -46,6 +48,119 @@ fn chat(db: &Arc<Database>) -> (RunnerCell, Arc<Recorder>) {
     let as_dyn: Arc<dyn AskRunner> = recorder.clone();
     cell.set(as_dyn).ok();
     (cell, recorder)
+}
+
+/// Shadows the real entry point so these tests never read the developer's own App.
+async fn dispatch(db: Arc<Database>, config: &HqConfig, runner: RunnerCell) -> Result<Outcome> {
+    let nowhere = std::env::temp_dir().join(format!("hq-no-app-{}", uuid::Uuid::new_v4().simple()));
+    let app = AppClient::new(Store::at(nowhere), "http://127.0.0.1:1/")?;
+    dispatch_with(db, config, runner, &app).await
+}
+
+struct Connected {
+    _dir: tempfile::TempDir,
+    app: AppClient,
+}
+
+fn connected(confirmed: bool, needs_reconnect: bool, secrets: &[&str]) -> Connected {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::at(dir.path().join("github"));
+    store
+        .save_record(&AppRecord {
+            app_id: 1,
+            client_id: "Iv-test".into(),
+            slug: "hq-coder-abc".into(),
+            owner_login: "o".into(),
+            owner_id: 42,
+            owner_name: None,
+            installation_id: Some(9),
+            repository_selection: Some("selected".into()),
+            needs_reconnect,
+            first_task_confirmed: confirmed,
+        })
+        .unwrap();
+    let scanned = json!([{"repo": "o/r", "private": true, "default_branch": "main",
+        "protected": false, "has_ci": true, "secrets": secrets, "previews": [], "unchecked": false}]);
+    store
+        .write_private(SCAN_FILE, scanned.to_string().as_bytes())
+        .unwrap();
+    let app = AppClient::new(store, "http://127.0.0.1:1/").unwrap();
+    Connected { _dir: dir, app }
+}
+
+fn by_default() -> HqConfig {
+    HqConfig::default()
+}
+
+#[test]
+fn dispatch_is_on_by_default_and_arms_only_with_something_to_work_on() {
+    let _active = worker_on();
+    assert!(by_default().github_write.dispatch_tasks);
+    let nowhere = tempfile::tempdir().unwrap();
+    let empty = AppClient::new(
+        Store::at(nowhere.path().join("github")),
+        "http://127.0.0.1:1/",
+    )
+    .unwrap();
+    assert!(!armed(&by_default(), &empty), "nothing connected");
+    assert!(armed(&by_default(), &connected(true, false, &[]).app));
+}
+
+#[tokio::test]
+async fn the_first_task_after_connecting_waits_for_the_owner() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    let c = connected(false, false, &[]);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+
+    let held = dispatch_with(db.clone(), &by_default(), cell.clone(), &c.app)
+        .await
+        .unwrap();
+    assert!(matches!(held, Outcome::AwaitingConfirmation(_)), "{held:?}");
+    assert!(recorder.questions.lock().unwrap().is_empty());
+    assert_eq!(task(&db, "tk-a").status, t::STATUS_TO_DO);
+
+    assert!(c.app.confirm_first_task().unwrap());
+    let started = dispatch_with(db, &by_default(), cell, &c.app)
+        .await
+        .unwrap();
+    assert!(matches!(started, Outcome::Started { .. }), "{started:?}");
+}
+
+#[tokio::test]
+async fn a_flagged_repository_is_not_taken() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    let c = connected(true, false, &["FOO"]);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    let outcome = dispatch_with(db, &by_default(), cell, &c.app)
+        .await
+        .unwrap();
+    assert_eq!(outcome, Outcome::Idle);
+    assert!(recorder.questions.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_dead_connection_takes_nothing_even_with_a_config_list() {
+    let _active = worker_on();
+    let db = Arc::new(db());
+    let (cell, recorder) = chat(&db);
+    let c = connected(true, true, &[]);
+    add(&db, "tk-a", &[DISPATCH_TAG], &[], None);
+    let outcome = dispatch_with(db, &on(), cell, &c.app).await.unwrap();
+    assert_eq!(outcome, Outcome::Idle);
+    assert!(recorder.questions.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_config_list_narrows_the_apps_repositories() {
+    let c = connected(true, false, &[]);
+    let mut narrowed = by_default();
+    narrowed.github_write.repos = vec!["o/other".into()];
+    assert!(allowed_repos(&narrowed, &c.app).is_empty());
+    assert_eq!(allowed_repos(&by_default(), &c.app), ["o/r"]);
 }
 
 fn no_chat() -> RunnerCell {

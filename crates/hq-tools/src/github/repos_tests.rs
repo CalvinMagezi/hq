@@ -30,6 +30,7 @@ async fn fixture() -> Fixture {
             installation_id: Some(9),
             repository_selection: Some("selected".into()),
             needs_reconnect: false,
+            first_task_confirmed: false,
         })
         .unwrap();
     let server = MockServer::start().await;

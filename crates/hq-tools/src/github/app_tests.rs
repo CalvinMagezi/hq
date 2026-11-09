@@ -23,6 +23,7 @@ fn record() -> AppRecord {
         installation_id: Some(INSTALLATION),
         repository_selection: Some("selected".into()),
         needs_reconnect: false,
+        first_task_confirmed: false,
     }
 }
 

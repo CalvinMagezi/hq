@@ -139,6 +139,7 @@ pub(crate) fn owner_routes<S>(flow: Arc<BrowserFlow>) -> Router<S> {
         .route("/api/github/disconnect", post(disconnect))
         .route("/api/github/repos/scan", post(scan))
         .route("/api/github/repos/confirm", post(confirm))
+        .route("/api/github/first-task", post(confirm_first_task))
         .with_state(flow)
 }
 
@@ -179,6 +180,7 @@ fn status_body(client: &AppClient) -> Value {
         "repository_selection": record.as_ref().and_then(|r| r.repository_selection.clone()),
         "install_url": record.as_ref().map(|r| r.install_url()),
         "settings_url": record.as_ref().map(|r| r.settings_url()),
+        "first_task_confirmed": record.as_ref().is_some_and(|r| r.first_task_confirmed),
         "repos": repo_rows(client),
     })
 }
@@ -201,6 +203,14 @@ async fn disconnect(State(flow): State<Arc<BrowserFlow>>) -> Result<Json<Value>,
         .disconnect()
         .map_err(|e| ApiError::internal(format!("could not remove the key: {e}")))?;
     Ok(Json(json!({"settings_url": settings_url})))
+}
+
+async fn confirm_first_task(State(flow): State<Arc<BrowserFlow>>) -> Result<Json<Value>, ApiError> {
+    let connected = flow
+        .client
+        .confirm_first_task()
+        .map_err(|e| ApiError::internal(format!("could not save that: {e}")))?;
+    Ok(Json(json!({"confirmed": connected})))
 }
 
 async fn scan(State(flow): State<Arc<BrowserFlow>>) -> Result<Json<Value>, ApiError> {

@@ -471,6 +471,7 @@ fn connect_app(f: &Fixture, needs_reconnect: bool) {
             installation_id: Some(9),
             repository_selection: Some("selected".into()),
             needs_reconnect,
+            first_task_confirmed: true,
         })
         .unwrap();
 }

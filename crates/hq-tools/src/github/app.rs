@@ -226,6 +226,9 @@ pub struct AppRecord {
     /// GitHub no longer accepts the key: the App or its key was deleted there.
     #[serde(default)]
     pub needs_reconnect: bool,
+    /// The owner agreed to the first queued task after this connection.
+    #[serde(default)]
+    pub first_task_confirmed: bool,
 }
 
 impl AppRecord {
@@ -511,6 +514,7 @@ impl AppClient {
             installation_id: None,
             repository_selection: None,
             needs_reconnect: false,
+            first_task_confirmed: false,
         };
         self.store.save_key(&made.pem)?;
         self.store.save_record(&record)?;
@@ -660,6 +664,16 @@ impl AppClient {
             bail!("this connection was not started here, or has expired; start again");
         }
         self.exchange(code).await
+    }
+
+    /// Owner only. False when nothing is connected.
+    pub fn confirm_first_task(&self) -> Result<bool> {
+        let Some(mut record) = self.store.load() else {
+            return Ok(false);
+        };
+        record.first_task_confirmed = true;
+        self.store.save_record(&record)?;
+        Ok(true)
     }
 
     /// Forgets the App here and returns the page where the person deletes it on GitHub, which

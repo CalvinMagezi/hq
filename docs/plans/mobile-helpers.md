@@ -157,6 +157,9 @@ Deviations from the plan above, decided while building G1:
   last scan is read before any work starts on it. A confirmation lapses if a new secret or preview
   host appears. With "All repositories" chosen, this is what keeps a new repository from being
   worked on unseen.
+- **The first-task confirmation applies to the App only.** Someone on the pasted token listed
+  `github_write.repos` by hand, which is already a deliberate choice. A connected App that stopped
+  working takes no tasks at all, even with a config list.
 - **`hq github` is not part of Lite,** which reaches no other service. On Windows the key is never
   written, because there are no owner-only file modes to protect it; WSL2 works.
 

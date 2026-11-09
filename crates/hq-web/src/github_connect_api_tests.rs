@@ -55,12 +55,13 @@ async fn a_return_without_a_matching_state_is_refused() {
     assert!(flow.client.store().load().is_none());
 }
 
-const OWNER_ROUTES: [(&str, &str); 5] = [
+const OWNER_ROUTES: [(&str, &str); 6] = [
     ("GET", "/api/github"),
     ("POST", "/api/github/connect"),
     ("POST", "/api/github/disconnect"),
     ("POST", "/api/github/repos/scan"),
     ("POST", "/api/github/repos/confirm"),
+    ("POST", "/api/github/first-task"),
 ];
 const WEB_TOKEN: &str = "s3cret-web-token";
 
