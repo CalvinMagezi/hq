@@ -107,6 +107,40 @@ which changes HQ proposed and that the person merged them. Commits carry the per
 GitHub no-reply address as author, so merged work counts on their profile. Check during G2 how
 GitHub credits a squash merge of a bot's pull request.
 
+## Spike results (2026-11-09)
+
+Run before G1 with a throwaway account, a one-file loopback server, Chrome 156 on a Mac, and a real
+Chrome Custom Tab on a Samsung Galaxy A32 (Android 13, `adb reverse` carrying the phone's loopback
+port to the server). The server recorded field names and permissions only, never a key or secret.
+
+| Question | Answer |
+|---|---|
+| Does a Custom Tab reach GitHub's manifest page from a loopback page? | Yes. The auto-submitted form lands on "Create GitHub App" with no tap. |
+| Does GitHub's redirect to `http://127.0.0.1:<port>/...` load? | Yes, on the Mac and in the Custom Tab, with `code` and `state` in the query. No fallback needed in Chrome. |
+| Samsung Internet | **Not attempted**: not installed on the test phone, skipped by the owner's decision. The paste-the-address fallback stays for any browser that refuses the redirect. |
+| Is a manifest without a webhook accepted? | Yes, with `hook_attributes` left out and `default_events: []`. The App's webhook shows inactive, and the conversion gives `webhook_secret: null`. |
+| Conversion response | HTTP 201 with `id`, `client_id`, `slug`, `node_id`, `owner`, `name`, `description`, `external_url`, `html_url`, `created_at`, `updated_at`, `webhook_secret`, `pem`, `client_secret`, `permissions`, `events`. |
+| Key format | PKCS#1 (`BEGIN RSA PRIVATE KEY`), so `ring`'s `RsaKeyPair::from_der` applies and no new crate is needed. |
+| Permissions | Granted exactly as the manifest asked, and shown that way on the install page. |
+| Return after Install | A manifest `setup_url` brings the Custom Tab back to loopback with `installation_id` and `setup_action=install`. |
+
+What this changes in the design:
+
+- **The install page defaults to "All repositories",** and a link cannot preselect the narrower
+  choice. The sheet says "choose Only select repositories" before the Custom Tab opens, and when an
+  installation reports `repository_selection: all` HQ says so on the repository list. Every
+  repository stays subject to the flagging below whichever was chosen.
+- **The install return carries no `state`,** so its `installation_id` proves nothing. HQ ignores it
+  and finds the installation with the App JWT (`GET /app/installations`).
+- **A Custom Tab cannot send the web token,** and URL tokens are refused. An authenticated
+  owner-only POST starts a flow and returns a one-time address; the browser-facing start and return
+  routes carry no credential, and the random `state` is their only capability. They do nothing
+  without a pending, unexpired flow.
+- **The person can rename the App on GitHub's page,** so HQ keeps the `slug` from the conversion
+  and never derives it from the name.
+- The redirect went to a server reached through `adb reverse`. G7 repeats it against HQ's own
+  server on the phone.
+
 ## Secure by default
 
 | Control | Default | Why |
