@@ -31,6 +31,7 @@ log in `.vault/_data/vault.db`), with no model.
 | Ordering the empty chat's chips, untried capabilities first (`GET /api/capabilities`) | the owner's web app and phone app | no |
 | The weekly digest in the inbox | the owner's web inbox and phone app | no |
 | The offer under a reply, and its answer | the owner's web and phone chats; `offer_log` | no |
+| A next step for a task the turn worked on, chosen by comparing the task with invented examples using the on-device embedder (`hq_tools::capabilities::next_step`); no language model and no provider sees it, and only its kind is logged | the owner's web and phone chats; `offer_log` | no |
 | `hq adoption` and `hq offers replay`, the same numbers on the command line | the terminal of the machine HQ runs on | no |
 | `GET /api/adoption` and `GET /api/offers/replay`, the same numbers for `scripts/phone-hq.sh` | a computer the owner signed in as a device | counts only, to that computer |
 

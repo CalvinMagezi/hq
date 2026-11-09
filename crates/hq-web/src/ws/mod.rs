@@ -865,13 +865,7 @@ impl ChatTurn {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .tool_names();
-        let (db, config) = (self.db.clone(), config.clone());
-        let chosen = tokio::task::spawn_blocking(move || {
-            crate::offers_api::choose(&db, &config, &ctx, &tools)
-        })
-        .await
-        .ok()
-        .flatten();
+        let chosen = crate::offers_api::choose(self.db.clone(), config.clone(), ctx, tools).await;
         if let Some(offer) = chosen {
             self.record
                 .lock()

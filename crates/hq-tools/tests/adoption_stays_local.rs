@@ -23,6 +23,10 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../src/capabilities/offers.rs"),
     ),
     (
+        "hq-tools/src/capabilities/next_step.rs",
+        include_str!("../src/capabilities/next_step.rs"),
+    ),
+    (
         "hq-cli/src/commands/adoption.rs",
         include_str!("../../hq-cli/src/commands/adoption.rs"),
     ),
