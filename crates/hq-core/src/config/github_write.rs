@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Off by default: with no repositories listed the tool refuses every call. The list is the
+/// With a connected GitHub App the repositories are the ones the person picked on GitHub, and
+/// `repos` only narrows them. Without an App, an empty list refuses every call. The list is the
 /// owner's alone; `config_manage` refuses this key and agents cannot write the config file.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubWriteConfig {

@@ -480,6 +480,19 @@ pub fn records_root() -> PathBuf {
     hq_core::config::HqConfig::hq_dir().join("github")
 }
 
+/// A read-only token for `repo` from the App. `None` when the App is absent or does not cover
+/// it, so a public repository can still be read without one.
+async fn fetch_token(app: &app::AppClient, repo: &str) -> Result<Option<app::AppToken>> {
+    if app.store().load().is_none() {
+        return Ok(None);
+    }
+    match app.token(repo, app::Step::Fetch).await {
+        Ok(token) => Ok(Some(token)),
+        Err(e) if e.downcast_ref::<app::TokenRefused>().is_some() => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Removes a checkout and its base record so the next fetch starts from the default branch. The
 /// record of pushed commits stays: a later push still knows which `hq/` branches are its own.
 fn discard_checkout(dest: &Path, records: &Path) -> Result<()> {
@@ -553,7 +566,12 @@ impl HqTool for GithubCloneTool {
         {
             discard_checkout(&dest, &records)?;
         }
-        let method = clone_method(which::which("gh").is_ok(), which::which("git").is_ok());
+        let app = app::AppClient::standard()?;
+        // github_write publishes only a tarball checkout, so a connected App always fetches one.
+        let method = match app.store().load() {
+            Some(_) => CloneMethod::Tarball,
+            None => clone_method(which::which("gh").is_ok(), which::which("git").is_ok()),
+        };
         if let Some(reply) = cached_reply(&dest, &records, method)? {
             return Ok(reply);
         }
@@ -565,7 +583,9 @@ impl HqTool for GithubCloneTool {
         // A base record left for a git checkout would describe files git did not fetch.
         let _ = std::fs::remove_file(tarball::base_record_path(&records));
         if method == CloneMethod::Tarball {
-            let fetched = tarball::fetch(API_HOST_URL, &repo, &dest, &records).await?;
+            let token = fetch_token(&app, &repo).await?;
+            let secret = token.as_ref().map(app::AppToken::secret);
+            let fetched = tarball::fetch(API_HOST_URL, &repo, &dest, &records, secret).await?;
             return Ok(tarball_reply(&dest_arg, &fetched));
         }
         if method == CloneMethod::Gh {

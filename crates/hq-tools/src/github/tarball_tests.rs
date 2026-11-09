@@ -486,13 +486,37 @@ async fn fetch_resolves_the_commit_unpacks_and_records_the_base() {
     let root = tempfile::tempdir().unwrap();
     let dest = root.path().join("o/r");
 
-    let fetched = fetch(&format!("{}/", server.uri()), "o/r", &dest, &records(&root))
-        .await
-        .unwrap();
+    let fetched = fetch(
+        &format!("{}/", server.uri()),
+        "o/r",
+        &dest,
+        &records(&root),
+        None,
+    )
+    .await
+    .unwrap();
     assert_eq!(fetched.base.commit, SHA);
     assert_eq!(fs::read(dest.join("README.md")).unwrap(), b"hello");
     assert_eq!(load_base(&records(&root)).unwrap(), fetched.base);
     assert_eq!(hq_leftovers(&root.path().join("o")), 0);
+}
+
+#[tokio::test]
+async fn fetch_sends_the_apps_token_when_it_has_one() {
+    let mut tar = Vec::new();
+    file(&mut tar, &format!("{TOP}/README.md"), b"hello");
+    let server = serve(&format!("{SHA}\n"), gzip(&finish(tar))).await;
+    let root = tempfile::tempdir().unwrap();
+    let dest = root.path().join("o/r");
+    let api = format!("{}/", server.uri());
+    fetch(&api, "o/r", &dest, &records(&root), Some("ghs_app"))
+        .await
+        .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        assert_eq!(request.headers["authorization"], "Bearer ghs_app");
+    }
 }
 
 #[tokio::test]
@@ -504,9 +528,15 @@ async fn fetch_leaves_nothing_when_the_archive_is_refused() {
     let dest = root.path().join("o/r");
 
     assert!(
-        fetch(&format!("{}/", server.uri()), "o/r", &dest, &records(&root))
-            .await
-            .is_err()
+        fetch(
+            &format!("{}/", server.uri()),
+            "o/r",
+            &dest,
+            &records(&root),
+            None
+        )
+        .await
+        .is_err()
     );
     assert!(!dest.exists());
     assert_eq!(fs::read_dir(root.path().join("o")).unwrap().count(), 0);
@@ -526,9 +556,15 @@ async fn fetch_replaces_a_stale_record_left_beside_a_missing_checkout() {
     );
     fs::write(base_record_path(&records(&root)), stale).unwrap();
 
-    fetch(&format!("{}/", server.uri()), "o/r", &dest, &records(&root))
-        .await
-        .unwrap();
+    fetch(
+        &format!("{}/", server.uri()),
+        "o/r",
+        &dest,
+        &records(&root),
+        None,
+    )
+    .await
+    .unwrap();
     let base = load_base(&records(&root)).unwrap();
     assert_eq!(base.commit, SHA);
     assert_eq!(base.files[0].path, "new.txt");
@@ -555,7 +591,7 @@ async fn a_fetch_dropped_mid_download_leaves_nothing_behind() {
     let api = format!("{}/", server.uri());
     let cut = tokio::time::timeout(
         Duration::from_millis(300),
-        fetch(&api, "o/r", &dest, &records(&root)),
+        fetch(&api, "o/r", &dest, &records(&root), None),
     )
     .await;
     assert!(
@@ -575,6 +611,7 @@ async fn fetch_refuses_an_answer_that_is_not_a_commit_id() {
         "o/r",
         &root.path().join("o/r"),
         &records(&root),
+        None,
     )
     .await
     .unwrap_err();
@@ -660,6 +697,7 @@ async fn fetch_a_real_public_repo() {
         "CalvinMagezi/Offline-Botanist",
         &dest,
         &records(&root),
+        None,
     )
     .await
     .unwrap();

@@ -165,9 +165,10 @@ pub(crate) async fn fetch(
     repo: &str,
     dest: &Path,
     records: &Path,
+    token: Option<&str>,
 ) -> Result<Fetched> {
     let client = client()?;
-    let commit = resolve_commit(&client, api_base, repo).await?;
+    let commit = resolve_commit(&client, api_base, repo, token).await?;
     let parent = dest.parent().context("the clone folder has no parent")?;
     tokio::fs::create_dir_all(parent).await?;
     sweep_leftovers(parent);
@@ -180,7 +181,7 @@ pub(crate) async fn fetch(
     let stop = StopOnDrop(Arc::new(AtomicBool::new(false)));
 
     let url = format!("{api_base}repos/{repo}/tarball/{commit}");
-    download(read_request(&client, &url, ACCEPT_TARBALL), &archive.path).await?;
+    download(authed(&client, &url, ACCEPT_TARBALL, token), &archive.path).await?;
     let (unpacked, mut staging) =
         unpack_file(&archive.path, staging_path, Arc::clone(&stop.0)).await?;
     let base = Base {
@@ -223,9 +224,27 @@ fn sweep_leftovers(parent: &Path) {
     }
 }
 
-async fn resolve_commit(client: &reqwest::Client, api_base: &str, repo: &str) -> Result<String> {
+/// The App's token when there is one, otherwise the read-only token from the environment.
+fn authed(
+    client: &reqwest::Client,
+    url: &str,
+    accept: &str,
+    token: Option<&str>,
+) -> reqwest::RequestBuilder {
+    match token {
+        Some(token) => client.get(url).header("Accept", accept).bearer_auth(token),
+        None => read_request(client, url, accept),
+    }
+}
+
+async fn resolve_commit(
+    client: &reqwest::Client,
+    api_base: &str,
+    repo: &str,
+    token: Option<&str>,
+) -> Result<String> {
     let url = format!("{api_base}repos/{repo}/commits/HEAD");
-    let resp = read_request(client, &url, ACCEPT_SHA).send().await?;
+    let resp = authed(client, &url, ACCEPT_SHA, token).send().await?;
     let status = resp.status();
     let body = resp.text().await?;
     if !status.is_success() {

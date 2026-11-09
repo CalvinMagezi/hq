@@ -307,7 +307,7 @@ impl Store {
         self.write_private(RECORD_FILE, &serde_json::to_vec_pretty(record)?)
     }
 
-    fn save_key(&self, pem: &str) -> Result<()> {
+    pub(crate) fn save_key(&self, pem: &str) -> Result<()> {
         self.write_private(KEY_FILE, pem.as_bytes())
     }
 
