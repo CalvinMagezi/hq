@@ -3577,6 +3577,13 @@
     <string name="helpers_tell_failed">Couldn\'t send that. Look at its screen.</string>
     <string name="chat_offer_yes">Yes</string>
     <string name="chat_offer_not_now">Not now</string>
+    <string name="chat_offer_schedule">Schedule</string>
+    <string name="chat_offer_later_today">Later today</string>
+    <string name="chat_offer_tomorrow">Tomorrow morning</string>
+    <string name="chat_offer_next_week">Next week</string>
+    <string name="chat_offer_back">Back</string>
+    <string name="chat_offer_scheduled">I will bring this back then.</string>
+    <string name="chat_offer_schedule_failed">Could not schedule that. Try again.</string>
     <plurals name="helpers_count">
         <item quantity="one">%1$s helper</item>
         <item quantity="other">%1$s helpers</item>

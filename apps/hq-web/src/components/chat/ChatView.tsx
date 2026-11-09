@@ -276,6 +276,18 @@ export function ChatView({ active, threadId }: Props) {
     focusInput()
   }
 
+  /** The line goes at once; the person is told whether it was scheduled. */
+  const scheduleOfferOn = (m: ThreadMessage, at: number) => {
+    if (!m.offer || !activeThreadId) return
+    const notice = useHQStore.getState().setSystemNotice
+    void answerOffer(activeThreadId, m.messageId, 'scheduled', at)
+      .then(() => notice(t('chat_offer_scheduled')))
+      .catch((err) => {
+        console.warn('ChatView: could not schedule an offer', err)
+        notice(t('chat_offer_schedule_failed'))
+      })
+  }
+
   const handleStop = () => {
     if (!activeThreadId) return
     void stopReply(activeThreadId, send, threadApi.stopThread).then((ok) => {
@@ -326,6 +338,7 @@ export function ChatView({ active, threadId }: Props) {
         onRegenerate={regenerate}
         onPick={(text) => draft.setText(text)}
         onOffer={answerOfferOn}
+        onScheduleOffer={scheduleOfferOn}
       />
 
       <ChatApprovals threadId={activeThreadId} waiting={waitingForOwner} onKeepGoing={() => void handleSend(t('chat_keep_going'))} />
