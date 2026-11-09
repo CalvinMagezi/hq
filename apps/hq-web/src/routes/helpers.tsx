@@ -20,6 +20,7 @@ import { useThreadStore } from '~/store/threadStore'
 import { tn } from '~/strings'
 import { useSidebarLayout } from '~/components/sessions/useSidebarLayout'
 import { ErrorText } from '~/components/sessions/ErrorText'
+import { GithubConnect } from '~/components/sessions/GithubConnect'
 import { useSharedConnection } from '~/lib/connection'
 import { helpersAway, readSavedHelpers, saveHelpers, type HelpersAway } from '~/lib/helpersSaved'
 import { savedLine } from '~/components/SavedStrip'
@@ -301,6 +302,7 @@ function AgentList({ away, offWhy, list, hosts, selectedId, showArchived, onShow
           </div>
         )}
         <LockdownBanner hosts={hosts} />
+        <GithubConnect />
         {banner && (
           <div className="a-card mx-4 mb-3" role="status">
             <b className="a-body-b">{banner.title}</b>

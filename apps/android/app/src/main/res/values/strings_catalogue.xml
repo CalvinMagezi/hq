@@ -3597,4 +3597,5 @@
     <string name="github_disconnect_note">This deletes the key from this phone, then opens GitHub so you can delete the App.</string>
     <string name="github_failed">HQ could not reach GitHub. Try again.</string>
     <string name="github_no_browser">This phone has no browser to open GitHub.</string>
+    <string name="github_web_same_device">Open this on the device HQ runs on. GitHub sends you back to that device\'s own address.</string>
 </resources>
