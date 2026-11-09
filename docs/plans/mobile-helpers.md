@@ -190,6 +190,13 @@ and GitHub refused it; the worker skill needed `github_write.repos`, so connecti
 it; `github_read` had no way into a private repository without `gh`; a deleted App answers 404
 rather than 401.
 
+Learned from the run: deleting an App leaves its past pull requests shown as `ghost` on GitHub, so
+Disconnect's advice to delete the App has that cost; a person who wants the history can keep the App
+and delete only its key.
+
+Not run on a phone, because the model key had expired by then: `allowed_paths` on the coding child,
+and the per-task budget ending a turn. Both have unit tests.
+
 Not measured: mobile data on a metered network (the phone was on Wi-Fi), Samsung Internet, and a
 full `-Phq.caddy` build (a placeholder was packaged, since Caddy stays off without a Caddyfile).
 

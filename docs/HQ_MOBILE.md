@@ -162,6 +162,14 @@ computer" through the share sheet) and a **Scan the code** button that opens the
 sheet asks HQ again when the owner comes back to it. See "One command, for the phone app" in
 [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md).
 
+**Code from this phone (HQ Coder).** The start sheet also offers HQ's own worker, which needs no
+computer. Connect GitHub makes the person's own private GitHub App in a Custom Tab; its key stays in
+`<hq dir>/github/` on the phone (mode 0600, outside the vault), and nobody else, the HQ project
+included, holds a way in. HQ fetches the repository, a sub-agent edits it, GitHub's CI tests the `hq/`
+branch and the person reviews and merges. A repository whose workflows use secrets, or that has a
+preview host, waits for the owner's confirmation, and the first task after connecting waits for
+their yes. Plan and phone results: [plans/mobile-helpers.md](plans/mobile-helpers.md).
+
 ## The bridge on the phone
 
 The phone can pair with another machine of its owner by QR code and then be reached by key, with no
